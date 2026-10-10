@@ -99,6 +99,8 @@ migrator and app roles, because it builds throwaway scratch databases next to th
 | `0009_content_write_plane.test.mjs` | 0009: columns, indexes, grants, preconditions, loud failures |
 | `0010_slug_release_and_ledger.test.mjs` | 0010: a soft-deleted item releases its slug; the app role loses the ledger |
 | `0011_drop_payload.test.mjs` | 0011: Payload's nine tables (and sequences) are dropped, WebDesk's catalog and rows are untouched, no CASCADE |
+| `0012_content_schedules.test.mjs` | 0012: pending version swaps on live items (WSK-61): the one-pending rule, RLS, grants, exact catalog diff |
+| `0013_preview_tokens.test.mjs` | 0013: draft-preview tokens (WSK-46): hash-only storage (64 lowercase hex), unique hash, composite FK to content_versions, expiry CHECK, RLS, no DELETE, exact catalog diff |
 
 **Retired: `0009_v1_bytes.test.mjs` (WSK-48b).** It proved 0009 left `/v1`'s bytes unchanged by capturing
 through the old Payload router before and after 0009. The old router is deleted and the api's router cannot

@@ -19,6 +19,10 @@
 //      is percent-decoded once (malformed -> 400 problem+json, a decoded segment holding `/` or NUL
 //      -> 404 never reaching SQL); a malformed pagination cursor is a 400 `invalid-cursor`; and the
 //      catch-all 500 carries a fixed detail instead of the thrown error's message (logged here).
+//   5. (WSK-46) The draft-preview route `GET|OPTIONS /v1/t/:tenantSlug/preview/:token`, answered BEFORE the
+//      method check and the tenant/key resolution: its credential is the token, not an api key, and its
+//      one failure is a 404 that is the same for every cause (see handlePreview). Every other path below
+//      is untouched.
 // Apart from item 4, the order of checks, every status, every problem slug/title/detail, the "unknown tenant and bad key
 // return the same 401" doctrine, and every header are unchanged.
 import { randomUUID } from 'node:crypto'
@@ -26,7 +30,9 @@ import { Logger } from '@nestjs/common'
 import { extractBearerKey, type ResolvedApiKey, type ResolvedTenant } from './auth'
 import type { DeliveryDb } from './db'
 import { getItem, InvalidCursorError, listItems, searchItems } from './content-read'
-import { SEARCH_SEGMENT, SITEMAP_SEGMENT } from './reserved-collection-keys'
+import { PREVIEW_SEGMENT, SEARCH_SEGMENT, SITEMAP_SEGMENT } from './reserved-collection-keys'
+import { loadPreview } from './preview-read'
+import { allowedPreviewOrigin, redactPreviewToken } from './preview-token'
 import { renderSitemapXml } from './redirects'
 import { applyCacheTagHeader, buildCacheTags } from './vocabulary/cache-tags'
 import { problemDetails, problemResponse } from './vocabulary/problem-details'
@@ -47,6 +53,12 @@ export interface V1Deps {
   /** Re-reads api_keys fresh on every call; null for unknown / revoked / orphaned keys. */
   resolveApiKey(tenant: ResolvedTenant, plaintextKey: string): Promise<ResolvedApiKey | null>
   onAuthenticated?(auth: ResolvedApiKey, ctx: { instance: string; requestId: string }): AuthGate | void | Promise<AuthGate | void>
+  /**
+   * (WSK-46) The same edge hook for a draft-preview read, called ONLY once a token has been proven valid
+   * (never for an unknown or expired one), so a stranger guessing tokens cannot spend a tenant's real read
+   * quota. Same AuthGate contract as onAuthenticated.
+   */
+  onPreviewServed?(tenant: ResolvedTenant, ctx: { instance: string; requestId: string }): AuthGate | void | Promise<AuthGate | void>
 }
 
 const logger = new Logger('DeliveryRouter')
@@ -71,9 +83,88 @@ function withHeaders(res: Response, headers?: Record<string, string>): Response 
   return res
 }
 
+/**
+ * Headers of EVERY response of the preview route, errors included: a draft must never be cached (a cached
+ * 200 would outlive a revoke), never indexed, and the answer depends on the Origin, so caches must vary.
+ */
+const PREVIEW_HEADERS = { 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', vary: 'Origin' } as const
+
+/**
+ * `/v1/t/:tenantSlug/preview/:token` — five raw segments with the literal `preview` fourth. The match is on
+ * the DECODED fourth segment (so `%70review` is the same route), but a segment that does not decode, or
+ * that decodes to something holding `/` or NUL, is never a credential: it yields `null` parts and the route
+ * answers its one 404. Anything that is not this shape is not a preview request and falls through.
+ */
+function matchPreviewRoute(segments: string[]): { tenantSlug: string | null; token: string | null } | null {
+  if (segments.length !== 5) return null
+  const decode = (s: string): string | null => {
+    try {
+      const d = decodeURIComponent(s)
+      return d.includes('/') || d.includes('\u0000') ? null : d
+    } catch {
+      return null
+    }
+  }
+  if (decode(segments[3]) !== PREVIEW_SEGMENT) return null
+  return { tenantSlug: decode(segments[2]), token: decode(segments[4]) }
+}
+
 /** Every /v1 request, whatever HTTP layer received it. Path shape: /v1/t/:tenantSlug/... */
 export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Response> {
   const { db } = deps
+
+  /**
+   * GET|OPTIONS /v1/t/:tenantSlug/preview/:token (WSK-46, owner ruling WSK-D52). No api key: the token is
+   * the credential, and it is a bearer capability. `instance` arrives with the token already redacted.
+   *
+   * ONE FAILURE: an unknown, malformed, expired or revoked token, a tenant slug that is not that token's
+   * tenant (or not a tenant at all, or an archived one), a deleted item: all the same 404 `not-found`, the
+   * body of any unknown /v1 path, with the same headers and no CORS. Nothing here lets a caller tell
+   * those apart. The quota is consumed only after the token proved valid.
+   */
+  async function handlePreview(
+    request: Request,
+    route: { tenantSlug: string | null; token: string | null },
+    instance: string,
+    requestId: string,
+  ): Promise<Response> {
+    const method = request.method.toUpperCase()
+    const failed = (status: number, slug: string, title: string, detail: string) =>
+      withHeaders(problem(status, slug, title, detail, instance, requestId), PREVIEW_HEADERS)
+    const notFound = () => failed(404, 'not-found', 'Not Found', 'No /v1 route matches this path.')
+    if (method !== 'GET' && method !== 'OPTIONS') {
+      return failed(405, 'method-not-allowed', 'Method Not Allowed', 'The /v1 envelope is a read-only contract in this ticket.')
+    }
+    if (!route.tenantSlug || !route.token) return notFound()
+
+    let hit
+    try {
+      const tenant = await deps.resolveTenantBySlug(route.tenantSlug)
+      if (!tenant || tenant.status !== 'active') return notFound()
+      hit = await loadPreview(db, tenant, route.token)
+      if (!hit) return notFound()
+
+      // From here the token is proven: the origin rule can be answered (it needs the token's site).
+      const origin = allowedPreviewOrigin(request.headers.get('origin'), hit.domains)
+      const cors: Record<string, string> = origin ? { 'access-control-allow-origin': origin } : {}
+
+      if (method === 'OPTIONS') {
+        return withHeaders(new Response(null, { status: 204 }), {
+          ...PREVIEW_HEADERS,
+          ...(origin
+            ? { ...cors, 'access-control-allow-methods': 'GET, OPTIONS', 'access-control-allow-headers': 'x-request-id', 'access-control-max-age': '600' }
+            : {}),
+        })
+      }
+
+      const gate = await deps.onPreviewServed?.(tenant, { instance, requestId })
+      if (gate?.reject) return withHeaders(gate.reject, { ...gate.headers, ...PREVIEW_HEADERS, ...cors })
+      return withHeaders(jsonResponse(hit.envelope, new Headers()), { ...gate?.headers, ...PREVIEW_HEADERS, ...cors })
+    } catch (err) {
+      logInternalError(err, instance, requestId)
+      return failed(500, 'internal-error', 'Internal error', INTERNAL_ERROR_DETAIL)
+    }
+  }
 
   return async function handleV1Request(request: Request): Promise<Response> {
     const requestId = request.headers.get('x-request-id') || randomUUID()
@@ -84,6 +175,8 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
     if (segments[0] !== ENVELOPE_VERSION || segments[1] !== 't' || !segments[2]) {
       return problem(404, 'not-found', 'Not Found', 'No /v1 route matches this path.', instance, requestId)
     }
+    const previewRoute = matchPreviewRoute(segments)
+    if (previewRoute) return handlePreview(request, previewRoute, redactPreviewToken(instance), requestId)
     if (request.method.toUpperCase() !== 'GET') {
       return problem(
         405,

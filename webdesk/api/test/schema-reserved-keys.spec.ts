@@ -46,7 +46,7 @@ describe("M3 T1 D1 — schema.apply refuses reserved collection keys", () => {
 
   it("refuses every reserved key (any case) with 422 collection-key-reserved, storing and auditing nothing", async () => {
     const before = await counts();
-    const keys = [...RESERVED_COLLECTION_KEYS, "Media", "FORMS", "Search", "SITEMAP.XML"];
+    const keys = [...RESERVED_COLLECTION_KEYS, "Media", "FORMS", "Search", "SITEMAP.XML", "Preview"];
     for (const key of keys) {
       const res = await apply(key);
       expect(res.statusCode, key).toBe(422);

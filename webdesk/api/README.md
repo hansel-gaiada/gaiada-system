@@ -1914,3 +1914,70 @@ produces the tenant webhook.
 boot, shutdown, config) and `migrations/tests/0012_content_schedules.test.mjs` (also in `qa/linux-gate.sh`'s
 `migrations` suite and the CI `webdesk-api` job). They need Postgres and Redis like the rest of the suite.
 
+## Draft preview (WSK-46) — `src/control/content/preview-token-*`, `src/delivery/preview-*`
+
+Owner ruling WSK-D52: a draft preview is an instant page **on the site**. The site's page fetches the draft from
+WebDesk with a short-lived token and renders it with the site's own components. This is the WebDesk api's half:
+the tokens, and the public endpoint the site's page calls. (The ERP button and the site page are other tickets.)
+
+**The token is a bearer capability. Anyone who holds the link sees that one draft until it expires or is revoked,
+with no other credential and no login.** Treat a preview link like a password to an unpublished page: do not paste
+it into a public channel, an issue or a ticket. It is deliberately short-lived (default one hour, at most 24) and
+revocable, and it pins one version of one item, so a later edit never changes what an old link shows.
+
+### Routes
+
+| Route | Auth | What |
+|---|---|---|
+| `POST /control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:itemId/preview-token` | control channel, scope `webdesk:operate`, editorial principal, `Idempotency-Key` | `content.previewToken` (MEDIUM). Body `{ version?, ttlSeconds? }`. 201 `{ tokenId, token, expiresAt, version, previewPath }` |
+| `DELETE /control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:itemId/preview-tokens/:tokenId` | same | `content.previewTokenRevoke` (MEDIUM). 200 `{ tokenId, itemId, revokedAt, alreadyRevoked }`. Idempotent |
+| `GET /v1/t/:tenantSlug/preview/:token` | **none** (the token is the credential) | the pinned version as the frozen item envelope |
+| `OPTIONS /v1/t/:tenantSlug/preview/:token` | none | CORS preflight |
+
+The two control routes are internal (mTLS vhost, like every `/control/*` route) and pass the same gates as the other
+content writes: L3 scope, then the L2e editorial assertion, then validation. Minting is MEDIUM and **not** read-only:
+it exposes unpublished content to whoever holds the link, so it is audited (`control.content.previewToken`, naming the
+token id and never the token), needs no WS4 approval, and carries an editorial principal (`created_by`).
+
+### Token format and storage
+
+32 random bytes from the OS CSPRNG, base64url (43 characters), generated server-side. Only its **sha256 (lowercase
+hex)** is stored (`preview_tokens.token_hash`, unique, migration `0013`); the plaintext exists only in the mint
+response. The mint runs in the shared command envelope with `withhold`, so the idempotency record is stored without
+the token **and without `previewPath`** (which embeds it): a replay of a mint answers **409
+`idempotency-response-withheld`** and mints nothing; mint again under a new `Idempotency-Key`. `ttlSeconds` defaults
+to 3600, is capped at 86400, and 0 or empty means the default; a negative, fractional or non-numeric value is a 400.
+`version` defaults to the item's head version; a missing version is 409 `version-not-found`, a deleted item 409
+`item-deleted`, and an item that is unknown, malformed or on another site or tenant is one 404 `item-not-found`.
+
+### The public endpoint
+
+- **One failure, one answer.** An unknown, malformed, expired or revoked token, a slug that is not that token's tenant
+  (or not a tenant, or an archived one), and a deleted item are all the **same 404 `not-found`** (the body of any
+  unknown `/v1` path), apart from `requestId`. The endpoint reveals nothing about which part was wrong.
+- **What it serves** is the pinned `content_versions` row's blocks and seo, wrapped by the same envelope builder the
+  item route uses, with the item's collection, locale, slug and meta. `meta.draft` is true unless the pinned version is
+  the one live right now. `localizations` lists only live siblings, so a preview never discloses other unpublished items.
+  The envelope shape is the frozen one; nothing in `/v1` changed.
+- **Headers** on every response of the route: `Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow`,
+  `Vary: Origin`, and **no `Cache-Tag`** (a CDN must never hold a draft, and a cached 200 would outlive a revoke).
+- **CORS.** `Access-Control-Allow-Origin` echoes the request `Origin` only when it equals `https://<domain>` for the
+  `environments.domain` of an environment (staging or production) of the token's site; otherwise no CORS header.
+  Never `Allow-Credentials`. The preflight answers 204 (`GET, OPTIONS`, `Access-Control-Max-Age: 600`); a preflight for a
+  bad token is the same 404. Set `environments.domain` for the site, or no browser origin will be allowed.
+- **Quota.** The per-tenant read quota applies, but is spent only after a token proves valid, so a stranger guessing
+  tokens cannot exhaust a tenant's real reads.
+- **Not leaked into logs or bodies.** `instance` and server log lines carry the path with the token replaced by
+  `:token`. **Operators:** the token is in the request URL, so any access log in front of the api (Caddy, a CDN, a load
+  balancer) records it. Redact `/v1/t/*/preview/*` in those logs, or accept that log readers can open a link until it
+  expires.
+- `preview` is a **reserved collection key** (`delivery/reserved-collection-keys.ts`): a collection with that key
+  would be unreachable. Check that no existing site already has one before you deploy.
+
+### Verify
+
+`test/preview-token-commands.spec.ts` (mint, revoke, gates, storage), `test/delivery/preview-endpoint.spec.ts` (the
+public route: draft not live, headers, CORS, every 404, api keys, quota), `test/delivery/preview-token.spec.ts` (pure
+primitives), `test/delivery/reserved-collection-keys.spec.ts`, and `migrations/tests/0013_preview_tokens.test.mjs`
+(also in `qa/linux-gate.sh`'s `migrations` suite and the CI `webdesk-api` job).
+
