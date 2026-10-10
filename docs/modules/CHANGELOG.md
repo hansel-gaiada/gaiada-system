@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.77.0` - the portal splits active and past projects, names the project lead, and groups People by side (2026-10-11) - PROTOTYPED
+
+Ticket PV2-07 in `docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. It renders PV2-03's fields (platform-nest 0.58.0); no backend change.
+
+- **Projects:** **Active** and **Past**, split on the server's `finished`. The UI never re-derives it from `status`;
+  undefined counts as active. Past is a native `<details>`, collapsed when there are active projects.
+- **Project page:** a "Project lead" line, with the email as selectable text and a Copy button that falls back to
+  selecting the text. Nothing renders when there is no lead.
+- **People:**
+  - **Your people** (`side` client), with plain-words access such as "Can sign, whole account".
+  - **Your account manager**, per client.
+  - **On our side** (`side` provider), so a client can see who from our company holds access to their account.
+- **Fix found in review:** the project page's "Was due" used its own status list without `completed`, the PV2-01
+  bug class. It now reads `finished`.
+- Pure helpers: `src/lib/portalPeople.ts` (`splitProjects`, `groupPeople`, `describeAccess`), 9 tests.
+- **Verified on Linux:** ui 228/228 files (4,516 tests); `next build` ok; portal e2e 12/12 in DEMO_MODE.
+
 ### webdesk `0.3.0` - gaiada.com can be served and edited through WebDesk: RustFS, `/v1` in the api, vocabulary 1.1.0, the write plane, live reads, the editorial assertion (2026-10-11) - DEV-VERIFIED
 
 Plan and tracker: `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; design `docs/plans/2026-10-10-webdesk-write-plane-design.md`; rulings WSK-D37…D48 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md`.

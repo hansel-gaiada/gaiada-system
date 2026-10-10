@@ -6,6 +6,7 @@ import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalProject } from "@/lib/portal-data";
 import { isPastDue, portalDate, relativeDays } from "@/lib/portal";
 import { Card, Eyebrow } from "@/components/ui";
+import { PortalCopyEmail } from "@/components/portal/PortalCopyEmail";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalBar, PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
@@ -32,7 +33,11 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
   if (!project) notFound();
 
   const now = new Date();
-  const overdue = isPastDue(project.dueDate, now) && !["done", "complete"].includes(project.status);
+  // `finished` is the server's one definition (FINISHED_PROJECT_STATUSES, PV2-01/03). The old local list
+  // lacked "completed", so a completed project past its due date read "Was due". Undefined (an older
+  // backend) falls back to that list, now including "completed".
+  const finished = project.finished ?? ["done", "complete", "completed", "archived", "cancelled"].includes(project.status);
+  const overdue = isPastDue(project.dueDate, now) && !finished;
   const w = project.workload ?? {};
   const inFlight = (w.in_progress ?? 0) + (w.blocked ?? 0);
 
@@ -46,6 +51,15 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
 
       <div className="cp-stack">
         <Card title="Where things stand" headerRight={<PortalStatus status={project.status} />}>
+          {/* PV2-07: nothing at all when the backend names no lead; never "Unknown". */}
+          {project.lead && (
+            <div style={{ marginBottom: 14, font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
+              <span style={{ fontWeight: 600, color: "var(--ink-strong)" }}>Project lead</span>
+              {": "}{project.lead.name}
+              {" · "}
+              <PortalCopyEmail email={project.lead.email} />
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
             <span style={{ font: "600 30px/1 var(--font-display)", color: "var(--ink-strong)" }}>
               {project.progressPercent}%

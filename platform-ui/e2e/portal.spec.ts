@@ -85,6 +85,20 @@ test.describe("client portal", () => {
     expect(pageErrors).toEqual([]);
   });
 
+  test("a finished project sits under Past, and People shows the account manager and our side @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/projects");
+    const past = page.locator("details", { hasText: "Past" });
+    await past.locator("summary").click();
+    await expect(past.getByText("Campaign — Q4 2025")).toBeVisible();
+
+    await page.goto("/portal/profile");
+    await expect(page.getByRole("heading", { name: /Your account manager/ })).toBeVisible();
+    await expect(page.getByText("made@gaiada.example").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /On our side/ })).toBeVisible();
+    await expect(page.getByText("Made Prabowo").first()).toBeVisible();
+  });
+
   test("the dashboard leads with what needs the client @portal", async ({ page }) => {
     await signInAsClient(page);
     // The fixture ships a pending gate and two unsigned contracts, so this must never be the empty state.

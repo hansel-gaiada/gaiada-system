@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalProjects } from "@/lib/portal-data";
+import { splitProjects } from "@/lib/portalPeople";
 import { isPastDue, portalDate, relativeDays } from "@/lib/portal";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -12,7 +13,7 @@ import { PortalBar, PortalPageHead, PortalStatus } from "@/components/portal/Por
 
 // CP-9 — the client's projects.
 //
-// Active projects first, then closed ones under their own heading rather than mixed in by date. A client
+// Active projects first, then finished ones under Past rather than mixed in by date. A client
 // scanning this list is nearly always asking about live work, and a finished project sorted to the top
 // by a recent `due_date` buries it.
 export default async function PortalProjectsPage() {
@@ -24,9 +25,8 @@ export default async function PortalProjectsPage() {
 
   const projects = await listPortalProjects(userId, tenant);
   const now = new Date();
-  const CLOSED = new Set(["done", "complete", "archived", "cancelled"]);
-  const active = projects.filter((p) => !CLOSED.has(p.status));
-  const closed = projects.filter((p) => CLOSED.has(p.status));
+  // PV2-07: the server decides what is finished (`finished`), never the UI from `status`.
+  const { active, past } = splitProjects(projects);
 
   return (
     <>
@@ -41,19 +41,30 @@ export default async function PortalProjectsPage() {
         <EmptyNote>No projects yet. Once your kickoff is processed, your project appears here.</EmptyNote>
       ) : (
         <div className="cp-stack">
-          {active.map((p) => (
-            <ProjectCard key={p.id} p={p} now={now} />
-          ))}
-          {closed.length > 0 && (
-            <>
-              <h2 style={{ margin: "10px 0 0", font: "600 15px/1.3 var(--font-body)", color: "var(--ink-muted)" }}>
-                Completed
-              </h2>
-              {closed.map((p) => (
-                <ProjectCard key={p.id} p={p} now={now} />
-              ))}
-            </>
+          <h2 style={{ margin: 0, font: "600 15px/1.3 var(--font-body)", color: "var(--ink-strong)" }}>Active</h2>
+          {active.length === 0 ? (
+            <EmptyNote>
+              Nothing is running right now.{" "}
+              {past.length > 0 ? "Your finished projects are listed under Past below. " : ""}
+              To start something new, send us a request.
+            </EmptyNote>
+          ) : (
+            active.map((p) => <ProjectCard key={p.id} p={p} now={now} />)
           )}
+
+          {/* Past is history: collapsed when there is live work to look at, open when it is all there is. */}
+          <details open={active.length === 0 && past.length > 0}>
+            <summary style={{ cursor: "pointer", font: "600 15px/1.3 var(--font-body)", color: "var(--ink-muted)" }}>
+              Past ({past.length})
+            </summary>
+            <div className="cp-stack" style={{ marginTop: 12 }}>
+              {past.length === 0 ? (
+                <EmptyNote>No finished projects yet. When a project wraps up, it moves here so you can still look back at it.</EmptyNote>
+              ) : (
+                past.map((p) => <ProjectCard key={p.id} p={p} now={now} />)
+              )}
+            </div>
+          </details>
         </div>
       )}
     </>
@@ -61,7 +72,7 @@ export default async function PortalProjectsPage() {
 }
 
 function ProjectCard({ p, now }: { p: Awaited<ReturnType<typeof listPortalProjects>>[number]; now: Date }) {
-  const overdue = isPastDue(p.dueDate, now) && !["done", "complete"].includes(p.status);
+  const overdue = isPastDue(p.dueDate, now) && p.finished !== true;
   return (
     <Card
       title={p.name}
