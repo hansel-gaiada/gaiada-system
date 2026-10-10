@@ -1205,10 +1205,16 @@ export async function controlProvisionSite(principal: Principal, tenantId: strin
  *
  * The environment must be one of THIS site's, read from the wall's own answer, so an approval can only name a
  * real target and its title tells the approver which one ("production read key"). One open request per
- * (site, environment, scope): filing again returns the pending request's id instead of queueing a second
- * mint (the same rule as `rebuild-requests`; two simultaneous first filings can still both land).
+ * (site, environment, scope): filing again returns the pending request's id, with `alreadyPending: true`,
+ * instead of queueing a second mint (the rebuild-requests rule; two simultaneous first filings can still
+ * both land).
  */
-export async function controlRequestKeyMint(principal: Principal, tenantId: string, siteIdParam: string, rawBody: unknown): Promise<{ approvalId: string }> {
+export async function controlRequestKeyMint(
+  principal: Principal,
+  tenantId: string,
+  siteIdParam: string,
+  rawBody: unknown,
+): Promise<{ approvalId: string; alreadyPending?: true }> {
   const b = strictBody(rawBody, ["tenantSlug", "envId", "scope"]);
   if (typeof b.tenantSlug !== "string" || b.tenantSlug === "") throw invalidRequest("tenantSlug is a required string");
   if (typeof b.envId !== "string" || !UUID_RE.test(b.envId)) throw invalidRequest("envId must be a uuid");
@@ -1242,7 +1248,8 @@ export async function controlRequestKeyMint(principal: Principal, tenantId: stri
     );
     return r.rows[0] ?? null;
   });
-  if (open) return { approvalId: open.id };
+  // `alreadyPending` lets a caller say "already requested" instead of "request filed" (additive: absent on a new filing).
+  if (open) return { approvalId: open.id, alreadyPending: true };
 
   return fileWebdeskCommandApproval(principal, tenantId, {
     command: "key.mint",
