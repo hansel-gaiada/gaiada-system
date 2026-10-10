@@ -1,23 +1,20 @@
-// WSK-07 — storage config. Every field is a GETTER (same reasoning as ../config.ts: env vars must
-// read live, not be snapshotted at module-import time, or a test process that sets
+// WSK-07 / WSK-52 — storage config. Every field is a GETTER (same reasoning as ../config.ts: env vars
+// must read live, not be snapshotted at module-import time, or a test process that sets
 // process.env.* after this module has already been imported transitively loses the race).
 //
-// FLAGGED GAP — reported in the ticket output, not fixed here (this ticket owns media/** and
-// storage/** only, not .env.example): there is no dedicated non-root MinIO credential for the api
-// service. `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in .env.example are the MinIO cluster's own
-// bootstrap admin credential (same shape as Postgres's `POSTGRES_SUPERUSER`), not a
-// least-privilege service credential. This file prefers dedicated `STORAGE_ACCESS_KEY_ID` /
-// `STORAGE_SECRET_ACCESS_KEY` vars if present and falls back to the MinIO root credential only for
-// dev — the same "requireInProd"-shaped honesty ../config.ts already uses elsewhere, applied here
-// too so a forgotten dedicated credential fails loud in production instead of silently running the
-// api as MinIO's root user.
-function requireInProd(name: string, devFallback: string): string {
+// WSK-52 (WSK-D42, RustFS replaces MinIO): the api authenticates to object storage with a DEDICATED,
+// least-privilege service key (STORAGE_ACCESS_KEY_ID / STORAGE_SECRET_ACCESS_KEY) minted by
+// webdesk/scripts/storage-bootstrap.mjs. The old fallback to the storage server's ROOT credential
+// (WSK-07's carried gap) is REMOVED: an unset key now throws at boot in EVERY environment, and a
+// key that equals the root user is refused too. Root credentials (RUSTFS_ROOT_USER/PASSWORD) are
+// used only by the bootstrap script and never reach the api container.
+function required(name: string): string {
   const v = process.env[name];
   if (v && v.length > 0) return v;
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(`[webdesk:api] ${name} is not set — refusing to boot in production.`);
-  }
-  return devFallback;
+  throw new Error(
+    `[webdesk:api] ${name} is not set — refusing to boot. The api needs the dedicated storage service key ` +
+      `created by webdesk/scripts/storage-bootstrap.mjs; it never falls back to the storage root credential.`,
+  );
 }
 
 export type BucketName = "media" | "video" | "uploads" | "artifacts";
@@ -34,15 +31,15 @@ export const CLIENT_UPLOADABLE_BUCKETS: ReadonlySet<BucketName> = new Set(["medi
 
 export const storageConfig = {
   get endpoint(): string {
-    return process.env.STORAGE_ENDPOINT || process.env.MINIO_ENDPOINT || "";
+    return process.env.STORAGE_ENDPOINT || "";
   },
   get region(): string {
-    // MinIO ignores the region value but the S3 SDK requires one to be set; S3/R2 need a real one
+    // RustFS ignores the region value but the S3 SDK requires one to be set; S3/R2 need a real one
     // at swap time — config-only, per the abstraction requirement.
     return process.env.STORAGE_REGION || "us-east-1";
   },
   get forcePathStyle(): boolean {
-    // MinIO (and most self-hosted S3-API providers) require path-style addressing
+    // RustFS (and most self-hosted S3-API providers) require path-style addressing
     // (`endpoint/bucket/key`, not `bucket.endpoint/key`) since they are not on a wildcard DNS
     // domain. AWS S3 defaults to virtual-hosted style but also accepts path-style, and R2 accepts
     // it too — so leaving this "true" as the default is broadly compatible, and it is exactly the
@@ -50,22 +47,27 @@ export const storageConfig = {
     return (process.env.STORAGE_FORCE_PATH_STYLE ?? "true") !== "false";
   },
   get accessKeyId(): string {
-    return requireInProd("STORAGE_ACCESS_KEY_ID", process.env.MINIO_ROOT_USER || "webdesk_minio");
+    const key = required("STORAGE_ACCESS_KEY_ID");
+    const root = process.env.RUSTFS_ROOT_USER;
+    if (root && key === root) {
+      throw new Error("[webdesk:api] STORAGE_ACCESS_KEY_ID equals RUSTFS_ROOT_USER — refusing to run the api as storage admin.");
+    }
+    return key;
   },
   get secretAccessKey(): string {
-    return requireInProd("STORAGE_SECRET_ACCESS_KEY", process.env.MINIO_ROOT_PASSWORD || "changeme_minio_password");
+    return required("STORAGE_SECRET_ACCESS_KEY");
   },
 
   bucketName(bucket: BucketName): string {
     switch (bucket) {
       case "media":
-        return process.env.MINIO_BUCKET_MEDIA || "media";
+        return process.env.STORAGE_BUCKET_MEDIA || "media";
       case "video":
-        return process.env.MINIO_BUCKET_VIDEO || "video";
+        return process.env.STORAGE_BUCKET_VIDEO || "video";
       case "uploads":
-        return process.env.MINIO_BUCKET_UPLOADS || "uploads";
+        return process.env.STORAGE_BUCKET_UPLOADS || "uploads";
       case "artifacts":
-        return process.env.MINIO_BUCKET_ARTIFACTS || "artifacts";
+        return process.env.STORAGE_BUCKET_ARTIFACTS || "artifacts";
     }
   },
 
@@ -95,6 +97,6 @@ export const storageConfig = {
    * this ticket's compose stack — see the ticket report).
    */
   get publicObjectBaseUrl(): string {
-    return process.env.STORAGE_PUBLIC_BASE_URL || process.env.MINIO_ENDPOINT || "";
+    return process.env.STORAGE_PUBLIC_BASE_URL || process.env.STORAGE_ENDPOINT || "";
   },
 };

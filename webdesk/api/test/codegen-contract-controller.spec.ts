@@ -10,8 +10,8 @@ process.env.MIGRATE_DATABASE_URL = process.env.MIGRATE_DATABASE_URL || "postgres
 process.env.API_KEY_PEPPER = process.env.API_KEY_PEPPER || "wsk15-test-pepper-never-used-outside-this-suite";
 process.env.WEBDESK_READ_QUOTA_PER_MIN = process.env.WEBDESK_READ_QUOTA_PER_MIN || "1000";
 process.env.STORAGE_ENDPOINT = process.env.STORAGE_ENDPOINT || "http://localhost:55501";
-process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_minio";
-process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_minio_password";
+process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_api";
+process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_api_secret_key";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";

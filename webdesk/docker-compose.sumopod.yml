@@ -16,7 +16,7 @@
 #
 #   sumopod runs 48 containers across 12 unrelated compose projects, the estate's observability
 #   store, a gVisor sandbox that executes employee-written code, and the WireGuard hub with a
-#   LIVE peer to gda-aicenter (the production ERP). Publishing Zone B's Postgres, Redis or MinIO
+#   LIVE peer to gda-aicenter (the production ERP). Publishing Zone B's Postgres, Redis or RustFS
 #   on 0.0.0.0 there would expose client data to every neighbour — and on this estate Docker's
 #   DNAT is evaluated BEFORE ufw, so a 0.0.0.0 bind is internet-reachable even where the
 #   firewall reports deny.
@@ -45,7 +45,7 @@
 #                       `- 404: /admin* /api/* /control/*
 #
 #   private compose network, NO host ports at all:
-#     postgres  redis  minio  payload (admin/internal)  payload-gateway  api
+#     postgres  redis  rustfs  payload (admin/internal)  payload-gateway  api
 #
 # Payload's admin panel is reachable ONLY from inside the Docker network — i.e. over an SSH
 # tunnel. That is design D-5 / WSK-D20 ("Payload admin is never public").
@@ -119,9 +119,9 @@ services:
     command: !override ["node", "dist/main.js"]
     ports: !reset []
     # THE COMPOSE ENV-PASSTHROUGH TRAP, caught by the first real boot (2026-08-29).
-    # The base file's `api` service declares exactly ONE storage var (MINIO_ENDPOINT), but
-    # api/src/storage/storage.config.ts calls requireInProd("STORAGE_ACCESS_KEY_ID") and
-    # requireInProd("STORAGE_SECRET_ACCESS_KEY") and reads eight more. A var in `.env` does
+    # The base file's `api` service declares exactly ONE storage var (STORAGE_ENDPOINT), but
+    # api/src/storage/storage.config.ts requires STORAGE_ACCESS_KEY_ID and
+    # STORAGE_SECRET_ACCESS_KEY (WSK-52: in every NODE_ENV, no root fallback) and reads more. A var in `.env` does
     # NOTHING unless the service lists it here — so `api` crash-looped with
     # "STORAGE_ACCESS_KEY_ID is not set — refusing to boot in production" on a .env that
     # defines it. The guard is right; the passthrough was missing.
@@ -129,14 +129,12 @@ services:
     # This belongs in docker-compose.yml (every environment needs it, not just this box) and is
     # REPORTED as a base-file fix, not silently owned here — the base file is another ticket's.
     environment:
-      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID}
-      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET_MEDIA: ${MINIO_BUCKET_MEDIA:-media}
-      MINIO_BUCKET_VIDEO: ${MINIO_BUCKET_VIDEO:-video}
-      MINIO_BUCKET_UPLOADS: ${MINIO_BUCKET_UPLOADS:-uploads}
-      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS:-artifacts}
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required - the dedicated service key from scripts/storage-bootstrap.mjs}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required - the dedicated service key from scripts/storage-bootstrap.mjs}
+      STORAGE_BUCKET_MEDIA: ${STORAGE_BUCKET_MEDIA:-media}
+      STORAGE_BUCKET_VIDEO: ${STORAGE_BUCKET_VIDEO:-video}
+      STORAGE_BUCKET_UPLOADS: ${STORAGE_BUCKET_UPLOADS:-uploads}
+      STORAGE_BUCKET_ARTIFACTS: ${STORAGE_BUCKET_ARTIFACTS:-artifacts}
       WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
@@ -202,7 +200,7 @@ services:
       resources:
         limits: { cpus: "0.25", memory: 256M }
 
-  minio:
+  rustfs:
     profiles: !reset []
     ports: !reset []
     deploy:

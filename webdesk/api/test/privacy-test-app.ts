@@ -15,9 +15,9 @@ process.env.MIGRATE_DATABASE_URL =
   process.env.MIGRATE_DATABASE_URL || "postgres://webdesk_migrator:throwaway_migrator@localhost:55530/webdesk";
 process.env.API_KEY_PEPPER = process.env.API_KEY_PEPPER || "wsk38-test-pepper-never-used-outside-this-suite";
 process.env.STORAGE_ENDPOINT = process.env.STORAGE_ENDPOINT || "http://localhost:55531";
-process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_minio";
-process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_minio_password";
-process.env.MINIO_BUCKET_UPLOADS = process.env.MINIO_BUCKET_UPLOADS || "uploads";
+process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_api";
+process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_api_secret_key";
+process.env.STORAGE_BUCKET_UPLOADS = process.env.STORAGE_BUCKET_UPLOADS || "uploads";
 
 import "reflect-metadata";
 import { Test } from "@nestjs/testing";

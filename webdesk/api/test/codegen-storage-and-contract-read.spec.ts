@@ -1,4 +1,4 @@
-// WSK-15 — live integration: real Postgres (composition read) + real MinIO (artifact store),
+// WSK-15 — live integration: real Postgres (composition read) + real RustFS (artifact store),
 // exercising `run-codegen`'s own building blocks directly (fetch -> build -> publish) and then
 // `ContractReadService` (the NestJS-facing read side) against what was actually published.
 // Every env var below is the REAL name the app code reads (`APP_DATABASE_URL`, `MIGRATE_DATABASE_URL`,
@@ -9,8 +9,8 @@ process.env.NODE_ENV = "test";
 process.env.APP_DATABASE_URL = process.env.APP_DATABASE_URL || "postgres://webdesk_app:throwaway_app@localhost:55500/webdesk";
 process.env.MIGRATE_DATABASE_URL = process.env.MIGRATE_DATABASE_URL || "postgres://webdesk_migrator:throwaway_migrator@localhost:55500/webdesk";
 process.env.STORAGE_ENDPOINT = process.env.STORAGE_ENDPOINT || "http://localhost:55501";
-process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_minio";
-process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_minio_password";
+process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_api";
+process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_api_secret_key";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -67,7 +67,7 @@ async function seedTenant(slug: string) {
   }
 }
 
-describe("codegen — live DB + MinIO integration", () => {
+describe("codegen — live DB + RustFS integration", () => {
   beforeAll(async () => {
     tenantSlug = `wsk15-live-${randomUUID().slice(0, 8)}`;
     tenantId = await seedTenant(tenantSlug);
@@ -153,13 +153,13 @@ describe("codegen — live DB + MinIO integration", () => {
   });
 
   it("ContractReadService.readLatest returns null (never throws) when the artifacts bucket itself does not exist — regression for a bug WSK-22's own test run surfaced live", async () => {
-    // `storageConfig.bucketName("artifacts")` reads `MINIO_BUCKET_ARTIFACTS` as a live getter —
+    // `storageConfig.bucketName("artifacts")` reads `STORAGE_BUCKET_ARTIFACTS` as a live getter —
     // pointing it at a bucket that was NEVER created (skipping `ensureBucket`) reproduces exactly
     // the failure mode WSK-22 observed against a throwaway stack with no artifact store bootstrap:
     // an unrecognized SDK error from `@aws-sdk/middleware-sdk-s3` instead of a clean 404. Before
     // this ticket's fix, `readLatest` propagated that error; it must now return `null`.
-    const previous = process.env.MINIO_BUCKET_ARTIFACTS;
-    process.env.MINIO_BUCKET_ARTIFACTS = `wsk15-bucket-that-was-never-created-${randomUUID().slice(0, 8)}`;
+    const previous = process.env.STORAGE_BUCKET_ARTIFACTS;
+    process.env.STORAGE_BUCKET_ARTIFACTS = `wsk15-bucket-that-was-never-created-${randomUUID().slice(0, 8)}`;
     try {
       const adapter = new S3StorageAdapter({
         endpoint: process.env.STORAGE_ENDPOINT!,
@@ -171,8 +171,8 @@ describe("codegen — live DB + MinIO integration", () => {
       const contractRead = new ContractReadService(adapter);
       await expect(contractRead.readLatest(tenantSlug)).resolves.toBeNull();
     } finally {
-      if (previous === undefined) delete process.env.MINIO_BUCKET_ARTIFACTS;
-      else process.env.MINIO_BUCKET_ARTIFACTS = previous;
+      if (previous === undefined) delete process.env.STORAGE_BUCKET_ARTIFACTS;
+      else process.env.STORAGE_BUCKET_ARTIFACTS = previous;
     }
   });
 

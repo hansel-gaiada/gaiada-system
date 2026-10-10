@@ -9,19 +9,21 @@
 # Checks, each run:
 #   1. The local sentinel file (written by webdesk-backup-local.sh) shows exit_code=0 and a
 #      finished_at within WD_BACKUP_MAX_AGE_HOURS.
-#   2. The newest object under <bucket>/pg/ in MinIO is younger than the same window (catches the
-#      case where the local script ran but the mc cp step silently produced an empty/stale mirror
+#   2. The newest object under <bucket>/pg/ in object storage (RustFS, WSK-D42) is younger than the
+#      same window (catches the case where the local script ran but the upload step silently
+#      produced an empty/stale mirror
 #      -- the sentinel file alone can't see that, only the bucket listing can).
 #
 # Run (compose service `wd-backup-sentinel`, looped; or standalone cron):
-#   WEBDESK_BACKUP_SENTINEL_FILE=... MINIO_ENDPOINT=... MINIO_ROOT_USER=... MINIO_ROOT_PASSWORD=... \
+#   WEBDESK_BACKUP_SENTINEL_FILE=... STORAGE_ENDPOINT=... \
+#   WEBDESK_BACKUP_ACCESS_KEY_ID=... WEBDESK_BACKUP_SECRET_ACCESS_KEY=... \
 #   WD_BACKUP_MAX_AGE_HOURS=26 DEADMANSSWITCH_URL=... TELEGRAM_BOT_TOKEN=... ALERT_CHAT_ID=... ALERT_EMAIL_TO=... \
 #     ./wd-backup-sentinel.sh
 set -eu
 
 SENTINEL_FILE="${WEBDESK_BACKUP_SENTINEL_FILE:-/var/lib/webdesk-backups/.last-run}"
 MAX_AGE_HOURS="${WD_BACKUP_MAX_AGE_HOURS:-26}"
-MINIO_ALIAS="${WEBDESK_MC_ALIAS:-webdesk}"
+STORAGE_REGION="${STORAGE_REGION:-us-east-1}"
 BACKUP_BUCKET="${WEBDESK_BACKUP_BUCKET:-backups}"
 
 now_epoch="$(date -u +%s)"
@@ -65,14 +67,47 @@ if [ "$age_seconds" -gt "$max_age_seconds" ]; then
   fail "last successful backup is $((age_seconds / 3600))h old (max ${MAX_AGE_HOURS}h) -- the nightly job appears to have stopped running"
 fi
 
-# --- 2. Bucket-side freshness check (optional -- only if MinIO creds are provided) -----------
-if [ -n "${MINIO_ENDPOINT:-}" ] && [ -n "${MINIO_ROOT_USER:-}" ] && [ -n "${MINIO_ROOT_PASSWORD:-}" ] \
-   && command -v mc >/dev/null 2>&1; then
-  mc alias set "$MINIO_ALIAS" "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
-    || fail "mc alias set failed during freshness check"
-  newest="$(mc ls --json "$MINIO_ALIAS/$BACKUP_BUCKET/pg/" 2>/dev/null | tail -1 || true)"
-  if [ -z "$newest" ]; then
-    fail "no objects found under $MINIO_ALIAS/$BACKUP_BUCKET/pg/ -- the local sentinel file says success but the bucket is empty. This is exactly the case #4/§4 exists to catch: a job that exits 0 without actually having mirrored anything."
+# --- 2. Bucket-side freshness check (optional -- only if backup-writer creds are provided) ----
+# WSK-52: no `mc` (RustFS ships none). ListObjectsV2 over curl --aws-sigv4 with the dedicated
+# backup-writer key (never root). Keys are pg/webdesk-YYYYMMDD-HHMMSS.sql.gz; the newest object is
+# the maximum LastModified across every page of the listing.
+if [ -n "${STORAGE_ENDPOINT:-}" ] && [ -n "${WEBDESK_BACKUP_ACCESS_KEY_ID:-}" ] && [ -n "${WEBDESK_BACKUP_SECRET_ACCESS_KEY:-}" ]; then
+  list_page() { # $1 = continuation token, or empty for the first page
+    if [ -n "$1" ]; then
+      curl -sS -f -G --aws-sigv4 "aws:amz:$STORAGE_REGION:s3" \
+        --user "$WEBDESK_BACKUP_ACCESS_KEY_ID:$WEBDESK_BACKUP_SECRET_ACCESS_KEY" \
+        --data-urlencode "list-type=2" --data-urlencode "prefix=pg/" --data-urlencode "continuation-token=$1" \
+        "${STORAGE_ENDPOINT%/}/$BACKUP_BUCKET"
+    else
+      curl -sS -f -G --aws-sigv4 "aws:amz:$STORAGE_REGION:s3" \
+        --user "$WEBDESK_BACKUP_ACCESS_KEY_ID:$WEBDESK_BACKUP_SECRET_ACCESS_KEY" \
+        --data-urlencode "list-type=2" --data-urlencode "prefix=pg/" \
+        "${STORAGE_ENDPOINT%/}/$BACKUP_BUCKET"
+    fi
+  }
+  token=""
+  newest_mod=""
+  while :; do
+    page="$(list_page "$token")" || fail "listing $BACKUP_BUCKET/pg/ failed during the freshness check"
+    page_newest="$(printf '%s' "$page" | grep -o '<LastModified>[^<]*' | sed 's/<LastModified>//' | sort | tail -1)"
+    # ISO-8601 timestamps sort lexically; blank lines sort first and lose.
+    newest_mod="$(printf '%s\n%s\n' "$newest_mod" "$page_newest" | sort | tail -1)"
+    if printf '%s' "$page" | grep -q '<IsTruncated>true</IsTruncated>'; then
+      token="$(printf '%s' "$page" | grep -o '<NextContinuationToken>[^<]*' | sed 's/<NextContinuationToken>//')"
+      [ -n "$token" ] || break
+    else
+      break
+    fi
+  done
+  if [ -z "$newest_mod" ]; then
+    fail "no objects found under $BACKUP_BUCKET/pg/ -- the local sentinel file says success but the bucket is empty. This is exactly the case #4/section 4 exists to catch: a job that exits 0 without actually having mirrored anything."
+  fi
+  newest_iso="$(printf '%s' "$newest_mod" | sed 's/\.[0-9]*Z$/Z/')"
+  newest_epoch="$(date -u -d "$newest_iso" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$newest_iso" +%s 2>/dev/null || echo 0)"
+  [ "$newest_epoch" != "0" ] || fail "could not parse newest object LastModified=$newest_mod"
+  bucket_age=$((now_epoch - newest_epoch))
+  if [ "$bucket_age" -gt "$max_age_seconds" ]; then
+    fail "newest object under $BACKUP_BUCKET/pg/ is $((bucket_age / 3600))h old (max ${MAX_AGE_HOURS}h) -- the sentinel file says success but the bucket copy is stale"
   fi
 fi
 

@@ -16,10 +16,10 @@ It stands up the Zone B stack's *shape*:
 ```
 proxy (Caddy) ── payload (Payload 3, stub)
              └── api (NestJS, stub) ── worker (BullMQ, stub)
-postgres (own DB, own ledger, own role split) ── minio ── redis ── clamav ── otel-collector
+postgres (own DB, own ledger, own role split) ── rustfs ── redis ── clamav ── otel-collector
 ```
 
-Every service except Postgres/MinIO/Redis/ClamAV/OTel-collector is a **placeholder process**
+Every service except Postgres/RustFS/Redis/ClamAV/OTel-collector is a **placeholder process**
 right now (`sleep infinity` with a log line naming the ticket that replaces it). The stack shape
 is this ticket's deliverable, not working application code — WSK-02 vendors Payload, WSK-21
 builds the api's control plane, WSK-07/10/11 build the media/forms/mail surfaces, WSK-28 wires
@@ -39,7 +39,7 @@ cross-tenant leakage and the boundary itself (§00). Concretely, for this projec
   deliberately separate from every Zone A compose project, so the estate's `--remove-orphans`
   trap (any container in the SAME project whose profile isn't in the current command gets
   deleted) cannot reach it — same precedent as the n8n project split.
-- **Its own Postgres, its own MinIO, its own Redis** — no shared infrastructure with Zone A, ever.
+- **Its own Postgres, its own RustFS, its own Redis** — no shared infrastructure with Zone A, ever.
 - The one channel that will eventually cross A→B (the control-plane call, mTLS + Keycloak
   client-credentials + WS4 assertion) and the two that cross B→A (signed fact webhooks, write-only
   OTLP push) are specified in design §03 and land at WSK-21/22/28 — none of that exists in this
@@ -85,6 +85,20 @@ is healthy:
 npm install
 npm run migrate     # reads MIGRATE_DATABASE_URL from your environment/.env
 ```
+
+Object storage (RustFS, WSK-52): the image ships no `mc`, so once `rustfs` is healthy, provision
+it — buckets, versioning, GOVERNANCE object lock and the api's least-privilege service key — with
+the bootstrap (needs `npm ci` in `api/`; reads `STORAGE_ENDPOINT`, `RUSTFS_ROOT_*`,
+`STORAGE_ACCESS_KEY_ID`/`STORAGE_SECRET_ACCESS_KEY` from the environment; idempotent):
+
+```sh
+(cd api && npm ci)
+set -a; . ./.env; set +a
+node scripts/storage-bootstrap.mjs      # a second run ends with `STORAGE_BOOTSTRAP changes=0`
+```
+
+`STORAGE_ACCESS_KEY_ID`/`STORAGE_SECRET_ACCESS_KEY` are mandatory: compose will not resolve
+without them and the api will not boot — there is no fallback to the root credential.
 
 Tear down: `docker compose --profile dev down -v` (the `-v` also drops the dev volumes — this is
 a throwaway dev stack, not anything holding real data).

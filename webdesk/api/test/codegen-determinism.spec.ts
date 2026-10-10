@@ -2,7 +2,7 @@
 // SAME composition input produces byte-identical `openapi.v1.json`/`sdk.d.ts`/`CONTENT-CONTRACT.md`
 // and an identical `contentHash` across repeated calls, while a DIFFERENT input produces a
 // different hash. This is the fast, no-container half of the determinism AC; the real
-// "two separate processes against a real Postgres/MinIO stack" proof is
+// "two separate processes against a real Postgres/RustFS stack" proof is
 // `codegen-double-run-gate.spec.ts` + this ticket's report (verbatim transcript).
 import { describe, expect, it } from "vitest";
 import { buildContractArtifacts } from "../src/codegen/generator/build-artifacts.mts";

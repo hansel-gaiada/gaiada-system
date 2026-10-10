@@ -1,5 +1,5 @@
 // WSK-38 — erase proofs: the hard part. Verifies (a) submission rows are SCRUBBED not deleted and
-// data_subject_ref is cleared, (b) the underlying MinIO object is ACTUALLY gone (HeadObject 404,
+// data_subject_ref is cleared, (b) the underlying RustFS object is ACTUALLY gone (HeadObject 404,
 // not just "the media_assets row disappeared"), (c) double-fire under the SAME idempotency key
 // produces exactly one effect, (d) cross-tenant isolation holds, and (e) THE AUDIT TRAIL SURVIVES
 // THE ERASURE — dsr_requests + audit_entries rows for this erase remain readable, with correct
@@ -41,7 +41,7 @@ describe("privacy.erase", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("scrubs the submission (payload={}, status='erased', data_subject_ref=NULL) and DELETES the real MinIO object", async () => {
+  it("scrubs the submission (payload={}, status='erased', data_subject_ref=NULL) and DELETES the real RustFS object", async () => {
     const tenant = await createFixtureTenant("erase-full");
     const formDefId = await insertFormDef(tenant, "contact");
     const email = `erase-${randomUUID().slice(0, 8)}@example.com`;

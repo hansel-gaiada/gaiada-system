@@ -1,5 +1,5 @@
 // WSK-38 — find/export proofs. Verification runbook: ../README.md's "WSK-38" section (throwaway
-// Postgres + MinIO, port block 55530-55531).
+// Postgres + RustFS, port block 55530-55531).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
@@ -94,7 +94,7 @@ describe("privacy.find / privacy.export", () => {
     expect(auditRows.rows[0].args_hash).not.toContain(email);
   });
 
-  it("export returns full field values AND fetches the real attachment bytes from MinIO", async () => {
+  it("export returns full field values AND fetches the real attachment bytes from RustFS", async () => {
     const tenant = await createFixtureTenant("export-full");
     const formDefId = await insertFormDef(tenant, "contact");
     const email = `export-${randomUUID().slice(0, 8)}@example.com`;

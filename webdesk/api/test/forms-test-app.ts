@@ -28,9 +28,9 @@ process.env.MAIL_QUEUE_NAME = process.env.MAIL_QUEUE_NAME || "wsk10-forms-mail-t
 process.env.MAIL_QUEUE_MAX_ATTEMPTS = process.env.MAIL_QUEUE_MAX_ATTEMPTS || "2";
 process.env.MAIL_QUEUE_BACKOFF_DELAY_MS = process.env.MAIL_QUEUE_BACKOFF_DELAY_MS || "200";
 process.env.STORAGE_ENDPOINT = process.env.STORAGE_ENDPOINT || "http://localhost:55464";
-process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_minio";
-process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_minio_password";
-process.env.MINIO_BUCKET_UPLOADS = process.env.MINIO_BUCKET_UPLOADS || "uploads";
+process.env.STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_api";
+process.env.STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_api_secret_key";
+process.env.STORAGE_BUCKET_UPLOADS = process.env.STORAGE_BUCKET_UPLOADS || "uploads";
 process.env.CLAMAV_HOST = process.env.CLAMAV_HOST || "localhost";
 process.env.CLAMAV_PORT = process.env.CLAMAV_PORT || "55466";
 // Deliberately generous defaults for the abuse-battery's own rate-limit specs to override per-file
