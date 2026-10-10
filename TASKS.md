@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **48%** · 89/183<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **50%** · 93/183<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████████████░░░` **83%** · 74/89<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **87%** · 78/89<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -64,7 +64,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Design doc: contract, draft/live, authoring + read commands, editorial assertion, Cerbos, loader principal, rebuild path, control channel
 - [x] Reviewed (claims checked against `breaking-change.ts` and the contract test); rulings landed as D44–D48
 
-### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `███████░░░` **72%** · 8/11<!-- /bar -->
+### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `█████████░` **90%** · 10/11<!-- /bar -->
 - [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
 - [x] Verification tenants removed (250 `wsk<n>-*` fixtures; none other existed)
 - [x] RustFS up from the pinned digest and bootstrapped (16 changes, then 0); MinIO container removed
@@ -74,8 +74,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
 - [ ] `api.gaiada.com` vhost enabled with TLS (rename the staged `api.gaiada.online.conf`; after the A record)
 - [x] The api image on the box built off the live box (sumopod `webdesk-api:1cbee520`, transferred in 30 s)
-- [ ] The api image signed via a release
-- [ ] ERP egress client's own live probe from `gaiada-platform-1` (needs the release that ships WSK-63b + its compose `extra_hosts`)
+- [x] The api image signed via a release (`v1.0.0-alpha.344`, cosign-verified digest `sha256:69abc934…`, live on gda-aicenter 2026-10-11)
+- [x] ERP egress client's own live probe from `gaiada-platform-1` (344: all four layers reach WebDesk, `404 tenant not found` before provisioning; without the client cert, refused at Layer 1)
 
 ### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
@@ -101,11 +101,11 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] ERP egress client: shared hash vectors, single-flight token cache, circuit breaker, no secret in logs (42/42 + 7/7 on Linux)
 - [x] Live: certificate + token reach the contract handler; no cert / foreign CA → 400 at nginx; forged cert + gate headers overwritten (Layer 2 answers, never Layer 1); garbage token → 401 Layer 2
 
-### Wave A · WSK-47 · Cerbos kinds <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
+### Wave A · WSK-47 · Cerbos kinds <!-- bar -->✅ `██████████` **100%** · 4/4<!-- /bar -->
 - [x] `webdesk_content_item` + `webdesk_collection`; maker ≠ checker, single-item self-publish (D46); publish/schedule without an approval denied for every principal
 - [x] Six artifacts and re-derived pinned counts in one change (kinds 101, catalog 416, grantable 401)
 - [x] `src/rbac` suite green on Linux with Cerbos reachable (849/849, 0 skipped; 41-row probe matrix)
-- [ ] Live Cerbos restarted; the probe matrix matches
+- [x] Live Cerbos restarted; the probe matrix matches (344 deploy restarted it; probe-wsk47: ALL ROWS AS EXPECTED)
 
 ### Wave A · WSK-54 · Bundle export (site repo) <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
 - [x] Two exports of one commit are byte-identical (site `webdesk-importer` @ `10c2d21`; content sha256 `3a23fc70…` twice)
@@ -126,12 +126,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Eight reads; cross-tenant 404 with a positive control (38/38; negative control 16 red; WSK-66 reconcile fields pinned)
 - [x] No audit rows written; pagination stable under a concurrent update (api 568/0/1)
 
-### Wave B · WSK-40 · Editorial assertion <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
+### Wave B · WSK-40 · Editorial assertion <!-- bar -->✅ `██████████` **100%** · 4/4<!-- /bar -->
 - [x] Adversarial matrix of ≥ 20 rows, each with its exact problem slug (32 rows; JWKS loader 25 cases)
 - [x] Signer and verifier pin the same vectors, both directions (+ end-to-end: an approved publish lands through real mTLS)
 - [x] Key rotation runbook executed once on a dev stack (overlap accepted, old kid refused after)
 
-- [ ] Live keys provisioned on gda-aicenter (ERP signing key + WebDesk JWKS) and probes P1/P2 pass
+- [x] Live keys provisioned on gda-aicenter (ERP signing key + WebDesk JWKS) and probes P1/P2 pass (kid `wde-2026-10`; P1 401 editorial-assertion-missing, P2 403 editorial-assertion-command-mismatch)
 ### Wave B · WSK-66 · Publish and key mint executed at approval <!-- bar -->✅ `██████████` **100%** · 5/5<!-- /bar -->
 - [x] Origin migration unions `webdesk` into the live CHECK (no value lost; planted-value regression test)
 - [x] Requester ≠ approver, except a single-item self-publish (D46); 0 Zone B calls on every denial
