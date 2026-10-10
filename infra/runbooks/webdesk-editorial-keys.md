@@ -120,7 +120,9 @@ sudo docker run --rm -v /root/wde-keygen:/out -v <deploy-tree>/platform-nest/scr
    file set. `vps.yml` alone is not a valid project, and a stale image tag in `.env` rolls back silently, so check both. Expected log line:
    `editorial assertion signer configured (kid wde-2026-10)`.
 6. **Probe:** P1 must give `401 editorial-assertion-missing`, and P2 must give `403 editorial-assertion-command-mismatch`.
-7. **Clean up:** `sudo shred -u /root/wde-keygen/*.pem && sudo rm -rf /root/wde-keygen`.
+7. **Clean up:** `sudo sh -c 'shred -u /root/wde-keygen/*.pem && rm -rf /root/wde-keygen'`. The glob must expand **as root**:
+   with a plain `sudo shred -u /root/wde-keygen/*.pem` the operator's shell expands it, cannot list `/root`, passes the literal
+   `*.pem`, and the `&&` then skips the `rm` too, leaving the scratch private key behind (found on the live install, 2026-10-11).
 
 ## Rotation (kid N → kid N+1), zero downtime
 
