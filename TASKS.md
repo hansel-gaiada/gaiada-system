@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **60%** · 125/205<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **60%** · 125/207<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████████░░` **88%** · 80/90<!-- /bar -->
+<!-- bar -->🟡 `█████████████████░░░` **86%** · 80/92<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -77,10 +77,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] The api image signed via a release (`v1.0.0-alpha.344`, cosign-verified digest `sha256:69abc934…`, live on gda-aicenter 2026-10-11)
 - [x] ERP egress client's own live probe from `gaiada-platform-1` (344: all four layers reach WebDesk, `404 tenant not found` before provisioning; without the client cert, refused at Layer 1)
 
-### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
+### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `█░░░░░░░░░` **14%** · 1/7<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
 - [ ] CI runs only the jobs whose component changed; superseded runs are cancelled — first half PROVEN on main 2026-10-11 (347 push, run 38082096371: only the platform-nest jobs ran, 9 jobs skipped); superseded-run cancellation not yet observed
-- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags
+- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags; 349 (2026-10-11): the plan built ONLY platform-ui and re-tagged 10, and 7 re-tags kept their digests (the fix works, wa-chat-bot included); the 8th failed for a different reason (below), so not yet proven end to end
+- [ ] GHCR prune deleted the CHILD manifest of a still-tagged image index (report-renderer `249e5e4c`, tags .303–.348, lost child `f627854c`): those tags are unpullable from GHCR. Prune DISABLED on main (`5cda7ea5`)
+- [ ] A reference-aware GHCR prune (never delete a digest that any tagged index lists) before re-enabling retention
 - [ ] Dependency and Docker layer caching
 - [ ] Billed minutes for a WebDesk-only change measured after, and recorded
 
