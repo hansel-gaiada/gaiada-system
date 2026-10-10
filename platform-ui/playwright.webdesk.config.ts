@@ -55,6 +55,9 @@ export default defineConfig({
         NEXT_DIST_DIR: DIST,
       },
       reuseExistingServer: !process.env.CI,
+      // Server logs matter when a state fails only against the BUILT app (the gate runs `next start`).
+      stdout: "pipe",
+      stderr: "pipe",
       timeout: 240_000,
     },
   ],

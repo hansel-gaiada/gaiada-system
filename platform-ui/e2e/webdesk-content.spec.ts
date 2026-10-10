@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 
 // WSK-44 — the Website workspace, against the STUBBED WSK-59 BFF (e2e/webdesk-stub/, run by
 // playwright.webdesk.config.ts). Every row of write-plane design §10's states table is reached here;
@@ -45,6 +45,18 @@ async function loginAs(page: Page, context: BrowserContext, email: string) {
 }
 
 const main = (page: Page) => page.locator(".dept-shell__main");
+
+// The gate runs the BUILT app: its server HTML is interactive-looking well before React has hydrated, so a click
+// that lands in that gap is silently lost (measured: the twin-create button). React tags a hydrated DOM node with a
+// `__reactProps$…` key, so "ready" means that tag is present — no test hook in shipped code.
+async function hydrated(loc: Locator) {
+  await expect.poll(() => loc.evaluate((el) => Object.keys(el).some((k) => k.startsWith("__reactProps$")))).toBe(true);
+}
+/** Open an EDITOR url and wait until it is interactive. */
+async function open(page: Page, url: string) {
+  await page.goto(url);
+  await hydrated(page.getByTestId("item-editor"));
+}
 
 test.beforeEach(async ({ page, context }) => {
   await stub.reset();
@@ -114,7 +126,7 @@ test("STATE editorial unavailable: a full-page notice on EVERY page, and no list
 
 test("STATE editorial unavailable recovers: Try again after the API returns shows the editor", async ({ page }) => {
   await stub.config({ unavailable: true });
-  await page.goto(SERVICE_SEO);
+  await page.goto(SERVICE_SEO); // there is no editor to wait for: that is the point
   await expect(page.getByTestId("wd-editorial-unavailable")).toBeVisible();
   await stub.config({ unavailable: false });
   await page.getByRole("link", { name: "Try again" }).click();
@@ -148,7 +160,7 @@ test("STATE forbidden: a Cerbos 403 is a refusal, not 'nothing here'", async ({ 
 // ── the editor: dirty / saving / saved, invalid, read-only ────────────────────────────────────────
 
 test("STATE dirty -> saving -> saved vN: the real composition renders and a save writes v4", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await expect(page.getByTestId("editor-title")).toHaveText("SEO Agency in Bali for Hotels");
   await expect(page.getByTestId("save-status")).toHaveText("No changes");
   await expect(page.getByTestId("save")).toBeDisabled();
@@ -176,7 +188,7 @@ test("STATE dirty -> saving -> saved vN: the real composition renders and a save
 });
 
 test("markdown fields have a source tab and a structural preview", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByRole("tab", { name: "Preview" }).click();
   await expect(page.getByTestId("markdown-preview").getByRole("heading", { name: "SEO Agency in Bali" })).toBeVisible();
   await expect(page.getByTestId("markdown-preview").locator("li")).toHaveCount(3);
@@ -185,7 +197,7 @@ test("markdown fields have a source tab and a structural preview", async ({ page
 });
 
 test("STATE invalid (422): errors are located inline by JSON pointer and the edits are kept", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.locator(P("phase")).selectOption(""); // a required select, now absent
   await page.locator(P("h1")).fill("Kept after the failed save");
   await page.getByTestId("save").click();
@@ -209,7 +221,7 @@ test("STATE invalid (422): errors are located inline by JSON pointer and the edi
 
 test("STATE read-only (no `update`): a 403 on save turns the form read-only, keeps the edit and says why", async ({ page, context }) => {
   await loginAs(page, context, "gede@gaiada.com"); // plain member: the stub grants read, refuses every write
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await expect(page.getByTestId("item-editor")).toBeVisible();
   await page.locator(P("h1")).fill("A member's edit");
   await page.getByTestId("save").click();
@@ -224,7 +236,7 @@ test("STATE read-only (no `update`): a 403 on save turns the form read-only, kee
 });
 
 test("STATE read-only (deleted item): opens read-only from the start, with the reason", async ({ page }) => {
-  await page.goto(`${SITE}/service/service.old-draft?locale=en`);
+  await open(page, `${SITE}/service/service.old-draft?locale=en`);
   await expect(page.getByTestId("readonly-banner")).toContainText("deleted");
   await expect(page.locator(P("h1"))).not.toBeEditable();
   await expect(page.getByTestId("save")).toBeDisabled();
@@ -233,7 +245,7 @@ test("STATE read-only (deleted item): opens read-only from the start, with the r
 // ── conflict / stale ───────────────────────────────────────────────────────────────────────────────
 
 test("STATE conflict (409): a dialog names the newer version, the local edit is KEPT; Save mine on top wins", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.locator(P("h1")).fill("Mine, typed before the conflict");
   await stub.post("concurrent-save", { itemId: "itm-service-seo-en", fields: { h1: "Theirs, saved meanwhile" }, by: "dept-manager" });
   await page.getByTestId("save").click();
@@ -263,7 +275,7 @@ test("STATE conflict (409): a dialog names the newer version, the local edit is 
 });
 
 test("STATE conflict: Load theirs replaces the form with the newer version", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.locator(P("h1")).fill("Mine");
   await stub.post("concurrent-save", { itemId: "itm-service-seo-en", fields: { h1: "Theirs, saved meanwhile" } });
   await page.getByTestId("save").click();
@@ -274,7 +286,7 @@ test("STATE conflict: Load theirs replaces the form with the newer version", asy
 });
 
 test("STATE stale: a failed refresh shows a banner, disables Save and Publish, and keeps the draft", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.locator(P("h1")).fill("Edited while the API is down");
   await expect(page.getByTestId("request-publish")).toBeDisabled(); // dirty
   await stub.config({ unavailable: true });
@@ -297,7 +309,7 @@ test("STATE stale: a failed refresh shows a banner, disables Save and Publish, a
 });
 
 test("a write that hits an unavailable API keeps the edits and goes stale instead of losing them", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.locator(P("h1")).fill("Typed, then the API died");
   await stub.config({ unavailable: true });
   await page.getByTestId("save").click();
@@ -309,7 +321,7 @@ test("a write that hits an unavailable API keeps the edits and goes stale instea
 // ── publish: pending approval -> rejected | failed | published -> rebuild ──────────────────────────
 
 test("STATE pending approval -> Withdraw; the pending request survives a reload", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await expect(page.getByTestId("publish-state")).toHaveText("Live · v2");
   await page.getByTestId("request-publish").click();
   const awaiting = page.getByTestId("awaiting-approval");
@@ -327,7 +339,7 @@ test("STATE pending approval -> Withdraw; the pending request survives a reload"
 });
 
 test("STATE rejected: the outcome is explained and Request again files a new request", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByTestId("request-publish").click();
   await expect(page.getByTestId("awaiting-approval")).toBeVisible();
   await stub.post("decide", { id: "ap-0001-publish", outcome: "reject", by: "dept-manager" });
@@ -341,7 +353,7 @@ test("STATE rejected: the outcome is explained and Request again files a new req
 });
 
 test("STATE failed: an approved request whose execution failed says why, in plain words", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByTestId("request-publish").click();
   await expect(page.getByTestId("awaiting-approval")).toBeVisible(); // the request must exist before it is decided
   await stub.post("decide", { id: "ap-0001-publish", outcome: "fail", by: "dept-manager" });
@@ -352,7 +364,7 @@ test("STATE failed: an approved request whose execution failed says why, in plai
 });
 
 test("STATE published vN -> rebuilding -> live on staging (confirmed only by the build status)", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByTestId("request-publish").click();
   await expect(page.getByTestId("awaiting-approval")).toBeVisible();
   await stub.post("decide", { id: "ap-0001-publish", outcome: "approve", by: "dept-manager" });
@@ -372,7 +384,7 @@ test("STATE published vN -> rebuilding -> live on staging (confirmed only by the
 });
 
 test("STATE rebuild unverified: a rebuild that never confirms is never shown as live", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByTestId("request-publish").click();
   await expect(page.getByTestId("awaiting-approval")).toBeVisible();
   await stub.post("decide", { id: "ap-0001-publish", outcome: "approve" });
@@ -385,7 +397,7 @@ test("STATE rebuild unverified: a rebuild that never confirms is never shown as 
 
 test("when the build-status route is not served the page says so and never claims 'live'", async ({ page }) => {
   await stub.config({ buildStatusServed: false });
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByTestId("request-publish").click();
   await expect(page.getByTestId("awaiting-approval")).toBeVisible();
   await stub.post("decide", { id: "ap-0001-publish", outcome: "approve" });
@@ -395,7 +407,7 @@ test("when the build-status route is not served the page says so and never claim
 });
 
 test("STATE unpublished, staging stale: unpublish needs no approval, warns, and offers Request rebuild", async ({ page }) => {
-  await page.goto(`${SITE}/service/service.web-design?locale=en`);
+  await open(page, `${SITE}/service/service.web-design?locale=en`);
   await expect(page.getByTestId("publish-state")).toHaveText("Live · v1");
   await page.getByTestId("unpublish").click();
   await page.getByTestId("confirm-unpublish").click();
@@ -415,7 +427,7 @@ test("STATE unpublished, staging stale: unpublish needs no approval, warns, and 
 const rowTitles = (page: Page) => page.locator(`fieldset${P("primary")} > ol > li > .wc-list__bar .wc-list__title`).allTextContents();
 
 test("list field: KEYBOARD-ONLY reorder (grab, arrows, drop, Escape cancels), add and remove", async ({ page }) => {
-  await page.goto(NAV_EN);
+  await open(page, NAV_EN);
   expect(await rowTitles(page)).toEqual(["/services/", "/work/", "/about/"]);
 
   // anchored names: a nested `children` list has its own handles ("Reorder /services/seo/, …")
@@ -463,7 +475,7 @@ test("list field: KEYBOARD-ONLY reorder (grab, arrows, drop, Escape cancels), ad
 test("list field: reorder by DRAG", async ({ page }) => {
   // HTML5 drag needs source and target on screen at once (a real user auto-scrolls; a synthetic mouse does not).
   await page.setViewportSize({ width: 1280, height: 2600 });
-  await page.goto(NAV_EN);
+  await open(page, NAV_EN);
   const src = page.getByRole("button", { name: /^Reorder \/about\/, position/ });
   const target = page.locator(`fieldset${P("primary")} > ol > li`).first();
   await src.dragTo(target);
@@ -474,11 +486,11 @@ test("list field: reorder by DRAG", async ({ page }) => {
 // ── locale-neutral members ─────────────────────────────────────────────────────────────────────────
 
 test("locale-neutral members are READ-ONLY on the id tab (and editable on en); a save writes the default value through", async ({ page }) => {
-  await page.goto(NAV_EN);
+  await open(page, NAV_EN);
   await expect(page.locator(P("primary/0/url"))).toBeEditable();
   await expect(page.locator(P("primary/0/children/0"))).toBeEditable();
 
-  await page.goto(NAV_ID);
+  await open(page, NAV_ID);
   await expect(page.getByTestId("item-editor")).toBeVisible();
   // localized members stay editable…
   await expect(page.locator(P("primary/0/label"))).toHaveValue("Layanan");
@@ -504,7 +516,7 @@ test("locale-neutral members are READ-ONLY on the id tab (and editable on en); a
 });
 
 test("locale tabs show twin status and create a missing twin from the saved version", async ({ page }) => {
-  await page.goto(`${SITE}/service/service.local-seo?locale=en`);
+  await open(page, `${SITE}/service/service.local-seo?locale=en`);
   await expect(page.getByTestId("create-locale-id")).toContainText("not created");
   await page.getByTestId("create-locale-id").click();
   await expect(page).toHaveURL(/service\.local-seo\?locale=id$/);
@@ -514,7 +526,7 @@ test("locale tabs show twin status and create a missing twin from the saved vers
 });
 
 test("read-only (ui.readOnly) members stay locked inside lists, while their siblings are editable", async ({ page }) => {
-  await page.goto(`${SITE}/token-registry/token-registry?locale=en`);
+  await open(page, `${SITE}/token-registry/token-registry?locale=en`);
   await expect(page.getByText("This collection is locale-neutral")).toBeVisible();
   await expect(page.locator(P("tokens/0/occurrences"))).not.toBeEditable();
   await expect(page.locator(P("tokens/0/pages/0"))).not.toBeEditable();
@@ -550,7 +562,7 @@ test("create: a new item is filled in on the same form, then created as a draft"
 });
 
 test("history: versions with head/live chips, diff against live, and Restore as draft", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByRole("link", { name: "Version history" }).click();
   const table = page.getByTestId("versions-table");
   await expect(table.locator("tbody tr")).toHaveCount(3);
@@ -563,6 +575,7 @@ test("history: versions with head/live chips, diff against live, and Restore as 
   await expect(diff).toContainText("H1");
   await expect(diff).toContainText("SEO Agency in Bali for Hotels");
 
+  await hydrated(page.getByTestId("restore-1"));
   await page.getByTestId("restore-1").click();
   await page.getByTestId("confirm-restore-1").click();
   await expect(page).toHaveURL(/service\.seo\?locale=en$/);
@@ -574,7 +587,7 @@ test("history: versions with head/live chips, diff against live, and Restore as 
 // ── the approvals renderer ────────────────────────────────────────────────────────────────────────
 
 test("approvals detail: origin `webdesk` shows the publish summary, and Approve executes it", async ({ page }) => {
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByTestId("request-publish").click();
   await expect(page.getByTestId("awaiting-approval")).toBeVisible();
   await page.getByRole("link", { name: "Open approval" }).click();
@@ -601,7 +614,7 @@ test("approvals detail: origin `webdesk` shows the publish summary, and Approve 
 test("approvals detail: a webdesk approval with arguments in the wrong format is flagged, not summarised", async ({ page }) => {
   await stub.post("config", {});
   // file a request, then corrupt it in the stub's store via the decide-less path: use an unknown workflow shape
-  await page.goto(SERVICE_SEO);
+  await open(page, SERVICE_SEO);
   await page.getByTestId("request-publish").click();
   await expect(page.getByTestId("awaiting-approval")).toBeVisible();
   await stub.post("corrupt-args", { id: "ap-0001-publish" });
