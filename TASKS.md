@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████░░░░░░░░░░░░░░░░░░` **39%** · 66/169<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████░░░░░░░░░░░░░░░░░░` **39%** · 67/170<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████████░░░░░░░` **65%** · 56/86<!-- /bar -->
+<!-- bar -->🟡 `█████████████░░░░░░░` **66%** · 57/86<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -131,13 +131,13 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Signer and verifier pin the same vectors, both directions
 - [ ] Key rotation runbook executed once (overlap accepted, old kid refused after)
 
-### Wave B · WSK-66 · Publish and key mint executed at approval <!-- bar -->🟡 `████████░░` **80%** · 4/5<!-- /bar -->
+### Wave B · WSK-66 · Publish and key mint executed at approval <!-- bar -->✅ `██████████` **100%** · 5/5<!-- /bar -->
 - [x] Origin migration unions `webdesk` into the live CHECK (no value lost; planted-value regression test)
 - [x] Requester ≠ approver, except a single-item self-publish (D46); 0 Zone B calls on every denial
 - [x] Approve → exactly one publish carrying WS4 + editorial assertions; failures typed, never retried blind (stub mTLS Zone B; tampered `tool_args` refused)
 - [x] `key.mint` plaintext only in the `decide()` response, never persisted (DB + log scans)
 
-- [ ] Fix the platform_admin parity sweep (`authz-permissions.controller.test.ts`) that WSK-47's deny-without-approval rule turned red — must be green before any release
+- [x] Fix the platform_admin parity sweep (`authz-permissions.controller.test.ts`) that WSK-47's deny-without-approval rule turned red (31/31; negative control red on a broken unrelated grant; full nest 7453 passed)
 ### Wave C · WSK-59 · ERP content BFF + MCP tools <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Routes with `authorize()` first; cross-company 404 wall with a positive control
 - [ ] Every editor action is an MCP tool with an impact class; both D14 halves for unpublish/delete
@@ -190,7 +190,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/27<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/28<!-- /bar -->
 
 ### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
@@ -205,7 +205,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] WSK-64 · CDN cache purge on publish
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/18<!-- /bar -->
+### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/19<!-- /bar -->
 - [ ] Reserved collection keys (`media`, `forms` collide with api routes)
 - [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
 - [ ] A bad cursor returns 500 with the raw database message
@@ -224,6 +224,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields`
 - [ ] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf`
 - [ ] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today)
+- [ ] Not ours, flagged: `agency-lead-convert-race.db.test.ts` is flaky (failed 1 of 3 identical runs) and `monitoring.controller.test.ts` is a date time bomb (red since ~09-17) — both red on main, owners elsewhere
 
 ---
 
