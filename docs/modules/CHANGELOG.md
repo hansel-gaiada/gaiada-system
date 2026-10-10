@@ -40,7 +40,7 @@ Ticket PV2-07 in `docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. It renders
 - Pure helpers: `src/lib/portalPeople.ts` (`splitProjects`, `groupPeople`, `describeAccess`), 9 tests.
 - **Verified on Linux:** ui 228/228 files (4,516 tests); `next build` ok; portal e2e 12/12 in DEMO_MODE.
 
-### webdesk `0.4.0` - M3 wave 1: the public `/v1` read path hardened, codegen and AI drafting on vocabulary 1.1.0, the last MinIO residue gone (2026-10-11) - DEV-VERIFIED
+### webdesk `0.4.0` - M3 waves 1-2: the public `/v1` read path hardened, deleted items release their slug, promotion fits the write plane, approvals claimed before the effect, codegen and AI drafting on vocabulary 1.1.0 (2026-10-11) - DEV-VERIFIED
 
 Plan `docs/plans/2026-10-11-webdesk-m3-plan.md`; rulings WSK-D49…D51 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md` (M3).
 
