@@ -3,8 +3,8 @@
 // here: (1) a double-fire with the SAME idempotency key returns the SAME domain result and
 // leaves exactly one row in the underlying table; (2) reusing an idempotency key with DIFFERENT
 // arguments is refused (409), not silently executed as a fresh command; (3) the domain table's
-// own natural uniqueness constraint is a second, independent backstop, proven by clearing the
-// in-memory idempotency store between two calls to simulate a cross-process double-fire.
+// own natural uniqueness constraint is a second, independent backstop, proven by a second call
+// under a fresh idempotency key (which the idempotency store cannot dedupe).
 //
 // Verification runbook: see ../README.md's "WSK-21 — Control-plane API v1" section.
 process.env.NODE_ENV = "test";
@@ -19,7 +19,6 @@ import { Client } from "pg";
 import { Test } from "@nestjs/testing";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { ControlModule } from "../src/control/control.module";
-import { IdempotencyStore } from "../src/control/idempotency/idempotency-store";
 
 const MIGRATOR_URL =
   process.env.WSK21_MIGRATE_DATABASE_URL || "postgres://webdesk_migrator:throwaway_migrator@localhost:55490/webdesk";
@@ -198,10 +197,10 @@ describe("control-plane commands — idempotency + audit (lifecycle / schema / k
 
     const siteId = site1.json().site.id as string;
 
-    // Now prove the DB-level UNIQUE(site_id,name) constraint is a REAL, independent backstop —
-    // not just decoration — by clearing the in-memory idempotency store between two calls (the
-    // cheapest honest simulation of "a second api process, which would not share this store").
-    const idempotency = app.get(IdempotencyStore);
+    // Now prove the DB-level UNIQUE(site_id,name) constraint is a REAL, independent backstop of the
+    // idempotency store: a second call with a DIFFERENT idempotency key gets no dedup from the store
+    // (M3 T5a: the store is the durable Postgres one, so there is no in-memory map to clear any more;
+    // a fresh key is what "a request the store has never seen" means).
     const env1 = await app.inject({
       method: "POST",
       url: `/control/v1/tenants/${slug}/sites/${siteId}/environments`,
@@ -209,8 +208,6 @@ describe("control-plane commands — idempotency + audit (lifecycle / schema / k
       payload: { name: "staging" },
     });
     expect(env1.statusCode).toBe(201);
-
-    idempotency.clear(); // simulate "a different process" — the next call gets NO in-memory dedup
 
     const env2 = await app.inject({
       method: "POST",
