@@ -13,6 +13,22 @@
 // GH-12 (`core/github/repo-creation.ts`) exactly: decide() recognises the row by origin AND
 // workflow_id, and executes synchronously, AS THE DECIDER, inside the decide request.
 //
+// ── WSK-60: THE REBUILD (publish → rebuild → staging, design §9) ────────────────────────────────
+// Two additions, both through the same door:
+//   1. After a SUCCESSFUL `content.publish` the executor makes ONE call, `startSiteRebuild`
+//      (site-builds.service.ts), authorised by this approval's id (R3). It never throws and a failure
+//      never fails the publish: the build row goes `failed` with a typed reason and the publish stands.
+//      `content.schedule` does not rebuild: nothing is public yet; the scheduled publish that makes it
+//      public is WSK-61's.
+//   2. `content.rebuild`, a fourth member of the CLOSED union, filed by the editor after an unpublish
+//      (which has no approval of its own). It sends nothing to Zone B and needs no editorial assertion:
+//      its whole effect is the dispatch. AUTHORISATION: `github_repo · deploy` (the dispatch's own D14
+//      rule, workflow-dispatch.ts), not `webdesk_content_item · publish`, because (a) a rebuild changes no
+//      WebDesk content (the takedown it propagates was already authorised, at unpublish), so publish's
+//      maker ≠ checker has nothing to guard, and (b) it adds no Cerbos action to a policy this ticket
+//      does not own. Filing needs only `request_publish` (the editor tier); the generic `decide` gate
+//      (company_admin) still applies at decide().
+//
 // ── THE ORDER IN decide() (automation-approvals.controller.ts) ───────────────────────────────────
 //   1. generic `decide` (unchanged; company_admin);
 //   2. `preflightWebdeskApprovedCommand` — parse the STORED tool_args, authorize the decider against
@@ -85,6 +101,8 @@ import {
   type WebdeskControlResponse,
 } from "./webdesk-control-client";
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
+import { WorkflowDispatchError, authorizeDeploy } from "../../core/github/workflow-dispatch";
+import { rebuildTargetFor, startSiteRebuild } from "./site-builds.service";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // The closed allow-list
@@ -92,7 +110,7 @@ import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-as
 
 /** The ONLY commands this executor runs. A closed union: a fourth command cannot ride it silently,
  *  because every table below is a `Record<WebdeskApprovedCommand, …>` and fails to compile without it. */
-export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint";
+export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint" | "content.rebuild";
 
 /** WSK-59: the editorial writes the BFF executes immediately (not through an approval). They sign through the
  *  SAME registered signer as the approved commands; only the command name differs (design §3.1). */
@@ -111,6 +129,7 @@ const TOOL_NAME: Record<WebdeskApprovedCommand, string> = {
   "content.publish": "webdesk.content.publish",
   "content.schedule": "webdesk.content.schedule",
   "key.mint": "webdesk.key.mint",
+  "content.rebuild": "webdesk.content.rebuild",
 };
 
 function isApprovedCommand(value: unknown): value is WebdeskApprovedCommand {
@@ -146,6 +165,9 @@ export const WEBDESK_EXEC_ERROR = {
   /** The request may have been delivered and the answer was lost (or Zone B said 5xx), and reading
    *  the state did not confirm the requested outcome. Reconcile by hand; NEVER resend. */
   ambiguous: "webdesk_ambiguous",
+  /** content.rebuild only: the dispatch did not happen. Format `webdesk_rebuild_failed: <reason>`, where
+   *  the reason is one of workflow-dispatch.ts's / site-builds.service.ts's typed tokens. */
+  rebuildFailed: "webdesk_rebuild_failed",
 } as const;
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -180,7 +202,8 @@ type ParsedArgs =
       publishAt: string | null;
       unpublishAt: string | null;
     }
-  | { command: "key.mint"; tenantSlug: string; siteId: string; envId: string; scope: "read" | "write" };
+  | { command: "key.mint"; tenantSlug: string; siteId: string; envId: string; scope: "read" | "write" }
+  | { command: "content.rebuild"; tenantSlug: string; siteId: string };
 
 interface ZoneBRequest {
   command: WebdeskApprovedCommand;
@@ -200,6 +223,15 @@ export type WebdeskApprovedCommandResult =
       items: Array<{ itemId: string; version: number; publishedAt?: string | null }>;
       /** WSK-D46 R3: this approval also authorises the staging rebuild. WSK-60 dispatches it. */
       rebuild: { target: "staging"; approvalId: string };
+      /** WSK-60: what the dispatch hook recorded (content.publish only; content.schedule never rebuilds).
+       *  Absent for a schedule. A `failed` build does NOT make this result `failed`: the publish stands. */
+      build?: { buildId: string | null; state: "rebuilding" | "live" | "unverified" | "failed"; failureReason: string | null };
+    }
+  | {
+      command: "content.rebuild";
+      executionStatus: "executed";
+      rebuild: { target: "staging"; approvalId: string };
+      build: { buildId: string | null; state: "rebuilding" | "live" | "unverified"; failureReason: null };
     }
   | {
       command: "key.mint";
@@ -312,6 +344,7 @@ const ARG_KEYS: Record<WebdeskApprovedCommand, ReadonlyArray<string>> = {
   "content.publish": ["items", "note"],
   "content.schedule": ["items", "publishAt", "unpublishAt"],
   "key.mint": ["envId", "scope"],
+  "content.rebuild": [],
 };
 
 class ArgsError extends Error {}
@@ -382,12 +415,17 @@ function parseCommandArgs(raw: unknown): ParsedArgs {
       if (raw.scope !== "read" && raw.scope !== "write") throw new ArgsError("scope must be read|write");
       return { command, tenantSlug, siteId, envId: raw.envId, scope: raw.scope };
     }
+    case "content.rebuild": {
+      const extra = ["items", "note", "publishAt", "unpublishAt", "envId", "scope"].filter((k) => raw[k] !== undefined);
+      if (extra.length) throw new ArgsError(`content.rebuild takes no ${extra.join(", ")}`);
+      return { command, tenantSlug, siteId };
+    }
   }
 }
 
 /** The exact Zone B request (design §3.1/§3.2; WebDesk keys.controller.ts for key.mint). Bodies never
  *  carry `tenantSlug`/`siteId`/`itemId` (design §3.2: a colliding key makes the hash ambiguous). */
-function zoneBRequestFor(a: ParsedArgs): ZoneBRequest {
+function zoneBRequestFor(a: Exclude<ParsedArgs, { command: "content.rebuild" }>): ZoneBRequest {
   const wireItems = (items: WebdeskPublishItem[]) => items.map(({ itemId, version }) => ({ itemId, version }));
   switch (a.command) {
     case "content.publish":
@@ -414,19 +452,29 @@ function zoneBRequestFor(a: ParsedArgs): ZoneBRequest {
   }
 }
 
-/** The hash Zone B will compute for this request (params ∪ JSON-round-tripped body). */
+/** The hash Zone B will compute for this request (params ∪ JSON-round-tripped body). For `content.rebuild`,
+ *  which sends nothing to Zone B, it is the same construction over its own (tenantSlug, siteId): the
+ *  tamper check the executor makes before the dispatch, exactly as for key.mint. */
 export function webdeskCommandHashFor(toolArgs: unknown): string {
-  const req = zoneBRequestFor(parseCommandArgs(toolArgs));
+  return commandHashOf(parseCommandArgs(toolArgs));
+}
+
+function commandHashOf(a: ParsedArgs): string {
+  if (a.command === "content.rebuild") {
+    return computeCommandHash(a.command, commandArgsAsZoneBSeesThem({ tenantSlug: a.tenantSlug, siteId: a.siteId }, {}));
+  }
+  const req = zoneBRequestFor(a);
   return computeCommandHash(req.command, commandArgsAsZoneBSeesThem(req.params, req.body));
 }
 
 function itemCountOf(a: ParsedArgs): number {
-  return a.command === "key.mint" ? 0 : a.items.length;
+  return a.command === "key.mint" || a.command === "content.rebuild" ? 0 : a.items.length;
 }
 
-/** WSK-D46 R4: only a single-item, NON-scheduled publish may be approved by its own requester. */
+/** WSK-D46 R4: only a single-item, NON-scheduled publish may be approved by its own requester. A
+ *  rebuild has no maker-checker arm (see the WSK-60 note in the header): its requester may decide it. */
 function isSelfApprovable(a: ParsedArgs): boolean {
-  return a.command === "content.publish" && a.items.length === 1;
+  return a.command === "content.rebuild" || (a.command === "content.publish" && a.items.length === 1);
 }
 
 function storedHashOf(toolArgs: unknown): string | null {
@@ -460,6 +508,21 @@ async function authorizeDecider(
   requestedBy: string,
   decider: Principal,
 ): Promise<void> {
+  if (a.command === "content.rebuild") {
+    // The dispatch's own D14 rule (`github_repo · deploy`, approvalId set, resolved against the ORG
+    // tenant). Run here so a refusal at preflight leaves the row pending; workflow-dispatch.ts runs it
+    // again at the send. A tenant that cannot resolve its org is a deployment fault (503), not a denial.
+    try {
+      await authorizeDeploy(decider, tenantId, approvalId);
+    } catch (err) {
+      if (err instanceof WorkflowDispatchError) {
+        if (err.reason === "deploy_denied") throw new ForbiddenException(`not authorized: ${err.message}`);
+        throw new ServiceUnavailableException({ message: `${WEBDESK_EXEC_ERROR.notConfigured}: ${err.message}`, reason: WEBDESK_EXEC_ERROR.notConfigured });
+      }
+      throw err;
+    }
+    return;
+  }
   if (a.command === "key.mint") {
     // resource_webdev_provisioned_site.yaml's `promote` has no maker-checker arm and this ticket may
     // not edit it, so the rule is enforced here. A key mint is never self-approvable (R4 is publish-only).
@@ -484,7 +547,18 @@ async function authorizeDecider(
   );
 }
 
-function ensureConfigured(a: ParsedArgs): WebdeskControlClient {
+function ensureConfigured(a: ParsedArgs): WebdeskControlClient | null {
+  if (a.command === "content.rebuild") {
+    // No Zone B send, no signer. What it needs is a configured staging target: without one the approval
+    // could only fail, so refuse (503) at preflight and leave the row pending rather than approve a no-op.
+    if (!rebuildTargetFor(a.tenantSlug, a.siteId)) {
+      throw new ServiceUnavailableException({
+        message: `${WEBDESK_EXEC_ERROR.notConfigured}: no staging rebuild target is configured for this site (WEBDESK_REBUILD_TARGETS)`,
+        reason: WEBDESK_EXEC_ERROR.notConfigured,
+      });
+    }
+    return null;
+  }
   let client: WebdeskControlClient;
   try {
     client = controlClient();
@@ -514,7 +588,7 @@ export async function preflightWebdeskApprovedCommand(
   toolArgs: unknown,
   requestedBy: string,
   decider: Principal,
-): Promise<{ args: ParsedArgs; client: WebdeskControlClient }> {
+): Promise<{ args: ParsedArgs; client: WebdeskControlClient | null }> {
   if (!decider.userId) throw new BadRequestException("an authenticated decider is required");
   let a: ParsedArgs;
   try {
@@ -576,7 +650,6 @@ export async function fileWebdeskCommandApproval(
   }
 
   const id = newId();
-  const req = zoneBRequestFor(parsed);
   const toolArgs: Record<string, unknown> = {
     ...parsed,
     // WSK-D46 R3: one human decision covers the publish AND the staging rebuild. WSK-60 reads this.
@@ -587,7 +660,7 @@ export async function fileWebdeskCommandApproval(
       ...(typeof summary.bundleSha256 === "string" ? { bundleSha256: summary.bundleSha256 } : {}),
     },
     // What the human approves, bound once. See the header: the editorial `cmh` carries THIS value.
-    commandHash: computeCommandHash(req.command, commandArgsAsZoneBSeesThem(req.params, req.body)),
+    commandHash: commandHashOf(parsed),
   };
 
   const filing = {
@@ -757,7 +830,7 @@ export async function executeApprovedWebdeskCommand(
   decider: Principal,
 ): Promise<WebdeskApprovedCommandResult> {
   // ── Phase 0: parse, authorize as the decider, check configuration. Nothing claimed, nothing sent.
-  let pre: { args: ParsedArgs; client: WebdeskControlClient };
+  let pre: { args: ParsedArgs; client: WebdeskControlClient | null };
   try {
     pre = await preflightWebdeskApprovedCommand(tenantId, approvalId, toolArgs, requestedBy, decider);
   } catch (err) {
@@ -795,6 +868,17 @@ export async function executeApprovedWebdeskCommand(
   const filedHash = storedHashOf(row.tool_args);
   if (!filedHash) {
     const error = `${WEBDESK_EXEC_ERROR.argsInvalid}: the approval carries no filed commandHash`;
+    await finish(tenantId, approvalId, deciderId, { ok: false, error });
+    return { command: a.command, executionStatus: "failed", error };
+  }
+  // ── WSK-60: a rebuild approval sends nothing to Zone B. Its whole effect is the dispatch.
+  if (a.command === "content.rebuild") {
+    return executeRebuildApproval({ tenantId, approvalId, a, toolArgs: row.tool_args, filedHash, requestedBy, decider, deciderId });
+  }
+  const zoneB = pre.client;
+  if (!zoneB) {
+    // Unreachable: preflight returns a client for every command that talks to Zone B.
+    const error = `${WEBDESK_EXEC_ERROR.notConfigured}: no control client`;
     await finish(tenantId, approvalId, deciderId, { ok: false, error });
     return { command: a.command, executionStatus: "failed", error };
   }
@@ -847,7 +931,7 @@ export async function executeApprovedWebdeskCommand(
   let res: WebdeskControlResponse | null = null;
   let sendError: unknown = null;
   try {
-    res = await pre.client.send({
+    res = await zoneB.send({
       command: req.command,
       method: "POST",
       path: req.path,
@@ -862,7 +946,7 @@ export async function executeApprovedWebdeskCommand(
   }
 
   // ── Phase 4: classify. Never resend.
-  let outcome: WebdeskApprovedCommandResult;
+  let outcome: Exclude<WebdeskApprovedCommandResult, { command: "content.rebuild" }>;
   const ambiguous =
     (sendError instanceof WebdeskControlTransportError && sendError.maybeDelivered) || (res !== null && res.status >= 500);
 
@@ -876,7 +960,7 @@ export async function executeApprovedWebdeskCommand(
         error: `${WEBDESK_EXEC_ERROR.ambiguous}: the mint may have committed and its answer was lost; revoke any key Zone B's audit shows under approval ${approvalId}`,
       };
     } else {
-      const holds = await reconcileByReading(pre.client, a);
+      const holds = await reconcileByReading(zoneB, a);
       outcome =
         holds === true
           ? successOf(a, null, approvalId, selfPublish, true)
@@ -930,6 +1014,13 @@ export async function executeApprovedWebdeskCommand(
   }
   logger.log(`approval ${approvalId} ${a.command}: ${outcome.executionStatus}${outcome.executionStatus === "failed" ? ` (${outcome.error.split(":")[0]})` : ""}`);
 
+  // ── WSK-60 (R3): ONE call to start the staging rebuild after a successful PUBLISH. The call never
+  // throws, and a rebuild that could not start does not touch the publish: the row above is already
+  // `executed`. (A schedule publishes nothing yet, so it rebuilds nothing.)
+  if (outcome.executionStatus === "executed" && outcome.command === "content.publish" && a.command === "content.publish") {
+    outcome = { ...outcome, build: await startRebuildAfterPublish(tenantId, approvalId, a, outcome.items, decider) };
+  }
+
   // The requester is the one waiting (design §6: "requester notified").
   if (requestedBy && requestedBy !== deciderId) {
     const ok = outcome.executionStatus === "executed";
@@ -947,13 +1038,104 @@ export async function executeApprovedWebdeskCommand(
   return outcome;
 }
 
+type PublishArgs = Extract<ParsedArgs, { command: "content.publish" }>;
+
+/** The newest `publishedAt` Zone B reported for this publish, or null when it reported none (a
+ *  reconciled outcome, or an older Zone B). Compared as instants, returned as the original string. */
+function newestPublishedAt(items: Array<{ publishedAt?: string | null }>): string | null {
+  let best: string | null = null;
+  let bestT = -Infinity;
+  for (const it of items) {
+    const t = it.publishedAt ? Date.parse(it.publishedAt) : NaN;
+    if (Number.isFinite(t) && t > bestT) {
+      bestT = t;
+      best = it.publishedAt as string;
+    }
+  }
+  return best;
+}
+
+async function startRebuildAfterPublish(
+  tenantId: string,
+  approvalId: string,
+  a: PublishArgs,
+  items: Array<{ publishedAt?: string | null }>,
+  decider: Principal,
+): Promise<{ buildId: string | null; state: "rebuilding" | "live" | "unverified" | "failed"; failureReason: string | null }> {
+  const r = await startSiteRebuild({
+    tenantId,
+    tenantSlug: a.tenantSlug,
+    siteId: a.siteId,
+    approvalId,
+    kind: "publish",
+    publishedAt: newestPublishedAt(items),
+    decider,
+  });
+  return { buildId: r.buildId, state: r.state, failureReason: r.failureReason };
+}
+
+/** A `content.rebuild` approval: tamper check, then ONE dispatch. Executed = the dispatch was accepted;
+ *  failed = it was not, with `webdesk_rebuild_failed: <typed reason>` on the row. */
+async function executeRebuildApproval(p: {
+  tenantId: string;
+  approvalId: string;
+  a: Extract<ParsedArgs, { command: "content.rebuild" }>;
+  toolArgs: unknown;
+  filedHash: string;
+  requestedBy: string;
+  decider: Principal;
+  deciderId: string;
+}): Promise<WebdeskApprovedCommandResult> {
+  const { tenantId, approvalId, a, deciderId } = p;
+  const fail = async (error: string): Promise<WebdeskApprovedCommandResult> => {
+    await finish(tenantId, approvalId, deciderId, { ok: false, error });
+    await writeActivity(tenantId, deciderId, "webdesk.content.rebuild", "automation_approval", approvalId, {
+      viaApproval: approvalId, tenantSlug: a.tenantSlug, siteId: a.siteId, requestedBy: p.requestedBy || null, outcome: "failed", error,
+    });
+    return { command: a.command, executionStatus: "failed", error };
+  };
+  if (webdeskCommandHashFor(p.toolArgs) !== p.filedHash) {
+    return fail(`${WEBDESK_EXEC_ERROR.argsTampered}: the stored args no longer match the filed command hash`);
+  }
+  const base = { viaApproval: approvalId, tenantSlug: a.tenantSlug, siteId: a.siteId, requestedBy: p.requestedBy || null };
+  await writeActivity(tenantId, deciderId, "webdesk.content.rebuild", "automation_approval", approvalId, { ...base, outcome: "attempted" });
+
+  const r = await startSiteRebuild({
+    tenantId, tenantSlug: a.tenantSlug, siteId: a.siteId, approvalId, kind: "rebuild", publishedAt: null, decider: p.decider,
+  });
+  let result: WebdeskApprovedCommandResult;
+  if (r.state === "failed") {
+    result = await fail(`${WEBDESK_EXEC_ERROR.rebuildFailed}: ${r.failureReason ?? "unknown"}`);
+  } else {
+    const stored = { command: a.command, rebuild: { target: "staging" as const, approvalId }, build: { buildId: r.buildId, state: r.state } };
+    await finish(tenantId, approvalId, deciderId, { ok: true, result: stored });
+    await writeActivity(tenantId, deciderId, "webdesk.content.rebuild", "automation_approval", approvalId, { ...base, outcome: "succeeded", buildId: r.buildId });
+    result = { command: a.command, executionStatus: "executed", rebuild: { target: "staging", approvalId }, build: { buildId: r.buildId, state: r.state, failureReason: null } };
+  }
+  logger.log(`approval ${approvalId} content.rebuild: ${result.executionStatus}${result.executionStatus === "failed" ? ` (${result.error.split(":")[0]})` : ""}`);
+  if (p.requestedBy && p.requestedBy !== deciderId) {
+    const ok = result.executionStatus === "executed";
+    await notifyBestEffort(tenantId, deciderId, [p.requestedBy], ok ? "automation_approval.executed" : "automation_approval.execution_failed", {
+      title: ok ? "Staging rebuild started" : "Staging rebuild FAILED to start",
+      body: ok ? undefined : (result as { error: string }).error,
+      href: `/approvals/${approvalId}`,
+      entityType: "automation_approval",
+      entityId: approvalId,
+      severity: ok ? "info" : "warning",
+      origin: WEBDESK_APPROVAL_ORIGIN,
+      tool: TOOL_NAME[a.command],
+    });
+  }
+  return result;
+}
+
 function successOf(
-  a: ParsedArgs,
+  a: Exclude<ParsedArgs, { command: "content.rebuild" }>,
   res: WebdeskControlResponse | null,
   approvalId: string,
   selfPublish: boolean,
   reconciled: boolean,
-): WebdeskApprovedCommandResult {
+): Exclude<WebdeskApprovedCommandResult, { command: "content.rebuild" }> {
   const j = res && isPlainObject(res.json) ? res.json : {};
   if (a.command === "key.mint") {
     return {

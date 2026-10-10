@@ -194,6 +194,24 @@ export class GithubInstallationClient {
       throw new GithubApiError(`${method} ${req.path}`, 401, await safeMessage(res));
     }
 
+    if (res.status === 403) {
+      // WSK-60: a 403 is NOT always a rate limit. "Resource not accessible by integration" is GitHub's
+      // fixed refusal text for an installation token that lacks the permission, or the repo, for the
+      // call (a missing `actions:write` on a workflow dispatch is the case that found this). Treated
+      // as a rate limit it would sit through the queue's 60 s default backoff three times, pausing
+      // every other caller of the role, and then report "rate limited" for what is a configuration
+      // fault. Only that exact text is carved out, and only when GitHub gave no rate-limit signal:
+      // any other 403, and every 403 that carries a retry-after or an exhausted bucket, is still
+      // retried exactly as before.
+      const noRateSignal = res.headers.get("retry-after") === null && res.headers.get("x-ratelimit-remaining") !== "0";
+      if (noRateSignal) {
+        const message = await safeMessage(res.clone());
+        if (message && /not accessible by integration/i.test(message)) {
+          throw new GithubApiError(`${method} ${req.path}`, 403, message);
+        }
+      }
+    }
+
     if (res.status === 403 || res.status === 429) {
       // §4.7: absorbed by the fairness queue's backoff, not surfaced to the caller unless retries
       // are exhausted (rate-limiter.ts turns an exhausted signal into a rejection with THIS signal,

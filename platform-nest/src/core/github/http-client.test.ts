@@ -144,6 +144,28 @@ describe("GithubInstallationClient — §4.7 403/429 backoff + retry, then error
     expect(call).toBe(2);
   });
 
+  it("WSK-60: 'Resource not accessible by integration' is a permission refusal, NOT a rate limit — surfaced at once, never retried", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(403, { message: "Resource not accessible by integration" }));
+    const { client } = fakeLimiterDeps(fetchImpl as unknown as FetchImpl);
+    await expect(
+      client.request("user-1", { role: "erp", method: "POST", path: "/repos/gaiadabali/foo/actions/workflows/w.yml/dispatches", body: {} }),
+    ).rejects.toMatchObject({ detail: { httpStatus: 403 }, status: 403 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("WSK-60: the same message WITH a rate-limit signal is still retried (the carve-out is not a blanket 403 exemption)", async () => {
+    let call = 0;
+    const fetchImpl: FetchImpl = (async () => {
+      call += 1;
+      if (call === 1) return jsonResponse(403, { message: "Resource not accessible by integration" }, { "retry-after": "0" });
+      return jsonResponse(200, { ok: true });
+    }) as FetchImpl;
+    const { client } = fakeLimiterDeps(fetchImpl);
+    const res = await client.request("user-1", { role: "erp", path: "/repos/gaiadabali/foo" });
+    expect(res.data).toEqual({ ok: true });
+    expect(call).toBe(2);
+  });
+
   it("exhausting all retries on a persistent 429 surfaces to the caller as a retryable signal", async () => {
     const fetchImpl: FetchImpl = (async () => jsonResponse(429, {}, { "retry-after": "0" })) as FetchImpl;
     const { client } = fakeLimiterDeps(fetchImpl);

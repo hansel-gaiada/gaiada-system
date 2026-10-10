@@ -46,6 +46,8 @@ export const webdevModule: ModuleContract = {
     "202609011230_webdev_provisioned_sites_framework_widen.sql",
     // WSK-47 (additive): IAM seed for the two WebDesk editorial kinds (no DDL).
     "202610101420_iam_webdesk_content_permissions.sql",
+    // WSK-60 (additive): the staging rebuild ledger + the stale-staging marker (third wall).
+    "202610101730_webdev_site_builds.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.

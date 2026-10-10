@@ -50,6 +50,7 @@ import { registerDriver } from "./modules/monitoring/drivers/registry";
 import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
 import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
 import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
+import { rebuildTargets, startSiteBuildsLoop } from "./modules/webdev/site-builds.service";
 import { invoiceModule } from "./modules/invoice";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -732,6 +733,14 @@ async function bootstrap(): Promise<void> {
     startMonitoringRunnerLoop(config.monitoring.runnerIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`monitoring runner on: re-asking due-ness every ${config.monitoring.runnerIntervalMs}ms`);
+  }
+  // WSK-60: the staging-rebuild stamp poller. It reads only rows that exist and GETs only the staging URL
+  // an operator put in WEBDESK_REBUILD_TARGETS, so "a target is configured" is its whole gate: with none,
+  // no build can have been dispatched and there is nothing to poll.
+  if (rebuildTargets().length > 0) {
+    startSiteBuildsLoop(config.webdeskRebuild.pollIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`webdesk staging-rebuild poller on: every ${config.webdeskRebuild.pollIntervalMs}ms, ${rebuildTargets().length} target(s)`);
   }
   if (config.search.schedulerEnabled) {
     startSearchPullSchedulerLoop(config.search.schedulerIntervalMs);

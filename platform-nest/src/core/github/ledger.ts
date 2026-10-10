@@ -79,6 +79,12 @@ interface GithubLedgerBase {
    *  to change shape to accept it later. */
   repoId?: string | null;
   ref?: string;
+  /** The D14 / WS4 approval that authorised this call, when there is one (WSK-60: a WebDesk publish
+   *  or rebuild approval authorising a `deploy` workflow dispatch). Recorded in `metadata.approvalId`
+   *  on all three rows of the attempt, so the ledger answers "which human decision started this run"
+   *  without a join. Absent for callers that have no approval; the key is then omitted, not null, so
+   *  every pre-existing row shape is byte-identical. */
+  approvalId?: string;
 }
 
 /** Discriminated on `action`: `attribution` is REQUIRED for `push`/`merge` (the two commit-producing
@@ -113,6 +119,7 @@ function baseMetadata(req: GithubLedgerRequest, correlationId?: string): Record<
     repo: req.repo,
     repoId: req.repoId ?? null,
     ref: req.ref ?? null,
+    ...(req.approvalId ? { approvalId: req.approvalId } : {}),
     ...(correlationId ? { correlationId } : {}),
     attribution: req.attribution ? { name: req.attribution.name, email: req.attribution.email } : null,
   };
