@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **51%** · 94/183<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **51%** · 95/184<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -168,7 +168,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **27%** · 5/18<!-- /bar -->
+<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **31%** · 6/19<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **57%** · 4/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
@@ -179,7 +179,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `█░░░░░░░░░` **12%** · 1/8<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `██░░░░░░░░` **22%** · 2/9<!-- /bar -->
 - [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
 - [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
 - [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
@@ -187,7 +187,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
 - [ ] Cost per run measured and recorded
-- [ ] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (built in WSK-60; not yet wired from WSK-59)
+- [x] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (only when the item had a live version; best-effort; Linux: webdev 29 files/484, negative control fails exactly 6)
+- [ ] Scheduled takedowns (`content.schedule` with `unpublishAt`) also mark staging stale (they take effect inside Zone B later: needs a Zone B event or a check at build-status time)
 
 ### P2 proof gate <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change
