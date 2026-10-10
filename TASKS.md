@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `█████████████░░░░░░░░░░░░░░░░░` **44%** · 76/172<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **45%** · 79/172<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -167,15 +167,15 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/14<!-- /bar -->
+<!-- bar -->🟡 `████░░░░░░░░░░░░░░░░` **21%** · 3/14<!-- /bar -->
 
-### WSK-44 · "Website" workspace in platform-ui <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/7<!-- /bar -->
+### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `████░░░░░░` **42%** · 3/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
-- [ ] Editor generated from the composition: text, Markdown, groups, lists (drag and keyboard reorder)
+- [x] Editor generated from the composition: text, Markdown, groups, lists (drag and keyboard reorder) — on gaiada.com's real compositions
 - [ ] Publish with the approval state shown inline
 - [ ] Version history with restore as draft
-- [ ] Unavailable / stale / conflict states (never a confident empty editor)
-- [ ] Every state reachable in Playwright; `next build` passes
+- [x] Unavailable / stale / conflict states (never a confident empty editor — structural: refusal renders before any data)
+- [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [ ] Re-verified against the REAL BFF once WSK-59 lands (every field the UI reads diffed against a live response — built on a stub first)
 
 ### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
