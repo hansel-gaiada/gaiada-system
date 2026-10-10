@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████░░░░░░░░░░░░░░░░░░░░` **33%** · 57/168<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████░░░░░░░░░░░░░░░░░░░` **36%** · 61/169<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `███████████░░░░░░░░░` **55%** · 47/85<!-- /bar -->
+<!-- bar -->🟡 `████████████░░░░░░░░` **59%** · 51/86<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -131,12 +131,13 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Signer and verifier pin the same vectors, both directions
 - [ ] Key rotation runbook executed once (overlap accepted, old kid refused after)
 
-### Wave B · WSK-66 · Publish and key mint executed at approval <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] Origin migration unions `webdesk` into the live CHECK (no value lost)
-- [ ] Requester ≠ approver, except a single-item self-publish (D46)
-- [ ] Approve → exactly one publish carrying WS4 + editorial assertions; failures typed, never retried blind
-- [ ] `key.mint` plaintext only in the `decide()` response, never persisted
+### Wave B · WSK-66 · Publish and key mint executed at approval <!-- bar -->🟡 `████████░░` **80%** · 4/5<!-- /bar -->
+- [x] Origin migration unions `webdesk` into the live CHECK (no value lost; planted-value regression test)
+- [x] Requester ≠ approver, except a single-item self-publish (D46); 0 Zone B calls on every denial
+- [x] Approve → exactly one publish carrying WS4 + editorial assertions; failures typed, never retried blind (stub mTLS Zone B; tampered `tool_args` refused)
+- [x] `key.mint` plaintext only in the `decide()` response, never persisted (DB + log scans)
 
+- [ ] Fix the platform_admin parity sweep (`authz-permissions.controller.test.ts`) that WSK-47's deny-without-approval rule turned red — must be green before any release
 ### Wave C · WSK-59 · ERP content BFF + MCP tools <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Routes with `authorize()` first; cross-company 404 wall with a positive control
 - [ ] Every editor action is an MCP tool with an impact class; both D14 halves for unpublish/delete
