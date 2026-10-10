@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **51%** · 95/184<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████████░░░░░░░░░░░░░░` **51%** · 96/185<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████████░░` **88%** · 79/89<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **88%** · 80/90<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -155,11 +155,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Refuses human principals; imports no publish/unpublish/delete function (static test; Cerbos probe)
 - [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1`
 
-### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **80%** · 4/5<!-- /bar -->
+### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **83%** · 5/6<!-- /bar -->
 - [x] Two git builds of one commit give an identical `dist/` (determinism first) — 303 files, 0 differ
 - [x] Source parity on all 315 files (Astro's parser; globals byte-identical; site `webdesk-parity` @ `b49b40a`)
 - [x] `dist/` parity, default mode: 302 files, 0 differ
-- [ ] `dist/` parity, preview-held mode — BLOCKED by a pre-existing site route bug (since `cef4b5b`, the git build fails too); 0 differ with a 2-file route patch in the gate only. Site owner to fix
+- [x] `dist/` parity, preview-held mode: 380 files, 0 differ, gates PASS on the REAL route fix (site `fix/about-team-preview-held` @ `bd258c2`, merged onto `webdesk-rebuild` in the gate; sumopod 2026-10-11; default mode still 302/0)
+- [ ] Site owner merges `fix/about-team-preview-held` into `astro-site` (default `dist/` byte-identical before/after; the site repo has an active redesign program)
 - [x] The site's own gates pass; negative control (one FAQ edit → exactly one page differs: `services/seo/index.html`)
 
 ### WSK-58 · Linux gate for the proof's suites <!-- bar -->✅ `██████████` **100%** · 1/1<!-- /bar -->
