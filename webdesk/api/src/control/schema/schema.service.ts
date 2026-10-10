@@ -19,7 +19,7 @@ import { DbService } from "../../db/db.service";
 import { TenantLookupService } from "../../tenants/tenant-lookup.service";
 import { AuditService } from "../../audit/audit.service";
 import { CommandAuditService } from "../command-audit.service";
-import { IdempotencyStore } from "../idempotency/idempotency-store";
+import { CommandEnvelope } from "../command-envelope";
 import { assertPlainObject } from "../dto";
 import { validateCollectionComposition } from "../../delivery/vocabulary/composition";
 import {
@@ -55,13 +55,20 @@ export function rateCollectionChange(collectionKey: string, previous: unknown | 
   return classifyTenantContractChange(before, after);
 }
 
+interface CollectionRow {
+  id: string;
+  key: string;
+  schema: Record<string, unknown>;
+  updated_at: string;
+}
+
 @Injectable()
 export class SchemaService {
   constructor(
     private readonly db: DbService,
     private readonly tenants: TenantLookupService,
     private readonly commandAudit: CommandAuditService,
-    private readonly idempotency: IdempotencyStore,
+    private readonly envelope: CommandEnvelope,
     private readonly auditHash: AuditService,
   ) {}
 
@@ -149,51 +156,50 @@ export class SchemaService {
       collectionKey: input.collectionKey,
       schemaJson,
     });
-    const scopeKey = `${input.tenantSlug}:schema.apply:${input.idempotencyKey}`;
 
-    const { result, replayed } = await this.idempotency.run(scopeKey, commandHash, async () => {
-      return this.db.withTenant(tenant.id, (db) =>
-        db.transaction(async (client) => {
-          const siteCheck = await client.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
-          if (!siteCheck.rows[0]) throw new NotFoundException("site not found for this tenant");
-
-          // WSK-41: rate the change against what is stored now (locked, so two applies cannot both
-          // be rated against the same baseline), and refuse MAJOR until WSK-42 governs it.
-          const { rows: prevRows } = await client.query<{ schema: unknown }>(
-            `SELECT schema FROM collections WHERE site_id = $1 AND key = $2 FOR UPDATE`,
-            [input.siteId, input.collectionKey],
-          );
-          const rating = rateCollectionChange(input.collectionKey, prevRows[0] ? prevRows[0].schema : null, schema);
-          if (rating.bump === "major") {
-            throw new ControlProblem(
-              409,
-              "contract-major-change",
-              "Contract MAJOR change refused",
-              "This schema change is a MAJOR tenant-contract change; MAJOR changes are refused until their governance (WSK-42) exists.",
-              { bump: rating.bump, reasons: rating.reasons },
-            );
-          }
-
-          const { rows } = await client.query<{ id: string; key: string; schema: Record<string, unknown>; updated_at: string }>(
-            `INSERT INTO collections (id, tenant_id, site_id, key, schema)
-             VALUES ($1, $2, $3, $4, $5::jsonb)
-             ON CONFLICT (site_id, key) DO UPDATE SET schema = EXCLUDED.schema, updated_at = now()
-             RETURNING id, key, schema, updated_at`,
-            [randomUUID(), tenant.id, input.siteId, input.collectionKey, schemaJson],
-          );
-          return { row: rows[0], bump: rating.bump, reasons: rating.reasons };
-        }),
-      );
-    });
-
-    await this.commandAudit.recordTenant({
-      tenantId: tenant.id,
+    // M3 T5a: from here on the command is the shared envelope (../command-envelope.ts). The refusals
+    // above (tenant, shape, reserved key, composition) run BEFORE it, so they claim no idempotency
+    // key and write no audit row. The audit row is now the first statement of the transaction, so it
+    // cannot name the collection's id (not known until the upsert); (siteId, collectionKey) is unique
+    // (UNIQUE(site_id,key)) and identifies the same row.
+    return this.envelope.run<{ collection: CollectionRow; bump: string; reasons: unknown }>({
       command: "schema.apply",
+      scope: { kind: "tenant", tenantId: tenant.id },
+      scopeKey: `${input.tenantSlug}:schema.apply:${input.idempotencyKey}`,
+      requestHash: commandHash,
       actor: input.actor,
-      args: { tenantSlug: input.tenantSlug, siteId: input.siteId, collectionKey: input.collectionKey, collectionId: result.row.id },
-      replayed,
-    });
+      auditArgs: { tenantSlug: input.tenantSlug, siteId: input.siteId, collectionKey: input.collectionKey },
+      ws4ApprovalId: null,
+      effect: async (client) => {
+        const siteCheck = await client.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
+        if (!siteCheck.rows[0]) throw new NotFoundException("site not found for this tenant");
 
-    return { collection: result.row, bump: result.bump, reasons: result.reasons, replayed };
+        // WSK-41: rate the change against what is stored now (locked, so two applies cannot both
+        // be rated against the same baseline), and refuse MAJOR until WSK-42 governs it.
+        const { rows: prevRows } = await client.query<{ schema: unknown }>(
+          `SELECT schema FROM collections WHERE site_id = $1 AND key = $2 FOR UPDATE`,
+          [input.siteId, input.collectionKey],
+        );
+        const rating = rateCollectionChange(input.collectionKey, prevRows[0] ? prevRows[0].schema : null, schema);
+        if (rating.bump === "major") {
+          throw new ControlProblem(
+            409,
+            "contract-major-change",
+            "Contract MAJOR change refused",
+            "This schema change is a MAJOR tenant-contract change; MAJOR changes are refused until their governance (WSK-42) exists.",
+            { bump: rating.bump, reasons: rating.reasons },
+          );
+        }
+
+        const { rows } = await client.query<CollectionRow>(
+          `INSERT INTO collections (id, tenant_id, site_id, key, schema)
+           VALUES ($1, $2, $3, $4, $5::jsonb)
+           ON CONFLICT (site_id, key) DO UPDATE SET schema = EXCLUDED.schema, updated_at = now()
+           RETURNING id, key, schema, updated_at`,
+          [randomUUID(), tenant.id, input.siteId, input.collectionKey, schemaJson],
+        );
+        return { result: { collection: rows[0], bump: rating.bump, reasons: rating.reasons } };
+      },
+    });
   }
 }

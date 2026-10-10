@@ -13,10 +13,11 @@ import type { JobRecord } from "./job.types";
 export class JobsService {
   private readonly jobs = new Map<string, JobRecord>();
 
-  create(input: { tenantSlug: string; command: CommandName; impactClass: ImpactClass }): JobRecord {
+  /** `id` is optional: the release commands fix the job id before their transaction (the audit row names it) and create the record after commit. */
+  create(input: { id?: string; tenantSlug: string; command: CommandName; impactClass: ImpactClass }): JobRecord {
     const now = new Date().toISOString();
     const job: JobRecord = {
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       tenantSlug: input.tenantSlug,
       command: input.command,
       impactClass: input.impactClass,

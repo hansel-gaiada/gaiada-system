@@ -40,7 +40,7 @@ Ticket PV2-07 in `docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. It renders
 - Pure helpers: `src/lib/portalPeople.ts` (`splitProjects`, `groupPeople`, `describeAccess`), 9 tests.
 - **Verified on Linux:** ui 228/228 files (4,516 tests); `next build` ok; portal e2e 12/12 in DEMO_MODE.
 
-### webdesk `0.4.0` - M3 wave 1: the public `/v1` read path hardened, codegen and AI drafting on vocabulary 1.1.0, the last MinIO residue gone (2026-10-11) - DEV-VERIFIED
+### webdesk `0.4.0` - M3 waves 1-2: the public `/v1` read path hardened, deleted items release their slug, promotion fits the write plane, approvals claimed before the effect, codegen and AI drafting on vocabulary 1.1.0 (2026-10-11) - DEV-VERIFIED
 
 Plan `docs/plans/2026-10-11-webdesk-m3-plan.md`; rulings WSK-D49…D51 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md` (M3).
 
@@ -48,6 +48,9 @@ Plan `docs/plans/2026-10-11-webdesk-m3-plan.md`; rulings WSK-D49…D51 in `docs/
 - **Codegen and AI drafting** (T2). Block unions are `anyOf`, so a strict validator accepts a valid known block; the generated SDK types are unchanged. The schema-draft prompt teaches vocabulary 1.1.0 from the vocabulary's own constants and never offers `fields` as a block. The WordPress theme knows all 10 block names, and `fields` renders nothing.
 - **RustFS everywhere** (T3). The customer residency statement names RustFS and no internal jargon. The artifact-URL expiry check runs against a real RustFS: 200 before the TTL, 403 "Request has expired" after.
 - **Rulings** WSK-D49 (rich text is Markdown, edited WYSIWYG; resolves OQ-3.1), D50 (CDN purge deferred as WSK-70), D51 (a soft-deleted item releases its slug).
+- **Deleted items release their slug** (M3 T4, WSK-D51, migration 0010). The slug is unique among live rows only (`ux_content_items_slug_live`), so a page can be deleted and its URL reused. The runtime role loses every right on the migration ledger. The 0009 and 0010 migration tests now run in the Linux gate and in CI; before this, nothing ran them.
+- **Promotion fits the write plane** (T4). Items are matched by localization group and locale, not slug. A restore soft-deletes what the bundle does not describe instead of hard-deleting it (which failed on the version FK). Every changed item gets a version attributed to the promotion's approval. Soft-deleted items are no longer exported, and so no longer resurrected. A slug held by another live item is a 409, with nothing changed.
+- **Approval claimed before the effect** (T5a). The keys, lifecycle, schema and releases commands run in one shared envelope: the audit row claiming the WS4 approval, then the effect, then the durable idempotency record, all in one transaction. Ten concurrent requests carrying one approval now give 1 success and 9 × 403 with exactly one effect; before, all ten effects ran. Idempotency survives a restart and works across replicas. A response that carries a one-time API key is never stored, not even encrypted; a replay of it is a 409.
 - Verified on the Linux gate (sumopod, runs `m3w1` + `m3w1b`): root 12, blocks 32, api 681 passed / 0 failed / 2 skipped, vocabulary 247. The first api run also caught 2 unhandled `ioredis` "Connection is closed" rejections from `editorial-assertion-matrix.spec.ts`, a spec wave 1 does not touch; the rerun was clean. Logged as an M3 defect.
 
 ### webdesk `0.3.0` - gaiada.com can be served and edited through WebDesk: RustFS, `/v1` in the api, vocabulary 1.1.0, the write plane, live reads, the editorial assertion (2026-10-11) - DEV-VERIFIED
