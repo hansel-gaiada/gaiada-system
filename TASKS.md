@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████████░░░░░░░░░░░░░░` **53%** · 108/201<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **61%** · 124/202<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -79,7 +79,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 
 ### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
-- [ ] CI runs only the jobs whose component changed; superseded runs are cancelled
+- [ ] CI runs only the jobs whose component changed; superseded runs are cancelled — first half PROVEN on main 2026-10-11 (347 push, run 38082096371: only the platform-nest jobs ran, 9 jobs skipped); superseded-run cancellation not yet observed
 - [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags
 - [ ] Dependency and Docker layer caching
 - [ ] Billed minutes for a WebDesk-only change measured after, and recorded
@@ -199,18 +199,18 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `█████░░░░░░░░░░░░░░░` **24%** · 12/49<!-- /bar -->
+<!-- bar -->🟡 `███████████░░░░░░░░░` **56%** · 28/50<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
-### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] Payload app, dependencies and the `payload` service removed
-- [ ] Forward migration drops `pages`, `users`, `payload_*`
-- [ ] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source
-- [ ] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted
+### WSK-48b · Delete Payload <!-- bar -->✅ `██████████` **100%** · 4/4<!-- /bar -->
+- [x] Payload app, dependencies and the `payload` service removed (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
+- [x] Forward migration drops `pages`, `users`, `payload_*` (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
+- [x] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
+- [x] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 
-### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **10%** · 1/10<!-- /bar -->
-- [ ] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52; ticked when on main)
+### CMS features <!-- bar -->🟡 `██░░░░░░░░` **20%** · 2/10<!-- /bar -->
+- [x] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52, recorded in webdesk-design-v2.md §14 on main `26862851`)
 - [ ] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved
 - [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
 - [ ] WSK-46 · site repo (gaiada-web-revamp): `/preview/` page renders the draft with the site's own components (coordinate with the site owner; needs `api.gaiada.com` public)
@@ -221,7 +221,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43 · media library
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `███░░░░░░░` **31%** · 11/35<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `██████░░░░` **61%** · 22/36<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
@@ -230,29 +230,30 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes)
 - [x] The privacy residency statement still names MinIO to customers (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] `check-artifact-url-expiry.mjs` still starts a MinIO container (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
-- [ ] In-memory read quota and idempotency under-enforce with more than one api replica
+- [ ] In-memory read quota and idempotency under-enforce with more than one api replica (idempotency: the WSK-21 commands moved to the durable store in T5a; promotion + privacy follow in T5b; the read quota moves to Redis in T6)
 - [ ] Defence in depth: a Cerbos rule denying `publish`/`schedule` to automation principals (today only the importer's code prevents it)
 - [ ] Approvals DETAIL page dead-ends for a requester (`automation_approval:read` 403) — needs a requester-own read rule in Cerbos
-- [ ] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim)
-- [ ] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale)
-- [ ] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state
+- [x] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim) (merged for 348: `webdesk/editor-followups` @ `560ca521`; Linux: platform-ui vitest 229 files/4538, tsc, next build; nest ui-contract 26/26; the new e2e state test passes every run)
+- [x] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale) (merged for 348: `webdesk/editor-followups` @ `560ca521`; Linux: platform-ui vitest 229 files/4538, tsc, next build; nest ui-contract 26/26; the new e2e state test passes every run)
+- [x] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state (merged for 348: `webdesk/editor-followups` @ `560ca521`; Linux: platform-ui vitest 229 files/4538, tsc, next build; nest ui-contract 26/26; the new e2e state test passes every run)
 - [ ] Importer CLI never wired the editorial signer (own process): the live run refused every write with 503 `editorial_signer_not_configured` — fixed on the proof branch (`f52f9a27`), verify in the next release gate
 - [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
 - [ ] `editorial-assertion-matrix.spec.ts` can leak 2 unhandled `ioredis` "Connection is closed" rejections when an app instance closes mid-command: the api suite exits 1 with 0 failures (1 of 2 runs on sumopod, 2026-10-11)
-- [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too)
-- [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
-- [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
-- [ ] Promotion export includes soft-deleted items, so a promotion resurrects them as live (found 2026-10-11)
-- [ ] Promotion writes the live projection without appending a version, so `published_version` points at content that is no longer live (found 2026-10-11)
-- [ ] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever. Ruled 2026-10-11: a deleted item releases its slug; a restore onto a taken slug is 409 (WSK-D51)
+- [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too) — measured 2026-10-11 (4 navigation tests × 3 on one box): base `cb81ba01` 9/12, branch `560ca521` 11/12, all `toHaveURL` after navigation; pre-existing, not from the editor follow-ups
+- [x] WSK-21 HIGH commands (keys, lifecycle, releases) claim the WS4 approval in the same transaction as the effect, through a shared envelope; a reused approval is 403 before any effect (T5a; 10-racer tests) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [ ] WSK-25 promotion and WSK-38 privacy commands still write the audit row after the side effect — move them onto the envelope (T5b)
+- [x] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] Promotion export includes soft-deleted items, so a promotion resurrects them as live (found 2026-10-11) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] Promotion writes the live projection without appending a version, so `published_version` points at content that is no longer live (found 2026-10-11) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever. Ruled 2026-10-11: a deleted item releases its slug; a restore onto a taken slug is 409 (WSK-D51) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [ ] Idempotency expiry sweep must run per tenant + once at platform scope; reads treat expired rows as absent (both already true in `pg-idempotency-store.ts`; what is missing is a caller: lands with WSK-61)
-- [ ] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written
-- [ ] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration
+- [x] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [x] Codegen `versioning.mts` drops `singleton`/`localized`/`ui`/`lint` from the tenant-contract snapshot (flips go unrated) — already fixed by WSK-41 (`toContractSnapshot`); pinned by `codegen-versioning.spec.ts`, green in the 2026-10-11 Linux release gate (api 643/0/2)
 - [x] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
-- [ ] WebDesk migration tests (0009, 0010) were never run by the gate or CI; T4 wired a `migrations` suite into `linux-gate.sh` and the `webdesk-api` CI job (found 2026-10-11)
+- [x] WebDesk migration tests (0009, 0010) were never run by the gate or CI; T4 wired a `migrations` suite into `linux-gate.sh` and the `webdesk-api` CI job (found 2026-10-11) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [ ] `tenant.archive` can never replay: the tenant lookup runs before the envelope and 404s once archived, so a lost-response retry gets 404 (found by T5a)
 - [ ] `site.archive` is HIGH but always 501 and consumes no approval; decide whether it claims one or leaves the registry (found by T5a)
 - [ ] `content-commands.service.ts` keeps a private copy of the command envelope; adopt `CommandEnvelope` (T5a follow-up)
