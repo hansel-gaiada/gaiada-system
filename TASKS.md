@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **61%** · 124/202<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **61%** · 124/203<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -199,7 +199,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `███████████░░░░░░░░░` **56%** · 28/50<!-- /bar -->
+<!-- bar -->🟡 `███████████░░░░░░░░░` **54%** · 28/51<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -221,7 +221,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43 · media library
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `██████░░░░` **61%** · 22/36<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `██████░░░░` **59%** · 22/37<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
@@ -238,6 +238,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state (merged for 348: `webdesk/editor-followups` @ `560ca521`; Linux: platform-ui vitest 229 files/4538, tsc, next build; nest ui-contract 26/26; the new e2e state test passes every run)
 - [ ] Importer CLI never wired the editorial signer (own process): the live run refused every write with 503 `editorial_signer_not_configured` — fixed on the proof branch (`f52f9a27`), verify in the next release gate
 - [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
+- [ ] Approving a `key.mint` on `/approvals/[id]` discards the once-only plaintext (the UI's decide action ignores the response body): until the fix lands (`webdesk/key-request-ui`), approve key mints through the API and read `webdesk.plaintextOnce`
 - [ ] `editorial-assertion-matrix.spec.ts` can leak 2 unhandled `ioredis` "Connection is closed" rejections when an app instance closes mid-command: the api suite exits 1 with 0 failures (1 of 2 runs on sumopod, 2026-10-11)
 - [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too) — measured 2026-10-11 (4 navigation tests × 3 on one box): base `cb81ba01` 9/12, branch `560ca521` 11/12, all `toHaveURL` after navigation; pre-existing, not from the editor follow-ups
 - [x] WSK-21 HIGH commands (keys, lifecycle, releases) claim the WS4 approval in the same transaction as the effect, through a shared envelope; a reused approval is 403 before any effect (T5a; 10-racer tests) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
