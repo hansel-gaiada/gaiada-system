@@ -19,6 +19,7 @@ import { checkSsrfSafe } from "./ssrf-guard";
 import { decryptWebhookSecret } from "./webhook-secret";
 import { tenantWebhooksConfig } from "./tenant-webhooks.config";
 import { redisConnectionOptions } from "../queue/redis-connection";
+import { closeBullmq } from "../queue/bullmq-shutdown";
 import { TenantWebhooksRepository } from "./tenant-webhooks.repository";
 import type { TenantWebhookJobData } from "./tenant-webhook-job";
 
@@ -111,6 +112,9 @@ export class TenantWebhookSenderProcessor implements OnModuleInit, OnModuleDestr
       (job) => this.process(job),
       { connection: redisConnectionOptions() as never, concurrency: 4 },
     );
+    // An EventEmitter 'error' with no listener throws (a connection error while running would be an
+    // unhandled rejection). The close-while-connecting race is a different one: see closeBullmq.
+    this.worker.on("error", (err) => this.logger.warn(`tenant webhook worker error: ${String(err)}`));
 
     // Same "only mark terminal once BullMQ has exhausted every attempt" rule as
     // mail-sender.processor.ts's own `failed` handler — a mid-retry failure is not the final word.
@@ -165,6 +169,6 @@ export class TenantWebhookSenderProcessor implements OnModuleInit, OnModuleDestr
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.worker?.close();
+    if (this.worker) await closeBullmq(this.worker, (err) => this.logger.warn(`tenant webhook worker close failed: ${String(err)}`));
   }
 }

@@ -31,6 +31,7 @@ import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@ne
 import { Queue, Worker, type Job } from "bullmq";
 import { DbService } from "../db/db.service";
 import { redisConnectionOptions } from "../queue/redis-connection";
+import { closeBullmq } from "../queue/bullmq-shutdown";
 import { ContentTickService } from "./content-tick.service";
 import { MaintenanceJobsService } from "./maintenance-jobs.service";
 import {
@@ -159,8 +160,10 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
     this.worker = undefined;
     this.queue = undefined;
     // Worker first: it stops taking jobs and waits for a running one. Then the queue. Both awaited.
-    await worker?.close().catch((err) => this.logger.warn(`scheduler worker close failed: ${String(err)}`));
-    await queue?.close().catch((err) => this.logger.warn(`scheduler queue close failed: ${String(err)}`));
+    // closeBullmq waits (bounded) for a still-connecting client before closing it: bullmq's close() of an
+    // initialising connection leaves an unhandled rejection behind (see ../queue/bullmq-shutdown.ts).
+    if (worker) await closeBullmq(worker, (err) => this.logger.warn(`scheduler worker close failed: ${String(err)}`));
+    if (queue) await closeBullmq(queue, (err) => this.logger.warn(`scheduler queue close failed: ${String(err)}`));
     // A registration that was mid-command has failed by now (its queue closed under it) and returned.
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([
