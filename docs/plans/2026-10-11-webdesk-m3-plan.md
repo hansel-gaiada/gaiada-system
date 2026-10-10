@@ -17,11 +17,15 @@ server, result observed). Every ticket's gate is `webdesk/qa/linux-gate.sh` on s
 | **T4** | Slugs released on delete (D51); `schema_migrations` revoked from `webdesk_app`; promotion keyed by localization group, soft-deletes, writes versions | Sonnet, Opus review | **0010** | wave 2 |
 | **T5a** | WSK-21 commands (keys, lifecycle, schema, releases): durable idempotency; HIGH commands claim the WS4 approval before the effect | Sonnet, Opus review | — | wave 2 |
 | **T5b** | The same for promotion (WSK-25) and privacy (WSK-38) | Sonnet, Opus review | — | after T4 |
-| **T6** | Read quota in Redis (multi-replica); storage lifecycle for locked versions; quota counts bytes held | Sonnet | — | wave 3 |
-| **T7** | ERP: Cerbos DENY on publish/schedule for automation principals; requester-own read of an approval | Sonnet, Opus review | — (Cerbos) | wave 3 |
-| **WSK-48b** | Delete Payload; `webdesk/payload/` → `webdesk/delivery/` (vocabulary source); differential → golden suite | Sonnet, Opus review | **0011** | after T1, T2 |
+| **T6** | Read quota in Redis (multi-replica). The storage-lifecycle defect (locked object versions never freed, quota counting rows) moved into WSK-43, which redesigns media deletes anyway | Sonnet | — | wave 3 |
+| **T7** | ERP: Cerbos DENY on publish/schedule for automation and bot principals (never on `request_publish`: the importer files its batch request as automation); requester-own read of an approval, same tenant only | Sonnet, Opus review | — (Cerbos) | ships in 1.0.0-alpha.348; the WebDesk orchestrator gates, releases and probes live Cerbos |
+| **WSK-48b** | Delete Payload; `webdesk/payload/` → `webdesk/delivery/` (vocabulary source); differential → golden suite | Sonnet, Opus review, **then the WebDesk orchestrator reviews before main** (it touches CI, release and compose) | **0011** | after T1, T2, T4 |
 | **WSK-61** | Scheduler: due publishes/takedowns, live-item version swaps, forms purge, idempotency sweep | Sonnet, Opus review | **0012** | after T4, T5a |
 | WSK-46 · WSK-45 · WSK-43 · WSK-49 | Preview, WYSIWYG Markdown editor (D49), media library, client editors | later waves | | |
+
+**Merging.** Each wave merges to main only after `webdesk/qa/linux-gate.sh` is green on the merged tree (main + the wave), under WSK-D47(b), and the WebDesk orchestrator is told each time.
+
+**Decided on the way (2026-10-11).** A command response that carries a one-time secret (`key.mint`, `key.rotate`) is never stored by the durable idempotency store, not even encrypted; a replay of it is 409 `idempotency-response-withheld`. In production the PDP already refuses a reused HIGH approval before the service runs, so a stored copy could never be served and would only be a liability.
 
 The three editor defects (`lint.unavailable`, `502 webdesk_ambiguous`, `503 webdesk_not_configured`) are being
 fixed by the M2 session (`webdesk/editor-followups`); M3 does not touch `platform-ui/src/components/webdesk/**` meanwhile.
