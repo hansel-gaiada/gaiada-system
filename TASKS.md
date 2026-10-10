@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **45%** · 79/172<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **45%** · 79/173<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -167,7 +167,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `████░░░░░░░░░░░░░░░░` **21%** · 3/14<!-- /bar -->
+<!-- bar -->🟡 `████░░░░░░░░░░░░░░░░` **20%** · 3/15<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `████░░░░░░` **42%** · 3/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
@@ -178,9 +178,10 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [ ] Re-verified against the REAL BFF once WSK-59 lands (every field the UI reads diffed against a live response — built on a stub first)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
 - [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
-- [ ] ERP GitHub App on the site repo; `webdesk-rebuild` workflow
+- [ ] Owner: install the `gaiada-erp` GitHub App on `gaiadabali/gaiada-web-revamp` (actions:write, metadata:read) and add the repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY`
+- [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo; build ledger + `build-status` / `rebuild-requests` routes in the ERP
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
 - [ ] Cost per run measured and recorded
 
