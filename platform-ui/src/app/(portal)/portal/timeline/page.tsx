@@ -28,7 +28,7 @@ const KIND_WORD: Record<PortalTimelineEvent["kind"], string> = {
   milestone: "Milestone",
   deliverable: "Deliverable",
   decision: "Your decision",
-  contract: "Agreement",
+  contract: "Contract",
   invoice: "Invoice",
   payment: "Payment",
 };

@@ -45,7 +45,7 @@ export function SectionSettingsView({
   return (
     <div className="cc-content">
       <Breadcrumb items={[...crumbs, "Settings"]} />
-      <div className="cc-head-row"><h1>{section.name} settings</h1></div>
+      <div className="cc-head-row"><h2>{section.name} settings</h2></div>
       <p className="cc-lede">
         What a {section.name.toLowerCase()} specialist needs to know to run this section for {clientName}. Fields
         marked <em className="cc-shared">Shared</em> are the same value across every section that uses them.

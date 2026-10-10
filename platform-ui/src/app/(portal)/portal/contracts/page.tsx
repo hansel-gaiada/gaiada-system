@@ -10,7 +10,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalFacts, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 
-// CP-14 — the client's agreements. Called "Agreements" in the UI and `contracts` in the schema: the
+// CP-14 — the client's agreements. Called "Contracts" in the UI (PV2-04; was "Agreements") and `contracts` in the schema: the
 // former is what a client says, the latter is what the table is.
 //
 // Anything awaiting their signature is hoisted to the top under its own heading. `draft` contracts never
@@ -32,13 +32,13 @@ export default async function PortalContractsPage() {
     <>
       <PortalPageHead
         eyebrow="Your account"
-        title="Agreements"
+        title="Contracts"
         lead="What we've agreed, for how much, and until when."
         actions={<PortalLive topics={["contracts"]} />}
       />
 
       {contracts.length === 0 ? (
-        <EmptyNote>No agreements yet.</EmptyNote>
+        <EmptyNote>No contracts yet.</EmptyNote>
       ) : (
         <div className="cp-stack">
           {awaiting.length > 0 && (
@@ -110,7 +110,7 @@ function ContractCard({ k, now, actionable }: {
           className={actionable ? "btn btn-primary" : "btn"}
           style={{ fontSize: 13, textDecoration: "none" }}
         >
-          {actionable ? "Read & sign" : "Read agreement"}
+          {actionable ? "Read & sign" : "Read contract"}
         </Link>
       </div>
     </Card>

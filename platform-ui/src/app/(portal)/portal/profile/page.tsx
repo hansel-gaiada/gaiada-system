@@ -26,7 +26,7 @@ export default async function PortalProfilePage() {
   if (!profile) {
     return (
       <>
-        <PortalPageHead eyebrow="Your details" title="Profile" />
+        <PortalPageHead eyebrow="Your details" title="People" />
         <EmptyNote>We couldn&apos;t load your profile. Please try again shortly.</EmptyNote>
       </>
     );
@@ -41,7 +41,7 @@ export default async function PortalProfilePage() {
     <>
       <PortalPageHead
         eyebrow="Your details"
-        title="Profile"
+        title="People"
         lead="Your own details, your organisation's record with us, and who else has access."
       />
 

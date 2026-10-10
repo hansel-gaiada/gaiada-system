@@ -29,6 +29,7 @@ import { authorize } from "./http";
 import { AuthGuard } from "../auth/guards";
 import { resolvePortalScope, type PortalScope } from "./portal-scope";
 import type { PoolClient } from "pg";
+import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "./project-status";
 
 /** SQL predicate restricting `projects p` to the caller's scope. Kept as one exported constant rather
  *  than retyped per query: the second copy of an isolation predicate is where the typo lives. Binds
@@ -82,8 +83,8 @@ export class PortalWorkspaceController {
         ),
         c.query<{ total: string; active: string; done: string; percent: string | null }>(
           `SELECT count(*) AS total,
-                  count(*) FILTER (WHERE p.status NOT IN ('done', 'complete', 'archived', 'cancelled')) AS active,
-                  count(*) FILTER (WHERE p.status IN ('done', 'complete')) AS done,
+                  count(*) FILTER (WHERE NOT (p.status = ANY($3::text[]))) AS active,
+                  count(*) FILTER (WHERE p.status = ANY($4::text[])) AS done,
                   -- Portfolio progress is the MEAN OF PROJECT progress, not of all tasks pooled: a
                   -- 200-task project would otherwise drown out a 3-task one and the headline number
                   -- would track the biggest project rather than the relationship.
@@ -94,7 +95,7 @@ export class PortalWorkspaceController {
                                   FROM pm_tasks t WHERE t.project_id = p.id AND t.deleted_at IS NULL), 0) AS pct
              ) sub
             WHERE ${PROJECT_SCOPE}`,
-          args,
+          [...args, [...FINISHED_PROJECT_STATUSES], [...DONE_PROJECT_STATUSES]],
         ),
         c.query(
           `SELECT m.id, m.name, to_char(m.due_date, 'YYYY-MM-DD') AS "dueDate", m.status,
@@ -278,9 +279,9 @@ export class PortalWorkspaceController {
                   WHERE m.project_id = p.id AND m.deleted_at IS NULL AND m.status <> 'done' AND m.due_date IS NOT NULL) AS "nextMilestoneDue"
            FROM projects p LEFT JOIN clients cl ON cl.id = p.client_id
           WHERE ${PROJECT_SCOPE}
-          ORDER BY (p.status IN ('done', 'complete', 'archived', 'cancelled')), p.due_date NULLS LAST, p.created_at DESC
+          ORDER BY (p.status = ANY($3::text[])), p.due_date NULLS LAST, p.created_at DESC
           LIMIT 200`,
-        args,
+        [...args, [...FINISHED_PROJECT_STATUSES]],
       );
       return rows.rows.map((r: Record<string, unknown>) => ({
         ...r,

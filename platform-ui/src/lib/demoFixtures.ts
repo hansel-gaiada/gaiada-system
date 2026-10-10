@@ -47,6 +47,7 @@ const DEMO_USER_MANAGER_ID = "dept-manager";  // manager tier — drives the GM 
 // External-client tier. `client` is the ONLY role: `isClientOnly` keys off "holds no staff role", so
 // adding any second role here would silently turn this identity back into staff and stop exercising
 // the portal-only nav + landing redirect this identity exists to cover.
+const DEMO_USER_VICEROY_MARKETING_ID = "demo-viceroy-marketing";  // PV2-02: staff of co-resort + client of co-agency
 const DEMO_USER_CLIENT_ID = "demo-client";
 
 let demoSeq = 1000;
@@ -147,6 +148,25 @@ const ME_MANAGER = {
   roles: [
     { role: "manager", scopeType: "company", scopeId: "co-agency" },
   ],
+};
+
+// PV2-02: staff of co-resort (Viceroy) AND a client contact of co-agency, the PV-D2 case. Exists for
+// PV2-05 and PV2-06. Sign in with viceroy-marketing@gaiada.com (see lib/demoIdentity.ts).
+// ONE staff role, scoped to co-resort only; the client side is carried by `clientOf`, not a role.
+const ME_VICEROY_MARKETING = {
+  userId: DEMO_USER_VICEROY_MARKETING_ID,
+  name: "Made Sari",
+  email: "viceroy-marketing@gaiada.com",
+  title: "Marketing Coordinator, Viceroy",
+  assurance: "high",
+  companies: [{ id: "co-resort", name: "Viceroy", type: "resort" }],
+  roles: [{ role: "member", scopeType: "company", scopeId: "co-resort" }],
+};
+
+// PV2-02: per-identity `clientOf` for the /api/me route (the route overrides `companies` for everyone).
+const DEMO_CLIENT_OF: Record<string, { companyId: string; companyName: string }[]> = {
+  [DEMO_USER_CLIENT_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
+  [DEMO_USER_VICEROY_MARKETING_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
 };
 
 const MEMBERS: Record<string, { user_id: string; name: string; email: string; title: string | null }[]> = {
@@ -1993,6 +2013,7 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_MANAGER_ID) return ME_MANAGER;
   if (userId === DEMO_USER_IC_ID) return ME_IC;
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
+  if (userId === DEMO_USER_VICEROY_MARKETING_ID) return ME_VICEROY_MARKETING;
   return ME;
 }
 
@@ -2258,7 +2279,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const currentIdentity = getCurrentDemoIdentity(userId);
 
   // /api/me reflects the (mutable) company set so newly-created companies appear.
-  if (p === "/api/me") return ok({ ...currentIdentity, companies: COMPANIES.map((c) => ({ id: c.id, name: c.name, type: c.type })) });
+  if (p === "/api/me") return ok({ ...currentIdentity, companies: COMPANIES.map((c) => ({ id: c.id, name: c.name, type: c.type })), clientOf: DEMO_CLIENT_OF[currentIdentity.userId] ?? [] });
   if (p === "/api/companies") {
     if (m === "POST") {
       const b = JSON.parse(body || "{}");

@@ -6,7 +6,7 @@ export function LeafPageView({ clientName, page, crumbs }: { clientName: string;
   return (
     <div className="cc-content">
       <Breadcrumb items={crumbs} />
-      <h1>{page.name}</h1>
+      <h2 className="cc-title">{page.name}</h2>
       <div className="cc-soon">
         <span className="cc-soon__tag">Coming soon</span>
         <h2>This page is being built</h2>

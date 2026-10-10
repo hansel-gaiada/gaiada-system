@@ -164,6 +164,9 @@ describe("statusTone", () => {
 
   it("maps the states the portal actually renders", () => {
     expect(statusTone("signed")).toBe("success");
+    // PV2-01: the staff project form's "completed" is a finished project, same as "complete".
+    expect(statusTone("completed")).toBe("success");
+    expect(statusTone("completed")).toBe(statusTone("complete"));
     expect(statusTone("sent")).toBe("warning");
     expect(statusTone("rejected")).toBe("danger");
     expect(statusTone("active")).toBe("info");

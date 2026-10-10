@@ -18,14 +18,16 @@ import "./portal.css";
 // `prefers-color-scheme` block, so it is still dark-mode-correct without a control the client would
 // have to discover.
 export function PortalShell({
-  children, clientName, userName, userInitials, pendingCount,
+  children, clientName, userName, userInitials, projectsBadge, billingBadge,
 }: {
   children: React.ReactNode;
   clientName: string | null;
   userName: string;
   userInitials: string;
-  /** Things waiting on the client, badged onto the Approvals tab. */
-  pendingCount: number;
+  /** Gates waiting on the client, badged onto the Projects area. */
+  projectsBadge: number;
+  /** Unsigned contracts plus overdue invoices, badged onto Contracts & billing. */
+  billingBadge: number;
 }) {
   return (
     <div className="cp-shell">
@@ -47,9 +49,7 @@ export function PortalShell({
           </div>
           <PortalUserMenu initials={userInitials} />
         </div>
-        <nav className="cp-tabs" aria-label="Portal sections">
-          <PortalTabs pendingCount={pendingCount} />
-        </nav>
+        <PortalTabs projectsBadge={projectsBadge} billingBadge={billingBadge} />
       </header>
 
       {/* The skip target the a11y pass requires; `tabIndex={-1}` so the skip link can focus it. */}

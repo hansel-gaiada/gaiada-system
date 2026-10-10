@@ -7,7 +7,7 @@ import { withTenants, newId } from "./db";
 import { resetModules } from "./modules/registry";
 import { buildApp } from "./main";
 import { initTestDb, teardownTestDb, TEST_URL } from "./testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "./testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "./testing/fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -56,6 +56,47 @@ describe.skipIf(!TEST_URL)("me / activity / tasks API (nest)", () => {
     expect(body.title).toBe("AI Manager");
     expect(body.companies.map((c: { name: string }) => c.name)).toContain("Gaiada HQ");
     expect(body.roles.some((r: { role: string }) => r.role === "manager")).toBe(true);
+  });
+
+  // PV2-02: clientOf. Mirrors testing/personas.ts's contact insert (withTenants: tenant_isolation is FOR ALL).
+  async function addContact(tenantId: string, userId: string, status: "active" | "revoked") {
+    const clientId = await createClient(tenantId, `Client of ${tenantId.slice(0, 4)}`);
+    await withTenants([tenantId], (c) =>
+      c.query(
+        `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, capability, status, origin_site)
+         VALUES ($1,$2,$3,$4,'viewer',$5,$6)`,
+        [newId(), tenantId, clientId, userId, status, config.originSite],
+      ),
+    );
+  }
+
+  it("GET /api/me clientOf lists every company the caller is an active client contact of, sorted by name", async () => {
+    const zeta = await createCompany("Zeta Studio");
+    const alpha = await createCompany("Alpha Agency");
+    const u = await createUser(`two-co-${newId()}@x.test`, "Two Company Contact");
+    await addContact(zeta, u, "active");
+    await addContact(alpha, u, "active");
+    const res = await app.inject({ method: "GET", url: "/api/me", headers: asUser(u) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().clientOf).toEqual([
+      { companyId: alpha, companyName: "Alpha Agency" },
+      { companyId: zeta, companyName: "Zeta Studio" },
+    ]);
+  });
+
+  it("GET /api/me clientOf excludes a revoked contact", async () => {
+    const live = await createCompany("Live Co");
+    const gone = await createCompany("Gone Co");
+    const u = await createUser(`revoked-${newId()}@x.test`, "Revoked Contact");
+    await addContact(live, u, "active");
+    await addContact(gone, u, "revoked");
+    const res = await app.inject({ method: "GET", url: "/api/me", headers: asUser(u) });
+    expect(res.json().clientOf).toEqual([{ companyId: live, companyName: "Live Co" }]);
+  });
+
+  it("GET /api/me clientOf is [] for a staff member with no contact row", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/me", headers: asUser(hansel) });
+    expect(res.json().clientOf).toEqual([]);
   });
 
   it("GET /api/:tenantId/tasks?assignee=me returns my tasks with project name", async () => {

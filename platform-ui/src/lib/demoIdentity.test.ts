@@ -30,6 +30,11 @@ describe("demoIdentityFor — dev-login identity tiers", () => {
     expect(demoIdentityFor("SEO-Staff@Gaiada.com")).toBe("seo-staff");
   });
 
+  it("viceroy-marketing resolves to its own identity, not the IC tier its 'ic' substring would give it", () => {
+    expect(demoIdentityFor("viceroy-marketing@gaiada.com")).toBe("demo-viceroy-marketing");
+    expect(demoIdentityFor("Viceroy-Marketing@Gaiada.com")).toBe("demo-viceroy-marketing");
+  });
+
   it("an ordinary staff address is never mistaken for a client", () => {
     for (const e of ["pm@gaiada.com", "owner@gaiada.com", "dewi@gaiada.com"]) {
       expect(demoIdentityFor(e)).toBe("demo-hansel");

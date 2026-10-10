@@ -8,7 +8,7 @@
 // ORDER IS THE MECHANISM, not a style choice, which is why it is asserted rather than described:
 // the tests below the obvious ones are the ones that matter (a client address containing "ic", a
 // staff address containing "client").
-export type DemoIdentityId = "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel";
+export type DemoIdentityId = "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel" | "demo-viceroy-marketing";
 
 export function demoIdentityFor(email: string): DemoIdentityId {
   const lower = email.toLowerCase();
@@ -18,6 +18,9 @@ export function demoIdentityFor(email: string): DemoIdentityId {
   // address easily can ("erica@…", "nicole@…"), and being an external client is the more specific
   // claim than the IC tier. Getting this order wrong hands a client the staff dashboard.
   if (lower.includes("client") || lower.endsWith("@northwind.example")) return "demo-client";
+  // PV2-02: staff of Viceroy AND a client contact of the agency, for PV2-05/PV2-06. BEFORE the "ic" test:
+  // "viceroy" contains "ic", which would otherwise demote this address to the IC tier.
+  if (lower === "viceroy-marketing@gaiada.com" || lower.includes("viceroy-marketing")) return "demo-viceroy-marketing";
   // GM-02b needs a MANAGER-tier identity: the GM console's narrowed department-lead view is gated on
   // `reports.department.view`, which `manager` holds and `member`/`viewer` do not — so neither
   // `demo-hansel` (platform_admin, full access) nor `gede-ic` (member, refused) can exercise it, and

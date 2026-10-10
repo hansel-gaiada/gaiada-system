@@ -52,7 +52,7 @@ export default async function PortalOverviewPage() {
           <EmptyNote>
             Nothing is wrong on your side, and there is nothing you need to do. Your account manager
             finishes the setup at their end; once they have, your projects, deliverables, invoices and
-            agreements all appear here.
+            contracts all appear here.
           </EmptyNote>
         </>
       );
@@ -66,7 +66,7 @@ export default async function PortalOverviewPage() {
         />
         <EmptyNote>
           A client signing in here sees their own projects, milestones, deliverables, invoices and
-          agreements — and nothing else. Nothing on this surface is reachable without a client contact
+          contracts — and nothing else. Nothing on this surface is reachable without a client contact
           record.
         </EmptyNote>
       </>

@@ -117,7 +117,7 @@
   flex-wrap: wrap;
   margin-bottom: 6px;
 }
-.cc-head-row h1 { font: 600 22px/1.25 var(--font-display); color: var(--ink-strong); margin: 0; }
+.cc-head-row h2, .cc-title { font: 600 22px/1.25 var(--font-display); color: var(--ink-strong); margin: 0; }
 .cc-lede { font: 400 14px/1.55 var(--font-body); color: var(--ink-muted); max-width: 72ch; margin: 0 0 18px; }
 .cc-saved-note {
   font: 500 12px/1 var(--font-body);

@@ -59,6 +59,31 @@ export class CoreController {
     // ORG-7b: serviceScopes is ADDITIVE to the Me shape — existing consumers that don't read it
     // are unaffected; [] whenever the release-train flag is off (default) or there is none.
     const serviceScopes = await getServiceScopes(req.principal.userId, req.principal.companies);
+    // PV2-02: clientOf is ADDITIVE. `companies` above is the union of staff memberships and client
+    // contacts with nothing marking which is which; this lists only the client side. WARNING:
+    // client_contacts is FORCE RLS with a `principal_lookup` policy keyed on `app.principal_user_id`,
+    // so a plain withGlobal read returns ZERO rows with no error (the MON-00i bug, see
+    // rbac/principal.ts). The GUC is set transaction-locally first, exactly as principal.ts does.
+    const clientOf = await withGlobal(async (c) => {
+      await c.query("BEGIN");
+      try {
+        await c.query("SELECT set_config('app.principal_user_id', $1, true)", [req.principal.userId]);
+        const r = await c.query<{ companyId: string; companyName: string }>(
+          `SELECT DISTINCT co.id AS "companyId", co.name AS "companyName"
+             FROM client_contacts cc
+             JOIN companies co ON co.id = cc.tenant_id
+            WHERE cc.user_id = $1 AND cc.status = 'active'
+              AND cc.deleted_at IS NULL AND co.deleted_at IS NULL
+            ORDER BY co.name, co.id`,
+          [req.principal.userId],
+        );
+        await c.query("COMMIT");
+        return r.rows;
+      } catch (e) {
+        await c.query("ROLLBACK");
+        throw e;
+      }
+    });
     return {
       userId: req.principal.userId,
       assurance: req.principal.assurance,
@@ -68,6 +93,7 @@ export class CoreController {
       companies: companies.rows,
       roles: req.principal.roles,
       serviceScopes,
+      clientOf,
     };
   }
 
