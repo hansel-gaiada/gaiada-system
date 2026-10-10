@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **50%** · 97/192<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `█████████████████░░░░░░░░░░░░░` **55%** · 108/194<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -199,9 +199,9 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `█░░░░░░░░░░░░░░░░░░░` **2%** · 1/40<!-- /bar -->
+<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **28%** · 12/42<!-- /bar -->
 
-Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md) (branch `webdesk/m3-rulings` until merged). Rulings WSK-D49–D51.
+Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
 ### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
@@ -209,23 +209,24 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source
 - [ ] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted
 
-### CMS features <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/7<!-- /bar -->
+### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **14%** · 1/7<!-- /bar -->
 - [ ] WSK-46 · preview links for drafts
 - [ ] WSK-61 · scheduled publish worker (+ the forms retention purge schedule, + the idempotency expiry sweep: `sweepExpired()` exists and nothing calls it)
 - [ ] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live)
-- [ ] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, on branch `webdesk/m3-rulings`; ticked when on main)
+- [x] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, recorded in webdesk-design-v2.md §14 on main)
 - [ ] WSK-45 · WYSIWYG editor (TipTap) on the `markdown` primitive; an unchanged body saves byte-identical
 - [ ] WSK-43 · media library
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `░░░░░░░░░░` **3%** · 1/29<!-- /bar -->
-- [ ] Reserved collection keys (`media`, `forms` collide with api routes)
-- [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
-- [ ] A bad cursor returns 500 with the raw database message
-- [ ] Undecodable `%` in a path gets Fastify's 400, not a problem+json body
+### Defects found on the way <!-- bar -->🟡 `████░░░░░░` **35%** · 11/31<!-- /bar -->
+- [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] Undecodable `%` in a path gets Fastify's 400, not a problem+json body (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] A non-integer `limit` (`limit=2.5`) reached `LIMIT $n` and 500ed — now truncated (found and fixed in M3 T1) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes)
-- [ ] The privacy residency statement still names MinIO to customers
-- [ ] `check-artifact-url-expiry.mjs` still starts a MinIO container
+- [x] The privacy residency statement still names MinIO to customers (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] `check-artifact-url-expiry.mjs` still starts a MinIO container (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [ ] In-memory read quota and idempotency under-enforce with more than one api replica
 - [ ] Defence in depth: a Cerbos rule denying `publish`/`schedule` to automation principals (today only the importer's code prevents it)
 - [ ] Approvals DETAIL page dead-ends for a requester (`automation_approval:read` 403) — needs a requester-own read rule in Cerbos
@@ -234,6 +235,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state
 - [ ] Importer CLI never wired the editorial signer (own process): the live run refused every write with 503 `editorial_signer_not_configured` — fixed on the proof branch (`f52f9a27`), verify in the next release gate
 - [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
+- [ ] `editorial-assertion-matrix.spec.ts` can leak 2 unhandled `ioredis` "Connection is closed" rejections when an app instance closes mid-command: the api suite exits 1 with 0 failures (1 of 2 runs on sumopod, 2026-10-11)
 - [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too)
 - [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
 - [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
@@ -244,9 +246,9 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written
 - [ ] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration
 - [x] Codegen `versioning.mts` drops `singleton`/`localized`/`ui`/`lint` from the tenant-contract snapshot (flips go unrated) — already fixed by WSK-41 (`toContractSnapshot`); pinned by `codegen-versioning.spec.ts`, green in the 2026-10-11 Linux release gate (api 643/0/2)
-- [ ] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields`
-- [ ] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf`
-- [ ] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today)
+- [x] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [ ] Not ours, flagged: `agency-lead-convert-race.db.test.ts` is flaky (failed 1 of 3 identical runs) and `monitoring.controller.test.ts` is a date time bomb (red since ~09-17) — both red on main, owners elsewhere
 
 ---
