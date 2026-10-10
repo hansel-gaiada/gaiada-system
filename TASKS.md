@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████░░░░░░░░░░░░░░░░░░░░░░` **25%** · 40/155<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████░░░░░░░░░░░░░░░░░░░░░░` **26%** · 43/161<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `███████░░░░░░░░░░░░░` **36%** · 30/83<!-- /bar -->
+<!-- bar -->🟡 `████████░░░░░░░░░░░░` **39%** · 33/83<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -88,10 +88,10 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `validateItemContent` (≥ 40 cases) and the composition validator
 - [ ] Codegen + every vendored copy (api delivery, schema-draft, blocks) re-vendored; drift checks green on Linux
 
-### Wave A · WSK-65 · Migration 0009 (write plane) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Applies on 0001–0008, idempotent; fails loudly on seeded duplicates (negative controls)
-- [ ] RLS integrity includes `control_idempotency_keys`; cross-tenant probe with a positive control
-- [ ] Every existing suite green after 0009
+### Wave A · WSK-65 · Migration 0009 (write plane) <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
+- [x] Applies on 0001–0008, idempotent; fails loudly on seeded duplicates (negative controls) — 96/96 checks; refuses non-migrator-owned tables
+- [x] RLS integrity includes `control_idempotency_keys` (20 tables); cross-tenant probe with a positive control
+- [x] Every existing suite green after 0009 (api 419/0/0; `/v1` bytes 32/32 identical; contract 60/60)
 
 ### Wave A · WSK-63 · The control channel made real <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
 - [ ] Internal vhost `control.webdesk.internal`: mTLS, verified-cert header overwrite, Caddy gate header; no new host port
@@ -186,7 +186,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/17<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/23<!-- /bar -->
 
 ### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
@@ -201,7 +201,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] WSK-64 · CDN cache purge on publish
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/8<!-- /bar -->
+### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/14<!-- /bar -->
 - [ ] Reserved collection keys (`media`, `forms` collide with api routes)
 - [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
 - [ ] A bad cursor returns 500 with the raw database message
@@ -210,6 +210,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] The privacy residency statement still names MinIO to customers
 - [ ] `check-artifact-url-expiry.mjs` still starts a MinIO container
 - [ ] In-memory read quota and idempotency under-enforce with more than one api replica
+- [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
+- [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
+- [ ] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever (senior-db decision)
+- [ ] Idempotency expiry sweep must run per tenant + once at platform scope; reads treat expired rows as absent
+- [ ] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written
+- [ ] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration
 
 ---
 
