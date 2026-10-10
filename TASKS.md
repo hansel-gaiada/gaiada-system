@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████░░░░░░░░░░░░░░░░░░░░░░` **26%** · 43/161<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████░░░░░░░░░░░░░░░░░░░░░░` **27%** · 44/161<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `████████░░░░░░░░░░░░` **39%** · 33/83<!-- /bar -->
+<!-- bar -->🟡 `████████░░░░░░░░░░░░` **40%** · 34/83<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -93,10 +93,10 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] RLS integrity includes `control_idempotency_keys` (20 tables); cross-tenant probe with a positive control
 - [x] Every existing suite green after 0009 (api 419/0/0; `/v1` bytes 32/32 identical; contract 60/60)
 
-### Wave A · WSK-63 · The control channel made real <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+### Wave A · WSK-63 · The control channel made real <!-- bar -->🟡 `███░░░░░░░` **25%** · 1/4<!-- /bar -->
 - [ ] Internal vhost `control.webdesk.internal`: mTLS, verified-cert header overwrite, Caddy gate header; no new host port
 - [ ] On the box: Keycloak client `webdesk-control`, client + server certs from the internal CA, NTP offset < 1 s
-- [ ] ERP egress client: shared hash vectors, single-flight token cache, circuit breaker, no secret in logs
+- [x] ERP egress client: shared hash vectors, single-flight token cache, circuit breaker, no secret in logs (42/42 + 7/7 on Linux)
 - [ ] Live: a contract read passes all four layers; the same call without a client cert fails at Layer 1
 
 ### Wave A · WSK-47 · Cerbos kinds <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->

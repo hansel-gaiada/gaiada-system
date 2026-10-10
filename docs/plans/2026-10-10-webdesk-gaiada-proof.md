@@ -125,3 +125,8 @@ deploy's `cosign verify` passes for all 9.
 the list endpoint's 7-day filter. It is a test-only time bomb. The shared checkout shows that file
 modified by another session, so it is left to that owner. The release is not gated on CI.
 
+**2026-10-10, live.** Migration 0009 was applied to the live WebDesk DB as `webdesk_migrator`: 1 applied,
+an idempotent re-run applied 0, RLS integrity OK on 20 tables, `/v1` unchanged (401 for an unknown
+tenant). Backup `~/webdesk-backups/20261010T051357Z`. WSK-63b (ERP egress client) merged. Its live probe
+needs the platform image that carries it, so it waits for the first release.
+
