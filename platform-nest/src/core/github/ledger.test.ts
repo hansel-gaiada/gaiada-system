@@ -61,22 +61,22 @@ describe.skipIf(!TEST_URL)("GH-04 — GitHub activities ledger", () => {
   it("WSK-60: an approvalId rides all three rows' metadata, and is ABSENT (not null) when none was given", async () => {
     const approvalId = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
     await withGithubLedger(
-      { tenantId: co, actorId: actor, repo: "gaiadabali/site-appr", ref: "astro-site", action: "deploy", approvalId },
+      { tenantId: co, actorId: actor, repo: "gaiadabali/site-appr", ref: "astro-site", action: "delete_repo", approvalId },
       async () => ({ data: 204 }),
     );
     await expect(
       withGithubLedger(
-        { tenantId: co, actorId: actor, repo: "gaiadabali/site-appr", action: "deploy", approvalId },
+        { tenantId: co, actorId: actor, repo: "gaiadabali/site-appr", action: "delete_repo", approvalId },
         async () => { throw new Error("nope"); },
       ),
     ).rejects.toThrow("nope");
-    await withGithubLedger({ tenantId: co, actorId: actor, repo: "gaiadabali/site-noappr", action: "deploy" }, async () => ({ data: 1 }));
+    await withGithubLedger({ tenantId: co, actorId: actor, repo: "gaiadabali/site-noappr", action: "delete_repo" }, async () => ({ data: 1 }));
 
-    const mine = (await activityRows("github.deploy")).filter((r) => r.metadata.repo === "gaiadabali/site-appr");
+    const mine = (await activityRows("github.delete_repo")).filter((r) => r.metadata.repo === "gaiadabali/site-appr");
     expect(mine.map((r) => r.metadata.outcome).sort()).toEqual(["attempted", "attempted", "failed", "succeeded"]);
     expect(mine.every((r) => r.metadata.approvalId === approvalId)).toBe(true);
     expect(mine.find((r) => r.metadata.outcome === "succeeded")?.metadata.ref).toBe("astro-site");
-    const without = (await activityRows("github.deploy")).filter((r) => r.metadata.repo === "gaiadabali/site-noappr");
+    const without = (await activityRows("github.delete_repo")).filter((r) => r.metadata.repo === "gaiadabali/site-noappr");
     expect(without).toHaveLength(2);
     for (const r of without) expect("approvalId" in r.metadata).toBe(false);
   });
