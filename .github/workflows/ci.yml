@@ -109,7 +109,6 @@ jobs:
       webdesk_root: ${{ steps.plan.outputs.webdesk_root }}
       webdesk_api: ${{ steps.plan.outputs.webdesk_api }}
       webdesk_blocks: ${{ steps.plan.outputs.webdesk_blocks }}
-      webdesk_payload: ${{ steps.plan.outputs.webdesk_payload }}
       webdesk_deploy: ${{ steps.plan.outputs.webdesk_deploy }}
       obs: ${{ steps.plan.outputs.obs }}
       any_test: ${{ steps.plan.outputs.any_test }}
@@ -556,14 +555,15 @@ jobs:
   # WSK-29 — WebDesk (Zone B) CI wiring. Before it, WebDesk appeared in no CI job at all. WSK-69
   # (2026-10-10) folds the three tiny, database-free WebDesk jobs (root 11s, deploy 13s, blocks 35s,
   # each previously billed a full minute) into ONE job of named steps, each `if: !cancelled()` and
-  # gated on its own plan output. webdesk-api and webdesk-payload stay separate: they are heavy.
+  # gated on its own plan output. webdesk-api stays separate: it is heavy. (WSK-48b: the webdesk-payload
+  # job, a `next build` of the Payload app, is deleted with Payload.)
   #
   # webdesk/ itself (WSK-01/04): the project-skeleton root — the migration RLS-backfill lint (ported
   # from platform-nest) and the RLS-integrity selftest, WSK-04's condition-1 CI gate ("stops a routine
   # migration from silently disarming RLS"). Neither needs a database.
   #
   # webdesk/blocks (WSK-16): no database, no external service. Its own `npm run build` already IS the
-  # gate (vendor-drift check against ../payload/vocabulary + the unit suite + `astro check`).
+  # gate (vendor-drift check against ../delivery/vocabulary + the unit suite + `astro check`).
   #
   # webdesk/deploy (WSK-29): the Zone A frontend-deploy driver seam. Every test injects a fake
   # exec/driver (no test spawns a process).
@@ -792,8 +792,10 @@ jobs:
       # databases next to the migrated `webdesk` one and drives the real runner against them, so
       # they need the cluster superuser as well as the migrator and app roles. Not part of
       # `npm test` (vitest), which is why they were silently never run before. Run from
-      # webdesk/api for 0009_v1_bytes.test.mjs's tsx; `pg` resolves from webdesk/node_modules.
-      - name: Migration tests — 0009 (two files) and 0010, against scratch databases
+      # webdesk/api like the rest of this job; `pg` resolves from webdesk/node_modules.
+      # WSK-48b: 0009_v1_bytes.test.mjs is retired (it drove the deleted Payload router) and
+      # 0011_drop_payload.test.mjs is added; the list is exactly the files in migrations/tests/.
+      - name: Migration tests — 0009, 0010 and 0011, against scratch databases
         if: ${{ !cancelled() }}
         env:
           SUPERUSER_DATABASE_URL: postgres://postgres:throwaway_superuser@localhost:5432/webdesk
@@ -801,56 +803,21 @@ jobs:
           APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           API_KEY_PEPPER: ci-throwaway-pepper
         run: |
-          for t in 0009_content_write_plane 0009_v1_bytes 0010_slug_release_and_ledger; do
+          for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload; do
             echo "##### $t"
             node --import tsx ../migrations/tests/$t.test.mjs
           done
-
-  # webdesk/payload (Zone B Payload 3 app — WSK-00/02/04/04b/06). Deliberately NOT running the full
-  # WSK-00/02 spike-style verification here (dual internal/public listeners, dev-push guard, a
-  # setup-schema push) — that needs a much heavier fixture and is a WSK-M0-gate-shaped effort, not
-  # a CI-wiring one. What IS wired: the same build gate platform-ui's own job above already uses
-  # for the identical reason ("`tsc` + vitest alone once passed while `next build` broke") — `next
-  # build`'s own type-checker, which reads this project's `.ts`-extension-import tsconfig correctly
-  # where a bare `tsc --noEmit` invocation (tried first) did not.
-  #
-  # ⚠ SUPERSEDED 2026-08-30. This comment used to record the build as RED with TS2578
-  # "Unused '@ts-expect-error' directive" in 4 files. That is no longer true — those suppressions
-  # were fixed by later work, and `next build` completes and produces a bootable image (verified on
-  # real Linux, twice). The comment outlived the defect, which is its own lesson: a stale RED note
-  # costs the next person a day of not trying.
-  #
-  # What DID break this job afterwards was mine: the generated Payload migration under
-  # `src/migrations/` does not type-check, because two physically duplicated copies of the SAME
-  # drizzle-orm version (0.45.2, nested under @payloadcms/db-postgres and @payloadcms/drizzle)
-  # give `SQL<unknown>` two distinct nominal types. `overrides` pins the version but does not
-  # collapse the nesting. Those migrations are executed by Payload's own CLI and never by the Next
-  # build, so `tsconfig.json` now excludes them — the phantom is out of scope rather than
-  # suppressed file-by-file in generated output that regeneration would overwrite.
-
-  webdesk-payload:
-    needs: plan
-    if: needs.plan.outputs.webdesk_payload == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: webdesk/payload
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: webdesk/payload/package-lock.json
-      - run: npm ci
-      - run: npm run build
-        env:
-          # A throwaway value satisfying Payload's own boot-time shape checks — this job never talks
-          # to a real Postgres (no `services:` entry above); it exists so `next build`'s import-time
-          # evaluation of `payload.config.ts` doesn't die on a missing var before ever reaching the
-          # type-check phase that is the actual point of this step.
-          DATABASE_URI: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
-          PAYLOAD_SECRET: ci-throwaway-secret-32-characters-min
+      # WSK-48b: the vocabulary tests (webdesk/delivery/test) had no CI home before: the webdesk-payload job
+      # only ran `next build`, and the gate (qa/linux-gate.sh) was the only place they ran. They are plain
+      # node scripts that need no database; they run from webdesk/api so `--import tsx` resolves from its
+      # node_modules (installed above).
+      - name: Vocabulary tests — webdesk/delivery
+        if: ${{ !cancelled() }}
+        run: |
+          for t in wsk64-classifier wsk64-item-fields vocabulary; do
+            echo "##### $t"
+            node --import tsx ../delivery/test/$t.test.mjs
+          done
 
   # P3-12: platform-ui build gate. `tsc` + vitest alone once passed while `next build` broke
   # (a `server-only` import reached a client component) and routes 500'd — `npm run build` here
