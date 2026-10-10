@@ -30,6 +30,17 @@ Cerbos policy and deploy pipeline, for **both** employees and the client's own c
 | CC-D10 | 2026-09-29 (owner) | **Clients are edited by staff, and get an owner, contacts, archive, notes and history.** Every staff member Cerbos allows (`resource_client.yaml`: create/update → company_admin, manager, member; delete → company_admin, manager) can use the matching UI controls, via capabilities `client.write` / `client.delete`, which replace `pm.manage`. A client has an optional **owner** (`clients.owner_user_id`, active tenant staff only) and structured **contact details** in `contact` (email, phone, address, billing contact, billing email), which `PATCH` merges key by key. **Archive** (status `archived`) is the everyday alternative to Delete; archived clients leave the default list. **Notes** are internal (core `comments` table, staff-only) and a **history** tab reads the client's activity log. `POST /clients` now stores the chosen status. Contract: BFF §26. | CC-D5's "staff rename a client in the existing client edit flow" (no such flow existed until this) |
 | CC-D9 | 2026-09-29 (owner) | **"Company" is reserved for the ERP's own group companies.** On the client profile, CMC's "Company settings" is renamed **Business details**, and its "Company name" label becomes **Client name**. The portal tab **Company** becomes **Business profile**; its URL stays `/portal/company` so links already sent to clients keep working. | — |
 
+> **Superseded in part on 2026-10-10 by PV-D4** (`docs/plans/2026-10-10-three-perspectives.md`, §4.2 and §11.2).
+>
+> - **What changes.** CC-D8's hub tab list (Overview · Work · Profile · Contacts & meetings ·
+>   Notes & history) is relabelled to match the client portal: Overview · Projects · Business ·
+>   People · Internal. A new **Contracts & billing** area is added at `/clients/[id]/billing`, and
+>   meetings move into Projects.
+> - **What stays.** Every existing hub path stays. The portal label "Business profile" (CC-D9)
+>   becomes **Business**, with its URL `/portal/company` unchanged. CC-D8's one-client-one-page
+>   principle stands.
+> - **Still open.** The CMC "departments" naming is left to the open decision D6 in that plan.
+
 ## The registry
 
 `platform-nest/src/modules/clients/centre/registry.json` is the **single source**. A byte-identical copy lives at
