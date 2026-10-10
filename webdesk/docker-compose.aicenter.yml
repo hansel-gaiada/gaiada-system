@@ -37,7 +37,7 @@
 #     becomes zero" trap (`${VAR:-}` + a busy loop at 46% CPU) means these must be literal
 #     numbers below, never left to an interpolated default that could resolve empty.
 #   * `no-new-privileges` + full cap-drop + read-only rootfs where the process can tolerate it
-#     (Payload/api/payload-gateway need a writable /tmp for Node — given as an explicit tmpfs,
+#     (the api needs a writable /tmp for Node — given as an explicit tmpfs,
 #     never a writable rootfs).
 #
 # ALWAYS AUDIT THE RESOLVED CONFIG, NEVER THE OVERLAY (same trap as the sumopod file: `!reset`
@@ -89,30 +89,8 @@ services:
     mem_limit: 256m
     pids_limit: 128
 
-  # --- Payload: admin + authoring ONLY. Not the read path (WSK-D24). ----------------------------
-  # Reachable ONLY from inside the compose network — i.e. an SSH tunnel to gda-aicenter, same as
-  # the design's D-5 rule everywhere else. No vhost, no published port, ever.
-  payload:
-    profiles: !reset []
-    image: !reset null
-    build:
-      context: ./payload
-      dockerfile: Dockerfile
-    command: !override ["node", "server.js"]
-    environment:
-      PORT: "3000"
-      NODE_ENV: production
-    ports: !reset []
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    cpus: 1.00
-    mem_limit: 1024m
-    pids_limit: 256
-
-  # --- payload-gateway: RETIRED by WSK-48a (/v1 is served by the api's `delivery` module) ---
+  # --- payload and payload-gateway: RETIRED (WSK-48a: /v1 is served by the api's `delivery` module;
+  # --- WSK-48b: the Payload app and its `payload` service are deleted, WSK-D37) ---
 
   # --- forms . mail . media . control plane -----------------------------------------------------
   api:

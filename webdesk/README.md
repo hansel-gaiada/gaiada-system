@@ -14,14 +14,13 @@ package), deliberately not wired into `platform-nest`/`platform-ui`/anything els
 It stands up the Zone B stack's *shape*:
 
 ```
-proxy (Caddy) ── payload (Payload 3, stub)
-             └── api (NestJS, stub) ── worker (BullMQ, stub)
+proxy (Caddy) ── api (NestJS, stub) ── worker (BullMQ, stub)
 postgres (own DB, own ledger, own role split) ── rustfs ── redis ── clamav ── otel-collector
 ```
 
 Every service except Postgres/RustFS/Redis/ClamAV/OTel-collector is a **placeholder process**
 right now (`sleep infinity` with a log line naming the ticket that replaces it). The stack shape
-is this ticket's deliverable, not working application code — WSK-02 vendors Payload, WSK-21
+is this ticket's deliverable, not working application code — WSK-21
 builds the api's control plane, WSK-07/10/11 build the media/forms/mail surfaces, WSK-28 wires
 real observability.
 

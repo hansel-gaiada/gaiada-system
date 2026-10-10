@@ -6,6 +6,8 @@
  *
  *   payload-gateway published "${WEBDESK_PAYLOAD_PUBLIC_PORT:-8384}:3000"
  *   redis           published "${WEBDESK_REDIS_PORT:-8384}:6379"
+ *   (historical: payload-gateway is long retired and Payload is deleted, WSK-48b; the selftest below
+ *   uses neutral service names for the same shape of collision)
  *
  * Both services are in the SAME `dev` profile, so `docker compose --profile dev up` dies on a
  * bind conflict for anyone who has not overridden one of those vars in `.env`.
@@ -161,7 +163,7 @@ function selftest() {
     {
       name: 'THE REGRESSION: two dev services defaulting to the same host port is caught',
       services: [
-        { name: 'payload-gateway', profiles: ['dev'], ports: [{ port: '8384', bindAddr: '0.0.0.0', spec: '${A:-8384}:3000', varName: 'A' }] },
+        { name: 'gateway', profiles: ['dev'], ports: [{ port: '8384', bindAddr: '0.0.0.0', spec: '${A:-8384}:3000', varName: 'A' }] },
         { name: 'redis', profiles: ['dev'], ports: [{ port: '8384', bindAddr: '0.0.0.0', spec: '${B:-8384}:6379', varName: 'B' }] },
       ],
       expect: 1,
@@ -214,10 +216,10 @@ function selftest() {
       '    profiles: ["dev"]',
       '    ports:',
       '      - "${WEBDESK_PROXY_HTTP_PORT:-8380}:80"',
-      '  payload:',
+      '  admin:',
       '    profiles: ["dev"]',
       '    ports:',
-      '      - "127.0.0.1:${WEBDESK_PAYLOAD_INTERNAL_PORT:-8381}:3000"',
+      '      - "127.0.0.1:${WEBDESK_ADMIN_INTERNAL_PORT:-8381}:3000"',
       '  imgproxy:',
       '    profiles: ["dev"]',
       '    ports:',
@@ -226,12 +228,12 @@ function selftest() {
     ].join('\n'),
   );
   const proxy = parsed.find((s) => s.name === 'proxy');
-  const payload = parsed.find((s) => s.name === 'payload');
+  const admin = parsed.find((s) => s.name === 'admin');
   const imgproxy = parsed.find((s) => s.name === 'imgproxy');
   const parserOk =
     proxy?.ports[0]?.port === '8380' &&
-    payload?.ports[0]?.port === '8381' &&
-    payload?.ports[0]?.bindAddr === '127.0.0.1' &&
+    admin?.ports[0]?.port === '8381' &&
+    admin?.ports[0]?.bindAddr === '127.0.0.1' &&
     imgproxy?.ports.length === 0; // a bare container port is not published and cannot collide
   if (!parserOk) fails++;
   console.log(`  ${parserOk ? 'PASS' : 'FAIL'}  parser reads both published forms and ignores a bare container port`);
