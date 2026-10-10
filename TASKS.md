@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████░░░░░░░░░░░░░░░░░░░` **36%** · 61/169<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████░░░░░░░░░░░░░░░░░░` **39%** · 66/169<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `████████████░░░░░░░░` **59%** · 51/86<!-- /bar -->
+<!-- bar -->🟡 `█████████████░░░░░░░` **65%** · 56/86<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -112,12 +112,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Every page and global round-trips to what the site's own loader reads (315/315 exact against Astro's `getEntryInfo`; 22/22 tests on Linux)
 - [x] Every item validates against vocabulary 1.1.0 (326 items, 17 compositions, 0 invalid, 0 disagreements — Linux, site `5b4476a`)
 
-### Wave B · WSK-41 · Authoring commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
-- [ ] Seven commands with impact classes in the registry; real `AppModule` boots
-- [ ] Draft isolation: publish is the only way to change what a production key sees
-- [ ] Concurrency (1×200, 9×409) and durable idempotency across a restart
-- [ ] Gate order proven with valid bodies; WS4 single-use under concurrency
-- [ ] `content.published` webhook event without prop values
+### Wave B · WSK-41 · Authoring commands <!-- bar -->✅ `██████████` **100%** · 5/5<!-- /bar -->
+- [x] Seven commands with impact classes in the registry; real `AppModule` boots (api 524/0/1)
+- [x] Draft isolation: publish is the only way to change what a production key sees
+- [x] Concurrency (1×200, 9×409) and durable idempotency across a restart
+- [x] Gate order proven with valid bodies; WS4 single-use under concurrency (claimed in the same transaction as the effect)
+- [x] `content.published` webhook event without prop values (2 deliveries to 2 enabled hooks; raw body carries no values)
 
 ### Wave B · WSK-41b · The read path hides deleted drafts <!-- bar -->✅ `██████████` **100%** · 1/1<!-- /bar -->
 - [x] Deleted draft 404 on item, list, search, sitemap; localizations exclude it; envelope gate unchanged (api 450/0/2; contract 60/60)
