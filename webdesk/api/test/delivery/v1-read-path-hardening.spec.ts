@@ -56,7 +56,7 @@ describe("M3 T1 — router (stub dependencies)", () => {
       const res = await get(path);
       expect(res.status, path).toBe(400);
       expect(res.headers.get("content-type")).toBe("application/problem+json");
-      expect((await res.json()).type).toBe(`${PROBLEM}invalid-path-encoding`);
+      expect(((await res.json()) as { type: string }).type).toBe(`${PROBLEM}invalid-path-encoding`);
       expect(slugsLookedUp).toEqual([]);
     }
   });
@@ -66,7 +66,7 @@ describe("M3 T1 — router (stub dependencies)", () => {
       const { get, slugsLookedUp } = build();
       const res = await get(path);
       expect(res.status, path).toBe(404);
-      expect((await res.json()).type, path).toBe(`${PROBLEM}not-found`);
+      expect(((await res.json()) as { type: string }).type, path).toBe(`${PROBLEM}not-found`);
       expect(slugsLookedUp, path).toEqual([]);
     }
   });
