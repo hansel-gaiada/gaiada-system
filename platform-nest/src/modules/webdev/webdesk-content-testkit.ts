@@ -5,6 +5,13 @@
 // refuses (403 `editorial-assertion-command-mismatch`) when `cmd`, `ten`, `site` or `cmh` do not match the
 // request as received, or when an `apr` claim rides a MEDIUM command (WSK-40's rule). A BFF that signs the
 // wrong thing fails here exactly as it would against the real thing.
+//
+// WSK-44b: the READ shapes were re-diffed against webdesk/api/src/control/{content/content-reads.service.ts,
+// content/content-commands.service.ts,tenants/tenant-reads.service.ts} and brought up to the real ones where the
+// first cut was thinner: the versions list rows carry the full row, an environment may have `domain: null`, a
+// pre-0009 item (`headVersion: 0`, no version row) has `headCreatedAt/headCreatedBy: null`, write results' `lint`
+// is `{placeholders:{unresolvedTokens,markers}}`, and a collection's composition can be set per test. The UI
+// contract test (webdesk-content-ui-contract.test.ts) is only as good as these shapes.
 import { createHash, randomUUID } from "node:crypto";
 import {
   WebdeskControlTransportError,
@@ -74,11 +81,14 @@ const ok = (json: unknown, status = 200): WebdeskControlResponse => ({
   bodyText: JSON.stringify(json),
 });
 
+const NO_LINT = { placeholders: { unresolvedTokens: [] as string[], markers: {} as Record<string, number> } };
 const hashOf = (fields: unknown): string => createHash("sha256").update(JSON.stringify(fields)).digest("hex");
 
 export class FakeZoneB {
   readonly calls: FakeCall[] = [];
   readonly items = new Map<string, FakeItem>();
+  /** collectionKey → the composition `collection.list` returns (default: `{ui:{label}}`). */
+  readonly compositions = new Map<string, unknown>();
   /** companyRef → tenant entry; `tenant.list` filters on it, as the real SQL does. */
   readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string }> = [];
   /** Throw this from the NEXT `send` (a breaker-open, a transport failure, ...). Persistent until cleared. */
@@ -107,6 +117,14 @@ export class FakeZoneB {
     this.dropBeforeApply = false;
   }
 
+  /** A PRE-0009 row: content lives only in the projection, `head_version` is 0 and there is no version row. */
+  seedPreVersioned(p: Partial<FakeItem> & { siteId: string; slug: string }): FakeItem {
+    const item = this.seedItem(p);
+    item.headVersion = 0;
+    item.versions = [];
+    return item;
+  }
+
   seedItem(p: Partial<FakeItem> & { siteId: string; slug: string }): FakeItem {
     const fields = { h1: p.slug };
     const item: FakeItem = {
@@ -129,6 +147,7 @@ export class FakeZoneB {
   }
 
   private itemJson(i: FakeItem) {
+    const headRow = i.headVersion > 0 ? i.versions[i.headVersion - 1] : undefined;
     return {
       itemId: i.itemId,
       collectionKey: i.collectionKey,
@@ -144,9 +163,21 @@ export class FakeZoneB {
       updatedAt: new Date().toISOString(),
       title: i.slug,
       pendingChanges: i.headVersion > (i.publishedVersion ?? 0),
-      headCreatedAt: i.versions[i.headVersion - 1].createdAt,
-      headCreatedBy: i.versions[i.headVersion - 1].createdBy,
+      headCreatedAt: headRow ? headRow.createdAt : null,
+      headCreatedBy: headRow ? headRow.createdBy : null,
     };
+  }
+
+  /** A write result's `item` is the write plane's ItemState: the editor extras (title, pendingChanges, headCreated*) are item.get/list only. */
+  private stateJson(i: FakeItem) {
+    const { title: _t, pendingChanges: _p, headCreatedAt: _a, headCreatedBy: _b, ...state } = this.itemJson(i);
+    void [_t, _p, _a, _b];
+    return state;
+  }
+
+  /** `item.get`'s `version` for a pre-0009 row: version 0, the projection's own content. */
+  private projectionJson(i: FakeItem) {
+    return { n: 0, version: 0, contentHash: hashOf({ h1: i.slug }), createdAt: new Date().toISOString(), createdBy: null, attribution: {}, note: null, blocks: [{ type: "fields", props: { h1: i.slug } }], seo: {} };
   }
 
   private versionJson(i: FakeItem, n: number) {
@@ -178,7 +209,14 @@ export class FakeZoneB {
       return ok({
         tenants: rows.map((t) => ({
           slug: t.slug, status: t.status, defaultLocale: "en", locales: ["en", "id"],
-          sites: [{ siteId: t.siteId, name: "Main", kind: "astro", environments: [{ envId: randomUUID(), name: "staging", domain: null, status: "active" }] }],
+          sites: [{
+            siteId: t.siteId, name: "Main", kind: "astro",
+            // `environments.domain` is nullable in WebDesk (a site with no hostname yet): one of each.
+            environments: [
+              { envId: randomUUID(), name: "production", domain: null, status: "pending" },
+              { envId: randomUUID(), name: "staging", domain: "staging.gaiada.test", status: "active" },
+            ],
+          }],
         })),
       });
     }
@@ -188,10 +226,27 @@ export class FakeZoneB {
     }
 
     switch (req.command) {
-      case "collection.list":
-        return ok({ collections: [{ key: "service", composition: { ui: { label: "Service pages" } }, vocabularyVersion: "1.1.0", counts: { items: this.items.size, byLocale: {}, live: 0, pendingChanges: 0 }, updatedAt: new Date().toISOString() }] });
+      case "collection.list": {
+        const keys = [...new Set(["service", ...this.compositions.keys()])];
+        return ok({
+          collections: keys.map((key) => {
+            const its = [...this.items.values()].filter((i) => i.siteId === p.siteId && i.collectionKey === key && !i.deletedAt);
+            const byLocale: Record<string, number> = {};
+            for (const i of its) byLocale[i.locale] = (byLocale[i.locale] ?? 0) + 1;
+            return {
+              key,
+              composition: this.compositions.get(key) ?? { ui: { label: "Service pages" } },
+              vocabularyVersion: "1.1.0",
+              counts: { items: its.length, byLocale, live: its.filter((i) => i.publishedVersion !== null).length, pendingChanges: its.filter((i) => i.headVersion > (i.publishedVersion ?? 0)).length },
+              updatedAt: new Date().toISOString(),
+            };
+          }),
+        });
+      }
       case "collection.get":
-        return p.key === "service" ? ok({ key: "service", composition: {}, vocabularyVersion: "1.1.0", updatedAt: new Date().toISOString() }) : problem(404, "collection-not-found");
+        return p.key === "service" || this.compositions.has(p.key)
+          ? ok({ key: p.key, composition: this.compositions.get(p.key) ?? {}, vocabularyVersion: "1.1.0", updatedAt: new Date().toISOString() })
+          : problem(404, "collection-not-found");
       case "item.list": {
         const q = req.query ?? {};
         const rows = [...this.items.values()].filter(
@@ -204,6 +259,9 @@ export class FakeZoneB {
         if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
         const sel = req.query?.version;
         const n = sel === undefined || sel === "head" ? i.headVersion : sel === "live" ? i.publishedVersion : Number(sel);
+        if (i.headVersion === 0 && (sel === undefined || sel === "head")) {
+          return ok({ item: this.itemJson(i), version: this.projectionJson(i), live: null, group: [{ locale: i.locale, itemId: i.itemId, slug: i.slug, headVersion: 0, publishedVersion: i.publishedVersion, publishState: i.publishState }], lint: { placeholders: { unresolvedTokens: [], markers: {} } } });
+        }
         if (!n || !i.versions[n - 1]) return problem(404, "version-not-found");
         return ok({
           item: this.itemJson(i), version: this.versionJson(i, n),
@@ -215,7 +273,14 @@ export class FakeZoneB {
       case "item.versions": {
         const i = this.items.get(p.itemId);
         if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
-        return ok({ versions: i.versions.map((_, k) => ({ version: i.versions.length - k })), page: { cursor: null, hasMore: false, limit: 50 } });
+        return ok({
+          versions: i.versions.map((_, k) => {
+            const v = i.versions[i.versions.length - 1 - k];
+            const n = i.versions.length - k;
+            return { version: n, contentHash: v.contentHash, createdAt: v.createdAt, createdBy: v.createdBy, attribution: {}, note: v.note };
+          }),
+          page: { cursor: null, hasMore: false, limit: 50 },
+        });
       }
       case "item.versionGet": {
         const i = this.items.get(p.itemId);
@@ -265,7 +330,7 @@ export class FakeZoneB {
         if (b.fields && b.fields.h1 === 42) return problem(422, "composition-violation", { issues: [{ path: "/blocks/0/props/h1", message: "must be a string", expected: "text" }] });
         const item = this.seedItem({ siteId: p.siteId, slug: b.slug, locale: b.locale, collectionKey: b.collectionKey });
         item.versions[0] = { version: 1, fields: b.fields ?? {}, contentHash: hashOf(b.fields ?? {}), createdBy: sub, createdAt: now, note: b.note ?? null };
-        return ok({ item: this.itemJson(item), version: { version: 1, contentHash: item.versions[0].contentHash, createdAt: now }, unchanged: false, lint: {}, replayed: false }, 201);
+        return ok({ item: this.stateJson(item), version: { version: 1, contentHash: item.versions[0].contentHash, createdAt: now }, unchanged: false, lint: NO_LINT, replayed: false }, 201);
       }
       case "content.update": {
         const i = this.items.get(p.itemId);
@@ -274,7 +339,7 @@ export class FakeZoneB {
         const fields = b.fields ?? {};
         i.headVersion += 1;
         i.versions.push({ version: i.headVersion, fields, contentHash: hashOf(fields), createdBy: sub, createdAt: now, note: b.note ?? null });
-        return ok({ item: this.itemJson(i), version: { version: i.headVersion, contentHash: hashOf(fields), createdAt: now }, unchanged: false, lint: {}, replayed: false });
+        return ok({ item: this.stateJson(i), version: { version: i.headVersion, contentHash: hashOf(fields), createdAt: now }, unchanged: false, lint: NO_LINT, replayed: false });
       }
       case "content.restoreVersion": {
         const i = this.items.get(p.itemId);
@@ -284,7 +349,7 @@ export class FakeZoneB {
         if (!src) return problem(409, "version-not-found");
         i.headVersion += 1;
         i.versions.push({ ...src, version: i.headVersion, createdBy: sub, createdAt: now });
-        return ok({ item: this.itemJson(i), version: { version: i.headVersion, contentHash: src.contentHash, createdAt: now }, unchanged: false, lint: {}, replayed: false });
+        return ok({ item: this.stateJson(i), version: { version: i.headVersion, contentHash: src.contentHash, createdAt: now }, unchanged: false, lint: NO_LINT, replayed: false });
       }
       case "content.unpublish": {
         const i = this.items.get(p.itemId);
@@ -293,14 +358,14 @@ export class FakeZoneB {
         if (i.publishedVersion !== b.expectedPublishedVersion) return problem(409, "published-version-changed");
         i.publishedVersion = null;
         i.publishState = "unpublished";
-        return ok({ item: this.itemJson(i), replayed: false });
+        return ok({ item: this.stateJson(i), replayed: false });
       }
       case "content.delete": {
         const i = this.items.get(p.itemId);
         if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
         if (i.publishedVersion !== null) return problem(409, "item-is-live");
         i.deletedAt = now;
-        return ok({ item: this.itemJson(i), replayed: false });
+        return ok({ item: this.stateJson(i), replayed: false });
       }
       case "content.publish": {
         // WSK-66's in-band publish (WS4 + editorial `apr`); the fake only needs to flip the state.

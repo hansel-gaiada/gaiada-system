@@ -200,6 +200,9 @@ describe("approval phase (§10: pending · rejected/failed · published)", () =>
   it.each([
     [{ status: "pending" }, "pending"],
     [{ status: "rejected", decidedByName: "Dewi" }, "rejected"],
+    // the requester withdrew it (WSK-59): not "rejected" (nobody with authority refused it), and nothing ran
+    [{ status: "cancelled" }, "withdrawn"],
+    [{ status: "cancelled", executionStatus: "not_applicable" }, "withdrawn"],
     [{ status: "approved", executionStatus: "executed", decidedByName: "Dewi" }, "executed"],
     [{ status: "approved", executionStatus: "failed", executionError: "version-conflict" }, "failed"],
     [{ status: "approved", executionStatus: "executing" }, "approved_publishing"],

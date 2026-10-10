@@ -128,13 +128,13 @@ export function PublishBar({
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
-      const r = await pollApprovalAction(approvalId);
+      const r = await pollApprovalAction(scope, approvalId);
       if (cancelled || !mounted.current) return;
       if (r.kind === "ok") {
         const phase = phaseOf(r.data);
         if (phase.phase === "executed") { void settle(flowKind, approvalId, flowVersion, phase); return; }
         setFlow({ kind: flowKind, approvalId, version: flowVersion, phase });
-        if (phase.phase === "rejected" || phase.phase === "failed") return;
+        if (phase.phase === "rejected" || phase.phase === "failed" || phase.phase === "withdrawn") return;
       } else {
         setFlow((f) => (f ? { ...f, refreshFailed: failureCopy(r) } : f));
       }
@@ -142,7 +142,7 @@ export function PublishBar({
     };
     timer = setTimeout(tick, APPROVAL_POLL_MS);
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [approvalId, flowKind, flowVersion, settle]);
+  }, [scope, approvalId, flowKind, flowVersion, settle]);
 
   // ── Poll the staging build until it is live / unverified / failed ──────────────────────────────
   useEffect(() => {
@@ -276,6 +276,12 @@ export function PublishBar({
         {phase?.phase === "rejected" && flow && (
           <div className="wc-banner wc-banner--bad" data-testid="request-rejected">
             <span className="wc-banner__body"><strong>Rejected</strong>{phase.decidedByName ? ` by ${phase.decidedByName}` : ""} — request {shortId(flow.approvalId)} was not approved. Nothing was published.</span>
+            {flow.kind === "publish" && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={requestPublish} disabled={busy !== null || requestBlock !== null}>Request again</button>}
+          </div>
+        )}
+        {phase?.phase === "withdrawn" && flow && (
+          <div className="wc-banner wc-banner--info" data-testid="request-withdrawn">
+            <span className="wc-banner__body"><strong>Withdrawn</strong> — request {shortId(flow.approvalId)} was withdrawn by its requester. Nothing was published.</span>
             {flow.kind === "publish" && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={requestPublish} disabled={busy !== null || requestBlock !== null}>Request again</button>}
           </div>
         )}

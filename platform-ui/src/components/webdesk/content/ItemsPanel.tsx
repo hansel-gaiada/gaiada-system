@@ -69,7 +69,7 @@ export function ItemsPanel({
                   <td><StateChip state={it.publishState} deleted={it.deletedAt !== null} />{it.pendingChanges && <> <span className="wc-chip wc-chip--warn">pending changes</span></>}</td>
                   <td>v{it.headVersion} / {it.publishedVersion !== null ? `v${it.publishedVersion}` : "—"}</td>
                   <td>{formatDateTime(it.updatedAt)}</td>
-                  <td>{authorLabel(it.headCreatedBy, authors)}</td>
+                  <td title={`Last edited ${formatDateTime(it.headCreatedAt)}`}>{authorLabel(it.headCreatedBy, authors)}</td>
                 </tr>
               ))}
             </tbody>

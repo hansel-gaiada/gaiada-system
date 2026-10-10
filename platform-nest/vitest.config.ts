@@ -1,4 +1,5 @@
 import swc from "unplugin-swc";
+import path from "node:path";
 import { defaultExclude, defineConfig } from "vitest/config";
 
 // The files excluded from this config, run instead by `npm run test:perf` (vitest.perf.config.ts).
@@ -16,6 +17,10 @@ export const PERF_TESTS = ["src/rbac/principal-perf.db.test.ts", "src/rbac/sessi
 // emit. unplugin-swc runs SWC instead, honoring .swcrc (legacyDecorator + decoratorMetadata),
 // so injected constructor param types resolve — the same reason Nest+vitest setups use SWC.
 export default defineConfig({
+  // WSK-44b: `webdesk-content-ui-contract.test.ts` loads platform-ui's REAL `lib/webdeskContent*.ts` (they begin with
+  // `import "server-only"`, which throws outside a react-server build) so its parsers judge the real BFF's bodies.
+  // Nothing in platform-nest imports `server-only`, so this alias is inert everywhere else.
+  resolve: { alias: { "server-only": path.resolve(__dirname, "src/testing/server-only-stub.ts") } },
   test: {
     globals: true,
     environment: "node",

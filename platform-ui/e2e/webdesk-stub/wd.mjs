@@ -4,9 +4,11 @@
 //
 // IT MATCHES THE SPEC, NOT THE UI. Every response shape below is transcribed from
 // docs/plans/2026-10-10-webdesk-write-plane-design.md §3.2 (writes), §3.4 (RFC 9457 problems),
-// §4 (read projections), §6 (the approval's tool_args), and the three PROPOSED routes are marked. If the
-// real WSK-59 differs from this file, that difference IS the finding the later re-verify subtask is for —
-// so keep this file boring and literal, never "helpful".
+// §4 (read projections), §6 (the approval's tool_args), and the routes WSK-59 did NOT build are marked
+// PROPOSED. WSK-44b re-verified this file against the REAL controller (platform-nest
+// `webdesk-content-ui-contract.test.ts`) and brought it to the real behaviour where it differed: a
+// withdrawn approval is `cancelled` (and stays), `GET …/publish-requests` exists, `lint` is always
+// `{placeholders:{…}}`, and a missing version is a 404. Keep this file boring and literal, never "helpful".
 //
 // Fixtures are the real compositions from the gaiada.com bundle (`compositions/*.json`, copied
 // read-only from the site repo's `scripts/webdesk/compositions/`): service (the shared page shape),
@@ -47,7 +49,7 @@ function stringLeaves(v, out = []) {
   return out;
 }
 function lintOf(composition, blocks) {
-  if (!composition.lint?.placeholders) return {};
+  if (!composition.lint?.placeholders) return { placeholders: { unresolvedTokens: [], markers: {} } };
   const text = stringLeaves(blocks).join("\n");
   const tokens = [...new Set([...text.matchAll(/\{\{[A-Z0-9_]+\}\}/g)].map((m) => m[0]))];
   const markers = {};
@@ -205,7 +207,7 @@ export function seed() {
     build: null,
     stagingStale: false,
     seq: 0,
-    cfg: { forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, drift: null, forceIssues: null, unavailableOnce: 0 },
+    cfg: { approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, drift: null, forceIssues: null, unavailableOnce: 0 },
     log: [],
   };
 }
@@ -341,7 +343,7 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
     if (!it) return problem(404, "item-not-found", "Item not found");
     if (method === "GET") {
       const b = detailBody(S, it, query.get("version") ?? "head");
-      if (!b) return it.publishedVersion === null && query.get("version") === "live" ? problem(409, "not-live", "Not live") : problem(409, "version-not-found", "Version not found");
+      if (!b) return problem(404, "version-not-found", "Version not found");
       return R(200, b);
     }
     if (method === "PUT") return updateItem(S, it, body, userId);
@@ -355,8 +357,8 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
     const it = S.items.get(mm[1]);
     if (!it) return problem(404, "item-not-found", "Item not found");
     const v = it.versions.find((x) => x.n === Number(mm[2]));
-    if (!v) return problem(409, "version-not-found", "Version not found");
-    return R(200, { version: v.n, contentHash: v.contentHash, createdAt: v.createdAt, createdBy: v.createdBy, attribution: v.attribution, note: v.note, blocks: v.blocks, seo: v.seo });
+    if (!v) return problem(404, "version-not-found", "Version not found");
+    return R(200, { n: v.n, version: v.n, contentHash: v.contentHash, createdAt: v.createdAt, createdBy: v.createdBy, attribution: v.attribution, note: v.note, blocks: v.blocks, seo: v.seo });
   }
   if ((mm = rest.match(/^\/items\/([^/]+)\/(restore|unpublish|delete)$/)) && method === "POST") {
     const it = S.items.get(mm[1]);
@@ -367,13 +369,26 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
   }
 
   if (rest === "/publish-requests" && method === "POST") return requestPublish(S, body, userId);
+  if (rest === "/publish-requests" && method === "GET") {
+    // WSK-44b: the caller's OWN publish/schedule approvals for this site (authorised as request_publish).
+    if (role === "viewer") return forbidden();
+    const want = query.get("status") ?? "pending";
+    return R(200, {
+      requests: [...S.approvals.values()]
+        .filter((a) => a.origin === "webdesk" && a.requestedBy === userId && (a.workflowId === "content.publish" || a.workflowId === "content.schedule") && (want === "all" || a.status === want))
+        .reverse()
+        .map((a) => ({ approvalId: a.id, status: a.status, createdAt: a.createdAt, itemIds: a.toolArgs.items.map((i) => i.itemId), executionStatus: a.executionStatus ?? null })),
+    });
+  }
   if ((mm = rest.match(/^\/publish-requests\/([^/]+)\/withdraw$/)) && method === "POST") {
-    // PROPOSED (not in WSK-59).
+    // WSK-59: the REQUESTER cancels their own pending request; the row stays, `cancelled` (not `rejected`).
     const a = S.approvals.get(mm[1]);
-    if (!a) return problem(404, "item-not-found", "Request not found");
-    if (a.status !== "pending") return problem(409, "not-pending", "Only a pending request can be withdrawn");
-    S.approvals.delete(a.id);
-    return R(200, { approvalId: a.id, status: "withdrawn" });
+    if (!a || a.origin !== "webdesk" || (a.workflowId !== "content.publish" && a.workflowId !== "content.schedule")) return R(404, { error: "approval_not_found", reason: "approval_not_found" });
+    if (a.requestedBy !== userId) return forbidden();
+    if (a.status !== "pending") return R(409, { error: "approval_not_pending: only a pending publish request can be withdrawn", reason: "approval_not_pending" });
+    a.status = "cancelled";
+    a.decidedAt = nowIso();
+    return R(200, { approvalId: a.id, status: "cancelled" });
   }
   if (rest === "/rebuild-requests" && method === "POST") {
     // PROPOSED (not in WSK-59).

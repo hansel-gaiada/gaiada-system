@@ -75,7 +75,7 @@ export function WdRefusal({
       return (
         <Card title="Not found">
           <EmptyNote>
-            {result.slug === "item-not-found" ? "That item does not exist" : result.slug === "collection-not-found" ? "That collection does not exist" : "That site does not exist or is not one of your company's"} in WebDesk.
+            {result.slug === "item-not-found" ? "That item does not exist" : result.slug === "collection-not-found" ? "That collection does not exist" : result.slug === "version-not-found" ? "That version does not exist" : "That site does not exist or is not one of your company's"} in WebDesk.
           </EmptyNote>
         </Card>
       );

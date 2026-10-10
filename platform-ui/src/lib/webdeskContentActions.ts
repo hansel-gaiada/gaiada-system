@@ -7,8 +7,8 @@
 //   POST …/sites/:tenantSlug/:siteId/publish-requests                       -> 202 { approvalId }
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/unpublish
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/delete
-//   PROPOSED (not in WSK-59 — see the WSK-44 report):
-//   POST …/sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw  -> { approvalId, status }
+//   POST …/sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw  -> { approvalId, status:"cancelled" }  (WSK-59, built)
+//   STILL PROPOSED (WSK-60; a 404 comes back as `not_enabled` and the UI says so):
 //   POST …/sites/:tenantSlug/:siteId/rebuild-requests                       -> 202 { approvalId }
 //
 // Same shape as the repo's other actions files: a `ctx()` resolving session -> me -> active company,
@@ -29,7 +29,7 @@ import { getMe } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
   wdCall, siteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus,
-  parseApprovalRow, loadEditorBundle, getItem,
+  loadEditorBundle, getItem, pollApproval,
   type EditorBundle,
 } from "./webdeskContent";
 import type {
@@ -159,7 +159,7 @@ export async function requestPublishAction(
   );
 }
 
-/** PROPOSED route (see header). A 404/405 comes back as `not_enabled` and the UI says so. */
+/** WSK-59's withdraw route: the requester cancels their own pending request (the row becomes `cancelled`). */
 export async function withdrawPublishRequestAction(scope: SiteScope, approvalId: string): Promise<WdResult<{ approvalId: string; status: string }>> {
   const c = await ctx(); if (!isCtx(c)) return c;
   if (!scopeOk(scope) || !clean(approvalId)) return badScope;
@@ -178,10 +178,12 @@ export async function requestRebuildAction(scope: SiteScope): Promise<WdResult<{
 
 // ── Client-driven re-reads (poll / refresh) ──────────────────────────────────────────────────────
 
-export async function pollApprovalAction(approvalId: string): Promise<WdResult<WebdeskApprovalRow>> {
+/** The approval detail needs `automation_approval:read`; a requester without it falls back to their own
+ *  requests for this site (see `pollApproval`), so the editor still learns the request was decided. */
+export async function pollApprovalAction(scope: SiteScope, approvalId: string): Promise<WdResult<WebdeskApprovalRow>> {
   const c = await ctx(); if (!isCtx(c)) return c;
-  if (!clean(approvalId)) return badScope;
-  return wdCall(`/api/${encodeURIComponent(c.company)}/automation-approvals/${encodeURIComponent(approvalId)}`, c.userId, parseApprovalRow);
+  if (!scopeOk(scope) || !clean(approvalId)) return badScope;
+  return pollApproval(c.userId, c.company, scope.tenantSlug, scope.siteId, approvalId);
 }
 
 export async function pollBuildStatusAction(scope: SiteScope): Promise<WdResult<BuildStatus>> {

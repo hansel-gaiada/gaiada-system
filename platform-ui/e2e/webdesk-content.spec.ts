@@ -338,7 +338,34 @@ test("STATE pending approval -> Withdraw; the pending request survives a reload"
   await page.getByRole("button", { name: "Withdraw" }).click();
   await expect(page.getByTestId("awaiting-approval")).toHaveCount(0);
   await expect(page.getByTestId("publish-message")).toContainText("withdrawn");
-  expect((await stub.state()).approvals).toHaveLength(0);
+  // the real BFF keeps the row and marks it `cancelled` (not `rejected`)
+  expect((await stub.state()).approvals.map((a) => a.status)).toEqual(["cancelled"]);
+  // and a withdrawn request is no longer "pending after reload"
+  await page.reload();
+  await expect(page.getByTestId("awaiting-approval")).toHaveCount(0);
+});
+
+test("a requester WITHOUT approval-read (webdev_staff): the request still shows after a reload, and the poll still learns it was decided", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await page.getByTestId("request-publish").click();
+  await expect(page.getByTestId("awaiting-approval")).toContainText("#ap-0001");
+  await stub.config({ approvalReadForbidden: true }); // the generic approvals list AND detail now 403 for this caller
+  await page.reload();
+  await expect(page.getByTestId("awaiting-approval")).toContainText("Awaiting approval #ap-0001"); // from …/publish-requests
+  await stub.post("decide", { id: "ap-0001-publish", outcome: "reject", by: "dept-manager" });
+  await expect(page.getByTestId("request-rejected")).toContainText("Rejected"); // the poll fell back to the own-requests route
+});
+
+test("STATE withdrawn elsewhere: a request cancelled in another tab reads Withdrawn, not Rejected", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await page.getByTestId("request-publish").click();
+  await expect(page.getByTestId("awaiting-approval")).toBeVisible();
+  const r = await fetch(`${STUB}/api/co-agency/modules/webdev/content/sites/gaiada/site-gaiada-com/publish-requests/ap-0001-publish/withdraw`, { method: "POST", headers: { "x-user-id": "demo-hansel" } });
+  expect(await r.json()).toEqual({ approvalId: "ap-0001-publish", status: "cancelled" });
+  const w = page.getByTestId("request-withdrawn");
+  await expect(w).toContainText("Withdrawn");
+  await expect(w).toContainText("Nothing was published");
+  await expect(page.getByTestId("request-rejected")).toHaveCount(0);
 });
 
 test("STATE rejected: the outcome is explained and Request again files a new request", async ({ page }) => {
@@ -567,7 +594,10 @@ test("create: a new item is filled in on the same form, then created as a draft"
 
 test("history: versions with head/live chips, diff against live, and Restore as draft", async ({ page }) => {
   await open(page, SERVICE_SEO);
-  await page.getByRole("link", { name: "Version history" }).click();
+  const historyLink = page.getByRole("link", { name: "Version history" });
+  await hydrated(historyLink); // a click that lands mid-hydration is lost (the editor stays; seen under load on the built app)
+  await historyLink.click();
+  await expect(page).toHaveURL(/\/history\?/);
   const table = page.getByTestId("versions-table");
   await expect(table.locator("tbody tr")).toHaveCount(3);
   await expect(table.locator("tr", { hasText: "v3" }).locator(".wc-chip", { hasText: "head" })).toBeVisible();

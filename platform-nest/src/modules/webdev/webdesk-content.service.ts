@@ -196,6 +196,7 @@ const IDEM_RE = /^[\x21-\x7e]{8,200}$/;
 const SITE_CACHE_TTL_MS = 60_000;
 const SITE_CACHE_REFETCH_ON_MISS_MS = 5_000;
 const ITEM_READ_CONCURRENCY = 8;
+const REQUEST_STATUSES: readonly string[] = ["pending", "approved", "rejected", "cancelled", "all"];
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
@@ -947,6 +948,50 @@ export class WebdeskContentService {
       summary: { title: title.length > 300 ? `${title.slice(0, 297)}...` : title, counts },
     });
     return { status: 202, body: { approvalId, command, itemCount: n } };
+  }
+
+  /**
+   * `GET …/publish-requests[?status=pending|approved|rejected|cancelled|all]` (default `pending`) →
+   * `{requests:[{approvalId, status, createdAt, itemIds, executionStatus}]}`: the CALLER'S OWN publish/schedule
+   * approvals for THIS site, newest first, at most 100. WSK-44b: the editor's "pending request after reload" read.
+   * `GET /api/:t/automation-approvals?origin=webdesk` needs `automation_approval:read` (company_admin/manager only),
+   * so a `webdev_staff` editor got 403 on it and could not see the request they had filed. This is authorised as
+   * the SAME right that filed it (`webdesk_content_item:request_publish`), behind the same cross-company wall, and
+   * can only ever return rows where `requested_by` is the caller: it widens nothing (no other user's request, no
+   * other origin, no other site is reachable). `executionStatus` is the approval's `execution_status` column.
+   */
+  async listOwnPublishRequests(gate: ContentGate, site: SiteRef, rawQuery: unknown): Promise<ZoneBResult> {
+    gate.require("webdesk_content_item", "request_publish");
+    const query = strictQuery(rawQuery, ["status"]);
+    const status = query.status ?? "pending";
+    if (!REQUEST_STATUSES.includes(status)) {
+      throw invalidRequest(`status must be one of ${REQUEST_STATUSES.join(", ")}`);
+    }
+    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    const params: unknown[] = [gate.principal.userId, site.tenantSlug, site.siteId];
+    if (status !== "all") params.push(status);
+    const found = await withTenants([gate.tenantId], (c) =>
+      c.query<{ id: string; status: string; created_at: Date | string; execution_status: string | null; tool_args: Record<string, unknown> | null }>(
+        `SELECT id, status, created_at, execution_status, tool_args FROM automation_approvals
+          WHERE origin = 'webdesk' AND deleted_at IS NULL AND requested_by = $1
+            AND workflow_id IN ('content.publish', 'content.schedule')
+            AND tool_args->>'tenantSlug' = $2 AND tool_args->>'siteId' = $3
+            ${status !== "all" ? "AND status = $4" : ""}
+          ORDER BY created_at DESC, id DESC LIMIT 100`,
+        params,
+      ),
+    );
+    const requests = found.rows.map((r) => {
+      const items = Array.isArray(r.tool_args?.items) ? (r.tool_args?.items as unknown[]) : [];
+      return {
+        approvalId: r.id,
+        status: r.status,
+        createdAt: new Date(r.created_at).toISOString(),
+        itemIds: items.flatMap((i) => (isPlainObject(i) && typeof i.itemId === "string" ? [i.itemId] : [])),
+        executionStatus: r.execution_status ?? null,
+      };
+    });
+    return { status: 200, body: { requests } };
   }
 
   /**

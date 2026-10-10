@@ -215,7 +215,7 @@ export function ItemEditor({
       case "invalid":
         setIssues(r.issues);
         setSaveState({ s: "error", message: r.issues.length ? `${r.issues.length} problem${r.issues.length === 1 ? "" : "s"} to fix before it can be ${verb}.` : r.message, issues: r.issues });
-        requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-pointer][aria-invalid='true']")?.scrollIntoView({ block: "center" }));
+        requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-pointer][aria-invalid='true']")?.scrollIntoView?.({ block: "center" }));
         return;
       case "forbidden":
         setForbidden(true);
@@ -346,7 +346,7 @@ export function ItemEditor({
   };
 
   // ── render ─────────────────────────────────────────────────────────────────────────────────────
-  const stagingBase = site.environments.find((e) => e.name.toLowerCase() === "staging");
+  const stagingBase = site.environments.find((e) => e.name.toLowerCase() === "staging" && e.domain);
   const urlField = typeof (nonDefaultLocale ? draft.fields.url : baseline.fields.url) === "string" ? (baseline.fields.url as string) : null;
   const stagingItemUrl = stagingBase && urlField && urlField.startsWith("/") && item && isLive(item) ? `https://${stagingBase.domain}${urlField}` : null;
 
