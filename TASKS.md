@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **50%** · 93/183<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **51%** · 94/183<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████████░░` **87%** · 78/89<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **88%** · 79/89<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -145,8 +145,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] BFF contract §27; breaker open → `editorial_unavailable`; ambiguous writes reconcile by reading
 
 - [x] Editors can read their own pending publish request (new `GET …/publish-requests`, own rows only, behind the wall)
-### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Tenant `gaiada`, site `gaiada-com`, staging + production environments
+### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->🟡 `███░░░░░░░` **33%** · 1/3<!-- /bar -->
+- [x] Tenant `gaiada`, site `gaiada-com`, staging + production environments (live 2026-10-11 over the control channel: tenant `b8ed45ee…` → ERP company Gaia Digital Agency; site `fc19fb0c-bc1d-4be0-af8b-b2ff9ce34c43`; staging `24-pyevq.gaiada.com`, production domain unset until the real-domain cutover)
 - [ ] Build key (production read) minted through an approval; preview key (staging read)
 - [ ] Read quota sized for a full site build
 
