@@ -12,8 +12,19 @@
 // plus the concrete reasons that produced it — never a bare "major"/"minor" with no explanation,
 // for the same reason the composition validator never says just "invalid" (WSK-32's AI drafting
 // flow, and the humans reviewing its diffs, both need to see WHY).
-import { PRIMITIVE_NAMES, type FieldDef, type PrimitiveName } from './primitives.ts'
-import { BLOCKS, BLOCK_TYPE_NAMES, type BlockDef, type BlockType } from './blocks.ts'
+//
+// WSK-64 (vocabulary 1.1.0, write-plane design §2.3) extended the classifier BEFORE the 1.1.0
+// shapes landed, because the 1.0.0 version was blind in three places and would have under-rated:
+//   - the snapshot now also records which primitives honour `multiple`, which keys a FieldDef may
+//     carry and which keys a composition may carry (widening = MINOR, narrowing = MAJOR);
+//   - `diffFieldDefs` recurses into a group's sub-fields (1.0.0 rated a removed sub-field PATCH);
+//   - it rates `itemKey` (any change MAJOR), `localized` (true->false MAJOR, false->true MINOR) and
+//     `ui` (PATCH, editor-only), and on the tenant axis `singleton`/`localized` flips (MAJOR) and
+//     `ui`/`lint` edits (PATCH).
+// A snapshot missing one of the 1.1.0 dimensions is refused loudly, never silently compared.
+import { MULTIPLE_CAPABLE_PRIMITIVES, PRIMITIVE_NAMES, FIELD_DEF_KEYS, type FieldDef, type PrimitiveName } from './primitives.ts'
+import { BLOCKS, BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, type BlockDef, type BlockType } from './blocks.ts'
+import { COMPOSITION_KEYS, type CollectionUi, type PlaceholderRule } from './composition.ts'
 import { buildItemEnvelope, buildListEnvelope } from './envelope.ts'
 import { problemDetails } from './problem-details.ts'
 
@@ -64,6 +75,20 @@ function classify(reasoned: ReasonedBump[]): ChangeClassification {
 // or block type" / "remove/rename a collection or field"; "new optional prop on an existing
 // block" / "add a collection/field/optional prop").
 // =================================================================================================
+/** Order-independent structural equality for small JSON values (ui/lint objects). */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`
+  if (v !== null && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    return `{${Object.keys(o)
+      .filter((k) => o[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(v ?? null)
+}
+
 function diffFieldDefs(scope: string, before: FieldDef[], after: FieldDef[]): ReasonedBump[] {
   const out: ReasonedBump[] = []
   const beforeByName = new Map(before.map((f) => [f.name, f]))
@@ -123,6 +148,35 @@ function diffFieldDefs(scope: string, before: FieldDef[], after: FieldDef[]): Re
         reason: `${scope}: field "${name}" multiplicity changed (multiple: ${!!beforeField.multiple} -> ${!!afterField.multiple}) — the wire shape changes between a single value and an array`,
       })
     }
+
+    // WSK-64: recurse into a group's sub-fields. Without this a removed sub-field rated PATCH.
+    if (beforeField.primitive === 'group' && afterField.primitive === 'group') {
+      out.push(...diffFieldDefs(`${scope} > group "${name}"`, beforeField.fields ?? [], afterField.fields ?? []))
+    }
+
+    // WSK-64: itemKey is list-item identity. Adding, removing or renaming it changes identity.
+    const beforeKey = beforeField.itemKey ?? null
+    const afterKey = afterField.itemKey ?? null
+    if (beforeKey !== afterKey) {
+      out.push({
+        bump: 'major',
+        reason: `${scope}: field "${name}" itemKey changed (${JSON.stringify(beforeKey)} -> ${JSON.stringify(afterKey)}) — list item identity changes`,
+      })
+    }
+
+    // WSK-64: localized defaults to true. true -> false drops every non-default-locale value for consumers.
+    const wasLocalized = beforeField.localized !== false
+    const isLocalized = afterField.localized !== false
+    if (wasLocalized && !isLocalized) {
+      out.push({ bump: 'major', reason: `${scope}: field "${name}" localized true -> false (consumers lose non-default-locale values)` })
+    } else if (!wasLocalized && isLocalized) {
+      out.push({ bump: 'minor', reason: `${scope}: field "${name}" localized false -> true` })
+    }
+
+    // WSK-64: ui is editor-only and never reaches the wire.
+    if (canonical(beforeField.ui ?? {}) !== canonical(afterField.ui ?? {})) {
+      out.push({ bump: 'patch', reason: `${scope}: field "${name}" ui changed (editor-only, descriptive)` })
+    }
   }
 
   return out
@@ -139,6 +193,12 @@ export interface VocabularySnapshot {
    *  copy for a test. `x` (the reserved extension namespace) and `seo` (documented free-form
    *  jsonb) are deliberately opaque leaves — their INNER keys are not part of the frozen shape. */
   envelopeShape: string[]
+  /** WSK-64: primitives whose validator honours `multiple`. Widening is MINOR, narrowing MAJOR. */
+  multipleCapable: PrimitiveName[]
+  /** WSK-64: keys a FieldDef may carry. A new key is MINOR, a removed one MAJOR. */
+  fieldDefKeys: string[]
+  /** WSK-64: keys a collection composition may carry. A new key is MINOR, a removed one MAJOR. */
+  compositionKeys: string[]
 }
 
 function paths(obj: Record<string, unknown>, prefix: string): string[] {
@@ -181,10 +241,44 @@ export function currentEnvelopeShapeSignature(): string[] {
 export function currentVocabularySnapshot(): VocabularySnapshot {
   const blocks: Record<string, Pick<BlockDef, 'fields'>> = {}
   for (const type of BLOCK_TYPE_NAMES) blocks[type] = { fields: BLOCKS[type].fields }
-  return { primitives: [...PRIMITIVE_NAMES], blocks, envelopeShape: currentEnvelopeShapeSignature() }
+  return {
+    primitives: [...PRIMITIVE_NAMES],
+    blocks,
+    envelopeShape: currentEnvelopeShapeSignature(),
+    multipleCapable: [...MULTIPLE_CAPABLE_PRIMITIVES].sort(),
+    fieldDefKeys: [...FIELD_DEF_KEYS].sort(),
+    compositionKeys: [...COMPOSITION_KEYS].sort(),
+  }
+}
+
+const SNAPSHOT_DIMENSIONS = ['primitives', 'blocks', 'envelopeShape', 'multipleCapable', 'fieldDefKeys', 'compositionKeys'] as const
+
+function assertCompleteSnapshot(which: string, snap: VocabularySnapshot): void {
+  const missing = SNAPSHOT_DIMENSIONS.filter((d) => (snap as unknown as Record<string, unknown>)[d] === undefined)
+  if (missing.length > 0) {
+    throw new Error(
+      `classifyVocabularyChange: the ${which} snapshot lacks ${missing.join(', ')}, so it predates WSK-64's extended snapshot. ` +
+        'Recapture it with payload/test/wsk64-snapshot-probe.mjs rather than comparing blind.',
+    )
+  }
+}
+
+function diffKeySet(label: string, before: string[], after: string[]): ReasonedBump[] {
+  const out: ReasonedBump[] = []
+  const b = new Set(before)
+  const a = new Set(after)
+  for (const k of [...b].sort()) {
+    if (!a.has(k)) out.push({ bump: 'major', reason: `${label} key "${k}" removed (content or compositions using it no longer validate)` })
+  }
+  for (const k of [...a].sort()) {
+    if (!b.has(k)) out.push({ bump: 'minor', reason: `${label} key "${k}" added (new optional key)` })
+  }
+  return out
 }
 
 export function classifyVocabularyChange(before: VocabularySnapshot, after: VocabularySnapshot): ChangeClassification {
+  assertCompleteSnapshot('before', before)
+  assertCompleteSnapshot('after', after)
   const reasoned: ReasonedBump[] = []
 
   // Hard rule 1 (§05): "the /v1 envelope is frozen ... envelope evolution means /v2 as a new
@@ -219,12 +313,36 @@ export function classifyVocabularyChange(before: VocabularySnapshot, after: Voca
     if (!afterBlockTypes.has(t)) reasoned.push({ bump: 'major', reason: `block type "${t}" removed/renamed` })
   }
   for (const t of afterBlockTypes) {
-    if (!beforeBlockTypes.has(t)) reasoned.push({ bump: 'minor', reason: `block type "${t}" added` })
+    if (beforeBlockTypes.has(t)) continue
+    reasoned.push({
+      bump: 'minor',
+      reason:
+        t === FIELDS_BLOCK_TYPE
+          ? `block type "${t}" added (the composition-typed block: its props are typed per collection, not by the vocabulary)`
+          : `block type "${t}" added`,
+    })
   }
   for (const t of beforeBlockTypes) {
     if (!afterBlockTypes.has(t)) continue
     reasoned.push(...diffFieldDefs(`block "${t}" props`, before.blocks[t].fields, after.blocks[t].fields))
   }
+
+  // WSK-64: which primitives honour `multiple`. Only primitives present on both sides are rated
+  // here; a primitive's own addition or removal is already rated above.
+  const stillPresent = (p: PrimitiveName) => beforePrimitives.has(p) && afterPrimitives.has(p)
+  const beforeMultiple = new Set(before.multipleCapable)
+  const afterMultiple = new Set(after.multipleCapable)
+  const widened = [...afterMultiple].filter((p) => stillPresent(p) && !beforeMultiple.has(p)).sort()
+  const narrowed = [...beforeMultiple].filter((p) => stillPresent(p) && !afterMultiple.has(p)).sort()
+  if (narrowed.length > 0) {
+    reasoned.push({ bump: 'major', reason: `"multiple" no longer honoured for primitive(s) ${narrowed.join(', ')} (stored arrays stop validating)` })
+  }
+  if (widened.length > 0) {
+    reasoned.push({ bump: 'minor', reason: `"multiple" now honoured for primitive(s) ${widened.join(', ')} (new capability)` })
+  }
+
+  reasoned.push(...diffKeySet('FieldDef', before.fieldDefKeys, after.fieldDefKeys))
+  reasoned.push(...diffKeySet('composition', before.compositionKeys, after.compositionKeys))
 
   return classify(reasoned)
 }
@@ -240,6 +358,14 @@ export interface CollectionFieldSet {
    *  Omit (or `[]`) for a fields-only collection (e.g. `redirect`), which by definition uses no
    *  block types and can never be reached by a block-props MAJOR. */
   blocks?: BlockType[]
+  /** WSK-64: at most one item per locale. Any flip is MAJOR. */
+  singleton?: boolean
+  /** WSK-64, default true. Any flip is MAJOR (the item set per locale changes). */
+  localized?: boolean
+  /** WSK-64: editor-only. Any change is PATCH. */
+  ui?: CollectionUi
+  /** WSK-64: advisory lint. Any change is PATCH. */
+  lint?: { placeholders?: PlaceholderRule[] }
 }
 
 export interface TenantContractSnapshot {
@@ -290,6 +416,22 @@ export function classifyTenantContractChange(
       if (!beforeBlocks.has(b)) {
         reasoned.push({ bump: 'minor', reason: `collection "${key}": block type "${b}" added to its allowed set` })
       }
+    }
+
+    // WSK-64: collection-level 1.1.0 keys.
+    const bc = before.collections[key]
+    const ac = after.collections[key]
+    if (!!bc.singleton !== !!ac.singleton) {
+      reasoned.push({ bump: 'major', reason: `collection "${key}": singleton flipped ${!!bc.singleton} -> ${!!ac.singleton}` })
+    }
+    if ((bc.localized !== false) !== (ac.localized !== false)) {
+      reasoned.push({ bump: 'major', reason: `collection "${key}": localized flipped ${bc.localized !== false} -> ${ac.localized !== false}` })
+    }
+    if (canonical(bc.ui ?? {}) !== canonical(ac.ui ?? {})) {
+      reasoned.push({ bump: 'patch', reason: `collection "${key}": ui changed (editor-only, descriptive)` })
+    }
+    if (canonical(bc.lint ?? {}) !== canonical(ac.lint ?? {})) {
+      reasoned.push({ bump: 'patch', reason: `collection "${key}": lint changed (advisory only)` })
     }
   }
 

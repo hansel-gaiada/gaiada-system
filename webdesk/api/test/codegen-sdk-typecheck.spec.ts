@@ -20,7 +20,25 @@ describe("sdk-ts — the generated SDK compiles standalone", () => {
       vocabularyVersion: "1.0.0",
       defaultLocale: "id-ID",
       locales: ["id-ID"],
-      composition: { "case-study": { blocks: ["hero", "richText"] } },
+      composition: {
+        "case-study": { blocks: ["hero", "richText"] },
+        // WSK-64: a fields collection that allows no other block (every gaiada.com collection) ...
+        service: {
+          blocks: [],
+          fields: [
+            { name: "url", primitive: "text", required: true },
+            { name: "publish_ready", primitive: "boolean", required: true },
+            { name: "schema", primitive: "text", multiple: true },
+            { name: "plan", primitive: "group", fields: [{ name: "action", primitive: "select", options: ["SHOW", "HOLD"], required: true }, { name: "why", primitive: "text" }] },
+            { name: "body", primitive: "markdown", required: true },
+          ],
+        },
+        // ... and one whose generic blocks may follow the fields block (the documented union fallback).
+        faq: {
+          blocks: ["richText"],
+          fields: [{ name: "faq", primitive: "group", multiple: true, itemKey: "q", fields: [{ name: "q", primitive: "text", required: true }, { name: "a", primitive: "markdown", required: true }] }],
+        },
+      },
     });
     const sdkTs = await generateTsSdk(doc);
     expect(sdkTs.length).toBeGreaterThan(0);
@@ -46,11 +64,35 @@ describe("sdk-ts — the generated SDK compiles standalone", () => {
           "  blocks: [],",
           "};",
           "",
+          "// WSK-64: a page item whose blocks[0] is the fields block, typed by the composition (exact tuple).",
+          'type ServiceItem = paths["/v1/t/p1-tenant/service/{slug}"]["get"]["responses"]["200"]["content"]["application/json"];',
+          "const _service: ServiceItem = {",
+          '  collection: "service", slug: "service.seo", locale: "en", localizations: [{ locale: "id", slug: "service.seo" }],',
+          '  seo: { title: "SEO Agency Bali" }, meta: { publishedAt: null, updatedAt: new Date().toISOString(), draft: false, x: {} },',
+          '  blocks: [{ type: "fields", props: { url: "/services/seo/", publish_ready: false, schema: ["Service"], plan: { action: "SHOW" }, body: "# SEO" } }],',
+          "};",
+          "const _body: string = _service.blocks[0].props.body;",
+          "const _ready: boolean = _service.blocks[0].props.publish_ready;",
+          "",
+          "// The union fallback still accepts the fields block followed by a generic block.",
+          'type FaqItem = paths["/v1/t/p1-tenant/faq/{slug}"]["get"]["responses"]["200"]["content"]["application/json"];',
+          "const _faq: FaqItem = {",
+          '  collection: "faq", slug: "faq.general", locale: "en", localizations: [],',
+          "  seo: {}, meta: { publishedAt: null, updatedAt: new Date().toISOString(), draft: false, x: {} },",
+          '  blocks: [{ type: "fields", props: { faq: [{ q: "Why?", a: "**Because.**" }] } }, { type: "richText", props: { content: "x" } }],',
+          "};",
+          "",
+          "// A list response of a fields collection still type-checks with blocks: [] (router.ts strips blocks).",
+          'type ServiceList = paths["/v1/t/p1-tenant/service"]["get"]["responses"]["200"]["content"]["application/json"];',
+          'const _serviceList: ServiceList = { collection: "service", locale: "en", page: { cursor: null, hasMore: false, limit: 25 }, items: [',
+          '  { collection: "service", slug: "service.seo", locale: "en", localizations: [], seo: {}, meta: { publishedAt: null, updatedAt: "x", draft: false, x: {} }, blocks: [] },',
+          "] };",
+          "",
           "// The ProblemDetails error schema is a real component.",
           'type Problem = components["schemas"]["ProblemDetails"];',
           'const _err: Problem = { type: "https://x", title: "x", status: 404, instance: "/x", requestId: "x" };',
           "",
-          "void _list; void _item; void _err;",
+          "void _list; void _item; void _err; void _service; void _body; void _ready; void _faq; void _serviceList;",
         ].join("\n"),
       );
       writeFileSync(

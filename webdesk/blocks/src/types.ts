@@ -186,6 +186,9 @@ export const EXPECTED_FIELDS: Record<BlockType, ExpectedField[]> = {
     { name: 'heading', required: false, multiple: false },
     { name: 'logos', required: true, multiple: true },
   ],
+  // WSK-64 (vocabulary 1.1.0): the composition-typed `fields` block has no vocabulary props (its
+  // props are typed per collection) and no component — it is non-visual (see renderer/resolve-blocks.ts).
+  fields: [],
 }
 
 // Referenced only for the doc comment cross-checks above (`FieldDef` import keeps this file

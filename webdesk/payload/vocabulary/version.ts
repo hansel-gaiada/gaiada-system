@@ -10,10 +10,19 @@
 //           ANY envelope shape change (hard rule 1: envelope evolution is /v2, never a mutation).
 //   MINOR — new block type; new optional prop on an existing block; new primitive.
 //   PATCH — docs/descriptions only.
+//
+// The bump is COMPUTED, never asserted: ./breaking-change.ts's classifyVocabularyChange, run
+// against the previous version's committed snapshot (test/fixtures/vocabulary-<v>.snapshot.json).
+//
+// History:
+//   1.0.0 — WSK-06: 8 primitives, 9 block types, the frozen /v1 envelope.
+//   1.1.0 — WSK-64 (ruling WSK-D44), MINOR: primitives group/boolean/markdown; `multiple` on every
+//           primitive; FieldDef fields/itemKey/localized/ui; composition singleton/localized/ui/lint;
+//           the composition-typed `fields` block. The envelope did not change by a byte.
 import { PRIMITIVE_NAMES } from './primitives.ts'
 import { BLOCK_TYPE_NAMES } from './blocks.ts'
 
-export const VOCABULARY_VERSION = '1.0.0'
+export const VOCABULARY_VERSION = '1.1.0'
 
 /** The frozen path segment (design §05 hard rule 1). Never mutated — evolution is a new /v2. */
 export const ENVELOPE_VERSION = 'v1'

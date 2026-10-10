@@ -6,7 +6,19 @@
 // so this renderer's notion of "known" can never drift from the vocabulary's). It does no
 // rendering itself — kept plain TypeScript, with zero Astro dependency, specifically so it is
 // testable with `node --test` alone, no Astro build/Container API required.
-import { isBlockType, type BlockType } from '../vocabulary/blocks.ts'
+//
+// WSK-64 (vocabulary 1.1.0): the composition-typed `fields` block is KNOWN (it is in the vocabulary)
+// but NON-VISUAL: it carries an item's typed field values for the site's own code to read, so the
+// renderer draws nothing for it and does NOT report it as unknown. A renderer pinned to 1.0.0
+// treats it as unknown instead, which is exactly the MINOR forward-compatibility path.
+import { FIELDS_BLOCK_TYPE, isBlockType, type BlockType } from '../vocabulary/blocks.ts'
+
+/** Block types the vocabulary knows that never render markup (1.1.0: only `fields`). */
+export const NON_VISUAL_BLOCK_TYPES: readonly BlockType[] = [FIELDS_BLOCK_TYPE]
+
+export function isNonVisualBlockType(type: string): boolean {
+  return (NON_VISUAL_BLOCK_TYPES as readonly string[]).includes(type)
+}
 
 /** One `{ type, props }` entry as it arrives in an envelope's `blocks` array (envelope.ts's shape). */
 export interface RawBlock {

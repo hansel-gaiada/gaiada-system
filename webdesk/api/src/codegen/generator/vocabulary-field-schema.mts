@@ -2,6 +2,13 @@
 // to a JSON Schema fragment. This is the "hand-authored" half of WSK-D19: every other artifact is
 // DERIVED by standard tooling from the document this file helps build, but the mapping from "the
 // 8 vocabulary primitives" to "JSON Schema" is our own domain knowledge, written once, here.
+//
+// WSK-64 (vocabulary 1.1.0): `group` (a closed object, recursively), `boolean` and `markdown`, and
+// `multiple` wraps EVERY primitive in an array (the validator now honours it everywhere; this file
+// already wrapped any `multiple` field, which is fact 9 of the write-plane design). Editor-only
+// FieldDef keys (`ui`) never reach the wire schema. `itemKey` and `localized: false` are carried as
+// `x-webdesk-*` annotations: JSON Schema cannot express "unique by this sub-field", and locale
+// neutrality is advisory (write-plane design §2.5 rule 2), so neither is a validation keyword here.
 import type { FieldDef, PrimitiveName } from "../../../../payload/vocabulary/primitives.ts";
 
 export type JsonSchema = Record<string, unknown>;
@@ -63,6 +70,12 @@ function primitiveSchema(primitive: PrimitiveName, field: FieldDef): JsonSchema 
       return { type: "string", enum: field.options ?? [] };
     case "geo":
       return GEO_SCHEMA;
+    case "boolean":
+      return { type: "boolean" };
+    case "markdown":
+      return { type: "string", contentMediaType: "text/markdown", description: "CommonMark + GFM source, stored verbatim." };
+    case "group":
+      return fieldsToObjectSchema(field.fields ?? []);
     default: {
       // Exhaustiveness guard — a new primitive reaching this file without an update here is a
       // vocabulary MINOR the codegen pipeline has not caught up with; fail loud rather than emit
@@ -74,10 +87,13 @@ function primitiveSchema(primitive: PrimitiveName, field: FieldDef): JsonSchema 
   }
 }
 
-/** A FieldDef, wrapped for `multiple` (`relation`/`media` only, per primitives.ts's own comment). */
+/** A FieldDef, wrapped for `multiple` (every primitive, vocabulary 1.1.0). */
 export function fieldValueSchema(field: FieldDef): JsonSchema {
   const base = primitiveSchema(field.primitive, field);
-  return field.multiple ? { type: "array", items: base } : base;
+  const schema: JsonSchema = field.multiple ? { type: "array", items: base } : { ...base };
+  if (field.multiple && field.primitive === "group" && field.itemKey) schema["x-webdesk-item-key"] = field.itemKey;
+  if (field.localized === false) schema["x-webdesk-localized"] = false;
+  return schema;
 }
 
 /** `fields[]` -> a JSON Schema object with `properties`/`required` — used for both a block's

@@ -4,8 +4,8 @@
 // the raw `blocks` array from a `/v1` item envelope, renders each KNOWN block through its
 // component, and for each UNKNOWN block: renders nothing (no fallback markup for that entry at
 // all) and calls the report hook (default: console.warn, from ./report.ts) — never throws.
-import type { BlockType } from '../vocabulary/blocks.ts'
-import { resolveBlocks, type RawBlock } from './resolve-blocks.ts'
+import type { ComposableBlockType } from '../vocabulary/blocks.ts'
+import { isNonVisualBlockType, resolveBlocks, type RawBlock } from './resolve-blocks.ts'
 import { defaultUnknownBlockReport, type UnknownBlockReportHook } from './report.ts'
 
 import Hero from '../components/Hero.astro'
@@ -32,10 +32,12 @@ export interface Props {
 
 const { blocks, onUnknownBlock = defaultUnknownBlockReport, collection, slug } = Astro.props
 
-// One entry per vocabulary block type (../vocabulary/blocks.ts BLOCK_TYPE_NAMES) — TypeScript
-// enforces this map is exhaustive (`Record<BlockType, ...>`), so adding a 10th type to the
-// vendored vocabulary without adding it here is a compile error, not a silent gap.
-const COMPONENT_MAP: Record<BlockType, unknown> = {
+// One entry per VISUAL vocabulary block type (../vocabulary/blocks.ts COMPOSABLE_BLOCK_TYPE_NAMES) —
+// TypeScript enforces this map is exhaustive (`Record<ComposableBlockType, ...>`), so adding a new
+// generic block type to the vendored vocabulary without adding it here is a compile error, not a
+// silent gap. WSK-64: the composition-typed `fields` block is known but non-visual (see
+// ./resolve-blocks.ts), so it has no component and is skipped below without a report.
+const COMPONENT_MAP: Record<ComposableBlockType, unknown> = {
   hero: Hero,
   richText: RichText,
   gallery: Gallery,
@@ -62,6 +64,10 @@ for (const b of resolved) {
     // page continues to the next block exactly as if this one were absent.
     return null
   }
-  const Component = COMPONENT_MAP[b.type] as any
+  if (isNonVisualBlockType(b.type)) {
+    // WSK-64: a known, non-visual block (the `fields` block) — data for the site's code, no markup.
+    return null
+  }
+  const Component = COMPONENT_MAP[b.type as ComposableBlockType] as any
   return <Component {...b.props} />
 })}
