@@ -24,5 +24,6 @@ function gaiada_known_block_types(): array
     'testimonial',
     'faq',
     'logoCloud',
+    'fields',
     ];
 }

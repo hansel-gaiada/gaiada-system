@@ -110,19 +110,19 @@ describe("openapi-builder — describes the real router.ts routes", () => {
 });
 
 describe("openapi-builder — composition.ts's `blocks` interpretation, honoured exactly", () => {
-  it("blocks ABSENT -> unrestricted: every known vocabulary block type is a oneOf branch, plus the unknown-type branch", () => {
+  it("blocks ABSENT -> unrestricted: every known vocabulary block type is a anyOf branch, plus the unknown-type branch", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { anything: {} } }) as any;
     const itemSchema = doc.components.schemas["ItemEnvelope_anything"];
-    const oneOf = itemSchema.properties.blocks.items.oneOf;
+    const anyOf = itemSchema.properties.blocks.items.anyOf;
     // 9 known block types + 1 "unknown/future" branch.
-    expect(oneOf.length).toBe(10);
+    expect(anyOf.length).toBe(10);
   });
 
   it("blocks PRESENT (non-empty) -> a closed set: only those types + the unknown-type branch", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { article: { blocks: ["richText", "hero"] } } }) as any;
-    const oneOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.oneOf;
-    expect(oneOf.length).toBe(3); // richText + hero + unknown-type branch
-    const constValues = oneOf.filter((b: any) => "properties" in b && b.properties.type.const).map((b: any) => b.properties.type.const);
+    const anyOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.anyOf;
+    expect(anyOf.length).toBe(3); // richText + hero + unknown-type branch
+    const constValues = anyOf.filter((b: any) => "properties" in b && b.properties.type.const).map((b: any) => b.properties.type.const);
     expect(constValues.sort()).toEqual(["hero", "richText"]);
   });
 
@@ -143,8 +143,8 @@ describe("openapi-builder — composition.ts's `blocks` interpretation, honoured
 
   it("the unknown-type branch never restricts `type` to an enum (renderer invariant, §05 hard rule 2)", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { article: { blocks: ["hero"] } } }) as any;
-    const oneOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.oneOf;
-    const unknownBranch = oneOf.find((b: any) => !("const" in (b.properties?.type ?? {})));
+    const anyOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.anyOf;
+    const unknownBranch = anyOf.find((b: any) => !("const" in (b.properties?.type ?? {})));
     expect(unknownBranch).toBeTruthy();
     expect(unknownBranch.properties.type.type).toBe("string");
   });
@@ -250,8 +250,8 @@ describe("openapi-builder — WSK-64 the fields block at blocks[0]", () => {
     expect(blocks.prefixItems).toBeUndefined();
     expect(blocks.minItems).toBe(1);
     expect(blocks["x-webdesk-blocks-prefix"]).toBe("FieldsBlock_page");
-    expect(blocks.items.oneOf[0]).toEqual({ $ref: "#/components/schemas/FieldsBlock_page" });
-    expect(blocks.items.oneOf.length).toBe(3); // fields + richText + unknown
+    expect(blocks.items.anyOf[0]).toEqual({ $ref: "#/components/schemas/FieldsBlock_page" });
+    expect(blocks.items.anyOf.length).toBe(3); // fields + richText + unknown
   });
 
   it("list items of a fields collection use ListItemEnvelope_<key>, which makes no positional claim", () => {
@@ -260,20 +260,20 @@ describe("openapi-builder — WSK-64 the fields block at blocks[0]", () => {
     const listBlocks = doc.components.schemas["ListItemEnvelope_page"].properties.blocks;
     expect(listBlocks.prefixItems).toBeUndefined();
     expect(listBlocks.minItems).toBeUndefined();
-    expect(listBlocks.items.oneOf[0]).toEqual({ $ref: "#/components/schemas/FieldsBlock_page" });
+    expect(listBlocks.items.anyOf[0]).toEqual({ $ref: "#/components/schemas/FieldsBlock_page" });
   });
 
   it("a collection without fields produces no FieldsBlock/ListItemEnvelope components and no fields branch", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { article: { blocks: ["richText"] } } }) as any;
     const names = Object.keys(doc.components.schemas);
     expect(names.some((n) => n.startsWith("FieldsBlock_") || n.startsWith("ListItemEnvelope_") || n.startsWith("CollectionFields_"))).toBe(false);
-    const oneOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.oneOf;
-    expect(oneOf.some((b: any) => b.properties?.type?.const === "fields")).toBe(false);
+    const anyOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.anyOf;
+    expect(anyOf.some((b: any) => b.properties?.type?.const === "fields")).toBe(false);
   });
 
   it("an unrestricted composition never offers `fields` as a generic block", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { anything: {} } }) as any;
-    const consts = doc.components.schemas["ItemEnvelope_anything"].properties.blocks.items.oneOf.map((b: any) => b.properties?.type?.const).filter(Boolean);
+    const consts = doc.components.schemas["ItemEnvelope_anything"].properties.blocks.items.anyOf.map((b: any) => b.properties?.type?.const).filter(Boolean);
     expect(consts).not.toContain("fields");
     expect(consts.length).toBe(9);
   });

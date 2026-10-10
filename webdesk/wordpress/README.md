@@ -115,8 +115,15 @@ gate (mirrors `webdesk/blocks/scripts/vendor-vocabulary.mjs` exactly). Run for r
 
 ```
 $ node scripts/vendor-block-vocabulary.mjs --check
-OK       .../inc/block-vocabulary.php matches webdesk/payload/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (9 types)
+OK       .../inc/block-vocabulary.php matches webdesk/payload/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (10 types)
 ```
+
+The 10 are the 9 generic blocks plus `fields`, the composition-typed block of vocabulary 1.1.0
+(WSK-64). `fields` is KNOWN but NON-VISUAL, exactly as in `webdesk/blocks`' renderer
+(`resolve-blocks.ts`'s `NON_VISUAL_BLOCK_TYPES`): `inc/block-templates.php`'s
+`gaiada_render_block_fields()` returns the empty string, and it is never reported as unknown. This
+theme once vendored only 9 names (a stale copy from before 1.1.0); the probe now also asserts that
+every vendored name has a template function, so a re-vendor that adds a type fails there first.
 
 (Confirmed the check can also FAIL: ran it once with the destination file deleted — it exited 1
 and printed `DRIFT`, before this session regenerated it. Also ran `webdesk/blocks`'s own
@@ -155,9 +162,17 @@ PASS  positive control: both known blocks actually rendered
 PASS  NEGATIVE CONTROL: with the vocabulary list forced empty, a normally-known type ("hero") IS
       classified unknown — proves the known/unknown branch is a real vocabulary lookup, not a
       hardcoded true
-PASS  sanity: the vendored vocabulary still has all 9 known block types
+PASS  sanity: the vendored vocabulary has all 10 known block types (...)
+PASS  `fields` is a known block type in the vendored vocabulary
+PASS  a `fields` block does NOT throw (a template exists for every known type)
+PASS  a `fields` block is NOT reported as unknown
+PASS  a `fields` block's values never reach the rendered HTML
+PASS  the block AFTER a `fields` block still renders
+PASS  the `fields` template returns the empty string
+PASS  a blocks array holding only a `fields` block renders to the empty string
+PASS  template coverage: gaiada_render_block_<type>() exists   (x10, one per known type)
 
-ALL PASS — 12 checks run. exit code 0.
+ALL PASS — 29 checks run. exit code 0.
 ```
 
 **A real bug found and fixed while proving this, on the FIRST Linux run** (the exact class of
