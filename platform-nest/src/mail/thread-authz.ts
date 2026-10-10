@@ -61,14 +61,21 @@ export async function authorizeThreadParent(
     // authorize. The read-before-authorize ordering is that controller's own idiom and is preserved
     // deliberately — diverging from it is how "403s exactly like the parent" stops being true.
     const existing = await withTenants([tenantId], (c) =>
-      c.query<{ origin: string }>(
-        `SELECT origin FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
+      c.query<{ origin: string; requested_by: string | null }>(
+        `SELECT origin, requested_by FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
         [entityId],
       ),
     );
     if (!existing.rows[0]) throw new NotFoundException("approval not found");
     const module = existing.rows[0].origin === "hr" ? "hr" : undefined;
-    await authorize(principal, { kind: "automation_approval", id: entityId, tenantId, module }, "read");
+    // T7 (WebDesk M3): same `creatorId` the approval's own detail read now passes, so the thread
+    // 403s EXACTLY when the parent does. Without it a requester could open their own approval and
+    // then have the page's embedded thread panel refuse them (that panel does not swallow a 403).
+    await authorize(
+      principal,
+      { kind: "automation_approval", id: entityId, tenantId, module, creatorId: existing.rows[0].requested_by ?? undefined },
+      "read",
+    );
     return;
   }
 

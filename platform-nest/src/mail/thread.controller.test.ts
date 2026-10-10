@@ -255,10 +255,34 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     expect(threadOk.statusCode).toBe(200);
     expect((threadOk.json() as { messages: unknown[] }).messages).toHaveLength(1);
 
-    const parentNo = await app.inject({ method: "GET", url: `/api/${coA}/automation-approvals`, headers: asUser(memberA) });
+    // T7: the parent a thread must mirror is the approval's own DETAIL read (the row-level check, which
+    // now also admits the requester). The inbox LIST is no longer the parity target: a plain member
+    // gets their own-rows-only list (200) instead of a 403, while this approval stays refused to them.
+    const parentNo = await app.inject({ method: "GET", url: `/api/${coA}/automation-approvals/${approvalA}`, headers: asUser(memberA) });
     const threadNo = await thread(coA, "automation_approval", approvalA, memberA);
     expect(parentNo.statusCode).toBe(403);
     expect(threadNo.statusCode).toBe(parentNo.statusCode);
+  });
+
+  // T7 (WebDesk M3) — the requester reads their OWN approval, and the embedded thread follows the parent.
+  it("automation_approval: the REQUESTER reads their own approval's thread; another member of the same company still gets 403, same as the parent", async () => {
+    const own = newId();
+    await adminPool().query(
+      `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason,
+                                         status, origin, requested_by, origin_site)
+       VALUES ($1,$2,'wf:authz','money.transfer','{}'::jsonb,'medium','suspend','pending','automation',$3,'test')`,
+      [own, coA, memberA],
+    );
+    const parentOwn = await app.inject({ method: "GET", url: `/api/${coA}/automation-approvals/${own}`, headers: asUser(memberA) });
+    const threadOwn = await thread(coA, "automation_approval", own, memberA);
+    expect(parentOwn.statusCode).toBe(200);
+    expect(threadOwn.statusCode).toBe(parentOwn.statusCode);
+
+    // Someone else's approval is refused identically at parent and thread (adminB is in another company).
+    const parentOther = await app.inject({ method: "GET", url: `/api/${coA}/automation-approvals/${own}`, headers: asUser(adminB) });
+    const threadOther = await thread(coA, "automation_approval", own, adminB);
+    expect(parentOther.statusCode).toBe(403);
+    expect(threadOther.statusCode).toBe(parentOther.statusCode);
   });
 
   // ── pipeline_gate parity (MAIL-33: parent authorization is the RUN, not the gate's own kind) ──

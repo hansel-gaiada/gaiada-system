@@ -61,8 +61,13 @@ describe.skipIf(!TEST_URL)("automation approvals suspension surface (WS4 §3)", 
     expect(rows.length).toBeGreaterThanOrEqual(1);
     expect(rows[0]).toMatchObject({ tool_name: "money.transfer", status: "pending", impact: "medium" });
 
-    const denied = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals`, headers: asUser(member) });
-    expect(denied.statusCode).toBe(403);
+    // T7 (WebDesk M3): a plain member no longer gets a 403 on the list. They get the OWN-rows-only view
+    // (a requester must be able to see what they filed). This member filed nothing, so the list is
+    // empty: none of the rows the admin just read are visible to them. The 403 that survives is for
+    // someone who is not in the tenant at all (T7 describe below).
+    const own = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals`, headers: asUser(member) });
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toEqual([]);
   });
 
   it("company_admin approves it; a second decide is 404; a member may not decide", async () => {
@@ -157,6 +162,119 @@ describe.skipIf(!TEST_URL)("automation approvals suspension surface (WS4 §3)", 
         `SELECT payload FROM notifications WHERE type = 'approval.requested' AND (payload->>'entityId') = $1`, [id],
       );
       expect(row.rows[0].payload.href).toBe(`/approvals/${id}`);
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // T7 (WebDesk M3) — a REQUESTER can read their own approval (resource_automation_approval.yaml's
+  // creatorId rule). Real Postgres + RLS + REAL Cerbos end to end: every status below is what the
+  // production policy decided, not a mock. The detail page used to dead-end for the person who filed
+  // the approval, because `read` was elevated-only.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("T7: a requester reads their own approval", () => {
+    let requester: string;
+    let peer: string;      // a second plain member of the SAME company
+    let mgr: string;       // a manager: reads everything, as before
+    let stranger: string;  // a user with NO membership in `co`
+    let ownId: string;
+    let peerId: string;
+
+    const file = async (who: string, reason: string) => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/automation-approvals`, headers: asUser(who),
+        payload: { workflowId: "wf:t7", toolName: "money.transfer", toolArgs: { n: 1 }, impact: "medium", reason },
+      });
+      expect(r.statusCode).toBe(201);
+      return (r.json() as { id: string }).id;
+    };
+
+    beforeAll(async () => {
+      requester = await createUser("t7-requester@approvals.test");
+      peer = await createUser("t7-peer@approvals.test");
+      mgr = await createUser("t7-manager@approvals.test");
+      stranger = await createUser("t7-stranger@approvals.test");
+      for (const u of [requester, peer, mgr]) await addMembership(co, u);
+      const memberRole = await createRole("member");
+      await grantRole(requester, memberRole, "company", co);
+      await grantRole(peer, memberRole, "company", co);
+      await grantRole(mgr, await createRole("manager"), "company", co);
+      ownId = await file(requester, "t7 own");
+      peerId = await file(peer, "t7 peer");
+    });
+
+    it("requester reads their OWN pending approval by id (200), and a plain member's list is their own rows only", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${ownId}`, headers: asUser(requester) });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ id: ownId, status: "pending", requestedBy: requester, reason: "t7 own" });
+
+      const list = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals`, headers: asUser(requester) });
+      expect(list.statusCode).toBe(200);
+      const rows = list.json() as Array<{ id: string; requested_by: string }>;
+      expect(rows.map((x) => x.id)).toEqual([ownId]); // exactly their own...
+      expect(rows.every((x) => x.requested_by === requester)).toBe(true); // ...and nobody else's
+      expect(rows.map((x) => x.id)).not.toContain(peerId);
+
+      // The peer's own view is symmetric, so the filter is by CALLER, not a fixed row.
+      const peerList = (await app.inject({ method: "GET", url: `/api/${co}/automation-approvals`, headers: asUser(peer) })).json() as Array<{ id: string }>;
+      expect(peerList.map((x) => x.id)).toEqual([peerId]);
+    });
+
+    it("ANOTHER user's pending approval in the SAME company is still 403 for a plain requester", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${peerId}`, headers: asUser(requester) });
+      expect(r.statusCode).toBe(403);
+      // ...including approvals filed by an automation account (requested_by is someone else).
+      const wfRow = await adminPool().query<{ id: string }>(
+        `SELECT id FROM automation_approvals WHERE tenant_id = $1 AND requested_by IS NOT NULL AND requested_by <> $2 AND requested_by <> $3 LIMIT 1`,
+        [co, requester, peer],
+      );
+      expect(wfRow.rows.length).toBe(1);
+      expect((await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${wfRow.rows[0].id}`, headers: asUser(requester) })).statusCode).toBe(403);
+    });
+
+    it("the tenant gate still holds: another tenant's path is 404, a lapsed membership and a non-member are 403", async () => {
+      // Wrong tenant path: RLS hides the row, so it 404s even for its own requester.
+      const otherCo = await createCompany("T7 other tenant");
+      await addMembership(otherCo, requester);
+      await grantRole(requester, await createRole("member"), "company", otherCo);
+      const crossPath = await app.inject({ method: "GET", url: `/api/${otherCo}/automation-approvals/${ownId}`, headers: asUser(requester) });
+      expect(crossPath.statusCode).toBe(404);
+
+      // The requester's membership in `co` ends. creatorId still equals their id, but inTenant is false.
+      await adminPool().query(`UPDATE company_memberships SET status = 'inactive' WHERE tenant_id = $1 AND user_id = $2`, [co, requester]);
+      try {
+        const gone = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${ownId}`, headers: asUser(requester) });
+        expect(gone.statusCode).toBe(403);
+        const goneList = await app.inject({ method: "GET", url: `/api/${co}/automation-approvals`, headers: asUser(requester) });
+        expect(goneList.statusCode).toBe(403);
+      } finally {
+        await adminPool().query(`UPDATE company_memberships SET status = 'active' WHERE tenant_id = $1 AND user_id = $2`, [co, requester]);
+      }
+      // A user who never belonged to `co` is refused both reads.
+      expect((await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${ownId}`, headers: asUser(stranger) })).statusCode).toBe(403);
+      expect((await app.inject({ method: "GET", url: `/api/${co}/automation-approvals`, headers: asUser(stranger) })).statusCode).toBe(403);
+      // Back in `co`, the requester reads their own again (the control for the 403s above).
+      expect((await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${ownId}`, headers: asUser(requester) })).statusCode).toBe(200);
+    });
+
+    it("the requester still CANNOT decide (or retry) their own request through the new read rule", async () => {
+      const decide = await app.inject({ method: "POST", url: `/api/${co}/automation-approvals/${ownId}/decide`, headers: asUser(requester), payload: { decision: "approved" } });
+      expect(decide.statusCode).toBe(403);
+      const retry = await app.inject({ method: "POST", url: `/api/${co}/automation-approvals/${ownId}/retry`, headers: asUser(requester) });
+      expect(retry.statusCode).toBe(403);
+      const still = await adminPool().query<{ status: string }>(`SELECT status FROM automation_approvals WHERE id = $1`, [ownId]);
+      expect(still.rows[0].status).toBe("pending");
+    });
+
+    it("managers and company admins are unchanged: they read every row and the whole inbox; decide stays company_admin-only", async () => {
+      for (const who of [mgr, admin]) {
+        expect((await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${ownId}`, headers: asUser(who) })).statusCode).toBe(200);
+        expect((await app.inject({ method: "GET", url: `/api/${co}/automation-approvals/${peerId}`, headers: asUser(who) })).statusCode).toBe(200);
+        const ids = ((await app.inject({ method: "GET", url: `/api/${co}/automation-approvals`, headers: asUser(who) })).json() as Array<{ id: string }>).map((x) => x.id);
+        expect(ids).toEqual(expect.arrayContaining([ownId, peerId]));
+      }
+      // a manager still cannot decide (decide is company_admin-only): unchanged.
+      expect((await app.inject({ method: "POST", url: `/api/${co}/automation-approvals/${peerId}/decide`, headers: asUser(mgr), payload: { decision: "approved" } })).statusCode).toBe(403);
+      expect((await app.inject({ method: "POST", url: `/api/${co}/automation-approvals/${peerId}/decide`, headers: asUser(admin), payload: { decision: "approved" } })).statusCode).toBe(200);
     });
   });
 
