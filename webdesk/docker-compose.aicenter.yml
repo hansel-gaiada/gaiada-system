@@ -58,6 +58,9 @@
 # =============================================================================================
 # WHAT IS DELIBERATELY ABSENT (same reasoning as the sumopod file)
 # =============================================================================================
+# * No `ports:` for the control channel, by design (WSK-63a): mTLS terminates in the host-nginx vhost
+#   `control.webdesk.internal` (ops/nginx/), listening on the docker0 address, and reaches the same
+#   loopback `proxy` above. Do not add a published port or a gaiada_default network for it.
 # * `worker` — no real entrypoint exists yet (api/package.json has one start script). Shipping
 #   the base file's stub here would be a container that prints a sentence and sleeps.
 # * `clamav`, `imgproxy`, `otel-collector`, `status-page`, `wd-backup-sentinel` — additive, none
@@ -73,6 +76,13 @@ services:
       - "127.0.0.1:${WEBDESK_PROXY_HTTP_PORT:-8380}:80"
     depends_on: !override
       - api
+    # WSK-63a: the gate secret Caddy compares against X-Webdesk-Control-Gate on /control/* (compose
+    # env-passthrough trap: a var in .env does nothing unless it is listed here). Required, not
+    # defaulted: the Caddyfile fails closed on an empty value, so a missing one would silently leave
+    # the control channel permanently 404 - better to refuse to start. `environment` is a MAP, so this
+    # merges with the base file's WEBDESK_EDGE_VERIFY_SECRET (no !override, which would drop it).
+    environment:
+      WEBDESK_CONTROL_GATE_SECRET: ${WEBDESK_CONTROL_GATE_SECRET:?WEBDESK_CONTROL_GATE_SECRET is required - 64 hex chars, shared with the host-nginx control.webdesk.internal vhost (infra/runbooks/webdesk-control-channel.md)}
     security_opt:
       - no-new-privileges:true
     cpus: 0.50

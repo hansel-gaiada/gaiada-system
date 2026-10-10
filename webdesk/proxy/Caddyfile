@@ -87,11 +87,29 @@
 	handle /api/* {
 		respond 404
 	}
+	# /control/* (WSK-63a, design write-plane §11): 404 for everyone EXCEPT a request that carries the
+	# gate header the host-nginx control vhost (`control.webdesk.internal`, ops/nginx/) adds after it has
+	# verified the client certificate. The gate is a shared secret between that vhost and this file, the
+	# same pattern as X-Webdesk-Edge-Verify below, with one deliberate difference: it FAILS CLOSED. An
+	# unset WEBDESK_CONTROL_GATE_SECRET means NO request matches the gate, so /control/* stays 404.
+	# (The edge-verify matcher is fail-open for dev; a control plane must not be.)
+	# The public api.gaiada.online nginx vhost also strips this header, so an outside caller cannot
+	# present it even if it guessed the value. Layer 1 (the app re-verifying the forwarded cert) and
+	# Layer 2 (the Keycloak token) still decide authentication; the gate only proves "this request
+	# came through the vhost that did the TLS client-cert check".
+	# Local order inside a `handle` is what you want: the matched `respond` answers first.
 	handle /control/* {
-		respond 404
+		@no_control_gate expression `"{$WEBDESK_CONTROL_GATE_SECRET}" == "" || {http.request.header.X-Webdesk-Control-Gate} != "{$WEBDESK_CONTROL_GATE_SECRET}"`
+		respond @no_control_gate 404
+		reverse_proxy api:3000 {
+			# The api needs the verified cert header, not the gate secret.
+			header_up -X-Webdesk-Control-Gate
+		}
 	}
 
 	# --- PUBLIC content surface ---------------------------------------------------------------
+	# WSK-63a: every public route below strips the two control-channel headers before the api sees them.
+	# Layer 1 reads x-webdesk-mtls-cert-pem; a public caller must never be able to supply it.
 	# The frozen /v1 envelope (WSK-06). WSK-48a rehomed it: it is served by the api's `delivery`
 	# module (webdesk/api/src/delivery/), no longer by the Payload app's public gateway (that process
 	# was killed on the live box on 2026-09-09 and /v1 was down until this move; Payload is removed
@@ -100,12 +118,18 @@
 	# surfaces whose own guards (API key + scope, PublicTenantGuard) decide; nothing under /internal/*
 	# or /control/* is routed here.
 	handle /v1/* {
-		reverse_proxy api:3000
+		reverse_proxy api:3000 {
+			header_up -X-Webdesk-Control-Gate
+			header_up -X-Webdesk-Mtls-Cert-Pem
+		}
 	}
 
 	# Public form submission (WSK-10). Scoped per-tenant by API key; never the control plane.
 	handle /forms/* {
-		reverse_proxy api:3000
+		reverse_proxy api:3000 {
+			header_up -X-Webdesk-Control-Gate
+			header_up -X-Webdesk-Mtls-Cert-Pem
+		}
 	}
 
 	# Public media (WSK-07), behind the CDN-bypass gate.
@@ -123,7 +147,10 @@
 		respond @missing_edge_verify 403 {
 			body "direct origin access is not permitted â€” this path is served through the CDN only"
 		}
-		reverse_proxy api:3000
+		reverse_proxy api:3000 {
+			header_up -X-Webdesk-Control-Gate
+			header_up -X-Webdesk-Mtls-Cert-Pem
+		}
 	}
 
 	# --- everything else ----------------------------------------------------------------------
