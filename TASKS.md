@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████░░░░░░░░░░░░░░░░░░` **41%** · 71/171<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `█████████████░░░░░░░░░░░░░░░░░` **42%** · 73/171<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████░░░░░░` **70%** · 61/87<!-- /bar -->
+<!-- bar -->🟡 `██████████████░░░░░░` **72%** · 63/87<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -122,9 +122,9 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ### Wave B · WSK-41b · The read path hides deleted drafts <!-- bar -->✅ `██████████` **100%** · 1/1<!-- /bar -->
 - [x] Deleted draft 404 on item, list, search, sitemap; localizations exclude it; envelope gate unchanged (api 450/0/2; contract 60/60)
 
-### Wave B · WSK-51 · Read commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/2<!-- /bar -->
-- [ ] Eight reads; cross-tenant 404 with a positive control
-- [ ] No audit rows written; pagination stable under a concurrent update
+### Wave B · WSK-51 · Read commands <!-- bar -->✅ `██████████` **100%** · 2/2<!-- /bar -->
+- [x] Eight reads; cross-tenant 404 with a positive control (38/38; negative control 16 red; WSK-66 reconcile fields pinned)
+- [x] No audit rows written; pagination stable under a concurrent update (api 568/0/1)
 
 ### Wave B · WSK-40 · Editorial assertion <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Adversarial matrix of ≥ 20 rows, each with its exact problem slug
