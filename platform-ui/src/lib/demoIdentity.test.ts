@@ -35,6 +35,11 @@ describe("demoIdentityFor — dev-login identity tiers", () => {
     expect(demoIdentityFor("Viceroy-Marketing@Gaiada.com")).toBe("demo-viceroy-marketing");
   });
 
+  it("two-companies resolves to the two-company client, not the generic client", () => {
+    expect(demoIdentityFor("two-companies@deity-labs.example")).toBe("demo-two-company-client");
+    expect(demoIdentityFor("Two-Companies@Deity-Labs.example")).toBe("demo-two-company-client");
+  });
+
   it("an ordinary staff address is never mistaken for a client", () => {
     for (const e of ["pm@gaiada.com", "owner@gaiada.com", "dewi@gaiada.com"]) {
       expect(demoIdentityFor(e)).toBe("demo-hansel");

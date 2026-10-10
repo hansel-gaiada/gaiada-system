@@ -48,6 +48,7 @@ const DEMO_USER_MANAGER_ID = "dept-manager";  // manager tier — drives the GM 
 // adding any second role here would silently turn this identity back into staff and stop exercising
 // the portal-only nav + landing redirect this identity exists to cover.
 const DEMO_USER_VICEROY_MARKETING_ID = "demo-viceroy-marketing";  // PV2-02: staff of co-resort + client of co-agency
+const DEMO_USER_TWO_COMPANY_CLIENT_ID = "demo-two-company-client";  // PV2-05: client of co-agency AND co-resort
 const DEMO_USER_CLIENT_ID = "demo-client";
 
 let demoSeq = 1000;
@@ -169,10 +170,34 @@ const ME_VICEROY_MARKETING = {
   ],
 };
 
+// PV2-05: a client contact of TWO of our companies (PV-D10: one client record per company), and nothing
+// else. The only demo identity that sees the portal's company switch. Sign in with
+// two-companies@deity-labs.example (see lib/demoIdentity.ts). Client-only, like ME_CLIENT: a staff role
+// here would turn it back into staff.
+const ME_TWO_COMPANY_CLIENT = {
+  userId: DEMO_USER_TWO_COMPANY_CLIENT_ID,
+  name: "Putu Ayu",
+  email: "two-companies@deity-labs.example",
+  title: "Operations Lead, Deity Labs",
+  assurance: "high",
+  companies: [
+    { id: "co-agency", name: "Gaia Digital Agency", type: "agency" },
+    { id: "co-resort", name: "Viceroy", type: "resort" },
+  ],
+  roles: [
+    { role: "client", scopeType: "company", scopeId: "co-agency" },
+    { role: "client", scopeType: "company", scopeId: "co-resort" },
+  ],
+};
+
 // PV2-02: per-identity `clientOf` for the /api/me route (the route overrides `companies` for everyone).
 const DEMO_CLIENT_OF: Record<string, { companyId: string; companyName: string }[]> = {
   [DEMO_USER_CLIENT_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
   [DEMO_USER_VICEROY_MARKETING_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
+  [DEMO_USER_TWO_COMPANY_CLIENT_ID]: [
+    { companyId: "co-agency", companyName: "Gaia Digital Agency" },
+    { companyId: "co-resort", companyName: "Viceroy" },
+  ],
 };
 
 const MEMBERS: Record<string, { user_id: string; name: string; email: string; title: string | null }[]> = {
@@ -2020,6 +2045,7 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_IC_ID) return ME_IC;
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
   if (userId === DEMO_USER_VICEROY_MARKETING_ID) return ME_VICEROY_MARKETING;
+  if (userId === DEMO_USER_TWO_COMPANY_CLIENT_ID) return ME_TWO_COMPANY_CLIENT;
   return ME;
 }
 
