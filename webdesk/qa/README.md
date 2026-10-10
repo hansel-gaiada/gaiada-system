@@ -9,7 +9,7 @@ per-run docker volume, everything joins one network `wg58-<id>`, and an EXIT tra
 containers, network and volume.
 
 ```
-bash webdesk/qa/linux-gate.sh <run-id> <source.tar> [webdesk-root,webdesk-blocks,webdesk-api,vocabulary]
+bash webdesk/qa/linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [webdesk-root,webdesk-blocks,webdesk-api,vocabulary]
 ```
 
 The tar must come from `git -c core.autocrlf=false archive --format=tar <ref>` (CRLF blobs break
@@ -29,12 +29,17 @@ Local Docker Desktop (Git Bash; a smoke test only, not the Linux-server verifica
 `MSYS_NO_PATHCONV=1 bash webdesk/qa/linux-gate.sh myrun /tmp/src.tar`.
 
 Notes: ClamAV needs 3 to 7 minutes to load signatures on a cold laptop (the script waits up to
-400 s). `mail-retry-backoff.spec.ts` stops/starts Mailpit through the docker CLI, so the runner gets
-the docker socket and a static `docker` binary (from `docker:cli`); Mailpit lives in the network
+400 s). `mail-retry-backoff.spec.ts` stops/starts Mailpit through the docker CLI, so with
+`--with-docker-socket` the runner gets the docker socket and a static `docker` binary (from
+`docker:cli`). Mailpit always lives in the network
 namespace of a holder container so a stopped Mailpit refuses connections instantly (like
 `127.0.0.1` in CI) instead of failing slowly on DNS.
 
-**The socket is host root.** Every `webdesk/api` spec runs with the host's docker socket, which is
-what CI's runner has too, but on a shared host (sumopod runs other projects' containers) a spec could
-stop or start any of them. Today only `mail-retry-backoff.spec.ts` uses it, on the per-run Mailpit
-(`MAILPIT_CONTAINER_NAME` is always set). Review new specs that shell out to `docker` with that in mind.
+**The docker socket is opt-in: `--with-docker-socket`, OFF by default.** Without it,
+`mail-retry-backoff.spec.ts` (which `docker stop`s Mailpit to prove retry/backoff) self-skips, and the
+summary names that skip, along with every other vitest file that skipped something. **The socket is
+host root.** With the flag, every `webdesk/api` spec runs with the host's docker socket, which is what
+CI's runner has too. On a shared host (sumopod runs other projects' containers) a spec could stop or
+start any of them. Today only `mail-retry-backoff.spec.ts` uses it, on the per-run Mailpit
+(`MAILPIT_CONTAINER_NAME` is always set). Pass the flag only on a box whose owner agrees, and review new
+specs that shell out to `docker` with that in mind.

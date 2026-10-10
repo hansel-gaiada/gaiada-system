@@ -15,8 +15,13 @@
 # every container mounts; one docker network per run; services are reached by container DNS name.
 # Everything is torn down in an EXIT trap (containers, network, volume).
 #
-# Usage:   bash linux-gate.sh <run-id> <source.tar> [suite,suite,...]
+# Usage:   bash linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [suite,suite,...]
 #   suites: webdesk-root,webdesk-blocks,webdesk-api,vocabulary (default: all)
+#   --with-docker-socket  OFF by default. Mounts the host docker socket (+ a docker CLI) into the
+#                         webdesk-api runner so mail-retry-backoff.spec.ts can stop/start Mailpit.
+#                         That is root-equivalent control of EVERY container on the host: never on
+#                         a shared box (sumopod) without the box owner's say-so. Without it that
+#                         spec self-skips, and the summary names the skip.
 #   The tar MUST come from:  git -c core.autocrlf=false archive --format=tar <ref>
 #   (a Windows checkout has CRLF blobs, which break init-roles.sh).
 # Logs:    ~/wg58-<id>/<suite>.log on the host running this script.
@@ -33,9 +38,18 @@
 set -euo pipefail
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'   # Git Bash must not rewrite container paths
 
-ID="${1:-}"; TAR="${2:-}"; SUITES_ARG="${3:-webdesk-root,webdesk-blocks,webdesk-api,vocabulary}"
+WITH_DOCKER_SOCKET=0
+declare -a POS=()
+for a in "$@"; do
+  case "$a" in
+    --with-docker-socket) WITH_DOCKER_SOCKET=1 ;;
+    --*) echo "SETUP FAILED: unknown option $a"; echo "### done ? FAIL"; exit 2 ;;
+    *) POS+=("$a") ;;
+  esac
+done
+ID="${POS[0]:-}"; TAR="${POS[1]:-}"; SUITES_ARG="${POS[2]:-webdesk-root,webdesk-blocks,webdesk-api,vocabulary}"
 if [ -z "$ID" ] || [ -z "$TAR" ]; then
-  echo "usage: bash linux-gate.sh <run-id> <source.tar> [suite,suite,...]"
+  echo "usage: bash linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [suite,suite,...]"
   echo "### done ${ID:-?} FAIL"; exit 2
 fi
 case "$ID" in *[!a-zA-Z0-9_.-]*) echo "SETUP FAILED: run-id must match [a-zA-Z0-9_.-]"; echo "### done $ID FAIL"; exit 2;; esac
@@ -77,7 +91,7 @@ docker info >/dev/null 2>&1 || setup_failed "docker daemon not reachable"
 for s in ${SUITES_ARG//,/ }; do
   case "$s" in webdesk-root|webdesk-blocks|webdesk-api|vocabulary) ;; *) setup_failed "unknown suite: $s";; esac
 done
-echo "run $ID  suites=$SUITES_ARG  tar=$TAR"
+echo "run $ID  suites=$SUITES_ARG  tar=$TAR  docker-socket=$([ "$WITH_DOCKER_SOCKET" = 1 ] && echo MOUNTED || echo off)"
 docker network create "$NET" >/dev/null || setup_failed "docker network create failed"
 docker volume create "$VOL" >/dev/null || setup_failed "docker volume create failed"
 docker run --rm -i -v "$VOL:/src" alpine tar -x -C /src < "$TAR" || setup_failed "untar into volume failed"
@@ -131,6 +145,19 @@ finish_suite() { # name rc logfile
     strip_ansi "$log" | grep -E '^[[:space:]]*(FAIL|×)[[:space:]]' | sort -u | head -15 | sed 's/^/    /' || true
     echo "  last lines of $log:"; tail -n 12 "$log" | sed 's/^/    /'
   fi
+}
+
+# Name every vitest file with a skip, so a skip is visible in the summary rather than a bare count.
+report_skips() { # name logfile
+  local name="$1" log="$2" line
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then mark "  skip  $name  $line"; fi
+  done < <(strip_ansi "$log" | grep -E '^[[:space:]]*(✓|↓|×)[[:space:]]+test/[^ ]+ \(.*[0-9]+ skipped\)' \
+             | sed -E 's/^[[:space:]]*(✓|↓|×)[[:space:]]+//; s/ [0-9]+ms$//' | sort -u || true)
+  if strip_ansi "$log" | grep -q '\[mail-retry-backoff\] SKIPPING'; then
+    mark "  skip  $name  mail-retry-backoff.spec.ts self-skipped: no docker socket (rerun with --with-docker-socket to exercise it)"
+  fi
+  return 0
 }
 
 run_suite() { # name workdir script   (RENV set by caller)
@@ -209,11 +236,15 @@ if [ "$NEED_DB" = 1 ]; then
     ok=0; for i in $(seq 1 200); do
       docker exec "$CLAM" sh -c 'nc -z 127.0.0.1 3310' >/dev/null 2>&1 && { ok=1; break; }; sleep 2; done
     [ "$ok" = 1 ] || { docker logs "$CLAM" 2>&1 | tail -20; setup_failed "clamav never opened 3310 (signature load)"; }
-    # mail-retry-backoff.spec.ts shells out to `docker stop|start <MAILPIT_CONTAINER_NAME>`: give the
-    # runner the docker CLI (static binary from docker:cli, kept in the volume) and the host socket.
-    docker run --rm -v "$VOL:/src" --entrypoint sh docker:cli \
-      -c 'mkdir -p /src/.gate-bin && cp /usr/local/bin/docker /src/.gate-bin/docker' \
-      || setup_failed "could not fetch the docker CLI binary (docker:cli image)"
+    # mail-retry-backoff.spec.ts shells out to `docker stop|start <MAILPIT_CONTAINER_NAME>`. Only with
+    # --with-docker-socket does the runner get the docker CLI (static binary from docker:cli, kept in
+    # the volume) and the host socket; otherwise the spec's own `docker inspect` probe fails and it
+    # self-skips (named in the summary).
+    if [ "$WITH_DOCKER_SOCKET" = 1 ]; then
+      docker run --rm -v "$VOL:/src" --entrypoint sh docker:cli \
+        -c 'mkdir -p /src/.gate-bin && cp /usr/local/bin/docker /src/.gate-bin/docker' \
+        || setup_failed "could not fetch the docker CLI binary (docker:cli image)"
+    fi
   fi
 
   # Shared prep: api deps, storage bootstrap (api only), migrations. Logged to prep.log.
@@ -260,12 +291,14 @@ if selected webdesk-api && [ "$DB_READY" = 1 ]; then
     -e MAIL_ENABLED=true -e MAIL_PROVIDER=smtp -e "MAIL_SMTP_HOST=$MAILNS" -e MAIL_SMTP_PORT=1025
     -e "MAILPIT_HTTP_URL=http://$MAILNS:8025" -e "MAILPIT_CONTAINER_NAME=$MAILPIT"
     -e WEBDESK_MEDIA_MAX_UPLOAD_BYTES=65536
-    -v /var/run/docker.sock:/var/run/docker.sock
   )
-  # /src/.gate-bin/docker is the docker CLI for mail-retry-backoff.spec.ts. MAIL_FROM_* stay unset (CI rule).
+  # Opt-in only (see the header). /src/.gate-bin/docker is the docker CLI for mail-retry-backoff.spec.ts.
+  # MAIL_FROM_* stay unset (CI rule).
+  if [ "$WITH_DOCKER_SOCKET" = 1 ]; then RENV+=(-v /var/run/docker.sock:/var/run/docker.sock); fi
   run_suite webdesk-api webdesk/api 'export PATH=/src/.gate-bin:$PATH
 npm run typecheck
 npm test'
+  report_skips webdesk-api "$LOGDIR/webdesk-api.log"
 fi
 
 # ---- vocabulary: WSK-64 suites + envelope-contract ---------------------------------------------
