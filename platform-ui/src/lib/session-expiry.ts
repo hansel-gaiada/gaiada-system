@@ -2,7 +2,7 @@
 //
 // ── WHY A SEPARATE FILE FROM session.ts ──────────────────────────────────────────────────────────
 // `session.ts` signs and verifies with `node:crypto`, which the Edge runtime cannot load — that is
-// exactly why `middleware.ts` has only ever done a cookie PRESENCE check. But middleware is the one
+// exactly why `middleware.ts` (now `proxy.ts`) has only ever done a cookie PRESENCE check. But the proxy is the one
 // place that runs before a page renders AND can set a cookie, so it is where a token refresh has to
 // be decided. This module gives it the single fact it needs (when does the access token expire?)
 // using only APIs Edge has.
@@ -54,7 +54,7 @@ export function peekSessionExpiry(sealed: string | undefined): number | null {
 /** Refresh this many ms BEFORE the token actually expires.
  *
  *  Not zero, and the margin is not arbitrary: a page render fans out several `platformFetch` calls,
- *  and a token that is valid when middleware waves the request through can expire while those are
+ *  and a token that is valid when the proxy waves the request through can expire while those are
  *  still in flight. 120s comfortably covers a slow render plus clock skew between this host and
  *  Keycloak, while staying a rounding error against the realm's 3600s token lifetime. */
 export const REFRESH_SKEW_MS = 120_000;
