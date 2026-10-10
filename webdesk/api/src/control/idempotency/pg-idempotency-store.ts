@@ -1,7 +1,9 @@
 // WSK-41 — the DURABLE idempotency store (migration 0009's control_idempotency_keys), replacing the
 // in-memory IdempotencyStore for the content commands (write-plane design §3.3). M3 T5a moved the
-// keys, lifecycle, schema.apply and release commands onto it too, through command-envelope.ts. Only
-// the promotion and privacy commands still use ./idempotency-store.ts (T5b moves them).
+// keys, lifecycle, schema.apply and release commands onto it too, through command-envelope.ts, and
+// M3 T5b moved the promotion and privacy commands (promotion as a SAGA: its claim transaction calls
+// complete() with a run reference, and the finished run later overwrites the record with its body;
+// see promotion/promotion-command.service.ts and amend() below). The old in-memory store is gone.
 //
 // LIFECYCLE (per scope key):
 //   begin()    — claims the key in its OWN short committed transaction: a row with status
@@ -18,6 +20,10 @@
 // read: begin() deletes an expired row for its own key before claiming. An `in_flight` row older
 // than STALE_IN_FLIGHT_MS is a claim whose process died between begin() and complete(); because
 // complete() is atomic with the effect, such a claim has no committed effect, so it is taken over.
+// For the promotion saga "the effect" is its FIRST transaction (the claim: audit row, run row,
+// complete()); the saga's later transactions run after the record is already `completed`, so they are
+// never covered by a takeover, and a saga that dies mid-way leaves a completed record that points at a
+// run which stays unfinished (replays answer 409 promotion-in-progress; there is no recovery sweep).
 //
 // RLS: the table is dual-mode (0009). Tenant rows are read and written under webdesk.tenant_ctx;
 // platform rows (tenant_id IS NULL) under webdesk.platform_ctx. The app role cannot see across
@@ -157,6 +163,25 @@ export class PgIdempotencyStore {
         "This request's idempotency claim was superseded before it completed; nothing was written.",
       );
     }
+  }
+
+  /**
+   * Overwrites the stored response of a COMPLETED record, inside the caller's transaction (`client`,
+   * under the same tenant/platform scope as the record). For a command whose first transaction stores
+   * a REFERENCE (complete(claim, ref)) and whose last transaction stores the final response: the
+   * promotion saga. Fenced like complete(): it only writes while the record for this scope key is
+   * unexpired, `completed`, and still holds exactly `expected` (jsonb equality), so a wrong reference,
+   * a record that is gone, an `in_flight` claim and a second amend (the record no longer equals the
+   * reference) all write nothing. Returns whether it wrote.
+   */
+  async amend(client: PoolClient, target: { tenantId: string | null; scopeKey: string }, expected: unknown, response: unknown): Promise<boolean> {
+    const m = keyMatch(target.tenantId, 3);
+    const { rowCount } = await client.query(
+      `UPDATE control_idempotency_keys SET response = $2::jsonb
+        WHERE ${m.sql} AND status = 'completed' AND expires_at > now() AND response = $1::jsonb`,
+      [JSON.stringify(expected), JSON.stringify(response), target.scopeKey, ...m.params],
+    );
+    return rowCount === 1;
   }
 
   /** The command failed and rolled back: drop the claim so a retry with the same key can run. */

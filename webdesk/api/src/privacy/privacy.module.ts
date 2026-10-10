@@ -42,8 +42,12 @@ import { POLICY_DECISION_POINT } from "../control/policy/policy-decision-point";
 import { DevModePolicyDecisionPoint } from "../control/policy/dev-mode-policy-decision-point";
 import { RealPolicyDecisionPoint } from "../control/policy/real-policy-decision-point";
 
-import { CommandAuditService } from "../control/command-audit.service";
-import { IdempotencyStore } from "../control/idempotency/idempotency-store";
+// M3 T5b — the command envelope and the durable idempotency store, re-provided here for the same reason
+// as the channel classes above (ControlModule does not export them). Both are stateless: the
+// idempotency record is the control_idempotency_keys table. CommandAuditService is no longer used by
+// this module.
+import { CommandEnvelope } from "../control/command-envelope";
+import { PgIdempotencyStore } from "../control/idempotency/pg-idempotency-store";
 
 import { PrivacyCommandAuthorizationGuard } from "./policy/privacy-command-authorization.guard";
 import { PrivacyRepository } from "./privacy.repository";
@@ -62,8 +66,8 @@ const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicy
   providers: [
     ControlAuthGuard,
     PrivacyCommandAuthorizationGuard,
-    CommandAuditService,
-    IdempotencyStore,
+    PgIdempotencyStore,
+    CommandEnvelope,
     PrivacyRepository,
     PrivacyAttachmentsService,
     PrivacyCommandService,

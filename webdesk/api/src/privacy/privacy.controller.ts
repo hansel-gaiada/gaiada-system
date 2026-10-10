@@ -19,7 +19,7 @@ import { ControlAuthGuard } from "../control/auth/control-auth.guard";
 import { PrivacyCommandAuthorizationGuard } from "./policy/privacy-command-authorization.guard";
 import { PrivacyCommand } from "./command.decorator";
 import { requireControlContext, type ControlRequest } from "../control/auth/control-request";
-import { assertTenantSlug, assertIdentifier, assertIdempotencyKey } from "./dto";
+import { assertTenantSlug, assertIdentifier, assertIdempotencyKey, assertOptionalIdempotencyKey } from "./dto";
 
 @Controller("control/v1/tenants")
 @UseGuards(ControlAuthGuard, PrivacyCommandAuthorizationGuard)
@@ -28,20 +28,32 @@ export class PrivacyController {
 
   @Post(":tenantSlug/privacy/find")
   @PrivacyCommand("privacy.find")
-  async find(@Req() req: ControlRequest, @Param("tenantSlug") tenantSlugRaw: string, @Body() body: { identifier?: string }) {
+  async find(
+    @Req() req: ControlRequest,
+    @Param("tenantSlug") tenantSlugRaw: string,
+    @Headers("idempotency-key") idempotencyKeyRaw: string | undefined,
+    @Body() body: { identifier?: string },
+  ) {
     const { principal, ws4ApprovalId } = requireControlContext(req);
     const tenantSlug = assertTenantSlug(tenantSlugRaw);
     const identifier = assertIdentifier(body?.identifier);
-    return this.privacy.find({ tenantSlug, identifier, actor: principal.subject, ws4ApprovalId });
+    const idempotencyKey = assertOptionalIdempotencyKey(idempotencyKeyRaw);
+    return this.privacy.find({ tenantSlug, identifier, actor: principal.subject, ws4ApprovalId, idempotencyKey });
   }
 
   @Post(":tenantSlug/privacy/export")
   @PrivacyCommand("privacy.export")
-  async export(@Req() req: ControlRequest, @Param("tenantSlug") tenantSlugRaw: string, @Body() body: { identifier?: string }) {
+  async export(
+    @Req() req: ControlRequest,
+    @Param("tenantSlug") tenantSlugRaw: string,
+    @Headers("idempotency-key") idempotencyKeyRaw: string | undefined,
+    @Body() body: { identifier?: string },
+  ) {
     const { principal, ws4ApprovalId } = requireControlContext(req);
     const tenantSlug = assertTenantSlug(tenantSlugRaw);
     const identifier = assertIdentifier(body?.identifier);
-    return this.privacy.export({ tenantSlug, identifier, actor: principal.subject, ws4ApprovalId });
+    const idempotencyKey = assertOptionalIdempotencyKey(idempotencyKeyRaw);
+    return this.privacy.export({ tenantSlug, identifier, actor: principal.subject, ws4ApprovalId, idempotencyKey });
   }
 
   @Post(":tenantSlug/privacy/erase")
