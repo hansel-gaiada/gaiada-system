@@ -602,6 +602,29 @@ services:
       KEYCLOAK_ADMIN_REALM: ${KEYCLOAK_ADMIN_REALM:-gaiada}
       KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-gaiada-provisioner}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      # WSK-63b — the WebDesk control channel's ERP end (modules/webdev/webdesk-control-client.ts).
+      # Every row is forwarded or the container sees nothing (the MEETING_VIDEO_MAX_BYTES lesson).
+      # Defaults are EMPTY on purpose: until the box steps (WSK-63a + the D47 steps) are done, the
+      # client answers a typed 503 naming what is missing — never a request at a host nobody chose.
+      # The PEM files are NOT here: only their in-container PATHS are, fixed to the read-only mount
+      # below (a multi-line PEM through env/env_file is mangled; see that mount's comment).
+      WEBDESK_CONTROL_BASE_URL: ${WEBDESK_CONTROL_BASE_URL:-}
+      WEBDESK_CONTROL_CLIENT_CERT_FILE: /run/webdesk-control/client.crt
+      WEBDESK_CONTROL_CLIENT_KEY_FILE: /run/webdesk-control/client.key
+      WEBDESK_CONTROL_CA_FILE: /run/webdesk-control/ca.crt
+      WEBDESK_CONTROL_TOKEN_URL: ${WEBDESK_CONTROL_TOKEN_URL:-}
+      WEBDESK_CONTROL_CLIENT_ID: ${WEBDESK_CONTROL_CLIENT_ID:-}
+      WEBDESK_CONTROL_CLIENT_SECRET: ${WEBDESK_CONTROL_CLIENT_SECRET:-}
+      WEBDESK_CONTROL_TOKEN_SCOPE: ${WEBDESK_CONTROL_TOKEN_SCOPE:-}
+      WEBDESK_CONTROL_WS4_KEY: ${WEBDESK_CONTROL_WS4_KEY:-}
+      # Tunables. An empty passthrough parses to the code default (config.ts positiveIntFromEnv),
+      # never to 0, so these rows are safe to leave unset.
+      WEBDESK_CONTROL_WS4_TTL_SEC: ${WEBDESK_CONTROL_WS4_TTL_SEC:-}
+      WEBDESK_CONTROL_TIMEOUT_MS: ${WEBDESK_CONTROL_TIMEOUT_MS:-}
+      WEBDESK_CONTROL_RETRY_ATTEMPTS: ${WEBDESK_CONTROL_RETRY_ATTEMPTS:-}
+      WEBDESK_CONTROL_BREAKER_THRESHOLD: ${WEBDESK_CONTROL_BREAKER_THRESHOLD:-}
+      WEBDESK_CONTROL_BREAKER_WINDOW_MS: ${WEBDESK_CONTROL_BREAKER_WINDOW_MS:-}
+      WEBDESK_CONTROL_BREAKER_OPEN_MS: ${WEBDESK_CONTROL_BREAKER_OPEN_MS:-}
       # The SAME omission again, and this one had been silently disabling THREE shipped features on
       # this box: a 43-char value sat in .env while the container saw an empty string, because no row
       # forwarded it. It signs W0 client-invite tokens (`core/client-invites.ts`), signs SEO's Google
@@ -969,6 +992,17 @@ services:
       MONITORING_RUNNER_INTERVAL_MS: ${MONITORING_RUNNER_INTERVAL_MS:-}
     volumes:
       - platform-files:/data/files
+      # WSK-63b — the control channel's mTLS material, FILE-MOUNTED and read-only: client.crt,
+      # client.key (CN platform-nest-webdesk, synccert internal CA) and ca.crt. Never env vars: a
+      # multi-line PEM through env_file arrives empty or truncated depending on the compose version
+      # (WebDesk's 337-restart incident). Host dir is OUTSIDE the deploy-synced repo tree so a deploy
+      # can never delete or overwrite it. The image runs as root, so 0400 root:root on the key works.
+      # If the dir is absent, compose creates it empty and the client answers 503 (fail-closed).
+      - ${WEBDESK_CONTROL_TLS_DIR:-/etc/gaiada/webdesk-control}:/run/webdesk-control:ro
+    # §11: the internal control vhost is NOT in public DNS; it is host nginx, reached via the
+    # docker0 gateway (the same host-gateway idiom hostdata.yml uses for host.docker.internal).
+    extra_hosts:
+      - "control.webdesk.internal:host-gateway"
     # FAULT REGISTER FINDING 14 (2026-09-08) — measured 148.4MiB working set on gda-aicenter
     # (`docker stats --no-stream`, read-only, 2026-09-08). This is THE platform — every request path
     # (module registry, Cerbos calls, report generation, agent orchestration) runs through it, so
