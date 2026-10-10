@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.80.0` - the portal passes an axe sweep in both themes, and every link sent to a client is pinned to a real page (2026-10-11) - PROTOTYPED
+
+PV2-08's two remaining QA checks, as tests that stay.
+
+- **axe sweep:** `e2e/a11y-axe-portal.spec.ts` runs axe (WCAG 2.1 A/AA) as a demo client on the 13 portal pages, light and dark. It runs in the existing `portal` project and is not a merge gate. The first run found one violation: the project page's "Back" label was dimmed with `opacity: 0.6` and failed colour contrast in light. It now uses `--ink-subtle`. Re-run: 0 violations, both themes.
+- **What axe could not decide:** the spec logs contrast axe left "incomplete". That is most text on every page (13-116 elements), because of the translucent backgrounds, so a green sweep is not a contrast check. A manual contrast pass is on the board before real clients use the portal.
+- **Link guard:** `portal-links.guard.test.ts` reads platform-nest and collects every `/portal…` literal on an `href` line (notifications and the dashboard's "needs you" items). Each must resolve to a page in the `(portal)` route group and sit in one of the five areas. There are six link shapes today, all correct. Teeth: a contract link pointed at `/portal/agreements/:id` fails both checks.
+- **Verified on Linux:** ui 230/230 files (4,524 tests); `next build` ok; portal axe 2/2.
+
 ### platform-ui `0.79.0` - the portal timeline's project rows lay out in full again (2026-10-11) - PROTOTYPED
 
 Found by the PV2-08 live drive on `v1.0.0-alpha.346`, the first time `/portal/timeline` rendered on live at all (344 crashed before reaching it).
