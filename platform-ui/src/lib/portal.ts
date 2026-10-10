@@ -85,6 +85,9 @@ export interface PortalProject {
   id: string;
   name: string;
   status: string;
+  /** PV2-03: server-derived "finished" (done/complete/completed/archived/cancelled). Optional for an
+   *  older backend; never re-derive it from `status` in the UI. */
+  finished?: boolean;
   startDate: string | null;
   dueDate: string | null;
   clientId: string | null;
@@ -129,6 +132,8 @@ export interface PortalDeliverable {
 }
 
 export interface PortalProjectDetail extends PortalProject {
+  /** PV2-03: the project's owner; null when none or the owner is deleted/disabled. */
+  lead?: { name: string; email: string } | null;
   milestones: PortalMilestone[];
   deliverables: PortalDeliverable[];
   runs: Array<{ id: string; title: string | null; status: string; pendingActions: number }>;
@@ -232,8 +237,12 @@ export interface PortalContractDetail extends Omit<PortalContract, "hasDocument"
 
 export interface PortalProfile {
   me: { id: string; name: string; email: string; title: string | null; memberSince: string } | null;
-  clients: Array<{ id: string; name: string; status: string; contact: Record<string, unknown>; projectCount: number }>;
-  contacts: Array<{ id: string; name: string; email: string; capability: string; status: string; clientId: string; projectId: string | null }>;
+  clients: Array<{ id: string; name: string; status: string; contact: Record<string, unknown>; projectCount: number;
+    /** PV2-03: `clients.owner_user_id`; null when unset. */
+    accountManager?: { name: string; email: string } | null }>;
+  contacts: Array<{ id: string; name: string; email: string; capability: string; status: string; clientId: string; projectId: string | null;
+    /** PV2-03: `client` = the client's own person; `provider` = our staff holding a contact row. */
+    side?: "client" | "provider" }>;
   access: {
     canSign: boolean;
     wholeClient: boolean;
