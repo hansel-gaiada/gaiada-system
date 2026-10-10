@@ -4,6 +4,22 @@
 mini-topology (see "Proof" at the end). **Nothing in this runbook has been run on `gda-aicenter`.** Every live step
 is executed by the orchestrator, in order. Design: `docs/plans/2026-10-10-webdesk-write-plane-design.md` section 11.
 
+## As executed on `gda-aicenter`, 2026-10-10 (read this before re-running)
+
+Steps 0, 2, 3, 4, 5, 6, 7, 9, 10 and 11 were run live by the orchestrator. Step 8 was deliberately left for the release that
+ships WSK-63b's compose change (`extra_hosts`). Reachability from the ERP network was proven instead with a throwaway
+container: `docker run --rm --network gaiada_default --add-host control.webdesk.internal:host-gateway alpine:3 nc -z control.webdesk.internal 9443` prints `tcp ok`.
+Five corrections to the steps below, each found live:
+
+1. **The WebDesk env file is `/etc/webdesk/.env`.** There is no project-directory `.env` on this box. Every compose call needs `--env-file /etc/webdesk/.env`, and the gate secret is appended there (owner `webdesk-svc`, mode 600).
+2. **Generate the gate secret BEFORE step 4's `up api`.** The overlay makes it a required variable, and compose validates the whole project, so `up -d --no-deps api` fails to interpolate until the secret exists. Order used: step 5 (secret + proxy), then step 4 (api).
+3. **Do not build the api on this box.** It is the live ERP kernel; a build once drove load to 16 on 4 cores. Build on sumopod from a `git -c core.autocrlf=false archive`, then `docker save | gzip -1 | ssh gda-aicenter 'gunzip | docker load'` (351 MB in 30 s). Tag it `webdesk-api:latest` and use `up -d --no-deps --no-build api`.
+4. **The Keycloak container has no `awk`.** Step 9's scope-binding loop dies under `set -e` after the client and scopes are created. Parse `kcadm` JSON on the host with python3 instead.
+5. **Matrix rows 3 and 4 must target a real route.** `GET /control/v1/tenants` does not exist (tenants is POST-only), and Nest's routing 404s before any guard runs, so those rows prove nothing. Use `GET /control/v1/tenants/<slug>/contract`: with cert and no token → `401 Layer 2 … no Bearer token presented`; the same with a forged URL-encoded cert header and a wrong gate header → the identical Layer 2 answer, never a Layer 1 refusal.
+
+Also: `/etc/gaiada` is root-only (0700), so curl running as the operator must read the cert/key/CA through `sudo cat` into a private temp dir.
+The CA pin in `/etc/webdesk/certs/ca-cert.pem` already equalled the internal CA (sha256 `54067520…`), so no swap was needed.
+
 ## What gets built
 
     platform (ERP)  --mTLS+Bearer-->  host nginx 172.17.0.1:9443  (vhost control.webdesk.internal)

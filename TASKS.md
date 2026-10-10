@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `█████████░░░░░░░░░░░░░░░░░░░░░` **29%** · 47/161<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `█████████░░░░░░░░░░░░░░░░░░░░░` **31%** · 51/163<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████░░░░░░░░░░░` **44%** · 37/83<!-- /bar -->
+<!-- bar -->🟡 `██████████░░░░░░░░░░` **48%** · 41/85<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -64,7 +64,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Design doc: contract, draft/live, authoring + read commands, editorial assertion, Cerbos, loader principal, rebuild path, control channel
 - [x] Reviewed (claims checked against `breaking-change.ts` and the contract test); rulings landed as D44–D48
 
-### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **77%** · 7/9<!-- /bar -->
+### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `███████░░░` **72%** · 8/11<!-- /bar -->
 - [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
 - [x] Verification tenants removed (250 `wsk<n>-*` fixtures; none other existed)
 - [x] RustFS up from the pinned digest and bootstrapped (16 changes, then 0); MinIO container removed
@@ -73,7 +73,9 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Defect fixed: every table was owned by `postgres` and `webdesk_app` had 0 grants — DB rebuilt as the repo intends (migrator-owned, 74 app grants, revokes intact, RLS integrity 19/19)
 - [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
 - [ ] `api.gaiada.online` vhost enabled with TLS (after the A record)
-- [ ] The api image on the box rebuilt from LF sources off the live box, then signed via a release
+- [x] The api image on the box built off the live box (sumopod `webdesk-api:1cbee520`, transferred in 30 s)
+- [ ] The api image signed via a release
+- [ ] ERP egress client's own live probe from `gaiada-platform-1` (needs the release that ships WSK-63b + its compose `extra_hosts`)
 
 ### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
@@ -93,11 +95,11 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] RLS integrity includes `control_idempotency_keys` (20 tables); cross-tenant probe with a positive control
 - [x] Every existing suite green after 0009 (api 419/0/0; `/v1` bytes 32/32 identical; contract 60/60)
 
-### Wave A · WSK-63 · The control channel made real <!-- bar -->🟡 `███░░░░░░░` **25%** · 1/4<!-- /bar -->
-- [ ] Internal vhost `control.webdesk.internal`: mTLS, verified-cert header overwrite, Caddy gate header; no new host port
-- [ ] On the box: Keycloak client `webdesk-control`, client + server certs from the internal CA, NTP offset < 1 s
+### Wave A · WSK-63 · The control channel made real <!-- bar -->✅ `██████████` **100%** · 4/4<!-- /bar -->
+- [x] Internal vhost `control.webdesk.internal`: mTLS, verified-cert header overwrite, Caddy gate header; no new host port (live on 172.17.0.1:9443 only)
+- [x] On the box: Keycloak client `webdesk-control`, client + server certs from the internal CA, NTP offset < 1 s (token: aud `webdesk-control-plane`, four `webdesk:*` scopes)
 - [x] ERP egress client: shared hash vectors, single-flight token cache, circuit breaker, no secret in logs (42/42 + 7/7 on Linux)
-- [ ] Live: a contract read passes all four layers; the same call without a client cert fails at Layer 1
+- [x] Live: certificate + token reach the contract handler; no cert / foreign CA → 400 at nginx; forged cert + gate headers overwritten (Layer 2 answers, never Layer 1); garbage token → 401 Layer 2
 
 ### Wave A · WSK-47 · Cerbos kinds <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
 - [x] `webdesk_content_item` + `webdesk_collection`; maker ≠ checker, single-item self-publish (D46); publish/schedule without an approval denied for every principal
