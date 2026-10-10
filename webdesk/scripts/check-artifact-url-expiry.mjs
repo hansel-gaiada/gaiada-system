@@ -9,14 +9,14 @@
 // (WSK-15) calls to mint the `sdkTsUrl`/`openapiUrl`/`contractMdUrl` a tenant's control-plane
 // contract response carries — against a REAL, throwaway RustFS container (WSK-52 replaced MinIO;
 // WSK-D42 ruling). Not a mock, not a unit-level assertion on the SDK's signature-generation math:
-// an actual HTTP GET against an actual presigned URL. The post-TTL refusal is EXPECTED to be 403
-// (see the classifier below), but that is unconfirmed against RustFS until a real --docker run
-// prints it: the run output is the evidence, not this comment.
+// an actual HTTP GET against an actual presigned URL, observed to succeed before its TTL and to be
+// refused after it. Observed on rustfs/rustfs:1.0.0 (2026-10-11, --docker): 200 before the TTL,
+// then 403 `AccessDenied` "Request has expired", and a fresh URL for the same object 200 again.
 //
 // Run for real (spins up its own throwaway `rustfs/rustfs:1.0.0` container, tears it down after):
 //   node webdesk/scripts/check-artifact-url-expiry.mjs --docker
 // Against an already-running RustFS (e.g. the dev compose stack, port 8385):
-//   STORAGE_ENDPOINT=http://localhost:8385 STORAGE_ACCESS_KEY_ID=... STORAGE_SECRET_ACCESS_KEY=... //     node webdesk/scripts/check-artifact-url-expiry.mjs
+//   STORAGE_ENDPOINT=http://localhost:8385 STORAGE_ACCESS_KEY_ID=... STORAGE_SECRET_ACCESS_KEY=... \n//     node webdesk/scripts/check-artifact-url-expiry.mjs
 // Selftest (no RustFS/network needed — proves the response-classification logic can fail):
 //   node webdesk/scripts/check-artifact-url-expiry.mjs --selftest
 
@@ -32,9 +32,9 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  *  live-fetch code so it can be selftested without a network. */
 export function classifyPresignedGetResponse(status) {
   if (status === 200) return 'valid'
-  // S3-API presign expiry is expected to surface as 403 (AccessDenied / SignatureDoesNotMatch /
-  // RequestTimeTooSkewed depending on provider). Expected RustFS behavior, to be re-confirmed by the
-  // real --docker run (the observed status and body are printed there), not assumed from this comment.
+  // S3-API presign expiry surfaces as 403 (AccessDenied / SignatureDoesNotMatch /
+  // RequestTimeTooSkewed depending on provider). RustFS 1.0.0 answers 403 AccessDenied "Request has
+  // expired", observed against the real container (see the header).
   if (status === 403) return 'expired-or-refused'
   return `unexpected-status-${status}`
 }
