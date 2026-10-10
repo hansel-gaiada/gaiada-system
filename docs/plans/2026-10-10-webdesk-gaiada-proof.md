@@ -110,3 +110,18 @@ default** (the owner ruled the states, not the mapping): SHOW/KEEP → shown (78
 MERGE/CUT → hidden (158); `/glossary/` → seo-only (1). The plan rows travel with the items, so the
 routing decisions are not lost. Validation against WSK-64's real 1.1.0 validator runs when WSK-64 merges.
 
+**2026-10-10, WSK-69 (merged; not yet run on GitHub).** CI now plans per-component jobs from a diff
+against the last *green* CI run on main, and merges tiny jobs to cut per-job minute rounding. The
+release builds only changed components and re-tags the rest by digest. That keeps their existing
+cosign signatures valid; digest preservation was proven against a real registry. The planner has
+17/17 unit tests on Linux, and actionlint is clean. Estimates: a WebDesk-only cycle drops from about
+58 to about 14 billed minutes. The deploy job's ~7 min is now the largest fixed cost. **The first push
+re-runs everything, because ci.yml itself changed; the first tag rebuilds all 12, because release.yml
+changed.** The real proof is the second tag: plan shows RE-TAG for the unchanged components, and
+deploy's `cosign verify` passes for all 9.
+
+**Found by WSK-69, not ours to fix:** `platform-nest` shard 1 has been red since about 2026-09-17.
+`monitoring.controller.test.ts:897` hard-codes 2026-09-10 window dates, which have since aged out of
+the list endpoint's 7-day filter. It is a test-only time bomb. The shared checkout shows that file
+modified by another session, so it is left to that owner. The release is not gated on CI.
+
