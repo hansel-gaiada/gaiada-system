@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████░░░░░░░░░░░░░░░░░░░░░░░░` **18%** · 23/124<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████░░░░░░░░░░░░░░░░░░░░░░░░` **19%** · 24/124<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -31,7 +31,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk (delivery half)
-<!-- bar -->🟡 `███████░░░░░░░░░░░░░` **36%** · 17/46<!-- /bar -->
+<!-- bar -->🟡 `████████░░░░░░░░░░░░` **39%** · 18/46<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -43,13 +43,13 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Full `webdesk/api` suite on Linux: 396 passed / 0 failed / 1 skipped
 - [ ] CI `webdesk-api` job green on GitHub with RustFS
 
-### WSK-48a · `/v1` moved out of Payload into `webdesk/api` <!-- bar -->🟡 `███████░░░` **71%** · 5/7<!-- /bar -->
+### WSK-48a · `/v1` moved out of Payload into `webdesk/api` <!-- bar -->🟡 `█████████░` **85%** · 6/7<!-- /bar -->
 - [x] `delivery` module serves `/v1` byte-identically (raw Fastify route, router unchanged)
 - [x] One API-key hash implementation; vocabulary vendored with a drift test
 - [x] WSK-05 demo `content` controller retired with no loss of guard coverage
 - [x] Caddy `/v1/*` → `api`; `payload-gateway` retired from compose and the status page
 - [x] Differential gate on Linux: 696/710 pairs identical, 14 classified, 0 unexplained; contract 60/60; api suite 409/0/1
-- [ ] Combined suite after merging WSK-52 + WSK-48a green on Linux
+- [x] Combined suite after merging WSK-52 + WSK-48a green on Linux (418/0/1; differential 696/710, 0 unexplained; contract 60/60)
 - [ ] Envelope + differential tests ported into `webdesk/api` and wired into CI
 
 ### WSK-53 · gaiada.com content inventory <!-- bar -->✅ `██████████` **100%** · 5/5<!-- /bar -->
