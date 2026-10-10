@@ -53,8 +53,9 @@
 //        outlive any sane HTTP wait (snapshot + import), the caller can poll by retrying, and a
 //        blocked replay would hold a pooled connection. Neither refusal writes an audit row: nothing
 //        was served.
-// The request hash is the REQUEST (tenant, site, env, source, the version AS SENT or null, whether a
-// bundle was sent), not the server-chosen defaults: `promote-<now>` differs per request, so hashing it
+// The request hash is the REQUEST (tenant, site, env, source, the version AS SENT or null, the checksum
+// of the bundle if one was sent: the same key with a different bundle is 409 idempotency-key-reused),
+// not the server-chosen defaults: `promote-<now>` differs per request, so hashing it
 // made every replay of a request without `version` a 409 idempotency-key-reused.
 //
 // The audit row is the claim row. Fields the old after-the-fact row carried are in its args, except the
@@ -67,7 +68,8 @@ import { DbService } from "../db/db.service";
 import { TenantLookupService } from "../tenants/tenant-lookup.service";
 import { AuditService } from "../audit/audit.service";
 import { CommandEnvelope } from "../control/command-envelope";
-import { ContentBundleService } from "./content-bundle.service";
+import { PgIdempotencyStore } from "../control/idempotency/pg-idempotency-store";
+import { ContentBundleService, bundleChecksum } from "./content-bundle.service";
 import { PromotionSnapshotService } from "./promotion-snapshot.service";
 import { PromotionAuditService } from "./promotion-audit.service";
 import { FRONTEND_DEPLOY_DRIVER, type FrontendDeployDriver } from "./frontend-deploy-driver";
@@ -170,6 +172,7 @@ export class PromotionCommandService {
     private readonly tenants: TenantLookupService,
     private readonly auditHash: AuditService,
     private readonly envelope: CommandEnvelope,
+    private readonly idempotency: PgIdempotencyStore,
     private readonly bundles: ContentBundleService,
     private readonly snapshots: PromotionSnapshotService,
     private readonly promotionAudit: PromotionAuditService,
@@ -210,8 +213,15 @@ export class PromotionCommandService {
       version,
       bundleProvided: Boolean(input.bundle),
     };
-    // The REQUEST, not the server's defaults: see the header on why `version` is hashed as sent.
-    const requestHash = this.auditHash.hashArgs({ ...args, version: input.version ?? null });
+    // The REQUEST, not the server's defaults: see the header on why `version` is hashed as sent. A
+    // bundle is hashed by content (its checksum, minus the informational siteId/exportedAt, which
+    // assertContentBundle may default per request), so the same key with a DIFFERENT bundle is 409
+    // idempotency-key-reused instead of replaying the first result.
+    const requestHash = this.auditHash.hashArgs({
+      ...args,
+      version: input.version ?? null,
+      bundleChecksum: input.bundle ? bundleChecksum({ ...input.bundle, siteId: "", exportedAt: "" }) : null,
+    });
     const scopeKey = `${input.tenantSlug}:content.promote:${input.idempotencyKey}`;
     // Known before the claim, so the claim's audit row can carry it.
     const runId = randomUUID();
@@ -449,18 +459,13 @@ export class PromotionCommandService {
   /**
    * Stores the finished run's response body on its idempotency record, in the CALLER's transaction (the
    * one that moves the run to its terminal status). The body goes in as JSON TEXT so a replay is the
-   * original's bytes (see the header). Fenced on the run id and on "not yet stored"; if the record is
-   * gone (expired, or swept) there is nothing to store and the run must still finish, so that is a
+   * original's bytes (see the header). PgIdempotencyStore.amend fences it on the run reference; if the
+   * record is gone (expired, or swept) there is nothing to store and the run must still finish, so that is a
    * warning, not a failure.
    */
   private async storeFinalBody(client: PoolClient, tenantId: string, scopeKey: string, runId: string, body: object): Promise<void> {
-    const { rowCount } = await client.query(
-      `UPDATE control_idempotency_keys SET response = $1::jsonb
-        WHERE tenant_id = $2 AND scope_key = $3 AND status = 'completed'
-          AND response ->> 'promotionRunId' = $4 AND NOT (response ? 'finalBody')`,
-      [JSON.stringify({ promotionRunId: runId, finalBody: JSON.stringify(body) }), tenantId, scopeKey, runId],
-    );
-    if (rowCount !== 1) this.logger.warn(`promotion run ${runId}: no idempotency record to store the final body on (scope key ${scopeKey})`);
+    const wrote = await this.idempotency.amend(client, { tenantId, scopeKey }, { promotionRunId: runId }, { promotionRunId: runId, finalBody: JSON.stringify(body) });
+    if (!wrote) this.logger.warn(`promotion run ${runId}: no idempotency record to store the final body on (scope key ${scopeKey})`);
   }
 
   /**

@@ -3,7 +3,7 @@
 // keys, lifecycle, schema.apply and release commands onto it too, through command-envelope.ts, and
 // M3 T5b moved the promotion and privacy commands (promotion as a SAGA: its claim transaction calls
 // complete() with a run reference, and the finished run later overwrites the record with its body;
-// see promotion/promotion-command.service.ts). No command uses ./idempotency-store.ts any more.
+// see promotion/promotion-command.service.ts and amend() below). The old in-memory store is gone.
 //
 // LIFECYCLE (per scope key):
 //   begin()    — claims the key in its OWN short committed transaction: a row with status
@@ -163,6 +163,25 @@ export class PgIdempotencyStore {
         "This request's idempotency claim was superseded before it completed; nothing was written.",
       );
     }
+  }
+
+  /**
+   * Overwrites the stored response of a COMPLETED record, inside the caller's transaction (`client`,
+   * under the same tenant/platform scope as the record). For a command whose first transaction stores
+   * a REFERENCE (complete(claim, ref)) and whose last transaction stores the final response: the
+   * promotion saga. Fenced like complete(): it only writes while the record for this scope key is
+   * unexpired, `completed`, and still holds exactly `expected` (jsonb equality), so a wrong reference,
+   * a record that is gone, an `in_flight` claim and a second amend (the record no longer equals the
+   * reference) all write nothing. Returns whether it wrote.
+   */
+  async amend(client: PoolClient, target: { tenantId: string | null; scopeKey: string }, expected: unknown, response: unknown): Promise<boolean> {
+    const m = keyMatch(target.tenantId, 3);
+    const { rowCount } = await client.query(
+      `UPDATE control_idempotency_keys SET response = $2::jsonb
+        WHERE ${m.sql} AND status = 'completed' AND expires_at > now() AND response = $1::jsonb`,
+      [JSON.stringify(expected), JSON.stringify(response), target.scopeKey, ...m.params],
+    );
+    return rowCount === 1;
   }
 
   /** The command failed and rolled back: drop the claim so a retry with the same key can run. */

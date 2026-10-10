@@ -8,7 +8,7 @@
 // (plain classes over DbService and AuditService, both reachable here) rather than imported from
 // ControlModule, which does not export them. They hold no state of their own: the idempotency record
 // is the control_idempotency_keys table, so a second instance next to ControlModule's is the same
-// store. The in-memory IdempotencyStore this module used to register is gone.
+// store.
 import { Module } from "@nestjs/common";
 import { TenantsModule } from "../tenants/tenants.module";
 import { AuditModule } from "../audit/audit.module";

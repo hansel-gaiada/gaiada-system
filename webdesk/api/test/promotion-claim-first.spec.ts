@@ -21,7 +21,7 @@ process.env.API_KEY_PEPPER = "wsk25-t5b-pepper-never-used-outside-this-suite";
 process.env.WEBDESK_READ_QUOTA_PER_MIN = process.env.WEBDESK_READ_QUOTA_PER_MIN || "1000";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Client } from "pg";
 import type { LightMyRequestResponse } from "fastify";
 import { Test } from "@nestjs/testing";
@@ -147,7 +147,17 @@ async function fixture(app: NestFastifyApplication): Promise<Fx> {
   return { slug, tenantId, siteId, envId };
 }
 
-/** A bundle that changes the seeded item and adds one: the import appends real content_versions. */
+/** A stable uuid per label: the same label is the same bundle (the request hash covers the bundle). */
+const stableUuid = (label: string) => {
+  const h = createHash("sha1").update(label).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+};
+
+/**
+ * A bundle that changes the seeded item and adds one: the import appends real content_versions.
+ * Deterministic per `title` except `exportedAt`, which is informational and deliberately differs per
+ * call (a replay must match even so).
+ */
 function bundleFor(title: string) {
   return {
     siteId: "informational-only",
@@ -158,7 +168,7 @@ function bundleFor(title: string) {
         collectionKey: "page",
         locale: "en-US",
         slug: `added-${title}`,
-        localizationGroupId: randomUUID(),
+        localizationGroupId: stableUuid(title),
         blocks: [],
         seo: { title },
         publishState: "published",
@@ -354,6 +364,29 @@ describe("M3 T5b — content.promote / content.rollback claim the WS4 approval f
       expect(other.statusCode).toBe(409);
       expect(other.json().type).toBe(`${PROBLEM}idempotency-key-reused`);
       expect(await runCount(fx, "promote")).toBe(1);
+    });
+
+    it("the same key with a DIFFERENT bundle is 409 idempotency-key-reused, and nothing runs (promote)", async () => {
+      const fx = await fixture(app);
+      const idem = randomUUID();
+      const first = await post(app, promoteUrl(fx), promoteH(randomUUID(), idem), { version: "same", bundle: bundleFor("first") });
+      expect(first.statusCode).toBe(201);
+      const applySpy = vi.spyOn(app.get(ContentBundleService), "applyBundle");
+      rec.reset();
+      const other = await post(app, promoteUrl(fx), promoteH(randomUUID(), idem), { version: "same", bundle: bundleFor("second") });
+      const calls = applySpy.mock.calls.length;
+      applySpy.mockRestore();
+      expect(other.statusCode).toBe(409);
+      expect(other.json().type).toBe(`${PROBLEM}idempotency-key-reused`);
+      expect(calls).toBe(0);
+      expect(rec.count(/INSERT INTO (audit_entries|promotion_runs|promotion_snapshots)/)).toBe(0);
+      expect(await runCount(fx, "promote")).toBe(1);
+      expect(await snapshotCount(fx)).toBe(1);
+      // ... while the SAME bundle (its informational exportedAt differs per call) still replays.
+      const same = await post(app, promoteUrl(fx), promoteH(randomUUID(), idem), { version: "same", bundle: bundleFor("first") });
+      expect(same.statusCode).toBe(201);
+      expect(same.json().replayed).toBe(true);
+      expect(bodyText(same)).toBe(bodyText(first));
     });
 
     it("a replay that arrives while the run is still IN PROGRESS is 409 promotion-in-progress, starts nothing, and the finished run then replays its body", async () => {

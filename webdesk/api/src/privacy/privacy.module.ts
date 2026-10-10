@@ -44,8 +44,8 @@ import { RealPolicyDecisionPoint } from "../control/policy/real-policy-decision-
 
 // M3 T5b — the command envelope and the durable idempotency store, re-provided here for the same reason
 // as the channel classes above (ControlModule does not export them). Both are stateless: the
-// idempotency record is the control_idempotency_keys table. CommandAuditService and the in-memory
-// IdempotencyStore are no longer used by this module.
+// idempotency record is the control_idempotency_keys table. CommandAuditService is no longer used by
+// this module.
 import { CommandEnvelope } from "../control/command-envelope";
 import { PgIdempotencyStore } from "../control/idempotency/pg-idempotency-store";
 
