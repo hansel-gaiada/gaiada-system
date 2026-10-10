@@ -59,12 +59,27 @@ test.describe("client portal", () => {
       ["/portal/requests", /Requests/],
       ["/portal/approvals", /Approvals/],
       ["/portal/invoices", /Invoices/],
-      ["/portal/contracts", /Agreements/],
-      ["/portal/profile", /Profile/],
+      ["/portal/contracts", /Contracts/],
+      ["/portal/profile", /People/],
     ] as Array<[string, RegExp]>) {
       await page.goto(href);
       await expect(page.getByRole("heading", { level: 1 })).toContainText(heading);
       // An error boundary's fallback also renders an h1, so the heading alone proves nothing.
+      await expect(page.getByText(/something went wrong|application error/i)).toHaveCount(0);
+    }
+    // PV2-04 - each of the five AREA links, once. A primary link goes to the area's first sub-tab.
+    for (const [area, heading] of [
+      ["Overview", /./],
+      ["Projects", /Projects/],
+      ["Business", /Business/],
+      ["Contracts & billing", /Contracts/],
+      ["People", /People/],
+    ] as Array<[string, RegExp]>) {
+      await page
+        .getByRole("navigation", { name: "Portal sections" })
+        .getByRole("link", { name: new RegExp("^" + area.replace("&", "\\&")) })
+        .click();
+      await expect(page.getByRole("heading", { level: 1 })).toContainText(heading);
       await expect(page.getByText(/something went wrong|application error/i)).toHaveCount(0);
     }
     expect(pageErrors).toEqual([]);

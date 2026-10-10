@@ -4,6 +4,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPortalOverview } from "@/lib/portal-data";
 import { PortalShell } from "@/components/portal/PortalShell";
+import { portalBadges } from "@/lib/portalNav";
 
 // CP-7 — the client portal's own route group.
 //
@@ -44,6 +45,8 @@ export default async function PortalLayout({ children }: { children: React.React
     ? (await getPortalOverview(userId, tenant).catch(() => null))?.overview ?? null
     : null;
 
+  const { projectsBadge, billingBadge } = portalBadges(overview);
+
   const initials = (me.name ?? me.email ?? "?")
     .split(/\s+/)
     .slice(0, 2)
@@ -55,7 +58,8 @@ export default async function PortalLayout({ children }: { children: React.React
       clientName={overview?.client?.name ?? null}
       userName={me.name ?? me.email ?? "You"}
       userInitials={initials}
-      pendingCount={overview?.needsYou?.length ?? 0}
+      projectsBadge={projectsBadge}
+      billingBadge={billingBadge}
     >
       {children}
     </PortalShell>

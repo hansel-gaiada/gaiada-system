@@ -41,7 +41,7 @@ export default async function PortalContractPage({ params }: { params: Promise<{
   return (
     <>
       <PortalPageHead
-        eyebrow={k.reference ? `${k.reference}${k.version > 1 ? ` · version ${k.version}` : ""}` : "Agreement"}
+        eyebrow={k.reference ? `${k.reference}${k.version > 1 ? ` · version ${k.version}` : ""}` : "Contract"}
         title={k.title}
         actions={<PortalLive topics={["contracts"]} />}
       />
@@ -127,7 +127,7 @@ export default async function PortalContractPage({ params }: { params: Promise<{
           </Card>
         )}
 
-        <PortalLink href="/portal/contracts">All agreements</PortalLink>
+        <PortalLink href="/portal/contracts">All contracts</PortalLink>
       </div>
     </>
   );

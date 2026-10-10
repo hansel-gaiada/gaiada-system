@@ -1,55 +1,67 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { PORTAL_AREAS, activePortalNav } from "@/lib/portalNav";
 
-// The portal's nine destinations. A client component only because the active tab needs `usePathname`.
+// The portal's navigation: five areas, each with sub-tabs (ruling PV-D4,
+// docs/plans/2026-10-10-three-perspectives.md; PV2-04). A client component only because the active
+// area needs `usePathname`.
 //
-// Order is the order a client asks the questions in: where are we, on what, when, what did we get, what
-// do I need to ask for, what do you need from me, what do I owe, what did we agree, who am I. "Requests"
-// (MI-04) sits between Deliverables and Approvals — asking for something is a different act from
-// signing something, so it does not get folded into the Approvals tab even though both can end up
-// waiting on staff. "Invoices" and "Agreements" are not buried under a Settings-like grouping — being
-// able to find your own contract is a headline feature of a client portal, not an administrative detail.
-const TABS: Array<{ href: string; label: string; badge?: "pending" }> = [
-  { href: "/portal", label: "Overview" },
-  // CC-D1 — the Client Centre profile (business type, setup fields, connections), CC-D4-editable by
-  // a client-wide signer contact and read-only for everyone else. Right after Overview per the plan:
-  // "who we are" belongs beside "where things stand", ahead of the transactional tabs that follow.
-  { href: "/portal/company", label: "Business profile" },
-  { href: "/portal/projects", label: "Projects" },
-  { href: "/portal/timeline", label: "Timeline" },
-  { href: "/portal/deliverables", label: "Deliverables" },
-  { href: "/portal/requests", label: "Requests" },
-  { href: "/portal/approvals", label: "Approvals", badge: "pending" },
-  // SMM-31/32 — social-post sign-off. Its own tab rather than folded into "Approvals": that tab's
-  // pending count comes from `portal/overview`'s `needsYou` (gates + unsigned contracts), which
-  // SMM-31's backend never extended — this tab deliberately carries NO badge rather than costing
-  // every portal page load a second always-on fetch just to produce one, or claiming an unverified
-  // number. The list page itself surfaces its own pending count once opened.
-  { href: "/portal/social-reviews", label: "Post reviews" },
-  { href: "/portal/invoices", label: "Invoices" },
-  { href: "/portal/contracts", label: "Agreements" },
-  { href: "/portal/profile", label: "Profile" },
-];
-
-export function PortalTabs({ pendingCount }: { pendingCount: number }) {
+// WHY FIVE AREAS: eleven flat tabs made a client scan a long strip to find one thing. The areas follow
+// the questions a client asks: where are we (Overview), what is being built (Projects, with the
+// approvals, deliverables, requests, post reviews and timeline that hang off it), who are we
+// (Business), what did we agree and what do I owe (Contracts & billing), who is on the account (People).
+//
+// WHY NO PATH MOVED: the sub-tab paths (/portal/approvals, /deliverables, /requests, /social-reviews,
+// /timeline, /contracts, /invoices) are already in emails and notifications sent to clients
+// (finding 7). Regrouping happens here, in the nav only; nothing is renamed or redirected. Each area's
+// primary link goes to its FIRST sub-tab.
+//
+// BADGES: Projects carries the count of gates waiting on the client; Contracts & billing carries unsigned
+// contracts plus overdue invoices (both computed in the layout from the overview it already fetches).
+// The "Post reviews" sub-tab deliberately carries NO badge: SMM-31/32's backend never extended
+// `portal/overview`'s `needsYou`, so a badge would cost every portal page load a second always-on fetch
+// just to produce one, or claim an unverified number. The list page surfaces its own pending count once
+// opened.
+export function PortalTabs({ projectsBadge, billingBadge }: { projectsBadge: number; billingBadge: number }) {
   const pathname = usePathname() ?? "/portal";
+  const { areaKey, tabHref } = activePortalNav(pathname);
+  const badges: Record<string, number> = { projects: projectsBadge, billing: billingBadge };
+  const active = PORTAL_AREAS.find((a) => a.key === areaKey) ?? null;
   return (
     <>
-      {TABS.map((t) => {
-        // Exact match for the root tab, prefix match for the rest — otherwise "/portal" would light up
-        // on every page (every path starts with it) and a detail route like
-        // `/portal/invoices/inv-1` would light up nothing.
-        const active = t.href === "/portal" ? pathname === "/portal" : pathname.startsWith(t.href);
-        return (
-          <Link key={t.href} href={t.href} className="cp-tab" aria-current={active ? "page" : undefined}>
-            {t.label}
-            {t.badge === "pending" && pendingCount > 0 && (
-              <span className="cp-tab__count" aria-label={`${pendingCount} waiting for you`}>{pendingCount}</span>
-            )}
-          </Link>
-        );
-      })}
+      <nav className="cp-tabs" aria-label="Portal sections">
+        {PORTAL_AREAS.map((a) => {
+          const count = badges[a.key] ?? 0;
+          return (
+            <Link
+              key={a.key}
+              href={a.tabs[0].href}
+              className="cp-tab"
+              aria-current={a.key === areaKey ? "page" : undefined}
+            >
+              {a.label}
+              {count > 0 && (
+                <span className="cp-tab__count" aria-label={`${count} waiting for you`}>{count}</span>
+              )}
+            </Link>
+          );
+        })}
+      </nav>
+      {active && active.tabs.length > 1 && (
+        <nav className="cp-subtabs" aria-label={`${active.label} pages`}>
+          {active.tabs.map((t) => (
+            <Link
+              key={t.href}
+              href={t.href}
+              className="cp-subtab"
+              aria-current={t.href === tabHref ? "page" : undefined}
+            >
+              {t.label}
+            </Link>
+          ))}
+        </nav>
+      )}
     </>
   );
 }

@@ -9,7 +9,7 @@ import { ClientCentreShell } from "@/components/client-centre/ClientCentreShell"
 import { PortalPageHead } from "@/components/portal/PortalBits";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 
-// CC-D1 — the portal's Business profile tab (CC-D9: labelled "Company" until alpha.342; the URL
+// CC-D1 — the portal's Business tab (CC-D9: labelled "Company" until alpha.342; the URL
 // stays `/portal/company` so links already sent to clients keep working). No client id in the URL (the plan's own route,
 // `/portal/company/[[...section]]`): `GET /portal/centre` is the caller's OWN client list, one
 // client goes straight in, several go through `getActivePortalClient`'s cookie (see
@@ -26,14 +26,14 @@ export default async function PortalCompanyPage({
   const { section } = await params;
 
   if (!tenant) {
-    return (<><PortalPageHead eyebrow="Your business" title="Business profile" /><EmptyNote>No workspace selected.</EmptyNote></>);
+    return (<><PortalPageHead eyebrow="Your business" title="Business" /><EmptyNote>No workspace selected.</EmptyNote></>);
   }
 
   const scope = await listPortalCentres(userId, tenant);
   if (scope.length === 0) {
     return (
       <>
-        <PortalPageHead eyebrow="Your business" title="Business profile" />
+        <PortalPageHead eyebrow="Your business" title="Business" />
         <EmptyNote>We couldn&apos;t find a company profile linked to your account. Ask your account manager.</EmptyNote>
       </>
     );
@@ -44,7 +44,7 @@ export default async function PortalCompanyPage({
   if (!clientId || !profile) {
     return (
       <>
-        <PortalPageHead eyebrow="Your business" title="Business profile" />
+        <PortalPageHead eyebrow="Your business" title="Business" />
         <EmptyNote>We couldn&apos;t load your company profile. Please try again shortly.</EmptyNote>
       </>
     );
@@ -52,7 +52,7 @@ export default async function PortalCompanyPage({
 
   return (
     <>
-      <PortalPageHead eyebrow="Your business" title="Business profile" lead="How your business is set up — the details and connections our team uses to work on your account." />
+      <PortalPageHead eyebrow="Your business" title="Business" lead="How your business is set up — the details and connections our team uses to work on your account." />
       <ClientCentreShell
         clientId={clientId}
         basePath="/portal/company"
