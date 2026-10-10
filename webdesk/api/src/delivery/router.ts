@@ -46,7 +46,7 @@ export interface V1Deps {
   resolveTenantBySlug(slug: string): Promise<ResolvedTenant | null>
   /** Re-reads api_keys fresh on every call; null for unknown / revoked / orphaned keys. */
   resolveApiKey(tenant: ResolvedTenant, plaintextKey: string): Promise<ResolvedApiKey | null>
-  onAuthenticated?(auth: ResolvedApiKey, ctx: { instance: string; requestId: string }): AuthGate | void
+  onAuthenticated?(auth: ResolvedApiKey, ctx: { instance: string; requestId: string }): AuthGate | void | Promise<AuthGate | void>
 }
 
 const logger = new Logger('DeliveryRouter')
@@ -135,7 +135,7 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
       return problem(401, 'invalid-credentials', 'Invalid credentials', 'Unknown tenant or invalid key.', instance, requestId)
     }
 
-    const gate = deps.onAuthenticated?.(auth, { instance, requestId })
+    const gate = await deps.onAuthenticated?.(auth, { instance, requestId })
     if (gate?.reject) return withHeaders(gate.reject, gate.headers)
 
     const locale = url.searchParams.get('locale')

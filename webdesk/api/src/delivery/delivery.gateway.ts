@@ -72,8 +72,8 @@ export class DeliveryGateway implements OnModuleInit {
       // response (status/body/content-type/Cache-Tag identical). Over quota: 429 in the frozen
       // problem+json envelope (not TenantQuotaGuard's ad-hoc `{ error, resetAt }`), because /v1's
       // contract is "one error shape for every failure".
-      onAuthenticated: (auth, { instance, requestId }): AuthGate => {
-        const d = this.quota.consume(auth.tenantId);
+      onAuthenticated: async (auth, { instance, requestId }): Promise<AuthGate> => {
+        const d = await this.quota.consume(auth.tenantId);
         const headers: Record<string, string> = {
           "x-ratelimit-limit": String(d.limit),
           "x-ratelimit-remaining": String(d.remaining),

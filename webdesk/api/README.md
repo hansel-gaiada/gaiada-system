@@ -30,7 +30,7 @@ Env renames (WSK-52): `MINIO_ENDPOINT`→`STORAGE_ENDPOINT`; `MINIO_BUCKET_{MEDI
 - `src/api-keys/` — mint/rotate/revoke service + controller (`/internal/tenants/:tenantSlug/api-keys`).
 - `src/auth/` — `ApiKeyAuthGuard` (resolves the key, sets tenant context) + `ScopeGuard` +
   `RequireScope` decorator.
-- `src/rate-limit/` — `TenantQuotaService` (in-memory fixed window, per tenant) + `TenantQuotaGuard`.
+- `src/rate-limit/` — `TenantQuotaService` (Redis fixed window, per tenant, shared by every api replica; per-process fallback if Redis is down) + `TenantQuotaGuard`.
 - `src/content/` — RETIRED by WSK-48a (was a demo read/write route that existed to prove the guards
   gate a "content route"; the guard coverage now runs against `src/delivery/` and media upload — see
   "Delivery (WSK-48a)" at the end of this file).
@@ -1734,7 +1734,11 @@ Serves, GET only, with the frozen envelope (design §05):
   applied after the key resolves. In-quota responses are byte-identical and gain `X-RateLimit-*`
   headers; over quota is a `429` in the frozen problem+json envelope (slug `rate-limited`, `Retry-After`).
   Default is 300 requests/min/tenant (`WEBDESK_READ_QUOTA_PER_MIN`) — check that against a site build's
-  fetch burst before enabling publicly.
+  fetch burst before enabling publicly. M3 T6: the counter is in Redis (aligned window, one Lua `INCR` +
+  first-hit `PEXPIRE` on `webdesk:quota:<tenantId>:<windowStart>`), so the quota holds across replicas.
+  If Redis errors or takes over 200 ms, that request falls back to a per-process window (fail open, one
+  warning a minute): read availability beats quota precision. `X-RateLimit-Reset` is now the end of the
+  aligned window.
 - `vocabulary/` — **vendored, mechanically**, from `webdesk/delivery/vocabulary/` (this package is
   CommonJS and cannot import the ESM `.ts` files). `node src/delivery/vocabulary/vendor.mjs`
   regenerates; `test/delivery/vocabulary-vendor-drift.spec.ts` fails if any copy diverges.
