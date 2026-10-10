@@ -9,6 +9,14 @@
 // WSK-06 — the 9 block types (webdesk-design.md §05, Layer 1), each with a typed `props` schema
 // built once from the primitives in ./primitives.ts. This is the shared code every tenant's page
 // composition (Layer 2, collections.schema jsonb) draws its blocks from.
+//
+// WSK-64 (vocabulary 1.1.0, ruling WSK-D44) adds ONE block type, `fields`: the composition-typed
+// block. It carries an item's typed field values as `{ type: 'fields', props: {...} }` at
+// `blocks[0]`, and its props are typed by the collection's composition, NOT by the vocabulary —
+// so its vocabulary `fields` list is empty and `validateBlock` treats it as a known block with no
+// vocabulary props. The composition-aware check lives in ./item-fields.ts. The 9 generic blocks
+// are unchanged. `fields` is never listed in a composition's `blocks` (see COMPOSABLE_BLOCK_TYPE_NAMES)
+// and is non-visual: a renderer resolves it as known and renders nothing for it.
 import { type FieldDef, validateField } from './primitives'
 
 export type BlockType =
@@ -21,6 +29,7 @@ export type BlockType =
   | 'testimonial'
   | 'faq'
   | 'logoCloud'
+  | 'fields'
 
 export interface BlockDef {
   type: BlockType
@@ -96,7 +105,15 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
       { name: 'logos', primitive: 'media', multiple: true, required: true },
     ],
   },
+  // 1.1.0: the composition-typed block. Empty on purpose: its props are typed per collection.
+  fields: { type: 'fields', fields: [] },
 }
+
+/** 1.1.0: the one composition-typed block type. */
+export const FIELDS_BLOCK_TYPE = 'fields' as const
+
+/** The block types a composition may list in `blocks`: every block type except `fields`. */
+export type ComposableBlockType = Exclude<BlockType, typeof FIELDS_BLOCK_TYPE>
 
 export const BLOCK_TYPE_NAMES: BlockType[] = Object.keys(BLOCKS) as BlockType[]
 
@@ -104,11 +121,20 @@ export function isBlockType(v: string): v is BlockType {
   return (BLOCK_TYPE_NAMES as string[]).includes(v)
 }
 
+/** 1.1.0: the 9 generic (visual) block types: what a composition's `blocks` may list. */
+export const COMPOSABLE_BLOCK_TYPE_NAMES: ComposableBlockType[] = BLOCK_TYPE_NAMES.filter(
+  (t): t is ComposableBlockType => t !== FIELDS_BLOCK_TYPE,
+)
+
+export function isComposableBlockType(v: string): v is ComposableBlockType {
+  return (COMPOSABLE_BLOCK_TYPE_NAMES as string[]).includes(v)
+}
+
 export interface BlockValidation {
   valid: boolean
   /** Empty when valid, or when the type is unknown (see the renderer-invariant note below). */
   errors: string[]
-  /** True when `type` is not one of the 9 known block types. */
+  /** True when `type` is not one of the known block types (the 9 generic ones plus `fields`). */
   unknownType: boolean
 }
 

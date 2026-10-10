@@ -25,9 +25,17 @@ export {
   PRIMITIVE_NAMES,
   isPrimitiveName,
   validateField,
+  validateFieldValue,
+  MULTIPLE_CAPABLE_PRIMITIVES,
+  FIELD_DEF_KEYS,
+  FIELD_NAME_PATTERN,
+  MAX_GROUP_DEPTH,
   type PrimitiveName,
   type PrimitiveDef,
   type FieldDef,
+  type FieldUi,
+  type FieldWidget,
+  type ValueIssue,
 } from './primitives.ts'
 
 // --- Layer 1: block types -----------------------------------------------------------------
@@ -36,6 +44,10 @@ export {
   BLOCK_TYPE_NAMES,
   isBlockType,
   validateBlock,
+  FIELDS_BLOCK_TYPE,
+  COMPOSABLE_BLOCK_TYPE_NAMES,
+  isComposableBlockType,
+  type ComposableBlockType,
   type BlockType,
   type BlockDef,
   type BlockValidation,
@@ -70,7 +82,11 @@ export {
   validateTenantComposition,
   formatCompositionIssue,
   formatCompositionIssues,
+  isVocabularyVersionSupported,
+  COMPOSITION_KEYS,
   type CollectionComposition,
+  type CollectionUi,
+  type PlaceholderRule,
   type TenantComposition,
   type CompositionIssue,
   type CompositionValidationResult,
@@ -95,3 +111,12 @@ export {
   type VocabularyChangeContext,
   type RendererDiff,
 } from './breaking-change.ts'
+
+// --- WSK-64: the composition-typed `fields` block (vocabulary 1.1.0) ----------------------
+export {
+  validateItemContent,
+  validateFieldValues,
+  fieldsBlockOf,
+  type ItemIssue,
+  type ItemContentValidation,
+} from './item-fields.ts'

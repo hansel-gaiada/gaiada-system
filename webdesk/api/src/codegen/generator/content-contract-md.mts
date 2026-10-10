@@ -2,18 +2,28 @@
 // (not by re-parsing the OpenAPI JSON it produces — that would be a second, lossy transform of
 // the same source data for no benefit). Human-readable restatement of the contract a scaffolded
 // site (WSK-20) or its author reads before writing a single fetch call.
-import type { BlockType } from "../../../../payload/vocabulary/blocks.ts";
+//
+// WSK-64 (vocabulary 1.1.0): a collection that declares `fields` carries them in the composition-
+// typed `fields` block at blocks[0]; group sub-fields are listed nested, and `multiple`, `itemKey`
+// and `localized: false` are stated per field. Editor-only `ui` hints are not part of the contract.
+import type { ComposableBlockType } from "../../../../payload/vocabulary/blocks.ts";
 import { BLOCKS } from "../../../../payload/vocabulary/blocks.ts";
+import type { FieldDef } from "../../../../payload/vocabulary/primitives.ts";
 import type { TenantComposition } from "../../../../payload/vocabulary/composition.ts";
 import type { OpenApiBuilderInput } from "./openapi-builder.mts";
 
-function fieldLine(f: { name: string; primitive: string; required?: boolean; options?: string[] }): string {
+function fieldLine(f: FieldDef, depth = 0): string {
   const req = f.required ? "required" : "optional";
   const opts = f.options && f.options.length > 0 ? ` (one of: ${f.options.join(", ")})` : "";
-  return `  - \`${f.name}\` — ${f.primitive}, ${req}${opts}`;
+  const list = f.multiple ? ", list" : "";
+  const key = f.multiple && f.itemKey ? `, items keyed by \`${f.itemKey}\`` : "";
+  const neutral = f.localized === false ? ", locale-neutral (the default-locale value is authoritative)" : "";
+  const lines = [`${"  ".repeat(depth + 1)}- \`${f.name}\` — ${f.primitive}${list}, ${req}${opts}${key}${neutral}`];
+  if (f.primitive === "group") for (const sub of f.fields ?? []) lines.push(fieldLine(sub, depth + 1));
+  return lines.join("\n");
 }
 
-function blockSection(type: BlockType): string {
+function blockSection(type: ComposableBlockType): string {
   const lines = [`- **${type}**`];
   for (const f of BLOCKS[type].fields) lines.push(fieldLine(f));
   return lines.join("\n");
@@ -54,15 +64,17 @@ export function renderContentContractMd(input: OpenApiBuilderInput): string {
     lines.push(`- \`GET /v1/t/${input.tenantSlug}/${key}\` — cursor-paginated list`);
     lines.push(`- \`GET /v1/t/${input.tenantSlug}/${key}/{slug}\` — one item`);
     lines.push("");
-    if (comp.fields && comp.fields.length > 0) {
-      lines.push("**Fields** (this collection's own composition-as-data — see design §05 Layer 2):");
+    if (comp.fields !== undefined) {
+      lines.push('**Fields** — carried in `blocks[0]` as `{ "type": "fields", "props": { ... } }` (vocabulary 1.1.0). Closed: no other keys.');
       for (const f of comp.fields) lines.push(fieldLine(f));
+      if (comp.singleton) lines.push("- Singleton: at most one item per locale.");
+      if (comp.localized === false) lines.push("- Not localized: items exist only in the default locale.");
       lines.push("");
     }
     if (comp.blocks === undefined) {
-      lines.push("**Blocks:** unrestricted — any of the vocabulary's block types may appear (composition declares no `blocks` allow-list).");
+      lines.push(`**Blocks:** unrestricted — any of the vocabulary's generic block types may appear${comp.fields !== undefined ? " after the fields block" : ""} (composition declares no \`blocks\` allow-list).`);
     } else if (comp.blocks.length === 0) {
-      lines.push("**Blocks:** none — this collection never carries page blocks.");
+      lines.push(comp.fields !== undefined ? "**Blocks:** none besides the fields block." : "**Blocks:** none — this collection never carries page blocks.");
     } else {
       lines.push("**Blocks** (this collection's declared allow-list):");
       lines.push("");

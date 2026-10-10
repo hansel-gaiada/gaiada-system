@@ -75,12 +75,13 @@ function check(name, ok, detail) {
 }
 {
   const r = validateCollectionComposition('survey', {
-    fields: [{ name: 'satisfied', primitive: 'boolean', required: true }],
+    // WSK-64: `boolean` became a real primitive in 1.1.0, so the probe is a name that is not.
+    fields: [{ name: 'satisfied', primitive: 'color', required: true }],
   })
   check('an unknown primitive is rejected', !r.valid, JSON.stringify(r))
   check(
     'the error names the field path and the primitive that does not exist',
-    r.issues.some((i) => i.path === 'survey.fields[0].primitive' && i.message.includes('boolean')),
+    r.issues.some((i) => i.path === 'survey.fields[0].primitive' && i.message.includes('color')),
     JSON.stringify(r.issues),
   )
 }

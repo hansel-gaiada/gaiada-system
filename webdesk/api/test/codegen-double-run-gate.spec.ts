@@ -107,6 +107,51 @@ describe("double-run-gate.mts — real child-process invocation against a live D
   );
 
   it(
+    "WSK-64: PASSES for a tenant whose collections declare fields (vocabulary 1.1.0: group, boolean, markdown, scalar multiple, the fields block)",
+    async () => {
+      const slug = `wsk64-gate-fields-${randomUUID().slice(0, 8)}`;
+      await seedTenant(pool, slug, {
+        service: {
+          blocks: [],
+          singleton: false,
+          ui: { label: "Service pages", group: "Pages", titleField: "h1" },
+          lint: { placeholders: [{ kind: "marker", open: "[CONFIRM:", close: "]", label: "confirm" }] },
+          fields: [
+            { name: "url", primitive: "text", required: true },
+            { name: "h1", primitive: "text" },
+            { name: "publish_ready", primitive: "boolean", required: true },
+            { name: "schema", primitive: "text", multiple: true },
+            { name: "plan", primitive: "group", fields: [{ name: "action", primitive: "select", options: ["SHOW", "HOLD"], required: true }, { name: "why", primitive: "text" }] },
+            { name: "body", primitive: "markdown", required: true },
+          ],
+        },
+        navigation: {
+          singleton: true,
+          blocks: ["richText"],
+          fields: [
+            {
+              name: "primary",
+              primitive: "group",
+              multiple: true,
+              itemKey: "key",
+              fields: [
+                { name: "key", primitive: "text", required: true, localized: false },
+                { name: "label", primitive: "text", required: true },
+              ],
+            },
+          ],
+        },
+        article: { blocks: ["richText"] },
+      });
+
+      const result = runNodeTsx(GATE_SCRIPT, ["--tenants", slug]);
+      expect(result.stdout).toContain("DETERMINISM GATE PASSED");
+      expect(result.status).toBe(0);
+    },
+    60_000,
+  );
+
+  it(
     "NEGATIVE CONTROL — generate-single.mts's own output genuinely differs when the composition genuinely changes between two calls (proves the diff step has something real to catch)",
     async () => {
       const slug = `wsk15-gate-negctrl-${randomUUID().slice(0, 8)}`;

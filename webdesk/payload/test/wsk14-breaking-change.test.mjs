@@ -81,9 +81,9 @@ const baseVocab = currentVocabularySnapshot()
   check('§05 example: a new optional prop on an existing block -> vocabulary MINOR', r.bump === 'minor', JSON.stringify(r))
 }
 {
-  // MINOR: "new primitive"
+  // MINOR: "new primitive" (WSK-64: `boolean` is real since 1.1.0, so the probe is a name that is not)
   const after = clone(baseVocab)
-  after.primitives = [...after.primitives, 'boolean']
+  after.primitives = [...after.primitives, 'color']
   const r = classifyVocabularyChange(baseVocab, after)
   check('§05 example: a new primitive -> vocabulary MINOR', r.bump === 'minor', JSON.stringify(r))
 }

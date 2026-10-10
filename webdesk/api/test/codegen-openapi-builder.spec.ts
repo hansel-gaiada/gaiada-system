@@ -126,10 +126,19 @@ describe("openapi-builder — composition.ts's `blocks` interpretation, honoured
     expect(constValues.sort()).toEqual(["hero", "richText"]);
   });
 
-  it("blocks PRESENT and EMPTY -> this collection never carries page blocks (e.g. `redirect`)", () => {
-    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { fixedstuff: { blocks: [], fields: [{ name: "toPath", primitive: "text", required: true }] } } }) as any;
+  it("blocks PRESENT and EMPTY, no fields -> this collection never carries page blocks", () => {
+    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { fixedstuff: { blocks: [] } } }) as any;
     const blocksSchema = doc.components.schemas["ItemEnvelope_fixedstuff"].properties.blocks;
     expect(blocksSchema.maxItems).toBe(0);
+  });
+
+  it("WSK-64: blocks PRESENT and EMPTY with fields -> exactly one block, the fields block (prefixItems)", () => {
+    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { fixedstuff: { blocks: [], fields: [{ name: "toPath", primitive: "text", required: true }] } } }) as any;
+    const blocksSchema = doc.components.schemas["ItemEnvelope_fixedstuff"].properties.blocks;
+    expect(blocksSchema.prefixItems).toEqual([{ $ref: "#/components/schemas/FieldsBlock_fixedstuff" }]);
+    expect(blocksSchema.minItems).toBe(1);
+    expect(blocksSchema.maxItems).toBe(1);
+    expect(blocksSchema.items).toBeUndefined();
   });
 
   it("the unknown-type branch never restricts `type` to an enum (renderer invariant, §05 hard rule 2)", () => {
@@ -142,7 +151,7 @@ describe("openapi-builder — composition.ts's `blocks` interpretation, honoured
 });
 
 describe("openapi-builder — every field primitive maps to a JSON Schema fragment", () => {
-  it("covers all 8 vocabulary primitives, surfaced as an informational CollectionFields_* component", () => {
+  it("covers the 8 vocabulary 1.0.0 primitives, surfaced as the CollectionFields_* component", () => {
     const doc = buildOpenApiDocument({
       ...BASE_INPUT,
       composition: {
@@ -169,10 +178,103 @@ describe("openapi-builder — every field primitive maps to a JSON Schema fragme
     expect(fieldsSchema.properties.g).toEqual({ type: "string", enum: ["x", "y"] });
     expect(fieldsSchema.properties.h.properties.lat.type).toBe("number");
 
-    // The reference is attached to the list operation, not inlined into the wire-shape response
-    // schema — see openapi-builder.mts's own comment on why `fields` has no distinct wire location.
+    // The pointer on the list operation is kept for existing readers (WSK-64 gave `fields` its wire
+    // location: the fields block at blocks[0], whose props ARE this component).
     expect(doc.paths["/v1/t/unit-tenant/kitchen_sink"].get["x-webdesk-fields-schema"]).toEqual({
       $ref: "#/components/schemas/CollectionFields_kitchen_sink",
     });
+  });
+
+  it("WSK-64: maps group (closed, recursive), boolean, markdown, scalar multiple, itemKey and localized:false", () => {
+    const doc = buildOpenApiDocument({
+      ...BASE_INPUT,
+      vocabularyVersion: "1.1.0",
+      composition: {
+        page: {
+          blocks: [],
+          fields: [
+            { name: "publish_ready", primitive: "boolean", required: true },
+            { name: "body", primitive: "markdown", required: true },
+            { name: "schema", primitive: "text", multiple: true },
+            { name: "plan", primitive: "group", fields: [{ name: "action", primitive: "select", options: ["SHOW"], required: true }, { name: "to", primitive: "text" }] },
+            {
+              name: "primary",
+              primitive: "group",
+              multiple: true,
+              itemKey: "key",
+              fields: [
+                { name: "key", primitive: "text", required: true, localized: false },
+                { name: "label", primitive: "text", required: true },
+              ],
+            },
+          ],
+        },
+      },
+    }) as any;
+    const props = doc.components.schemas["CollectionFields_page"].properties;
+    expect(doc.components.schemas["CollectionFields_page"].required).toEqual(["publish_ready", "body"]);
+    expect(doc.components.schemas["CollectionFields_page"].additionalProperties).toBe(false);
+    expect(props.publish_ready).toEqual({ type: "boolean" });
+    expect(props.body.type).toBe("string");
+    expect(props.body.contentMediaType).toBe("text/markdown");
+    expect(props.schema).toEqual({ type: "array", items: { type: "string" } });
+    expect(props.plan).toEqual({
+      type: "object",
+      properties: { action: { type: "string", enum: ["SHOW"] }, to: { type: "string" } },
+      additionalProperties: false,
+      required: ["action"],
+    });
+    expect(props.primary.type).toBe("array");
+    expect(props.primary["x-webdesk-item-key"]).toBe("key");
+    expect(props.primary.items.additionalProperties).toBe(false);
+    expect(props.primary.items.properties.key).toEqual({ type: "string", "x-webdesk-localized": false });
+  });
+});
+
+describe("openapi-builder — WSK-64 the fields block at blocks[0]", () => {
+  const FIELDS = [{ name: "title", primitive: "text", required: true }] as const;
+
+  it("FieldsBlock_<key> is { type: const 'fields', props: CollectionFields_<key> }, closed", () => {
+    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { page: { fields: [...FIELDS], blocks: [] } } }) as any;
+    expect(doc.components.schemas["FieldsBlock_page"]).toEqual({
+      type: "object",
+      properties: { type: { const: "fields" }, props: { $ref: "#/components/schemas/CollectionFields_page" } },
+      required: ["type", "props"],
+      additionalProperties: false,
+    });
+  });
+
+  it("generic blocks allowed after it -> the documented union fallback, fields block first, position stated", () => {
+    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { page: { fields: [...FIELDS], blocks: ["richText"] } } }) as any;
+    const blocks = doc.components.schemas["ItemEnvelope_page"].properties.blocks;
+    expect(blocks.prefixItems).toBeUndefined();
+    expect(blocks.minItems).toBe(1);
+    expect(blocks["x-webdesk-blocks-prefix"]).toBe("FieldsBlock_page");
+    expect(blocks.items.oneOf[0]).toEqual({ $ref: "#/components/schemas/FieldsBlock_page" });
+    expect(blocks.items.oneOf.length).toBe(3); // fields + richText + unknown
+  });
+
+  it("list items of a fields collection use ListItemEnvelope_<key>, which makes no positional claim", () => {
+    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { page: { fields: [...FIELDS], blocks: [] } } }) as any;
+    expect(doc.components.schemas["ListEnvelope_page"].properties.items.items).toEqual({ $ref: "#/components/schemas/ListItemEnvelope_page" });
+    const listBlocks = doc.components.schemas["ListItemEnvelope_page"].properties.blocks;
+    expect(listBlocks.prefixItems).toBeUndefined();
+    expect(listBlocks.minItems).toBeUndefined();
+    expect(listBlocks.items.oneOf[0]).toEqual({ $ref: "#/components/schemas/FieldsBlock_page" });
+  });
+
+  it("a collection without fields produces no FieldsBlock/ListItemEnvelope components and no fields branch", () => {
+    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { article: { blocks: ["richText"] } } }) as any;
+    const names = Object.keys(doc.components.schemas);
+    expect(names.some((n) => n.startsWith("FieldsBlock_") || n.startsWith("ListItemEnvelope_") || n.startsWith("CollectionFields_"))).toBe(false);
+    const oneOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.oneOf;
+    expect(oneOf.some((b: any) => b.properties?.type?.const === "fields")).toBe(false);
+  });
+
+  it("an unrestricted composition never offers `fields` as a generic block", () => {
+    const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { anything: {} } }) as any;
+    const consts = doc.components.schemas["ItemEnvelope_anything"].properties.blocks.items.oneOf.map((b: any) => b.properties?.type?.const).filter(Boolean);
+    expect(consts).not.toContain("fields");
+    expect(consts.length).toBe(9);
   });
 });

@@ -127,7 +127,7 @@ describe("GET /control/v1/tenants/:slug/contract (WSK-15 replacing WSK-21's 501)
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.version).toBe("1.0.0");
-    expect(body.vocabularyVersion).toBe("1.0.0");
+    expect(body.vocabularyVersion).toBe("1.1.0"); // WSK-64: vocabulary 1.1.0
     expect(body.blockLibrary).toEqual({ package: "@gaiada/webdesk-blocks", version: "0.0.0-pending-wsk16", range: "^0.0.0-pending-wsk16" });
     expect(body.contentHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(typeof body.generatedAt).toBe("string");

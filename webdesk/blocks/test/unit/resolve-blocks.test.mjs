@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { resolveBlocks, partitionResolvedBlocks } from '../../src/renderer/resolve-blocks.ts'
-import { BLOCK_TYPE_NAMES } from '../../src/vocabulary/blocks.ts'
+import { COMPOSABLE_BLOCK_TYPE_NAMES } from '../../src/vocabulary/blocks.ts'
 import { fullEnvelopeFixture } from '../fixtures/full-envelope.mjs'
 import { unknownBlockEnvelopeFixture } from '../fixtures/unknown-block-envelope.mjs'
 
@@ -18,7 +18,8 @@ test('every one of the 9 known block types in the full-envelope fixture resolves
     assert.equal(b.known, true, `block[${b.index}] type "${b.type}" should be known`)
   }
   const types = resolved.map((b) => b.type)
-  assert.deepEqual([...types].sort(), [...BLOCK_TYPE_NAMES].sort(), 'fixture should cover every vocabulary block type exactly once')
+  // WSK-64: the 9 VISUAL block types; the non-visual `fields` block is covered by wsk64-fields-block.test.mjs.
+  assert.deepEqual([...types].sort(), [...COMPOSABLE_BLOCK_TYPE_NAMES].sort(), 'fixture should cover every visual vocabulary block type exactly once')
 })
 
 test('an unknown block type resolves known:false without throwing', () => {

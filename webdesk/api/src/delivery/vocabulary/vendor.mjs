@@ -30,8 +30,13 @@ const HERE = path.dirname(url.fileURLToPath(import.meta.url))
 const SOURCE_DIR = path.resolve(HERE, '..', '..', '..', '..', 'payload', 'vocabulary')
 
 // Exactly what ./router.ts, ./content-read.ts and ./redirects.ts import, plus the transitive
-// closure of those (version.ts -> primitives.ts + blocks.ts). NOT composition.ts / breaking-change.ts
-// / index.ts — nothing in the read path needs them.
+// closure of those (version.ts -> primitives.ts + blocks.ts).
+//
+// WSK-64 (vocabulary 1.1.0) adds composition.ts and item-fields.ts: this directory is the api's ONE
+// importable copy of the vocabulary, so the write plane (WSK-41's content commands validate items
+// with validateItemContent) and src/schema-draft/vocabulary-vendor.ts (which re-exports the
+// composition validator from here instead of hand-transcribing it) use the real rules, mechanically.
+// Still NOT breaking-change.ts / index.ts: nothing in the api needs them.
 export const FILES = [
   'cache-tags.ts',
   'problem-details.ts',
@@ -40,6 +45,8 @@ export const FILES = [
   'primitives.ts',
   'blocks.ts',
   'version.ts',
+  'composition.ts',
+  'item-fields.ts',
 ]
 
 export function banner(file) {

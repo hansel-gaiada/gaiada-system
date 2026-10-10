@@ -20,7 +20,7 @@ describe("schema-draft validator — rejects out-of-vocabulary proposals with na
     expect(result.valid).toBe(false);
     const hit = result.issues.find((i) => i.path === "article.fields[0].primitive");
     expect(hit).toBeDefined();
-    expect(hit!.message).toMatch(/"star-rating" is not one of the 8 vocabulary primitives/);
+    expect(hit!.message).toMatch(/"star-rating" is not one of the 11 vocabulary primitives/);
   });
 
   it("REJECTS an unknown composition key (not a block/field-type case, but the same class of out-of-vocabulary construct)", () => {
