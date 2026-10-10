@@ -28,7 +28,6 @@ import { ApiKeysService } from "../src/api-keys/api-keys.service";
 import { TenantLookupService } from "../src/tenants/tenant-lookup.service";
 import { JobsService } from "../src/control/jobs/jobs.service";
 import { PgIdempotencyStore } from "../src/control/idempotency/pg-idempotency-store";
-import { openJson, sealJson } from "../src/control/idempotency/response-seal";
 import {
   RELEASE_TRANSPORT,
   type ReleaseTransportAdapter,
@@ -357,25 +356,26 @@ describe("M3 T5a — the WSK-21 commands on the command envelope", () => {
   // ==============================================================================================
   // Replay
   // ==============================================================================================
-  describe("replay: same key + same body -> same body with replayed:true, no second effect, one .replay audit row", () => {
-    it("key.mint (the plaintext key comes back unchanged)", async () => {
+  describe("replay: same key + same body -> same body with replayed:true, no second effect, one .replay audit row (mint and rotate: 409 withheld instead)", () => {
+    it("key.mint: the plaintext key is never stored, so a replay is 409 idempotency-response-withheld with no second key and no audit row", async () => {
       const fx = await fixture(app);
       const approval = randomUUID();
       const idem = randomUUID();
       rec.reset();
       const first = await post(app, mintUrl(fx), keys(approval, idem), { envId: fx.envId, scope: "read" });
       const second = await post(app, mintUrl(fx), keys(approval, idem), { envId: fx.envId, scope: "read" });
-      expect([first.statusCode, second.statusCode]).toEqual([201, 201]);
+      expect(first.statusCode).toBe(201);
       expect(first.json().replayed).toBe(false);
-      expect(second.json().replayed).toBe(true);
-      expect(second.json().key).toBe(first.json().key);
-      expect(withoutReplayed(second)).toEqual(withoutReplayed(first));
+      expect(first.json().key).toMatch(/^wdsk_/);
+      expect(second.statusCode).toBe(409);
+      expect(second.json().type).toBe(`${PROBLEM}idempotency-response-withheld`);
+      expect(JSON.stringify(second.json())).not.toContain(first.json().key);
       expect(rec.count(/INSERT INTO api_keys/)).toBe(1);
       expect(await keyCount(fx)).toBe(1);
-      expect(await approvalActions(fx.tenantId, approval)).toEqual(["control.key.mint", "control.key.mint.replay"]);
+      expect(await approvalActions(fx.tenantId, approval)).toEqual(["control.key.mint"]); // no .replay row
     });
 
-    it("key.rotate and key.revoke", async () => {
+    it("key.rotate (409 withheld) and key.revoke (a real replay)", async () => {
       const fx = await fixture(app);
       const minted = await post(app, mintUrl(fx), keys(randomUUID(), randomUUID()), { envId: fx.envId, scope: "read" });
       const apiKeyId = minted.json().id as string;
@@ -385,11 +385,14 @@ describe("M3 T5a — the WSK-21 commands on the command envelope", () => {
       rec.reset();
       const r1 = await post(app, `${mintUrl(fx)}/${apiKeyId}/rotate`, keys(rotateApproval, rotateIdem));
       const r2 = await post(app, `${mintUrl(fx)}/${apiKeyId}/rotate`, keys(rotateApproval, rotateIdem));
-      expect([r1.json().replayed, r2.json().replayed]).toEqual([false, true]);
-      expect(r2.json().key).toBe(r1.json().key);
+      expect(r1.statusCode).toBe(201);
+      expect(r1.json().replayed).toBe(false);
       expect(r1.json().key).not.toBe(minted.json().key);
+      expect(r2.statusCode).toBe(409);
+      expect(r2.json().type).toBe(`${PROBLEM}idempotency-response-withheld`);
+      expect(JSON.stringify(r2.json())).not.toContain(r1.json().key);
       expect(rec.count(/UPDATE api_keys SET key_hash/)).toBe(1);
-      expect(await approvalActions(fx.tenantId, rotateApproval)).toEqual(["control.key.rotate", "control.key.rotate.replay"]);
+      expect(await approvalActions(fx.tenantId, rotateApproval)).toEqual(["control.key.rotate"]);
 
       const revokeApproval = randomUUID();
       const revokeIdem = randomUUID();
@@ -473,8 +476,9 @@ describe("M3 T5a — the WSK-21 commands on the command envelope", () => {
       const promote2 = await post(appB, promoteUrl(fx), promote(promoteApproval, promoteIdem), { version: "9.0.0" });
       const apply2 = await post(appB, applyUrl(fx, "t5a-durable"), operate(applyIdem), { schema: COMPOSITION });
       const provision2 = await post(appB, "/control/v1/tenants", operate(provisionIdem), provisionBody);
+      expect(mint2.statusCode).toBe(409); // the key was never stored: nothing to replay, in any process
+      expect(mint2.json().type).toBe(`${PROBLEM}idempotency-response-withheld`);
       for (const [again, first] of [
-        [mint2, mint1],
         [promote2, promote1],
         [apply2, apply1],
         [provision2, provision1],
@@ -483,7 +487,6 @@ describe("M3 T5a — the WSK-21 commands on the command envelope", () => {
         expect(again.json().replayed).toBe(true);
         expect(withoutReplayed(again)).toEqual(withoutReplayed(first));
       }
-      expect(mint2.json().key).toBe(mint1.json().key);
       expect(recB.count(/INSERT INTO api_keys/)).toBe(0);
       expect(recB.count(/INSERT INTO collections/)).toBe(0);
       expect(recB.count(/INSERT INTO tenants/)).toBe(0);
@@ -639,7 +642,7 @@ describe("M3 T5a — the WSK-21 commands on the command envelope", () => {
   });
 
   // ==============================================================================================
-  // The public contract: response bodies are unchanged; the stored key is sealed
+  // The public contract: response bodies are unchanged; the stored key is withheld
   // ==============================================================================================
   it("response bodies keep their exact shape (the ERP parses key.mint at approval time)", async () => {
     const fx = await fixture(app);
@@ -661,55 +664,24 @@ describe("M3 T5a — the WSK-21 commands on the command envelope", () => {
     expect(Object.keys(arch.json().environment)).toEqual(["id", "name", "status"]);
   });
 
-  describe("the plaintext api key never reaches control_idempotency_keys", () => {
-    it("mint and rotate store a sealed response; a replay opens it; a changed API_KEY_PEPPER makes it unreadable (409), never a wrong key", async () => {
-      const fx = await fixture(app);
-      const mintIdem = randomUUID();
-      const mintApproval = randomUUID();
-      const mint = await post(app, mintUrl(fx), keys(mintApproval, mintIdem), { envId: fx.envId, scope: "read" });
-      const plaintext = mint.json().key as string;
-      const rotateIdem = randomUUID();
-      const rotate = await post(app, `${mintUrl(fx)}/${mint.json().id}/rotate`, keys(randomUUID(), rotateIdem));
-      const rotated = rotate.json().key as string;
+  it("the plaintext api key never reaches control_idempotency_keys: mint and rotate store a redacted record with the withheld marker", async () => {
+    const fx = await fixture(app);
+    const mint = await post(app, mintUrl(fx), keys(randomUUID(), randomUUID()), { envId: fx.envId, scope: "read" });
+    const plaintext = mint.json().key as string;
+    const rotate = await post(app, `${mintUrl(fx)}/${mint.json().id}/rotate`, keys(randomUUID(), randomUUID()));
+    const rotated = rotate.json().key as string;
 
-      const stored = await inTenant(fx.tenantId, async (c) =>
-        (await c.query(`SELECT response::text AS body FROM control_idempotency_keys WHERE command IN ('key.mint', 'key.rotate')`)).rows.map((r) => r.body as string),
-      );
-      expect(stored).toHaveLength(2);
-      for (const body of stored) {
-        expect(body).toContain('"sealed"');
-        expect(body).not.toContain(plaintext);
-        expect(body).not.toContain(rotated);
-        expect(body).not.toContain(plaintext.slice(5)); // not even the random part
-      }
-
-      const pepper = process.env.API_KEY_PEPPER;
-      process.env.API_KEY_PEPPER = "a-different-pepper";
-      try {
-        const unreadable = await post(app, mintUrl(fx), keys(mintApproval, mintIdem), { envId: fx.envId, scope: "read" });
-        expect(unreadable.statusCode).toBe(409);
-        expect(unreadable.json().type).toBe(`${PROBLEM}idempotency-response-unreadable`);
-        expect(JSON.stringify(unreadable.json())).not.toContain(plaintext);
-      } finally {
-        process.env.API_KEY_PEPPER = pepper;
-      }
-      const again = await post(app, mintUrl(fx), keys(mintApproval, mintIdem), { envId: fx.envId, scope: "read" });
-      expect(again.statusCode).toBe(201);
-      expect(again.json().key).toBe(plaintext);
-      expect(await keyCount(fx)).toBe(1);
-    });
-
-    it("sealJson/openJson: round trip; a different aad, a tampered blob and a foreign shape all fail to open", () => {
-      const secret = { key: "wdsk_abc", n: 1 };
-      const sealed = sealJson(secret, "scope-a");
-      expect(openJson(sealed, "scope-a")).toEqual(secret);
-      expect(JSON.stringify(sealed)).not.toContain("wdsk_abc");
-      expect(() => openJson(sealed, "scope-b")).toThrow();
-      const [v, iv, tag, ct] = sealed.sealed.split(".");
-      const flipped = `${ct.slice(0, -2)}${ct.endsWith("AA") ? "BB" : "AA"}`;
-      expect(() => openJson({ sealed: [v, iv, tag, flipped].join(".") }, "scope-a")).toThrow();
-      expect(() => openJson({ key: "wdsk_abc" }, "scope-a")).toThrow();
-      expect(sealJson(secret, "scope-a").sealed).not.toBe(sealed.sealed); // fresh IV every time
-    });
+    const stored = await inTenant(fx.tenantId, async (c) =>
+      (await c.query(`SELECT command, response::text AS body FROM control_idempotency_keys WHERE command IN ('key.mint', 'key.rotate') ORDER BY command`)).rows,
+    );
+    expect(stored.map((r) => r.command)).toEqual(["key.mint", "key.rotate"]);
+    for (const { body } of stored) {
+      expect(body).not.toContain(plaintext);
+      expect(body).not.toContain(rotated);
+      expect(body).not.toContain(plaintext.slice(5)); // not even the random part
+      expect(body).not.toContain(rotated.slice(5));
+      expect(Object.keys(JSON.parse(body)).sort()).toEqual(["createdAt", "envId", "id", "scope", "secretWithheld", "tenantId"]); // no `key`, no ciphertext (jsonb reorders keys)
+      expect(JSON.parse(body).secretWithheld).toBe(true);
+    }
   });
 });

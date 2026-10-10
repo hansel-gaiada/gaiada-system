@@ -24,10 +24,13 @@
 // connection out of the pool while it holds this transaction's one: ten blocked approvals would
 // hold ten connections, and an effect waiting for an eleventh would never get it.
 //
-// RESPONSE SEAL. The stored response of key.mint / key.rotate holds the plaintext api key (a replay
-// must return the same key; the ERP retries a mint after a lost response). WSK-05's invariant is that
-// only the key's hash ever reaches the database, so such a response is stored sealed
-// (response-seal.ts) and opened on replay.
+// WITHHELD RESPONSES. key.mint / key.rotate return the plaintext api key exactly once. WSK-66's rule
+// is that the key plaintext is never persisted, so those commands pass `withhold`: the replay record
+// stores the response WITHOUT the secret (and nothing recoverable from it, no ciphertext either), plus
+// `secretWithheld: true`. A replay that finds that marker answers 409 idempotency-response-withheld
+// (nothing changed; mint or rotate again under a new approval). The replay writes no audit row: it
+// served nothing, and a `.replay` row would claim a successful replay. In production the real PDP
+// refuses a reused HIGH approval before the service runs, so such a replay is not reachable there.
 import { Injectable, Logger } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
@@ -38,12 +41,6 @@ import { ControlProblem } from "./content/content-problem";
 
 /** Which row-level-security scope the command's rows (audit, idempotency, effect) live under. */
 export type EnvelopeScope = { kind: "tenant"; tenantId: string } | { kind: "platform" };
-
-/** Encrypts/decrypts the response stored in control_idempotency_keys. `aad` is the scope key. */
-export interface ResponseSeal<R> {
-  seal(result: R, aad: string): unknown;
-  open(stored: unknown, aad: string): R;
-}
 
 export interface EffectOutcome<R> {
   /** The response body (without `replayed`). It is what a replay returns, so it must be JSON-safe. */
@@ -64,7 +61,12 @@ export interface EnvelopeInput<R extends object> {
   ws4ApprovalId: string | null;
   /** Runs inside the envelope's transaction on `client`. Throw to roll everything back. */
   effect: (client: PoolClient) => Promise<EffectOutcome<R>>;
-  seal?: ResponseSeal<R>;
+  /**
+   * Opt-in for a response that carries a one-time secret. Returns the object to store in its place
+   * (the response minus the secret and anything derived from it); the envelope adds
+   * `secretWithheld: true`. The caller still receives the full result on the fresh run.
+   */
+  withhold?: (result: R) => { stored: object };
 }
 
 /** The single-use refusal. Also what a concurrent reuse of one approval gets when it loses the race. */
@@ -128,17 +130,15 @@ export class CommandEnvelope {
     });
 
     if (begin.kind === "replay") {
-      let stored: R;
-      try {
-        stored = input.seal ? input.seal.open(begin.response, input.scopeKey) : (begin.response as R);
-      } catch {
+      if ((begin.response as { secretWithheld?: unknown } | null)?.secretWithheld === true) {
         throw new ControlProblem(
           409,
-          "idempotency-response-unreadable",
-          "Stored response unreadable",
-          "The response stored for this Idempotency-Key cannot be read back. Nothing was changed; retry with a fresh Idempotency-Key.",
+          "idempotency-response-withheld",
+          "Response withheld",
+          "This command's response carried a one-time secret, which is never stored. Nothing was changed. Mint or rotate again under a new approval.",
         );
       }
+      const stored = begin.response as R;
       // A replay changes nothing; it is recorded as such (`.replay` rows are outside the WS4
       // single-use index).
       await this.transact(input.scope, (client) =>
@@ -171,7 +171,7 @@ export class CommandEnvelope {
         await this.idempotency.complete(
           client,
           begin.claim,
-          input.seal ? input.seal.seal(outcome.result, input.scopeKey) : outcome.result,
+          input.withhold ? { ...input.withhold(outcome.result).stored, secretWithheld: true } : outcome.result,
         );
         return outcome.result;
       });

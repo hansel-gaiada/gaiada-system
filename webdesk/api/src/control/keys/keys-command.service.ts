@@ -10,17 +10,20 @@
 // M3 T5a — all three are HIGH, and run in the shared command envelope (../command-envelope.ts):
 // the `control.key.*` audit row (which CLAIMS the WS4 approval) is the first statement of ONE
 // transaction, ApiKeysService's write runs on that same transaction, and the durable replay record
-// is stored in it too. mint/rotate's stored response holds the plaintext key, so it is sealed
-// (../idempotency/response-seal.ts). Nothing runs after commit.
+// is stored in it too. mint/rotate's response holds the plaintext key, which is never persisted: the
+// stored replay record omits it (`withhold`), and a replay answers 409 idempotency-response-withheld.
+// Nothing runs after commit.
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { ApiKeysService, type ApiKeyScope } from "../../api-keys/api-keys.service";
 import { TenantLookupService } from "../../tenants/tenant-lookup.service";
 import { AuditService } from "../../audit/audit.service";
 import { CommandEnvelope } from "../command-envelope";
-import { sealedResponse } from "../idempotency/response-seal";
 
 type MintedKey = Awaited<ReturnType<ApiKeysService["mint"]>>;
+/** The stored replay record of mint/rotate: everything but the one-time plaintext key (no field is derived from it). */
+const withoutKey = ({ key: _key, ...rest }: MintedKey): { stored: object } => ({ stored: rest });
+
 type RevokedKey = Awaited<ReturnType<ApiKeysService["revoke"]>>;
 
 @Injectable()
@@ -55,7 +58,7 @@ export class KeysCommandService {
       effect: async (client) => ({
         result: await this.apiKeys.mintInTx(client, { tenantId: tenant.id, envId: input.envId, scope: input.scope, actor: input.actor, id: apiKeyId }),
       }),
-      seal: sealedResponse<MintedKey>(),
+      withhold: withoutKey,
     });
   }
 
@@ -72,7 +75,7 @@ export class KeysCommandService {
       auditArgs: args,
       ws4ApprovalId: input.ws4ApprovalId,
       effect: async (client) => ({ result: await this.apiKeys.rotateInTx(client, tenant.id, input.apiKeyId, input.actor) }),
-      seal: sealedResponse<MintedKey>(),
+      withhold: withoutKey,
     });
   }
 
