@@ -35,6 +35,8 @@ import { SchemaDraftModule } from "./schema-draft/schema-draft.module";
 // same pattern as SchemaDraftModule above), not nested inside it. This import + registration is
 // the one cross-file edit this ticket's brief explicitly permits.
 import { PromotionModule } from "./promotion/promotion.module";
+// WSK-61 — the scheduler: due publishes/takedowns, live-item version swaps, forms purge, idempotency sweep.
+import { SchedulerModule } from "./scheduler/scheduler.module";
 
 @Module({
   imports: [
@@ -53,6 +55,7 @@ import { PromotionModule } from "./promotion/promotion.module";
     TenantWebhooksModule,
     SchemaDraftModule,
     PromotionModule,
+    SchedulerModule,
   ],
 })
 export class AppModule {}

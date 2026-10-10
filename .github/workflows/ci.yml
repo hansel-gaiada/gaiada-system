@@ -794,8 +794,8 @@ jobs:
       # `npm test` (vitest), which is why they were silently never run before. Run from
       # webdesk/api like the rest of this job; `pg` resolves from webdesk/node_modules.
       # WSK-48b: 0009_v1_bytes.test.mjs is retired (it drove the deleted Payload router) and
-      # 0011_drop_payload.test.mjs is added; the list is exactly the files in migrations/tests/.
-      - name: Migration tests — 0009, 0010 and 0011, against scratch databases
+      # 0011_drop_payload.test.mjs is added; WSK-61 adds 0012_content_schedules.test.mjs. The list is exactly the files in migrations/tests/.
+      - name: Migration tests — 0009, 0010, 0011 and 0012, against scratch databases
         if: ${{ !cancelled() }}
         env:
           SUPERUSER_DATABASE_URL: postgres://postgres:throwaway_superuser@localhost:5432/webdesk
@@ -803,7 +803,7 @@ jobs:
           APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           API_KEY_PEPPER: ci-throwaway-pepper
         run: |
-          for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload; do
+          for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload 0012_content_schedules; do
             echo "##### $t"
             node --import tsx ../migrations/tests/$t.test.mjs
           done

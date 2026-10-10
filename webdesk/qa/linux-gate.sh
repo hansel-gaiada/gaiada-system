@@ -13,10 +13,11 @@
 #                   resolves from webdesk/api/node_modules (they need no database, only that `npm ci`).
 #                   CI runs the same three in the webdesk-api job.
 #   migrations      webdesk/migrations/tests: 0009_content_write_plane, 0010_slug_release_and_ledger (WSK-D51),
-#                   0011_drop_payload (WSK-48b; 0009_v1_bytes is retired, it drove the deleted Payload router).
+#                   0011_drop_payload (WSK-48b; 0009_v1_bytes is retired, it drove the deleted Payload router),
+#                   0012_content_schedules (WSK-61).
 #                   Each builds throwaway scratch databases next to the migrated one and drives the REAL
 #                   runner, so it connects as the cluster superuser too (SUPERUSER_DATABASE_URL). CI runs
-#                   the same three in the webdesk-api job.
+#                   the same four in the webdesk-api job.
 #
 # Design: no host paths, no host ports. The source tar is untarred into a per-run docker VOLUME that
 # every container mounts; one docker network per run; services are reached by container DNS name.
@@ -331,7 +332,7 @@ if selected migrations && [ "$DB_READY" = 1 ]; then
   RENV=(-e "SUPERUSER_DATABASE_URL=$SUPER_URL" -e "MIGRATE_DATABASE_URL=$MIG_URL" -e "APP_DATABASE_URL=$APP_URL"
         -e API_KEY_PEPPER=ci-throwaway-pepper)
   run_suite migrations webdesk/api 'rc=0
-for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload; do
+for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload 0012_content_schedules; do
   echo "##### $t"
   node --import tsx ../migrations/tests/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
 done

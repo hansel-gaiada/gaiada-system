@@ -9,6 +9,7 @@ import { runAsPlatform, runWithTenant } from "./tenant-context";
 @Injectable()
 export class DbService implements OnModuleDestroy {
   readonly pool: TenantAwarePool;
+  private readonly beforeEnd: (() => Promise<void>)[] = [];
 
   constructor(connectionString: string, max = 10) {
     this.pool = createTenantAwarePool({ connectionString, max });
@@ -60,7 +61,18 @@ export class DbService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Registers work that must FINISH before the pool ends: a background worker that still runs queries
+   * (WSK-61's scheduler). Nest destroys modules deepest-first and DbModule sits deep, so a consumer's
+   * own onModuleDestroy can run after the pool is gone and cut a job off mid-run; this makes the order
+   * explicit. Tasks run last-registered-first, each awaited, a failing one never blocks the pool's end.
+   */
+  onBeforeEnd(task: () => Promise<void>): void {
+    this.beforeEnd.push(task);
+  }
+
   async onModuleDestroy() {
+    for (const task of this.beforeEnd.splice(0).reverse()) await task().catch(() => {});
     await this.pool.end();
   }
 }
