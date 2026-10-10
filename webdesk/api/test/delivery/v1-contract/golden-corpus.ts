@@ -1,8 +1,12 @@
-// WSK-48a (tests port) — the differential gate's SECOND half, ported from
-// webdesk/payload/test/v1-differential-extra.test.mjs: every request class the envelope-contract
-// suite does not make (it only asks for happy paths plus three auth failures). Seeds its own
-// fixtures (two differently-composed tenants, a third that is archived), then sends each request to
-// the OLD router and the NEW api route through `comparePair`.
+// WSK-48b -- the /v1 extra corpus: every request class the envelope-contract suite does not make (it
+// only asks for happy paths plus three auth failures). Born in WSK-48a as the second half of the
+// old-router-vs-api differential (ported from payload/test/v1-differential-extra.test.mjs); since
+// WSK-48b it is replayed against the api alone and compared with the committed golden
+// (golden/extra.json, see golden.ts and v1-golden.spec.ts). It is the only coverage of /v1's error
+// paths and edge cases, which is why it was kept when Payload was deleted.
+//
+// Seeds its own fixtures (two differently-composed tenants, a third that is archived), then sends
+// each request through `recordPair`.
 //
 // Covers: unknown tenant, archived (non-active) tenant, missing key, bad key, revoked key,
 // cross-tenant key use, auth-header spelling variants, every non-GET method (with and without a
@@ -15,10 +19,11 @@
 // rows that share one created_at (id tie-break).
 //
 // The request list is the original's, in the original order. Only the redirect seeding moved to
-// v1-fixtures.ts#createRedirect (the original used the old router's own write helper).
+// v1-fixtures.ts#createRedirect (the original used the old router's own write helper), and the three
+// rows that share a created_at get ids with a fixed first byte (see below) so the golden is deterministic.
 import { Client } from "pg";
 import { randomUUID } from "node:crypto";
-import type { ComparePair, IntendedDivergence, PairOptions } from "./differential";
+import type { IntendedDivergence, PairOptions, RecordPair } from "./golden";
 import {
   createFixtureCollection,
   createFixtureTenant,
@@ -43,16 +48,18 @@ async function asMigrator(tenant: V1Tenant, sql: string, params: unknown[] = [])
   }
 }
 
-// M3 T1 — behaviours the api changed on purpose; the OLD router never had them (see differential.ts).
+// M3 T1 — behaviours the api changed on purpose; the old Payload router (deleted in WSK-48b) never had
+// them. Each is recorded as an annotation (`intended`) on exactly the calls it explains; the golden
+// holds the api's answer, the statuses in the comments below are what the OLD router answered.
 // Each is attached ONLY to the calls it explains; everything else in the corpus must stay identical.
 //   D2: path segments are percent-decoded once (the old router looked the raw text up), and a decoded
 //       `/` or NUL matches nothing (404 before auth), so these inputs answer differently.
-const M3_T1_DECODED_SEGMENT: IntendedDivergence = { name: "percent-decoded path segment (M3 T1 D2)", old: [200, 401, 404], new: [200, 404] };
+const M3_T1_DECODED_SEGMENT: IntendedDivergence = { name: "percent-decoded path segment (M3 T1 D2)" };
 //   A non-integer `limit` is truncated (`2.5` -> 2). The old router passed it to `LIMIT $n` and 500ed; it was the
 //   corpus's only 500 trigger, so the fixed-500-detail rule (D3) is proven by the hardening spec instead.
-const M3_T1_INTEGER_LIMIT: IntendedDivergence = { name: "non-integer limit is truncated, not a 500 (M3 T1)", old: [500], new: [200] };
+const M3_T1_INTEGER_LIMIT: IntendedDivergence = { name: "non-integer limit is truncated, not a 500 (M3 T1)" };
 //   D3: a cursor the api never issued is a 400 invalid-cursor (old: ignored -> 200, or a Postgres error -> 500).
-const M3_T1_INVALID_CURSOR: IntendedDivergence = { name: "invalid pagination cursor -> 400 (M3 T1 D3)", old: [200, 500], new: [400] };
+const M3_T1_INVALID_CURSOR: IntendedDivergence = { name: "invalid pagination cursor -> 400 (M3 T1 D3)" };
 // The path-anomaly inputs D2 changes (the other anomalies must stay identical): an escaped letter in the
 // collection key, `%2F` and NUL inside a segment, and `%2f` inside the tenant segment.
 const M3_T1_PATH_ANOMALIES = ["/po%73t", "/post%2Fpost-0", "/post/%00", "/v1/t/..%2f"];
@@ -61,7 +68,7 @@ const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString(
 const bearer = (k: string) => ({ authorization: `Bearer ${k}` });
 
 /** Runs the whole corpus. Returns the harness self-check failures (must be empty). */
-export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]> {
+export async function runExtraCorpus(recordPair: RecordPair): Promise<string[]> {
   const harnessFailures: string[] = [];
   const must = (cond: unknown, msg: string) => {
     if (!cond) harnessFailures.push(msg);
@@ -138,9 +145,11 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
   await seedContentItem(A, { collectionId: cs, locale: "id-ID", slug: "search-zephyrhoof", seo: { title: "Zephyrhoof Widgetronic", description: "a very unique search term" } });
   await seedContentItem(A, { collectionId: cs, locale: "en-US", slug: "running-en", seo: { title: "Running runners run", description: "stemming probe" } });
   // 7 posts, three of them sharing ONE created_at (the cursor's id tie-break)
+  // The three that tie get ids whose first byte is fixed (20, 30, 40) so the tie-break order is the same on every
+  // run (a random uuid would reorder them between recordings); the rest of each id stays random.
   const shared = iso(-5_000);
   for (let i = 0; i < 7; i++) {
-    await seedContentItem(A, { collectionId: post, locale: "id-ID", slug: `post-${i}`, createdAt: i >= 2 && i <= 4 ? shared : undefined });
+    await seedContentItem(A, { collectionId: post, locale: "id-ID", slug: `post-${i}`, createdAt: i >= 2 && i <= 4 ? shared : undefined, id: i >= 2 && i <= 4 ? `${i}0${randomUUID().slice(2)}` : undefined });
     await new Promise((r) => setTimeout(r, 4));
   }
   await seedContentItem(B, { collectionId: article, locale: "en-US", slug: "hello-world", seo: { title: "Hello World" } });
@@ -152,7 +161,7 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
 
   // ---------------------------------------------------------------------------------- requests
   const get = (path: string, headers: Record<string, string> = {}, opts?: PairOptions) =>
-    comparePair({ method: "GET", pathAndQuery: path, headers }, opts);
+    recordPair({ method: "GET", pathAndQuery: path, headers }, opts);
   const a = `/v1/t/${A.slug}`;
   const b = `/v1/t/${B.slug}`;
 
@@ -193,7 +202,7 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
       [`/v1/t/does-not-exist-wsk48a/x`, {}],
       [`/v1/nonsense`, {}],
     ] as [string, Record<string, string>][]) {
-      await comparePair({ method, pathAndQuery: path, headers: h });
+      await recordPair({ method, pathAndQuery: path, headers: h });
     }
   }
   for (const [method, ct, body] of [
@@ -203,7 +212,7 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
     ["PUT", "application/x-www-form-urlencoded", "a=1"],
     ["POST", "application/x-wsk48a-unsupported", "xyz"],
   ]) {
-    await comparePair({ method, pathAndQuery: `${a}/case-study`, headers: { ...bearer(writeA), "content-type": ct }, body });
+    await recordPair({ method, pathAndQuery: `${a}/case-study`, headers: { ...bearer(writeA), "content-type": ct }, body });
   }
 
   // 3. lists, per key (production vs staging vs write), locales, expand, limits --------------
@@ -260,7 +269,7 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
   async function walk(base: string, key: string, limit: number, extra = "") {
     let cursor: string | null = null;
     for (let i = 0; i < 20; i++) {
-      const { old } = await get(`${base}?limit=${limit}${extra}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, bearer(key), { note: `walk limit=${limit}` });
+      const old = await get(`${base}?limit=${limit}${extra}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, bearer(key), { note: `walk limit=${limit}` });
       const page = JSON.parse(old.body.toString("utf8"));
       if (!page.page?.hasMore) return;
       cursor = page.page.cursor;
@@ -338,8 +347,8 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
     await get(p, {}, { note: "path anomaly, no key", intended });
   }
   // a handful of other prefixes that must NOT be answered by the delivery route in either world
-  // (old: gateway 404s them before the router; new: Nest's own 404) are intentionally NOT compared —
-  // they are different servers by design.
+  // (old: gateway 404s them before the router; new: Nest's own 404) are intentionally NOT recorded —
+  // they are not the delivery route's behaviour.
 
   return harnessFailures;
 }

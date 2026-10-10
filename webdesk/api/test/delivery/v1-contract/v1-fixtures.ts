@@ -123,10 +123,12 @@ export async function seedContentItem(
     seo?: Record<string, unknown>;
     localizationGroupId?: string;
     createdAt?: string;
+    /** Fixed id, for rows that tie on created_at: the cursor's id tie-break then orders them deterministically. */
+    id?: string;
   },
 ): Promise<{ id: string; localizationGroupId: string }> {
   return inTenant(tenant, async (c) => {
-    const id = randomUUID();
+    const id = opts.id ?? randomUUID();
     const groupId = opts.localizationGroupId ?? randomUUID();
     await c.query(
       `INSERT INTO content_items
