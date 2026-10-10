@@ -168,3 +168,8 @@ The ERP side was the real platform-nest egress client and signer, driven from
 | Removed probe | wde-gate-1 signature → **401 `editorial-assertion-unknown-key`**; wde-gate-2 → **201** | as required |
 
 The 4-minute wait before step 4 was skipped on the gate, because no assertion was in flight. Do not skip it live.
+
+**Probes P1/P2, run verbatim** (only `/app/dist` was mapped to a `tsc` build of the same tree), after step 4:
+- with `wde-gate-2`: `{"probe":"P1","status":401,"slug":"editorial-assertion-missing"}` and
+  `{"probe":"P2","kid":"wde-gate-2","status":403,"slug":"editorial-assertion-command-mismatch"}`;
+- with the retired `wde-gate-1`: P2 gave `{"status":401,"slug":"editorial-assertion-unknown-key"}`.
