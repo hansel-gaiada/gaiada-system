@@ -793,7 +793,7 @@ jobs:
       # they need the cluster superuser as well as the migrator and app roles. Not part of
       # `npm test` (vitest), which is why they were silently never run before. Run from
       # webdesk/api for 0009_v1_bytes.test.mjs's tsx; `pg` resolves from webdesk/node_modules.
-      - name: Migration tests — 0009 (two files) and 0010, against scratch databases
+      - name: Migration tests — 0009 (two files), 0010 and 0012, against scratch databases
         if: ${{ !cancelled() }}
         env:
           SUPERUSER_DATABASE_URL: postgres://postgres:throwaway_superuser@localhost:5432/webdesk
@@ -801,7 +801,7 @@ jobs:
           APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           API_KEY_PEPPER: ci-throwaway-pepper
         run: |
-          for t in 0009_content_write_plane 0009_v1_bytes 0010_slug_release_and_ledger; do
+          for t in 0009_content_write_plane 0009_v1_bytes 0010_slug_release_and_ledger 0012_content_schedules; do
             echo "##### $t"
             node --import tsx ../migrations/tests/$t.test.mjs
           done
