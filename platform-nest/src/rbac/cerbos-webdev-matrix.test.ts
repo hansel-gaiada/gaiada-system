@@ -431,6 +431,24 @@ describe.skipIf(!live)("WSK-47 Cerbos matrix — webdesk_content_item / webdesk_
     expect(await allow(platformAdmin, coll, "apply_schema")).toBe(true);
   });
 
+  it("HIGH for every principal (WSK-D46): no approval id means no publish/schedule, platform_admin wildcard included", async () => {
+    const noApproval = (creatorId: string, itemCount: number, approvalId?: string): Resource => ({ ...item, creatorId, itemCount, approvalId });
+    for (const p of [platformAdmin, principal("company_admin", "company", T1), publisher()]) {
+      for (const a of ["publish", "schedule"]) {
+        expect(await allow(p, noApproval(OTHER_USER, 1), a), `${a} approvalId omitted`).toBe(false);
+        expect(await allow(p, noApproval(OTHER_USER, 1, ""), a), `${a} approvalId empty`).toBe(false);
+        // positive control: the same request WITH an approval id
+        expect(await allow(p, noApproval(OTHER_USER, 1, "appr-1"), a), `${a} with approvalId`).toBe(true);
+      }
+      // R4 self single-item still needs the approval id
+      expect(await allow(p, noApproval(ME, 1), "publish"), "self single, no approvalId").toBe(false);
+      expect(await allow(p, noApproval(ME, 1, "appr-1"), "publish"), "self single, with approvalId").toBe(true);
+    }
+    // takedown stays immediate: the approval DENY is scoped to publish/schedule only
+    expect(await allow(platformAdmin, item, "unpublish")).toBe(true);
+    expect(await allow(publisher(), item, "delete")).toBe(true);
+  });
+
   it("member, client, group_executive and a T1 admin on T2: nothing on either kind", async () => {
     const ALL_ITEM = [...EDIT, ...TAKEDOWN, "publish", "schedule"];
     const exec: Principal = { userId: ME, assurance: "high", companies: [T1], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };

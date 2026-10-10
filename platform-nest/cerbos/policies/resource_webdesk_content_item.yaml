@@ -15,7 +15,8 @@
 #   unpublish · delete — MEDIUM, the publisher tier, run immediately (a takedown must not wait for a
 #                second person — WSK-D46).
 #   publish · schedule — HIGH for every principal class. Reachable ONLY at decide() of an approved
-#                WS4 row: the approval id must be present, and maker ≠ checker applies (below).
+#                WS4 row: the approval id must be present (a DENY enforces this for every principal,
+#                platform_admin included), and maker ≠ checker applies (below).
 #
 # ── MAKER ≠ CHECKER, AND THE R4 SELF-PUBLISH EXCEPTION (WSK-D46) ────────────────────────────────
 # `creatorId` is the approval row's `requested_by` (the maker); `principal.id` is the decider (the
@@ -53,7 +54,8 @@ resourcePolicy:
   variables:
     import: ["gaiada_common"]
   rules:
-    # Operator tier. Subject to the DENY rules at the bottom of this file (deny-overrides).
+    # Operator tier. Subject to the DENY rules at the bottom of this file (deny-overrides): no
+    # publish/schedule without an approval id, and no self-approval outside R4.
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
@@ -172,3 +174,18 @@ resourcePolicy:
           expr: >-
             has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
             request.resource.attr.creatorId == request.principal.id
+
+    # ══════════ HIGH for EVERY principal (WSK-D46): no approval id, no publish/schedule ═════════
+    # Without this, the platform_admin wildcard at the top of this file would publish with no WS4
+    # approval at all. `roles: ["user"]` (the invoice precedent) matches every principal, so under
+    # deny-overrides this beats the wildcard and any future ALLOW. resourcePayload() always sends
+    # approvalId ("" when unset), so the has()/type() arms are defence against a raw caller.
+    - actions: ["publish", "schedule"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.resource.attr.approvalId) ||
+            type(request.resource.attr.approvalId) != string ||
+            request.resource.attr.approvalId == ""
