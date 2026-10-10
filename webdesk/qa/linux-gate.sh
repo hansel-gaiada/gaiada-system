@@ -10,13 +10,17 @@
 #   vocabulary      payload/test: wsk64-classifier, wsk64-item-fields, vocabulary, envelope-contract
 #                   (run from webdesk/api so `--import tsx` resolves from webdesk/api/node_modules;
 #                   needs the DB prepared for webdesk-api)
+#   migrations      webdesk/migrations/tests: 0009_content_write_plane, 0009_v1_bytes,
+#                   0010_slug_release_and_ledger (WSK-D51). Each builds throwaway scratch databases next
+#                   to the migrated one and drives the REAL runner, so it connects as the cluster
+#                   superuser too (SUPERUSER_DATABASE_URL). CI runs the same three in the webdesk-api job.
 #
 # Design: no host paths, no host ports. The source tar is untarred into a per-run docker VOLUME that
 # every container mounts; one docker network per run; services are reached by container DNS name.
 # Everything is torn down in an EXIT trap (containers, network, volume).
 #
 # Usage:   bash linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [suite,suite,...]
-#   suites: webdesk-root,webdesk-blocks,webdesk-api,vocabulary (default: all)
+#   suites: webdesk-root,webdesk-blocks,webdesk-api,vocabulary,migrations (default: all)
 #   --with-docker-socket  OFF by default. Mounts the host docker socket (+ a docker CLI) into the
 #                         webdesk-api runner so mail-retry-backoff.spec.ts can stop/start Mailpit.
 #                         That is root-equivalent control of EVERY container on the host: never on
@@ -47,7 +51,7 @@ for a in "$@"; do
     *) POS+=("$a") ;;
   esac
 done
-ID="${POS[0]:-}"; TAR="${POS[1]:-}"; SUITES_ARG="${POS[2]:-webdesk-root,webdesk-blocks,webdesk-api,vocabulary}"
+ID="${POS[0]:-}"; TAR="${POS[1]:-}"; SUITES_ARG="${POS[2]:-webdesk-root,webdesk-blocks,webdesk-api,vocabulary,migrations}"
 if [ -z "$ID" ] || [ -z "$TAR" ]; then
   echo "usage: bash linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [suite,suite,...]"
   echo "### done ${ID:-?} FAIL"; exit 2
@@ -89,7 +93,7 @@ mark() { RESULT_LINES+=("$1"); echo "$1"; }  # one summary line per suite
 [ -f "$TAR" ] || setup_failed "source tar not found: $TAR"
 docker info >/dev/null 2>&1 || setup_failed "docker daemon not reachable"
 for s in ${SUITES_ARG//,/ }; do
-  case "$s" in webdesk-root|webdesk-blocks|webdesk-api|vocabulary) ;; *) setup_failed "unknown suite: $s";; esac
+  case "$s" in webdesk-root|webdesk-blocks|webdesk-api|vocabulary|migrations) ;; *) setup_failed "unknown suite: $s";; esac
 done
 echo "run $ID  suites=$SUITES_ARG  tar=$TAR  docker-socket=$([ "$WITH_DOCKER_SOCKET" = 1 ] && echo MOUNTED || echo off)"
 docker network create "$NET" >/dev/null || setup_failed "docker network create failed"
@@ -188,9 +192,11 @@ fi
 NEED_DB=0; NEED_API=0
 selected webdesk-api && { NEED_DB=1; NEED_API=1; }
 selected vocabulary && NEED_DB=1
+selected migrations && NEED_DB=1
 
 APP_URL="postgres://webdesk_app:throwaway_app@$PG:5432/webdesk"
 MIG_URL="postgres://webdesk_migrator:throwaway_migrator@$PG:5432/webdesk"
+SUPER_URL="postgres://postgres:throwaway_superuser@$PG:5432/webdesk"
 STORAGE_ENDPOINT="http://$RUSTFS:9000"
 RUSTFS_ROOT_USER=webdesk_root
 RUSTFS_ROOT_PASSWORD=ci-throwaway-root-password
@@ -265,6 +271,7 @@ if [ "$NEED_DB" = 1 ]; then
     OVERALL=FAIL
     selected webdesk-api && mark "FAIL  webdesk-api  setup failed (prep.log)"
     selected vocabulary && mark "FAIL  vocabulary  setup failed (prep.log)"
+    selected migrations && mark "FAIL  migrations  setup failed (prep.log)"
   fi
 fi
 
@@ -309,6 +316,22 @@ if selected vocabulary && [ "$DB_READY" = 1 ]; then
 for t in wsk64-classifier wsk64-item-fields vocabulary envelope-contract; do
   echo "##### $t"
   node --import tsx ../payload/test/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
+done
+exit $rc'
+fi
+
+# ---- migrations: the migration test files ------------------------------------------------------
+# Run from webdesk/api: 0009_v1_bytes.test.mjs needs that directory's tsx to load the .ts router, and
+# `pg` resolves from webdesk/node_modules for all three. Last on purpose: each file creates and drops
+# its own scratch databases on the shared Postgres (the migrated `webdesk` database is only read, or
+# written inside a rolled-back transaction).
+if selected migrations && [ "$DB_READY" = 1 ]; then
+  RENV=(-e "SUPERUSER_DATABASE_URL=$SUPER_URL" -e "MIGRATE_DATABASE_URL=$MIG_URL" -e "APP_DATABASE_URL=$APP_URL"
+        -e API_KEY_PEPPER=ci-throwaway-pepper)
+  run_suite migrations webdesk/api 'rc=0
+for t in 0009_content_write_plane 0009_v1_bytes 0010_slug_release_and_ledger; do
+  echo "##### $t"
+  node --import tsx ../migrations/tests/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
 done
 exit $rc'
 fi

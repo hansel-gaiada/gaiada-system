@@ -51,13 +51,12 @@ async function main() {
     const fx = await import('../../payload/test/v1-fixtures.mjs')
     const { handleV1Request } = await import('../../payload/collections/router.ts')
     const { closePool } = await import('../../payload/collections/db.ts')
-    const { createRedirect } = await import('../../payload/collections/redirects.ts')
 
     // ---- seed (0008 schema) --------------------------------------------------------------
     const A = await fx.createFixtureTenant({ label: 'a', defaultLocale: 'id-ID', locales: ['id-ID', 'en-US'] })
     const caseStudy = await fx.createFixtureCollection(A, 'case-study')
     const post = await fx.createFixtureCollection(A, 'post')
-    await fx.createFixtureCollection(A, 'redirect')
+    const redirectCol = await fx.createFixtureCollection(A, 'redirect')
     const prodA = await fx.mintFixtureApiKey(A, 'production', 'read')
     const stagA = await fx.mintFixtureApiKey(A, 'staging', 'read')
     const B = await fx.createFixtureTenant({ label: 'b', defaultLocale: 'en-US', locales: ['en-US'] })
@@ -81,12 +80,17 @@ async function main() {
       await fx.seedContentItem(A, { collectionId: post, locale: 'id-ID', slug: `post-${i}`, publishState: 'published', createdAt: at(10 + i) })
     }
     await fx.seedContentItem(B, { collectionId: article, locale: 'en-US', slug: 'hello-world', publishState: 'published', seo: { title: 'Hello World' }, createdAt: at(20) })
-    const auth = {
-      tenantId: A.tenantId, tenantSlug: A.slug, tenantDefaultLocale: A.defaultLocale, tenantLocales: A.locales,
-      envId: A.productionEnvId, siteId: A.siteId, envName: 'production', scope: 'write', apiKeyId: 'fixture',
+    // The two redirect rows createRedirect (payload/collections/redirects.ts) would write: a
+    // published row in the redirect collection, slug = fromPath, seo.redirect = {toPath, status,
+    // active}. Seeded as plain rows because createRedirect's upsert repeats 0010's partial-index
+    // predicate (WHERE deleted_at IS NULL), and this database is deliberately at 0008, before
+    // deleted_at exists.
+    for (const [slug, toPath, status, active] of [['/old-page', '/new-page', '301', 'true'], ['/inactive-page', '/somewhere', '302', 'false']]) {
+      await fx.seedContentItem(A, {
+        collectionId: redirectCol, locale: A.defaultLocale, slug, publishState: 'published', blocks: [],
+        seo: { redirect: { toPath, status, active } },
+      })
     }
-    await createRedirect({ auth, fromPath: '/old-page', toPath: '/new-page', status: 301, active: true })
-    await createRedirect({ auth, fromPath: '/inactive-page', toPath: '/somewhere', status: 302, active: false })
     await fx.setEnvironmentDomain(A, 'production', 'acme.example.invalid')
 
     // ---- the request matrix ------------------------------------------------------------------
@@ -134,7 +138,7 @@ async function main() {
     check('the matrix exercises 200s and error paths', (statuses[200] ?? 0) >= 15 && Object.keys(statuses).length >= 3, statuses)
 
     await closePool() // drop pooled connections before the DDL takes its locks
-    const run = runRunner(mUrl)
+    const run = runRunner(mUrl, { through: TARGET_FILE })
     console.log(`        runner exit=${run.status}: ${run.stdout.trim().split('\n').at(-1)}`)
     check(`the real runner applied ${TARGET_FILE} between the two captures`, run.status === 0 && /1 applied/.test(run.stdout), run.stdout + run.stderr)
 

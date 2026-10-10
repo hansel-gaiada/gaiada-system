@@ -788,6 +788,23 @@ jobs:
           # handler runs, and the app's error envelope never gets the chance to fire — the test
           # then fails on 413-vs-400 and looks like an assertion bug rather than a missing value.
           WEBDESK_MEDIA_MAX_UPLOAD_BYTES: "65536"
+      # WSK-D51: the migration tests (webdesk/migrations/tests). Each builds throwaway scratch
+      # databases next to the migrated `webdesk` one and drives the real runner against them, so
+      # they need the cluster superuser as well as the migrator and app roles. Not part of
+      # `npm test` (vitest), which is why they were silently never run before. Run from
+      # webdesk/api for 0009_v1_bytes.test.mjs's tsx; `pg` resolves from webdesk/node_modules.
+      - name: Migration tests — 0009 (two files) and 0010, against scratch databases
+        if: ${{ !cancelled() }}
+        env:
+          SUPERUSER_DATABASE_URL: postgres://postgres:throwaway_superuser@localhost:5432/webdesk
+          MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          API_KEY_PEPPER: ci-throwaway-pepper
+        run: |
+          for t in 0009_content_write_plane 0009_v1_bytes 0010_slug_release_and_ledger; do
+            echo "##### $t"
+            node --import tsx ../migrations/tests/$t.test.mjs
+          done
 
   # webdesk/payload (Zone B Payload 3 app — WSK-00/02/04/04b/06). Deliberately NOT running the full
   # WSK-00/02 spike-style verification here (dual internal/public listeners, dev-push guard, a

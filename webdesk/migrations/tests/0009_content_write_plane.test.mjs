@@ -26,16 +26,22 @@
  */
 import { randomUUID } from 'node:crypto'
 import {
+  SNAPSHOT_SQL,
   TARGET_FILE,
   applyThrough,
+  attempt,
   connect,
   createScratchDb,
   dropScratchDb,
+  errSummary,
   makeChecker,
+  one,
   requireEnv,
   resolveRoles,
   runRunner,
+  seedTenant,
   setCtx,
+  snapshot,
   withDb,
 } from './0009_helpers.mjs'
 
@@ -45,21 +51,6 @@ const MIGRATE = process.env.MIGRATE_DATABASE_URL
 const APP = process.env.APP_DATABASE_URL
 
 const { check, summary } = makeChecker('0009')
-
-/** Runs `sql` inside a savepoint; returns the pg error (or null) and rolls back to the savepoint. */
-async function attempt(client, sql, params = []) {
-  await client.query('SAVEPOINT sp')
-  try {
-    const r = await client.query(sql, params)
-    await client.query('RELEASE SAVEPOINT sp')
-    return { err: null, rowCount: r.rowCount, rows: r.rows }
-  } catch (err) {
-    await client.query('ROLLBACK TO SAVEPOINT sp')
-    return { err }
-  }
-}
-const errSummary = (r) => (r.err ? `${r.err.code} ${r.err.message}` : `no error (rowCount=${r.rowCount})`)
-const one = async (client, sql, params = []) => (await client.query(sql, params)).rows[0]
 
 // =============================================================================================
 // A. Catalog state of the main database
@@ -379,18 +370,6 @@ async function partB() {
 // =============================================================================================
 // C. Negative controls: duplicates seeded under the tenant GUC on a 0008 scratch db
 // =============================================================================================
-async function seedTenant(m) {
-  const t = randomUUID()
-  await m.query('BEGIN')
-  await setCtx(m, { platform: true })
-  await m.query(`INSERT INTO tenants (id, slug, company_ref) VALUES ($1, $2, $3)`, [t, `wsk65-neg-${t.slice(0, 8)}`, randomUUID()])
-  await setCtx(m, { tenant: t })
-  const site = (await one(m, `INSERT INTO sites (tenant_id, kind, name) VALUES ($1, 'astro', 's') RETURNING id`, [t])).id
-  const col = (await one(m, `INSERT INTO collections (tenant_id, site_id, key) VALUES ($1, $2, 'page') RETURNING id`, [t, site])).id
-  await m.query('COMMIT')
-  return { t, site, col }
-}
-
 async function assertLoudFailure(roles, dbName, label, seed, expectMsg) {
   console.log(`\n-- negative control: ${label} (scratch db ${dbName}) --`)
   await createScratchDb(SUPER, dbName, roles)
@@ -407,7 +386,7 @@ async function assertLoudFailure(roles, dbName, label, seed, expectMsg) {
     } finally {
       await m.end()
     }
-    const run = runRunner(mUrl)
+    const run = runRunner(mUrl, { through: TARGET_FILE })
     console.log(`        runner exit=${run.status}`)
     for (const line of (run.stdout + run.stderr).trim().split('\n')) console.log(`        | ${line}`)
     check(`[${label}] the real runner exits non-zero`, run.status === 1, run.status)
@@ -470,7 +449,7 @@ async function partC(roles) {
       } finally {
         await m.end()
       }
-      const rerun = runRunner(url1)
+      const rerun = runRunner(url1, { through: TARGET_FILE })
       console.log(`        rerun exit=${rerun.status}: ${rerun.stdout.trim().split('\n').at(-1)}`)
       check('[remediation] after the fix the runner applies 0009 (exit 0)', rerun.status === 0 && /1 applied/.test(rerun.stdout), rerun.stdout + rerun.stderr)
     }
@@ -524,26 +503,6 @@ async function partC(roles) {
 // =============================================================================================
 // D. Positive control: a populated 0008 db takes 0009 cleanly; nothing pre-existing changes
 // =============================================================================================
-const SNAPSHOT_SQL = {
-  constraints: `SELECT conrelid::regclass::text AS tbl, conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
-                 WHERE connamespace = 'public'::regnamespace AND conrelid <> 0 ORDER BY 1, 2`,
-  indexes: `SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY 1, 2`,
-  policies: `SELECT tablename, policyname, cmd, qual, with_check, roles::text FROM pg_policies WHERE schemaname = 'public' ORDER BY 1, 2`,
-  columns: `SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns
-             WHERE table_schema = 'public' ORDER BY 1, 2`,
-  grants: `SELECT table_name, grantee, privilege_type FROM information_schema.role_table_grants
-            WHERE table_schema = 'public' ORDER BY 1, 2, 3`,
-  rls: `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
-         WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' ORDER BY 1`,
-  triggers: `SELECT tgrelid::regclass::text AS tbl, tgname, pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE NOT tgisinternal ORDER BY 1, 2`,
-}
-const keyOf = (r) => JSON.stringify(Object.values(r))
-async function snapshot(c) {
-  const out = {}
-  for (const [k, sql] of Object.entries(SNAPSHOT_SQL)) out[k] = (await c.query(sql)).rows.map(keyOf)
-  return out
-}
-
 async function partD(roles) {
   console.log('\n== D. positive control: populated 0008 db -> 0009, nothing pre-existing altered ==')
   const db = 'wsk65_pos'
@@ -581,7 +540,7 @@ async function partD(roles) {
     const snapBefore = await snapshot(sc)
     await sc.end()
 
-    const run = runRunner(mUrl)
+    const run = runRunner(mUrl, { through: TARGET_FILE })
     console.log(`        runner exit=${run.status}: ${(run.stdout + run.stderr).trim().split('\n').join(' | ')}`)
     check('populated db with replay rows + cross-site group reuse takes 0009 (exit 0, 1 applied)', run.status === 0 && /1 applied/.test(run.stdout), run.stdout + run.stderr)
 
@@ -610,7 +569,7 @@ async function partD(roles) {
     await sc2.end()
     check('pre-0009 rows are unadopted (head 0, published NULL) and keep publish_state; versions get {} / NULL', st.unadopted === 2 && st.items === 2 && st.legacy_versions === 1 && st.state === 'published', st)
 
-    const again = runRunner(mUrl)
+    const again = runRunner(mUrl, { through: TARGET_FILE })
     check('second runner pass is a no-op (0 applied)', again.status === 0 && /0 applied/.test(again.stdout), again.stdout + again.stderr)
   } catch (err) {
     check('[positive control] unexpected harness error', false, err.stack)
