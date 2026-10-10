@@ -21,7 +21,8 @@ server, result observed). Every ticket's gate is `webdesk/qa/linux-gate.sh` on s
 | **T7** | ERP: Cerbos DENY on publish/schedule for automation and bot principals (never on `request_publish`: the importer files its batch request as automation); requester-own read of an approval, same tenant only | Sonnet, Opus review | — (Cerbos) | ships in 1.0.0-alpha.348; the WebDesk orchestrator gates, releases and probes live Cerbos |
 | **WSK-48b** | Delete Payload; `webdesk/payload/` → `webdesk/delivery/` (vocabulary source); differential → golden suite | Sonnet, Opus review, **then the WebDesk orchestrator reviews before main** (it touches CI, release and compose) | **0011** | after T1, T2, T4 |
 | **WSK-61** | Scheduler: due publishes/takedowns, live-item version swaps, forms purge, idempotency sweep | Sonnet, Opus review | **0012** | after T4, T5a |
-| WSK-46 · WSK-45 · WSK-43 · WSK-49 | Preview, WYSIWYG Markdown editor (D49), media library, client editors | later waves | | |
+| **WSK-46** | Draft preview as an instant page on the site (D52): hashed expiring tokens + public `/v1/t/:tenant/preview/:token`; an ERP Preview action; a `/preview/` page in gaiada-web-revamp | Sonnet, Opus review; the site part with the site owner | **0013** | WebDesk part after WSK-61; ERP part after the M2 editor follow-ups merge (347); site part needs `api.gaiada.com` public |
+| WSK-45 · WSK-43 · WSK-49 | WYSIWYG Markdown editor (D49), media library (+ the storage-lifecycle defect), client editors | later waves | | |
 
 **Merging.** Each wave merges to main only after `webdesk/qa/linux-gate.sh` is green on the merged tree (main + the wave), under WSK-D47(b), and the WebDesk orchestrator is told each time.
 
