@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████░░░░░░░░░░░░░░░░░░░░░░` **27%** · 44/161<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `█████████░░░░░░░░░░░░░░░░░░░░░` **29%** · 47/161<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `████████░░░░░░░░░░░░` **40%** · 34/83<!-- /bar -->
+<!-- bar -->🟡 `█████████░░░░░░░░░░░` **44%** · 37/83<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -99,10 +99,10 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] ERP egress client: shared hash vectors, single-flight token cache, circuit breaker, no secret in logs (42/42 + 7/7 on Linux)
 - [ ] Live: a contract read passes all four layers; the same call without a client cert fails at Layer 1
 
-### Wave A · WSK-47 · Cerbos kinds <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] `webdesk_content_item` + `webdesk_collection`; maker ≠ checker, single-item self-publish (D46)
-- [ ] Six artifacts and re-derived pinned counts in one change
-- [ ] `src/rbac` suite green on Linux with Cerbos reachable
+### Wave A · WSK-47 · Cerbos kinds <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
+- [x] `webdesk_content_item` + `webdesk_collection`; maker ≠ checker, single-item self-publish (D46); publish/schedule without an approval denied for every principal
+- [x] Six artifacts and re-derived pinned counts in one change (kinds 101, catalog 416, grantable 401)
+- [x] `src/rbac` suite green on Linux with Cerbos reachable (849/849, 0 skipped; 41-row probe matrix)
 - [ ] Live Cerbos restarted; the probe matrix matches
 
 ### Wave A · WSK-54 · Bundle export (site repo) <!-- bar -->🟡 `███████░░░` **66%** · 2/3<!-- /bar -->
