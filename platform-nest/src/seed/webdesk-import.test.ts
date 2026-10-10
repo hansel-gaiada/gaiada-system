@@ -101,7 +101,7 @@ class ImporterFake extends FakeZoneB {
     return [...this.store.values()].find((i) => i.collectionKey === collectionKey && i.locale === locale && i.slug === slug);
   }
 
-  private itemJson(i: StoredItem) {
+  private wireItem(i: StoredItem) {
     const head = i.versions[i.versions.length - 1];
     return {
       itemId: i.itemId,
@@ -117,12 +117,12 @@ class ImporterFake extends FakeZoneB {
       title: i.slug,
     };
   }
-  private versionJson(i: StoredItem, n: number) {
+  private wireVersion(i: StoredItem, n: number) {
     const v = i.versions[n - 1];
     return { version: v.version, contentHash: v.contentHash, blocks: v.blocks, seo: v.seo, note: v.note, createdBy: v.createdBy };
   }
 
-  private editorial(req: WebdeskControlRequest): { sub: string } | WebdeskControlResponse {
+  private checkEditorial(req: WebdeskControlRequest): { sub: string } | WebdeskControlResponse {
     if (!req.editorialAssertion) return problem(401, "editorial-assertion-missing");
     const claims = JSON.parse(Buffer.from(req.editorialAssertion.split(".")[1], "base64url").toString("utf8")) as Record<string, unknown>;
     const cmh = computeCommandHash(req.command, commandArgsAsZoneBSeesThem(req.params ?? {}, req.body));
@@ -154,14 +154,14 @@ class ImporterFake extends FakeZoneB {
         const size = Math.min(Number(q.limit ?? 50), this.pageSize);
         const slice = rows.slice(start, start + size);
         const more = start + size < rows.length;
-        return reply({ items: slice.map((i) => this.itemJson(i)), page: { cursor: more ? String(start + size) : null, hasMore: more, limit: size } });
+        return reply({ items: slice.map((i) => this.wireItem(i)), page: { cursor: more ? String(start + size) : null, hasMore: more, limit: size } });
       }
       case "item.get": {
         const i = this.store.get(p.itemId);
         if (!i) return problem(404, "item-not-found");
         const n = req.query?.version === undefined || req.query.version === "head" ? i.versions.length : Number(req.query.version);
         if (!i.versions[n - 1]) return problem(404, "version-not-found");
-        return reply({ item: this.itemJson(i), version: this.versionJson(i, n), lint: {} });
+        return reply({ item: this.wireItem(i), version: this.wireVersion(i, n), lint: {} });
       }
       default:
         break;
@@ -171,7 +171,7 @@ class ImporterFake extends FakeZoneB {
     if (!req.idempotencyKey) return problem(400, "invalid-request", { detail: "Idempotency-Key required" });
     let sub = "";
     if (req.command !== "schema.apply") {
-      const v = this.editorial(req);
+      const v = this.checkEditorial(req);
       if ("status" in v) return v;
       sub = v.sub;
     }
@@ -183,12 +183,12 @@ class ImporterFake extends FakeZoneB {
         ? { ...seen.res, json: { ...(seen.res.json as object), replayed: true } }
         : problem(422, "idempotency-key-reuse", { detail: "same key, different request" });
     }
-    const res = this.apply(req, sub);
+    const res = this.applyWrite(req, sub);
     if (res.status < 300) this.idem.set(scope, { hash: bodyHash, res });
     return res;
   }
 
-  private apply(req: WebdeskControlRequest, sub: string): WebdeskControlResponse {
+  private applyWrite(req: WebdeskControlRequest, sub: string): WebdeskControlResponse {
     const p = req.params ?? {};
     const b = (req.body ?? {}) as Record<string, any>;
     if (req.command === "schema.apply") {
@@ -212,7 +212,7 @@ class ImporterFake extends FakeZoneB {
         versions: [{ version: 1, blocks, seo, contentHash: hashOf(blocks, seo), createdBy: sub, note: b.note ?? null }],
       };
       this.store.set(item.itemId, item);
-      return reply({ item: this.itemJson(item), version: { version: 1, contentHash: item.versions[0].contentHash }, unchanged: false, lint: {}, replayed: false }, 201);
+      return reply({ item: this.wireItem(item), version: { version: 1, contentHash: item.versions[0].contentHash }, unchanged: false, lint: {}, replayed: false }, 201);
     }
     // content.update
     const i = this.store.get(p.itemId);
@@ -221,9 +221,9 @@ class ImporterFake extends FakeZoneB {
     const { blocks, seo } = assemble(i.collectionKey, this.comps.get(i.collectionKey) ?? {}, b);
     const head = i.versions[i.versions.length - 1];
     const hash = hashOf(blocks, seo);
-    if (hash === head.contentHash) return reply({ item: this.itemJson(i), version: { version: head.version, contentHash: hash }, unchanged: true, lint: {}, replayed: false });
+    if (hash === head.contentHash) return reply({ item: this.wireItem(i), version: { version: head.version, contentHash: hash }, unchanged: true, lint: {}, replayed: false });
     i.versions.push({ version: i.versions.length + 1, blocks, seo, contentHash: hash, createdBy: sub, note: b.note ?? null });
-    return reply({ item: this.itemJson(i), version: { version: i.versions.length, contentHash: hash }, unchanged: false, lint: {}, replayed: false });
+    return reply({ item: this.wireItem(i), version: { version: i.versions.length, contentHash: hash }, unchanged: false, lint: {}, replayed: false });
   }
 }
 
