@@ -109,7 +109,9 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // CLIENT-CENTRE CC-D4 (2026-09-29): +1 grantable — portal.edit_company_profile, in its OWN group
     // (portal_edit_company_profile — NOT folded into portal_basic_access: bundling it would make
     // every basic-access contact an editor). 390 -> 391.
-    expect(grantable.length).toBe(391);
+    // WSK-47 (2026-10-10): 391 -> 401 (+10 across the NEW webdesk_content_item/webdesk_collection kinds;
+    // +2 authoring groups, publish/schedule advancedOnly). Relationship set untouched.
+    expect(grantable.length).toBe(401);
     expect(relationshipKeys.size).toBe(15);
   });
 

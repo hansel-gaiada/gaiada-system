@@ -222,7 +222,11 @@ function moduleStaffTargets(kind, cond) {
   // today (github-repos.controller.ts never resolves module at all; core/github/ledger.ts's future
   // GH-10 caller is the only one that will), matching the same "real console consumer today" test
   // WSK-19 used to justify webdev_contract_snapshot's own inclusion here.
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo") {
+  // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
+  // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
+  // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
+      kind === "webdesk_content_item" || kind === "webdesk_collection") {
     return ["webdev_staff"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
@@ -251,7 +255,11 @@ function moduleManagerTargets(kind, cond) {
       : ["hr_manager", "search_manager", "reports_manager"];
   }
   // GH-03 (2026-08-31) — see moduleStaffTargets' own GH-03 note above.
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo") {
+  // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
+  // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
+  // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
+      kind === "webdesk_content_item" || kind === "webdesk_collection") {
     return ["webdev_manager"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];

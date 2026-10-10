@@ -125,8 +125,11 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // CLIENT-CENTRE CC-D4 (2026-09-29): +1 pair, NO new kind — `edit_company_profile` is a new
     // action on the EXISTING `portal` kind (the client-editor half of the Client Centre profile
     // surface). 405/99 -> 406/99.
-    expect(catalog.length).toBe(406);
-    expect(catalogKindSet.size).toBe(99);
+    // WSK-47 (2026-10-10): +10 pairs / +2 kinds (webdesk_content_item: read/create/update/
+    // request_publish/publish/schedule/unpublish/delete; webdesk_collection: read/apply_schema),
+    // 406/99 -> 416/101.
+    expect(catalog.length).toBe(416);
+    expect(catalogKindSet.size).toBe(101);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

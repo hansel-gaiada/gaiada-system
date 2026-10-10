@@ -82,6 +82,19 @@ export interface Resource {
    *  && != ""` guard denies, same fail-closed convention as every other optional attr here — so an
    *  unwired caller (today, there is none) gets a denial rather than a silent bypass. */
   approvalId?: string;
+  /** WSK-47 — the WebDesk collection an item belongs to (`webdesk_content_item`/
+   *  `webdesk_collection`). Taken from ZONE B's read of the item (WSK-51), never from the request
+   *  body: a caller that could name its own collection could name its way into a later writer rule
+   *  (`collectionKey in ["post","guide"]`). No rule reads it yet. Omitted -> "" -> fail closed. */
+  collectionKey?: string;
+  /** WSK-47 — the item's locale, same provenance rule as `collectionKey` (Zone B's read). Reserved
+   *  for the later translator rule (`locale == "id"`). Omitted -> "" -> fail closed. */
+  locale?: string;
+  /** WSK-47 / WSK-D46 (R4) — how many items a `webdesk_content_item` publish approval covers,
+   *  counted by the decide() executor (WSK-66) from the STORED approval row's tool_args.items, never
+   *  from the client. `publish` lets a maker approve their own request only when this is exactly 1;
+   *  batches keep maker ≠ checker. Omitted -> 0 -> the strict two-person rule applies (fail closed). */
+  itemCount?: number;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -151,6 +164,12 @@ function resourcePayload(r: Resource) {
       // anyway because the estate's own trap note names this allow-list as the failure class to
       // check first when a resource-policy rule "isn't seeing" an attribute a caller believes it set.
       approvalId: r.approvalId ?? "",
+      // WSK-47. Listed here or they never reach resource_webdesk_*.yaml (this is an allow-list).
+      // `itemCount` is the one whose absence changes a decision: missing, R4's single-item
+      // self-publish exception cannot apply, so a self-approval is denied (fail closed).
+      collectionKey: r.collectionKey ?? "",
+      locale: r.locale ?? "",
+      itemCount: r.itemCount ?? 0,
     },
   };
 }

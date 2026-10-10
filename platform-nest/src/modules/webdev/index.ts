@@ -44,6 +44,8 @@ export const webdevModule: ModuleContract = {
     // WSK-D28 / §08 (additive): widens the framework CHECK to admit the canonical kind vocabulary
     // (astro/node/wp) alongside the original vite/nextjs — one quarter of the four-point refusal lift.
     "202609011230_webdev_provisioned_sites_framework_widen.sql",
+    // WSK-47 (additive): IAM seed for the two WebDesk editorial kinds (no DDL).
+    "202610101420_iam_webdesk_content_permissions.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
@@ -54,6 +56,18 @@ export const webdevModule: ModuleContract = {
     // WSK-19 (additive): the one-rail contract-snapshot mirror (design §06).
     { key: "webdev.contract_snapshot.read", description: "View pinned WebDesk contract snapshots (the Contract card)" },
     { key: "webdev.contract_snapshot.refresh", description: "Fetch, hash-verify and record a new WebDesk contract snapshot" },
+    // WSK-47 (additive): the WebDesk editorial kinds (write-plane design §7). publish/schedule are
+    // reachable only at decide() of an approved WS4 row (approvalId + maker != checker in Cerbos).
+    { key: "webdev.webdesk_content_item.read", description: "View WebDesk editorial items" },
+    { key: "webdev.webdesk_content_item.create", description: "Create a WebDesk editorial item (a draft)" },
+    { key: "webdev.webdesk_content_item.update", description: "Edit a WebDesk editorial item's draft" },
+    { key: "webdev.webdesk_content_item.request_publish", description: "Request publication of WebDesk items (files a WS4 approval)" },
+    { key: "webdev.webdesk_content_item.publish", description: "Publish WebDesk items at decide() of an approved WS4 row" },
+    { key: "webdev.webdesk_content_item.schedule", description: "Schedule a WebDesk publish at decide() of an approved WS4 row" },
+    { key: "webdev.webdesk_content_item.unpublish", description: "Take a published WebDesk item down" },
+    { key: "webdev.webdesk_content_item.delete", description: "Delete a WebDesk editorial item" },
+    { key: "webdev.webdesk_collection.read", description: "View a WebDesk site's collections and compositions" },
+    { key: "webdev.webdesk_collection.apply_schema", description: "Apply a composition change to a WebDesk collection" },
   ],
   customFieldTargets: [],
   mcpTools: [
