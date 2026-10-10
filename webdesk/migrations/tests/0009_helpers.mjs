@@ -1,6 +1,16 @@
-// WSK-65 — shared helpers for the migration test files (0009_content_write_plane.test.mjs,
-// 0009_v1_bytes.test.mjs and, since WSK-D51, 0010_slug_release_and_ledger.test.mjs). Not a test
-// itself.
+// WSK-65 — shared helpers for the migration test files (0009_content_write_plane.test.mjs and, since
+// WSK-D51, 0010_slug_release_and_ledger.test.mjs; since WSK-48b also 0011_drop_payload.test.mjs). Not a
+// test itself.
+//
+// RETIRED (WSK-48b): 0009_v1_bytes.test.mjs, which proved "0009 left every /v1 response byte-identical"
+// by capturing a request matrix through the OLD Payload router (payload/collections/router.ts) on a
+// database stopped at 0008, applying 0009 with the real runner, and replaying. It could not be ported to
+// the api's router (webdesk/api/src/delivery/router.ts): the api's read SQL filters `deleted_at IS NULL`,
+// a column that does not exist until 0009, so it cannot run against the 0008 database the capture
+// needed, and the old router is deleted. The proof was a one-time pre/post comparison on the 0009
+// change itself, and it passed (4/4 on the base before 0011); it is recorded in the repo history
+// (git log -- webdesk/migrations/tests/0009_v1_bytes.test.mjs). What now guards /v1's bytes is the
+// api's golden suite (test/delivery/v1-golden.spec.ts).
 //
 // The negative controls need a database that stops short of the migration under test, so these helpers build throwaway
 // scratch databases next to the main one. Each is set up exactly as postgres/init-roles.sh sets up

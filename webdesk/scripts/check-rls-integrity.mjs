@@ -44,7 +44,6 @@ import pg from 'pg';
 const EXEMPT = new Set([
   'tenants',              // the tenant registry itself: keyed on id, not tenant_id
   'webdesk_migrations',   // ledger
-  'payload_migrations',   // Payload's own ledger
 ]);
 
 const SQL_TENANT_TABLES = `
@@ -101,7 +100,7 @@ function report(findings, scanned) {
     for (const p of f.problems) console.error(`      - ${p}`);
   }
   console.error(
-    '\n  A Payload dev schema push (PAYLOAD_ALLOW_PUSH=true) is the known cause: it disables row\n' +
+    '\n  The known historical cause was a Payload dev schema push (Payload is deleted, WSK-48b): it disables row\n' +
       '  security and drops policies while leaving relforcerowsecurity=true, so the table still looks\n' +
       '  protected. Re-apply the policies, then re-run this gate.\n' +
       '  See webdesk/spike-rls/payload/FINDINGS.md (addendum).',

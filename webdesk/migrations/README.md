@@ -85,3 +85,24 @@ There is no baseline cutoff yet — this ledger has no applied migrations to gra
 real migration that needs a backfill against an already-FORCE-RLS'd table should follow
 platform-nest's `0051_pm_short_codes_backfill_fix.sql` as the reference pattern: wrap the
 statement with `PERFORM set_config('webdesk.tenant_ctx', <tenant>::text, true)` per tenant first.
+
+## Tests (`tests/`)
+
+Plain `node` scripts, run from `webdesk/api` as `node --import tsx ../migrations/tests/<name>.test.mjs`
+(CI's `webdesk-api` job and `qa/linux-gate.sh` run exactly these three; `pg` resolves from
+`webdesk/node_modules`). Each needs the cluster superuser (`SUPERUSER_DATABASE_URL`) as well as the
+migrator and app roles, because it builds throwaway scratch databases next to the migrated one
+(`0009_helpers.mjs`) and drives the REAL runner against them.
+
+| File | Proves |
+|---|---|
+| `0009_content_write_plane.test.mjs` | 0009: columns, indexes, grants, preconditions, loud failures |
+| `0010_slug_release_and_ledger.test.mjs` | 0010: a soft-deleted item releases its slug; the app role loses the ledger |
+| `0011_drop_payload.test.mjs` | 0011: Payload's nine tables (and sequences) are dropped, WebDesk's catalog and rows are untouched, no CASCADE |
+
+**Retired: `0009_v1_bytes.test.mjs` (WSK-48b).** It proved 0009 left `/v1`'s bytes unchanged by capturing
+through the old Payload router before and after 0009. The old router is deleted and the api's router cannot
+run at 0008 (it reads `deleted_at`, which 0009 adds), so it could not be ported; it was a one-time proof of
+0009 itself, passed, and stays in git history. `/v1`'s bytes are guarded now by the api's golden suite
+(`webdesk/api/test/delivery/v1-golden.spec.ts`). The gate's `migrations` suite and CI's step list exactly
+the files in this directory.
