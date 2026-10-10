@@ -22,7 +22,7 @@ export function HomeView({ clientId, basePath, profile }: { clientId: string; ba
     <div className="cc-content">
       <Breadcrumb items={[profile.clientName, "Home"]} />
       <div className="cc-head-row">
-        <h1>{profile.clientName}</h1>
+        <h2>{profile.clientName}</h2>
         <Link href={sectionHref(basePath, { kind: "company" })} className="lux-btn lux-btn--ghost lux-btn--sm">
           Business details
         </Link>

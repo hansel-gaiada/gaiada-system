@@ -36,7 +36,7 @@ export function SectionOverviewView({
     <div className="cc-content">
       <Breadcrumb items={crumbs} />
       <div className="cc-head-row">
-        <h1>{section.name}</h1>
+        <h2>{section.name}</h2>
         <Link href={settingsHref} className="lux-btn lux-btn--ghost lux-btn--sm">Settings</Link>
       </div>
       <p className="cc-lede">

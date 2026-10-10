@@ -32,7 +32,7 @@ export function CompanySettingsView({
   return (
     <div className="cc-content">
       <Breadcrumb items={[clientName, "Business details"]} />
-      <div className="cc-head-row"><h1>Business details</h1></div>
+      <div className="cc-head-row"><h2>Business details</h2></div>
       <p className="cc-lede">
         The basics every section shares. Each section&apos;s own settings page adds what that specialist
         needs on top. Changes save automatically.
