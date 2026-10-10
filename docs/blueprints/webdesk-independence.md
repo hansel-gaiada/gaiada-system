@@ -421,7 +421,7 @@ these belong in v2.2 §14 before any ticket cites them.
 
 | # | Question | Default if unanswered |
 |---|---|---|
-| **OQ-3.1** | Rich-text storage format — Lexical JSON, TipTap/ProseMirror JSON, or portable-text? It enters the **frozen** `/v1` envelope, so it is a contract decision with a vocabulary version bump. | Lexical JSON — closest to what the current dependency would have produced, so no consumer changes shape |
+| ~~**OQ-3.1**~~ | ~~Rich-text storage format — Lexical JSON, TipTap/ProseMirror JSON, or portable-text?~~ | ✅ **RESOLVED 2026-10-11 by the owner — Markdown, edited WYSIWYG (WSK-D49).** The existing `markdown` primitive of vocabulary 1.1.0 is the storage format. No new primitive, no envelope change. The editor must round-trip byte-stably |
 | **OQ-3.2** | Do client editors get the `content` module inside the existing client portal, or a narrowed editorial-only shell? | Existing client portal, narrowed by Cerbos — one shell, one RBAC |
 | ~~**OQ-3.3**~~ | ~~Redis: pin ≤ 7.2, or swap to Valkey 8?~~ | ✅ **RESOLVED + DONE 2026-09-21 — Valkey 8.** Swapped across 8 services in 7 files (5 compose + both CI service containers), with `redis-server`→`valkey-server` and `redis-cli`→`valkey-cli` where present. Topology unchanged. **Server verification pending** |
 | ~~**OQ-3.4**~~ | ~~SMTP provider (A-10 input, still unchosen)~~ | ✅ **RESOLVED 2026-09-21 — see [`vendor-independence-doctrine.md`](./vendor-independence-doctrine.md) §4.1.** Resend free tier now → SES at volume → Postmark as the named upgrade. Never self-host the MTA. The generic `MAIL_SMTP_*` wiring makes this reversible by env var |
