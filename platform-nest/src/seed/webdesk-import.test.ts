@@ -291,10 +291,12 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
     requestPublish: false,
     ...extra,
   });
-  const approvals = async () =>
+  /** The webdesk approvals of company A; `bundleSha` narrows to one bundle's (the suites share the company). */
+  const approvals = async (bundleSha?: string) =>
     (await adminPool().query<{ id: string; status: string; workflow_id: string; requested_by: string; tool_args: any }>(
-      `SELECT id, status, workflow_id, requested_by, tool_args FROM automation_approvals WHERE tenant_id = $1 AND origin = 'webdesk' ORDER BY created_at`,
-      [A],
+      `SELECT id, status, workflow_id, requested_by, tool_args FROM automation_approvals
+        WHERE tenant_id = $1 AND origin = 'webdesk' AND ($2::text IS NULL OR tool_args->'summary'->>'bundleSha256' = $2) ORDER BY created_at`,
+      [A, bundleSha ?? null],
     )).rows;
   const ledgerCount = async () =>
     Number((await adminPool().query(`SELECT count(*)::int AS n FROM activities WHERE tenant_id = $1 AND verb LIKE 'webdesk.%'`, [A])).rows[0].n);
@@ -416,7 +418,7 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
         expect(zb.writes).toHaveLength(0);
         expect(zb.store.size).toBe(0);
         expect(await ledgerCount()).toBe(before);
-        expect((await approvals()).length).toBe(0);
+        expect((await approvals(bundle.sha256)).length).toBe(0);
         expect(r.writes).toEqual({ schemaApplied: 0, created: 0, updated: 0, unchanged: 0, versionsWritten: 0 });
       });
 
@@ -512,11 +514,11 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
       });
 
       it("5 · --request-publish files exactly ONE approval whose items are the head versions; it never publishes", async () => {
-        expect((await approvals()).length).toBe(0);
+        expect((await approvals(bundle.sha256)).length).toBe(0);
         const r = await runImport(opts(path, { apply: true, requestPublish: true }), env());
         expect(r.failures).toEqual([]);
         expect(r.publishApprovalId).toBeTruthy();
-        const rows = await approvals();
+        const rows = await approvals(bundle.sha256);
         expect(rows).toHaveLength(1);
         const row = rows[0];
         expect(row.id).toBe(r.publishApprovalId);
@@ -539,7 +541,7 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
         const again = await runImport(opts(path, { apply: true, requestPublish: true }), env());
         expect(again.publishApprovalId).toBeNull();
         expect(again.failures.map((f) => f.reason).join(" ")).toMatch(/already pending/);
-        expect(await approvals()).toHaveLength(1);
+        expect(await approvals(bundle.sha256)).toHaveLength(1);
       });
     });
   });
@@ -578,7 +580,8 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
   // ── 6 ────────────────────────────────────────────────────────────────────────────────────────
   describe("6 · static: the module can never publish, unpublish or delete", () => {
     const src = readFileSync(join(__dirname, "webdesk-import.ts"), "utf8");
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    // whole-line // comments first: a `/*` inside one (a glob like `scripts/*.ts`) must not open a block comment
+    const code = src.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
 
     it("imports only an allow-listed set of names from an allow-listed set of modules", () => {
       const imports = [...code.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+"([^"]+)"/g)].map((m) => ({
@@ -630,6 +633,7 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
       try {
         wd = await import(/* @vite-ignore */ mod);
       } catch (err) {
+        if (process.env.WSK67_REQUIRE_PARITY) throw err; // the gate ships webdesk/ and demands the comparison
         console.log(`parity: webdesk sources not importable here (${(err as Error).message.slice(0, 120)}); skipped`);
       }
       if (!wd) return;
@@ -644,6 +648,7 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
         checked++;
       }
       expect(checked).toBe(bundle.items.length);
+      console.log(`parity: ${checked} items, assembly and content hash identical to WebDesk's own functions`);
     });
   });
 });
