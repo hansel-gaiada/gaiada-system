@@ -145,6 +145,13 @@ services:
       # vhost's own Caddy `trusted_ca_cert_file` already expects (see
       # ../infra/runbooks/webdesk-zoneb-box-hardening.md §5) — one file, one source of truth.
       WEBDESK_CONTROL_MTLS_CA_FILE: /etc/webdesk/certs/ca-cert.pem
+      # WSK-40 — the pinned editorial JWKS (design §5): the ERP's PUBLIC Ed25519 key(s), 1 normally, 2
+      # during a rotation overlap. Same discipline and channel class as the CA above: a literal path,
+      # a read-only FILE mount, shape-validated at boot (a present-but-truncated or non-Ed25519 file
+      # refuses boot). Absent → the api still boots (/v1 delivery stays up) and every content write
+      # answers 503 editorial-keys-not-configured. No private key ever lives on this box (D39).
+      # Install / rotate: ../infra/runbooks/webdesk-editorial-keys.md.
+      WEBDESK_EDITORIAL_JWKS_FILE: /etc/webdesk/editorial/editorial.jwks.json
     # Everything else control-channel (WSK-22) still comes from its own env file, NOT `.env`
     # (single-line secrets only now — the CA left this file on purpose, see above). On THIS box
     # the file is `/etc/webdesk/.env.control`, owned by the dedicated `webdesk-svc` unix user,
@@ -158,6 +165,11 @@ services:
       # see webdesk/README.md's WSK-22 operator steps for how it gets there. Never bind-mount the
       # CA *key* material; Zone B only ever holds the CA's public certificate (design §03).
       - /etc/webdesk/certs/ca-cert.pem:/etc/webdesk/certs/ca-cert.pem:ro
+      # WSK-40 — the pinned editorial JWKS, public keys only, read-only FILE mount (see the env row
+      # above). If the host file does not exist when the container is created, Docker creates an
+      # empty DIRECTORY at the host path; the api treats that as "not configured" (503 on writes), and
+      # the runbook removes it before installing the real file.
+      - /etc/webdesk/editorial/editorial.jwks.json:/etc/webdesk/editorial/editorial.jwks.json:ro
     security_opt:
       - no-new-privileges:true
     read_only: true
