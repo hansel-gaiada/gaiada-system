@@ -542,6 +542,7 @@ test("create: a new item is filled in on the same form, then created as a draft"
   await page.goto(`${SITE}/service`);
   await page.getByTestId("new-item").click();
   await expect(page).toHaveURL(/service\/~new\?locale=en$/);
+  await hydrated(page.getByTestId("item-editor")); // typing into a not-yet-hydrated controlled input is lost
   await page.locator("#wc-slug").fill("Bad Slug");
   await page.getByTestId("save").click();
   await expect(page.locator("#wc-slug")).toHaveAttribute("aria-invalid", "true");
