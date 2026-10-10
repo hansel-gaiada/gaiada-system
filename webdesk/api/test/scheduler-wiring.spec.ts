@@ -193,6 +193,24 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
     expect(unhandled.slice(before)).toEqual([]);
   }, 60_000);
 
+  it("three replicas booting at the same instant still register exactly three job schedulers", async () => {
+    useEnv({ WEBDESK_SCHEDULER_ENABLED: "true", WEBDESK_SCHEDULER_TICK_SECONDS: "30", WEBDESK_SCHEDULER_HOURLY_SECONDS: "900" });
+    const replicas = await Promise.all([boot(), boot(), boot()]);
+    await Promise.all(replicas.map((a) => a.get(SchedulerService).registered));
+    const probe = new Queue(queueName, { connection: redisConnectionOptions() as never });
+    try {
+      const list = await probe.getJobSchedulers();
+      expect(list.map((j) => j.key).sort()).toEqual([...SCHEDULER_JOB_IDS].sort());
+      expect(Object.fromEntries(list.map((j) => [j.key, Number(j.every)]))).toEqual({
+        [JOB_CONTENT_TICK]: 30_000,
+        [JOB_FORMS_PURGE]: 900_000,
+        [JOB_IDEMPOTENCY_SWEEP]: 900_000,
+      });
+    } finally {
+      await probe.close();
+    }
+  }, 60_000);
+
   it("an EMPTY env gives the defaults (60 s tick, hourly 3600 s), never 0", async () => {
     useEnv({ WEBDESK_SCHEDULER_ENABLED: "true", WEBDESK_SCHEDULER_TICK_SECONDS: "", WEBDESK_SCHEDULER_HOURLY_SECONDS: "" });
     const app = await boot();
