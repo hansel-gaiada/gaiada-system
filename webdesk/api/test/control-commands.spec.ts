@@ -288,7 +288,7 @@ describe("control-plane commands — idempotency + audit (lifecycle / schema / k
     expect(collectionRows[0].schema).toEqual({ fields: [{ name: "title", primitive: "text" }] });
   });
 
-  it("key.mint requires WS4 (HIGH), delegates to ApiKeysService, and is idempotent under double-fire", async () => {
+  it("key.mint requires WS4 (HIGH), delegates to ApiKeysService, and a double-fire mints once", async () => {
     const slug = freshSlug();
     const provision = await app.inject({
       method: "POST",
@@ -337,8 +337,10 @@ describe("control-plane commands — idempotency + audit (lifecycle / schema / k
       payload: { envId, scope: "read" },
     });
     expect(mint1.statusCode).toBe(201);
-    expect(mint2.json().id).toBe(mint1.json().id);
-    expect(mint2.json().key).toBe(mint1.json().key); // same plaintext returned — proves NO second mint happened
+    // M3 T5a: the plaintext key is never stored, so the double-fire cannot return it again: 409
+    // idempotency-response-withheld. The row count below still proves NO second mint happened.
+    expect(mint2.statusCode).toBe(409);
+    expect(mint2.json().type).toBe("https://webdesk.gaiada.online/errors/idempotency-response-withheld");
 
     const keyCount = await withTenant(tenantId, async (client) => {
       const { rows } = await client.query("SELECT count(*)::int AS n FROM api_keys WHERE env_id = $1", [envId]);
