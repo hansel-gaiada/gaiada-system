@@ -1195,3 +1195,60 @@ export async function controlProvisionSite(principal: Principal, tenantId: strin
     webdeskZoneB.clearSiteCache(tenantId);
   }
 }
+
+/**
+ * `POST control/sites/:siteId/keys` body `{tenantSlug, envId, scope}`: FILES one key.mint approval (HIGH, WS4)
+ * and answers `{approvalId}`. It never mints. WSK-66's executor mints at decide(), as the DECIDER (a key mint
+ * is never self-approvable), and the plaintext appears ONCE, in that decide response; it is never stored,
+ * ledgered or logged on this side. The controller has already authorized `promote` on
+ * `webdev_provisioned_site`; the filer authorizes it again (it is also the importer's entry point).
+ *
+ * The environment must be one of THIS site's, read from the wall's own answer, so an approval can only name a
+ * real target and its title tells the approver which one ("production read key"). One open request per
+ * (site, environment, scope): filing again returns the pending request's id instead of queueing a second
+ * mint (the same rule as `rebuild-requests`; two simultaneous first filings can still both land).
+ */
+export async function controlRequestKeyMint(principal: Principal, tenantId: string, siteIdParam: string, rawBody: unknown): Promise<{ approvalId: string }> {
+  const b = strictBody(rawBody, ["tenantSlug", "envId", "scope"]);
+  if (typeof b.tenantSlug !== "string" || b.tenantSlug === "") throw invalidRequest("tenantSlug is a required string");
+  if (typeof b.envId !== "string" || !UUID_RE.test(b.envId)) throw invalidRequest("envId must be a uuid");
+  if (b.scope !== "read" && b.scope !== "write") throw invalidRequest('scope must be "read" or "write"');
+  const scope = b.scope;
+  const envId = b.envId.toLowerCase();
+
+  const { site } = await webdeskZoneB.resolveEditableSite(tenantId, b.tenantSlug, siteIdParam);
+  const env = site.environments.find(
+    (e): e is { envId: string; name?: unknown } => isPlainObject(e) && typeof e.envId === "string" && e.envId.toLowerCase() === envId,
+  );
+  if (!env) {
+    throw new WebdeskProblem(404, {
+      type: "https://webdesk.gaiada.online/errors/environment-not-found",
+      title: "Environment not found",
+      status: 404,
+      detail: "No such environment on this site.",
+    });
+  }
+  const envName = typeof env.name === "string" && env.name !== "" ? env.name : "environment";
+  const siteId = site.siteId.toLowerCase();
+
+  const open = await withTenants([tenantId], async (c) => {
+    const r = await c.query<{ id: string }>(
+      `SELECT id FROM automation_approvals
+        WHERE tenant_id = $1 AND origin = 'webdesk' AND workflow_id = 'key.mint'
+          AND status = 'pending' AND deleted_at IS NULL
+          AND tool_args->>'siteId' = $2 AND tool_args->>'envId' = $3 AND tool_args->>'scope' = $4
+        ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, siteId, envId, scope],
+    );
+    return r.rows[0] ?? null;
+  });
+  if (open) return { approvalId: open.id };
+
+  return fileWebdeskCommandApproval(principal, tenantId, {
+    command: "key.mint",
+    tenantSlug: b.tenantSlug,
+    siteId,
+    args: { envId, scope },
+    summary: { title: `Mint a ${envName} ${scope} API key for ${b.tenantSlug} (site "${site.name}")` },
+  });
+}

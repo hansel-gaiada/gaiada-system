@@ -365,8 +365,10 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.key.mint",
       description:
-        "Mint a new WebDesk environment API key (shown once, hash-only at rest). HIGH write — ALWAYS "
-        + "WS4, every principal class (§07). STUB: 501 webdesk_control_plane_not_wired.",
+        "Request a new WebDesk environment API key: files ONE key.mint approval (HIGH, WS4) for one of the site's "
+        + "environments and returns {approvalId} (a pending request for the same site, environment and scope is returned "
+        + "instead of a second one). Nothing is minted until a DIFFERENT authorised user approves it; the plaintext key "
+        + "is shown ONCE, in that decide response, and only its hash is kept. HIGH write — ALWAYS WS4, every principal class (§07).",
       minAssurance: "low",
       write: true,
       impact: "high",
@@ -374,8 +376,11 @@ export const webdevModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/webdev/control/sites/:siteId/keys",
       inputSchema: {
         type: "object",
-        properties: { tenantId: { type: "string" }, siteId: { type: "string" }, scope: { type: "string", enum: ["read", "write"] } },
-        required: ["tenantId", "siteId", "scope"],
+        properties: {
+          tenantId: { type: "string" }, siteId: { type: "string" }, tenantSlug: { type: "string" },
+          envId: { type: "string" }, scope: { type: "string", enum: ["read", "write"] },
+        },
+        required: ["tenantId", "siteId", "tenantSlug", "envId", "scope"],
       },
     },
     {
