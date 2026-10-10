@@ -297,7 +297,7 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       okData(await step("getItem live", () => ui.getItem(editorA, A, GAIADA_SLUG, GAIADA_SITE, live1.itemId, "live")));
       okData(await step("getItem v1", () => ui.getItem(editorA, A, GAIADA_SLUG, GAIADA_SITE, item.itemId, 1)));
       const legacy = okData(await step("getItem pre-0009", () => ui.getItem(editorA, A, GAIADA_SLUG, GAIADA_SITE, pre.itemId, "head")));
-      expect(legacy).toMatchObject({ item: { headVersion: 0, headCreatedAt: null }, version: { n: 0, createdBy: null } });
+      expect(legacy).toMatchObject({ item: { headVersion: 0 }, version: { n: 0, createdBy: null } }); // (the UI keeps ItemRef, not the summary extras)
       // `?version=live` on a draft: WebDesk answers 404 `version-not-found`. Before WSK-44b this read as not_enabled/not_served.
       const none = await step("getItem live on a draft", () => ui.getItem(editorA, A, GAIADA_SLUG, GAIADA_SITE, item.itemId, "live"));
       expect(none).toEqual({ kind: "not_found", slug: "version-not-found" });
