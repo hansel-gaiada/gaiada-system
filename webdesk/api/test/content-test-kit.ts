@@ -17,8 +17,9 @@ process.env.WEBDESK_APPROVAL_ASSERTION_KEY = process.env.WEBDESK_APPROVAL_ASSERT
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { Test, type TestingModuleBuilder } from "@nestjs/testing";
-import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
+import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "../src/app.module";
+import { createFastifyAdapter } from "../src/app";
 import { POLICY_DECISION_POINT } from "../src/control/policy/policy-decision-point";
 import { RealPolicyDecisionPoint } from "../src/control/policy/real-policy-decision-point";
 import { mintWs4Assertion, computeCommandHash } from "../src/control/auth/ws4-assertion";
@@ -34,7 +35,7 @@ export async function buildContentApp(extra?: (b: TestingModuleBuilder) => Testi
   let builder = Test.createTestingModule({ imports: [AppModule] }).overrideProvider(POLICY_DECISION_POINT).useClass(RealPolicyDecisionPoint);
   if (extra) builder = extra(builder);
   const moduleRef = await builder.compile();
-  const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { logger: ["error"] });
+  const app = moduleRef.createNestApplication<NestFastifyApplication>(createFastifyAdapter(), { logger: ["error"] });
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   return app;

@@ -18,7 +18,7 @@
 // v1-fixtures.ts#createRedirect (the original used the old router's own write helper).
 import { Client } from "pg";
 import { randomUUID } from "node:crypto";
-import type { ComparePair, PairOptions } from "./differential";
+import type { ComparePair, IntendedDivergence, PairOptions } from "./differential";
 import {
   createFixtureCollection,
   createFixtureTenant,
@@ -42,6 +42,17 @@ async function asMigrator(tenant: V1Tenant, sql: string, params: unknown[] = [])
     await c.end();
   }
 }
+
+// M3 T1 — behaviours the api changed on purpose; the OLD router never had them (see differential.ts).
+// Each is attached ONLY to the calls it explains; everything else in the corpus must stay identical.
+//   D2: path segments are percent-decoded once (the old router looked the raw text up), and a decoded
+//       `/` or NUL matches nothing (404 before auth), so these inputs answer differently.
+const M3_T1_DECODED_SEGMENT: IntendedDivergence = { name: "percent-decoded path segment (M3 T1 D2)", old: [200, 401, 404], new: [200, 404] };
+//   D3: a cursor the api never issued is a 400 invalid-cursor (old: ignored -> 200, or a Postgres error -> 500).
+const M3_T1_INVALID_CURSOR: IntendedDivergence = { name: "invalid pagination cursor -> 400 (M3 T1 D3)", old: [200, 500], new: [400] };
+// The path-anomaly inputs D2 changes (the other anomalies must stay identical): an escaped letter in the
+// collection key, `%2F` and NUL inside a segment, and `%2f` inside the tenant segment.
+const M3_T1_PATH_ANOMALIES = ["/po%73t", "/post%2Fpost-0", "/post/%00", "/v1/t/..%2f"];
 
 const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString();
 const bearer = (k: string) => ({ authorization: `Bearer ${k}` });
@@ -216,13 +227,13 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
     ["staging", stgA],
   ]) {
     for (const slug of slugs) {
-      for (const loc of ["", "?locale=en-US", "?locale=id-ID", "?locale=fr-FR", "?locale=xx-YY"]) await get(`${a}/case-study/${slug}${loc}`, bearer(key), { note: label });
+      for (const loc of ["", "?locale=en-US", "?locale=id-ID", "?locale=fr-FR", "?locale=xx-YY"]) await get(`${a}/case-study/${slug}${loc}`, bearer(key), { note: label, intended: /%|[^\x00-\x7f]| /.test(slug) ? M3_T1_DECODED_SEGMENT : undefined });
     }
   }
   await get(`${b}/article/hello-world`, bearer(prodB));
   await get(`${b}/article/hello-world?locale=id-ID`, bearer(prodB));
   await get(`${b}/article/nope`, bearer(prodB));
-  await get(`${a}/redirect/%2Fold-page`, bearer(prodA));
+  await get(`${a}/redirect/%2Fold-page`, bearer(prodA), { intended: M3_T1_DECODED_SEGMENT }); // D2: decodes to `/old-page`, which contains `/` -> 404
   await get(`${a}/redirect//old-page`, bearer(prodA));
 
   // 5. cursors -------------------------------------------------------------------------------
@@ -239,8 +250,8 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
     b64(`2999-01-01 00:00:00+00|${randomUUID()}`),
     "",
   ]) {
-    await get(`${a}/post?limit=2&cursor=${encodeURIComponent(cursor)}`, bearer(prodA), { note: `cursor=${cursor.slice(0, 12)}` });
-    await get(`${a}/search?q=post&limit=2&cursor=${encodeURIComponent(cursor)}`, bearer(prodA), { note: `search cursor=${cursor.slice(0, 12)}` });
+    await get(`${a}/post?limit=2&cursor=${encodeURIComponent(cursor)}`, bearer(prodA), { note: `cursor=${cursor.slice(0, 12)}`, intended: M3_T1_INVALID_CURSOR });
+    await get(`${a}/search?q=post&limit=2&cursor=${encodeURIComponent(cursor)}`, bearer(prodA), { note: `search cursor=${cursor.slice(0, 12)}`, intended: M3_T1_INVALID_CURSOR });
   }
   // full walks, the cursor taken from the OLD side's page and replayed to both
   async function walk(base: string, key: string, limit: number, extra = "") {
@@ -319,8 +330,9 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
     "/v1/t/" + A.slug + "/post;x=1",
     "/v1/t/" + A.slug + "/post#frag",
   ]) {
-    await get(p, bearer(prodA), { note: "path anomaly" });
-    await get(p, {}, { note: "path anomaly, no key" });
+    const intended = M3_T1_PATH_ANOMALIES.some((m) => p.includes(m)) ? M3_T1_DECODED_SEGMENT : undefined;
+    await get(p, bearer(prodA), { note: "path anomaly", intended });
+    await get(p, {}, { note: "path anomaly, no key", intended });
   }
   // a handful of other prefixes that must NOT be answered by the delivery route in either world
   // (old: gateway 404s them before the router; new: Nest's own 404) are intentionally NOT compared —

@@ -38,6 +38,9 @@ const EXPECTED = {
   contractApi: { pairs: 24, statusOnly: 1 },
   contractOld: { pairs: 24, statusOnly: 1 },
   extra: { pairs: 662, statusOnly: 6, knownDivergent: 14 },
+  // M3 T1: the 14 are all the bad-'%' path class (now 400 problem+json, slug invalid-path-encoding);
+  // the rest are the named intended divergences (decoding, cursors). Pinned per class.
+  extraByName: {} as Record<string, number>,
 };
 
 type Differential = ReturnType<typeof createV1Differential>;
@@ -117,9 +120,13 @@ describe("WSK-48a differential — the old Payload router vs the api's /v1, byte
     const harnessFailures = await runExtraCorpus(d.comparePair);
     expect(harnessFailures).toEqual([]);
     expectNoUnexplainedDifference(d);
-    // The one classified class: a raw '%' without two hex digits in the PATH, which Fastify refuses
-    // (400 FST_ERR_BAD_URL) before any route runs. Every member must be exactly that.
-    for (const k of d.stats.knownDivergent) expect(k.new).toBe(400);
+    // The classified divergences, each NAMED and counted separately (a new class, or a member that
+    // moves between classes, fails here). The first is the original framework class: a raw '%' without
+    // two hex digits in the PATH, which the old router never saw (Fastify refused it before any route);
+    // the api now answers it as 400 problem+json. The other two are behaviours M3 T1 changed on purpose.
+    const byName: Record<string, number> = {};
+    for (const k of d.stats.knownDivergent) byName[k.name] = (byName[k.name] ?? 0) + 1;
+    expect(byName).toEqual(EXPECTED.extraByName);
     expect({ pairs: d.stats.pairs, statusOnly: d.stats.statusOnlyPairs, knownDivergent: d.stats.knownDivergent.length }).toEqual(EXPECTED.extra);
   }, 300_000);
 });
