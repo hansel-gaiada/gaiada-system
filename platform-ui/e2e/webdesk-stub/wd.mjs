@@ -207,7 +207,7 @@ export function seed() {
     build: null,
     stagingStale: false,
     seq: 0,
-    cfg: { approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, drift: null, forceIssues: null, unavailableOnce: 0 },
+    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, drift: null, forceIssues: null, unavailableOnce: 0 },
     log: [],
   };
 }
@@ -240,8 +240,8 @@ export const tenantList = (S, company) => company === COMPANY ? {
     sites: [{
       siteId: SITE, name: "gaiada.com", kind: "static",
       environments: [
-        { envId: "env-staging", name: "staging", domain: "24-pyevq.gaiada.com", status: "active" },
-        { envId: "env-production", name: "production", domain: "gaiada.com", status: "pending" },
+        { envId: "2b3c4d5e-6f70-4b8c-9d0e-1f2a3b4c5d6e", name: "staging", domain: "24-pyevq.gaiada.com", status: "active" },
+        { envId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", name: "production", domain: "gaiada.com", status: "pending" },
       ],
     }],
   }],
@@ -545,14 +545,68 @@ function requestPublish(S, body, userId) {
   return R(202, { approvalId: id });
 }
 
+// ── API keys (control plane): POST …/control/sites/:siteId/keys files a key.mint approval; approving it mints IN-BAND ────────
+// `controlRequestKeyMint` (platform-nest webdesk-content.service.ts) is the model: strict body `{tenantSlug, envId (uuid), scope}`,
+// the site read's own environments decide `environment-not-found`, one open request per (site, env, scope) answers
+// `{approvalId, alreadyPending: true}`, and `promote` (company_admin/manager) is the gate, so a plain member is a 403 for BOTH scopes.
+// NOTHING is minted at filing. On approve the decide response carries `webdesk.plaintextOnce` and that is the ONLY place the
+// key exists: this file generates it at decide time and keeps it in no store, no approval row and no log (the e2e reads it off
+// the approver's screen).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function keyApprovalRow(S, id, userId, args, title) {
+  return {
+    id, workflowId: "key.mint", toolName: "webdesk.key.mint",
+    toolArgs: { command: "key.mint", ...args, summary: { title }, commandHash: sha({ command: "key.mint", ...args }) },
+    impact: "high", reason: title, status: "pending", origin: "webdesk", agentName: null,
+    requestedBy: userId, requestedByName: NAME[userId] ?? null, decidedBy: null, decidedByName: null, decidedAt: null,
+    createdAt: nowIso(), executionStatus: "not_applicable", executedAt: null, executedBy: null, executionError: null, executionResult: null, executionAttempts: null,
+  };
+}
+
+export function handleKeyRequest(S, { method, siteId, body, userId, company }) {
+  const role = roleOf(userId);
+  if (S.cfg.moduleDisabled) return R(404, { error: "module webdev not enabled for this company" });
+  if (role !== "publisher") return forbidden(); // `promote`: a member / viewer / editor is refused for both scopes
+  if (S.cfg.unavailable) return R(503, { error: "editorial_unavailable", reason: "editorial_unavailable" });
+  if (method !== "POST") return R(404, { error: `Cannot ${method}` });
+  const invalid = (m) => R(400, { error: m, reason: "invalid_request" });
+  if (!body || typeof body !== "object" || Array.isArray(body)) return invalid("body must be an object");
+  for (const k of Object.keys(body)) if (!["tenantSlug", "envId", "scope"].includes(k)) return invalid(`unknown key ${k}`);
+  if (typeof body.tenantSlug !== "string" || body.tenantSlug === "") return invalid("tenantSlug is a required string");
+  if (typeof body.envId !== "string" || !UUID_RE.test(body.envId)) return invalid("envId must be a uuid");
+  if (body.scope !== "read" && body.scope !== "write") return invalid('scope must be "read" or "write"');
+  const wall = tenantList(S, company).tenants.find((t) => t.slug === body.tenantSlug)?.sites.find((s) => s.siteId === siteId);
+  if (!wall) return problem(404, "site-not-found", "Site not found");
+  const env = wall.environments.find((e) => e.envId.toLowerCase() === body.envId.toLowerCase());
+  if (!env) return problem(404, "environment-not-found", "Environment not found", { detail: "No such environment on this site." });
+  const envId = env.envId;
+  const open = [...S.approvals.values()].find((a) => a.workflowId === "key.mint" && a.status === "pending" && a.toolArgs.siteId === siteId && a.toolArgs.envId === envId && a.toolArgs.scope === body.scope);
+  if (open) return R(202, { approvalId: open.id, alreadyPending: true });
+  const id = `ap-${(++S.seq).toString(16).padStart(4, "0")}-key`;
+  S.approvals.set(id, keyApprovalRow(S, id, userId, { tenantSlug: body.tenantSlug, siteId, envId, scope: body.scope }, `Mint a ${env.name} ${body.scope} API key for ${body.tenantSlug} (site "${wall.name}")`));
+  return R(202, { approvalId: id });
+}
+
 /** decide an approval: `approve` executes in-band (§6); `fail` = approved but the executor failed. */
 export function decideApproval(S, id, outcome, byUserId = "dept-manager") {
   const a = S.approvals.get(id);
   if (!a) return R(404, { error: "approval not found" });
   if (a.status !== "pending") return R(409, { error: "already decided" });
+  // A key mint is never self-approvable (maker != checker); a publish still is, unchanged.
+  if (a.workflowId === "key.mint" && a.requestedBy === byUserId) return R(403, { error: "not authorized: a key mint may not be approved by the principal who requested it" });
   a.decidedBy = byUserId; a.decidedByName = NAME[byUserId] ?? null; a.decidedAt = nowIso();
-  if (outcome === "reject") { a.status = "rejected"; return R(200, { id, status: "rejected" }); }
+  if (outcome === "reject") { a.status = "rejected"; return R(200, a.workflowId === "key.mint" ? { ok: true } : { id, status: "rejected" }); }
   a.status = "approved";
+  if (a.workflowId === "key.mint") {
+    // WSK-66 mints in-band: the answer carries the key ONCE and nothing else here ever holds it (`cfg.keyMintFails` = the executor failed).
+    if (S.cfg.keyMintFails) {
+      a.executionStatus = "failed"; a.executionError = "webdesk_unreachable";
+      return R(200, { ok: true, webdesk: { command: "key.mint", executionStatus: "failed", error: "webdesk_unreachable" } });
+    }
+    a.executionStatus = "executed"; a.executedAt = nowIso();
+    return R(200, { ok: true, webdesk: { command: "key.mint", executionStatus: "executed", apiKeyId: crypto.randomUUID(), envId: a.toolArgs.envId, scope: a.toolArgs.scope, plaintextOnce: `wdk_${a.toolArgs.scope}_${crypto.randomBytes(24).toString("hex")}` } });
+  }
   if (outcome === "fail") { a.executionStatus = "failed"; a.executionError = "version-conflict"; return R(200, { id, status: "approved" }); }
   if (outcome === "executing") { a.executionStatus = "executing"; return R(200, { id, status: "approved" }); }
   for (const r of a.toolArgs.items) {

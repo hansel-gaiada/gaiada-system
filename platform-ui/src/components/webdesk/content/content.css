@@ -147,3 +147,16 @@
 /* Approvals summary */
 .wc-summary { display: flex; flex-direction: column; gap: var(--space-16); }
 .wc-summary__grid { display: grid; gap: var(--space-12); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+/* ── API keys: the request control (site overview) and the once-only reveal (approval page) ────── */
+.wc-keys { display: flex; flex-direction: column; gap: var(--space-12); }
+.wc-keys__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-12); }
+.wc-keys__form .lux-field { flex: 0 1 200px; min-width: 150px; }
+.wc-keys__hint { flex: 1 1 100%; margin: 0; max-width: 70ch; }
+
+.wc-key-once { display: flex; flex-direction: column; gap: var(--space-12); }
+.wc-key-once__facts { display: flex; flex-wrap: wrap; gap: var(--space-16); margin: 0; font: 400 13px var(--font-body); color: var(--ink-body); }
+.wc-key-once__facts dt { font: 600 11px var(--font-body); color: var(--ink-subtle); }
+.wc-key-once__facts dd { margin: 2px 0 0; }
+.wc-key-once__row { display: flex; flex-wrap: wrap; gap: var(--space-8); align-items: stretch; }
+.wc-key-once__value { flex: 1 1 320px; min-width: 0; font-family: var(--font-mono, monospace); font-size: 13px; letter-spacing: 0.02em; }

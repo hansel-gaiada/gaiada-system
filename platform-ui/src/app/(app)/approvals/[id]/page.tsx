@@ -9,6 +9,10 @@ import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 import { WebdeskPublishSummary } from "@/components/webdesk/content/WebdeskPublishSummary";
+import { WebdeskKeyRequestSummary } from "@/components/webdesk/content/WebdeskKeyRequestSummary";
+import { KeyMintDecide } from "@/components/webdesk/content/KeyMintDecide";
+import { findKeyTarget } from "@/lib/webdeskContent";
+import { isKeyMintApproval, parseKeyMintArgs } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
 
 // APPR-01 — the per-approval detail route emailed approval links actually land on now. Before
@@ -100,6 +104,13 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
 
   const mayDecide = can(me, "approvals.decide", resolvedTenant) && detail.data.status === "pending";
 
+  // A WebDesk key.mint row is NOT a publish: it gets its own label and summary, and its decide control is a client component that
+  // keeps the once-only API key in its own state (the generic form below posts to an action that ignores the response body — a
+  // key approved that way would be minted and thrown away). The row never holds the key; this render reads the row only.
+  const isKeyMint = detail.kind === "automation_approval" && detail.origin === "webdesk" && isKeyMintApproval(detail.data);
+  const keyArgs = isKeyMint && detail.kind === "automation_approval" ? parseKeyMintArgs(detail.data.toolArgs) : null;
+  const keyTarget = keyArgs ? await findKeyTarget(userId, resolvedTenant, keyArgs.tenantSlug, keyArgs.siteId, keyArgs.envId) : null;
+
   // Hidden fields carry everything the façade needs (mirrors `pipeline/[runId]/page.tsx`'s
   // GateRow — `runId`/`gateId` hidden inputs, not a closure over the fetched row) so this action
   // doesn't serialize `detail`/`tenant` into the form's server-action reference.
@@ -127,7 +138,7 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Approvals", href: "/approvals" }, { label: title }]} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <Eyebrow style={{ color: "var(--erp-accent)" }}>
-            {detail.kind === "automation_approval" ? (detail.origin === "webdesk" ? "Website publish" : detail.origin) : "Agency"}
+            {detail.kind === "automation_approval" ? (detail.origin === "webdesk" ? (isKeyMint ? "API key request" : "Website publish") : detail.origin) : "Agency"}
           </Eyebrow>
           <StatusBadge label={detail.data.status.replace(/_/g, " ")} />
         </div>
@@ -184,11 +195,23 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         {/* WSK-44 — an approval filed by the Website workspace (write-plane design §6/§10): what is being
             published, to which site, which versions against what is live, lint counts and the rebuild
             target. `toolArgs` is validated inside the component — never trusted as typed. */}
-        {detail.kind === "automation_approval" && detail.origin === "webdesk" && (
+        {detail.kind === "automation_approval" && detail.origin === "webdesk" && !isKeyMint && (
           <WebdeskPublishSummary userId={userId} company={resolvedTenant} toolArgs={detail.data.toolArgs} workflowId={detail.data.workflowId} />
         )}
 
-        {mayDecide && (
+        {isKeyMint && detail.kind === "automation_approval" && (
+          <>
+            <WebdeskKeyRequestSummary toolArgs={detail.data.toolArgs} siteName={keyTarget?.siteName ?? null} environmentName={keyTarget?.environmentName ?? null} />
+            {/* Rendered for EVERY key.mint row, decided or not: this component must stay mounted when the revalidation that follows
+                a successful approve flips `mayDecide` to false, because its state is the only place the key exists. */}
+            <KeyMintDecide
+              tenantId={resolvedTenant} approvalId={detail.data.id} environmentName={keyTarget?.environmentName ?? null}
+              mayDecide={mayDecide} ownRequest={detail.data.requestedBy === userId}
+            />
+          </>
+        )}
+
+        {mayDecide && !isKeyMint && (
           <Card title="Decide">
             <form action={onDecide} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
               <input type="hidden" name="tenantId" value={resolvedTenant} />

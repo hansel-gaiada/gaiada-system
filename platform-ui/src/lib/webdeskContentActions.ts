@@ -8,6 +8,7 @@
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/unpublish
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/delete
 //   POST …/sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw  -> { approvalId, status:"cancelled" }  (WSK-59, built)
+//   POST /api/:t/modules/webdev/control/sites/:siteId/keys  {tenantSlug, envId, scope}   -> 202 {approvalId[, alreadyPending]}  (files a key.mint approval; mints NOTHING)
 //   STILL PROPOSED (WSK-60; a 404 comes back as `not_enabled` and the UI says so):
 //   POST …/sites/:tenantSlug/:siteId/rebuild-requests                       -> 202 { approvalId }
 //
@@ -28,12 +29,13 @@ import { getSessionUserId } from "./session-server";
 import { getMe } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
-  wdCall, siteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus,
+  wdCall, siteBase, controlSiteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus, parseKeyRequest,
   loadEditorBundle, getItem, pollApproval,
   type EditorBundle,
 } from "./webdeskContent";
+import { KEY_SCOPES } from "./webdeskContentModel";
 import type {
-  Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, WdResult, WebdeskApprovalRow,
+  Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, KeyRequestFiled, KeyScope, WdResult, WebdeskApprovalRow,
 } from "./webdeskContentModel";
 
 export interface SiteScope { tenantSlug: string; siteId: string }
@@ -174,6 +176,24 @@ export async function requestRebuildAction(scope: SiteScope): Promise<WdResult<{
   const c = await ctx(); if (!isCtx(c)) return c;
   if (!scopeOk(scope)) return badScope;
   return wdCall(`${siteBase(c.company, scope.tenantSlug, scope.siteId)}/rebuild-requests`, c.userId, parseApprovalId, { method: "POST" });
+}
+
+// ── API keys ─────────────────────────────────────────────────────────────────────────────────────
+
+/** "Request an API key": FILES one key.mint approval for (site, environment, scope). Nothing is minted here — a DIFFERENT authorised
+ *  user approves it, and the key is shown to THAT person once (see `decideKeyMintApproval`). The route is the control plane's, keyed by
+ *  `siteId` alone with `tenantSlug` in the body (unlike every content route above). `alreadyPending` means the BFF returned an open
+ *  request for the same (site, environment, scope) instead of queueing a second one. A 403 (Cerbos `promote`) comes back as
+ *  `{ kind: "forbidden" }`, a foreign site as `not_found/site-not-found`, an environment that is not this site's as
+ *  `not_found/environment-not-found`. */
+export async function requestKeyAction(scope: SiteScope, envId: string, keyScope: KeyScope): Promise<WdResult<KeyRequestFiled>> {
+  const c = await ctx(); if (!isCtx(c)) return c;
+  if (!scopeOk(scope)) return badScope;
+  if (!clean(envId) || !KEY_SCOPES.includes(keyScope)) return { kind: "invalid", issues: [], message: "Choose an environment and a scope." };
+  return wdCall(
+    `${controlSiteBase(c.company, clean(scope.siteId))}/keys`, c.userId, parseKeyRequest,
+    json({ tenantSlug: clean(scope.tenantSlug), envId: clean(envId), scope: keyScope }),
+  );
 }
 
 // ── Client-driven re-reads (poll / refresh) ──────────────────────────────────────────────────────
