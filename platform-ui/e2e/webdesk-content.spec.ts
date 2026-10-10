@@ -343,6 +343,7 @@ test("STATE rejected: the outcome is explained and Request again files a new req
 test("STATE failed: an approved request whose execution failed says why, in plain words", async ({ page }) => {
   await page.goto(SERVICE_SEO);
   await page.getByTestId("request-publish").click();
+  await expect(page.getByTestId("awaiting-approval")).toBeVisible(); // the request must exist before it is decided
   await stub.post("decide", { id: "ap-0001-publish", outcome: "fail", by: "dept-manager" });
   const failed = page.getByTestId("request-failed");
   await expect(failed).toContainText("Approved, but it failed");
@@ -417,16 +418,18 @@ test("list field: KEYBOARD-ONLY reorder (grab, arrows, drop, Escape cancels), ad
   await page.goto(NAV_EN);
   expect(await rowTitles(page)).toEqual(["/services/", "/work/", "/about/"]);
 
+  // anchored names: a nested `children` list has its own handles ("Reorder /services/seo/, …")
   const handle = (name: RegExp) => page.getByRole("button", { name });
-  await handle(/Reorder \/services\//).focus();
+  const SERVICES = /^Reorder \/services\/, position/;
+  await handle(SERVICES).focus();
   await page.keyboard.press("Space"); // grab
-  await expect(handle(/Reorder \/services\//)).toHaveAttribute("aria-pressed", "true");
+  await expect(handle(SERVICES)).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Space"); // drop
   expect(await rowTitles(page)).toEqual(["/work/", "/about/", "/services/"]);
   await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes");
-  await expect(handle(/Reorder \/services\//)).toBeFocused(); // focus follows the moved row
+  await expect(handle(SERVICES)).toBeFocused(); // focus follows the moved row
 
   // Escape restores the order the grab started from
   await page.keyboard.press("Space");
@@ -435,12 +438,12 @@ test("list field: KEYBOARD-ONLY reorder (grab, arrows, drop, Escape cancels), ad
   expect(await rowTitles(page)).toEqual(["/work/", "/about/", "/services/"]);
 
   // Alt+Arrow moves without grabbing
-  await handle(/Reorder \/about\//).focus();
+  await handle(/^Reorder \/about\/, position/).focus();
   await page.keyboard.press("Alt+ArrowUp");
   expect(await rowTitles(page)).toEqual(["/about/", "/work/", "/services/"]);
 
   // remove (keyboard: Tab to the button, Enter) and add
-  await page.getByRole("button", { name: "Remove /work/" }).focus();
+  await page.getByRole("button", { name: "Remove /work/", exact: true }).focus();
   await page.keyboard.press("Enter");
   expect(await rowTitles(page)).toEqual(["/about/", "/services/"]);
   await page.getByRole("button", { name: "Add item" }).first().focus();
@@ -450,7 +453,6 @@ test("list field: KEYBOARD-ONLY reorder (grab, arrows, drop, Escape cancels), ad
   // fix up the new row (url + label are required) and save: the stub stores the keyboard-made order
   const newRow = page.locator(`fieldset${P("primary")} > ol > li`).nth(2);
   await newRow.locator(`[data-pointer$="/label"]`).fill("Contact");
-  await newRow.locator(`[data-pointer$="/key"]`).fill("contact");
   await newRow.locator(`[data-pointer$="/url"]`).fill("/contact/");
   await page.getByTestId("save").click();
   await expect(page.getByTestId("save-status")).toHaveText("Saved v2");
@@ -459,8 +461,10 @@ test("list field: KEYBOARD-ONLY reorder (grab, arrows, drop, Escape cancels), ad
 });
 
 test("list field: reorder by DRAG", async ({ page }) => {
+  // HTML5 drag needs source and target on screen at once (a real user auto-scrolls; a synthetic mouse does not).
+  await page.setViewportSize({ width: 1280, height: 2600 });
   await page.goto(NAV_EN);
-  const src = page.getByRole("button", { name: /Reorder \/about\//, });
+  const src = page.getByRole("button", { name: /^Reorder \/about\/, position/ });
   const target = page.locator(`fieldset${P("primary")} > ol > li`).first();
   await src.dragTo(target);
   expect(await rowTitles(page)).toEqual(["/about/", "/services/", "/work/"]);
@@ -532,7 +536,7 @@ test("create: a new item is filled in on the same form, then created as a draft"
 
   await page.locator("#wc-slug").fill("service.new-thing");
   await page.locator(P("url")).fill("/services/new-thing/");
-  await page.locator(P("source_path")).fill("content/en/services/new-thing.md");
+  await expect(page.locator(P("source_path"))).not.toBeEditable(); // ui.readOnly: carried by the importer, stays ""
   await page.locator(P("template")).selectOption("service");
   await page.locator(P("section")).fill("service");
   await page.locator(P("language")).fill("en-GB");

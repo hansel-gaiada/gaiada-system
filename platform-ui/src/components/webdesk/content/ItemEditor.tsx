@@ -36,7 +36,7 @@ type SaveState =
   | { s: "idle" }
   | { s: "saving" }
   | { s: "saved"; version: number; unchanged: boolean }
-  | { s: "error"; message: string };
+  | { s: "error"; message: string; issues?: Issue[] };
 
 interface ConflictState {
   currentHeadVersion: number | null;
@@ -214,7 +214,7 @@ export function ItemEditor({
     switch (r.kind) {
       case "invalid":
         setIssues(r.issues);
-        setSaveState({ s: "error", message: r.issues.length ? `${r.issues.length} problem${r.issues.length === 1 ? "" : "s"} to fix before it can be ${verb}.` : r.message });
+        setSaveState({ s: "error", message: r.issues.length ? `${r.issues.length} problem${r.issues.length === 1 ? "" : "s"} to fix before it can be ${verb}.` : r.message, issues: r.issues });
         requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-pointer][aria-invalid='true']")?.scrollIntoView({ block: "center" }));
         return;
       case "forbidden":
@@ -417,7 +417,13 @@ export function ItemEditor({
         {banner && <div className={`wc-banner wc-banner--${banner.tone}`} role={banner.tone === "bad" ? "alert" : "status"} data-testid="editor-banner"><span className="wc-banner__body">{banner.text}</span></div>}
         {authoritativeNote(bundle)}
         {saveState.s === "error" && (
-          <div className="wc-banner wc-banner--bad" role="alert" data-testid="save-error"><span className="wc-banner__body">{saveState.message}</span></div>
+          <div className="wc-banner wc-banner--bad" role="alert" data-testid="save-error"><span className="wc-banner__body">{saveState.message}
+              {/* Every issue, with its pointer: one with no control on this form (an unknown key, a member the
+                  composition hides) must still be visible somewhere, never silently counted. */}
+              {saveState.issues && saveState.issues.length > 0 && (
+                <ul className="wc-errors" data-testid="issue-list">{saveState.issues.map((i, n) => <li key={n}><code>{i.path || "/"}</code> — {i.message}</li>)}</ul>
+              )}
+            </span></div>
         )}
 
         {/* ── create-only: slug ─────────────────────────────────────────────────────────────── */}

@@ -561,6 +561,17 @@ export async function resolveItemBySlug(
     if (!r.data.page.hasMore || !r.data.page.cursor) break;
     cursor = r.data.page.cursor;
   }
+  // The default list hides deleted items. A deleted item's URL must still open (read-only, with the
+  // reason), so look in the `deleted` state before concluding it does not exist.
+  cursor = undefined;
+  for (let i = 0; i < SLUG_SCAN_MAX_PAGES; i++) {
+    const r = await listItems(userId, company, tenantSlug, siteId, collectionKey, { locale, state: "deleted", cursor, limit: 100 });
+    if (r.kind !== "ok") return r;
+    const hit = r.data.items.find((it) => it.slug === slug && it.locale === locale);
+    if (hit) return { kind: "ok", data: hit };
+    if (!r.data.page.hasMore || !r.data.page.cursor) break;
+    cursor = r.data.page.cursor;
+  }
   return { kind: "not_found", slug: "item-not-found" };
 }
 

@@ -176,10 +176,11 @@ describe("NO path turns a refusal into []  (the library's one rule)", () => {
     fetchMock.mockResolvedValue({ items: [], page: { cursor: null, hasMore: false, limit: 100 } });
     expect(await listItems("u", "c", "gaiada", "s1", "service", {})).toEqual({ kind: "ok", data: { items: [], page: { cursor: null, hasMore: false, limit: 100 } } });
   });
-  it("findPendingPublishRequests: an unrecognised origin (400 before WSK-66) is `unavailable`, never 'none pending'", async () => {
+  it("findPendingPublishRequests: an unrecognised origin (400 before WSK-66) is a refusal, never 'none pending'", async () => {
     fetchMock.mockRejectedValue(new PlatformError(400, "invalid origin"));
     const r = await findPendingPublishRequests("u", "c", "i1");
-    expect(r.kind).toBe("unavailable");
+    expect(r.kind).not.toBe("ok");
+    expect("data" in r).toBe(false);
   });
 });
 
@@ -214,7 +215,8 @@ describe("resolveItemBySlug pages through the list (WSK-59 has no by-slug read)"
     expect(new URL(fetchMock.mock.calls[1][0] as string, "http://x").searchParams.get("cursor")).toBe("1");
   });
   it("reports not_found only after the list is exhausted — and an error mid-walk is NOT 'not found'", async () => {
-    fetchMock.mockResolvedValueOnce({ items: [], page: { cursor: null, hasMore: false, limit: 100 } });
+    const empty = { items: [], page: { cursor: null, hasMore: false, limit: 100 } };
+    fetchMock.mockResolvedValueOnce(empty).mockResolvedValueOnce(empty); // live list, then the deleted list
     expect(await resolveItemBySlug("u", "c", "gaiada", "s1", "service", "nope", "en")).toEqual({ kind: "not_found", slug: "item-not-found" });
     fetchMock.mockReset();
     fetchMock
@@ -229,6 +231,7 @@ describe("resolveItemBySlug pages through the list (WSK-59 has no by-slug read)"
 });
 
 describe("loadEditorBundle", () => {
+  const navList = () => ({ items: [summary({ itemId: "i1id", slug: "navigation", locale: "id" }), summary({ itemId: "i1en", slug: "navigation", locale: "en" })], page: { cursor: null, hasMore: false, limit: 100 } });
   function route(over: Record<string, () => unknown> = {}) {
     fetchMock.mockImplementation(async (path: string) => {
       const p = String(path);
@@ -287,6 +290,7 @@ describe("loadEditorBundle", () => {
 
   it("non-default locale + locale-neutral members: loads the default-locale twin as the authoritative copy", async () => {
     route({
+      "/collections/navigation/items": navList,
       "/items/i1id": () => detail({ item: ref({ itemId: "i1id", collectionKey: "navigation", locale: "id" }), group: [{ locale: "en", itemId: "i1en", slug: "navigation", headVersion: 1, publishedVersion: 1, publishState: "published" }] }),
       "/items/i1en": () => detail({ item: ref({ itemId: "i1en", collectionKey: "navigation" }), version: { n: 1, contentHash: "h", createdAt: "t", createdBy: "u", attribution: {}, note: null, blocks: [{ type: "fields", props: { cta: { label: "EN", url: "/free-audit/" } } }], seo: {} } }),
     });
@@ -298,7 +302,7 @@ describe("loadEditorBundle", () => {
   });
 
   it("…and says so when the default-locale twin does not exist or cannot be read", async () => {
-    route({ "/items/i1id": () => detail({ item: ref({ itemId: "i1id", collectionKey: "navigation", locale: "id" }), group: [] }) });
+    route({ "/collections/navigation/items": navList, "/items/i1id": () => detail({ item: ref({ itemId: "i1id", collectionKey: "navigation", locale: "id" }), group: [] }) });
     const r = await loadEditorBundle("u", "c", "gaiada", "s1", "navigation", "navigation", "id");
     expect(r.kind === "ok" && r.data.authoritative).toBeNull();
     expect(r.kind === "ok" && r.data.authoritativeProblem).toMatch(/no en version yet/);

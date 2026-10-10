@@ -303,10 +303,12 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
   const reorderLocked = fullyLocked;
 
   const [grabbed, setGrabbed] = useState<{ id: string; originValue: unknown[]; originIds: string[] } | null>(null);
-  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  // The drag SOURCE is a ref, not state: re-rendering the dragged element inside `dragstart` makes
+  // Chromium cancel the drag. Only the drop-target highlight is state.
+  const dragFromRef = useRef<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [announce, setAnnounce] = useState("");
-  const handleRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const handleRefs = useRef(new Map<string, HTMLElement | null>());
   const focusAfter = useRef<string | null>(null);
   const addedRef = useRef<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLLIElement | null>());
@@ -364,7 +366,7 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
     setAnnounce(`Added a new ${label} row. ${items.length + 1} in total.`);
   };
 
-  const onHandleKey = (e: React.KeyboardEvent<HTMLButtonElement>, i: number, id: string) => {
+  const onHandleKey = (e: React.KeyboardEvent<HTMLElement>, i: number, id: string) => {
     if (reorderLocked) return;
     if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
@@ -408,15 +410,18 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
             <li
               key={id}
               ref={(el) => { rowRefs.current.set(id, el); }}
-              className={`wc-list__row${isGrabbed ? " wc-list__row--grabbed" : ""}${dragOver === i && dragFrom !== null && dragFrom !== i ? " wc-list__row--over" : ""}`}
-              data-pointer={fieldPointer(...segments, i)}
-              onDragOver={(e) => { if (dragFrom !== null) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOver(i); } }}
-              onDrop={(e) => { if (dragFrom !== null) { e.preventDefault(); move(dragFrom, i, id); setDragFrom(null); setDragOver(null); } }}
+              className={`wc-list__row${isGrabbed ? " wc-list__row--grabbed" : ""}${dragOver === i && dragFromRef.current !== null && dragFromRef.current !== i ? " wc-list__row--over" : ""}`}
+              data-row-pointer={fieldPointer(...segments, i)}
+              onDragOver={(e) => { if (dragFromRef.current !== null) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOver !== i) setDragOver(i); } }}
+              onDrop={(e) => { const from = dragFromRef.current; if (from !== null) { e.preventDefault(); dragFromRef.current = null; setDragOver(null); move(from, i, id); } }}
             >
               <div className="wc-list__bar">
                 {!reorderLocked && (
-                  <button
-                    type="button"
+                  // A <span role="button">, not a <button>: Chromium will not start an HTML5 drag from a
+                  // <button> (mousedown lands on its child and no `dragstart` ever fires — measured).
+                  <span
+                    role="button"
+                    tabIndex={0}
                     ref={(el) => { handleRefs.current.set(id, el); }}
                     className="wc-list__handle"
                     draggable
@@ -430,12 +435,12 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
                       e.dataTransfer.setData("text/plain", String(i));
                       const li = rowRefs.current.get(id);
                       if (li) e.dataTransfer.setDragImage(li, 16, 16);
-                      setDragFrom(i);
+                      dragFromRef.current = i;
                     }}
-                    onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
+                    onDragEnd={() => { dragFromRef.current = null; setDragOver(null); }}
                   >
                     <span aria-hidden="true">⠿</span>
-                  </button>
+                  </span>
                 )}
                 <span className="wc-list__title">{rowTitle(row, i)}</span>
                 {!structureLocked && (

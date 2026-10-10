@@ -134,17 +134,17 @@ function fieldsBlock(props) { return [{ type: "fields", props }]; }
 
 const NAV_EN = {
   primary: [
-    { key: "services", label: "Services", hub: "All services", url: "/services/", children: ["/services/seo/", "/services/branding/"] },
-    { key: "work", label: "Work", hub: "All case studies", url: "/work/", children: ["/work/villa-ubud/"] },
-    { key: "about", label: "About", hub: "About Gaia", url: "/about/", children: [] },
+    { label: "Services", hub: "All services", url: "/services/", children: ["/services/seo/", "/services/branding/"] },
+    { label: "Work", hub: "All case studies", url: "/work/", children: ["/work/villa-ubud/"] },
+    { label: "About", hub: "About Gaia", url: "/about/", children: [] },
   ],
   cta: { label: "Get your free audit", url: "/free-audit/" },
 };
 const NAV_ID = {
   primary: [
-    { key: "services", label: "Layanan", hub: "Semua layanan", url: "/services/", children: ["/stale/"] },
-    { key: "work", label: "Karya", hub: "Semua studi kasus", url: "/work/", children: ["/work/villa-ubud/"] },
-    { key: "about", label: "Tentang", hub: "Tentang Gaia", url: "/about/", children: [] },
+    { label: "Layanan", hub: "Semua layanan", url: "/services/", children: ["/stale/"] },
+    { label: "Karya", hub: "Semua studi kasus", url: "/work/", children: ["/work/villa-ubud/"] },
+    { label: "Tentang", hub: "Tentang Gaia", url: "/about/", children: [] },
   ],
   cta: { label: "Dapatkan audit gratis", url: "/free-audit/" },
 };
