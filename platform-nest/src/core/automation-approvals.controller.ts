@@ -33,6 +33,15 @@ import { executeApprovedGithubRepoCreation, isGithubRepoCreationRequest } from "
 // why — the requester, not the decider, must receive the plaintext, so decide() only LIFTS the gate;
 // a separate, later, single-use `reveal` call does the actual decrypt).
 import { isIntegrationConnectionRevealRequest } from "./connection-reveal";
+// WSK-66: an approved WebDesk HIGH command (content.publish / content.schedule / key.mint) ALSO
+// executes in-band, as the decider, with a WS4 assertion over the control channel. Same shape as
+// GH-12; the module owns every WebDesk-specific rule (see webdesk-approved-command.ts's header).
+import {
+  WEBDESK_APPROVAL_ORIGIN,
+  executeApprovedWebdeskCommand,
+  isWebdeskApprovedCommandRequest,
+  preflightWebdeskApprovedCommand,
+} from "../modules/webdev/webdesk-approved-command";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -299,6 +308,9 @@ export class AutomationApprovalsController {
     const isGithubCreate = isGithubRepoCreationRequest(rowOrigin, existing.rows[0].workflow_id);
     // VLT-3: identified the SAME way isOverride/isGithubCreate are (origin + workflow_id).
     const isReveal = isIntegrationConnectionRevealRequest(rowOrigin, existing.rows[0].workflow_id);
+    // WSK-66: identified the SAME way (origin + workflow_id). The generic `decide` below stays the
+    // "may you decide approvals here" gate; the command's OWN rule is checked in the preflight.
+    const isWebdesk = isWebdeskApprovedCommandRequest(rowOrigin, existing.rows[0].workflow_id);
     const subKind = isLeave ? "leave" : undefined;
     // Owner split (2026-08-19): the two IAM request kinds authorize against DIFFERENT actions, so a
     // policy can narrow one without narrowing the other, and the audit row records which kind of
@@ -377,6 +389,28 @@ export class AutomationApprovalsController {
         "update",
       );
     }
+    // ── WSK-66: a WebDesk HIGH command — the decider must hold the command's OWN authority ────────
+    // Checked BEFORE the decide UPDATE, so a refusal (Cerbos DENY on maker = checker for a batch, a
+    // decider without `publish`, an unconfigured channel or signer, malformed stored args) leaves the
+    // row `pending` and Zone B untouched. Rejection needs no such check: it sends nothing.
+    // A webdesk-origin row whose workflow_id is outside the closed allow-list is refused outright —
+    // approving it as `not_applicable` would record a decision nothing can honour.
+    if (rowOrigin === WEBDESK_APPROVAL_ORIGIN && !isWebdesk && decision === "approved") {
+      throw new BadRequestException({
+        message: "webdesk_args_invalid: this WebDesk approval names a command outside the approved-command allow-list",
+        reason: "webdesk_args_invalid",
+      });
+    }
+    if (isWebdesk && decision === "approved") {
+      await preflightWebdeskApprovedCommand(
+        tenantId,
+        id,
+        existing.rows[0].tool_args,
+        existing.rows[0].requested_by ?? "",
+        req.principal,
+      );
+    }
+
     // D14-02: the executor is REGISTRY-scoped, not origin-scoped (approval-executables.ts's own
     // doctrine + migration 0078's header). execution_status is computed here and flipped in the
     // SAME UPDATE that flips `status` below — never a second statement — so a crash between the two
@@ -395,8 +429,10 @@ export class AutomationApprovalsController {
     // automation|agent before it ever claims a row, so a `credential_reveal`-origin row sitting at
     // 'pending' is never auto-claimed), but because 'pending' IS the redeemable-grant state
     // `redeemConnectionReveal`'s own atomic claim consumes exactly once.
+    // WSK-66: an approved webdesk row also starts at 'pending' — the state its in-band executor
+    // claims (pending → executing) below. The D14 handler never claims it (origin filter).
     const executionStatus: "pending" | "not_applicable" =
-      executable || (isReveal && decision === "approved") ? "pending" : "not_applicable";
+      executable || ((isReveal || isWebdesk) && decision === "approved") ? "pending" : "not_applicable";
     const res = await withTenants([tenantId], async (c) => {
       const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
         `UPDATE automation_approvals
@@ -487,8 +523,26 @@ export class AutomationApprovalsController {
       });
     }
 
+    // ── WSK-66: an APPROVED WebDesk command executes IN-BAND, exactly once ───────────────────────
+    // `res.tool_args` is this UPDATE's own RETURNING (the stored row), never the request body. The
+    // executor re-authorizes as the decider, claims pending → executing, sends ONE write carrying the
+    // WS4 + editorial assertions, and records executed/failed with a typed token. Post-send outcomes
+    // come back as data (the decision itself stands either way); for key.mint the plaintext appears
+    // ONLY in this response body.
+    let webdeskResult: Awaited<ReturnType<typeof executeApprovedWebdeskCommand>> | null = null;
+    if (res && isWebdesk && decision === "approved") {
+      webdeskResult = await executeApprovedWebdeskCommand(
+        tenantId,
+        id,
+        res.tool_args,
+        existing.rows[0].requested_by ?? "",
+        req.principal,
+      );
+    }
+
     if (!res) throw new NotFoundException("approval not found or already decided");
     await writeActivity(tenantId, req.principal.userId, decision, "automation_approval", id);
+    if (webdeskResult) return { id, status: decision, webdesk: webdeskResult };
     // `override`/`github` are present ONLY for their own approved kind, so every existing consumer
     // of this response sees a byte-identical shape otherwise. They carry what the approval actually
     // produced because a decider who cannot see that has to go and look it up to be sure.
