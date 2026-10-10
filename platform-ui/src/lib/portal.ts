@@ -456,7 +456,7 @@ export function clientStatus(status: string | null | undefined): string {
 export type PortalTone = "success" | "warning" | "danger" | "info" | "neutral";
 export function statusTone(status: string | null | undefined): PortalTone {
   switch (status) {
-    case "done": case "complete": case "delivered": case "approved": case "signed": case "paid":
+    case "done": case "complete": case "completed": case "delivered": case "approved": case "signed": case "paid":
     case "confirmed":
       return "success";
     case "sent": case "awaiting_gate": case "pending": case "new":

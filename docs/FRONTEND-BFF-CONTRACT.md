@@ -1677,7 +1677,7 @@ becomes an existence oracle for another client's ids.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/portal/overview` | The whole landing payload in ONE request: `{clients[], client, viewOnly, progress{projects,activeProjects,completedProjects,percent}, deliverables{total,delivered,overdue}, nextMilestone, needsYou[], finance{byCurrency[],primary}}`. `needsYou[]` = `{kind:'gate'\|'contract', id, requires:'signature'\|'feedback', label, context, href, since}`. Progress is the mean of PROJECT progress (not of pooled tasks), each project weighted by `pm_tasks.progress` with `done` counting 100. |
+| ✅ | GET | `/api/:t/portal/overview` | The whole landing payload in ONE request: `{clients[], client, viewOnly, progress{projects,activeProjects,completedProjects,percent}, deliverables{total,delivered,overdue}, nextMilestone, needsYou[], finance{byCurrency[],primary}}`. `needsYou[]` = `{kind:'gate'\|'contract', id, requires:'signature'\|'feedback', label, context, href, since}`. Progress is the mean of PROJECT progress (not of pooled tasks), each project weighted by `pm_tasks.progress` with `done` counting 100. Finished projects = status done, complete, completed, archived, cancelled (`core/project-status.ts`); `activeProjects` = not finished, `completedProjects` = done, complete, completed. |
 | ✅ | GET | `/api/:t/portal/projects` | `PortalProject[]` — progress, milestone counts, deliverable count, next milestone due. |
 | ✅ | GET | `/api/:t/portal/projects/:projectId` | Adds `milestones[]`, `deliverables[]`, `runs[]`, `workload{todo,in_progress,blocked,done}`. **Never returns individual tasks** — `workload` is aggregate counts only. 404 for another client's or another project-scope's project. |
 | ✅ | GET | `/api/:t/portal/milestones` | Commitment calendar across visible projects. |
@@ -4359,7 +4359,7 @@ endpoint (none exists).
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ NEW | GET | `/api/:t/clients/:clientId/overview` | The staff mirror of `/portal/overview` (§16b). Authz: `client` read. 404 for a client outside the tenant. Runs with `{ modules: ["social"] }` — the post-review join carries the `social` third wall, and without the scope that SELECT returns **zero rows and raises nothing**, so the hub would report "no post reviews outstanding" for a client with ten. |
+| ✅ NEW | GET | `/api/:t/clients/:clientId/overview` | The staff mirror of `/portal/overview` (§16b). Authz: `client` read. 404 for a client outside the tenant. Runs with `{ modules: ["social"] }` — the post-review join carries the `social` third wall, and without the scope that SELECT returns **zero rows and raises nothing**, so the hub would report "no post reviews outstanding" for a client with ten. `projects.active`/`done` use the same definition: finished = done, complete, completed, archived, cancelled. |
 
 Response: `{ client, projects{total,active,done,percent}, tasks{total,open,overdue,blocked},
 deliverables{total,delivered,overdue}, nextMilestone, money{byCurrency[],primary}, needsUs[],

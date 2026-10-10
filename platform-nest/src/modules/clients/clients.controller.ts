@@ -10,6 +10,7 @@ import { authorize, writeActivity } from "../../core/http";
 import { validateCustomFields } from "../../core/custom-fields";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
+import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "../../core/project-status";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { assertActiveStaff } from "../../core/agency-lead-convert.service";
 import {
@@ -291,8 +292,8 @@ export class ClientsController {
           // choice `portal/overview` makes, for the same reason: pooling lets a 200-task project drown
           // out a 3-task one, so the headline would track the biggest project, not the relationship.
           `SELECT count(*) AS total,
-                  count(*) FILTER (WHERE p.status NOT IN ('done','complete','archived','cancelled')) AS active,
-                  count(*) FILTER (WHERE p.status IN ('done','complete')) AS done,
+                  count(*) FILTER (WHERE NOT (p.status = ANY($2::text[]))) AS active,
+                  count(*) FILTER (WHERE p.status = ANY($3::text[])) AS done,
                   round(avg(sub.pct)) AS percent
              FROM projects p
              CROSS JOIN LATERAL (
@@ -300,7 +301,7 @@ export class ClientsController {
                                   FROM pm_tasks t WHERE t.project_id = p.id AND t.deleted_at IS NULL), 0) AS pct
              ) sub
             WHERE p.client_id = $1 AND p.deleted_at IS NULL`,
-          a,
+          [clientId, [...FINISHED_PROJECT_STATUSES], [...DONE_PROJECT_STATUSES]],
         ),
         c.query<{ total: string; open: string; overdue: string; blocked: string }>(
           // `current_date` is acceptable here (unlike listTasks, which resolves `today` in Node): these
