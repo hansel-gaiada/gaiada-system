@@ -4,7 +4,7 @@
 **Handoff it answers:** [`2026-10-10-gaiada-com-website-cms-analytics.md`](./2026-10-10-gaiada-com-website-cms-analytics.md) ·
 **Older tracker (history, stale since 2026-08-27):** [`2026-08-26-webdesk-PROGRESS.md`](./2026-08-26-webdesk-PROGRESS.md)
 
-**Update the status in the same change that moves the work.** Status words are the estate's:
+**Status lives in [`TASKS.md`](../../TASKS.md) at the repo root** — progress bars computed from checkboxes, ticked in the same change that moves the work. This file holds the ticket descriptions, ground truth, open questions and the log. Status words are the estate's:
 PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED. DEV-VERIFIED means driven on a **Linux server**
 and the result observed (owner rule 2026-08-26); a green suite on the Windows laptop is not evidence.
 
@@ -30,29 +30,29 @@ page for page** (WSK-D41).
 
 ## M1 — WebDesk serves gaiada.com (the delivery half)
 
-| Status | # | Ticket | Tier | Deps |
-|---|---|---|---|---|
-| IN PROGRESS | **WSK-52** | **RustFS replaces MinIO** (WSK-D42) — compose (dev, aicenter, CI), presigners with `requestChecksumCalculation: "WHEN_REQUIRED"`, bucket bootstrap without `mc` (versioning + GOVERNANCE object lock re-proven through the S3 API), a least-privilege service key via the RustFS admin API (closes WSK-07's root-fallback gap), backup script off `mc mirror`, healthcheck on `/health` | medior (Sonnet) | — |
-| IN PROGRESS | **WSK-48a** | **Rehome `/v1` into `webdesk/api`** (WSK-D37, OQ-3.5) — port the read router, content-read, redirects, sitemap and key resolution into an api `delivery` module on the api's own tenant pool; retire WSK-05's demo `content` controller (it collides with the router on `/v1/t/:slug/content`); Caddy `/v1/*` → `api`. **Gate: `envelope-contract.test.mjs` passes byte-identically against the api.** Payload stays running until WSK-48b | senior-be (Sonnet) | — |
-| PROTOTYPED | **WSK-53** | **gaiada.com content inventory** — [`webdesk/sites/gaiada-com/INVENTORY.md`](../../webdesk/sites/gaiada-com/INVENTORY.md) + `inventory.json` (site commit `075ff5f`). 33 config modules / 4,490 lines · 315 long-form pages (235 EN + 80 ID; 79 built) · 9 globals · 16 vocabulary gaps (G1–G16) · stable ids for every page, home section, CTA and form · 12 owner questions. **Decisive finding:** the site chooses section components at build time from `## ` headings (`lib/sections/split.ts` + `rules.ts`), so the CMS must round-trip the site's source shapes rather than model ~101 section bindings | medior (Sonnet) | — |
-| IN PROGRESS | **WSK-62** | **Design pass for the write plane** (architect) — the `fields` contract decision under §05; WSK-41 authoring + WSK-51 read commands with impact classes; WSK-40's editorial assertion; WSK-47's Cerbos kinds; the M1 loader's machine principal; publish → rebuild options. Output: exact signatures, owned paths, tests | architect (Opus) | — |
-| PLANNED | WSK-41 | Content authoring commands — create · update · publish · unpublish · schedule · delete; writes `content_versions` | senior-be | WSK-62 |
-| PLANNED | WSK-51 | Control-plane read commands — collections, items, versions, media (ends `stale:true` by construction) | senior-be | WSK-62 |
-| PLANNED | WSK-54 | **Importer** — site repo → a deterministic bundle (collections + items, EN + ID, stable ids) → loaded through WSK-41 | medior | WSK-53, 41 |
-| PLANNED | WSK-55 | **Site reads `/v1`** (gaiada-web-revamp branch) — `CONTENT_SOURCE=webdesk\|git`, generated SDK, build-time loader; **parity gate**: both builds, `dist/` diffed page for page | senior-fe | WSK-48a, 54 |
-| PLANNED | WSK-56 | **Deploy to `gda-aicenter`** (WSK-D43) — volume backup → wipe `wsk05-*` → RustFS → new api → Caddy `/v1` → api → stop `payload-gateway`; tenant `gaiada` + site + envs + keys (WSK-57); vhost + certbot once the A record resolves | orchestrator | WSK-52, 48a |
-| PLANNED | WSK-57 | Provision tenant `gaiada` / site `gaiada-com` / staging + production / build + preview keys | orchestrator | WSK-56 |
-| PLANNED | WSK-58 | **Linux gate** for every surviving WebDesk suite on `sumopod` (WSK-D34), minus what D37 deletes | qa | M1 code |
+| # | Ticket | Tier | Deps |
+|---|---|---|---|
+| **WSK-52** | **RustFS replaces MinIO** (WSK-D42) — compose (dev, aicenter, CI), presigners with `requestChecksumCalculation: "WHEN_REQUIRED"`, bucket bootstrap without `mc` (versioning + GOVERNANCE object lock re-proven through the S3 API), a least-privilege service key via the RustFS admin API (closes WSK-07's root-fallback gap), backup script off `mc mirror`, healthcheck on `/health` | medior (Sonnet) | — |
+| **WSK-48a** | **Rehome `/v1` into `webdesk/api`** (WSK-D37, OQ-3.5) — port the read router, content-read, redirects, sitemap and key resolution into an api `delivery` module on the api's own tenant pool; retire WSK-05's demo `content` controller (it collides with the router on `/v1/t/:slug/content`); Caddy `/v1/*` → `api`. **Gate: `envelope-contract.test.mjs` passes byte-identically against the api.** Payload stays running until WSK-48b | senior-be (Sonnet) | — |
+| **WSK-53** | **gaiada.com content inventory** — [`webdesk/sites/gaiada-com/INVENTORY.md`](../../webdesk/sites/gaiada-com/INVENTORY.md) + `inventory.json` (site commit `075ff5f`). 33 config modules / 4,490 lines · 315 long-form pages (235 EN + 80 ID; 79 built) · 9 globals · 16 vocabulary gaps (G1–G16) · stable ids for every page, home section, CTA and form · 12 owner questions. **Decisive finding:** the site chooses section components at build time from `## ` headings (`lib/sections/split.ts` + `rules.ts`), so the CMS must round-trip the site's source shapes rather than model ~101 section bindings | medior (Sonnet) | — |
+| **WSK-62** | **Design pass for the write plane** (architect) — the `fields` contract decision under §05; WSK-41 authoring + WSK-51 read commands with impact classes; WSK-40's editorial assertion; WSK-47's Cerbos kinds; the M1 loader's machine principal; publish → rebuild options. Output: exact signatures, owned paths, tests | architect (Opus) | — |
+| WSK-41 | Content authoring commands — create · update · publish · unpublish · schedule · delete; writes `content_versions` | senior-be | WSK-62 |
+| WSK-51 | Control-plane read commands — collections, items, versions, media (ends `stale:true` by construction) | senior-be | WSK-62 |
+| WSK-54 | **Importer** — site repo → a deterministic bundle (collections + items, EN + ID, stable ids) → loaded through WSK-41 | medior | WSK-53, 41 |
+| WSK-55 | **Site reads `/v1`** (gaiada-web-revamp branch) — `CONTENT_SOURCE=webdesk\|git`, generated SDK, build-time loader; **parity gate**: both builds, `dist/` diffed page for page | senior-fe | WSK-48a, 54 |
+| WSK-56 | **Deploy to `gda-aicenter`** (WSK-D43) — volume backup → wipe `wsk05-*` → RustFS → new api → Caddy `/v1` → api → stop `payload-gateway`; tenant `gaiada` + site + envs + keys (WSK-57); vhost + certbot once the A record resolves | orchestrator | WSK-52, 48a |
+| WSK-57 | Provision tenant `gaiada` / site `gaiada-com` / staging + production / build + preview keys | orchestrator | WSK-56 |
+| WSK-58 | **Linux gate** for every surviving WebDesk suite on `sumopod` (WSK-D34), minus what D37 deletes | qa | M1 code |
 
 ## M2 — editing from the ERP (the authoring half)
 
-| Status | # | Ticket | Tier | Deps |
-|---|---|---|---|---|
-| PLANNED | WSK-40 | Editorial identity seam — EdDSA assertion minted in platform-nest, verified by public key in WebDesk (WSK-D39) | senior-integrator (Opus) | WSK-62 |
-| PLANNED | WSK-47 | Cerbos kinds `webdesk_content_item` · `webdesk_collection` · `webdesk_media_asset` — **six artifacts each**, then a Cerbos restart proven by a probe | senior-be (Opus) | WSK-62 |
-| PLANNED | WSK-59 | platform-nest `webdev` content BFF + MCP tools (agentic-native bar: every editor action is an endpoint and a tool with an impact class) | senior-be | WSK-40, 41, 47 |
-| PLANNED | WSK-44 | platform-ui **"Website" workspace** — gaiada.com sections first: list → edit → publish → version history; "editorial unavailable" state, never a confident empty editor | senior-fe + senior-uiux | WSK-59 |
-| PLANNED | WSK-60 | **Publish → rebuild → staging deploy** — tenant webhook `content.published` drives the site build; where the build runs is open (below) | senior-integrator | WSK-55 |
+| # | Ticket | Tier | Deps |
+|---|---|---|---|
+| WSK-40 | Editorial identity seam — EdDSA assertion minted in platform-nest, verified by public key in WebDesk (WSK-D39) | senior-integrator (Opus) | WSK-62 |
+| WSK-47 | Cerbos kinds `webdesk_content_item` · `webdesk_collection` · `webdesk_media_asset` — **six artifacts each**, then a Cerbos restart proven by a probe | senior-be (Opus) | WSK-62 |
+| WSK-59 | platform-nest `webdev` content BFF + MCP tools (agentic-native bar: every editor action is an endpoint and a tool with an impact class) | senior-be | WSK-40, 41, 47 |
+| WSK-44 | platform-ui **"Website" workspace** — gaiada.com sections first: list → edit → publish → version history; "editorial unavailable" state, never a confident empty editor | senior-fe + senior-uiux | WSK-59 |
+| WSK-60 | **Publish → rebuild → staging deploy** — tenant webhook `content.published` drives the site build; where the build runs is open (below) | senior-integrator | WSK-55 |
 
 ## M3 — after the proof
 
