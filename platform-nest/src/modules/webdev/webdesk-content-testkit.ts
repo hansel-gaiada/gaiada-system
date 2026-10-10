@@ -60,7 +60,7 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "schema.apply", "site.provision"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "schema.apply", "site.provision"]);
 const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete"]);
 
 export function problem(status: number, slug: string, extra: Record<string, unknown> = {}): WebdeskControlResponse {
@@ -301,6 +301,16 @@ export class FakeZoneB {
         if (i.publishedVersion !== null) return problem(409, "item-is-live");
         i.deletedAt = now;
         return ok({ item: this.itemJson(i), replayed: false });
+      }
+      case "content.publish": {
+        // WSK-66's in-band publish (WS4 + editorial `apr`); the fake only needs to flip the state.
+        const published = (b.items as Array<{ itemId: string; version: number }>).map(({ itemId, version }) => {
+          const i = this.items.get(itemId)!;
+          i.publishedVersion = version;
+          i.publishState = "published";
+          return { itemId, collectionKey: i.collectionKey, locale: i.locale, slug: i.slug, version, publishedAt: now };
+        });
+        return ok({ published, replayed: false });
       }
       case "schema.apply":
         return ok({ collectionKey: p.collectionKey, bump: "minor", reasons: [], persisted: true, replayed: false }, 201);

@@ -166,6 +166,17 @@ export class WebdeskContentController {
     return (await webdeskContent.requestPublish(gate, { tenantSlug, siteId }, body)).body;
   }
 
+  /** The REQUESTER cancels their own pending publish approval (status `cancelled`). */
+  @Post("sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw")
+  @HttpCode(200)
+  async withdraw(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Param("approvalId") approvalId: string,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "request_publish");
+    return (await webdeskContent.withdrawPublishRequest(gate, { tenantSlug, siteId }, approvalId)).body;
+  }
+
   @Post("sites/:tenantSlug/:siteId/items/:itemId/unpublish")
   async unpublish(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,

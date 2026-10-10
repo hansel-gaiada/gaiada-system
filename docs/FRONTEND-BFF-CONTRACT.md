@@ -4775,7 +4775,7 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 |---|---|---|---|
 | GET | `/sites` | `webdesk_collection:read` | 200 `{tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,environments:[{envId,name,domain,status}]}]}]}`: only THIS company's tenants |
 | GET | `/sites/:ts/:site/collections` | `webdesk_collection:read` | 200 `{collections:[{key,composition,vocabularyVersion,counts:{items,byLocale,live,pendingChanges},updatedAt}]}` |
-| GET | `/sites/:ts/:site/collections/:collectionKey/items?locale&state&q&includeDeleted&cursor&limit` | `webdesk_content_item:read` | 200 `{items:[ItemSummary],page:{cursor,hasMore,limit}}`, editor order (slug, locale, id). `state` = draft·live·scheduled·unpublished·deleted·pending; `limit` 1..100 |
+| GET | `/sites/:ts/:site/collections/:collectionKey/items?locale&state&q&includeDeleted&cursor&limit&slug` | `webdesk_content_item:read` | 200 `{items:[ItemSummary],page:{cursor,hasMore,limit}}`, editor order (slug, locale, id). `state` = draft·live·scheduled·unpublished·deleted·pending; `limit` 1..100. **`slug=` (BFF-side)** returns only the EXACT-slug matches (all locales, or the one `locale` asks for): WebDesk has no slug filter, so the BFF asks for `q=<slug>` at limit 100 and keeps the exact matches, following the cursor up to 5 pages; `page.hasMore:true` with no match means *not found yet*, never *does not exist*. Not combinable with `q` |
 | GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint}` |
 | GET | `/sites/:ts/:site/items/:itemId/versions?cursor&limit` | `webdesk_content_item:read` | 200 `{versions:[{version,contentHash,createdAt,createdBy,attribution,note}],page}`, newest first |
 | GET | `/sites/:ts/:site/items/:itemId/versions/:n` | `webdesk_content_item:read` | 200 one full version (`blocks`, `seo`, …) |
@@ -4784,6 +4784,7 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | PUT (and `PATCH`, the MCP hub's alias) | `/sites/:ts/:site/items/:itemId` | `…:update` | 200 `ItemWriteResult` |
 | POST | `/sites/:ts/:site/items/:itemId/restore` | `…:update` | 200 `ItemWriteResult` |
 | POST | `/sites/:ts/:site/publish-requests` | `…:request_publish` | **202** `{approvalId,command,itemCount}` |
+| POST | `/sites/:ts/:site/publish-requests/:approvalId/withdraw` | `…:request_publish` (the right that filed it) | 200 `{approvalId, status:"cancelled"}` |
 | POST | `/sites/:ts/:site/items/:itemId/unpublish` | `…:unpublish` | 200 `{item,replayed}` |
 | POST | `/sites/:ts/:site/items/:itemId/delete` | `…:delete` | 200 `{item,replayed}` |
 
@@ -4816,6 +4817,21 @@ typed 404 `item-not-found`/`version-not-found`, 409 `item-deleted`), authorizes 
 `decide()` in the Approvals inbox, as the decider (maker ≠ checker; a publisher may approve their own single-item,
 non-scheduled publish, R4); see §9 row `automation-approvals` (WSK-66). The UI shows "Awaiting approval #…" and polls the approval.
 
+### Withdrawing a request, and the approvals façade
+
+`…/publish-requests/:approvalId/withdraw` lets the REQUESTER cancel their own PENDING publish/schedule approval. The row becomes
+`status:"cancelled"` (the loan-withdraw precedent: nobody with authority refused it; `rejected` would say they did), `execution_status`
+stays `not_applicable`, and one `activities` row (`cancelled`, `outcome:"withdrawn_by_requester"`) is written. Nothing is sent to
+WebDesk. Another user's row is **403**, an id that is not a publish request for THIS site (unknown, another site, another origin) is
+**404 `approval_not_found`**, and a row no longer pending is **409 `approval_not_pending`**. **The UI's approval-status parser must
+accept `cancelled`** (the CHECK admits `pending|approved|rejected|cancelled`).
+
+`POST /api/:t/approvals/:id/decide` (the unified façade) now accepts `origin:"webdesk"`, and `GET /api/approvals` lists webdesk rows. For a
+webdesk row the response is `{ok:true, webdesk:{command, executionStatus:"executed"|"failed", error?, …}}` (WSK-66's in-band outcome;
+every other origin is byte-unchanged `{ok:true}`). The editor's "pending request after reload" reads
+`GET /api/:t/automation-approvals?origin=webdesk&status=pending`, which needs `automation_approval:read` (company_admin/manager): a
+`webdev_staff`/`webdev_manager` caller without it gets 403 there (see the ticket report).
+
 ### Errors the UI must render (each a distinct state, §10 of the design)
 
 | Status + body | Meaning | UI state |
@@ -4825,7 +4841,7 @@ non-scheduled publish, R4); see §9 row `automation-approvals` (WSK-66). The UI 
 | **502 `{error:"webdesk_ambiguous", reason}`** | A write may have landed and its outcome could not be established (`not_observed`, `reconcile_failed`). **Never retry blind**: re-read the item, and retry only with the SAME `Idempotency-Key`. | "Couldn't confirm the save": re-read, then offer retry |
 | 502 `{error:"webdesk_refused"\|"webdesk_error", reason}` | WebDesk refused OUR credentials or signing (its 401/403) or answered 5xx. A platform fault, so it is **never forwarded as 401/403** (the UI would read that as a session expiry). | "Something is wrong on our side" |
 | **Zone B problems, passed through untouched** (`application/problem+json`, WebDesk's own body, same status) | 400 `invalid-request` · 404 `item-not-found`/`collection-not-found`/`version-not-found` · **409** `version-conflict {currentHeadVersion,currentContentHash,updatedAt}` · `slug-taken` · `twin-locale-taken` · `singleton-exists` · `item-is-live` · `item-deleted` · `not-live` · `published-version-changed` · `contract-major-change` · 413 `payload-too-large` · **422** `composition-violation {issues:[{path,message,expected}]}` | conflict dialog · inline errors by JSON pointer |
-| 404 `{error:"site_not_found"}` | `(tenantSlug, siteId)` is not an ACTIVE site of THIS company: unknown slug, another tenant's site, **another company's** tenant, or an archived tenant. One answer for all (no existence oracle). | not-found page |
+| **404 problem `…/errors/site-not-found`** | `(tenantSlug, siteId)` is not an ACTIVE site of THIS company: unknown slug, another tenant's site, **another company's** tenant, or an archived tenant. One answer for all (no existence oracle), and the SAME problem type WebDesk itself uses, so the UI has one not-found shape. | not-found page |
 | 403 `{error:"not authorized: …"}` · 401 | Cerbos denied the caller (or no/expired session) | `ReadRefusal` / sign-in |
 | 400 `{error:"invalid_request: …", reason:"invalid_request"}` | Strict body/query validation (after authorization) | inline |
 

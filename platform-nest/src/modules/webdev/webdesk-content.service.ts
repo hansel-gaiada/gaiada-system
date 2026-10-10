@@ -45,6 +45,7 @@ import {
   BadRequestException,
   ForbiddenException,
   HttpException,
+  ConflictException,
   InternalServerErrorException,
   Logger,
   NotFoundException,
@@ -52,6 +53,7 @@ import {
   BadGatewayException,
 } from "@nestjs/common";
 import { authorize, writeActivity } from "../../core/http";
+import { withTenants } from "../../db";
 import type { Principal } from "../../rbac/principal";
 import {
   EditorialUnavailableError,
@@ -113,10 +115,16 @@ function notConfigured(reason: string): ServiceUnavailableException {
 function invalidRequest(detail: string): BadRequestException {
   return new BadRequestException({ message: `invalid_request: ${detail}`, reason: "invalid_request" });
 }
-function siteNotFound(): NotFoundException {
+function siteNotFound(): WebdeskProblem {
   // One answer for every way a site can be "not yours": unknown slug, another tenant's site, another
-  // company's tenant, an archived tenant. No existence oracle.
-  return new NotFoundException({ message: "site_not_found", reason: "site_not_found" });
+  // company's tenant, an archived tenant. No existence oracle. A PROBLEM DOCUMENT with the same `type` WebDesk
+  // itself uses for an unknown site, so the UI has ONE not-found shape (`…/errors/site-not-found`).
+  return new WebdeskProblem(404, {
+    type: "https://webdesk.gaiada.online/errors/site-not-found",
+    title: "Site not found",
+    status: 404,
+    detail: "No such site for this company.",
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -553,14 +561,35 @@ export class WebdeskContentService {
 
   async listItems(gate: ContentGate, site: SiteRef, collectionKey: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
-    const query = strictQuery(rawQuery, ["locale", "state", "q", "includeDeleted", "cursor", "limit"]);
+    const { slug, ...query } = strictQuery(rawQuery, ["locale", "state", "q", "includeDeleted", "cursor", "limit", "slug"]);
     await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
-    return this.zoneB.read({
-      command: "item.list",
-      path: "/control/v1/tenants/:tenantSlug/sites/:siteId/collections/:key/items",
-      params: { tenantSlug: site.tenantSlug, siteId: site.siteId, key: collectionKey },
-      query,
-    });
+    const read = (q: Query) =>
+      this.zoneB.read({
+        command: "item.list",
+        path: "/control/v1/tenants/:tenantSlug/sites/:siteId/collections/:key/items",
+        params: { tenantSlug: site.tenantSlug, siteId: site.siteId, key: collectionKey },
+        query: q,
+      });
+    if (slug === undefined) return read(query);
+
+    // `?slug=` (the editor's by-slug open). WebDesk's item.list has no slug filter, only `q`, a substring match on
+    // slug OR title, so this asks for `q=<slug>` at the page maximum and keeps the EXACT slug matches (all locales,
+    // or the one `locale` asks for). It follows the cursor a few pages if the substring is common. The answer keeps
+    // WebDesk's `page`: `hasMore:true` with no match means "not found YET", never "does not exist".
+    if (slug === "" || slug.length > 200) throw invalidRequest("slug must be a non-empty string of at most 200 characters");
+    if (query.q !== undefined) throw invalidRequest("slug and q cannot be combined");
+    const matches: unknown[] = [];
+    let page: unknown = { cursor: null, hasMore: false, limit: 100 };
+    let cursor = query.cursor;
+    for (let i = 0; i < 5; i++) {
+      const r = await read({ ...query, q: slug, limit: "100", ...(cursor !== undefined ? { cursor } : {}) });
+      const body = r.body as { items?: unknown[]; page?: { cursor: string | null; hasMore: boolean } };
+      for (const it of body.items ?? []) if (isPlainObject(it) && it.slug === slug) matches.push(it);
+      page = body.page ?? page;
+      if (matches.length > 0 || !body.page?.hasMore || !body.page.cursor) break;
+      cursor = body.page.cursor;
+    }
+    return { status: 200, body: { items: matches, page } };
   }
 
   async getItem(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
@@ -918,6 +947,62 @@ export class WebdeskContentService {
       summary: { title: title.length > 300 ? `${title.slice(0, 297)}...` : title, counts },
     });
     return { status: 202, body: { approvalId, command, itemCount: n } };
+  }
+
+  /**
+   * `POST …/publish-requests/:approvalId/withdraw` → 200 `{approvalId, status:"cancelled"}`. The REQUESTER cancels
+   * their own PENDING publish/schedule approval (the loan-withdraw precedent: `status='cancelled'`, which records
+   * that nobody with authority refused it; `rejected` would). Cerbos: the same `request_publish` right that filed it.
+   * Nothing is sent to WebDesk: the approval never executed. Another user's row is 403, a row that is not a publish
+   * request for THIS site is 404 (no oracle across sites), and a row no longer pending is 409.
+   */
+  async withdrawPublishRequest(gate: ContentGate, site: SiteRef, approvalId: string): Promise<ZoneBResult> {
+    gate.require("webdesk_content_item", "request_publish");
+    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    const userId = gate.principal.userId as string;
+    const notFound = (): HttpException => new NotFoundException({ message: "approval_not_found", reason: "approval_not_found" });
+    if (!UUID_RE.test(approvalId)) throw notFound();
+
+    const found = await withTenants([gate.tenantId], (c) =>
+      c.query<{ status: string; requested_by: string | null; workflow_id: string; tool_args: Record<string, unknown> }>(
+        `SELECT status, requested_by, workflow_id, tool_args FROM automation_approvals
+          WHERE id = $1 AND origin = 'webdesk' AND deleted_at IS NULL`,
+        [approvalId],
+      ),
+    );
+    const row = found.rows[0];
+    if (
+      !row ||
+      (row.workflow_id !== "content.publish" && row.workflow_id !== "content.schedule") ||
+      row.tool_args?.tenantSlug !== site.tenantSlug ||
+      row.tool_args?.siteId !== site.siteId
+    ) {
+      throw notFound();
+    }
+    if (row.requested_by !== userId) {
+      throw new ForbiddenException("not authorized: only the requester may withdraw a publish request");
+    }
+    const conflict = (): HttpException =>
+      new ConflictException({ message: "approval_not_pending: only a pending publish request can be withdrawn", reason: "approval_not_pending" });
+    if (row.status !== "pending") throw conflict();
+
+    // The guarded UPDATE is the single-use guarantee: a decider who approved a moment ago wins, and this is 409.
+    const upd = await withTenants([gate.tenantId], (c) =>
+      c.query(
+        `UPDATE automation_approvals SET status = 'cancelled', decided_at = now(), updated_at = now()
+          WHERE id = $1 AND origin = 'webdesk' AND status = 'pending' AND requested_by = $2 AND deleted_at IS NULL`,
+        [approvalId, userId],
+      ),
+    );
+    if (upd.rowCount === 0) throw conflict();
+    await writeActivity(gate.tenantId, userId, "cancelled", "automation_approval", approvalId, {
+      origin: "webdesk",
+      workflowId: row.workflow_id,
+      tenantSlug: site.tenantSlug,
+      siteId: site.siteId,
+      outcome: "withdrawn_by_requester",
+    });
+    return { status: 200, body: { approvalId, status: "cancelled" } };
   }
 }
 

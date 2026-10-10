@@ -276,7 +276,8 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
       for (const [name, method, path, body] of routes(OTHER_SLUG, OTHER_SITE, itemId)) {
         const r = await call(method, `${base(A)}${path}`, adminA, body);
         expect(r.statusCode, name).toBe(404);
-        expect(r.json(), name).toMatchObject({ error: "site_not_found" });
+        expect(r.json(), name).toMatchObject({ type: "https://webdesk.gaiada.online/errors/site-not-found", status: 404 });
+        expect(r.headers["content-type"], name).toContain("application/problem+json");
       }
       expect(zb.calls.filter((c) => c.params.siteId === OTHER_SITE)).toHaveLength(0);
       expect(zb.writes).toHaveLength(0);
@@ -742,6 +743,113 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
     it("the other control routes are STILL honest 501s", async () => {
       const r = await call("POST", control("sites/s1/promote"), adminA, {});
       expect(r.statusCode).toBe(501);
+    });
+  });
+
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("?slug= on the items route (the editor's by-slug open)", () => {
+    it("returns only the exact-slug matches (all locales), asking WebDesk for q=<slug> at the page maximum", async () => {
+      zb.seedItem({ siteId: GAIADA_SITE, slug: "service.seo", locale: "id" });
+      zb.seedItem({ siteId: GAIADA_SITE, slug: "service.seo-audit", locale: "en" }); // a substring neighbour
+      const r = await call("GET", `${site()}/collections/service/items?slug=service.seo`, editorA);
+      expect(r.statusCode).toBe(200);
+      const slugs = r.json().items.map((i: { slug: string; locale: string }) => `${i.slug}:${i.locale}`).sort();
+      expect(slugs).toEqual(["service.seo:en", "service.seo:id"]);
+      expect(zb.calls.find((c) => c.command === "item.list")!.query).toEqual({ q: "service.seo", limit: "100" });
+      expect(r.json().page).toMatchObject({ hasMore: false });
+    });
+
+    it("an unknown slug is an empty list WITH page.hasMore=false (evidence), and slug+q together is a 400", async () => {
+      const r = await call("GET", `${site()}/collections/service/items?slug=nope&locale=en`, editorA);
+      expect(r.statusCode).toBe(200);
+      expect(r.json().items).toEqual([]);
+      expect((await call("GET", `${site()}/collections/service/items?slug=a&q=b`, editorA)).statusCode).toBe(400);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("withdraw: the REQUESTER cancels their own pending publish request", () => {
+    const withdraw = (as: string, id: string, s = site()) => call("POST", `${s}/publish-requests/${id}/withdraw`, as);
+    async function fileAs(as: string): Promise<string> {
+      const r = await call("POST", `${site()}/publish-requests`, as, { items: [{ itemId: item.itemId, version: 1 }] });
+      expect(r.statusCode).toBe(202);
+      return r.json().approvalId;
+    }
+    const rowOf = async (id: string) =>
+      (await adminPool().query<{ status: string; execution_status: string }>(`SELECT status, execution_status FROM automation_approvals WHERE id = $1`, [id])).rows[0];
+
+    it("🔴 the requester withdraws: 200 {approvalId, status:'cancelled'}; the row is cancelled (not rejected) and never executes; Zone B untouched", async () => {
+      const id = await fileAs(editorA);
+      const r = await withdraw(editorA, id);
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ approvalId: id, status: "cancelled" });
+      expect(await rowOf(id)).toMatchObject({ status: "cancelled", execution_status: "not_applicable" });
+      expect(zb.writes).toHaveLength(0);
+      const led = await ledger("cancelled");
+      expect(led.at(-1)!.metadata).toMatchObject({ origin: "webdesk", outcome: "withdrawn_by_requester" });
+    });
+
+    it("only the requester: another editor is 403 (positive control: the requester succeeds on the same id); a member is 403 first", async () => {
+      const id = await fileAs(editorA);
+      expect((await withdraw(publisherA, id)).statusCode).toBe(403);
+      expect((await withdraw(memberA, id)).statusCode).toBe(403);
+      expect((await rowOf(id)).status).toBe("pending");
+      expect((await withdraw(editorA, id)).statusCode).toBe(200);
+    });
+
+    it("only while pending: a second withdraw and a withdraw after a decision are 409", async () => {
+      const id = await fileAs(editorA);
+      expect((await withdraw(editorA, id)).statusCode).toBe(200);
+      const again = await withdraw(editorA, id);
+      expect(again.statusCode).toBe(409);
+      expect(again.json()).toMatchObject({ reason: "approval_not_pending" });
+      const id2 = await fileAs(editorA);
+      await adminPool().query(`UPDATE automation_approvals SET status = 'approved' WHERE id = $1`, [id2]);
+      expect((await withdraw(editorA, id2)).statusCode).toBe(409);
+    });
+
+    it("not another site's, not a non-webdesk row, not an unknown id: 404; and a foreign site is the wall's 404", async () => {
+      const id = await fileAs(editorA);
+      expect((await withdraw(editorA, randomUUID())).statusCode).toBe(404);
+      expect((await withdraw(editorA, "not-a-uuid")).statusCode).toBe(404);
+      expect((await withdraw(adminA, id, site(A, OTHER_SLUG, OTHER_SITE))).statusCode).toBe(404);
+      // an approval of another origin is not addressable here
+      const other = randomUUID();
+      await adminPool().query(
+        `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, origin, origin_site)
+         VALUES ($1,$2,'wf:x','x.y','{}','medium','pending',$3,'automation','main')`, [other, A, editorA],
+      );
+      expect((await withdraw(editorA, other)).statusCode).toBe(404);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("the unified approvals façade accepts origin 'webdesk' (WSK-66 rows were un-decidable and invisible)", () => {
+    it("🔴 POST /api/:t/approvals/:id/decide {origin:'webdesk'} approves, WSK-66 executes ONE publish, the response carries the outcome; an unknown origin is still 400", async () => {
+      const filed = await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: item.itemId, version: 1 }] });
+      const id = filed.json().approvalId;
+      const listed = await call("GET", `/api/approvals?origin=webdesk`, adminA);
+      expect(listed.statusCode).toBe(200);
+      expect(JSON.stringify(listed.json())).toContain(id);
+
+      const bad = await call("POST", `/api/${A}/approvals/${id}/decide`, adminA, { origin: "nonsense", decision: "approved" });
+      expect(bad.statusCode).toBe(400);
+      const ok = await call("POST", `/api/${A}/approvals/${id}/decide`, adminA, { origin: "webdesk", decision: "approved" });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json()).toMatchObject({ ok: true, webdesk: { command: "content.publish", executionStatus: "executed" } });
+      const publishes = zb.writes.filter((w) => w.command === "content.publish");
+      expect(publishes).toHaveLength(1);
+      expect(publishes[0].hadWs4).toBe(true);
+      expect(item.publishedVersion).toBe(1);
+    });
+
+    it("the requester still cannot approve their own batch through the façade (maker ≠ checker holds): 403, nothing published", async () => {
+      const second = zb.seedItem({ siteId: GAIADA_SITE, slug: "service.b2" });
+      const filed = await call("POST", `${site()}/publish-requests`, publisherA, { items: [{ itemId: item.itemId, version: 1 }, { itemId: second.itemId, version: 1 }] });
+      const denied = await call("POST", `/api/${A}/approvals/${filed.json().approvalId}/decide`, publisherA, { origin: "webdesk", decision: "approved" });
+      expect(denied.statusCode).toBe(403);
+      expect(zb.writes.filter((w) => w.command === "content.publish")).toHaveLength(0);
     });
   });
 
