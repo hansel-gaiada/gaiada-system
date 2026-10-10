@@ -9,7 +9,7 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace: vi.fn() }) }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/webdeskContentActions", () => ({
-  createItemAction: vi.fn(), deleteItemAction: vi.fn(), getItemHeadAction: vi.fn(), refreshEditorAction: vi.fn(), saveItemAction: vi.fn(),
+  createItemAndOpenAction: vi.fn(), deleteItemAction: vi.fn(), getItemHeadAction: vi.fn(), refreshEditorAction: vi.fn(), saveItemAction: vi.fn(),
 }));
 // The publish bar has its own suite; here it only needs to show what the editor tells it.
 vi.mock("./PublishBar", () => ({
@@ -37,6 +37,7 @@ const SERVICE_FIELDS = { url: "/services/seo/", source_path: "content/en/seo.md"
 const bundle = (d: ItemDetail, over: Partial<EditorBundle> = {}, c = coll("service", service)): EditorBundle => ({
   tenant, site, collection: c, detail: d, authoritative: null, authoritativeProblem: null, pendingRequests: [], pendingProblem: null, build: null, buildProblem: null, loadedAt: "2026-10-10T08:30:00Z", ...over,
 });
+const redirected = (url: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${url};307;` });
 const written = (n: number): ItemWriteResult => ({ item: ref({ headVersion: n }), version: { version: n, contentHash: "h", createdAt: "t" }, unchanged: false, lint: noLint, replayed: false });
 
 function mount(b: EditorBundle, extra: Partial<React.ComponentProps<typeof ItemEditor>> = {}) {
@@ -269,7 +270,7 @@ describe("unconfirmed (502 webdesk_ambiguous): a write whose outcome is unknown"
   });
 
   it("an unknown-outcome create has no Reload button (nothing to re-read yet) but still blocks Create", async () => {
-    a.createItemAction.mockResolvedValue(ambiguous);
+    a.createItemAndOpenAction.mockResolvedValue(ambiguous);
     render(<ItemEditor mode="create" scope={SCOPE} routeBase={ROUTE} collection={coll("service", service)} tenant={tenant} site={site} seed={{ locale: "en", twinOf: null, slug: "", fields: {}, seo: {}, extraBlocks: [] }} authors={{}} readOnlyReason={null} />);
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.new" } });
     await click(saveBtn());
@@ -366,13 +367,24 @@ describe("locale-neutral members (id locale)", () => {
 
 describe("locale tabs", () => {
   it("links an existing twin and offers to create a missing one from the saved version", async () => {
-    a.createItemAction.mockResolvedValue(ok({ ...written(1), item: ref({ locale: "id", itemId: "i2" }) }));
+    // Success navigates from the SERVER: the action redirects, so its awaited promise rejects with Next's redirect error
+    // and the editor pushes nothing itself (a client push after an action was sometimes dropped).
+    a.createItemAndOpenAction.mockRejectedValue(redirected(`${ROUTE}/service/service.seo?locale=id`));
     mount(bundle(detail(SERVICE_FIELDS)));
     const create = screen.getByTestId("create-locale-id");
     expect(create.textContent).toContain("not created");
     await click(create);
-    expect(a.createItemAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "id", slug: "service.seo", twinOf: "i1", fields: expect.objectContaining({ h1: "SEO Agency" }) }));
-    expect(push).toHaveBeenCalledWith(`${ROUTE}/service/service.seo?locale=id`);
+    expect(a.createItemAndOpenAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "id", slug: "service.seo", twinOf: "i1", fields: expect.objectContaining({ h1: "SEO Agency" }) }), ROUTE);
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("editor-banner")).toBeNull();
+  });
+
+  it("a twin that could not be created stays on the page and says why (the typed failure, unchanged)", async () => {
+    a.createItemAndOpenAction.mockResolvedValue({ kind: "conflict", slug: "twin-locale-taken", message: "taken", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    await click(screen.getByTestId("create-locale-id"));
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByTestId("editor-banner")).toBeTruthy();
   });
 });
 
@@ -384,22 +396,22 @@ describe("create mode", () => {
     mountCreate();
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "Bad Slug" } });
     await click(saveBtn());
-    expect(a.createItemAction).not.toHaveBeenCalled();
+    expect(a.createItemAndOpenAction).not.toHaveBeenCalled();
     expect(document.querySelector("#wc-slug")?.getAttribute("aria-invalid")).toBe("true");
   });
 
   it("creates with the typed fields and goes to the new item's editor", async () => {
-    a.createItemAction.mockResolvedValue(ok({ ...written(1), item: ref({ slug: "service.new", itemId: "i9" }) }));
+    a.createItemAndOpenAction.mockRejectedValue(redirected(`${ROUTE}/service/service.new?locale=en`));
     mountCreate();
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.new" } });
     type("h1", "New");
     await click(saveBtn());
-    expect(a.createItemAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "en", slug: "service.new", twinOf: null, fields: expect.objectContaining({ h1: "New" }) }));
-    expect(push).toHaveBeenCalledWith(`${ROUTE}/service/service.new?locale=en`);
+    expect(a.createItemAndOpenAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "en", slug: "service.new", twinOf: null, fields: expect.objectContaining({ h1: "New" }) }), ROUTE);
+    expect(push).not.toHaveBeenCalled(); // the server's redirect navigates, not a client push
   });
 
   it("slug-taken (409) lands on the slug field", async () => {
-    a.createItemAction.mockResolvedValue({ kind: "conflict", slug: "slug-taken", message: "x", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
+    a.createItemAndOpenAction.mockResolvedValue({ kind: "conflict", slug: "slug-taken", message: "x", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
     mountCreate();
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.seo" } });
     await click(saveBtn());
