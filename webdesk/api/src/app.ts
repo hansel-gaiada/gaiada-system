@@ -16,6 +16,25 @@ export function createFastifyAdapter(): FastifyAdapter {
   return new FastifyAdapter({ frameworkErrors: frameworkErrorsHandler });
 }
 
+/**
+ * Graceful shutdown (M3 T8). Without shutdown hooks a SIGTERM (what `docker stop` and a deploy send) kills
+ * the process on the spot, mid-item if the scheduler is running a tick. With them, Nest runs the same
+ * sequence as `app.close()`: every module's onModuleDestroy, deepest module first. DbService sits at the
+ * bottom and ends the pool, so anything that still queries must be finished BEFORE that; the scheduler
+ * registers its worker's close with `DbService.onBeforeEnd`, which DbService runs, awaited, ahead of
+ * `pool.end()` whatever the order of the modules above it. Only the signals a supervisor sends are
+ * handled; the process then re-raises the signal and exits as it would have. (Nest 10 closes the HTTP
+ * server AFTER the destroy hooks, so a request that arrives during the drain meets a closing app.) main.ts calls this; tests
+ * that build the app with buildApp() do not (they close it themselves), which keeps signal handlers
+ * from piling up across specs.
+ */
+export const SHUTDOWN_SIGNALS = ["SIGTERM", "SIGINT"] as const;
+
+export function enableGracefulShutdown<T extends Pick<NestFastifyApplication, "enableShutdownHooks">>(app: T): T {
+  app.enableShutdownHooks([...SHUTDOWN_SIGNALS]);
+  return app;
+}
+
 export async function buildApp(adapter: FastifyAdapter = createFastifyAdapter()): Promise<NestFastifyApplication> {
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
     // "error" stays on even in test mode — a fully silenced logger is what let a bootstrap
