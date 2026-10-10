@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.3.0` - gaiada.com can be served and edited through WebDesk: RustFS, `/v1` in the api, vocabulary 1.1.0, the write plane, live reads, the editorial assertion (2026-10-11) - DEV-VERIFIED
+
+Plan and tracker: `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; design `docs/plans/2026-10-10-webdesk-write-plane-design.md`; rulings WSK-D37…D48 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md`.
+
+- **Storage is RustFS** (WSK-D42, WSK-52). Pinned by digest; an idempotent bootstrap creates the buckets with versioning and GOVERNANCE object lock and a least-privilege api key; the api refuses to boot on the root key. No `mc` anywhere.
+- **`/v1` is served by the api** (WSK-48a), byte-identical to the Payload-hosted router (differential: 696/710 pairs identical, 14 classified, 0 unexplained). `payload-gateway` is retired. Live on `gda-aicenter` since 2026-10-10, after a month down.
+- **Vocabulary 1.1.0** (WSK-D44, WSK-64): `group`, `boolean`, `markdown`, `multiple` on every primitive, and a `fields` block at `blocks[0]`. The classifier now rates it MINOR and catches the changes 1.0.0 waved through; the envelope is unchanged by a byte.
+- **Migration 0009** (WSK-D45, WSK-65): draft is not live; a durable idempotency table; a single-use WS4 approval index. Applied live.
+- **The write plane** (WSK-41): create · update · restore · publish · schedule · unpublish · delete, with impact classes, versions, durable idempotency and the approval claimed in the same transaction as the effect. **Live reads** (WSK-51): eight control-plane reads. **The editorial assertion** (WSK-40): Ed25519, verified by a pinned public key; 32-row adversarial matrix. **Deleted drafts** never reach `/v1` (WSK-41b).
+- **Control channel** (WSK-63a): an internal mTLS vhost, a Caddy gate header, URL-encoded Layer 1. Live on `gda-aicenter`.
+- **Two live defects fixed** (WSK-56): compose gave the api `DATABASE_URL` but it reads `APP_DATABASE_URL` (the live api never had a database); every table was owned by `postgres` with 0 app grants (DB rebuilt as designed).
+- Verified on the Linux gate: `webdesk/api` 601 passed; envelope contract 60/60.
+
+### platform-nest `0.59.0` - the ERP side of WebDesk editing: Cerbos kinds, the control channel client, publish on approval, the content BFF + 13 MCP tools, the importer, the staging rebuild (2026-10-11) - PROTOTYPED
+
+- **Cerbos kinds** `webdesk_content_item` + `webdesk_collection` (WSK-47; migration `202610101420`): maker ≠ checker, a publisher may self-approve a single item (WSK-D46), and publish/schedule are denied without an approval for every principal. The platform_admin parity sweep probes those keys with an approval id (WSK-47b).
+- **Control channel client** (WSK-63b): mTLS + Keycloak client-credentials + WS4, a circuit breaker, no secret in any log.
+- **Publish executed at approval** (WSK-66; migration `202610101500` unions `webdesk` into the approvals origin CHECK). **Editorial signer** (WSK-40). **Content BFF + 13 MCP tools** (WSK-59; BFF §27): a cross-company wall, both D14 halves for unpublish/delete, ambiguous writes reconciled by reading, and a requester's own pending-request list (WSK-44b).
+- **Importer CLI** `dist/seed/webdesk-import.js` (WSK-67): never publishes; files one batch approval.
+- **Staging rebuild** (WSK-60; migration `202610101730`, PROTOTYPED, not yet driven live): a GitHub `workflow_dispatch` through the chokepoint, a build ledger, and a stamp poll that says "live on staging" only when the stamp proves it. The GitHub client no longer treats a missing permission (403) as a rate limit.
+- `docs/modules/CAPABILITY-INVENTORY.md` regenerated.
+- Verified on the Linux gate (full suite, real Postgres + Cerbos). Live: after this release.
+
+### platform-ui `0.76.0` - the "Website" workspace: edit gaiada.com in the ERP (2026-10-11) - PROTOTYPED
+
+- **WSK-44:** Web Dev console → Website → Content → site → collection → item editor, generated from the composition (text, Markdown, groups, lists with drag and keyboard reorder), publish with the approval state inline, version history with restore, and every degraded state rendered explicitly — "editorial unavailable" never shows a list or a form.
+- **WSK-44b:** re-verified against the real BFF: a 26-test contract run drives the UI's own parsers and server actions against the real controller; three drifts fixed.
+- Verified on the Linux gate: vitest 4471, `next build`. The stub Playwright suite flakes on a loaded box (filed).
+
+### infra `0.9.0` - CI runs only what a change affects; releases re-tag unchanged images; WebDesk control channel + editorial key wiring (2026-10-11) - PROTOTYPED
+
+- **WSK-69:** `ci.yml` plans per-component jobs from the diff against the last green run; `release.yml` builds only changed components and re-tags the rest by digest, so their cosign signatures still verify. Estimated WebDesk-only cycle: ~58 → ~14 billed minutes. First real run: this release.
+- `docker-compose.vps.yml` (platform): the WebDesk control-channel and editorial-key file mounts, `extra_hosts: control.webdesk.internal`, and the staging-rebuild targets. Runbooks: `webdesk-control-channel.md` (executed live), `webdesk-editorial-keys.md`, `webdesk-staging-rebuild.md`.
+
 ### platform-nest `0.57.0` - one definition of "finished project"; `/api/me` says which companies the caller is a client of (2026-10-10) - PROTOTYPED
 
 Plan: `docs/plans/2026-10-10-three-perspectives.md`. Tickets PV2-01 and PV2-02 are in
