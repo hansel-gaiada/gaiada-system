@@ -275,7 +275,9 @@ export class ApprovalsController {
         let anyReadable = false;
         const wantsAgency = origins.includes("agency");
         const wantsPipeline = origins.includes("pipeline");
-        const automationSubOrigins = origins.filter((o) => o === "automation" || o === "agent" || o === "hr");
+        // `webdesk` (WSK-59) is routed here: without it the row is filed and decidable by id but never listed.
+        // (`search` is NOT in this filter today: a pre-existing gap, reported and left alone.)
+        const automationSubOrigins = origins.filter((o) => o === "automation" || o === "agent" || o === "hr" || o === "webdesk");
 
         if (wantsAgency) {
           const leg = await agencyLeg(req.principal, tenantId, companyName, status);

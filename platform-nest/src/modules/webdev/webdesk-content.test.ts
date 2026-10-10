@@ -23,7 +23,6 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { NotFoundException } from "@nestjs/common";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
@@ -33,7 +32,7 @@ import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/s
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
 import { EditorialUnavailableError, WebdeskControlClient, WebdeskControlTransportError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests, NOT_CONFIGURED_EDITORIAL_SIGNER } from "./webdesk-approved-command";
-import { webdeskZoneB } from "./webdesk-content.service";
+import { WebdeskProblem, webdeskZoneB } from "./webdesk-content.service";
 import { webdevModule } from "./index";
 import { FakeZoneB, GAIADA_SITE, GAIADA_SLUG, OTHER_SITE, OTHER_SLUG, makeTestSigner, problem, type FakeItem } from "./webdesk-content-testkit";
 
@@ -955,7 +954,7 @@ describe("WebdeskZoneB.resolveEditableSite cache (60 s TTL; a miss refetches onc
   it("a site provisioned just now is found: a miss on a cache older than 5 s refetches once; a miss on a fresh cache does not", async () => {
     await zoneB.resolveEditableSite(CO, GAIADA_SLUG, GAIADA_SITE);
     const newSite = randomUUID();
-    await expect(zoneB.resolveEditableSite(CO, GAIADA_SLUG, newSite)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(zoneB.resolveEditableSite(CO, GAIADA_SLUG, newSite)).rejects.toBeInstanceOf(WebdeskProblem);
     expect(lists()).toBe(1); // fresh cache: no storm
     fake.tenants[0].siteId = newSite; // Zone B now has it
     now += 6_000;
@@ -965,7 +964,7 @@ describe("WebdeskZoneB.resolveEditableSite cache (60 s TTL; a miss refetches onc
 
   it("the cache is per company: another company never reads this one's entry", async () => {
     await zoneB.resolveEditableSite(CO, GAIADA_SLUG, GAIADA_SITE);
-    await expect(zoneB.resolveEditableSite(OTHER_CO, GAIADA_SLUG, GAIADA_SITE)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(zoneB.resolveEditableSite(OTHER_CO, GAIADA_SLUG, GAIADA_SITE)).rejects.toBeInstanceOf(WebdeskProblem);
     expect(fake.calls.filter((c) => c.command === "tenant.list").map((c) => c.query?.companyRef)).toEqual([CO, OTHER_CO]);
   });
 });

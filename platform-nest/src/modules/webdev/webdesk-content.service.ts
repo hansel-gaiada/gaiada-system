@@ -440,7 +440,7 @@ export class WebdeskZoneB {
 
   // ── the wall ─────────────────────────────────────────────────────────────────────────────────
 
-  private async fetchTenants(companyId: string): Promise<WebdeskTenantEntry[]> {
+  private async loadTenants(companyId: string): Promise<WebdeskTenantEntry[]> {
     const { body } = await this.read({
       command: "tenant.list",
       path: "/control/v1/tenants",
@@ -456,7 +456,7 @@ export class WebdeskZoneB {
   async tenantsOf(companyId: string, opts: { fresh?: boolean } = {}): Promise<WebdeskTenantEntry[]> {
     const hit = this.cache.get(companyId);
     if (!opts.fresh && hit && this.now() - hit.at < SITE_CACHE_TTL_MS) return hit.tenants;
-    return this.fetchTenants(companyId);
+    return this.loadTenants(companyId);
   }
 
   /**
@@ -478,7 +478,7 @@ export class WebdeskZoneB {
       // bad ids must not become a stream of Zone B calls.
       if (this.now() - cached.at < SITE_CACHE_REFETCH_ON_MISS_MS) throw siteNotFound();
     }
-    const hit = find(await this.fetchTenants(companyId));
+    const hit = find(await this.loadTenants(companyId));
     if (!hit) throw siteNotFound();
     return hit;
   }
@@ -492,7 +492,7 @@ export class WebdeskZoneB {
       if (hit) return hit;
       if (this.now() - cached.at < SITE_CACHE_REFETCH_ON_MISS_MS) throw siteNotFound();
     }
-    const hit = find(await this.fetchTenants(companyId));
+    const hit = find(await this.loadTenants(companyId));
     if (!hit) throw siteNotFound();
     return hit;
   }
