@@ -74,27 +74,8 @@ services:
 
   # --- NestJS api (forms · mail · media · control-plane) -------------------------------------
   # Real command surface lands at WSK-10/11/07/21. Placeholder process only.
-  # WSK-02: the ONLY Payload-side process the public vhost may reach. Hardcoded
-  # denylist (/admin, /api/graphql, /api/*) checked BEFORE any allowlist; this
-  # process never imports payload or next, so it cannot serve them even by mistake.
-  payload-gateway:
-    image: node:20-alpine
-    profiles: ["dev"]
-    command:
-      - sh
-      - -c
-      - "echo '[webdesk] payload PUBLIC gateway — /v1 + /healthz only. Real command: npm run gateway' && sleep infinity"
-    environment:
-      NODE_ENV: ${NODE_ENV:-development}
-      PAYLOAD_INTERNAL_HOST: payload
-      PAYLOAD_INTERNAL_PORT: 3000
-      DATABASE_URI: ${APP_DATABASE_URL}
-      API_KEY_PEPPER: ${API_KEY_PEPPER}
-      PAYLOAD_PUBLIC_PORT: 3000
-    ports:
-      - "${WEBDESK_PAYLOAD_PUBLIC_PORT:-8384}:3000"
-    depends_on:
-      - payload
+  # WSK-48a: the `payload-gateway` service is retired. /v1 is served by the api's `delivery`
+  # module (webdesk/api/src/delivery/), and Caddy routes /v1/* to `api`.
 
   api:
     image: node:20-alpine
@@ -406,7 +387,6 @@ services:
       WEBDESK_STATUS_OUT_DIR: /srv/status
       WEBDESK_STATUS_PROXY_URL: http://proxy:80/healthz
       WEBDESK_STATUS_API_URL: http://api:3000/healthz
-      WEBDESK_STATUS_PAYLOAD_GATEWAY_URL: http://payload-gateway:3000/healthz
       WEBDESK_STATUS_REFRESH_SECONDS: ${WEBDESK_STATUS_REFRESH_SECONDS:-30}
     volumes:
       - ./ops/scripts:/app/ops/scripts:ro

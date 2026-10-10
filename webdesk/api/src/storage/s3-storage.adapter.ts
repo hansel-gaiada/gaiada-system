@@ -35,10 +35,12 @@ export type S3StorageAdapterConfig = {
 
 /**
  * The ONE place an S3Client is built for this api (WSK-52). `requestChecksumCalculation:
- * "WHEN_REQUIRED"` is load-bearing: AWS SDK v3's default ("WHEN_SUPPORTED") bakes a placeholder
- * `x-amz-checksum-crc32` into every PRESIGNED PUT URL, and RustFS validates that placeholder
- * strictly — the real upload is then rejected `400 BadDigest`. Measured against rustfs/rustfs:1.0.0
- * (see test/storage-rustfs.spec.ts, which fails if this option is removed).
+ * "WHEN_REQUIRED"` is DEFENSIVE (WSK-D42 obligation b): AWS SDK v3's default ("WHEN_SUPPORTED")
+ * bakes a placeholder `x-amz-checksum-crc32` into every PRESIGNED PUT URL. A 2026-09-28 probe in
+ * another project saw RustFS reject such an upload with `400 BadDigest`; WSK-52 could NOT reproduce
+ * that on rustfs/rustfs:1.0.0 with SDK 3.1118.0 (the PUT returned 200). The option is kept so a
+ * presigned URL never carries a checksum the browser cannot honour. test/storage-rustfs.spec.ts
+ * asserts the option and the absence of the URL parameter; it does not claim RustFS rejects it.
  */
 export function createS3Client(cfg: S3StorageAdapterConfig): S3Client {
   return new S3Client({

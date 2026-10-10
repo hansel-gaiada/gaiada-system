@@ -23,7 +23,6 @@ const OUT_DIR = process.env.WEBDESK_STATUS_OUT_DIR || path.join(process.cwd(), '
 const TARGETS = [
   { name: 'proxy', url: process.env.WEBDESK_STATUS_PROXY_URL || 'http://proxy:80/healthz' },
   { name: 'api', url: process.env.WEBDESK_STATUS_API_URL || 'http://api:3000/healthz' },
-  { name: 'payload-gateway', url: process.env.WEBDESK_STATUS_PAYLOAD_GATEWAY_URL || 'http://payload-gateway:3000/healthz' },
 ];
 
 function probe(url, timeoutMs = 3000) {
@@ -93,7 +92,7 @@ function writeOutput(statusDoc, outDir) {
 async function selftest() {
   let ok = true;
 
-  const allUp = await generate({ proxy: 'up', api: 'up', 'payload-gateway': 'up' });
+  const allUp = await generate({ proxy: 'up', api: 'up' });
   if (allUp.components.some((c) => c.state !== 'up')) {
     console.error('SELFTEST FAIL: all-up fixture did not render all-up');
     ok = false;
@@ -101,7 +100,7 @@ async function selftest() {
     console.log('SELFTEST: all-up fixture renders correctly');
   }
 
-  const oneDown = await generate({ proxy: 'up', api: 'degraded', 'payload-gateway': 'up' });
+  const oneDown = await generate({ proxy: 'up', api: 'degraded' });
   const oneDownHtml = renderHtml(oneDown);
   if (!oneDownHtml.includes('Degraded')) {
     console.error('SELFTEST FAIL: a degraded component did not surface in rendered HTML');

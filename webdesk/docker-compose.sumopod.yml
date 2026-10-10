@@ -75,7 +75,6 @@ services:
       - "127.0.0.1:${WEBDESK_PROXY_HTTP_PORT:-8380}:80"
     depends_on: !override
       - api
-      - payload-gateway
     deploy:
       resources:
         limits: { cpus: "0.50", memory: 256M }
@@ -96,18 +95,7 @@ services:
       resources:
         limits: { cpus: "1.00", memory: 1024M }
 
-  # --- the public read path: /v1 + /healthz, denylist before allowlist --------------------------
-  payload-gateway:
-    profiles: !reset []
-    image: !reset null
-    build:
-      context: ./payload
-      dockerfile: Dockerfile
-    command: !override ["node", "src/public-gateway.mjs"]
-    ports: !reset []
-    deploy:
-      resources:
-        limits: { cpus: "0.50", memory: 512M }
+  # --- payload-gateway: RETIRED by WSK-48a (/v1 is served by the api's `delivery` module) ---
 
   # --- forms · mail · media · control plane -----------------------------------------------------
   api:
