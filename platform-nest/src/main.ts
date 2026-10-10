@@ -61,6 +61,9 @@ import { assistantModule } from "./modules/assistant";
 import { searchModule } from "./modules/search";
 import { reportsModule } from "./modules/reports";
 import { webdevModule } from "./modules/webdev";
+// WSK-40 — the WebDesk editorial assertion signer (Ed25519, file-mounted key). Registration only; see
+// the call site below.
+import { wireWebdeskEditorialSigner } from "./modules/webdev/webdesk-editorial-signer";
 import { createDataForSeoProviderFromConfig } from "./modules/search/providers/dataforseo";
 import { createSemrushProviderFromConfig } from "./modules/search/providers/semrush";
 import { createAhrefsProviderFromConfig } from "./modules/search/providers/ahrefs";
@@ -459,6 +462,11 @@ async function bootstrap(): Promise<void> {
   // hardcoded hub-side). Registering the module does NOT make the tool reachable by automation —
   // that needs the hub's AUTOMATION_ALLOWLIST entry and its Cerbos `mcp_tool` row, both PRV-03's.
   registerModule(webdevModule);
+  // WSK-40: bind the real editorial-assertion signer into WSK-66's seam when its key file is mounted.
+  // Absent or invalid key → WSK-66's refusing default stays (every WebDesk content command answers 503
+  // unsent) and one boot log line says why. Reads one local file; no network; never throws, so a
+  // missing WebDesk key cannot take the ERP down.
+  wireWebdeskEditorialSigner();
   // SMM-02: the social-media department. Registering it contributes its permissions (validated
   // against the 0106 catalog rows immediately below), its rollup metrics, and its McpToolDefs to
   // `GET /mcp/tool-defs` — nothing is hardcoded hub-side. It does NOT make the module reachable for
