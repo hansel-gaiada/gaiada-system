@@ -24,7 +24,7 @@ same tool `webdesk/payload/scripts/*.mjs` already uses for the identical reason)
 The NestJS-facing half of this ticket (`../contract-read.service.ts`, `../codegen.module.ts`,
 `../contract-manifest.types.ts`, `../artifact-keys.ts`) is deliberately **plain commonjs-safe
 `.ts`** with **zero vocabulary imports** — it only ever reads a JSON pointer object
-(`contracts/<tenantSlug>/latest.json`) this directory's `run-codegen.mts` already wrote to MinIO,
+(`contracts/<tenantSlug>/latest.json`) this directory's `run-codegen.mts` already wrote to the object store,
 and mints pre-signed GET URLs. Nothing under `src/control/**` (the NestJS graph) imports anything
 from this directory.
 
@@ -52,7 +52,7 @@ from this directory.
   tenant slug → `{tenantId, defaultLocale, locales, composition}` under the real
   `webdesk.platform_ctx` / `webdesk.tenant_ctx` GUCs (same mechanism as every other Zone B
   service), `ORDER BY key` for deterministic iteration order.
-- `storage-io.mts` — the ONLY file in this directory that touches MinIO: reads/writes
+- `storage-io.mts` — the ONLY file in this directory that touches the object store (RustFS): reads/writes
   `contracts/<tenantSlug>/latest.json` and the per-version artifact bodies, via WSK-07's
   `StorageAdapter` (`../../storage/s3-storage.adapter.ts` — imported directly; it is a plain class
   with no vocabulary/NestJS-DI dependency of its own, so it is safe to import from this ESM side

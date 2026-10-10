@@ -1505,8 +1505,8 @@ prose:
 > All of tenant '\<slug>''s content, form submissions and uploaded media are stored on self-hosted
 > infrastructure we operate — Postgres at \<host> and RustFS (S3-API object storage, self-hosted, never Cloudflare
 > R2 or any third-party object store) at \<host> — with backups going to \<phase-specific target,
-> e.g. "a nightly pull-model backup to a second estate-owned box (the source estate holds no credential for the
-> destination and cannot reach, overwrite, or delete it)">.
+> e.g. "a nightly pull-model backup to a second estate-owned box (the server that hosts the content holds no credential
+> for that box and cannot reach, overwrite, or delete it)">.
 
 Not wired to any HTTP route in this ticket (no design text asks for one) — a plain injectable a
 future control-plane read endpoint, or the WSK-24 console card, can call directly. Proven by

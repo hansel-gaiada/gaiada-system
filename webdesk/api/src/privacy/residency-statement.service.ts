@@ -31,7 +31,7 @@ export type ResidencyStatement = {
 /** design §11a: "object store / R2 / Cloudflare split needs one real answer" — under WSK-D23 the answer
  *  is that there IS no split: everything is self-hosted. */
 const BACKUP_TARGET_BY_PHASE: Record<BackupPhase, string> = {
-  now: "a nightly pull-model backup to a second estate-owned box (the source estate holds no credential for the destination and cannot reach, overwrite, or delete it)",
+  now: "a nightly pull-model backup to a second estate-owned box (the server that hosts the content holds no credential for that box and cannot reach, overwrite, or delete it)",
   staging: "a nightly pull-model backup to the company's own Google Workspace (Drive/Shared Drive via a dedicated service account) — encrypted before upload",
   "target-state": "a local server + NAS with RAID for redundancy, plus the same offsite pull-model copy (RAID alone is never treated as a backup)",
 };
