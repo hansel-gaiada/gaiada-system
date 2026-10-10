@@ -190,6 +190,11 @@ test("ci: a webdesk-only change runs only webdesk groups", () => {
   assert.deepEqual(on(outputs), ["webdesk_api"]);
   const both = planCi({ files: ["webdesk/payload/vocabulary/primitives.ts"] }).outputs;
   assert.deepEqual(on(both), ["webdesk_api", "webdesk_blocks", "webdesk_payload"]);
+  // The api's differential spec imports the OLD /v1 router from the Payload tree (until WSK-48b).
+  for (const f of ["webdesk/payload/collections/router.ts", "webdesk/payload/src/tenant-pg.mjs", "webdesk/payload/src/tenant-pool.mjs"]) {
+    assert.deepEqual(on(planCi({ files: [f] }).outputs), ["webdesk_api", "webdesk_payload"], f);
+  }
+  assert.deepEqual(on(planCi({ files: ["webdesk/payload/app/(payload)/layout.tsx"] }).outputs), ["webdesk_payload"]);
 });
 
 test("ci: a platform-nest-only change runs the nest group (+ nothing else); migrations also run sync-engine", () => {
