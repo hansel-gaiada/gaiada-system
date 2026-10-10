@@ -12,7 +12,7 @@ Machine-readable twin: `inventory.json` (same folder). Gap ids `G1..G16` and que
 | Commit at start | `57f583d537f07ad32a144e706c2928bc2fc7871a` |
 | Commit at end | `075ff5f1b93543615de86a6ab64f1946c0fbe52b` (another session committed meanwhile; `git diff 57f583d HEAD -- src/config data content docs public` = `src/config/chat.ts`, 2 lines) |
 | Uncommitted changes | `?? .claude/` only (untracked, not site content) |
-| WebDesk contract read | `webdesk/payload/vocabulary/{primitives,blocks,composition,envelope,locale}.ts`, `collections/redirects.ts`, `migrations/0002_content.sql`, `sites/wsk17-proof/README.md` |
+| WebDesk contract read | `webdesk/delivery/vocabulary/{primitives,blocks,composition,envelope,locale}.ts`, `collections/redirects.ts`, `migrations/0002_content.sql`, `sites/wsk17-proof/README.md` |
 | Scope | all 33 files under `src/config/**` (4,490 lines), `content/{en,id}` (315 files), `data/*.json`, `public/`, `src/scripts/tracking/`, `src/scripts/deck/` |
 
 Not read or run: `npm`, `astro`, any build (a build writes `dist/`), any git command that changes state.

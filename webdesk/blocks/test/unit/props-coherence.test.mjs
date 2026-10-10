@@ -92,7 +92,7 @@ for (const type of KNOWN_MULTIPLE_MEDIA_VALIDATION_GAP) {
     assert.equal(
       result.valid,
       false,
-      `if this now passes, webdesk/payload/vocabulary's "media"+multiple validation gap has been fixed upstream — ` +
+      `if this now passes, webdesk/delivery/vocabulary's "media"+multiple validation gap has been fixed upstream — ` +
         `flip this assertion to true and delete it from KNOWN_MULTIPLE_MEDIA_VALIDATION_GAP above`,
     )
   })

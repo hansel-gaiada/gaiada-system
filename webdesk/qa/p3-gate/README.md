@@ -53,8 +53,8 @@ and failed immediately — `esbuild`/`tsx` ship native platform binaries, and a 
 `node_modules` copied into a Linux container throws `You installed esbuild for another platform`.
 Fixed by having each container run its own `npm ci` from `package.json`/`package-lock.json` — which
 is also the *more correct* proof: it demonstrates the **pinned lockfile versions**, not a copied
-binary, are what make the two machines agree. A second bug (Node resolving `payload/vocabulary`'s
-`.ts` files as CommonJS because `webdesk/payload/package.json`'s `"type": "module"` was not copied
+binary, are what make the two machines agree. A second bug (Node resolving `delivery/vocabulary`'s
+`.ts` files as CommonJS because the vocabulary package's `package.json` (`"type": "module"`; `webdesk/delivery/package.json` now, `webdesk/payload/package.json` before WSK-48b) was not copied
 alongside them) produced `does not provide an export named 'BLOCKS'` — fixed by copying that file too.
 
 ### 2. SDK ↔ OpenAPI ↔ contract coherence

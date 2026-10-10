@@ -107,7 +107,7 @@ NOT reject; it skips and reports.
 
 ### The vendored vocabulary (a second instance of WSK-16's own hazard, PHP-side)
 
-`inc/block-vocabulary.php` is a vendored copy of `payload/vocabulary/blocks.ts`'s
+`inc/block-vocabulary.php` is a vendored copy of `delivery/vocabulary/blocks.ts`'s
 `BLOCK_TYPE_NAMES` — PHP cannot `import` a `.ts` file at all (not an ESM-vs-commonjs problem like
 WSK-15/32 hit; there is simply no cross-language import), so vendoring-with-a-drift-check is the
 only mechanism available, not a workaround. `scripts/vendor-block-vocabulary.mjs --check` is that
@@ -115,7 +115,7 @@ gate (mirrors `webdesk/blocks/scripts/vendor-vocabulary.mjs` exactly). Run for r
 
 ```
 $ node scripts/vendor-block-vocabulary.mjs --check
-OK       .../inc/block-vocabulary.php matches webdesk/payload/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (10 types)
+OK       .../inc/block-vocabulary.php matches webdesk/delivery/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (10 types)
 ```
 
 The 10 are the 9 generic blocks plus `fields`, the composition-typed block of vocabulary 1.1.0

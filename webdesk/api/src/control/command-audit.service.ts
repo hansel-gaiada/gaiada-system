@@ -3,6 +3,13 @@
 // only adds the GUC-context plumbing + a consistent `control.<command>[.replay]` action naming;
 // it does not reimplement hashing or the insert itself (AuditService.hashArgs/record do that).
 //
+// M3 T5a: the lifecycle, schema.apply, keys and release commands NO LONGER audit through this
+// class. They run in the shared command envelope (command-envelope.ts), which writes the same
+// `control.<command>` / `control.<command>.replay` rows itself, as the first statement of the
+// command's own transaction (so a HIGH command claims its WS4 approval before its effect). Still
+// served here: site.archive (no effect), schema.propose and contract.read (reads), and the
+// promotion and privacy commands, which move to the envelope in T5b.
+//
 // Scope: audited here are the C-05 command set's actual commands (lifecycle/schema/keys/release)
 // plus contract.read (explicitly named in the ticket's command list, §5). Deliberately NOT
 // audited: job.get/job.list — those are read-only status polls of a job a real command already

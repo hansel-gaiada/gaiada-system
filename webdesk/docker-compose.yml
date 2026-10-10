@@ -5,10 +5,10 @@
 # profile isn't in the current command gets deleted) cannot reach it — same precedent as the
 # n8n project split (see ../docs/blueprints/webdesk-design.md §09).
 #
-# Services here are STUBS per WSK-01's scope: the stack SHAPE is the deliverable (proxy · payload
-# · api · worker · postgres · rustfs · redis · clamav · otel-collector), not working application
-# code. Payload/api/worker become real at WSK-02/21/07; this file is what those tickets extend,
-# not replace.
+# Services here are STUBS per WSK-01's scope: the stack SHAPE is the deliverable (proxy · api
+# · worker · postgres · rustfs · redis · clamav · otel-collector), not working application
+# code. Api/worker become real at WSK-21/07; this file is what those tickets extend, not replace.
+# (WSK-48b: the `payload` service is deleted with the Payload app, WSK-D37.)
 #
 # Everything runs under the `dev` profile — nothing starts on a bare `docker compose up` without
 # explicitly selecting it, mirroring the estate's COMPOSE_PROFILES convention:
@@ -38,38 +38,7 @@ services:
       - webdesk_status:/srv/status:ro
     depends_on:
       - api
-      - payload
       - status-page
-    restart: unless-stopped
-
-  # --- Payload 3 content engine --------------------------------------------------------------
-  # Vendored + rebranded at WSK-02 (PG adapter onto Zone B's own DB, tenancy columns, RLS GUC
-  # plumbing at WSK-04). Placeholder process only — no application code lands in this ticket.
-  payload:
-    image: node:20-alpine
-    profiles: ["dev"]
-    command:
-      - sh
-      - -c
-      - "echo '[webdesk] payload INTERNAL listener — admin + Payload REST. NEVER on the public vhost (WSK-D20/D-5). Real command: npm run start:internal' && sleep infinity"
-    environment:
-      NODE_ENV: ${NODE_ENV:-development}
-      DATABASE_URL: ${APP_DATABASE_URL}
-      # Payload reads DATABASE_URI; WSK-06's /v1 read path resolves it too.
-      DATABASE_URI: ${APP_DATABASE_URL}
-      # WSK-06's /v1 auth verifies api_keys hashes: sha256(key + pepper).
-      # MUST match the api service's API_KEY_PEPPER exactly (see WSK-06 coupling note).
-      API_KEY_PEPPER: ${API_KEY_PEPPER}
-      PAYLOAD_SECRET: ${PAYLOAD_SECRET}
-      PAYLOAD_TELEMETRY_DISABLED: ${PAYLOAD_TELEMETRY_DISABLED:-1}
-      TENANT_GUC_NAME: ${TENANT_GUC_NAME}
-    ports:
-      # Bound to LOCALHOST only: the admin panel and Payload's raw REST live here.
-      # Caddy must not forward the public vhost to this service (WSK-D20).
-      - "127.0.0.1:${WEBDESK_PAYLOAD_INTERNAL_PORT:-8381}:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     restart: unless-stopped
 
   # --- NestJS api (forms · mail · media · control-plane) -------------------------------------
@@ -280,7 +249,7 @@ services:
     image: redis:7-alpine
     profiles: ["dev"]
     ports:
-      # WSK-28 fix: was :-8384, which WEBDESK_PAYLOAD_PUBLIC_PORT already claims. Two services in the
+      # WSK-28 fix: was :-8384, which the (since retired) payload-gateway's WEBDESK_PAYLOAD_PUBLIC_PORT claimed. Two services in the
       # SAME (dev) profile defaulting to one host port means `up` dies on a bind conflict, and
       # `docker compose config` cannot see it — it validates schema, not port uniqueness. See
       # scripts/check-compose-ports.mjs, added so this cannot recur.

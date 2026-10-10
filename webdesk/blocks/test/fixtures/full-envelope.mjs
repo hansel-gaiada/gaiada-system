@@ -2,7 +2,7 @@
 //
 // WSK-16 — "every block renders from a real envelope fixture". Built with the vendored
 // vocabulary's OWN `buildItemEnvelope` (../../src/vocabulary/envelope.ts, byte-identical to
-// webdesk/payload/vocabulary/envelope.ts) rather than a hand-typed object literal, so this fixture
+// webdesk/delivery/vocabulary/envelope.ts) rather than a hand-typed object literal, so this fixture
 // is guaranteed to be a real, valid `/v1` item envelope shape — not merely something that looks
 // like one. Uses all 9 known block types, in the exact order the vocabulary declares them
 // (BLOCK_TYPE_NAMES), each with props exercising both its required and optional fields.

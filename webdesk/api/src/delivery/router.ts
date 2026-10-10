@@ -1,6 +1,6 @@
 // webdesk/api/src/delivery/router.ts
 //
-// WSK-48a — MOVED from webdesk/payload/collections/router.ts (WSK-06): the frozen /v1 envelope's
+// WSK-48a — MOVED from webdesk/payload/collections/router.ts (WSK-06; that tree was deleted in WSK-48b): the frozen /v1 envelope's
 // handler. Still a plain Web Request -> Response function with no framework in it; the HTTP edge
 // (delivery.gateway.ts) adapts Fastify to it, exactly as the Payload app's Next route file did.
 // Style (no semicolons, single quotes) is kept from the original so a reviewer can diff the two.
@@ -14,7 +14,7 @@
 //      per-tenant read quota (TenantQuotaService) AFTER the key resolves and BEFORE any content
 //      query, and attach rate-limit headers. With no hook the behaviour is exactly the original's.
 //   3. Vocabulary imports point at the vendored copy (./vocabulary/*), which a drift test pins to
-//      webdesk/payload/vocabulary/*.
+//      webdesk/delivery/vocabulary/*.
 //   4. (M3 T1) Hardening of the read path, and ONLY these: each path segment after the tenant prefix
 //      is percent-decoded once (malformed -> 400 problem+json, a decoded segment holding `/` or NUL
 //      -> 404 never reaching SQL); a malformed pagination cursor is a 400 `invalid-cursor`; and the

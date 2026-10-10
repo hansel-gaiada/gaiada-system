@@ -1,13 +1,32 @@
 // WSK-21 — the "lifecycle" quarter of the C-05 command set: tenant + site + environment
 // provision/archive, as idempotent commands (design §04's own DDL is the domain model; nothing
 // here alters it).
+//
+// M3 T5a — every command here except site.archive runs in the shared command envelope
+// (../command-envelope.ts): ONE transaction holding the `control.<cmd>` audit row FIRST (on the
+// two HIGH archives it carries ws4_approval_id, which claims the approval before the write), the
+// domain write on the same client, and the durable replay record. tenant.provision/archive run under
+// the platform scope (tenant_id NULL audit row), the rest under the tenant's. Nothing runs after
+// commit. Ids of the rows being created are generated before the transaction, because the audit row
+// that names them is its first statement.
+//
+// site.archive is the exception: it has no effect (the `sites` table has no status column, so it only
+// ever answers 501), takes no idempotency key, and records its audit row through CommandAuditService.
+// It consumes no approval and changes nothing, so there is nothing to claim.
 import { ConflictException, Injectable, NotFoundException, NotImplementedException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { DbService } from "../../db/db.service";
 import { TenantLookupService } from "../../tenants/tenant-lookup.service";
 import { AuditService } from "../../audit/audit.service";
 import { CommandAuditService } from "../command-audit.service";
-import { IdempotencyStore } from "../idempotency/idempotency-store";
+import { CommandEnvelope } from "../command-envelope";
+
+interface TenantRow {
+  id: string;
+  slug: string;
+  company_ref: string;
+  status: string;
+  created_at: string;
+}
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "23505";
@@ -16,10 +35,9 @@ function isUniqueViolation(err: unknown): boolean {
 @Injectable()
 export class LifecycleService {
   constructor(
-    private readonly db: DbService,
     private readonly tenants: TenantLookupService,
     private readonly commandAudit: CommandAuditService,
-    private readonly idempotency: IdempotencyStore,
+    private readonly envelope: CommandEnvelope,
     private readonly auditHash: AuditService,
   ) {}
 
@@ -37,63 +55,55 @@ export class LifecycleService {
 
   async provisionTenant(input: { slug: string; companyRef: string; actor: string; idempotencyKey: string }) {
     const args = { slug: input.slug, companyRef: input.companyRef };
-    const commandHash = this.auditHash.hashArgs(args);
-    const scopeKey = `platform:tenant.provision:${input.idempotencyKey}`;
+    const tenantId = randomUUID();
 
-    const { result, replayed } = await this.idempotency.run(scopeKey, commandHash, async () => {
-      try {
-        return await this.db.withPlatformCtx(async (client) => {
-          const { rows } = await client.query<{ id: string; slug: string; company_ref: string; status: string; created_at: string }>(
+    return this.envelope.run<{ tenant: TenantRow }>({
+      command: "tenant.provision",
+      scope: { kind: "platform" },
+      scopeKey: `platform:tenant.provision:${input.idempotencyKey}`,
+      requestHash: this.auditHash.hashArgs(args),
+      actor: input.actor,
+      auditArgs: { ...args, tenantId },
+      ws4ApprovalId: null,
+      effect: async (client) => {
+        try {
+          const { rows } = await client.query<TenantRow>(
             `INSERT INTO tenants (id, slug, company_ref) VALUES ($1, $2, $3)
              RETURNING id, slug, company_ref, status, created_at`,
-            [randomUUID(), input.slug, input.companyRef],
+            [tenantId, input.slug, input.companyRef],
           );
-          return rows[0];
-        });
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          throw new ConflictException(`tenant slug '${input.slug}' already exists — provisioning with a NEW idempotency key does not rename or reuse an existing tenant`);
+          return { result: { tenant: rows[0] } };
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            throw new ConflictException(`tenant slug '${input.slug}' already exists — provisioning with a NEW idempotency key does not rename or reuse an existing tenant`);
+          }
+          throw err;
         }
-        throw err;
-      }
+      },
     });
-
-    await this.commandAudit.recordPlatform({
-      command: "tenant.provision",
-      actor: input.actor,
-      args: { ...args, tenantId: result.id },
-      replayed,
-    });
-
-    return { tenant: result, replayed };
   }
 
   async archiveTenant(input: { slug: string; actor: string; idempotencyKey: string; ws4ApprovalId: string | null }) {
-    await this.resolveActiveTenant(input.slug);
+    const tenant = await this.resolveActiveTenant(input.slug);
     const args = { slug: input.slug };
-    const commandHash = this.auditHash.hashArgs(args);
-    const scopeKey = `platform:tenant.archive:${input.idempotencyKey}`;
 
-    const { result, replayed } = await this.idempotency.run(scopeKey, commandHash, async () => {
-      return this.db.withPlatformCtx(async (client) => {
+    return this.envelope.run<{ tenant: { id: string; slug: string; status: string } }>({
+      command: "tenant.archive",
+      scope: { kind: "platform" },
+      scopeKey: `platform:tenant.archive:${input.idempotencyKey}`,
+      requestHash: this.auditHash.hashArgs(args),
+      actor: input.actor,
+      auditArgs: { ...args, tenantId: tenant.id },
+      ws4ApprovalId: input.ws4ApprovalId,
+      effect: async (client) => {
         const { rows } = await client.query<{ id: string; slug: string; status: string }>(
           `UPDATE tenants SET status = 'archived' WHERE slug = $1 RETURNING id, slug, status`,
           [input.slug],
         );
         if (!rows[0]) throw new NotFoundException("tenant not found");
-        return rows[0];
-      });
+        return { result: { tenant: rows[0] } };
+      },
     });
-
-    await this.commandAudit.recordPlatform({
-      command: "tenant.archive",
-      actor: input.actor,
-      args: { ...args, tenantId: result.id },
-      ws4ApprovalId: input.ws4ApprovalId,
-      replayed,
-    });
-
-    return { tenant: result, replayed };
   }
 
   // ---------------------------------------------------------------------------
@@ -103,31 +113,25 @@ export class LifecycleService {
   async provisionSite(input: { tenantSlug: string; kind: "astro" | "node" | "wp"; name: string; actor: string; idempotencyKey: string }) {
     const tenant = await this.resolveActiveTenant(input.tenantSlug);
     const args = { tenantSlug: input.tenantSlug, kind: input.kind, name: input.name };
-    const commandHash = this.auditHash.hashArgs(args);
-    const scopeKey = `${input.tenantSlug}:site.provision:${input.idempotencyKey}`;
+    const siteId = randomUUID();
 
-    const { result, replayed } = await this.idempotency.run(scopeKey, commandHash, async () => {
-      return this.db.withTenant(tenant.id, (db) =>
-        db.transaction(async (client) => {
-          const { rows } = await client.query<{ id: string; kind: string; name: string; created_at: string }>(
-            `INSERT INTO sites (id, tenant_id, kind, name) VALUES ($1, $2, $3, $4)
-             RETURNING id, kind, name, created_at`,
-            [randomUUID(), tenant.id, input.kind, input.name],
-          );
-          return rows[0];
-        }),
-      );
-    });
-
-    await this.commandAudit.recordTenant({
-      tenantId: tenant.id,
+    return this.envelope.run<{ site: { id: string; kind: string; name: string; created_at: string } }>({
       command: "site.provision",
+      scope: { kind: "tenant", tenantId: tenant.id },
+      scopeKey: `${input.tenantSlug}:site.provision:${input.idempotencyKey}`,
+      requestHash: this.auditHash.hashArgs(args),
       actor: input.actor,
-      args: { ...args, siteId: result.id },
-      replayed,
+      auditArgs: { ...args, siteId },
+      ws4ApprovalId: null,
+      effect: async (client) => {
+        const { rows } = await client.query<{ id: string; kind: string; name: string; created_at: string }>(
+          `INSERT INTO sites (id, tenant_id, kind, name) VALUES ($1, $2, $3, $4)
+           RETURNING id, kind, name, created_at`,
+          [siteId, tenant.id, input.kind, input.name],
+        );
+        return { result: { site: rows[0] } };
+      },
     });
-
-    return { site: result, replayed };
   }
 
   /**
@@ -176,73 +180,58 @@ export class LifecycleService {
   }) {
     const tenant = await this.resolveActiveTenant(input.tenantSlug);
     const args = { tenantSlug: input.tenantSlug, siteId: input.siteId, name: input.name, domain: input.domain };
-    const commandHash = this.auditHash.hashArgs(args);
-    const scopeKey = `${input.tenantSlug}:environment.provision:${input.idempotencyKey}`;
+    const envId = randomUUID();
 
-    const { result, replayed } = await this.idempotency.run(scopeKey, commandHash, async () => {
-      try {
-        return await this.db.withTenant(tenant.id, (db) =>
-          db.transaction(async (client) => {
-            const siteCheck = await client.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
-            if (!siteCheck.rows[0]) throw new NotFoundException("site not found for this tenant");
-
-            const { rows } = await client.query<{ id: string; name: string; domain: string | null; status: string }>(
-              `INSERT INTO environments (id, site_id, tenant_id, name, domain, status)
-               VALUES ($1, $2, $3, $4, $5, 'provisioning')
-               RETURNING id, name, domain, status`,
-              [randomUUID(), input.siteId, tenant.id, input.name, input.domain],
-            );
-            return rows[0];
-          }),
-        );
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          throw new ConflictException(`environment '${input.name}' already exists for this site — provisioning with a NEW idempotency key does not create a second one (UNIQUE(site_id,name))`);
-        }
-        throw err;
-      }
-    });
-
-    await this.commandAudit.recordTenant({
-      tenantId: tenant.id,
+    return this.envelope.run<{ environment: { id: string; name: string; domain: string | null; status: string } }>({
       command: "environment.provision",
+      scope: { kind: "tenant", tenantId: tenant.id },
+      scopeKey: `${input.tenantSlug}:environment.provision:${input.idempotencyKey}`,
+      requestHash: this.auditHash.hashArgs(args),
       actor: input.actor,
-      args: { ...args, envId: result.id },
-      replayed,
+      auditArgs: { ...args, envId },
+      ws4ApprovalId: null,
+      effect: async (client) => {
+        const siteCheck = await client.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
+        if (!siteCheck.rows[0]) throw new NotFoundException("site not found for this tenant");
+        try {
+          const { rows } = await client.query<{ id: string; name: string; domain: string | null; status: string }>(
+            `INSERT INTO environments (id, site_id, tenant_id, name, domain, status)
+             VALUES ($1, $2, $3, $4, $5, 'provisioning')
+             RETURNING id, name, domain, status`,
+            [envId, input.siteId, tenant.id, input.name, input.domain],
+          );
+          return { result: { environment: rows[0] } };
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            throw new ConflictException(`environment '${input.name}' already exists for this site — provisioning with a NEW idempotency key does not create a second one (UNIQUE(site_id,name))`);
+          }
+          throw err;
+        }
+      },
     });
-
-    return { environment: result, replayed };
   }
 
   async archiveEnvironment(input: { tenantSlug: string; envId: string; actor: string; idempotencyKey: string; ws4ApprovalId: string | null }) {
     const tenant = await this.resolveActiveTenant(input.tenantSlug);
     const args = { tenantSlug: input.tenantSlug, envId: input.envId };
-    const commandHash = this.auditHash.hashArgs(args);
-    const scopeKey = `${input.tenantSlug}:environment.archive:${input.idempotencyKey}`;
 
-    const { result, replayed } = await this.idempotency.run(scopeKey, commandHash, async () => {
-      return this.db.withTenant(tenant.id, (db) =>
-        db.transaction(async (client) => {
-          const { rows } = await client.query<{ id: string; name: string; status: string }>(
-            `UPDATE environments SET status = 'archived' WHERE id = $1 AND tenant_id = $2
-             RETURNING id, name, status`,
-            [input.envId, tenant.id],
-          );
-          if (!rows[0]) throw new NotFoundException("environment not found for this tenant");
-          return rows[0];
-        }),
-      );
-    });
-
-    await this.commandAudit.recordTenant({
-      tenantId: tenant.id,
+    return this.envelope.run<{ environment: { id: string; name: string; status: string } }>({
       command: "environment.archive",
+      scope: { kind: "tenant", tenantId: tenant.id },
+      scopeKey: `${input.tenantSlug}:environment.archive:${input.idempotencyKey}`,
+      requestHash: this.auditHash.hashArgs(args),
       actor: input.actor,
-      args: { ...args, envId: result.id },
+      auditArgs: args,
       ws4ApprovalId: input.ws4ApprovalId,
-      replayed,
+      effect: async (client) => {
+        const { rows } = await client.query<{ id: string; name: string; status: string }>(
+          `UPDATE environments SET status = 'archived' WHERE id = $1 AND tenant_id = $2
+           RETURNING id, name, status`,
+          [input.envId, tenant.id],
+        );
+        if (!rows[0]) throw new NotFoundException("environment not found for this tenant");
+        return { result: { environment: rows[0] } };
+      },
     });
-
-    return { environment: result, replayed };
   }
 }

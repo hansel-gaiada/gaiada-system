@@ -595,6 +595,9 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
         "../db": ["closePool", "withGlobal", "withTenants"],
         "../rbac/principal": ["assemblePrincipal", "Principal"],
         "../modules/webdev/webdesk-approved-command": ["fileWebdeskCommandApproval"],
+        // main() wires the editorial signer exactly as main.ts does at boot (a CLI is its own process); the
+        // signer only signs what the content service sends, so it adds no command.
+        "../modules/webdev/webdesk-editorial-signer": ["wireWebdeskEditorialSigner"],
         "../modules/webdev/webdesk-content.service": [
           "WebdeskProblem", "authorizeContent", "controlApplySchema", "problemSlug", "resolveEditableSite", "webdeskContent", "ContentGate", "SiteRef",
         ],

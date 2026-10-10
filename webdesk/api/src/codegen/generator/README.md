@@ -3,7 +3,7 @@
 **Why this directory is `.mts`, not `.ts`, and why that matters.**
 
 `webdesk/api` is a NestJS service compiled by `tsc -p tsconfig.json` under
-`"module": "commonjs"`. `webdesk/payload/vocabulary/**` (WSK-06/WSK-14 — frozen, DEV-VERIFIED,
+`"module": "commonjs"`. `webdesk/delivery/vocabulary/**` (WSK-06/WSK-14 — frozen, DEV-VERIFIED,
 this ticket builds ON it per the brief, not around it) is ESM and every file in it imports its own
 siblings with an explicit `.ts` extension (e.g. `blocks.ts`'s `import ... from './primitives.ts'`).
 TypeScript's classic (`commonjs`/`node10`) module resolution — what `webdesk/api/tsconfig.json`
@@ -14,10 +14,10 @@ uses — rejects a relative import ending in `.ts` outright (`TS5097`) unless
 The fix applied here is **not** a `tsconfig.json` edit and **not** a vendored copy of the
 vocabulary — both would either weaken the main build or violate "build ON WSK-06/14, don't
 re-derive it." It is a **file-extension boundary**: every file in this directory that transitively
-imports `webdesk/payload/vocabulary/**` is named `.mts`. `webdesk/api/tsconfig.json`'s `include` is
+imports `webdesk/delivery/vocabulary/**` is named `.mts`. `webdesk/api/tsconfig.json`'s `include` is
 `["src/**/*.ts", "test/**/*.ts"]` — a glob that does **not** match `.mts` — so `tsc -p tsconfig.json`
 never sees these files at all; they are executed directly by `tsx` (`node --import tsx ...`, the
-same tool `webdesk/payload/scripts/*.mjs` already uses for the identical reason), which resolves
+same tool `webdesk/delivery/test/*.mjs` run under for the identical reason), which resolves
 `.ts`-extension specifiers the way esbuild/Vite do — literally, no `TS5097` rule — and by `vitest`
 (`test/codegen-*.spec.ts`), whose Vite-based transform does the same.
 
@@ -36,7 +36,7 @@ from this directory.
   fragment. The one piece of "hand-authored OpenAPI" logic (WSK-D19) proper.
 - `openapi-builder.mts` — `buildOpenApiDocument(input)`: composition × vocabulary →
   `openapi.v1.json` (a plain object; canonicalized by the caller before writing). Describes the
-  REAL routes `webdesk/payload/collections/router.ts` serves — see that file and
+  REAL routes `webdesk/api/src/delivery/router.ts` serves — see that file and
   `content-read.ts`/`redirects.ts` for the routes this mirrors; this file's own header repeats the
   exact correspondence.
 - `content-contract-md.mts` — renders `CONTENT-CONTRACT.md` from the same input the OpenAPI

@@ -20,7 +20,7 @@ namespace GaiadaWebDesk\Theme;
 require_once __DIR__ . '/block-vocabulary.php';
 
 /**
- * Splits a raw `blocks` array (an ItemEnvelope's own `blocks`, per webdesk/payload/vocabulary/
+ * Splits a raw `blocks` array (an ItemEnvelope's own `blocks`, per webdesk/delivery/vocabulary/
  * envelope.ts) into resolved entries — never throws, mirroring resolve-blocks.ts's own "a
  * resolution failure here is exactly the scenario the renderer invariant exists to survive"
  * comment. Preserves order and the original index (needed for an accurate report).

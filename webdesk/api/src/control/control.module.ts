@@ -16,7 +16,7 @@ import { CodegenModule } from "../codegen/codegen.module";
 import { TenantWebhooksModule } from "../tenant-webhooks/tenant-webhooks.module";
 
 import { CommandAuditService } from "./command-audit.service";
-import { IdempotencyStore } from "./idempotency/idempotency-store";
+import { CommandEnvelope } from "./command-envelope";
 import { JobsService } from "./jobs/jobs.service";
 
 import { CONTROL_CHANNEL_AUTHENTICATOR } from "./auth/control-channel-authenticator";
@@ -120,7 +120,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
   ],
   providers: [
     CommandAuditService,
-    IdempotencyStore,
+    CommandEnvelope,
     JobsService,
     ControlAuthGuard,
     CommandAuthorizationGuard,

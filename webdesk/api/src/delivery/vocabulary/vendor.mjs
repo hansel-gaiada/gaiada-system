@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // webdesk/api/src/delivery/vocabulary/vendor.mjs
 //
-// WSK-48a — vendors the subset of `webdesk/payload/vocabulary/**` that the /v1 delivery module
-// (webdesk/api/src/delivery/) needs, so the api never imports the Payload app's source tree.
+// WSK-48a — vendors the subset of `webdesk/delivery/vocabulary/**` that the /v1 delivery module
+// (webdesk/api/src/delivery/) needs, so the api never imports across the package boundary into
+// webdesk/delivery/ (the single source; it was webdesk/payload/vocabulary until WSK-48b, WSK-D38).
 //
 // WHY A COPY AND NOT AN IMPORT: webdesk/api is CommonJS (`tsconfig` "module": "commonjs"), and the
 // vocabulary files use ESM `.ts`-extension relative imports (`from './primitives.ts'`), which
@@ -26,8 +27,8 @@ import path from 'node:path'
 import url from 'node:url'
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url))
-// webdesk/api/src/delivery/vocabulary -> webdesk/payload/vocabulary
-const SOURCE_DIR = path.resolve(HERE, '..', '..', '..', '..', 'payload', 'vocabulary')
+// webdesk/api/src/delivery/vocabulary -> webdesk/delivery/vocabulary
+const SOURCE_DIR = path.resolve(HERE, '..', '..', '..', '..', 'delivery', 'vocabulary')
 
 // Exactly what ./router.ts, ./content-read.ts and ./redirects.ts import, plus the transitive
 // closure of those (version.ts -> primitives.ts + blocks.ts).
@@ -54,7 +55,7 @@ export const FILES = [
 
 export function banner(file) {
   return (
-    `// VENDORED — generated from webdesk/payload/vocabulary/${file} (WSK-06/WSK-14, frozen per\n` +
+    `// VENDORED — generated from webdesk/delivery/vocabulary/${file} (WSK-06/WSK-14, frozen per\n` +
     `// webdesk-design.md §05) by webdesk/api/src/delivery/vocabulary/vendor.mjs. DO NOT HAND-EDIT.\n` +
     `// The only transform: LF line endings and relative '.ts' import extensions stripped (this\n` +
     `// package is CommonJS). Re-vendor with \`node src/delivery/vocabulary/vendor.mjs\`; drift is\n` +
@@ -88,7 +89,7 @@ function main() {
       const actual = fs.existsSync(destPath) ? normalise(fs.readFileSync(destPath, 'utf8')) : null
       if (actual !== expected) {
         bad = true
-        console.error(`DRIFT    delivery/vocabulary/${file} != payload/vocabulary/${file} (run vendor.mjs)`)
+        console.error(`DRIFT    delivery/vocabulary/${file} != delivery/vocabulary/${file} (run vendor.mjs)`)
       } else {
         console.log(`OK       delivery/vocabulary/${file}`)
       }

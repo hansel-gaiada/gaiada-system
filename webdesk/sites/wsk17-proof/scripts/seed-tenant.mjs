@@ -8,7 +8,7 @@
  * items (multi-block, real English/Indonesian copy, not lorem-ipsum), and a production-scope API
  * key -- all through plain `pg`, connected as `webdesk_migrator`, setting the same
  * `webdesk.platform_ctx` / `webdesk.tenant_ctx` GUCs the real control plane and every other
- * fixture helper in this repo use (mirrors webdesk/payload/test/v1-fixtures.mjs and
+ * fixture helper in this repo use (mirrors webdesk/api/test/delivery/v1-contract/v1-fixtures.ts (formerly webdesk/payload/test/v1-fixtures.mjs) and
  * webdesk/api/test/helpers/fixtures.ts -- same pattern, reimplemented here rather than imported,
  * because this ticket's ownership boundary excludes both `payload/**` and `api/**`).
  *

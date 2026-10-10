@@ -8,7 +8,7 @@
 // process. This is a short-lived, single-tenant, single-threaded CLI script — a plain transaction
 // is the correct-sized tool, not a missing reuse of the server-side one.
 import pg from "pg";
-import type { TenantComposition } from "../../../../payload/vocabulary/composition.ts";
+import type { TenantComposition } from "../../../../delivery/vocabulary/composition.ts";
 
 export interface FetchedTenantComposition {
   tenantId: string;

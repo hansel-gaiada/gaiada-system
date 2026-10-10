@@ -7,8 +7,8 @@
 // Port rules: every request, fixture and check of the original is here, in the original order,
 // with the check names verbatim. Two mechanical substitutions only:
 //   - `handleV1Request` is a parameter, so the same suite runs against the api over real HTTP
-//     (envelope-contract.spec.ts) and through the old-vs-new tee (v1-differential.spec.ts);
-//   - `validateBlock` is the api's vendored vocabulary (byte-identical to payload/vocabulary by
+//     (envelope-contract.spec.ts) and through the golden recorder (v1-golden.spec.ts);
+//   - `validateBlock` is the api's vendored vocabulary (byte-identical to webdesk/delivery/vocabulary by
 //     vocabulary-vendor-drift.spec.ts), and redirects are seeded by v1-fixtures.ts#createRedirect.
 // The suite seeds its own fixtures on every run, against the shared throwaway database, as the
 // webdesk_app role reads them in production (the api's pool) — never as the migrator.

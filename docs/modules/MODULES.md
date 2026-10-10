@@ -34,14 +34,14 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.59.0` | IN PROGRESS | WS1 | 2026-10-11 |
+| platform-nest | `0.60.0` | IN PROGRESS | WS1 | 2026-10-11 |
 | platform-ui | `0.78.0` | IN PROGRESS | WS5 | 2026-10-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
-| infra | `0.9.0` | PROTOTYPED | WS10 | 2026-10-11 |
+| infra | `0.9.1` | PROTOTYPED | WS10 | 2026-10-11 |
 | wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
 | ai-agents | `0.8.1` | PROTOTYPED | WS8 | 2026-08-23 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
@@ -603,7 +603,7 @@ webdesk's own P3 codegen lands.
 
 ## webdesk — Website Platform · `0.4.0` · DEV-VERIFIED
 
-**Current state (2026-10-11):** M3 (a complete CMS, Payload removed) is in progress: wave 1 is on main (0.4.0; plan `docs/plans/2026-10-11-webdesk-m3-plan.md`), not yet live. 0.3.0 is live on `gda-aicenter` (`/v1` in the api, RustFS, migration 0009, the control channel). The write plane, live reads, the editorial assertion and vocabulary 1.1.0 are Linux-verified; editing from the ERP and the gaiada.com import go live with the 2026-10-11 release. Tracker `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; board `TASKS.md`. The paragraphs below are history.
+**Current state (2026-10-11):** M3 (a complete CMS, Payload removed) is in progress: waves 1-2 are on main (0.4.0, migration 0010 not yet applied live; plan `docs/plans/2026-10-11-webdesk-m3-plan.md`), not yet live. 0.3.0 is live on `gda-aicenter` (`/v1` in the api, RustFS, migration 0009, the control channel). The write plane, live reads, the editorial assertion and vocabulary 1.1.0 are Linux-verified; editing from the ERP and the gaiada.com import go live with the 2026-10-11 release. Tracker `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; board `TASKS.md`. The paragraphs below are history.
 
 **What exists:** blueprint only (approved 2026-07-23) — see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation → P2 Forms+Mail → P3 Contract/codegen → P4 ERP control+envs →
