@@ -1851,6 +1851,9 @@ enables it explicitly with its own queue name. Because of the compose pass-throu
 
 ### What the content tick does
 
+`now` is the **database's** clock when the job runs (the `/v1` read path judges visibility by the database's
+`now()`, so an api host with a fast clock cannot flip an item early); a test passes its own.
+
 Per active tenant, under that tenant's `webdesk.tenant_ctx`, in this order, **one transaction per item**:
 
 1. **Due publishes.** `publish_state = 'scheduled' AND publish_at <= now AND deleted_at IS NULL` becomes

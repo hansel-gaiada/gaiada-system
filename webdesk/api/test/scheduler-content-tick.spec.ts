@@ -41,6 +41,7 @@ import { SubmissionsPurgeService } from "../src/forms/submissions-purge.service"
 import { TenantWebhooksService } from "../src/tenant-webhooks/tenant-webhooks.service";
 import { ContentTickService, SCHEDULE_EXECUTED_ACTION, SCHEDULER_ACTOR, type TenantTickResult } from "../src/scheduler/content-tick.service";
 import { MaintenanceJobsService } from "../src/scheduler/maintenance-jobs.service";
+import { SchedulerModule } from "../src/scheduler/scheduler.module";
 import { TenantWebhookSink } from "./helpers/tenant-webhook-sink";
 
 const HOUR = 3_600_000;
@@ -607,6 +608,12 @@ describe("WSK-61 content tick (real DB, injected clock)", () => {
     expect(await auditRows(c)).toHaveLength(2);
   });
 
+  it("the scheduled job's clock is the database's: databaseNow() agrees with this host to within a few seconds", async () => {
+    const dbNow = await tick.databaseNow();
+    expect(dbNow).toBeInstanceOf(Date);
+    expect(Math.abs(dbNow.getTime() - Date.now())).toBeLessThan(5000);
+  });
+
   it("isolation: a tick walks each tenant under its own context and never touches another tenant's items", async () => {
     const a = await newTenant("isoA");
     const b = await newTenant("isoB");
@@ -675,8 +682,10 @@ describe("WSK-61 content tick (real DB, injected clock)", () => {
 
     it("errors are logged and rethrown (BullMQ records the failure); the process does not crash", async () => {
       const jobs = app.get(MaintenanceJobsService);
-      const purge = app.get(SubmissionsPurgeService);
-      const store = app.get(PgIdempotencyStore);
+      // The instances the handlers were given (SchedulerModule provides its own, see scheduler.module.ts).
+      const inScheduler = app.select(SchedulerModule);
+      const purge = inScheduler.get(SubmissionsPurgeService, { strict: true });
+      const store = inScheduler.get(PgIdempotencyStore, { strict: true });
       const p = vi.spyOn(purge, "purgeDueSubmissions").mockRejectedValueOnce(new Error("purge boom"));
       await expect(jobs.runFormsPurge()).rejects.toThrow("purge boom");
       p.mockRestore();

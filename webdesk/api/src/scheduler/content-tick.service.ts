@@ -133,9 +133,21 @@ export class ContentTickService {
   ) {}
 
   /**
-   * Runs one tick over every active tenant. `now` is injectable so a test can drive time; production
-   * passes nothing. Resolves with per-tenant counts (never rejects for an item or tenant that failed:
-   * those are logged and counted in `errors`).
+   * The database's clock. The /v1 read path judges visibility by the database's now(), so the scheduled
+   * worker takes its "now" from there too (SchedulerService passes this to runContentTick): an api host
+   * whose clock runs ahead must not flip an item to published, or take one down, before the read path
+   * would have shown it.
+   */
+  async databaseNow(): Promise<Date> {
+    const { rows } = await this.db.query<{ now: Date }>(`SELECT now() AS now`);
+    return rows[0].now;
+  }
+
+  /**
+   * Runs one tick over every active tenant. `now` is injectable so a test can drive time; the scheduled
+   * job passes the database's clock (databaseNow) and a direct caller with no argument gets this process's.
+   * Resolves with per-tenant counts (never rejects for an item or tenant that failed: those are logged and
+   * counted in `errors`).
    */
   async runContentTick(now: Date = new Date()): Promise<ContentTickResult> {
     const tenants = await this.db.withPlatformCtx(async (client) => {

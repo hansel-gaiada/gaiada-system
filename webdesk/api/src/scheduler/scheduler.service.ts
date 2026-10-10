@@ -119,7 +119,7 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
   private async dispatch(job: Job): Promise<unknown> {
     switch (job.name) {
       case JOB_CONTENT_TICK: {
-        const result = await this.content.runContentTick();
+        const result = await this.content.runContentTick(await this.content.databaseNow());
         // Per-item failures are counted, not thrown, so one poison item cannot starve the rest; surface
         // them here so the job shows as failed and the next tick still runs.
         if (result.totals.errors > 0) throw new Error(`content tick finished with ${result.totals.errors} error(s); see the api log`);
