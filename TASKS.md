@@ -26,7 +26,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] GoDaddy A record `api.gaiada.online → 35.240.135.48` (owner)
 - [ ] Content-model questions from the inventory: import scope (Q3), visibility states (Q4), default locale (Q11)
 - [ ] Owner questions from the write-plane design (WSK-62)
-- [ ] Backup role: approve a read-only `BYPASSRLS` role for `pg_dump` in the WebDesk database (WSK-63)
+- [ ] Backup role: approve a read-only `BYPASSRLS` role for `pg_dump` in the WebDesk database (WSK-68)
 
 ---
 
@@ -189,7 +189,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 
 ### Operations <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
 - [ ] Deploy procedure committed: LF-safe shipping (`git -c core.autocrlf=false archive`), images built off the live box
-- [ ] WSK-63 · backup role, nightly backup producing a real dump
+- [ ] WSK-68 · backup role, nightly backup producing a real dump
 - [ ] Restore drill from a backup, timed
 - [ ] OTel to sumopod; status page live
 - [ ] Stale WebDesk copy on sumopod retired
