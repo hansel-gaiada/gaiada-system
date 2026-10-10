@@ -34,13 +34,20 @@ const OLD_DB = path.join(WEBDESK_ROOT, "payload/collections/db.ts");
 // original runner's own numbers: run-v1-differential.mjs and this file, on one tree and one
 // database, both reported 24+1 / 24+1 / 662+6 with 14 classified divergences (710 byte-compared
 // pairs, 696 identical, 0 unexplained) — the same totals WSK-48a was accepted on.
+// M3 T1 then added 75 NAMED intended divergences to the extra corpus (14 -> 89 classified; the pair
+// counts are unchanged), see extraByName below.
 const EXPECTED = {
   contractApi: { pairs: 24, statusOnly: 1 },
   contractOld: { pairs: 24, statusOnly: 1 },
-  extra: { pairs: 662, statusOnly: 6, knownDivergent: 14 },
-  // M3 T1: the 14 are all the bad-'%' path class (now 400 problem+json, slug invalid-path-encoding);
-  // the rest are the named intended divergences (decoding, cursors). Pinned per class.
-  extraByName: {} as Record<string, number>,
+  extra: { pairs: 662, statusOnly: 6, knownDivergent: 89 },
+  // M3 T1: the original 14 are all the bad-'%' path class (now 400 problem+json, slug
+  // invalid-path-encoding); the other 75 are the named intended divergences. Pinned per class.
+  extraByName: {
+    "invalid % escape in the path -> 400 problem+json (M3 T1 D4)": 14,
+    "percent-decoded path segment (M3 T1 D2)": 58,
+    "invalid pagination cursor -> 400 (M3 T1 D3)": 14,
+    "500 detail is fixed text, not the thrown message (M3 T1 D3)": 3,
+  } as Record<string, number>,
 };
 
 type Differential = ReturnType<typeof createV1Differential>;

@@ -33,6 +33,9 @@ describe("M3 T1 D1 — reserved collection keys", () => {
       registeredUrls.push(route.url);
     });
     app = await buildApp(adapter);
+    // Plugin-scoped routes (the delivery gateway's `/v1/*`) register when Fastify becomes ready, which
+    // Nest's init() does not wait for; without this the list would silently miss them.
+    await adapter.getInstance().ready();
   }, 60_000);
 
   afterAll(async () => {
