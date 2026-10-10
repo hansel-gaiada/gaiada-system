@@ -80,8 +80,9 @@ export function computeCommandHash(command: string, args: unknown): string {
   return createHash("sha256").update(`${command}:${canonicalize(args)}`).digest("hex");
 }
 
-/** Deterministic JSON: object keys sorted recursively, arrays keep their order. */
-function canonicalize(value: unknown): string {
+/** Deterministic JSON: object keys sorted recursively, arrays keep their order. Exported for WSK-41: the
+ *  content hash (content-projection.ts contentHash) is sha256 of this same serialization (design §3.3). */
+export function canonicalize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
   const record = value as Record<string, unknown>;

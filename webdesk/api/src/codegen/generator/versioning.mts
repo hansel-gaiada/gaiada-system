@@ -11,14 +11,27 @@ import {
   type TenantContractSnapshot,
 } from "../../../../payload/vocabulary/breaking-change.ts";
 
-/** `TenantComposition` (`{ fields?, blocks? }`) -> `TenantContractSnapshot` (`{ fields: [], blocks? }`)
+/** `TenantComposition` (`{ fields?, blocks?, singleton?, localized?, ui?, lint? }`) ->
+ *  `TenantContractSnapshot` (`{ fields: [], blocks?, singleton?, localized?, ui?, lint? }`)
  *  — breaking-change.ts's `CollectionFieldSet.fields` is non-optional (it diffs field ARRAYS
  *  directly), so a blocks-only collection with no declared `fields` maps to `fields: []`, which is
- *  the correct "nothing here to have removed/added" baseline for the diff. */
+ *  the correct "nothing here to have removed/added" baseline for the diff.
+ *
+ *  WSK-41: the 1.1.0 collection keys are carried too. Before this, the snapshot held only
+ *  `{fields, blocks}`, so the classifier's WSK-64 tenant-axis rules (a `singleton`/`localized` flip is
+ *  MAJOR, a `ui`/`lint` edit is PATCH) never saw their inputs and a composition flip was rated
+ *  "no structural change" (PATCH). A key is copied only when the composition declares it, so a
+ *  collection that declares none of them snapshots exactly as before (byte-stable for the
+ *  codegen determinism gate). */
 export function toContractSnapshot(composition: TenantComposition): TenantContractSnapshot {
   const collections: TenantContractSnapshot["collections"] = {};
   for (const [key, comp] of Object.entries(composition)) {
-    collections[key] = { fields: comp.fields ?? [], blocks: comp.blocks };
+    const entry: TenantContractSnapshot["collections"][string] = { fields: comp.fields ?? [], blocks: comp.blocks };
+    if (comp.singleton !== undefined) entry.singleton = comp.singleton;
+    if (comp.localized !== undefined) entry.localized = comp.localized;
+    if (comp.ui !== undefined) entry.ui = comp.ui;
+    if (comp.lint !== undefined) entry.lint = comp.lint;
+    collections[key] = entry;
   }
   return { collections };
 }

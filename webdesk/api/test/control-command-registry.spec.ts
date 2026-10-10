@@ -4,7 +4,7 @@
 // departures from §07's literal wording (schema.propose folded into `read`; job.get/job.list are
 // this ticket's own addition).
 import { describe, expect, it } from "vitest";
-import { COMMAND_REGISTRY, type CommandName, type CommandMeta } from "../src/control/command-types";
+import { COMMAND_REGISTRY, EDITORIAL_COMMANDS, type CommandName, type CommandMeta } from "../src/control/command-types";
 
 const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "tenant.provision": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
@@ -36,6 +36,25 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "job.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "job.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "contract.read": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // WSK-41 — write-plane design §3.1 and ruling WSK-D46: publish and schedule are HIGH for every
+  // principal (always WS4); unpublish and delete are MEDIUM under promote (a takedown never waits
+  // for a second person); draft writes are MEDIUM under operate.
+  "content.create": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.update": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.restoreVersion": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.publish": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  "content.schedule": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  "content.unpublish": { impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
+  "content.delete": { impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
+  // WSK-51 — design §4: every editor read is read/webdesk:read.
+  "tenant.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "collection.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "collection.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.versions": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.versionGet": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "media.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
 };
 
 describe("control command registry — the impact-class map (design §07)", () => {
@@ -66,5 +85,33 @@ describe("control command registry — the impact-class map (design §07)", () =
     expect(jobTracked.sort()).toEqual(
       ["release.deploy", "release.promote", "release.rollback", "release.triggerRebuild"].sort(),
     );
+  });
+
+  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1)", () => {
+    expect([...EDITORIAL_COMMANDS].sort()).toEqual(
+      [
+        "content.create",
+        "content.update",
+        "content.restoreVersion",
+        "content.publish",
+        "content.schedule",
+        "content.unpublish",
+        "content.delete",
+      ].sort(),
+    );
+  });
+
+  it("publish and schedule are HIGH, unpublish and delete are MEDIUM (ruling WSK-D46)", () => {
+    expect(COMMAND_REGISTRY["content.publish"].impactClass).toBe("high");
+    expect(COMMAND_REGISTRY["content.schedule"].impactClass).toBe("high");
+    expect(COMMAND_REGISTRY["content.unpublish"].impactClass).toBe("medium");
+    expect(COMMAND_REGISTRY["content.delete"].impactClass).toBe("medium");
+  });
+
+  it("no editorial command is a read, and no read command is editorial", () => {
+    for (const c of EDITORIAL_COMMANDS) expect(COMMAND_REGISTRY[c].impactClass).not.toBe("read");
+    for (const meta of Object.values(COMMAND_REGISTRY)) {
+      if (meta.impactClass === "read") expect(EDITORIAL_COMMANDS.has(meta.command)).toBe(false);
+    }
   });
 });

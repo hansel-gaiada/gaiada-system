@@ -31,7 +31,8 @@ describe("WSK-48a vocabulary vendoring", () => {
       );
     }
     // WSK-64: 7 read-path files + composition.ts + item-fields.ts (vocabulary 1.1.0).
-    expect(out.match(/^OK /gm)?.length).toBe(9);
+    // WSK-41: + breaking-change.ts (schema.apply rates the change it commits).
+    expect(out.match(/^OK /gm)?.length).toBe(10);
   });
 
   it("the check can fail: a mutated copy is reported as drift (negative control)", () => {

@@ -36,7 +36,9 @@ const SOURCE_DIR = path.resolve(HERE, '..', '..', '..', '..', 'payload', 'vocabu
 // importable copy of the vocabulary, so the write plane (WSK-41's content commands validate items
 // with validateItemContent) and src/schema-draft/vocabulary-vendor.ts (which re-exports the
 // composition validator from here instead of hand-transcribing it) use the real rules, mechanically.
-// Still NOT breaking-change.ts / index.ts: nothing in the api needs them.
+// WSK-41 adds breaking-change.ts: schema.apply now computes the tenant-contract bump of the change it
+// is about to commit (write-plane design §3.1, `{bump, reasons}`, refusing `major`), and that rating
+// must be the classifier's own, not a hand-restated copy. Still NOT index.ts: nothing needs it.
 export const FILES = [
   'cache-tags.ts',
   'problem-details.ts',
@@ -47,6 +49,7 @@ export const FILES = [
   'version.ts',
   'composition.ts',
   'item-fields.ts',
+  'breaking-change.ts',
 ]
 
 export function banner(file) {
