@@ -28,6 +28,9 @@ import {
 import { can } from "../rbac/can";
 import type { Principal, RoleGrant, PermissionGrant } from "../rbac/principal";
 import permissionCatalog from "../rbac/permission-catalog.json";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import * as yaml from "js-yaml";
 
 /** Every `class: "grantable"` key in the catalog — the set superadmin's scope-level answer must
  *  cover in full. Derived, so retiring or adding a permission cannot leave this test asserting a
@@ -44,6 +47,38 @@ import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
 
 const live = !!process.env.CERBOS_URL;
+
+/** WSK-47b — the grantable keys whose Cerbos policy refuses the action, for EVERY principal, when the
+ *  request carries no approval id: an `EFFECT_DENY` rule whose condition reads `attr.approvalId`
+ *  (today `webdesk_content_item` publish/schedule, ruling WSK-D46: HIGH for every principal). DERIVED
+ *  from `cerbos/policies/*.yaml` + the catalog, never listed by hand, so a future approval-gated
+ *  action joins automatically and nothing else can hide in here. An ALLOW-side approvalId condition
+ *  (github_repo's D14 actions) is deliberately NOT matched: those rules do not bind the
+ *  platform_admin wildcard, so the sweep must keep probing them WITHOUT an approval id. */
+function approvalGatedKeys(): Set<string> {
+  const policiesDir = join(__dirname, "../../cerbos/policies");
+  const gated = new Set<string>(); // "kind:action", "*" expanded below
+  for (const fn of readdirSync(policiesDir)) {
+    if (!fn.endsWith(".yaml") || fn.startsWith("_") || fn === "derived_roles.yaml") continue;
+    for (const doc of yaml.loadAll(readFileSync(join(policiesDir, fn), "utf8")) as any[]) {
+      const rp = doc?.resourcePolicy;
+      if (!rp) continue;
+      for (const rule of rp.rules ?? []) {
+        const expr: string = rule.condition?.match?.expr ?? "";
+        if (rule.effect === "EFFECT_DENY" && /attr\.approvalId/.test(expr)) {
+          for (const a of rule.actions ?? []) gated.add(`${rp.resource}:${a}`);
+        }
+      }
+    }
+  }
+  const keys = new Set<string>();
+  for (const e of permissionCatalog.permissions as Array<{ key: string; class: string; cerbosKind: string; cerbosAction: string }>) {
+    if (e.class !== "grantable") continue;
+    if (gated.has(`${e.cerbosKind}:${e.cerbosAction}`) || gated.has(`${e.cerbosKind}:*`)) keys.add(e.key);
+  }
+  return keys;
+}
+const APPROVAL_GATED_KEYS = approvalGatedKeys();
 const T1 = "aaaaaaaa-0000-0000-0000-000000000001";
 const T2 = "aaaaaaaa-0000-0000-0000-000000000002";
 
@@ -386,13 +421,36 @@ describe.skipIf(!live)("scopeLevelPermissions vs can() — live parity sweep (su
       // was unsatisfiable, which is the same shape as positions.controller.ts's "rule a handler can
       // never satisfy" note. A creator who is somebody ELSE is the case this sweep means to ask about;
       // the requester-is-decider refusal has its own dedicated tests.
+      //
+      // WSK-47b: the same reasoning, one attribute further. A key in APPROVAL_GATED_KEYS is refused for
+      // every principal unless the request carries a WS4 approval id (WSK-D46), so a probe without one
+      // asks an unsatisfiable question. Those keys alone are probed WITH an approval id; every other
+      // key is still probed WITHOUT one, so an ordinary key that platform_admin loses still goes red
+      // here. The gate itself is proven by the dedicated test below (denied without, allowed with).
       const allowed = await can(p, key, {
         id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", module: "hr", creatorId: "someone-else",
+        ...(APPROVAL_GATED_KEYS.has(key) ? { approvalId: "probe-approval" } : {}),
       });
       if (!allowed) mismatches.push(key);
     }
     expect(mismatches).toEqual([]);
   }, 60_000);
+
+  it("WSK-47b: the approval-gated keys are derived (non-empty, include WSK-D46's publish/schedule) and really are DENIED to platform_admin without an approval id", async () => {
+    // Floor: a broken policy path or regex must not silently empty the set (which would turn the
+    // probe above back into the unsatisfiable one, and this test into a vacuous pass).
+    expect([...APPROVAL_GATED_KEYS].sort()).toEqual(
+      expect.arrayContaining(["webdev.webdesk_content_item.publish", "webdev.webdesk_content_item.schedule"]),
+    );
+    const p = bundlePrincipal("platform_admin");
+    const wrong: string[] = [];
+    for (const key of APPROVAL_GATED_KEYS) {
+      const base = { id: "probe-1", tenantId: T1, module: "webdev", creatorId: "someone-else", itemCount: 1 };
+      if (await can(p, key, base)) wrong.push(`${key}: ALLOWED without an approval id`);
+      if (!(await can(p, key, { ...base, approvalId: "probe-approval" }))) wrong.push(`${key}: DENIED even with an approval id`);
+    }
+    expect(wrong).toEqual([]);
+  }, 30_000);
 
   it("platform_admin does NOT reach the 15 relationship-class keys even via can() — the bypass is correctly absent there (no wildcard rule on those kinds)", async () => {
     const p = bundlePrincipal("platform_admin");
