@@ -7,7 +7,7 @@ vi.mock("@/app/(app)/account/actions", () => ({ logout: vi.fn() }));
 // PV2-06: "Back to workspace" appears only for staff. The caller computes `staff` with isStaff(me).
 function openMenu(staff: boolean) {
   const { container } = render(<PortalUserMenu initials="VM" staff={staff} />);
-  fireEvent.click(container.querySelector(".erp-usermenu__trigger") as HTMLElement);
+  fireEvent.click(container.querySelector(".cp-usermenu__trigger") as HTMLElement);
   return screen.getByRole("menu");
 }
 

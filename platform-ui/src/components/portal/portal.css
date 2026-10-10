@@ -107,6 +107,57 @@
 }
 .cp-switch__go:hover { border-color: var(--line-strong); }
 .cp-switch__go:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+
+/* The account menu, styled here and nowhere else. Until 2026-10-11 it borrowed the staff shell's
+   `.erp-usermenu*` / `.erp-side__avatar` classes, which live in shell.css: a client's page never loads
+   that file, so clients got an unstyled menu, and someone arriving from the workspace (shell.css still
+   loaded) got the SIDEBAR's popover, which opens upward, off the top of the screen. Found by the PV2-06
+   e2e. It drops down from the header and sits inside `.cp-head`'s stacking context (z-index 20). */
+.cp-usermenu { position: relative; flex: 0 0 auto; }
+.cp-usermenu__trigger {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent-fill);
+  color: var(--ink-on-accent-fill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 13px/1 var(--font-display);
+  cursor: pointer;
+}
+.cp-usermenu__trigger:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.cp-usermenu__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-overlay);
+}
+.cp-usermenu__item {
+  display: block;
+  width: 100%;
+  padding: 11px 14px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  font: 400 13px var(--font-body);
+  color: var(--ink-strong);
+}
+.cp-usermenu__item + .cp-usermenu__item, .cp-usermenu__pop form { border-top: 0.5px solid var(--line-soft); }
+.cp-usermenu__item:hover { background: var(--tint-hover); }
+.cp-usermenu__item:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: -2px; }
+.cp-usermenu__item--danger { color: var(--erp-accent); }
 @media (max-width: 640px) { .cp-switch__label { display: none; } }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────────────────────────── */

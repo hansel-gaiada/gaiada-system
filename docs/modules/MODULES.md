@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.60.0` | IN PROGRESS | WS1 | 2026-10-11 |
-| platform-ui | `0.80.0` | IN PROGRESS | WS5 | 2026-10-11 |
+| platform-ui | `0.81.0` | IN PROGRESS | WS5 | 2026-10-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -168,8 +168,9 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.80.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.81.0` · IN PROGRESS
 
+**0.81.0 (2026-10-11, top-bar menus + portal account menu — PROTOTYPED):** the staff top bar's account and New menus opened under the page (equal `z-index: 1` stacking contexts since gold-glass Phase 4), so "Sign out" and "Client view" did not respond over page content; top bar now 2, sidebar 3. The portal account menu borrowed staff-shell classes that a client's page never loads; it now has its own `.cp-usermenu*` styles and drops down from the header. Identity e2e for PV2-05 (new `demo-two-company-client`) and PV2-06, teeth-proven. Linux: ui 230/230, `next build` ok, portal e2e 17/17.
 **0.80.0 (2026-10-11, PV2-08 portal QA — PROTOTYPED):** an axe sweep of the 13 portal pages in both themes (`e2e/a11y-axe-portal.spec.ts`, `portal` project) found one contrast failure, the project page's opacity-dimmed "Back" label, now `--ink-subtle`; 0 violations after. axe leaves most portal text's contrast undecided (translucent backgrounds), so a manual contrast pass is still owed. `portal-links.guard.test.ts` pins every `/portal` link the backend sends a client to a real page inside an area (teeth-proven). Linux: ui 230/230, `next build` ok, portal axe 2/2.
 **0.79.0 (2026-10-11, portal timeline project rows — PROTOTYPED):** the "Your projects" rows on `/portal/timeline` render all three cells of the `.cp-tl__row` grid (when · rail · body), so the project name no longer wraps one word per line; rows extracted to `PortalTimelineRows.tsx` with a render test (teeth-proven). Found by the PV2-08 drive on 346. Linux: ui 229/229, `next build` ok, portal e2e 12/12.
 **0.78.0 (2026-10-11, portal timeline hotfix — PROTOTYPED):** `PortalTimelineEvent.at` is `string | null` and `splitTimeline` sorts undated items last; the live `/portal/timeline` crash (`localeCompare` on null) found by the PV2-08 drive. Linux: ui 228/228, `next build` ok, portal e2e 12/12.
