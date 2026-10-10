@@ -4,7 +4,7 @@
  *
  *   node --import tsx test/wsk64-classifier.test.mjs
  *
- * Optional: WSK64_BASE_VOCAB_DIR=<a pre-WSK-64 webdesk/payload/vocabulary checkout> also runs the
+ * Optional: WSK64_BASE_VOCAB_DIR=<a pre-WSK-64 webdesk/delivery/vocabulary checkout> also runs the
  * negative controls through the 1.0.0 classifier, proving it rated the blind cases PATCH.
  */
 import crypto from 'node:crypto'
