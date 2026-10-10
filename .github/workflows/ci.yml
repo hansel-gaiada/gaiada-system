@@ -62,6 +62,28 @@ on:
       - "legal/**"
       - "design/**"
 
+# ── WSK-69 (2026-10-10, ruling WSK-D47) — RUN ONLY WHAT A CHANGE CAN AFFECT ─────────────────────
+# The 2026-08 note above deliberately did NOT add per-component path filters, because a change to a
+# shared contract that touches one folder still needs the other suites. That is solved here by
+# making the dependency map EXPLICIT instead of absent: scripts/ci/config.mjs lists, per job group,
+# the component's own directory PLUS every cross-component file its tests read (e.g. platform-ui
+# reads platform-nest/cerbos; sync-engine-go applies platform-nest/migrations). The `plan` job
+# below turns the diff into one boolean per group; jobs `needs: plan` and skip when theirs is false.
+#
+# What keeps this safe rather than merely fast:
+#   * The diff base on `push` is the head of the LAST SUCCESSFUL ci run on main, not `github.event.before`.
+#     With cancel-in-progress, `before` would silently drop the changes of a cancelled run; "last green"
+#     cannot, because a cancelled or red run is never a base. So everything since the last fully
+#     green commit is re-tested, and a red component stays red until it is fixed or re-run.
+#   * A pull_request diffs against its own merge base (HEAD^1 of the merge commit).
+#   * Anything uncertain (no base, base not in the clone, workflow_dispatch, a change to ci.yml or
+#     scripts/ci/) runs EVERYTHING. A manual dispatch is therefore always a full run.
+#   * version-gate stays unconditional on PRs; docs-map is its own workflow and is untouched.
+#   * Skipped jobs are not billed. Tiny jobs that were each rounded UP to a billed minute are merged
+#     (test, webdesk-light, nest-corpus-perf), with every step `if: !cancelled()` so one red step
+#     neither hides nor aborts its neighbours.
+# Unit tests for the planner: node --test scripts/ci/plan.test.mjs
+
 # Supersede in-flight runs of the same ref. NOT applied to deploy.yml, which sets
 # `cancel-in-progress: false` on purpose — a half-applied migration is worse than a queued deploy.
 concurrency:
@@ -69,6 +91,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # WSK-69 — diff -> one boolean per job group. ~15s of real work (billed: 1 min).
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # list the last successful run (diff base)
+    outputs:
+      nest: ${{ steps.plan.outputs.nest }}
+      ui: ${{ steps.plan.outputs.ui }}
+      gateway: ${{ steps.plan.outputs.gateway }}
+      sync: ${{ steps.plan.outputs.sync }}
+      wa_chat_bot: ${{ steps.plan.outputs.wa_chat_bot }}
+      mcp_hub: ${{ steps.plan.outputs.mcp_hub }}
+      ai_agents: ${{ steps.plan.outputs.ai_agents }}
+      report_renderer: ${{ steps.plan.outputs.report_renderer }}
+      webdesk_root: ${{ steps.plan.outputs.webdesk_root }}
+      webdesk_api: ${{ steps.plan.outputs.webdesk_api }}
+      webdesk_blocks: ${{ steps.plan.outputs.webdesk_blocks }}
+      webdesk_payload: ${{ steps.plan.outputs.webdesk_payload }}
+      webdesk_deploy: ${{ steps.plan.outputs.webdesk_deploy }}
+      obs: ${{ steps.plan.outputs.obs }}
+      any_test: ${{ steps.plan.outputs.any_test }}
+      any_webdesk_light: ${{ steps.plan.outputs.any_webdesk_light }}
+    steps:
+      # Full history, no blobs: `git diff --name-only` between two commits only needs trees.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            workflow_dispatch)
+              node scripts/ci/plan.mjs ci --all ;;
+            pull_request)
+              # The checked-out ref is the PR's MERGE commit; its first parent is the base branch tip.
+              node scripts/ci/plan.mjs ci --base "$(git rev-parse HEAD^1)" ;;
+            *)
+              # push to main: everything since the last fully green run (see the note at the top).
+              base="$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
+                --jq '.workflow_runs[0].head_sha // empty' || true)"
+              node scripts/ci/plan.mjs ci --base "$base" ;;
+          esac
+
   # VERSION COLLISION GATE (2026-08-31). Several sessions cut releases against this repo at once. Two
   # of them picked `Alpha 01.071.0208a` minutes apart; because both wrote the SAME string into
   # /VERSION, git auto-merged with no conflict and nothing anywhere complained — but the tag resolves
@@ -99,32 +170,58 @@ jobs:
         if: steps.changed.outputs.hit == 'true'
         run: node scripts/next-version.mjs --check-file
 
+  # wa-chat-bot, mcp-hub, ai-agents, report-renderer: four tiny suites (10-50s each) that used to be a
+  # 4-way matrix, i.e. four runners each billed a minimum minute. WSK-69 runs them as steps of ONE job.
+  # Every step is `if: !cancelled() && <this project changed>`, so a red project neither aborts nor
+  # hides the next one (the same "a red step costs you the run's signal" reasoning as the shards).
+  # These run standalone; their DB-backed suites self-skip without a test DB.
+  # report-renderer (TR-19): its auth-gate tests (incl. the token-less-request-\>401
+  # acceptance check) run against the plain Express app and need no Postgres/Chromium —
+  # `npm ci` here will attempt Playwright's own browser download, which is expected to
+  # succeed on GitHub-hosted runners (network egress allowed).
   test:
+    needs: plan
+    if: needs.plan.outputs.any_test == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # platform-nest has its own job below (it needs Postgres + Cerbos to actually run its
-        # suite). These run standalone; their DB-backed suites self-skip without a test DB.
-        # report-renderer (TR-19): its auth-gate tests (incl. the token-less-request-\>401
-        # acceptance check) run against the plain Express app and need no Postgres/Chromium —
-        # `npm ci` here will attempt Playwright's own browser download, which is expected to
-        # succeed on GitHub-hosted runners (network egress allowed) even though it's unverified
-        # in this offline dev environment.
-        project: [wa-chat-bot, mcp-hub, ai-agents, report-renderer]
-    defaults:
-      run:
-        working-directory: ${{ matrix.project }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: ${{ matrix.project }}/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+          cache-dependency-path: |
+            wa-chat-bot/package-lock.json
+            mcp-hub/package-lock.json
+            ai-agents/package-lock.json
+            report-renderer/package-lock.json
+      - name: wa-chat-bot — ci, typecheck, test
+        if: ${{ !cancelled() && needs.plan.outputs.wa_chat_bot == 'true' }}
+        working-directory: wa-chat-bot
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: mcp-hub — ci, typecheck, test
+        if: ${{ !cancelled() && needs.plan.outputs.mcp_hub == 'true' }}
+        working-directory: mcp-hub
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: ai-agents — ci, typecheck, test
+        if: ${{ !cancelled() && needs.plan.outputs.ai_agents == 'true' }}
+        working-directory: ai-agents
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+      - name: report-renderer — ci, typecheck, test
+        if: ${{ !cancelled() && needs.plan.outputs.report_renderer == 'true' }}
+        working-directory: report-renderer
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
 
   # platform-nest (WS1 core) — its suite is meaningful only against live Postgres + Cerbos, so it
   # gets a dedicated job. The vitest harness builds its own schema and repoints at a NOBYPASSRLS
@@ -133,6 +230,8 @@ jobs:
   # database copied from it. (It used to re-run all 166 migrations per file, which was 1219s of a
   # 22.6-minute workflow — see those two files for the measurements.)
   platform-nest:
+    needs: plan
+    if: needs.plan.outputs.nest == 'true'
     runs-on: ubuntu-latest
     strategy:
       # fail-fast MUST stay false. The default cancels sibling jobs the moment one fails, which on a
@@ -249,6 +348,8 @@ jobs:
   # longer queue behind `npm ci` + two containers — but they can no longer mask the suite. This
   # also drops ~75s of duplicated vitest boots out of the critical path.
   nest-static-gates:
+    needs: plan
+    if: needs.plan.outputs.nest == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -323,21 +424,28 @@ jobs:
       - name: IAM permission-contract chain alignment (IAM-07b — CI promotion of the wave-3 audit)
         run: npm run test:iam-chain-alignment
 
-  # MAIL-13 / design A13 — the inbound adversarial corpus as a NAMED, FAIL-FAST gate.
+  # MAIL-13 / design A13 — the inbound adversarial corpus as a NAMED, FAIL-FAST gate — and
+  # IAM-03b's assemblePrincipal() benchmark. WSK-69 (2026-10-10) runs the two as steps of ONE job.
+  #
+  # They were separate jobs (mail-corpus 62s, nest-perf 59s) for a real reason, and it still holds:
+  # neither may abort the ~430-file suite in `platform-nest`, and a red corpus must be legible as its
+  # own red result. Both are kept as their own NAMED STEPS with `if: !cancelled()`, so a red corpus
+  # does not stop the benchmark from running and vice versa. What the merge removes is one runner's
+  # billed-minute rounding plus a duplicate Postgres/Cerbos start and `npm ci`.
   #
   # A13 makes the committed corpus (platform-nest/src/mail/__fixtures__/inbound/) a permanent
   # regression suite, not dev scaffolding: "a live provider will never conveniently send forged
   # senders, replayed message-ids, oversized bodies, or hostile HTML on demand". The full suite
-  # runs it too, so this is deliberately redundant — it exists so a corpus regression is legible as
-  # its own red result and survives any future narrowing of `npm test`. Staging APPENDS real
-  # captured Brevo samples here rather than replacing anything.
+  # runs it too, so this is deliberately redundant.
   #
-  # It is its OWN JOB rather than a step in platform-nest (where it was until 2026-08-24) for the
-  # same reason as nest-static-gates above: as a step it aborted the full suite on failure, so a
-  # corpus regression cost us the other ~430 files' result as well. Unlike those gates it is
-  # genuinely DB-backed, so it cannot join them — it needs its own Postgres and Cerbos. Running in
-  # parallel with platform-nest, that costs no wall clock.
-  mail-corpus:
+  # The benchmark is excluded from `npm test` because that run is parallel and a benchmark sharing a
+  # 4-vCPU runner with three sibling workers measures contention rather than the code (it blew the
+  # 20s testTimeout outright). Here it runs AFTER the corpus step, sequentially, so the runner is
+  # idle while it measures. Distinct TEST_DB_PREFIX values keep the two steps' databases apart on
+  # the one shared Postgres.
+  nest-corpus-perf:
+    needs: plan
+    if: needs.plan.outputs.nest == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -368,59 +476,15 @@ jobs:
             curl -fsS http://localhost:3592/_cerbos/health && break || sleep 1
           done
       - run: npm ci
-      - run: npm run test:mail-corpus
+      - name: mail-corpus (MAIL-13 inbound adversarial corpus)
+        run: npm run test:mail-corpus
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
           CERBOS_URL: http://localhost:3592
-          # Distinct prefix so this job's template + per-file databases cannot collide with the
-          # full-suite job's (src/testing/db-names.ts derives every name from the test path and this
-          # prefix, so two runs against one Postgres would otherwise drop each other's schema
-          # mid-run). Vestigial now that the two run on separate runners with separate Postgres
-          # containers, but kept: it is what makes the pair safe if they are ever recombined, or run
-          # against a shared server locally.
           TEST_DB_PREFIX: mailcorpus
-
-  # IAM-03b's assemblePrincipal() benchmark. vitest.config.ts excludes it from `npm test` because
-  # that run is now parallel, and a benchmark sharing a 4-vCPU runner with three sibling workers
-  # measures contention rather than the code — it blew the 20s testTimeout outright, and the p95s and
-  # EXPLAIN ANALYZE plans it prints for a human were inflated by whatever ran beside it.
-  #
-  # Its OWN job, not a step in platform-nest, for both reasons that shaped the two jobs above: a red
-  # benchmark must not abort the ~430-file suite (and vice versa), and on a dedicated runner it gets
-  # a genuinely idle machine — a strictly better place to measure than alongside the suite's own
-  # Postgres and Cerbos. Runs in parallel with everything else, so it costs no wall clock.
-  nest-perf:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: platform-nest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: platform-nest/package-lock.json
-      - name: Start Postgres (tuned for a disposable test cluster — see platform-nest job)
-        run: |
-          docker run -d --name postgres -p 5432:5432 \
-            -e POSTGRES_PASSWORD=postgres \
-            postgres:17-alpine \
-            -c max_connections=200 -c fsync=off -c full_page_writes=off \
-            -c synchronous_commit=off
-          for i in $(seq 1 30); do
-            docker exec postgres pg_isready -U postgres && break || sleep 1
-          done
-      - name: Start Cerbos
-        run: |
-          docker run -d --name cerbos -p 3592:3592 \
-            -v "$PWD/cerbos:/config:ro" -v "$PWD/cerbos/policies:/policies:ro" \
-            ghcr.io/cerbos/cerbos:0.54.0 server --config=/config/cerbos.yaml
-          for i in $(seq 1 30); do
-            curl -fsS http://localhost:3592/_cerbos/health && break || sleep 1
-          done
-      - run: npm ci
-      - run: npm run test:perf
+      - name: nest-perf (IAM-03b assemblePrincipal benchmark)
+        if: ${{ !cancelled() }}
+        run: npm run test:perf
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
           CERBOS_URL: http://localhost:3592
@@ -428,6 +492,8 @@ jobs:
 
   # ai-gateway is the Go service (ai-gateway-go/); it replaced the retired Node gateway.
   gateway-go:
+    needs: plan
+    if: needs.plan.outputs.gateway == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -445,6 +511,8 @@ jobs:
   # convergence/chaos tests, against two databases with the platform-nest migrations applied and
   # a NOBYPASSRLS role (superusers bypass RLS and would test nothing).
   sync-engine-go:
+    needs: plan
+    if: needs.plan.outputs.sync == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -485,67 +553,60 @@ jobs:
           DATABASE_URL_SITE_A: postgres://sync_app:test@localhost:5432/gaiada_sync_test
         run: go test ./...
 
-  # ── WSK-29 — WebDesk (Zone B) CI wiring ──────────────────────────────────────────────────────
-  # Before this, `grep -rn webdesk .github/workflows/` returned ZERO hits: WebDesk appeared in no
-  # CI job and no release job, so nothing built a webdesk image and there was nothing to deploy
-  # even once the Zone B box (A-12) exists. These four jobs close the CI half of that gap,
-  # matching the house pattern (own working-directory, own services, `npm ci && typecheck && test`)
-  # rather than inventing a new one. They do NOT touch `webdesk/docker-compose*.yml` (a concurrent
-  # ticket's file) or deploy anything — see release.yml for the image-build half and this ticket's
-  # report for exactly what a real Zone B deploy still needs (A-12, plus the two WSK-D26 blockers on
-  # `delphi`/`helios` for the FRONTEND half, unrelated to this backend).
-
-  # webdesk/ itself (WSK-01/04) — the project-skeleton root: its OWN package.json (a `pg`
-  # dependency + the migration runner other jobs below reuse) and its OWN gates: the migration
-  # RLS-backfill lint (ported from platform-nest, per WSK-01) and the RLS-integrity selftest that
-  # is WSK-04's condition-1 CI gate ("stops a routine migration from silently disarming RLS" —
-  # PROGRESS.md's "what's next, in order" list). Neither needs a database — the selftest exercises
-  # `check-rls-integrity.mjs`'s OWN classification logic against fixtures, not a live cluster.
-  # Verified on a real Linux checkout before landing this: lint OK on 7 migrations, selftest 6/6.
-  webdesk-root:
+  # WSK-29 — WebDesk (Zone B) CI wiring. Before it, WebDesk appeared in no CI job at all. WSK-69
+  # (2026-10-10) folds the three tiny, database-free WebDesk jobs (root 11s, deploy 13s, blocks 35s,
+  # each previously billed a full minute) into ONE job of named steps, each `if: !cancelled()` and
+  # gated on its own plan output. webdesk-api and webdesk-payload stay separate: they are heavy.
+  #
+  # webdesk/ itself (WSK-01/04): the project-skeleton root — the migration RLS-backfill lint (ported
+  # from platform-nest) and the RLS-integrity selftest, WSK-04's condition-1 CI gate ("stops a routine
+  # migration from silently disarming RLS"). Neither needs a database.
+  #
+  # webdesk/blocks (WSK-16): no database, no external service. Its own `npm run build` already IS the
+  # gate (vendor-drift check against ../payload/vocabulary + the unit suite + `astro check`).
+  #
+  # webdesk/deploy (WSK-29): the Zone A frontend-deploy driver seam. Every test injects a fake
+  # exec/driver (no test spawns a process).
+  webdesk-light:
+    needs: plan
+    if: needs.plan.outputs.any_webdesk_light == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: webdesk
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: webdesk/package-lock.json
-      - run: npm ci
-      - run: npm test
-      # WSK-28 (2026-08-27) — published-port collision gate. `docker compose config` exits 0 on a
-      # file whose service DEFAULTS claim the same host port: it validates schema, not whether the
-      # services can coexist. payload-gateway and redis both defaulted to 8384, so `--profile dev up`
-      # died on a bind conflict for anyone without a local override — and the local override is
-      # exactly what hides it from the person who has one. Selftest runs first so a gate that has
-      # stopped being able to fail cannot report a pass.
-      - name: Compose published-port collision gate (WSK-28)
+          cache-dependency-path: |
+            webdesk/package-lock.json
+            webdesk/blocks/package-lock.json
+            webdesk/deploy/package-lock.json
+      - name: webdesk-root — migration lint, RLS selftest, compose port gate
+        if: ${{ !cancelled() && needs.plan.outputs.webdesk_root == 'true' }}
+        working-directory: webdesk
+        # WSK-28 (2026-08-27) — published-port collision gate. `docker compose config` exits 0 on a
+        # file whose service DEFAULTS claim the same host port: it validates schema, not whether the
+        # services can coexist. payload-gateway and redis both defaulted to 8384, so `--profile dev up`
+        # died on a bind conflict for anyone without a local override. The selftest runs first so a
+        # gate that has stopped being able to fail cannot report a pass.
         run: |
+          npm ci
+          npm test
           node scripts/check-compose-ports.mjs --selftest
           node scripts/check-compose-ports.mjs docker-compose.yml
-
-  # webdesk/blocks (WSK-16) — the lightest of the three: no database, no external service. Its own
-  # `npm run build` already IS the gate (vendor-drift check against ../payload/vocabulary + the unit
-  # suite + `astro check`), so this job is a thin wrapper, not a hand-rolled substitute. Verified on
-  # a real Linux checkout before landing this (26/26 unit tests, astro check 0 errors/warnings) —
-  # see this ticket's report.
-  webdesk-blocks:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
+      - name: webdesk-blocks — build (vendor drift + unit + astro check)
+        if: ${{ !cancelled() && needs.plan.outputs.webdesk_blocks == 'true' }}
         working-directory: webdesk/blocks
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: webdesk/blocks/package-lock.json
-      - run: npm ci
-      - run: npm run build
+        run: |
+          npm ci
+          npm run build
+      - name: webdesk-deploy — typecheck, test
+        if: ${{ !cancelled() && needs.plan.outputs.webdesk_deploy == 'true' }}
+        working-directory: webdesk/deploy
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
 
   # webdesk/api (Zone B NestJS service — WSK-05/07/10/11/12/21/37/38/schema-draft/privacy/control).
   # Postgres gets the SAME role bootstrap (init-roles.sh: owner/migrator/app, all NOBYPASSRLS) the
@@ -568,6 +629,8 @@ jobs:
   # that a fully-green webdesk-api suite in CI does not exist yet — strictly better than the
   # previous zero signal.
   webdesk-api:
+    needs: plan
+    if: needs.plan.outputs.webdesk_api == 'true'
     runs-on: ubuntu-latest
     env:
       # Object storage (WSK-52). 127.0.0.1, NOT localhost: `docker run -p 9000:9000` binds IPv4
@@ -602,7 +665,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: webdesk/api/package-lock.json
+          cache-dependency-path: |
+            webdesk/api/package-lock.json
+            webdesk/package-lock.json
       - name: Start Postgres with the project's own role bootstrap (owner/migrator/app, NOBYPASSRLS)
         run: |
           docker run -d --name webdesk-postgres -p 5432:5432 \
@@ -747,6 +812,8 @@ jobs:
   # suppressed file-by-file in generated output that regeneration would overwrite.
 
   webdesk-payload:
+    needs: plan
+    if: needs.plan.outputs.webdesk_payload == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -768,32 +835,14 @@ jobs:
           DATABASE_URI: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           PAYLOAD_SECRET: ci-throwaway-secret-32-characters-min
 
-  # webdesk/deploy (WSK-29, THIS ticket) — the Zone A frontend-deploy driver seam. No database, no
-  # external service: every test injects a fake exec/driver (see ssh-rsync-driver.test.ts's own
-  # header — grep -L real-exec confirms no test spawns a process). Verified on a real Linux
-  # checkout: 24/24 (config 6, driver 9, HTTP server 9).
-  webdesk-deploy:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: webdesk/deploy
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: webdesk/deploy/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-
   # P3-12: platform-ui build gate. `tsc` + vitest alone once passed while `next build` broke
   # (a `server-only` import reached a client component) and routes 500'd — `npm run build` here
   # is the actual gate for that class of bug. DEMO_MODE=1 so no backend is needed (demoFixtures).
   # The optional Playwright smoke check runs against that same build (`next start`, not
   # `next dev` — see platform-ui/playwright.config.ts) so it exercises the real build artifact.
   platform-ui:
+    needs: plan
+    if: needs.plan.outputs.ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -880,6 +929,8 @@ jobs:
   # and a YAML/JSON parse fallback. otelcol validate is skipped in CI (large binary); the collector
   # config is YAML-parsed here and otelcol-validated on a Docker host before deploy.
   observability-lint:
+    needs: plan
+    if: needs.plan.outputs.obs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
