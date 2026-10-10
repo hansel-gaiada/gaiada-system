@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.79.0` - the portal timeline's project rows lay out in full again (2026-10-11) - PROTOTYPED
+
+Found by the PV2-08 live drive on `v1.0.0-alpha.346`, the first time `/portal/timeline` rendered on live at all (344 crashed before reaching it).
+
+- **Cause:** the "Your projects" rows rendered two cells (rail, body) inside the three-column `.cp-tl__row` grid (when · rail · body). The body landed in the 14px rail column, so the project name wrapped one word per line for every client. This dates from P4-K2, not PV-2.
+- **Fix:** both row lists move to `components/portal/PortalTimelineRows.tsx`. The project row gains the "when" cell (its due date and days away, the same cell the stream rows use). The page keeps its data loading and section logic.
+- **Test:** `PortalTimelineRows.test.tsx` renders dated and undated rows of both lists and pins when · rail · body. Teeth: with the project row's when cell removed, both project tests fail.
+- **Verified on Linux:** ui 229/229 files (4,520 tests); `next build` ok; portal e2e 12/12.
+
 ### platform-nest `0.60.0` - WebDesk: a live takedown marks staging stale; keys are requested through an approval; the importer signs its writes (2026-10-11) - PROTOTYPED
 
 - **WSK-60:** an unpublish of an item that had a live version now calls `noteStagingStale()`, so the editor's stale-staging banner can show. Best-effort: a failed mark is logged and never fails the takedown. A draft-only delete never marks (WebDesk refuses deleting a live item: 409 `item-is-live`). Scheduled takedowns are not marked yet (board gap).
