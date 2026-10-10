@@ -6,13 +6,13 @@
 // concurrent session's own throwaway database.
 import { Client } from "pg";
 import { randomUUID } from "node:crypto";
-import { S3Client, PutObjectCommand, CreateBucketCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 
 const MIGRATOR_URL = process.env.MIGRATE_DATABASE_URL || "postgres://webdesk_migrator:throwaway_migrator@localhost:55530/webdesk";
 const STORAGE_ENDPOINT = process.env.STORAGE_ENDPOINT || "http://localhost:55531";
-const STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_minio";
-const STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_minio_password";
-const UPLOADS_BUCKET = process.env.MINIO_BUCKET_UPLOADS || "uploads";
+const STORAGE_ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_api";
+const STORAGE_SECRET_ACCESS_KEY = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_api_secret_key";
+const UPLOADS_BUCKET = process.env.STORAGE_BUCKET_UPLOADS || "uploads";
 
 export type FixtureTenant = { tenantId: string; slug: string; siteId: string };
 
@@ -116,7 +116,7 @@ export async function insertSubmission(
   }
 }
 
-/** Puts a real object into the throwaway MinIO's `uploads` bucket AND records the media_assets row
+/** Puts a real object into the throwaway RustFS's `uploads` bucket AND records the media_assets row
  *  that points at it — the exact `<bucket>/<objectKey>` encoding media/bucket-key-codec.ts uses,
  *  reproduced here (read-only reference to that module's documented format, not an import, so this
  *  fixture has no compile-time dependency on media/** internals beyond the format it already
@@ -130,8 +130,8 @@ export async function putFixtureAttachment(
     region: "us-east-1",
     forcePathStyle: true,
     credentials: { accessKeyId: STORAGE_ACCESS_KEY_ID, secretAccessKey: STORAGE_SECRET_ACCESS_KEY },
+    requestChecksumCalculation: "WHEN_REQUIRED",
   });
-  await s3.send(new CreateBucketCommand({ Bucket: UPLOADS_BUCKET })).catch(() => {});
   const objectKey = `${tenant.tenantId}/${tenant.siteId}/${randomUUID()}-${opts.filename}`;
   await s3.send(new PutObjectCommand({ Bucket: UPLOADS_BUCKET, Key: objectKey, Body: opts.body, ContentType: opts.contentType }));
 
@@ -162,6 +162,7 @@ export async function objectExistsInUploads(tenant: FixtureTenant, objectKeySuff
     region: "us-east-1",
     forcePathStyle: true,
     credentials: { accessKeyId: STORAGE_ACCESS_KEY_ID, secretAccessKey: STORAGE_SECRET_ACCESS_KEY },
+    requestChecksumCalculation: "WHEN_REQUIRED",
   });
   try {
     await s3.send(new HeadObjectCommand({ Bucket: UPLOADS_BUCKET, Key: objectKeySuffix }));

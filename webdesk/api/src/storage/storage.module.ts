@@ -1,5 +1,11 @@
-// WSK-07 — wires the concrete S3StorageAdapter behind the STORAGE_ADAPTER token and ensures the
-// four buckets (§07 AC) exist with versioning + object lock on boot, idempotently.
+// WSK-07 / WSK-52 — wires the concrete S3StorageAdapter behind the STORAGE_ADAPTER token.
+//
+// WSK-52: the api no longer CREATES or CONFIGURES buckets. Its credential is a least-privilege
+// service key (object CRUD + list only — it cannot create buckets, change versioning/object-lock
+// or write bucket policies), so bucket provisioning (the four buckets, versioning, GOVERNANCE
+// default retention, optional public-read policies) is done once, idempotently, by
+// webdesk/scripts/storage-bootstrap.mjs using the storage ROOT credential. On boot the api only
+// VERIFIES that each bucket is reachable and logs loudly if not.
 import { Global, Logger, Module, OnModuleInit } from "@nestjs/common";
 import { S3StorageAdapter } from "./s3-storage.adapter";
 import { STORAGE_ADAPTER } from "./storage.tokens";
@@ -9,51 +15,55 @@ import type { BucketName } from "./storage.config";
 
 const ALL_BUCKETS: BucketName[] = ["media", "video", "uploads", "artifacts"];
 
+function buildAdapter(): S3StorageAdapter {
+  if (!storageConfig.endpoint) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("[webdesk:api] STORAGE_ENDPOINT is not set — refusing to boot in production.");
+    }
+    // Non-production boot with no storage configured (e.g. a unit-test boot that never touches
+    // storage): an inert client with placeholder credentials. Any real call fails; nothing is
+    // silently authenticated as root.
+    return new S3StorageAdapter({
+      endpoint: "http://storage-not-configured.invalid",
+      region: storageConfig.region,
+      forcePathStyle: storageConfig.forcePathStyle,
+      accessKeyId: "unconfigured",
+      secretAccessKey: "unconfigured",
+    });
+  }
+  return new S3StorageAdapter({
+    endpoint: storageConfig.endpoint,
+    region: storageConfig.region,
+    forcePathStyle: storageConfig.forcePathStyle,
+    accessKeyId: storageConfig.accessKeyId,
+    secretAccessKey: storageConfig.secretAccessKey,
+  });
+}
+
 @Global()
 @Module({
-  providers: [
-    {
-      provide: STORAGE_ADAPTER,
-      useFactory: (): StorageAdapter =>
-        new S3StorageAdapter({
-          endpoint: storageConfig.endpoint,
-          region: storageConfig.region,
-          forcePathStyle: storageConfig.forcePathStyle,
-          accessKeyId: storageConfig.accessKeyId,
-          secretAccessKey: storageConfig.secretAccessKey,
-        }),
-    },
-  ],
+  providers: [{ provide: STORAGE_ADAPTER, useFactory: (): StorageAdapter => buildAdapter() }],
   exports: [STORAGE_ADAPTER],
 })
 export class StorageModule implements OnModuleInit {
   private readonly logger = new Logger(StorageModule.name);
 
-  constructor() {}
-
   async onModuleInit() {
-    // Bucket bootstrap is deliberately best-effort/log-and-continue per bucket: one bucket's
-    // provisioning failure (e.g. object-lock unsupported on this provider edition) must not take
-    // the whole api down — the ensureBucket() call itself already swallows the
-    // versioning/object-lock sub-steps for the same reason (see s3-storage.adapter.ts).
-    // Skipped entirely when no endpoint is configured (e.g. some unit-test boots) so this never
-    // becomes a hard dependency for suites that do not exercise storage at all.
+    // Verify-only and log-and-continue per bucket: a missing bucket must not take the whole api
+    // down (suites that never touch storage boot this module too), but it must be LOUD.
     if (!storageConfig.endpoint) {
-      this.logger.warn("STORAGE_ADAPTER: no endpoint configured — skipping bucket bootstrap");
+      this.logger.warn("STORAGE_ADAPTER: no endpoint configured — skipping bucket verification");
       return;
     }
-    const adapter = new S3StorageAdapter({
-      endpoint: storageConfig.endpoint,
-      region: storageConfig.region,
-      forcePathStyle: storageConfig.forcePathStyle,
-      accessKeyId: storageConfig.accessKeyId,
-      secretAccessKey: storageConfig.secretAccessKey,
-    });
+    const adapter = buildAdapter();
     for (const bucket of ALL_BUCKETS) {
+      const name = storageConfig.bucketName(bucket);
       try {
-        await adapter.ensureBucket(storageConfig.bucketName(bucket), { versioning: true, objectLock: true });
+        if (!(await adapter.bucketReachable(name))) {
+          this.logger.error(`bucket '${name}' does not exist — run webdesk/scripts/storage-bootstrap.mjs (root credential)`);
+        }
       } catch (err) {
-        this.logger.warn(`bucket '${bucket}' bootstrap failed (continuing): ${String(err)}`);
+        this.logger.warn(`bucket '${name}' verification failed (continuing): ${String(err)}`);
       }
     }
   }

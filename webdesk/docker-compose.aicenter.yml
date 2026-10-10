@@ -28,7 +28,7 @@
 #   * NO host ports at all except `proxy`, bound to 127.0.0.1. A NEW public nginx vhost
 #     (`../infra/nginx/webdesk.aicenter.conf`) is the actual public listener — nginx already
 #     owns 0.0.0.0:80/:443 on this box, so Caddy structurally cannot be. See that file.
-#   * Own Postgres, own Redis, own MinIO — no reuse of the host Postgres instance the ERP uses.
+#   * Own Postgres, own Redis, own RustFS — no reuse of the host Postgres instance the ERP uses.
 #     Collapsing WebDesk into the ERP's host Postgres would destroy the credential separation
 #     that is the one containment property the design has left after co-tenancy (v2.0 §03: "Zone
 #     B holds no Zone A credential"). Never do this regardless of how tempting the ops
@@ -130,17 +130,15 @@ services:
       dockerfile: Dockerfile
     command: !override ["node", "dist/main.js"]
     ports: !reset []
-    # Same passthrough-trap fix as the sumopod overlay: these are `requireInProd` in
+    # Same passthrough-trap fix as the sumopod overlay: these are required in
     # api/src/storage/storage.config.ts and are NOT in the base file's `api` block.
     environment:
-      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID}
-      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET_MEDIA: ${MINIO_BUCKET_MEDIA:-media}
-      MINIO_BUCKET_VIDEO: ${MINIO_BUCKET_VIDEO:-video}
-      MINIO_BUCKET_UPLOADS: ${MINIO_BUCKET_UPLOADS:-uploads}
-      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS:-artifacts}
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required - the dedicated service key from scripts/storage-bootstrap.mjs}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required - the dedicated service key from scripts/storage-bootstrap.mjs}
+      STORAGE_BUCKET_MEDIA: ${STORAGE_BUCKET_MEDIA:-media}
+      STORAGE_BUCKET_VIDEO: ${STORAGE_BUCKET_VIDEO:-video}
+      STORAGE_BUCKET_UPLOADS: ${STORAGE_BUCKET_UPLOADS:-uploads}
+      STORAGE_BUCKET_ARTIFACTS: ${STORAGE_BUCKET_ARTIFACTS:-artifacts}
       WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
@@ -195,7 +193,7 @@ services:
     mem_limit: 256m
     pids_limit: 128
 
-  minio:
+  rustfs:
     profiles: !reset []
     ports: !reset []
     security_opt:

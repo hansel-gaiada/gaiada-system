@@ -7,6 +7,20 @@ prove the guards actually gate something real. Status: **DEV-VERIFIED** against 
 Postgres — see the verification runbook below. Not wired into `../docker-compose.yml` (that file
 is WSK-01's; see the ticket report for why and what changes it needs).
 
+## Object storage is RustFS (WSK-52 / WSK-D42) — read this before running any storage-touching suite
+
+MinIO is gone; storage is `rustfs/rustfs:1.0.0` (pinned by digest in `../docker-compose.yml`). The image has no `mc`, so everything `mc` did is done by **`../scripts/storage-bootstrap.mjs`** over the S3 API + RustFS admin API. Run it (root credential, once, idempotent — a second run prints `changes=0`) after `npm ci` in this directory:
+
+```bash
+STORAGE_ENDPOINT=http://<host>:9000 RUSTFS_ROOT_USER=... RUSTFS_ROOT_PASSWORD=... \
+STORAGE_ACCESS_KEY_ID=<api service key> STORAGE_SECRET_ACCESS_KEY=<its secret, >= 8 chars> \
+  node ../scripts/storage-bootstrap.mjs
+```
+
+It creates the buckets (`media` `video` `uploads` `artifacts`, plus `backups`) with object lock + versioning + GOVERNANCE default retention (1 day; `backups` 30), and the least-privilege service user the api (and the test suites) authenticate as. **The api never gets the root credential and refuses to boot without `STORAGE_ACCESS_KEY_ID`/`STORAGE_SECRET_ACCESS_KEY`** (no fallback). The api only verifies buckets on boot; it no longer creates or configures them.
+
+Env renames (WSK-52): `MINIO_ENDPOINT`→`STORAGE_ENDPOINT`; `MINIO_BUCKET_{MEDIA,VIDEO,UPLOADS,ARTIFACTS}`→`STORAGE_BUCKET_*`; `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`→`RUSTFS_ROOT_USER`/`RUSTFS_ROOT_PASSWORD` (bootstrap/compose only). The per-ticket verification runbooks below were rewritten to RustFS recipes; their dated result notes remain the records of those (MinIO-era) runs.
+
 ## Layout
 
 - `src/db/` — `tenant-context.ts` (AsyncLocalStorage, anchored on `globalThis`) +
@@ -319,7 +333,7 @@ names, all read as live getters (`forms.config.ts`):
 | `TURNSTILE_STUB_PASS_TOKEN` | `stub-pass` | The ONE token the stub verifier accepts. |
 | `TURNSTILE_REQUEST_TIMEOUT_MS` | `5000` | Live-mode HTTP timeout. |
 
-Reuses existing vars unchanged: `REDIS_URL` (WSK-11), `STORAGE_*`/`MINIO_BUCKET_UPLOADS` (WSK-07),
+Reuses existing vars unchanged: `REDIS_URL` (WSK-11), `STORAGE_*`/`STORAGE_BUCKET_UPLOADS` (WSK-07; renamed by WSK-52),
 `CLAMAV_HOST`/`CLAMAV_PORT` (WSK-07), `MAIL_*` (WSK-11).
 
 ### Verification runbook — five throwaway containers, a NEW port block (55460-55466)
@@ -346,10 +360,15 @@ docker run -d --name wsk10-redis -p 55461:6379 redis:7-alpine
 # 3. Mailpit (notification/autoresponder proof) — SMTP 55462, HTTP evidence API 55463.
 docker run -d --name wsk10-mailpit -p 55462:1025 -p 55463:8025 axllent/mailpit:latest
 
-# 4. MinIO (PRIVATE `uploads` bucket for attachments) — API 55464, console 55465.
-docker run -d --name wsk10-minio -p 55464:9000 -p 55465:9001 \
-  -e MINIO_ROOT_USER=webdesk_minio -e MINIO_ROOT_PASSWORD=changeme_minio_password \
-  minio/minio:latest server /data --console-address ":9001"
+# 4. RustFS (WSK-52; PRIVATE `uploads` bucket for attachments) — S3 API 55464 (one port).
+docker run -d --name wsk10-rustfs -p 55464:9000 \
+  -e RUSTFS_ROOT_USER=webdesk_root -e RUSTFS_ROOT_PASSWORD=changeme_root_password \
+  rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+#    ...then provision it (buckets + versioning + lock + the api's service key; idempotent). Needs
+#    `npm install` in webdesk/api first, so run it after step 8's `cd api && npm install`:
+#      STORAGE_ENDPOINT=http://localhost:55464 RUSTFS_ROOT_USER=webdesk_root \
+#      RUSTFS_ROOT_PASSWORD=changeme_root_password STORAGE_ACCESS_KEY_ID=webdesk_api \
+#      STORAGE_SECRET_ACCESS_KEY=changeme_api_secret_key node scripts/storage-bootstrap.mjs
 
 # 5. ClamAV (attachment scan) — port 55466. SLOW first boot (freshclam DB download, can take
 #    several minutes) — wait for `docker inspect --format='{{.State.Health.Status}}' wsk10-clamav`
@@ -374,8 +393,8 @@ MAIL_SMTP_HOST="localhost" \
 MAIL_SMTP_PORT="55462" \
 MAILPIT_HTTP_URL="http://localhost:55463" \
 STORAGE_ENDPOINT="http://localhost:55464" \
-STORAGE_ACCESS_KEY_ID="webdesk_minio" \
-STORAGE_SECRET_ACCESS_KEY="changeme_minio_password" \
+STORAGE_ACCESS_KEY_ID="webdesk_api" \
+STORAGE_SECRET_ACCESS_KEY="changeme_api_secret_key" \
 CLAMAV_HOST="localhost" \
 CLAMAV_PORT="55466" \
   npx vitest run test/forms-abuse-battery.spec.ts test/forms-submit.spec.ts \
@@ -383,7 +402,7 @@ CLAMAV_PORT="55466" \
 
 # 9. Tear down.
 cd ..
-docker rm -f wsk10-db wsk10-redis wsk10-mailpit wsk10-minio wsk10-clamav
+docker rm -f wsk10-db wsk10-redis wsk10-mailpit wsk10-rustfs wsk10-clamav
 ```
 
 ### Cold-start reproduction (actually run, 2026-08-26)
@@ -425,7 +444,7 @@ flushing Redis globally between test files (which would risk interfering with a 
 sharing the same Redis container in a real dev-box scenario). All 23 tests green on the re-run
 immediately after the fix, with no other containers or state touched.
 
-Containers torn down (`docker rm -f wsk10-db wsk10-redis wsk10-mailpit wsk10-minio wsk10-clamav`)
+Containers torn down (`docker rm -f wsk10-db wsk10-redis wsk10-mailpit wsk10-minio wsk10-clamav` — MinIO-era names; the runbook above now uses `wsk10-rustfs`)
 after the run.
 
 ---
@@ -579,7 +598,7 @@ context `ApiKeysService` has no parameter for — not a duplicate to fix.
 
 ### Verification runbook — one throwaway Postgres, port 55490 (checked free via `docker ps` first)
 
-No Redis/MinIO/Mailpit needed — the control module only touches Postgres (job/idempotency stores
+No Redis/object storage/Mailpit needed — the control module only touches Postgres (job/idempotency stores
 are in-memory) and delegates key hashing to WSK-05's existing, already-migrated schema.
 
 ```bash
@@ -958,7 +977,7 @@ Container torn down (`docker rm -f wsk22-db`) after the run.
 
 Design §05 Layer 3 / §06, the rail's supply side: composition × vocabulary -> `openapi.v1.json`
 (hand-authored, WSK-D19) -> derived TS SDK (`openapi-typescript`) + `CONTENT-CONTRACT.md`; a
-canonical-serialization + per-artifact-hash `contentHash`; an artifact store in MinIO
+canonical-serialization + per-artifact-hash `contentHash`; an artifact store in object storage (RustFS since WSK-52)
 (WSK-07's `StorageAdapter`, no second S3 client); a **byte-identical double-run CI gate**; and the
 real response for `GET /control/v1/tenants/:slug/contract` (replacing WSK-21's documented 501).
 
@@ -995,7 +1014,7 @@ Schema), `openapi-builder.mts` (the hand-authored artifact), `content-contract-m
 same input as the OpenAPI builder), `sdk-ts.mts` (derived, wraps `openapi-typescript`),
 `versioning.mts` (thin wrapper over WSK-14's `breaking-change.ts` classifier — no version logic
 reimplemented), `build-artifacts.mts` (pure orchestration), `fetch-composition.mts` (the only file
-that touches Postgres), `storage-io.mts` (the only file that touches MinIO — reuses
+that touches Postgres), `storage-io.mts` (the only file that touches object storage — reuses
 `s3-storage.adapter.ts` directly), `run-codegen.mts` (the real CLI pipeline: fetch -> build ->
 publish -> optional `contract.published` event), `generate-single.mts` +
 `double-run-gate.mts` (the CI determinism gate — two separate child processes, byte-compared).
@@ -1095,7 +1114,7 @@ hash.
 processes per tenant (fresh module cache each time — the closest proxy to "a second
 machine/container" without a second physical machine) and byte-compares every artifact.
 
-### Verification runbook — one throwaway Postgres + one throwaway MinIO, port block 55500-55502
+### Verification runbook — one throwaway Postgres + one throwaway RustFS (WSK-52; was MinIO), port block 55500-55501
 
 Checked free via `docker ps` first — not `55432`/`55433`/`55435`/`56380` (other concurrent
 sessions), not the `55450-55466`/`55480`/`55490` blocks WSK-05/10/11/14/21/22 already use.
@@ -1112,11 +1131,11 @@ MSYS_NO_PATHCONV=1 docker run -d --name wsk15-db -p 55500:5432 \
   -v "$(pwd -W)/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro" \
   postgres:16-alpine
 
-# 2. MinIO (the `artifacts` bucket — WSK-07's platform-internal bucket, no new bucket added),
-#    API 55501, console 55502.
-docker run -d --name wsk15-minio -p 55501:9000 -p 55502:9001 \
-  -e MINIO_ROOT_USER=webdesk_minio -e MINIO_ROOT_PASSWORD=changeme_minio_password \
-  minio/minio:latest server /data --console-address ":9001"
+# 2. RustFS (the `artifacts` bucket — WSK-07's platform-internal bucket, no new bucket added),
+#    S3 API 55501. Provisioned by scripts/storage-bootstrap.mjs after `npm install` in api (step 5).
+docker run -d --name wsk15-rustfs -p 55501:9000 \
+  -e RUSTFS_ROOT_USER=webdesk_root -e RUSTFS_ROOT_PASSWORD=changeme_root_password \
+  rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
 
 # 3. Migrations (idempotent — 5 file(s), same ledger every other ticket uses; this ticket adds none).
 MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@localhost:55500/webdesk" \
@@ -1130,12 +1149,15 @@ DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@localhost:55500/web
 #    (APP_DATABASE_URL/MIGRATE_DATABASE_URL/STORAGE_*) — no WSK15_-prefixed shadow variable.
 cd api
 npm install
+STORAGE_ENDPOINT=http://localhost:55501 RUSTFS_ROOT_USER=webdesk_root \
+RUSTFS_ROOT_PASSWORD=changeme_root_password STORAGE_ACCESS_KEY_ID=webdesk_api \
+STORAGE_SECRET_ACCESS_KEY=changeme_api_secret_key node ../scripts/storage-bootstrap.mjs
 npx tsc --noEmit
 APP_DATABASE_URL="postgres://webdesk_app:throwaway_app@localhost:55500/webdesk" \
 MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@localhost:55500/webdesk" \
 STORAGE_ENDPOINT="http://localhost:55501" \
-STORAGE_ACCESS_KEY_ID="webdesk_minio" \
-STORAGE_SECRET_ACCESS_KEY="changeme_minio_password" \
+STORAGE_ACCESS_KEY_ID="webdesk_api" \
+STORAGE_SECRET_ACCESS_KEY="changeme_api_secret_key" \
   npx vitest run test/codegen-*.spec.ts
 
 # 6. The real double-run CI gate against two real, differently-composed tenants (seed them first —
@@ -1146,7 +1168,7 @@ APP_DATABASE_URL="postgres://webdesk_app:throwaway_app@localhost:55500/webdesk" 
 
 # 7. Tear down.
 cd ..
-docker rm -f wsk15-db wsk15-minio
+docker rm -f wsk15-db wsk15-rustfs
 ```
 
 ### Exact env vars this ticket's code reads (all live getters, real names, no shadow prefix)
@@ -1154,9 +1176,9 @@ docker rm -f wsk15-db wsk15-minio
 | Var | Read by | Default |
 |---|---|---|
 | `APP_DATABASE_URL` | `fetch-composition.mts`'s caller (`run-codegen.mts`/`generate-single.mts`), same var every other ticket uses | — (must be set) |
-| `STORAGE_ENDPOINT` / `MINIO_ENDPOINT` | `storage.config.ts` (WSK-07, unmodified) — `storageConfig.endpoint` | empty string |
-| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY` | `storage.config.ts` — falls back to `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in dev | dev-only fallback |
-| `MINIO_BUCKET_ARTIFACTS` | `storage.config.ts` — `storageConfig.bucketName("artifacts")` | `artifacts` |
+| `STORAGE_ENDPOINT` | `storage.config.ts` — `storageConfig.endpoint` (WSK-52: the `MINIO_ENDPOINT` alias is gone) | empty string |
+| `STORAGE_ACCESS_KEY_ID` / `STORAGE_SECRET_ACCESS_KEY` | `storage.config.ts` — REQUIRED in every NODE_ENV (WSK-52: no root fallback) | none — boot refuses |
+| `STORAGE_BUCKET_ARTIFACTS` | `storage.config.ts` — `storageConfig.bucketName("artifacts")` | `artifacts` |
 | `WEBDESK_MEDIA_PRESIGN_TTL_SECONDS` | `storage.config.ts` — the pre-signed GET TTL `ContractReadService` reuses | `300` |
 | `WEBDESK_ZONEB_EVENTS_ENABLED` / `WEBDESK_ZONEB_BRIDGE_URL` / `WEBDESK_EVENT_SECRET` | `events.config.ts` (WSK-12, unmodified) — only consulted when `run-codegen.mts --emit-event` is passed | fail-soft no-op if unset |
 
@@ -1213,7 +1235,7 @@ against this ticket's changes — **50/50 passed**. `control-jobs.spec.ts`: 4/5 
 failure being the stale WSK-21-authored 501 expectation documented above (not a regression — that
 test's own describe-block name already says "WSK-15 unbuilt").
 
-Containers torn down (`docker rm -f wsk15-db wsk15-minio`) after the run.
+Containers torn down (`docker rm -f wsk15-db wsk15-minio` — MinIO-era name; the runbook above now uses `wsk15-rustfs`) after the run.
 
 ## WSK-37 — per-tenant outbound webhooks
 
@@ -1554,7 +1576,7 @@ per §11's own phased backup description).
   4. `test/privacy-test-app.ts` and `test/privacy-fixtures.ts` keep working unchanged either way
      (they build their own standalone Nest app, same as every other ticket's `*-test-app.ts`).
 - **`.env.example`** — no NEW env vars: this ticket reads only vars that already exist
-  (`APP_DATABASE_URL`, `MIGRATE_DATABASE_URL` via the migration runner, `STORAGE_*`/`MINIO_BUCKET_UPLOADS`
+  (`APP_DATABASE_URL`, `MIGRATE_DATABASE_URL` via the migration runner, `STORAGE_*`/`STORAGE_BUCKET_UPLOADS`
   from `storage.config.ts`, `TENANT_GUC_NAME` from `db/tenant-pool.ts`) — flagged loudly per this
   ticket's own instruction, and true: no `WSK38_*` prefix was invented anywhere.
 - **The console card (WSK-24's surface, NOT built here).** Shape this ticket's command surface
@@ -1573,22 +1595,22 @@ per §11's own phased backup description).
     `.sentence` rendered as plain text on the same card (or an adjacent "Data & Privacy" settings
     section) — this is the §11 "(d)" requirement and has no other natural home in the console.
 
-### Verification runbook — one throwaway Postgres (5432→55530) + one throwaway MinIO (9000→55531), run INSIDE a Linux container
+### Verification runbook — one throwaway Postgres (5432→55530) + one throwaway RustFS (9000→55531, WSK-52; was MinIO), run INSIDE a Linux container
 
 Owner rule (2026-08-26): tests run on Linux, never the Windows host. This runbook stands up
-Postgres + MinIO as ordinary Windows-Docker-Desktop containers (host ports only needed for local
+Postgres + RustFS as ordinary Windows-Docker-Desktop containers (host ports only needed for local
 inspection), puts a `node:22-bookworm-slim` container on the SAME docker network, `docker cp`s
 `src/`/`test/`/`package*.json`/`tsconfig.json`/`vitest.config.ts`/`.swcrc` in (never a `-v` bind
 mount — Git Bash on Windows silently rewrites container-side paths; `docs/...gitbash-docker-path-
 mangling.md`), runs `npm install` FRESH inside the container (a Windows-built `node_modules` has
-native bindings — `@swc/core` — that will not load on Linux), and talks to Postgres/MinIO by their
+native bindings — `@swc/core` — that will not load on Linux), and talks to Postgres/RustFS by their
 container DNS names on the shared network, not `localhost`. Ports checked free via `docker ps`
 first (2026-08-27): not 55432/55433/55435, not the 55450/55460-55466/55480-55481/55490/
 55500-55502/55510-55511 blocks from prior tickets, and NOT 55520 (`wsk17-postgres`, a concurrent
 session's own container observed still running at verification time).
 
 ```bash
-# 1. Network + throwaway Postgres + throwaway MinIO.
+# 1. Network + throwaway Postgres + throwaway RustFS.
 docker network create wsk38-net
 MSYS_NO_PATHCONV=1 docker run -d --name wsk38-db --network wsk38-net -p 55530:5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=throwaway_super -e POSTGRES_DB=webdesk \
@@ -1597,9 +1619,9 @@ MSYS_NO_PATHCONV=1 docker run -d --name wsk38-db --network wsk38-net -p 55530:54
   -e POSTGRES_APP_USER=webdesk_app -e POSTGRES_APP_PASSWORD=throwaway_app \
   -v "$(pwd -W)/../postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro" \
   postgres:16-alpine
-docker run -d --name wsk38-minio --network wsk38-net -p 55531:9000 \
-  -e MINIO_ROOT_USER=webdesk_minio -e MINIO_ROOT_PASSWORD=changeme_minio_password \
-  minio/minio:latest server /data --console-address :9001
+docker run -d --name wsk38-rustfs --network wsk38-net -p 55531:9000 \
+  -e RUSTFS_ROOT_USER=webdesk_root -e RUSTFS_ROOT_PASSWORD=changeme_root_password \
+  rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
 
 # 2. The Linux test runner — `docker cp`, never a bind mount (see header above).
 MSYS_NO_PATHCONV=1 docker run -d --name wsk38-runner --network wsk38-net -w /work node:22-bookworm-slim sleep infinity
@@ -1610,7 +1632,14 @@ docker cp package.json package-lock.json tsconfig.json vitest.config.ts .swcrc w
 docker cp ../migrations/. wsk38-runner:/work/webdesk/migrations
 docker cp ../postgres/init-roles.sh wsk38-runner:/work/webdesk/postgres/init-roles.sh
 docker cp ../scripts/check-rls-integrity.mjs wsk38-runner:/work/webdesk/scripts/check-rls-integrity.mjs
+docker cp ../scripts/storage-bootstrap.mjs wsk38-runner:/work/webdesk/scripts/storage-bootstrap.mjs
 MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'cd /work/webdesk/api && npm install --no-audit --no-fund'
+
+# 2b. Provision RustFS (buckets/versioning/lock + the api's least-privilege service key; idempotent).
+MSYS_NO_PATHCONV=1 docker exec -e STORAGE_ENDPOINT="http://wsk38-rustfs:9000" \
+  -e RUSTFS_ROOT_USER=webdesk_root -e RUSTFS_ROOT_PASSWORD=changeme_root_password \
+  -e STORAGE_ACCESS_KEY_ID=webdesk_api -e STORAGE_SECRET_ACCESS_KEY=changeme_api_secret_key \
+  wsk38-runner sh -c 'cd /work/webdesk/api && node ../scripts/storage-bootstrap.mjs'
 
 # 3. Migrate (real env var name — MIGRATE_DATABASE_URL). Container DNS name, not localhost.
 MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'ln -s /work/webdesk/api/node_modules /work/webdesk/migrations/node_modules'
@@ -1628,15 +1657,15 @@ MSYS_NO_PATHCONV=1 docker exec \
   -e APP_DATABASE_URL="postgres://webdesk_app:throwaway_app@wsk38-db:5432/webdesk" \
   -e MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@wsk38-db:5432/webdesk" \
   -e API_KEY_PEPPER="wsk38-test-pepper-never-used-outside-this-suite" \
-  -e STORAGE_ENDPOINT="http://wsk38-minio:9000" \
-  -e STORAGE_ACCESS_KEY_ID="webdesk_minio" \
-  -e STORAGE_SECRET_ACCESS_KEY="changeme_minio_password" \
-  -e MINIO_BUCKET_UPLOADS="uploads" \
+  -e STORAGE_ENDPOINT="http://wsk38-rustfs:9000" \
+  -e STORAGE_ACCESS_KEY_ID="webdesk_api" \
+  -e STORAGE_SECRET_ACCESS_KEY="changeme_api_secret_key" \
+  -e STORAGE_BUCKET_UPLOADS="uploads" \
   wsk38-runner sh -c 'cd /work/webdesk/api && npx vitest run test/privacy-command-registry.spec.ts test/privacy-residency.spec.ts test/privacy-find-export.spec.ts test/privacy-erase.spec.ts'
 
 # 6. tsc, then tear down.
 MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'cd /work/webdesk/api && npx tsc --noEmit -p tsconfig.json'
-docker rm -f wsk38-runner wsk38-db wsk38-minio
+docker rm -f wsk38-runner wsk38-db wsk38-rustfs
 docker network rm wsk38-net
 ```
 
@@ -1673,5 +1702,5 @@ UPDATE, DELETE`) instead of `webdesk_app` (the actual runtime role the REVOKE ta
 adding `withTenantAsApp` (connects via `APP_DATABASE_URL`) to `test/privacy-fixtures.ts` and
 re-pointing that one assertion at it; both `DELETE` and `UPDATE` are now proven refused against the
 real runtime role, and the row is proven still present and unmodified afterward. Containers torn
-down (`docker rm -f wsk38-runner wsk38-db wsk38-minio && docker network rm wsk38-net`) after the
+down (`docker rm -f wsk38-runner wsk38-db wsk38-minio && docker network rm wsk38-net` — MinIO-era name, now `wsk38-rustfs`) after the
 run.

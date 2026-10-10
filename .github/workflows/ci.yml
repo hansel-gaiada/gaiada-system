@@ -550,11 +550,11 @@ jobs:
   # webdesk/api (Zone B NestJS service — WSK-05/07/10/11/12/21/37/38/schema-draft/privacy/control).
   # Postgres gets the SAME role bootstrap (init-roles.sh: owner/migrator/app, all NOBYPASSRLS) the
   # project's own verification runbooks use (webdesk/api/README.md) — a superuser test role would
-  # test nothing, same reasoning platform-nest's job above gives. MinIO is included (WSK-07/38 read
-  # real objects); Redis backs BullMQ (WSK-11 mail) and the WSK-37 webhook queue.
+  # test nothing, same reasoning platform-nest's job above gives. RustFS (WSK-D42; MinIO before it)
+  # is included (WSK-07/38 read real objects); Redis backs BullMQ (WSK-11 mail) and the WSK-37 webhook queue.
   #
   # ⚠ HONEST STATE, recorded 2026-08-27 (see this ticket's report for the full breakdown): run
-  # against a real Linux checkout with exactly this Postgres+Redis+MinIO trio, `npm run typecheck`
+  # against a real Linux checkout with exactly this Postgres+Redis+object-storage trio (MinIO then, RustFS since WSK-52), `npm run typecheck`
   # is clean but `npm test` is NOT fully green today — 130/274 passed in this session's run. The
   # dominant cause was NOT missing infra: most failures traced to a `SchemaDraftModule` DI wiring
   # gap (`ControlAuthGuard` needs `CONTROL_CHANNEL_AUTHENTICATOR`, not provided in that module's own
@@ -569,6 +569,23 @@ jobs:
   # previous zero signal.
   webdesk-api:
     runs-on: ubuntu-latest
+    env:
+      # Object storage (WSK-52). 127.0.0.1, NOT localhost: `docker run -p 9000:9000` binds IPv4
+      # only, while `localhost` on the runner resolves to ::1 first. `pg` degrades gracefully
+      # across address families; undici (which the S3 client's fetch uses) does not — it reports
+      # the combined failure as a bare `AggregateError`, which surfaced here as every
+      # storage-touching create returning 500 instead of 201, with nothing naming the port.
+      STORAGE_ENDPOINT: http://127.0.0.1:9000
+      # ROOT: used by the RustFS container and storage-bootstrap.mjs ONLY. The api (and the tests'
+      # own clients) use the dedicated least-privilege STORAGE_ACCESS_KEY_ID below.
+      RUSTFS_ROOT_USER: webdesk_root
+      RUSTFS_ROOT_PASSWORD: ci-throwaway-root-password
+      STORAGE_ACCESS_KEY_ID: webdesk_api
+      STORAGE_SECRET_ACCESS_KEY: ci-throwaway-api-secret-key
+      STORAGE_BUCKET_MEDIA: media
+      STORAGE_BUCKET_VIDEO: video
+      STORAGE_BUCKET_UPLOADS: uploads
+      STORAGE_BUCKET_ARTIFACTS: artifacts
     services:
       redis:
         image: redis:7-alpine
@@ -598,24 +615,22 @@ jobs:
           for i in $(seq 1 30); do
             docker exec webdesk-postgres pg_isready -U webdesk_owner -d webdesk && break || sleep 1
           done
-      - name: Start MinIO as a STEP, not a service container
-        # A `services:` container cannot pass the `server /data` subcommand this image needs, and
-        # `options:` reaches `docker create`'s flags rather than the image's own args — so as a
-        # service it started, found no subcommand, and exited: "Failed to initialize container
-        # minio/minio". The job then failed before a single test ran, on every run since it was
-        # added. Fixed the way THIS JOB ALREADY SOLVES THE SAME PROBLEM one step below for
-        # Postgres: run it as a step, where arguments are expressible.
+      - name: Start RustFS as a STEP, not a service container
+        # Same reason as Postgres above and ClamAV/Mailpit below: a STEP lets us name the container
+        # and pass arguments (the old MinIO image needed `server /data`, which a `services:`
+        # container cannot take). Pinned by digest (rustfs/rustfs:1.0.0, Apache-2.0). Root creds
+        # are the job-level RUSTFS_ROOT_*; they are used ONLY by the bootstrap step below.
         run: |
-          docker run -d --name webdesk-minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=webdesk_minio -e MINIO_ROOT_PASSWORD=changeme_minio_password \
-            minio/minio:RELEASE.2024-01-01T16-36-33Z server /data
-          # The image is RHEL-minimal: no curl, no wget, no mc. bash's own /dev/tcp proves the same
-          # thing a curl probe would — the port is accepting connections.
+          docker run -d --name webdesk-rustfs -p 9000:9000 \
+            -e RUSTFS_ROOT_USER -e RUSTFS_ROOT_PASSWORD \
+            rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+          # curl ships in the RustFS image (an `mc`/`rc` client is not); /health is unauthenticated.
           for i in $(seq 1 30); do
-            bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000' 2>/dev/null && break || sleep 1
+            docker exec webdesk-rustfs curl -sf http://127.0.0.1:9000/health >/dev/null && break || sleep 1
           done
+          docker exec webdesk-rustfs curl -sf http://127.0.0.1:9000/health
       - name: Start ClamAV and Mailpit (the last two fixtures webdesk-api's suites need)
-        # Both are STEPS rather than `services:` for the same reason MinIO and Postgres above are:
+        # Both are STEPS rather than `services:` for the same reason RustFS and Postgres above are:
         # arguments and container NAMES are expressible here and not there. `mail-retry-backoff`
         # looks for a container literally named `wsk11-mailpit` (MAILPIT_CONTAINER_NAME), which a
         # service container cannot provide.
@@ -629,7 +644,7 @@ jobs:
             -e CLAMAV_NO_FRESHCLAMD=true clamav/clamav:stable
           # Mailpit is up in about a second; ClamAV loads its signature database first and needs
           # far longer, so it gets its own generous budget. Both probes use bash's /dev/tcp for the
-          # same reason the MinIO one does: neither image ships curl.
+          # same reason the Postgres one does: neither image ships curl.
           for i in $(seq 1 30); do
             bash -c 'exec 3<>/dev/tcp/127.0.0.1/8025' 2>/dev/null && break || sleep 1
           done
@@ -637,12 +652,11 @@ jobs:
             bash -c 'exec 3<>/dev/tcp/127.0.0.1/3310' 2>/dev/null && break || sleep 2
           done
           docker ps --format '  {{.Names}} {{.Status}}'
-      - name: Create the 4 MinIO buckets the storage adapter expects (media/video/uploads/artifacts)
-        run: |
-          docker run --rm --network host --entrypoint sh minio/mc:latest -c "
-            mc alias set local http://localhost:9000 webdesk_minio changeme_minio_password &&
-            mc mb -p local/media local/video local/uploads local/artifacts"
       - run: npm ci
+      - name: Bootstrap RustFS (buckets + versioning + GOVERNANCE lock + least-privilege api key)
+        # webdesk/scripts/storage-bootstrap.mjs — S3 API + RustFS admin API, no `mc`. Needs
+        # webdesk/api/node_modules (the step above). Idempotent: a re-run says changes=0.
+        run: node ../scripts/storage-bootstrap.mjs
       - name: Apply Zone B migrations with the project's own runner (migrations/migrate.mjs)
         # `webdesk/` (the PARENT of `webdesk/api`) is a separate npm project (its own package.json,
         # `pg` dependency, own `migrate` script — see the webdesk-root job below) — migrate.mjs
@@ -662,16 +676,9 @@ jobs:
           WSK05_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           REDIS_URL: redis://localhost:6379
           API_KEY_PEPPER: ci-throwaway-pepper
-          # 127.0.0.1, NOT localhost. `docker run -p 9000:9000` binds IPv4 only, while `localhost`
-          # on the runner resolves to ::1 first. `pg` degrades gracefully across address families;
-          # undici (which the S3 client's fetch uses) does not — it reports the combined failure as
-          # a bare `AggregateError`, which surfaced here as every storage-touching create returning
-          # 500 instead of 201, with nothing naming the port. Redis keeps `localhost` because it is
-          # a real service container on the job network, not a published port.
-          MINIO_ENDPOINT: http://127.0.0.1:9000
-          STORAGE_ENDPOINT: http://127.0.0.1:9000
-          MINIO_ROOT_USER: webdesk_minio
-          MINIO_ROOT_PASSWORD: changeme_minio_password
+          # Storage env (STORAGE_*, RUSTFS_ROOT_*) is job-level — see the `env:` block above.
+          # Redis keeps `localhost` because it is a real service container on the job network,
+          # not a published port (see the IPv4 note on STORAGE_ENDPOINT).
           # ── THE PER-TICKET ENV FRAGMENTATION, paid off here ────────────────────────────────
           # The suites read SEVEN different names for "the test database URL" — APP_, MIGRATE_,
           # WSK05_, WSK21_x2, WSK25_x3, WSK33_x2 — each with its OWN hardcoded localhost:555xx
@@ -691,14 +698,6 @@ jobs:
           WSK25_TARGET_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
           WSK33_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           WSK33_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
-          # Storage credentials the S3 adapter requires by name (MINIO_ROOT_* is the server's view;
-          # STORAGE_* is the client's, and the adapter reads the latter).
-          STORAGE_ACCESS_KEY_ID: webdesk_minio
-          STORAGE_SECRET_ACCESS_KEY: changeme_minio_password
-          MINIO_BUCKET_MEDIA: media
-          MINIO_BUCKET_VIDEO: video
-          MINIO_BUCKET_UPLOADS: uploads
-          MINIO_BUCKET_ARTIFACTS: artifacts
           # Throwaway secrets. Real values live only on the box; these exist so the suites that
           # assert on hashing/signing BEHAVIOUR have deterministic inputs.
           TENANT_WEBHOOK_SECRET_PEPPER: ci-throwaway-webhook-pepper

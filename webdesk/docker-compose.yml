@@ -6,7 +6,7 @@
 # n8n project split (see ../docs/blueprints/webdesk-design.md §09).
 #
 # Services here are STUBS per WSK-01's scope: the stack SHAPE is the deliverable (proxy · payload
-# · api · worker · postgres · minio · redis · clamav · otel-collector), not working application
+# · api · worker · postgres · rustfs · redis · clamav · otel-collector), not working application
 # code. Payload/api/worker become real at WSK-02/21/07; this file is what those tickets extend,
 # not replace.
 #
@@ -133,21 +133,22 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: ${APP_DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT}
       # ── THE PASSTHROUGH TRAP, closed 2026-08-29 (found by the first real production boot) ──
       # A var in `.env` does NOTHING unless the service lists it here. Everything below is read by
       # api/src/**, and four of them are `requireInProd` — without them the container crash-loops
       # with "… is not set — refusing to boot in production" on a .env that defines all of them.
       # This block is why `api` could never have booted in production from this file before.
       API_KEY_PEPPER: ${API_KEY_PEPPER}
-      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID}
-      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET_MEDIA: ${MINIO_BUCKET_MEDIA:-media}
-      MINIO_BUCKET_VIDEO: ${MINIO_BUCKET_VIDEO:-video}
-      MINIO_BUCKET_UPLOADS: ${MINIO_BUCKET_UPLOADS:-uploads}
-      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS:-artifacts}
+      # WSK-52: the api gets ONLY the dedicated least-privilege service key (made by
+      # scripts/storage-bootstrap.mjs) — never the storage root credential — and compose refuses to
+      # resolve without it (`:?`), closing WSK-07's "unset falls back to root" gap.
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required - run scripts/storage-bootstrap.mjs and set the service key}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required - run scripts/storage-bootstrap.mjs and set the service key}
+      STORAGE_BUCKET_MEDIA: ${STORAGE_BUCKET_MEDIA:-media}
+      STORAGE_BUCKET_VIDEO: ${STORAGE_BUCKET_VIDEO:-video}
+      STORAGE_BUCKET_UPLOADS: ${STORAGE_BUCKET_UPLOADS:-uploads}
+      STORAGE_BUCKET_ARTIFACTS: ${STORAGE_BUCKET_ARTIFACTS:-artifacts}
       WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
@@ -209,8 +210,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      minio:
-        condition: service_started
+      rustfs:
+        condition: service_healthy
     restart: unless-stopped
 
   # --- BullMQ worker ---------------------------------------------------------------------------
@@ -267,24 +268,24 @@ services:
       retries: 30
     restart: unless-stopped
 
-  # --- MinIO (self-hosted object storage, WSK-D23) --------------------------------------------
-  minio:
-    # WSK-28: pinned (was :latest — estate rule "pin versions; no latest tags in committed
-    # config"). This exact tag was pulled and exercised against the mc/versioning/object-lock
-    # sequence in ../infra/runbooks/webdesk-zoneb-backups.md §7 on this dev machine.
-    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+  # --- RustFS (self-hosted S3-compatible object storage, WSK-D23 / WSK-D42) --------------------
+  # WSK-52: replaces MinIO. Pinned by digest (rustfs/rustfs:1.0.0, Apache-2.0, first GA
+  # 2026-09-16; the digest was confirmed against the 1.0.0 tag with `docker pull`). ONE port, 9000:
+  # S3 API + admin API + /health. The image has NO `mc`/`rc` CLI, so buckets, versioning, object
+  # lock, policies and the api's least-privilege service user are provisioned over the S3 and
+  # admin APIs by scripts/storage-bootstrap.mjs (root credential used there only).
+  rustfs:
+    image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
     profiles: ["dev"]
-    command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-webdesk_minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme_minio_password}
+      RUSTFS_ROOT_USER: ${RUSTFS_ROOT_USER:-webdesk_root}
+      RUSTFS_ROOT_PASSWORD: ${RUSTFS_ROOT_PASSWORD:-changeme_root_password}
     ports:
-      - "${WEBDESK_MINIO_API_PORT:-8385}:9000"
-      - "${WEBDESK_MINIO_CONSOLE_PORT:-8386}:9001"
+      - "${WEBDESK_RUSTFS_API_PORT:-8385}:9000"
     volumes:
-      - webdesk_miniodata:/data
+      - webdesk_rustfsdata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/health"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -317,13 +318,14 @@ services:
       # Signed URLs only — an unsigned request must be refused.
       IMGPROXY_ALLOW_UNSAFE_URL: "false"
       IMGPROXY_USE_S3: "true"
-      IMGPROXY_S3_ENDPOINT: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-${MINIO_ROOT_USER}}
-      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD}}
+      IMGPROXY_S3_ENDPOINT: http://rustfs:9000
+      # WSK-52: the same least-privilege service key as the api (read is all it uses) — no root fallback.
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:?STORAGE_ACCESS_KEY_ID is required}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:?STORAGE_SECRET_ACCESS_KEY is required}
     expose:
       - "8080"
     depends_on:
-      - minio
+      - rustfs
 
   clamav:
     image: clamav/clamav:stable
@@ -369,11 +371,12 @@ services:
     environment:
       WEBDESK_BACKUP_SENTINEL_FILE: ${WEBDESK_BACKUP_SENTINEL_FILE:-/var/lib/webdesk-backups/.last-run}
       WD_BACKUP_MAX_AGE_HOURS: ${WD_BACKUP_MAX_AGE_HOURS:-26}
-      WEBDESK_MC_ALIAS: webdesk
       WEBDESK_BACKUP_BUCKET: ${WEBDESK_BACKUP_BUCKET:-backups}
-      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # WSK-52: the sentinel lists the backups bucket with the dedicated backup-writer key
+      # (storage-bootstrap.mjs, policy `webdesk-backup`) — not the storage root credential.
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT}
+      WEBDESK_BACKUP_ACCESS_KEY_ID: ${WEBDESK_BACKUP_ACCESS_KEY_ID:-}
+      WEBDESK_BACKUP_SECRET_ACCESS_KEY: ${WEBDESK_BACKUP_SECRET_ACCESS_KEY:-}
       DEADMANSSWITCH_URL: ${WD_BACKUP_DEADMANSSWITCH_URL:-}
       TELEGRAM_BOT_TOKEN: ${WD_BACKUP_ALERT_TELEGRAM_BOT_TOKEN:-}
       ALERT_CHAT_ID: ${WD_BACKUP_ALERT_CHAT_ID:-}
@@ -412,7 +415,7 @@ services:
 
 volumes:
   webdesk_pgdata:
-  webdesk_miniodata:
+  webdesk_rustfsdata:
   webdesk_redisdata:
   webdesk_backups:
   webdesk_status:

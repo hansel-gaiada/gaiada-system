@@ -1,18 +1,18 @@
-// WSK-07 — the abstraction test the ticket brief explicitly asks for: proof that no MinIO-specific
+// WSK-07 — the abstraction test the ticket brief explicitly asks for: proof that no vendor-specific
 // assumption leaked into calling code, so the design's "endpoint swap to R2/NAS = config only"
 // claim (§11a/WSK-D23) is a checked property, not an aspiration. Three independent checks:
 //
 //   1. STATIC: grep media/**  — nothing there imports an SDK client type (S3Client, PutObjectCommand,
-//      etc.) or the string "minio" (case-insensitive) outside of comments/docs. Every call in
+//      etc.) or a storage-vendor name ("minio"/"rustfs", case-insensitive) outside of comments/docs. Every call in
 //      media/** must go through the StorageAdapter interface only.
 //   2. BEHAVIOURAL: instantiate S3StorageAdapter TWICE with two DIFFERENT configs (pointed at the
-//      one throwaway MinIO this ticket stood up, but through two independently-constructed client
+//      one throwaway RustFS this ticket stood up, but through two independently-constructed client
 //      instances with different credentials objects) and prove both drive the exact same
 //      put/get/presign/delete contract with IDENTICAL calling code — i.e. the adapter's behavior is
 //      fully determined by its constructor config, not by anything hardcoded.
 //   3. TYPE-LEVEL: MediaService is constructed against the STORAGE_ADAPTER token (an interface),
 //      never against S3StorageAdapter directly — checked by constructing MediaService in this test
-//      with a hand-written FAKE StorageAdapter (not talking to MinIO, or any S3-API endpoint, at
+//      with a hand-written FAKE StorageAdapter (not talking to RustFS, or any S3-API endpoint, at
 //      all) and proving the upload path still runs end-to-end. If MediaService secretly depended on
 //      an S3-specific method, the fake would not satisfy it and this would fail to type-check /
 //      compile, let alone run.
@@ -27,15 +27,15 @@ import { ClamAvService } from "../src/media/clamav.service";
 import { QuotaService } from "../src/media/quota.service";
 import { DbService } from "../src/db/db.service";
 
-describe("WSK-07 — storage abstraction: no MinIO-specific leak into media/**", () => {
-  it("STATIC: media/** source files contain no SDK-client or 'minio' reference", () => {
+describe("WSK-07 — storage abstraction: no vendor-specific leak into media/**", () => {
+  it("STATIC: media/** source files contain no SDK-client or storage-vendor reference", () => {
     const mediaDir = join(__dirname, "..", "src", "media");
     const offenders: string[] = [];
     for (const file of readdirSync(mediaDir)) {
       if (!file.endsWith(".ts")) continue;
       const text = readFileSync(join(mediaDir, file), "utf8");
       // Strip line/block comments before scanning so explanatory prose (which legitimately says
-      // "MinIO" a lot, e.g. media.config.ts's header) doesn't trip this check — only executable
+      // "RustFS" a lot, e.g. media.config.ts's header) doesn't trip this check — only executable
       // references to a concrete SDK type or the literal word in NON-comment code count.
       const codeOnly = text
         .split("\n")
@@ -45,18 +45,18 @@ describe("WSK-07 — storage abstraction: no MinIO-specific leak into media/**",
       if (/S3Client|PutObjectCommand|GetObjectCommand|@aws-sdk/.test(codeOnly)) {
         offenders.push(`${file}: imports/uses an SDK-specific symbol directly`);
       }
-      if (/\bminio\b/i.test(codeOnly)) {
-        offenders.push(`${file}: references 'minio' in executable code`);
+      if (/\b(minio|rustfs)\b/i.test(codeOnly)) {
+        offenders.push(`${file}: references a storage-vendor name in executable code`);
       }
     }
     expect(offenders).toEqual([]);
   });
 
   it("BEHAVIOURAL: two independently-configured S3StorageAdapter instances behave identically for the same object", async () => {
-    const endpoint = process.env.MINIO_ENDPOINT || "http://localhost:55480";
-    const bucket = process.env.MINIO_BUCKET_ARTIFACTS || "artifacts";
-    const accessKeyId = process.env.MINIO_ROOT_USER || "webdesk_minio";
-    const secretAccessKey = process.env.MINIO_ROOT_PASSWORD || "throwaway_minio_password";
+    const endpoint = process.env.STORAGE_ENDPOINT || "http://localhost:55480";
+    const bucket = process.env.STORAGE_BUCKET_ARTIFACTS || "artifacts";
+    const accessKeyId = process.env.STORAGE_ACCESS_KEY_ID || "webdesk_api";
+    const secretAccessKey = process.env.STORAGE_SECRET_ACCESS_KEY || "changeme_api_secret_key";
 
     // Adapter A and adapter B differ only in how their config object was BUILT (different object
     // literal, different property order, a spread vs. explicit fields) — proving the adapter's
@@ -66,7 +66,7 @@ describe("WSK-07 — storage abstraction: no MinIO-specific leak into media/**",
     const configB = { endpoint, region: "us-east-1", forcePathStyle: true, accessKeyId, secretAccessKey };
     const adapterB: StorageAdapter = new S3StorageAdapter({ ...configB });
 
-    await adapterA.ensureBucket(bucket, { versioning: true, objectLock: true });
+    await adapterA.ensureBucket(bucket); // verify-only: buckets are provisioned by webdesk/scripts/storage-bootstrap.mjs
 
     const key = `abstraction-test/${Date.now()}.txt`;
     await adapterA.putObject(bucket, key, Buffer.from("written by adapter A"), "text/plain");
@@ -82,7 +82,7 @@ describe("WSK-07 — storage abstraction: no MinIO-specific leak into media/**",
     expect(headAfterDelete).toBeNull();
   }, 30_000);
 
-  it("TYPE-LEVEL: MediaService runs its upload path against a hand-written FAKE StorageAdapter (no S3/MinIO at all)", async () => {
+  it("TYPE-LEVEL: MediaService runs its upload path against a hand-written FAKE StorageAdapter (no S3/RustFS at all)", async () => {
     const stored = new Map<string, Buffer>();
     const fakeAdapter: StorageAdapter = {
       providerName: "in-memory-fake",

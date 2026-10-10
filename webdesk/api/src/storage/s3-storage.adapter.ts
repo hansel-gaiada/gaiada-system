@@ -1,6 +1,6 @@
 // WSK-07 — the ONE concrete `StorageAdapter` implementation. Built on the OFFICIAL AWS SDK v3 S3
-// client — not a MinIO-branded SDK — precisely because that client speaks the generic S3 API that
-// MinIO, Cloudflare R2, and AWS S3 all implement; the only thing that changes between them is the
+// client — not a vendor-branded SDK — precisely because that client speaks the generic S3 API that
+// RustFS (WSK-D42), Cloudflare R2, and AWS S3 all implement; the only thing that changes between them is the
 // constructor config (`endpoint`, `region`, `forcePathStyle`, credentials), which is exactly what
 // `storage.config.ts` centralizes. That is the whole "config only" swap the design (§11a/WSK-D23)
 // requires, made mechanically true rather than aspirational: nothing below branches on which
@@ -33,17 +33,40 @@ export type S3StorageAdapterConfig = {
   secretAccessKey: string;
 };
 
+/**
+ * The ONE place an S3Client is built for this api (WSK-52). `requestChecksumCalculation:
+ * "WHEN_REQUIRED"` is load-bearing: AWS SDK v3's default ("WHEN_SUPPORTED") bakes a placeholder
+ * `x-amz-checksum-crc32` into every PRESIGNED PUT URL, and RustFS validates that placeholder
+ * strictly — the real upload is then rejected `400 BadDigest`. Measured against rustfs/rustfs:1.0.0
+ * (see test/storage-rustfs.spec.ts, which fails if this option is removed).
+ */
+export function createS3Client(cfg: S3StorageAdapterConfig): S3Client {
+  return new S3Client({
+    endpoint: cfg.endpoint,
+    region: cfg.region,
+    forcePathStyle: cfg.forcePathStyle,
+    credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  });
+}
+
 export class S3StorageAdapter implements StorageAdapter {
   readonly providerName = "s3-api";
   private readonly client: S3Client;
 
   constructor(cfg: S3StorageAdapterConfig) {
-    this.client = new S3Client({
-      endpoint: cfg.endpoint,
-      region: cfg.region,
-      forcePathStyle: cfg.forcePathStyle,
-      credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
-    });
+    this.client = createS3Client(cfg);
+  }
+
+  /** Presigned PUT (client-side direct upload). Kept on the class, not the StorageAdapter interface. */
+  async presignPutObject(bucket: string, key: string, contentType: string, expiresInSeconds: number): Promise<string> {
+    const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType });
+    return getSignedUrl(this.client, command, { expiresIn: expiresInSeconds });
+  }
+
+  /** True when the bucket exists and the credential may HeadBucket it. Never creates anything. */
+  async bucketReachable(bucket: string): Promise<boolean> {
+    return this.bucketExists(bucket);
   }
 
   async putObject(bucket: string, key: string, body: Buffer, contentType: string): Promise<PutObjectResult> {
@@ -84,7 +107,7 @@ export class S3StorageAdapter implements StorageAdapter {
       await this.client.send(
         new CreateBucketCommand({
           Bucket: bucket,
-          // Object lock can ONLY be enabled at creation time (S3-API rule, not MinIO-specific) —
+          // Object lock can ONLY be enabled at creation time (S3-API rule, not vendor-specific) —
           // this is why `ensureBucket` must decide it up front rather than as a later step.
           ObjectLockEnabledForBucket: options.objectLock === true,
         }),
@@ -96,7 +119,7 @@ export class S3StorageAdapter implements StorageAdapter {
       await this.client
         .send(new PutBucketVersioningCommand({ Bucket: bucket, VersioningConfiguration: { Status: "Enabled" } }))
         .catch((err) => {
-          // "where MinIO supports it" (§11a wording) — a provider/edition that rejects this call
+          // "where the provider supports it" (§11a wording) — a provider/edition that rejects this call
           // must not take the whole boot down; ensureBucket runs on every start.
           // eslint-disable-next-line no-console
           console.warn(`[webdesk:storage] bucket '${bucket}': versioning enable failed: ${String(err)}`);
