@@ -31,7 +31,7 @@ Node scripts per component:
 - `hermes-gateway` — `start`, `test`
 - `lab-runner` — `dev`, `start`, `test`, `typecheck`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `check:function-drift`, `check:shards`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-immutable`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:client-portal-logins`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:finance-demo`, `seed:finance-live-defaults`, `seed:github-apps`, `seed:github-sync`, `seed:hr-config`, `seed:hr-statutory-ratify`, `seed:lms-creative-social`, `seed:lms-general-track`, `seed:lms-hr-it`, `seed:lms-seo-gm`, `seed:lms-webdev-curriculum`, `seed:lms-webdev-labs`, `seed:monitoring-delivery`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `test:perf`, `typecheck`
+- `platform-nest` — `build`, `check:function-drift`, `check:shards`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `import:webdesk`, `lint:migration-immutable`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:client-portal-logins`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:finance-demo`, `seed:finance-live-defaults`, `seed:github-apps`, `seed:github-sync`, `seed:hr-config`, `seed:hr-statutory-ratify`, `seed:lms-creative-social`, `seed:lms-general-track`, `seed:lms-hr-it`, `seed:lms-seo-gm`, `seed:lms-webdev-curriculum`, `seed:lms-webdev-labs`, `seed:monitoring-delivery`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `test:perf`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202609290551_client_owner.sql`
+- Head: `202610101730_webdev_site_builds.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 234 (121 legacy `NNNN_`, 113 timestamped)
+- Applied files on disk: 237 (121 legacy `NNNN_`, 116 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -258,8 +258,10 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/youtube-oauth.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev-contracts/contract-snapshots.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/console-reads.controller.ts` |
+| `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/site-builds.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/webdev.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
+| `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-content.controller.ts` |
 | `/api/:tenantId/modules/webdev/control` | `platform-nest/src/modules/webdev/webdesk-control.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
@@ -377,6 +379,13 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`
+- `/departments/[deptId]/website`
+- `/departments/[deptId]/website/content`
+- `/departments/[deptId]/website/content/[tenant]/[site]`
+- `/departments/[deptId]/website/content/[tenant]/[site]/[collection]`
+- `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/[slug]`
+- `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/[slug]/history`
+- `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/~new`
 - `/finance`
 - `/finance/[...unbuilt]`
 - `/finance/accounts`
@@ -563,7 +572,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
+Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `webdesk-control-channel.md`, `webdesk-editorial-keys.md`, `webdesk-staging-rebuild.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 
