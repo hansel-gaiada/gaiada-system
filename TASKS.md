@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████░░░░░░░░░░░░░░░░░░░░` **33%** · 56/167<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████░░░░░░░░░░░░░░░░░░░░` **34%** · 57/167<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `███████████░░░░░░░░░` **54%** · 46/85<!-- /bar -->
+<!-- bar -->🟡 `███████████░░░░░░░░░` **55%** · 47/85<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -119,8 +119,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Gate order proven with valid bodies; WS4 single-use under concurrency
 - [ ] `content.published` webhook event without prop values
 
-### Wave B · WSK-41b · The read path hides deleted drafts <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
-- [ ] Deleted draft 404 on item, list, search; localizations exclude it; envelope gate unchanged
+### Wave B · WSK-41b · The read path hides deleted drafts <!-- bar -->✅ `██████████` **100%** · 1/1<!-- /bar -->
+- [x] Deleted draft 404 on item, list, search, sitemap; localizations exclude it; envelope gate unchanged (api 450/0/2; contract 60/60)
 
 ### Wave B · WSK-51 · Read commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/2<!-- /bar -->
 - [ ] Eight reads; cross-tenant 404 with a positive control
