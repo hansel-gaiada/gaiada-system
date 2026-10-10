@@ -37,7 +37,7 @@ export async function renderSitemapXml(db: DeliveryDb, args: { auth: ResolvedApi
       `SELECT c.key AS collection_key, ci.slug, ci.updated_at
          FROM content_items ci
          JOIN collections c ON c.id = ci.collection_id
-        WHERE c.site_id = $1 AND ci.locale = $2 AND c.key <> $3
+        WHERE c.site_id = $1 AND ci.locale = $2 AND c.key <> $3 AND ci.deleted_at IS NULL
           AND (
             (ci.publish_state = 'published' AND (ci.unpublish_at IS NULL OR ci.unpublish_at > now()))
             OR (ci.publish_state = 'scheduled' AND ci.publish_at IS NOT NULL AND ci.publish_at <= now()

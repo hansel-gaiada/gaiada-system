@@ -105,7 +105,7 @@ async function loadLocalizations(
 ): Promise<LocalizationLink[]> {
   const { rows } = await client.query(
     `SELECT ci.locale, ci.slug FROM content_items ci
-      WHERE ci.localization_group_id = $1 AND ci.locale <> $2
+      WHERE ci.localization_group_id = $1 AND ci.locale <> $2 AND ci.deleted_at IS NULL
         AND ($3::boolean = false OR ${EFFECTIVE_PUBLISHED_SQL})
       ORDER BY ci.locale`,
     [groupId, currentLocale, productionOnly],
@@ -158,7 +158,7 @@ export async function getItem(db: DeliveryDb, args: GetItemArgs): Promise<{ id: 
       const { rows } = await client.query<ContentRow>(
         `SELECT ci.*, ci.created_at::text AS created_at_raw, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
            FROM content_items ci
-          WHERE ci.collection_id = $1 AND ci.locale = $2 AND ci.slug = $3
+          WHERE ci.collection_id = $1 AND ci.locale = $2 AND ci.slug = $3 AND ci.deleted_at IS NULL
             AND ($4::boolean = false OR ${EFFECTIVE_PUBLISHED_SQL})`,
         [collectionId, locale, args.slug, productionOnly],
       )
@@ -223,7 +223,7 @@ export async function listItems(db: DeliveryDb, args: ListItemsArgs): Promise<Li
     const { rows } = await client.query<ContentRow>(
       `SELECT ci.*, ci.created_at::text AS created_at_raw, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
          FROM content_items ci
-        WHERE ci.collection_id = $1 AND ci.locale = $2
+        WHERE ci.collection_id = $1 AND ci.locale = $2 AND ci.deleted_at IS NULL
           AND ($3::boolean = false OR ${EFFECTIVE_PUBLISHED_SQL})
           ${cursorClause}
         ORDER BY ci.created_at ASC, ci.id ASC
@@ -299,7 +299,7 @@ export async function searchItems(db: DeliveryDb, args: SearchItemsArgs): Promis
       `SELECT ci.*, ci.created_at::text AS created_at_raw, c.key AS collection_key, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
          FROM content_items ci
          JOIN collections c ON c.id = ci.collection_id
-        WHERE c.site_id = $1 AND ci.locale = $2
+        WHERE c.site_id = $1 AND ci.locale = $2 AND ci.deleted_at IS NULL
           AND ($3::boolean = false OR ${EFFECTIVE_PUBLISHED_SQL})
           AND ci.search_vector @@ websearch_to_tsquery(webdesk_locale_ts_config($2), $4)
           ${collectionFilter}
