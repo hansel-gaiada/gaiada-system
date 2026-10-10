@@ -406,8 +406,15 @@ function timeline() {
       kind: "decision" as const, id: "gate-demo-1", label: "Scope Agreement signed", status: "signed",
       at: stamp(-40), tense: "happened" as const, context: "Northwind — website relaunch", projectId: "proj-nw-site",
     },
+    // An UNDATED milestone, exactly as the live BFF sends one (`at: null`). Live 2026-10-11 this shape
+    // crashed the timeline page; keeping one here puts that path under the portal e2e for good.
+    {
+      kind: "milestone" as const, id: "ms-nw-undated", label: "Content sign-off (date to be agreed)", status: "open",
+      at: null as string | null, tense: "due" as const, context: "Northwind — website relaunch", projectId: "proj-nw-site",
+    },
   ];
-  return events.sort((a, b) => b.at.localeCompare(a.at));
+  // Newest first, undated last (null-safe: see splitTimeline in lib/portal.ts).
+  return events.sort((a, b) => (a.at === null ? 1 : b.at === null ? -1 : b.at.localeCompare(a.at)));
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────────────────────────
