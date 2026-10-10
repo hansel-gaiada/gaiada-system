@@ -10,7 +10,9 @@
 //      CA pins the SERVER too: nothing here ever sets `rejectUnauthorized:false`. Host nginx
 //      (`control.webdesk.internal`, WSK-63a) terminates TLS, verifies our cert and OVERWRITES
 //      `x-webdesk-mtls-cert-pem`; it also adds the gate header. This client sends NEITHER header and
-//      offers no way for a caller to add headers at all, so a forged value cannot originate here.
+//      offers no way for a caller to add arbitrary headers, so a forged value cannot originate here.
+//      (WSK-66 added ONE typed slot, `editorialAssertion` → `x-webdesk-editorial-assertion`, shape-
+//      checked as a compact JWS; it is the design §5 Layer 2e credential, not a proxy header.)
 //   2. A Keycloak client-credentials token (`webdesk-control` client), cached per process with
 //      single-flight: 50 concurrent calls make exactly ONE token request (the
 //      `core/keycloak-admin.ts` precedent, made per-instance instead of module-level).
@@ -139,6 +141,12 @@ export interface WebdeskControlRequest {
   idempotencyKey?: string;
   /** Present ⇒ an `x-ws4-assertion` is minted for this exact command + args (HIGH commands). */
   ws4?: { approvalId: string };
+  /** WSK-66: the compact JWS for `x-webdesk-editorial-assertion` (design §5), already signed by the
+   *  caller's `EditorialAssertionSigner` (WSK-40) over `commandArgsAsZoneBSeesThem(params, body)`.
+   *  The ONE named header slot a caller may fill; there is still no way to add an arbitrary header,
+   *  so the proxy-owned headers (`x-webdesk-mtls-cert-pem`, the gate header) cannot originate here.
+   *  Only on writes, and redacted from every error message like the other credentials. */
+  editorialAssertion?: string;
 }
 
 export interface WebdeskControlResponse {
@@ -545,6 +553,7 @@ export class WebdeskControlClient {
         ttlSec: this.#ws4TtlSec,
       });
     }
+    if (req.editorialAssertion !== undefined) headers["x-webdesk-editorial-assertion"] = req.editorialAssertion;
 
     const safeMethod = req.method === "GET" || req.method === "HEAD";
     const ambiguousIsSafe = safeMethod || (req.idempotencyKey !== undefined && !req.ws4);
@@ -578,7 +587,7 @@ export class WebdeskControlClient {
     const msg = redact(
       `webdesk-control ${req.command} (${req.method} ${req.path}) failed after ${attempt} attempt(s): ` +
         `${f.error.code ?? f.error.name}: ${f.error.message}`,
-      [token, this.#tokens.current, this.#clientSecret, this.#ws4Key, headers["x-ws4-assertion"]],
+      [token, this.#tokens.current, this.#clientSecret, this.#ws4Key, headers["x-ws4-assertion"], headers["x-webdesk-editorial-assertion"]],
     );
     throw new WebdeskControlTransportError(msg, attempt, f.delivered, f.error.code ?? null);
   }
@@ -594,6 +603,16 @@ export class WebdeskControlClient {
     }
     if (req.ws4 && (req.method === "GET" || req.method === "HEAD")) {
       throw new Error("webdesk-control: a WS4 assertion belongs on a write, not a read");
+    }
+    if (req.editorialAssertion !== undefined) {
+      if (req.method === "GET" || req.method === "HEAD") {
+        throw new Error("webdesk-control: an editorial assertion belongs on a write, not a read");
+      }
+      // A compact JWS is three base64url segments; anything else (a newline above all) would be a
+      // header-injection vector, so it is refused before any I/O.
+      if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+$/.test(req.editorialAssertion) || req.editorialAssertion.length > 8192) {
+        throw new Error("webdesk-control: editorialAssertion must be a compact JWS");
+      }
     }
     const params = req.params ?? {};
     const used = new Set<string>();
