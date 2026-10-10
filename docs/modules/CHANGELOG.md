@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.60.0` - WebDesk: a live takedown marks staging stale; keys are requested through an approval; the importer signs its writes (2026-10-11) - PROTOTYPED
+
+- **WSK-60:** an unpublish of an item that had a live version now calls `noteStagingStale()`, so the editor's stale-staging banner can show. Best-effort: a failed mark is logged and never fails the takedown. A draft-only delete never marks (WebDesk refuses deleting a live item: 409 `item-is-live`). Scheduled takedowns are not marked yet (board gap).
+- **WSK-66 key.mint filing:** `POST /api/:tenantId/modules/webdev/control/sites/:siteId/keys` (was a 501 stub) FILES a `key.mint` approval: `promote` gate first, strict body `{tenantSlug, envId, scope}`, the cross-company wall, the environment must be this site's, one open request per (site, env, scope). Nothing is minted until a DIFFERENT authorised user decides it; the plaintext appears once, in that decide response, and nowhere else. The `webdesk.key.mint` MCP tool is no longer a stub and has a real D14 precondition.
+- **WSK-67 importer:** the CLI wires the editorial signer itself (`wireWebdeskEditorialSigner()`). It runs as its own process, so on the live import every write was refused unsent with 503 `editorial_signer_not_configured` until a wrapper did the same.
+
+### infra `0.9.1` - a re-tagged image keeps its digest, so its signature carries over (2026-10-11) - PROTOTYPED
+
+- **WSK-69:** the release `retag` step now runs `docker buildx imagetools create --prefer-index=false`. Without it, a single-manifest source was re-wrapped into a new index with a new digest, so the cosign signature could not carry over: 346's first release run failed there (the guard caught it, nothing deployed). Reproduced against a local registry. Unproven in CI until a partial release retags.
+
 ### platform-ui `0.78.0` - the portal timeline no longer crashes on an undated item (2026-10-11) - PROTOTYPED
 
 Found by the PV2-08 live drive on `v1.0.0-alpha.344`: `/portal/timeline` hit the error boundary for every client tested.
