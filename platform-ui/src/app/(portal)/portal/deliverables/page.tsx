@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalDeliverables } from "@/lib/portal-data";
 import { isPastDue, portalDate } from "@/lib/portal";
 import { Card } from "@/components/ui";
@@ -31,7 +31,7 @@ export default async function PortalDeliverablesPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
   if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
   const deliverables = await listPortalDeliverables(userId, tenant);

@@ -182,4 +182,20 @@ test.describe("client portal", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText(/what your clients see/i);
     await expect(page.getByText(/signed in as a staff member/i)).toBeVisible();
   });
+  test("a staff member who is also a client of another company gets that company's portal @portal", async ({ page }) => {
+    // PV2-05: demo-viceroy-marketing is staff of co-resort and a contact of co-agency. The portal must
+    // resolve through `clientOf`, so it shows Gaia Digital Agency, never the staff teach-state and
+    // never Viceroy (the company they are merely employed by).
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("viceroy-marketing@gaiada.com");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL("**/");
+
+    await page.goto("/portal");
+    await expect(page.getByRole("navigation", { name: /portal sections/i })).toBeVisible();
+    await expect(page.getByText(/signed in as a staff member/i)).toHaveCount(0);
+    await expect(page.locator(".cp-brand__mark")).toHaveText("Gaia Digital Agency");
+    // One client company only, so no switch.
+    await expect(page.getByLabel("Company")).toHaveCount(0);
+  });
 });

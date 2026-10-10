@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
-import { getActiveTenant } from "./tenant";
+import { getActivePortalCompany } from "./portal-company";
 import { describeSocialReviewError } from "./portal";
 
 // Client-portal WRITE actions: the client signs their gates and contracts, records a payment against
@@ -34,7 +34,7 @@ async function ctx(): Promise<{ userId: string; tenant: string } | null> {
   const userId = await getSessionUserId();
   if (!userId) return null;
   const me: Me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
   if (!tenant) return null;
   return { userId, tenant };
 }

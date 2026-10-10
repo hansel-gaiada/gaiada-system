@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalRuns } from "@/lib/portal-data";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -24,7 +24,7 @@ export default async function PortalApprovalsPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
   if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
   const { runs, isPortalClient } = await listPortalRuns(userId, tenant);

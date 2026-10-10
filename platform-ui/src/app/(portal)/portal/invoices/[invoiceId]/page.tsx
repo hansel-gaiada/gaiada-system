@@ -1,7 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalInvoice } from "@/lib/portal-data";
 import { clientStatus, money, portalDate } from "@/lib/portal";
 import { Card, Eyebrow, HairlineTable } from "@/components/ui";
@@ -20,7 +20,7 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
   if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
   const invoice = await getPortalInvoice(userId, tenant, invoiceId);

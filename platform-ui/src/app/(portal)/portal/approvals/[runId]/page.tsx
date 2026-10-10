@@ -1,7 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalRun } from "@/lib/portal-data";
 import { portalDate } from "@/lib/portal";
 import { Card, Eyebrow } from "@/components/ui";
@@ -27,7 +27,7 @@ export default async function PortalRunPage({ params }: { params: Promise<{ runI
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
   if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
   const run = await getPortalRun(userId, tenant, runId);

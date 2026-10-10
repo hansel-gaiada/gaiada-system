@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalTimeline, listPortalProjects } from "@/lib/portal-data";
 import {
   clientStatus, portalDate, projectRange, projectUrgencyTier, relativeDays, splitTimeline, statusTone,
@@ -37,7 +37,7 @@ export default async function PortalTimelinePage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
   if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
 
   // P4-K2: the project range + urgency tier crossing into the portal, per the K1 client-safe
