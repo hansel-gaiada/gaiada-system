@@ -36,7 +36,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { resetModules } from "../registry";
 import { resetCoreRollupProviders } from "../../rollups/engine";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
 import { EditorialUnavailableError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests } from "./webdesk-approved-command";
@@ -235,7 +235,9 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
     platform = (await load("platform.ts")) as unknown as UiPlatform;
   }, 180_000);
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // WSK-60: an unpublish of live content marks staging stale in Postgres, which zb.reset() does not touch.
+    await adminPool().query(`DELETE FROM webdev_site_staging_marks WHERE tenant_id = $1`, [A]);
     zb.reset();
     signer.calls.length = 0;
     signer.configured = true;
@@ -361,6 +363,10 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       as(publisherA);
       const un = okData(await step("unpublishItemAction", () => actions.unpublishItemAction(SCOPE, live1.itemId, 1)));
       expect(un.item).toMatchObject({ publishState: "unpublished", publishedVersion: null });
+      // WSK-60: taking live content down raises the stale-staging banner; the editor's own bundle (page load +
+      // Refresh) reads it through the real build-status route and the UI's real parser.
+      const bundle = okData(await step("refreshEditorAction (after unpublish)", () => actions.refreshEditorAction(SCOPE, "service", "service.live", "en")));
+      expect(bundle.build).toEqual({ build: null, stagingStale: true });
       const del = okData(await step("deleteItemAction", () => actions.deleteItemAction(SCOPE, item.itemId, 1)));
       expect(del.item.deletedAt).toEqual(expect.any(String));
     });
