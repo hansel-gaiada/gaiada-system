@@ -660,6 +660,47 @@ const configBase = {
     retryAttempts: Number(process.env.WEBDEV_CONTROL_RETRY_ATTEMPTS ?? 3),
     retryBaseDelayMs: Number(process.env.WEBDEV_CONTROL_RETRY_BASE_DELAY_MS ?? 500),
   },
+  // WSK-63b — the REAL four-layer A→B control channel's ERP end (the half WSK-23 never shipped).
+  // Design: docs/plans/2026-10-10-webdesk-write-plane-design.md §11; read ONLY by
+  // `modules/webdev/webdesk-control-client.ts`. The `webdevControl` stub above stays until its
+  // callers are re-pointed (WSK-59); it is not this block.
+  //
+  // FAIL-CLOSED, SAME DOCTRINE AS `provision`: no default endpoint, no default credential. Every
+  // missing value is named in a `WebdeskControlNotConfiguredError` (503) at call time, never guessed.
+  //
+  // PEM MATERIAL IS FILE-MOUNTED, NEVER AN ENV VAR. `env_file` mangles a multi-line PEM differently
+  // per compose version (empty on one box, the 27-char BEGIN line on another — WebDesk lost 337
+  // restarts to it). So only PATHS travel through env; the bytes live in read-only mounted files.
+  // The two single-line secrets (the Keycloak client secret and the WS4 HMAC key) are env vars, the
+  // `KEYCLOAK_ADMIN_CLIENT_SECRET` precedent.
+  webdeskControl: {
+    /** e.g. `https://control.webdesk.internal` (internal host-nginx vhost, not in public DNS). */
+    baseUrl: process.env.WEBDESK_CONTROL_BASE_URL ?? "",
+    /** Layer 1 (mTLS): client cert + key issued by the synccert internal CA, and that CA (pins the server). */
+    clientCertFile: process.env.WEBDESK_CONTROL_CLIENT_CERT_FILE ?? "",
+    clientKeyFile: process.env.WEBDESK_CONTROL_CLIENT_KEY_FILE ?? "",
+    caFile: process.env.WEBDESK_CONTROL_CA_FILE ?? "",
+    /** Layer 2: Keycloak client-credentials against the `webdesk-control` confidential client. */
+    tokenUrl: process.env.WEBDESK_CONTROL_TOKEN_URL ?? "",
+    clientId: process.env.WEBDESK_CONTROL_CLIENT_ID ?? "",
+    clientSecret: process.env.WEBDESK_CONTROL_CLIENT_SECRET ?? "",
+    /** Optional space-separated `scope` request parameter; empty = the client's default scopes. */
+    tokenScope: process.env.WEBDESK_CONTROL_TOKEN_SCOPE ?? "",
+    /** Layer 4: the WS4 HMAC key. MUST equal WebDesk's `WEBDESK_APPROVAL_ASSERTION_KEY`. */
+    ws4Key: process.env.WEBDESK_CONTROL_WS4_KEY ?? "",
+    ws4TtlSec: positiveIntFromEnv("WEBDESK_CONTROL_WS4_TTL_SEC", 60),
+    // Transport tunables. Parsed with positiveIntFromEnv() because compose's `${X:-}` passthrough yields an
+    // EMPTY STRING when unset, and `Number("")` is 0 (the MON-12c busy-loop class): 0 retries or a
+    // 0 ms breaker window must never be what an unset variable means.
+    timeoutMs: positiveIntFromEnv("WEBDESK_CONTROL_TIMEOUT_MS", 15_000),
+    retryAttempts: positiveIntFromEnv("WEBDESK_CONTROL_RETRY_ATTEMPTS", 3),
+    retryBaseDelayMs: positiveIntFromEnv("WEBDESK_CONTROL_RETRY_BASE_DELAY_MS", 250),
+    maxSockets: positiveIntFromEnv("WEBDESK_CONTROL_MAX_SOCKETS", 16),
+    /** Circuit breaker (§11): this many transport failures inside the window opens it for openMs. */
+    breakerThreshold: positiveIntFromEnv("WEBDESK_CONTROL_BREAKER_THRESHOLD", 5),
+    breakerWindowMs: positiveIntFromEnv("WEBDESK_CONTROL_BREAKER_WINDOW_MS", 30_000),
+    breakerOpenMs: positiveIntFromEnv("WEBDESK_CONTROL_BREAKER_OPEN_MS", 30_000),
+  },
   // ASST-06 — the assistant's send->stream engine. Reuses `services.gateway` above for the actual
   // ai-gateway-go URL/token (already the one place GATEWAY_URL/GATEWAY_TOKEN are wired from env,
   // same binding admin-systems.controller.ts and search's providers/gateway-client.ts read) —

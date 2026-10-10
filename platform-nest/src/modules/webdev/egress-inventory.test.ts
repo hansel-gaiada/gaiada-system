@@ -26,6 +26,12 @@ const APPROVED_EGRESS: Record<string, string> = {
     "provision (Zone B′, gda-s01): POST /api/users/login, POST /api/provision, GET /api/projects/:id, "
     + "GET /api/projects?where[name][equals]= (config.provision). Service-account auth only; holds no "
     + "provider credential of any kind.",
+  // WSK-63b — the second, unrelated far side: WebDesk's control plane (Zone B), over the ONE A→B
+  // channel of webdesk-design-v2 §03. Row added WITH the network code, per this file's house rule.
+  "webdesk-control-client.ts":
+    "WebDesk control channel (Zone B, host-nginx vhost from WEBDESK_CONTROL_BASE_URL): https.request "
+    + "with an mTLS agent (file-mounted cert/key/CA) to /control/v1/**, plus a fetch to the Keycloak "
+    + "token endpoint (client-credentials, `webdesk-control`). config.webdeskControl only.",
 };
 
 /** Namespaces that would indicate cross-contamination if this module referenced them. */
@@ -72,7 +78,9 @@ function networkLines(text: string): number[] {
   const lines: number[] = [];
   text.split("\n").forEach((line, i) => {
     const code = line.replace(/\/\/.*$/, "").replace(/typeof\s+fetch/g, "");
-    if (/\b\w*[fF]etch\w*\s*\(/.test(code) || /\?\?\s*fetch\b/.test(code)) lines.push(i + 1);
+    // `https?.request(` / `.get(` added with WSK-63b: an mTLS client cannot use fetch (undici takes no
+    // node:https Agent), and a scanner that only knows `fetch` would have waved it through unseen.
+    if (/\b\w*[fF]etch\w*\s*\(/.test(code) || /\?\?\s*fetch\b/.test(code) || /\bhttps?\.(request|get)\s*\(/.test(code)) lines.push(i + 1);
   });
   return lines;
 }
