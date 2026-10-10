@@ -183,8 +183,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
 - [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
 - [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
-- [ ] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (needs an account with admin on the private repo; neither ERP `gh` account can see it)
-- [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo; build ledger + `build-status` / `rebuild-requests` routes in the ERP
+- [ ] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (the `web-gaiada` gh account is admin there; none set as of 2026-10-11)
+- [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
 - [ ] Cost per run measured and recorded
 - [ ] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (built in WSK-60; not yet wired from WSK-59)
