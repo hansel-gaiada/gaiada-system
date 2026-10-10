@@ -65,10 +65,16 @@ export async function createRedirect(args: {
   return withTenant(args.auth.tenantId, async (client) => {
     const collectionId = await ensureRedirectCollection(client, args.auth.tenantId, args.auth.siteId)
     const locale = args.auth.tenantDefaultLocale
+    // WSK-D51 (migration 0010): the slug is unique among LIVE rows only (ux_content_items_slug_live,
+    // a partial unique index), and a soft-deleted redirect releases its slug. Postgres infers a
+    // partial index for ON CONFLICT only when the statement repeats its predicate, so the WHERE
+    // below is required: without it this upsert fails with "no unique or exclusion constraint
+    // matching the ON CONFLICT specification". A soft-deleted row with the same slug is left alone
+    // and a fresh live row is inserted beside it.
     await client.query(
       `INSERT INTO content_items (tenant_id, site_id, collection_id, locale, slug, blocks, seo, publish_state)
        VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, 'published')
-       ON CONFLICT (collection_id, locale, slug) DO UPDATE SET seo = EXCLUDED.seo`,
+       ON CONFLICT (collection_id, locale, slug) WHERE deleted_at IS NULL DO UPDATE SET seo = EXCLUDED.seo`,
       [
         args.auth.tenantId,
         args.auth.siteId,

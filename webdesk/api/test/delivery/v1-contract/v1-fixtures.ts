@@ -203,7 +203,7 @@ export async function createRedirect(
     await c.query(
       `INSERT INTO content_items (tenant_id, site_id, collection_id, locale, slug, blocks, seo, publish_state)
        VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, 'published')
-       ON CONFLICT (collection_id, locale, slug) DO UPDATE SET seo = EXCLUDED.seo`,
+       ON CONFLICT (collection_id, locale, slug) WHERE deleted_at IS NULL DO UPDATE SET seo = EXCLUDED.seo`,
       [
         tenant.tenantId,
         tenant.siteId,

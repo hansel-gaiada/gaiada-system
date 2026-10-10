@@ -28,6 +28,8 @@ import {
   type ContentFixture,
 } from "./content-test-kit";
 import { TenantWebhooksService } from "../src/tenant-webhooks/tenant-webhooks.service";
+import { mapDbError } from "../src/control/content/content-commands.service";
+import { ControlProblem } from "../src/control/content/content-problem";
 import { TenantWebhookSink } from "./helpers/tenant-webhook-sink";
 
 const PROBLEM = "https://webdesk.gaiada.online/errors/";
@@ -341,6 +343,56 @@ describe("WSK-41 content commands (real DB + real PDP)", () => {
     expect(withBlocks.json().issues.map((i: { path: string }) => i.path)).toContain("/blocks");
     const notAPath = await createItem(app, fx, { collectionKey: "redirect", locale: "en", slug: "no-slash", fields: { toPath: "/x" } });
     expect(notAPath.statusCode).toBe(422);
+  });
+
+  it("(7g) WSK-D51: a soft-deleted item releases its slug. create -> delete -> create again succeeds; two LIVE items with one slug are still refused", async () => {
+    const slug = "service.d51-release";
+    const first = await createItem(app, fx, { collectionKey: "service", locale: "en", slug, fields: serviceFields({ h1: "first" }) });
+    expect(first.statusCode).toBe(201);
+    const firstId = first.json().item.itemId as string;
+
+    const del = await app.inject({ method: "POST", url: `${base(fx)}/items/${firstId}/delete`, headers: hdr(), payload: { baseVersion: 1 } });
+    expect(del.statusCode).toBe(200);
+    expect(del.json().item.deletedAt).not.toBeNull();
+
+    // The slug of a soft-deleted item is free again (this was 409 slug-taken against an invisible row).
+    const again = await createItem(app, fx, { collectionKey: "service", locale: "en", slug, fields: serviceFields({ h1: "second" }) });
+    expect(again.statusCode).toBe(201);
+    const secondId = again.json().item.itemId as string;
+    expect(secondId).not.toBe(firstId);
+    expect(again.json().item).toMatchObject({ slug, headVersion: 1, publishedVersion: null, publishState: "draft", deletedAt: null });
+
+    // Two LIVE items with one slug: still refused, as a problem, and nothing was written.
+    const third = await createItem(app, fx, { collectionKey: "service", locale: "en", slug, fields: serviceFields({ h1: "third" }) });
+    expect(third.statusCode).toBe(409);
+    expect(third.json().type).toBe(`${PROBLEM}slug-taken`);
+    expect(third.headers["content-type"]).toContain("application/problem+json");
+
+    const rows = await asTenant(fx.tenantId, async (db) =>
+      (
+        await db.query(
+          `SELECT ci.id, ci.deleted_at IS NULL AS live, (SELECT count(*)::int FROM content_versions v WHERE v.content_item_id = ci.id) AS versions
+             FROM content_items ci JOIN collections c ON c.id = ci.collection_id
+            WHERE ci.site_id = $1 AND c.key = 'service' AND ci.locale = 'en' AND ci.slug = $2 ORDER BY ci.created_at`,
+          [fx.siteId, slug],
+        )
+      ).rows,
+    );
+    // The deleted item and its history are untouched; exactly one live row holds the slug.
+    expect(rows).toEqual([
+      { id: firstId, live: false, versions: 1 },
+      { id: secondId, live: true, versions: 1 },
+    ]);
+  });
+
+  it("(7h) WSK-D51: mapDbError names ux_content_items_slug_live as slug-taken, and the pre-0010 constraint name no longer exists to map", () => {
+    const mapped = mapDbError({ code: "23505", constraint: "ux_content_items_slug_live" });
+    expect(mapped).toBeInstanceOf(ControlProblem);
+    expect((mapped as ControlProblem).getStatus()).toBe(409);
+    expect((mapped as ControlProblem).slug).toBe("slug-taken");
+    // 0010 dropped content_items_collection_id_locale_slug_key; an error naming it is not ours to translate.
+    const stale = { code: "23505", constraint: "content_items_collection_id_locale_slug_key" };
+    expect(mapDbError(stale)).toBe(stale);
   });
 
   it("(7e) write-time validation: unknown block type, missing required field, bad slug and unknown field -> 422 with JSON-pointer issues", async () => {

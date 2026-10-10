@@ -1,14 +1,16 @@
-// WSK-65 — shared helpers for the 0009 test files (0009_content_write_plane.test.mjs and
-// 0009_v1_bytes.test.mjs). Not a test itself.
+// WSK-65 — shared helpers for the migration test files (0009_content_write_plane.test.mjs,
+// 0009_v1_bytes.test.mjs and, since WSK-D51, 0010_slug_release_and_ledger.test.mjs). Not a test
+// itself.
 //
-// The negative controls need a database that stops at 0008, so these helpers build throwaway
+// The negative controls need a database that stops short of the migration under test, so these helpers build throwaway
 // scratch databases next to the main one. Each is set up exactly as postgres/init-roles.sh sets up
 // the main database (same owner, same CONNECT grants, same schema grants, same default-privilege
 // hand-off to the app role), then migrated file by file with the same per-file transaction and
 // ledger shape as migrations/migrate.mjs. The final step to 0009 is always the REAL runner,
 // spawned as a child process, so the loud failure being asserted is the one an operator would see.
 import pg from 'pg'
-import { readFileSync, readdirSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -136,14 +138,37 @@ export async function applyThrough(migratorUrl, stopBefore = TARGET_FILE) {
   }
 }
 
-/** Runs the real migration runner against `migratorUrl`. */
-export function runRunner(migratorUrl) {
-  const r = spawnSync(process.execPath, [RUNNER], {
-    env: { ...process.env, MIGRATE_DATABASE_URL: migratorUrl },
-    encoding: 'utf8',
-    timeout: 120_000,
-  })
-  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
+/**
+ * Runs the real migration runner against `migratorUrl`.
+ *
+ * `through` (a migration file name) stops the run at that file: the runner discovers files by
+ * reading its OWN directory, so a copy of migrate.mjs plus every file <= `through` is staged in a
+ * throwaway directory next to this one (inside webdesk/, so `pg` resolves from webdesk/node_modules)
+ * and run from there. The code that runs is still the real runner, unmodified, with its real output
+ * ("N applied"). The 0009 tests pass `through: TARGET_FILE` so they keep proving 0009 in isolation
+ * now that later files (0010...) exist; without it the runner applies everything pending.
+ */
+export function runRunner(migratorUrl, { through } = {}) {
+  let stage = null
+  let runner = RUNNER
+  if (through) {
+    stage = mkdtempSync(join(HERE, '.runner-'))
+    copyFileSync(RUNNER, join(stage, 'migrate.mjs'))
+    for (const f of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql') && f <= through)) {
+      copyFileSync(join(MIGRATIONS_DIR, f), join(stage, f))
+    }
+    runner = join(stage, 'migrate.mjs')
+  }
+  try {
+    const r = spawnSync(process.execPath, [runner], {
+      env: { ...process.env, MIGRATE_DATABASE_URL: migratorUrl },
+      encoding: 'utf8',
+      timeout: 120_000,
+    })
+    return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
+  } finally {
+    if (stage) rmSync(stage, { recursive: true, force: true })
+  }
 }
 
 /** Sets both GUCs for the rest of the current transaction. */
@@ -152,4 +177,53 @@ export async function setCtx(client, { tenant = null, platform = false } = {}) {
     tenant ?? '',
     platform ? 'true' : 'false',
   ])
+}
+
+/** Runs `sql` inside a savepoint; returns the pg error (or null) and rolls back to the savepoint. */
+export async function attempt(client, sql, params = []) {
+  await client.query('SAVEPOINT sp')
+  try {
+    const r = await client.query(sql, params)
+    await client.query('RELEASE SAVEPOINT sp')
+    return { err: null, rowCount: r.rowCount, rows: r.rows }
+  } catch (err) {
+    await client.query('ROLLBACK TO SAVEPOINT sp')
+    return { err }
+  }
+}
+export const errSummary = (r) => (r.err ? `${r.err.code} ${r.err.message}` : `no error (rowCount=${r.rowCount})`)
+export const one = async (client, sql, params = []) => (await client.query(sql, params)).rows[0]
+
+// A tenant + site + 'page' collection committed under the right GUCs, as a migrator session.
+export async function seedTenant(m) {
+  const t = randomUUID()
+  await m.query('BEGIN')
+  await setCtx(m, { platform: true })
+  await m.query(`INSERT INTO tenants (id, slug, company_ref) VALUES ($1, $2, $3)`, [t, `wsk65-neg-${t.slice(0, 8)}`, randomUUID()])
+  await setCtx(m, { tenant: t })
+  const site = (await one(m, `INSERT INTO sites (tenant_id, kind, name) VALUES ($1, 'astro', 's') RETURNING id`, [t])).id
+  const col = (await one(m, `INSERT INTO collections (tenant_id, site_id, key) VALUES ($1, $2, 'page') RETURNING id`, [t, site])).id
+  await m.query('COMMIT')
+  return { t, site, col }
+}
+
+// Every catalog fact a migration could alter, as comparable strings (before/after diffs).
+export const SNAPSHOT_SQL = {
+  constraints: `SELECT conrelid::regclass::text AS tbl, conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
+                 WHERE connamespace = 'public'::regnamespace AND conrelid <> 0 ORDER BY 1, 2`,
+  indexes: `SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY 1, 2`,
+  policies: `SELECT tablename, policyname, cmd, qual, with_check, roles::text FROM pg_policies WHERE schemaname = 'public' ORDER BY 1, 2`,
+  columns: `SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns
+             WHERE table_schema = 'public' ORDER BY 1, 2`,
+  grants: `SELECT table_name, grantee, privilege_type FROM information_schema.role_table_grants
+            WHERE table_schema = 'public' ORDER BY 1, 2, 3`,
+  rls: `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class
+         WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' ORDER BY 1`,
+  triggers: `SELECT tgrelid::regclass::text AS tbl, tgname, pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE NOT tgisinternal ORDER BY 1, 2`,
+}
+const keyOf = (r) => JSON.stringify(Object.values(r))
+export async function snapshot(c) {
+  const out = {}
+  for (const [k, sql] of Object.entries(SNAPSHOT_SQL)) out[k] = (await c.query(sql)).rows.map(keyOf)
+  return out
 }

@@ -3,13 +3,15 @@
 ## `linux-gate.sh` (WSK-58) -- one Linux gate for the WebDesk proof's suites
 
 Runs the CI steps of `webdesk-light` (root, blocks) and `webdesk-api`, plus the WSK-64 vocabulary
-suites (`payload/test/wsk64-classifier`, `wsk64-item-fields`, `vocabulary`, `envelope-contract`),
-each in throwaway containers. No host paths, no host ports: the source tar is untarred into a
+suites (`payload/test/wsk64-classifier`, `wsk64-item-fields`, `vocabulary`, `envelope-contract`)
+and the `migrations` suite (`migrations/tests/0009_content_write_plane`, `0009_v1_bytes`,
+`0010_slug_release_and_ledger`: each builds scratch databases beside the migrated one and drives the
+real runner; CI runs the same three as a step of the `webdesk-api` job), each in throwaway containers. No host paths, no host ports: the source tar is untarred into a
 per-run docker volume, everything joins one network `wg58-<id>`, and an EXIT trap removes the
 containers, network and volume.
 
 ```
-bash webdesk/qa/linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [webdesk-root,webdesk-blocks,webdesk-api,vocabulary]
+bash webdesk/qa/linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [webdesk-root,webdesk-blocks,webdesk-api,vocabulary,migrations]
 ```
 
 The tar must come from `git -c core.autocrlf=false archive --format=tar <ref>` (CRLF blobs break
