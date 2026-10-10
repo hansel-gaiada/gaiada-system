@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { logout } from "@/app/(app)/account/actions";
 
-// The portal's account button. Two items only: the client's own profile, and sign out.
+// The portal's account button. The client's own profile, sign out, and (PV2-06) "Back to workspace"
+// for staff who are also client contacts. `staff` is computed by the caller with `isStaff(me)`.
 //
 // It reuses the STAFF `logout` server action rather than duplicating it — that action clears the shared
 // `gaiada_session` cookie and redirects to `/login`, which is exactly right for a client too (same realm,
@@ -13,7 +14,7 @@ import { logout } from "@/app/(app)/account/actions";
 // Not a reuse of `shell/UserMenu`: that one links to `/account` (staff preferences: density, width,
 // theme) and carries the sidebar's name/role card. This links to `/portal/profile` and is a bare icon
 // button, because the header already shows who the person is.
-export function PortalUserMenu({ initials }: { initials: string }) {
+export function PortalUserMenu({ initials, staff = false }: { initials: string; staff?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -40,6 +41,11 @@ export function PortalUserMenu({ initials }: { initials: string }) {
           <Link href="/portal/profile" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
             Your profile
           </Link>
+          {staff && (
+            <Link href="/" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
+              Back to workspace
+            </Link>
+          )}
           <form action={logout}>
             <button type="submit" role="menuitem" className="erp-usermenu__item erp-usermenu__item--danger">
               Sign out
