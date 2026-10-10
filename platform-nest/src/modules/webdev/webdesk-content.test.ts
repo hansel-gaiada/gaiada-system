@@ -14,7 +14,14 @@
 //   8 publish-requests files exactly one approval, never calls Zone B publish → "publish-requests"
 //   (7, the agent + D14 re-drive, is webdesk-content-d14.test.ts; 6 is the BFF §27.)
 // Needs DATABASE_URL_TEST + CERBOS_URL (skips otherwise).
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as http from "node:http";
+import * as net from "node:net";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { NotFoundException } from "@nestjs/common";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
@@ -24,7 +31,7 @@ import { resetModules } from "../registry";
 import { resetCoreRollupProviders } from "../../rollups/engine";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
-import { EditorialUnavailableError, WebdeskControlTransportError } from "./webdesk-control-client";
+import { EditorialUnavailableError, WebdeskControlClient, WebdeskControlTransportError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests, NOT_CONFIGURED_EDITORIAL_SIGNER } from "./webdesk-approved-command";
 import { webdeskZoneB } from "./webdesk-content.service";
 import { webdevModule } from "./index";
@@ -736,6 +743,74 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
     it("the other control routes are STILL honest 501s", async () => {
       const r = await call("POST", control("sites/s1/promote"), adminA, {});
       expect(r.statusCode).toBe(501);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("the REAL egress client's breaker, over real sockets (done-when 4, end to end)", () => {
+    let dir = "";
+    let tokenServer: http.Server;
+    let tokenPort = 0;
+    let tokenRequests = 0;
+    let deadPort = 0;
+    const openssl = (...a: string[]) => execFileSync("openssl", a, { cwd: dir, stdio: "pipe" });
+
+    beforeAll(async () => {
+      dir = mkdtempSync(join(tmpdir(), "wsk59-pki-"));
+      openssl("ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", "ca.key");
+      openssl("req", "-x509", "-new", "-key", "ca.key", "-subj", "/CN=wsk59-ca", "-days", "2", "-sha256",
+        "-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=critical,keyCertSign,cRLSign", "-out", "ca.crt");
+      openssl("ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", "client.key");
+      openssl("req", "-new", "-key", "client.key", "-subj", "/CN=platform-nest-webdesk", "-out", "client.csr");
+      writeFileSync(join(dir, "client.ext"), "extendedKeyUsage=clientAuth\n");
+      openssl("x509", "-req", "-in", "client.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-days", "2", "-sha256", "-extfile", "client.ext", "-out", "client.crt");
+      tokenServer = http.createServer((_req, res) => {
+        tokenRequests++;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ access_token: "wsk59-token", expires_in: 300 }));
+      });
+      await new Promise<void>((r) => tokenServer.listen(0, "127.0.0.1", () => r()));
+      tokenPort = (tokenServer.address() as AddressInfo).port;
+      // a port nothing listens on: every connect is refused (a transport failure)
+      const probe = net.createServer();
+      await new Promise<void>((r) => probe.listen(0, "127.0.0.1", () => r()));
+      deadPort = (probe.address() as AddressInfo).port;
+      await new Promise<void>((r) => probe.close(() => r()));
+    }, 60_000);
+    afterAll(async () => {
+      await new Promise<void>((r) => tokenServer?.close(() => r()));
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("🔴 two real connection failures open the breaker; after that every READ and WRITE is 503 editorial_unavailable/circuit_open with NO token request and NO socket", async () => {
+      const client = new WebdeskControlClient({
+        baseUrl: `https://127.0.0.1:${deadPort}`,
+        clientCertFile: join(dir, "client.crt"), clientKeyFile: join(dir, "client.key"), caFile: join(dir, "ca.crt"),
+        tokenUrl: `http://127.0.0.1:${tokenPort}/token`, clientId: "webdesk-control", clientSecret: "wsk59-secret-value",
+        ws4Key: "wsk59-ws4-key-value", retryAttempts: 1, timeoutMs: 3_000, breakerThreshold: 2, breakerOpenMs: 60_000, sleep: async () => undefined,
+      });
+      setWebdeskApprovedCommandDepsForTests({ client, signer });
+      webdeskZoneB.clearSiteCache();
+      try {
+        for (let i = 0; i < 2; i++) {
+          const r = await call("GET", `${site()}/collections`, adminA);
+          expect(r.statusCode).toBe(503);
+          expect(r.json()).toMatchObject({ error: "editorial_unavailable", reason: "webdesk_unreachable" });
+        }
+        expect(client.describe().breaker).toBe("open");
+        const tokensBefore = tokenRequests;
+        const read = await call("GET", `${site()}/collections`, adminA);
+        const write = await call("PUT", `${site()}/items/${item.itemId}`, adminA, { baseVersion: 1, fields: {} });
+        const create = await call("POST", `${site()}/collections/service/items`, adminA, { locale: "en", slug: "x", fields: {} });
+        for (const r of [read, write, create]) {
+          expect(r.statusCode).toBe(503);
+          expect(r.json()).toMatchObject({ error: "editorial_unavailable", reason: "circuit_open" });
+        }
+        expect(tokenRequests).toBe(tokensBefore); // an open breaker does no I/O at all
+        expect(signer.calls).toHaveLength(0);
+      } finally {
+        client.close();
+      }
     });
   });
 });
