@@ -28,6 +28,16 @@ Ticket PV2-07 in `docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. It renders
 - Pure helpers: `src/lib/portalPeople.ts` (`splitProjects`, `groupPeople`, `describeAccess`), 9 tests.
 - **Verified on Linux:** ui 228/228 files (4,516 tests); `next build` ok; portal e2e 12/12 in DEMO_MODE.
 
+### webdesk `0.4.0` - M3 wave 1: the public `/v1` read path hardened, codegen and AI drafting on vocabulary 1.1.0, the last MinIO residue gone (2026-10-11) - DEV-VERIFIED
+
+Plan `docs/plans/2026-10-11-webdesk-m3-plan.md`; rulings WSK-D49…D51 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md` (M3).
+
+- **`/v1` read path** (M3 T1). Collection keys `forms`, `media`, `search` and `sitemap.xml` are reserved: `schema.apply` answers `422 collection-key-reserved`, and a boot-time test fails if a new route under `/v1/t/:tenantSlug/` is not reserved. Path segments are percent-decoded once, so non-ASCII slugs are reachable; a decoded `/` or NUL is a 404 before any lookup. A cursor the api did not issue is `400 invalid-cursor`. An undecodable `%` is `400 application/problem+json`. No 500 carries the thrown error's text any more (three leak sites). A non-integer `limit` is truncated instead of a 500.
+- **Codegen and AI drafting** (T2). Block unions are `anyOf`, so a strict validator accepts a valid known block; the generated SDK types are unchanged. The schema-draft prompt teaches vocabulary 1.1.0 from the vocabulary's own constants and never offers `fields` as a block. The WordPress theme knows all 10 block names, and `fields` renders nothing.
+- **RustFS everywhere** (T3). The customer residency statement names RustFS and no internal jargon. The artifact-URL expiry check runs against a real RustFS: 200 before the TTL, 403 "Request has expired" after.
+- **Rulings** WSK-D49 (rich text is Markdown, edited WYSIWYG; resolves OQ-3.1), D50 (CDN purge deferred as WSK-70), D51 (a soft-deleted item releases its slug).
+- Verified on the Linux gate (sumopod, runs `m3w1` + `m3w1b`): root 12, blocks 32, api 681 passed / 0 failed / 2 skipped, vocabulary 247. The first api run also caught 2 unhandled `ioredis` "Connection is closed" rejections from `editorial-assertion-matrix.spec.ts`, a spec wave 1 does not touch; the rerun was clean. Logged as an M3 defect.
+
 ### webdesk `0.3.0` - gaiada.com can be served and edited through WebDesk: RustFS, `/v1` in the api, vocabulary 1.1.0, the write plane, live reads, the editorial assertion (2026-10-11) - DEV-VERIFIED
 
 Plan and tracker: `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; design `docs/plans/2026-10-10-webdesk-write-plane-design.md`; rulings WSK-D37…D48 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md`.

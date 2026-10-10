@@ -47,7 +47,7 @@ versions below; the running build reports it at `GET /health`.
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
-| webdesk | `0.3.0` | DEV-VERIFIED | Web Dev | 2026-10-11 |
+| webdesk | `0.4.0` | DEV-VERIFIED | Web Dev | 2026-10-11 |
 | search-marketing | `0.5.2` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
@@ -600,9 +600,9 @@ Phase 1; Phase 3 (external wiring — GitHub App, Drive OAuth, Claude Admin usag
 decisions OQ-2/OQ-3; Phase 4 (webdesk + the one-rail contract-snapshot scaffolder) activates once
 webdesk's own P3 codegen lands.
 
-## webdesk — Website Platform · `0.3.0` · DEV-VERIFIED
+## webdesk — Website Platform · `0.4.0` · DEV-VERIFIED
 
-**Current state (2026-10-11):** live on `gda-aicenter` (`/v1` in the api, RustFS, migration 0009, the control channel). The write plane, live reads, the editorial assertion and vocabulary 1.1.0 are Linux-verified; editing from the ERP and the gaiada.com import go live with the 2026-10-11 release. Tracker `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; board `TASKS.md`. The paragraphs below are history.
+**Current state (2026-10-11):** M3 (a complete CMS, Payload removed) is in progress: wave 1 is on main (0.4.0; plan `docs/plans/2026-10-11-webdesk-m3-plan.md`), not yet live. 0.3.0 is live on `gda-aicenter` (`/v1` in the api, RustFS, migration 0009, the control channel). The write plane, live reads, the editorial assertion and vocabulary 1.1.0 are Linux-verified; editing from the ERP and the gaiada.com import go live with the 2026-10-11 release. Tracker `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; board `TASKS.md`. The paragraphs below are history.
 
 **What exists:** blueprint only (approved 2026-07-23) — see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation → P2 Forms+Mail → P3 Contract/codegen → P4 ERP control+envs →
