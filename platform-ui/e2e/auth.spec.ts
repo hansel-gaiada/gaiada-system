@@ -26,7 +26,7 @@ test("login honours the return path", async ({ page }) => {
 });
 
 // UI-01 — the actual bug MAIL-09 found live: an emailed approval deep link, clicked with no
-// session, must not dead-end on "/" after sign-in. This walks the REAL round trip (middleware's
+// session, must not dead-end on "/" after sign-in. This walks the REAL round trip (the proxy's
 // redirect-to-login, not a hand-built `/login?return=` URL) for both of `entityHref()`'s staff
 // shapes (`/approvals/:id`, `/pipeline/:id`).
 test("an unauthenticated deep link to an approval survives the login round trip", async ({ page }) => {
@@ -54,7 +54,7 @@ test("no return target: unauthenticated root request still lands on / after logi
   await page.goto("/");
   await page.waitForURL("**/login**");
   // No path was requested beyond "/", so the default-landing behaviour must be exactly as before:
-  // no `return=` param at all (sanitizeReturnTo("/") intentionally omits it — see middleware.ts).
+  // no `return=` param at all (sanitizeReturnTo("/") intentionally omits it — see src/proxy.ts).
   expect(page.url()).not.toContain("return=");
 
   await page.getByLabel("Email").fill("hansel@gaiada.com");
@@ -63,7 +63,7 @@ test("no return target: unauthenticated root request still lands on / after logi
 });
 
 // Open-redirect probes against the actual running app, one hop past the unit tests: these hit
-// `/login?return=<probe>` directly (the same entry point the middleware and /step-up both funnel
+// `/login?return=<probe>` directly (the same entry point the proxy and /step-up both funnel
 // into) and require every one to land on the safe default instead of leaving the origin.
 test("open-redirect probes at /login all refuse and fall back to the default landing", async ({ page }) => {
   const probes = [

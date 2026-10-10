@@ -4,7 +4,7 @@ import { sanitizeReturnToParam } from "@/lib/returnTo";
 import "../login/login.css";
 
 // D4 identity step-up landing. WA/Telegram (low-assurance) users are routed
-// here when they attempt a sensitive action. Public route (see middleware).
+// here when they attempt a sensitive action. Public route (see `src/proxy.ts`).
 // Reads ?return= to send the user back after a full sign-in.
 //
 // Shares login.css's `.auth-*` classes with /login (same file, imported by

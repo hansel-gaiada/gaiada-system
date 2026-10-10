@@ -2,9 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { sanitizeReturnTo } from "@/lib/returnTo";
 import { peekSessionExpiry, needsRefresh } from "@/lib/session-expiry";
 
-// Edge runtime can't use node:crypto — presence check only here; every page
-// verifies the HMAC server-side via getSessionUserId() before using the id.
-export function middleware(req: NextRequest) {
+// Next 16 renamed `middleware.ts` to `proxy.ts` and runs it on the Node runtime instead of Edge. The check stays
+// what it was on Edge, a cookie PRESENCE check only; every page verifies the HMAC server-side via
+// getSessionUserId() before using the id.
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   // /step-up is reachable pre-full-session (WA/Telegram users land here for
   // sensitive actions), so it's public like /login.
@@ -12,12 +13,12 @@ export function middleware(req: NextRequest) {
   // `jobToken` and NO cookies at all, by construction — that's the whole point of the sidecar never
   // seeing a browser session. Gating it behind `hasSession` would 302 every render to /login and the
   // route's own token check (`reports-print-data.ts::getPrintPayload`) is what actually authorizes
-  // the request, not this middleware.
+  // the request, not this proxy.
   // /invite is the W0-5 client-portal magic link. It MUST be public: the person arriving has no
   // account yet — creating one is the entire purpose of the page — so gating it on `hasSession` would
   // 302 every invited client to /login and the flow could never complete. As with /print, the route's
   // own credential is what authorizes it: a single-use, HMAC-signed, email-bound, expiring invite
-  // token verified server-side (platform-nest client-invites.ts), not this middleware.
+  // token verified server-side (platform-nest client-invites.ts), not this proxy.
   const isPublic =
     pathname.startsWith("/login") || pathname.startsWith("/step-up") || pathname.startsWith("/auth") ||
     pathname.startsWith("/print") || pathname.startsWith("/invite");
@@ -35,7 +36,7 @@ export function middleware(req: NextRequest) {
 
   // ── SILENT TOKEN REFRESH (finding 01, 2026-09-08) ──────────────────────────────────────────────
   // The access token expires an hour after sign-in and nothing renewed it, so every backend call
-  // started 401-ing while this middleware — which only ever checked that the cookie EXISTED — kept
+  // started 401-ing while this proxy (then `middleware.ts`) — which only ever checked that the cookie EXISTED — kept
   // waving the request through. The user was never logged out, just broken. See
   // `app/auth/refresh/route.ts` for why the renewal lives in a route handler and not here.
   //
@@ -71,7 +72,7 @@ export function middleware(req: NextRequest) {
       }
     }
   } catch {
-    // Deliberately swallowed. A refresh that does not happen is yesterday's behaviour; a middleware
+    // Deliberately swallowed. A refresh that does not happen is yesterday's behaviour; a proxy
     // that throws is every page down.
   }
 
@@ -80,14 +81,14 @@ export function middleware(req: NextRequest) {
 
 // `office-sprites` joins `fonts` here for the same reason fonts were excluded: they are static
 // public assets, not routes. /office is authenticated so the sprites were never actually exposed
-// by gating them, but every one of the 24 files was running the edge middleware on each request —
+// by gating them, but every one of the 24 files was running the proxy (then the edge middleware) on each request —
 // pure overhead on a path that has no session to check, and it also puts a redirect in front of
 // an asset that should just be cacheable.
 // `office-env` (the 135-file Waha environment pack, 2026-08-24) joins them for the same reason,
 // and it is worth recording that it did NOT join them when the pack landed: the assets were
 // committed, deployed, and served 307-to-login to every unauthenticated request while
 // `office-sprites` beside them served 200. In a browser they still worked — the session cookie
-// rides along — so nothing looked broken; the cost was 135 files running the edge middleware on
+// rides along — so nothing looked broken; the cost was 135 files running the proxy (then the edge middleware) on
 // every request and a redirect standing in front of something that should simply be cacheable.
 // The comment above already said this. Adding assets means adding them here.
 export const config = { matcher: ["/((?!_next|fonts|office-sprites|office-env|office-chars|favicon.ico).*)"] };
