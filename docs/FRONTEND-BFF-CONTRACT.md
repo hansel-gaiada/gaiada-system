@@ -4753,7 +4753,7 @@ route below uses the existing `client` resource.
 UI mirror: capabilities `client.write` (company_admin, manager, member, owner) and `client.delete`
 (company_admin, manager, owner) in `platform-ui/src/lib/rbac.ts`, matching `resource_client.yaml`.
 
-## 27. WebDesk content BFF — the "Website" editor's backend (WSK-59, 2026-10-10) — `src/modules/webdev/webdesk-content.{controller,service}.ts`, `platform-ui/src/lib/webdeskContent.ts` (WSK-44) — **STATUS: BACKEND DEV-VERIFIED (Linux, see the ticket report); UI: WSK-44 builds against this section**
+## 27. WebDesk content BFF — the "Website" editor's backend (WSK-59, 2026-10-10) — `src/modules/webdev/webdesk-content.{controller,service}.ts`, `platform-ui/src/lib/webdeskContent.ts` (WSK-44) — **STATUS: BACKEND DEV-VERIFIED (Linux, see the ticket report); UI: WSK-44 builds against this section; UI RE-VERIFIED against the real controller by WSK-44b (see "Re-verified" below)**
 
 **§27 claimed at write time** (`grep -n "^## 27"` found nothing; §26 was the last). Design:
 `docs/plans/2026-10-10-webdesk-write-plane-design.md` §12 WSK-59 (routes, tools, done-when), §3.2 and §4 (the
@@ -4784,6 +4784,7 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | PUT (and `PATCH`, the MCP hub's alias) | `/sites/:ts/:site/items/:itemId` | `…:update` | 200 `ItemWriteResult` |
 | POST | `/sites/:ts/:site/items/:itemId/restore` | `…:update` | 200 `ItemWriteResult` |
 | POST | `/sites/:ts/:site/publish-requests` | `…:request_publish` | **202** `{approvalId,command,itemCount}` |
+| GET | `/sites/:ts/:site/publish-requests?status=pending` (WSK-44b) | `…:request_publish` (the right that filed it) | 200 `{requests:[{approvalId, status, createdAt, itemIds:[…], executionStatus\|null}]}`: the CALLER'S OWN `origin='webdesk'` publish/schedule approvals for THIS site, newest first, at most 100. `status` = `pending` (default) · `approved` · `rejected` · `cancelled` · `all`; anything else is 400 `invalid_request`, as is any other query key. `executionStatus` is the approval's `execution_status` (`not_applicable` while pending or withdrawn, then `pending`·`executing`·`executed`·`failed`). Behind the same cross-company wall (`resolveEditableSite`): a foreign site is the uniform 404 `site-not-found`. Only `requested_by = caller` rows are ever returned, so it reveals no other user's request |
 | POST | `/sites/:ts/:site/publish-requests/:approvalId/withdraw` | `…:request_publish` (the right that filed it) | 200 `{approvalId, status:"cancelled"}` |
 | POST | `/sites/:ts/:site/items/:itemId/unpublish` | `…:unpublish` | 200 `{item,replayed}` |
 | POST | `/sites/:ts/:site/items/:itemId/delete` | `…:delete` | 200 `{item,replayed}` |
@@ -4824,13 +4825,37 @@ non-scheduled publish, R4); see §9 row `automation-approvals` (WSK-66). The UI 
 stays `not_applicable`, and one `activities` row (`cancelled`, `outcome:"withdrawn_by_requester"`) is written. Nothing is sent to
 WebDesk. Another user's row is **403**, an id that is not a publish request for THIS site (unknown, another site, another origin) is
 **404 `approval_not_found`**, and a row no longer pending is **409 `approval_not_pending`**. **The UI's approval-status parser must
-accept `cancelled`** (the CHECK admits `pending|approved|rejected|cancelled`).
+accept `cancelled`** (the CHECK admits `pending|approved|rejected|cancelled`); since WSK-44b it does, and renders it as "Withdrawn".
 
 `POST /api/:t/approvals/:id/decide` (the unified façade) now accepts `origin:"webdesk"`, and `GET /api/approvals` lists webdesk rows. For a
 webdesk row the response is `{ok:true, webdesk:{command, executionStatus:"executed"|"failed", error?, …}}` (WSK-66's in-band outcome;
-every other origin is byte-unchanged `{ok:true}`). The editor's "pending request after reload" reads
-`GET /api/:t/automation-approvals?origin=webdesk&status=pending`, which needs `automation_approval:read` (company_admin/manager): a
-`webdev_staff`/`webdev_manager` caller without it gets 403 there (see the ticket report).
+every other origin is byte-unchanged `{ok:true}`). The editor used to read its "pending request after reload"
+from `GET /api/:t/automation-approvals?origin=webdesk&status=pending`, which needs `automation_approval:read` (company_admin/manager): a
+`webdev_staff`/`webdev_manager` caller got **403**. WSK-44b added `GET …/publish-requests` (above) for exactly that, and the editor now uses it.
+**Still true, and pinned by a test, not widened:** `GET /api/:t/automation-approvals/:id` (the DETAIL, which `/approvals/[id]` and the
+editor's poll read) has no requester carve-out either, so a `webdev_staff` requester gets 403 on the detail of their own approval. The editor's
+poll therefore falls back to `…/publish-requests?status=all` on a 403 (it still learns approved/rejected/cancelled and the execution status, but
+not the decider's name or the failure reason); the `/approvals/[id]` page itself still refuses that requester. Giving requesters read of their own
+rows is a Cerbos change (`resource_automation_approval.yaml`), which is the architect's call.
+
+### Re-verified against the real controller (WSK-44b, 2026-10-10)
+
+`platform-nest/src/modules/webdev/webdesk-content-ui-contract.test.ts` drives the Website editor's own code (`platform-ui/src/lib/webdeskContent.ts`
+readers, `webdeskContentActions.ts` server actions, the real `platformFetch`) over a real socket against the real controller, Postgres, Cerbos and the
+strict Zone B fake, and pipes every real body through the UI's `parse*` validators and `problemOf`. It found four drifts, all fixed in the UI:
+
+| Real body | What WebDesk/the BFF sends | What the UI assumed | Fix |
+|---|---|---|---|
+| approval `status` after Withdraw | `cancelled` | `pending\|approved\|rejected` only: `contract_drift` | accepted; phase `withdrawn`, shown as "Withdrawn" |
+| `ItemSummary.headCreatedAt` | `null` for a pre-0009 row (no version row) | non-null string: `contract_drift` | nullable; rendered as "—" |
+| `environments[].domain` (`GET …/sites`) | `null` while an environment has no hostname | non-null string: `contract_drift` on the WHOLE sites list | nullable; a null-domain environment never becomes `https://null` |
+| 404 `version-not-found` | typed problem (`?version=live` on a draft, an unknown `n`) | read as `not_enabled/not_served` ("not available on this deployment yet") | `not_found` |
+
+Routes the UI calls that **no ticket has built** (WSK-60 owns them): `GET …/sites/:ts/:site/build-status` and `POST …/sites/:ts/:site/rebuild-requests`. The BFF
+answers a plain Nest 404; the UI maps it to `not_enabled/not_served` ("rebuild status isn't available on this deployment yet"), never to a fabricated build.
+The UI reads nothing from `GET …/media` (it has no media reader); its §27 shape is asserted in the same test. A `502 webdesk_ambiguous` reaches the UI as
+`unavailable/upstream_error` with the machine reason (`not_observed` / `reconcile_failed`) kept: the editor goes STALE (Save disabled until a re-read), which is
+the safe behaviour, but it has no dedicated "couldn't confirm the save" copy yet.
 
 ### Errors the UI must render (each a distinct state, §10 of the design)
 
