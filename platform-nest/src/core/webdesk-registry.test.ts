@@ -13,9 +13,10 @@ import {
   registerWebdeskExecutableApprovals,
   getExecutable,
   WEBDESK_REGISTRY_TOOLS,
+  WEBDESK_CONTENT_REGISTRY_TOOLS,
 } from "./approval-executables";
 
-describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools", () => {
+describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools (+ WSK-59 content tools)", () => {
   beforeEach(() => {
     // Independent of whatever another test file in this worker left the registry in — restore the
     // FULL production set via the exported bootstraps, same discipline PRV-03's own suite states.
@@ -56,14 +57,68 @@ describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools", () => {
     }
   });
 
-  it("🔴 every precondition ALWAYS refuses with webdesk_control_plane_not_wired — the honest answer, not a silent no-op", async () => {
-    // Never `not_applicable` (the absent-entry default) and never a fabricated `{ok:true}` — see
-    // approval-executables.ts's own section header for why an always-refusing, NAMED-reason
-    // precondition is the honest choice while WSK-23 has not landed.
-    for (const name of WEBDESK_REGISTRY_TOOLS) {
+  const NOW_REAL = ["webdesk.schema.apply", "webdesk.site.provision"]; // WSK-59 re-pointed these two routes at the real channel
+  const STILL_NOT_WIRED = WEBDESK_REGISTRY_TOOLS.filter((n) => !NOW_REAL.includes(n));
+
+  it("🔴 the eight tools whose routes are STILL 501 ALWAYS refuse with webdesk_control_plane_not_wired — the honest answer", async () => {
+    expect(STILL_NOT_WIRED).toHaveLength(8);
+    for (const name of STILL_NOT_WIRED) {
       const verdict = await getExecutable(name)!.precondition({} as never, {});
       expect(verdict, name).toEqual({ ok: false, reason: "webdesk_control_plane_not_wired" });
     }
+  });
+
+  it("WSK-59: schema.apply and site.provision carry a REAL structural precondition (their routes are live now)", async () => {
+    const apply = getExecutable("webdesk.schema.apply")!;
+    const site = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+    expect(await apply.precondition({} as never, { tenantSlug: "gaiada", siteId: site, collectionKey: "service", schema: {} })).toEqual({ ok: true });
+    expect(await apply.precondition({} as never, { tenantSlug: "gaiada", siteId: "nope", collectionKey: "service", schema: {} })).toEqual({ ok: false, reason: "site_id_invalid" });
+    expect(await apply.precondition({} as never, { tenantSlug: "gaiada", siteId: site, collectionKey: "service" })).toEqual({ ok: false, reason: "schema_invalid" });
+    const prov = getExecutable("webdesk.site.provision")!;
+    expect(await prov.precondition({} as never, { tenantSlug: "gaiada", kind: "astro", name: "Main" })).toEqual({ ok: true });
+    expect(await prov.precondition({} as never, { tenantSlug: "gaiada", kind: "static", name: "Main" })).toEqual({ ok: false, reason: "kind_invalid" });
+  });
+
+  describe("WSK-59 — webdesk.content.unpublish / delete (the editor's MEDIUM tools)", () => {
+    const item = "7a1d2c3e-4f5b-4c6d-9e7f-8091a2b3c4d5";
+    const site = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+
+    it("exactly the two MEDIUM tools are registered, with a real lockKey and precondition", () => {
+      expect(WEBDESK_CONTENT_REGISTRY_TOOLS).toEqual(["webdesk.content.unpublish", "webdesk.content.delete"]);
+      for (const name of WEBDESK_CONTENT_REGISTRY_TOOLS) {
+        expect(getExecutable(name), name).toBeDefined();
+        expect(() => registerExecutableApproval({ toolName: name })).toThrow(/already registered/i);
+      }
+      // low writes and reads never suspend, so they are NOT here (and there is no publish tool at all)
+      for (const n of ["webdesk.content.create", "webdesk.content.update", "webdesk.content.restoreVersion", "webdesk.content.requestPublish", "webdesk.content.getItem", "webdesk.content.publish"]) {
+        expect(getExecutable(n), n).toBeUndefined();
+      }
+    });
+
+    it("unpublish: structural precondition only (Zone B's expectedPublishedVersion guard is the atomic re-check)", async () => {
+      const e = getExecutable("webdesk.content.unpublish")!;
+      const ok = { tenantSlug: "gaiada", siteId: site, itemId: item, expectedPublishedVersion: 3 };
+      expect(await e.precondition({} as never, ok)).toEqual({ ok: true });
+      expect(await e.precondition({} as never, { ...ok, expectedPublishedVersion: 0 })).toEqual({ ok: false, reason: "expected_published_version_invalid" });
+      expect(await e.precondition({} as never, { ...ok, itemId: "x" })).toEqual({ ok: false, reason: "item_id_invalid" });
+      expect(await e.precondition({} as never, { ...ok, tenantSlug: "" })).toEqual({ ok: false, reason: "tenant_slug_invalid" });
+    });
+
+    it("delete: structural precondition", async () => {
+      const e = getExecutable("webdesk.content.delete")!;
+      const ok = { tenantSlug: "gaiada", siteId: site, itemId: item, baseVersion: 0 };
+      expect(await e.precondition({} as never, ok)).toEqual({ ok: true });
+      expect(await e.precondition({} as never, { ...ok, baseVersion: -1 })).toEqual({ ok: false, reason: "base_version_invalid" });
+      expect(await e.precondition({} as never, { tenantSlug: "gaiada" })).toEqual({ ok: false, reason: "site_id_invalid" });
+    });
+
+    it("lockKey is the ITEM, per tool-agnostic, and malformed args never collapse onto one key", () => {
+      const u = getExecutable("webdesk.content.unpublish")!;
+      const d = getExecutable("webdesk.content.delete")!;
+      expect(u.lockKey({ itemId: item })).toBe(`webdesk:content:${item}`);
+      expect(d.lockKey({ itemId: item })).toBe(u.lockKey({ itemId: item })); // an unpublish and a delete of ONE item contend
+      expect(new Set([u.lockKey({}), u.lockKey({ itemId: 5 }), u.lockKey({ itemId: "" })]).size).toBe(3);
+    });
   });
 
   describe("lockKey", () => {

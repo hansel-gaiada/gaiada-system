@@ -561,7 +561,11 @@ export class WebdeskControlClient {
     if (req.editorialAssertion !== undefined) headers["x-webdesk-editorial-assertion"] = req.editorialAssertion;
 
     const safeMethod = req.method === "GET" || req.method === "HEAD";
-    const ambiguousIsSafe = safeMethod || (req.idempotencyKey !== undefined && !req.ws4);
+    // WSK-59: an editorial assertion carries a single-use `jti` that Zone B consumes on the FIRST delivery,
+    // exactly like a WS4 approval. A resend after an ambiguous failure could only come back 401
+    // `editorial-assertion-replayed`, which hides whether the first attempt landed. So it follows the WS4
+    // rule: never resent once it may have been delivered (the caller reconciles by reading).
+    const ambiguousIsSafe = safeMethod || (req.idempotencyKey !== undefined && !req.ws4 && req.editorialAssertion === undefined);
 
     let last: AttemptFailure | null = null;
     let attempt = 0;

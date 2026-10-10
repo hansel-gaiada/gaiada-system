@@ -96,6 +96,14 @@ export function problemSlug(problem: unknown): string | null {
   return /^[a-z0-9][a-z0-9_-]{0,79}$/i.test(last) ? last : null;
 }
 
+/** A write that MAY have landed and whose outcome could not be established. 502, never success, never a plain
+ *  failure: the caller re-reads (the item state) and retries with the SAME Idempotency-Key. */
+export class AmbiguousWriteError extends HttpException {
+  constructor(reason: string) {
+    super({ message: "webdesk_ambiguous", reason }, 502);
+  }
+}
+
 function editorialUnavailable(reason: string, extra?: string): ServiceUnavailableException {
   return new ServiceUnavailableException({ message: "editorial_unavailable", reason, ...(extra ? { detail: extra } : {}) });
 }
@@ -232,6 +240,9 @@ export interface EgressWrite {
   entity: { type: string; id: string | null };
   /** Non-secret identifiers copied onto both ledger rows. */
   ledger: Record<string, unknown>;
+  /** After an AMBIGUOUS failure (the write may have landed): read Zone B and return the success body when the
+   *  write provably landed, else null. Reads only; the write is never resent. */
+  reconcile?: () => Promise<ZoneBResult | null>;
 }
 
 export class WebdeskZoneB {
@@ -239,6 +250,11 @@ export class WebdeskZoneB {
   private readonly cache = new Map<string, { at: number; tenants: WebdeskTenantEntry[] }>();
 
   constructor(private readonly now: () => number = Date.now) {}
+
+  /** Seed the wall's cache from an answer already in hand (the editor's first call is `listSites`). */
+  primeSiteCache(companyId: string, tenants: WebdeskTenantEntry[]): void {
+    this.cache.set(companyId, { at: this.now(), tenants });
+  }
 
   /** Tests, and after a provisioning write. */
   clearSiteCache(companyId?: string): void {
@@ -265,7 +281,8 @@ export class WebdeskZoneB {
     if (err instanceof EditorialSignerNotConfiguredError) return notConfigured("editorial_signer_not_configured");
     if (err instanceof WebdeskControlTransportError) {
       // A write that was fully written before the link died MAY have landed: say so, so the UI re-reads.
-      return editorialUnavailable(write && err.maybeDelivered ? "webdesk_ambiguous" : "webdesk_unreachable");
+      if (write && err.maybeDelivered) return new AmbiguousWriteError("not_observed");
+      return editorialUnavailable("webdesk_unreachable");
     }
     if (err instanceof WebdeskControlTokenError) return editorialUnavailable("webdesk_token_unavailable");
     logger.error(`unexpected egress failure: ${(err as Error)?.name ?? "error"}`);
@@ -288,16 +305,12 @@ export class WebdeskZoneB {
     // user's): never forward them, or the UI would read a 401 as "your session expired".
     if (res.status === 401 || res.status === 403) {
       // A replayed editorial assertion after a client-level resend means the first send may have landed.
-      if (slug === "editorial-assertion-replayed") return this.fail(editorialUnavailable("webdesk_ambiguous"));
+      if (slug === "editorial-assertion-replayed") throw new AmbiguousWriteError("not_observed");
       throw new BadGatewayException({ message: "webdesk_refused", reason: slug ?? `http_${res.status}` });
     }
     if (res.status === 503) throw editorialUnavailable(slug ?? "webdesk_unavailable");
     if (res.status >= 500) throw new BadGatewayException({ message: "webdesk_error", reason: slug ?? `http_${res.status}` });
     throw new WebdeskProblem(res.status, body);
-  }
-
-  private fail(err: HttpException): never {
-    throw err;
   }
 
   /** One read. Never audited (design §4). */
@@ -363,6 +376,7 @@ export class WebdeskZoneB {
 
     let outcome: ZoneBResult | null = null;
     let thrown: HttpException | null = null;
+    let reconciled = false;
     if (sendError !== null) {
       thrown = this.mapTransport(sendError, true);
     } else {
@@ -372,12 +386,27 @@ export class WebdeskZoneB {
         thrown = err as HttpException;
       }
     }
+    if (thrown instanceof AmbiguousWriteError && w.reconcile) {
+      // The write may have landed. READ to find out (never resend): landed => the reconciled state,
+      // anything else => stays a typed 502 webdesk_ambiguous.
+      try {
+        const landed = await w.reconcile();
+        if (landed) {
+          outcome = landed;
+          thrown = null;
+          reconciled = true;
+        }
+      } catch (err) {
+        logger.warn(`${w.verb}: reconcile read failed (${(err as Error)?.name ?? "error"})`);
+        thrown = new AmbiguousWriteError("reconcile_failed");
+      }
+    }
 
     const result = outcome ? (outcome.body as Record<string, unknown>) : null;
     const after = outcome
       ? {
           ...base,
-          outcome: "succeeded",
+          outcome: reconciled ? "reconciled" : "succeeded",
           status: outcome.status,
           ...(result && result.replayed === true ? { replayed: true } : {}),
           ...(result && isPlainObject(result.item) && typeof result.item.itemId === "string" ? { resultItemId: result.item.itemId } : {}),
@@ -385,7 +414,7 @@ export class WebdeskZoneB {
         }
       : {
           ...base,
-          outcome: thrown instanceof WebdeskProblem ? "refused" : "failed",
+          outcome: thrown instanceof WebdeskProblem ? "refused" : thrown instanceof AmbiguousWriteError ? "ambiguous" : "failed",
           status: thrown?.getStatus() ?? null,
           ...(thrown instanceof WebdeskProblem ? { problem: problemSlug(thrown.problem) } : {}),
           ...(thrown && !(thrown instanceof WebdeskProblem) ? { error: errorToken(thrown) } : {}),
@@ -487,6 +516,14 @@ interface ItemAttrs {
   deletedAt: string | null;
   contentHash: string | null;
   headVersion: number | null;
+  publishedVersion: number | null;
+}
+
+/** `item.get`'s answer, narrowed to what reconciliation reads. */
+interface RawItem {
+  item: Record<string, unknown>;
+  version: Record<string, unknown>;
+  lint: unknown;
 }
 
 export class WebdeskContentService {
@@ -500,7 +537,7 @@ export class WebdeskContentService {
     const r = await this.zoneB.read({ command: "tenant.list", path: "/control/v1/tenants", query: { companyRef: gate.tenantId } });
     // Refresh the wall's cache from the same answer, so the editor's first click is warm.
     const tenants = isPlainObject(r.body) && Array.isArray(r.body.tenants) ? (r.body.tenants as WebdeskTenantEntry[]) : null;
-    if (tenants) await this.zoneB.tenantsOf(gate.tenantId, { fresh: false }).catch(() => undefined);
+    if (tenants) this.zoneB.primeSiteCache(gate.tenantId, tenants);
     return r;
   }
 
@@ -611,6 +648,7 @@ export class WebdeskContentService {
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
       entity: { type: "webdesk_content_item", id: null },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, collectionKey, locale: locale || null, slug: typeof b.slug === "string" ? b.slug : null },
+      reconcile: this.reconcileCreate(site, collectionKey, gate.principal.userId as string, b.locale, b.slug),
     });
   }
 
@@ -651,6 +689,84 @@ export class WebdeskContentService {
       deletedAt: typeof item.deletedAt === "string" ? item.deletedAt : null,
       contentHash: v && typeof v.contentHash === "string" ? v.contentHash : null,
       headVersion: typeof item.headVersion === "number" ? item.headVersion : null,
+      publishedVersion: typeof item.publishedVersion === "number" ? item.publishedVersion : null,
+    };
+  }
+
+  private async rawItem(site: SiteRef, itemId: string, version?: string): Promise<RawItem> {
+    const { body } = await this.zoneB.read({
+      command: "item.get",
+      path: ITEM_PATH,
+      params: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId },
+      ...(version !== undefined ? { query: { version } } : {}),
+    });
+    if (!isPlainObject(body) || !isPlainObject(body.item) || !isPlainObject(body.version)) {
+      throw new BadGatewayException({ message: "webdesk_error", reason: "item_shape" });
+    }
+    return { item: body.item, version: body.version, lint: body.lint };
+  }
+
+  // ── reconciliation after an AMBIGUOUS write (reads only; the write is never resent) ──────────
+
+  /** update / restore landed iff the head moved to baseVersion+1 and its author is the caller; a restore
+   *  must also have the source version's content hash. Anything else is "cannot tell" (null). */
+  private reconcileEdit(site: SiteRef, itemId: string, sub: string, baseVersion: unknown, restoreFrom?: unknown) {
+    return async (): Promise<ZoneBResult | null> => {
+      if (typeof baseVersion !== "number") return null;
+      const h = await this.rawItem(site, itemId);
+      if (h.item.headVersion !== baseVersion + 1 || h.item.headCreatedBy !== sub) return null;
+      if (restoreFrom !== undefined) {
+        if (typeof restoreFrom !== "number") return null;
+        const src = await this.rawItem(site, itemId, String(restoreFrom));
+        if (typeof src.version.contentHash !== "string" || src.version.contentHash !== h.version.contentHash) return null;
+      }
+      return {
+        status: 200,
+        body: {
+          item: h.item,
+          version: { version: h.version.version, contentHash: h.version.contentHash, createdAt: h.version.createdAt },
+          unchanged: false,
+          lint: h.lint,
+          replayed: false,
+          reconciled: true,
+        },
+      };
+    };
+  }
+
+  private reconcileState(site: SiteRef, itemId: string, landed: (item: Record<string, unknown>) => boolean) {
+    return async (): Promise<ZoneBResult | null> => {
+      const h = await this.rawItem(site, itemId);
+      return landed(h.item) ? { status: 200, body: { item: h.item, replayed: false, reconciled: true } } : null;
+    };
+  }
+
+  /** create landed iff an item with that slug+locale exists in the collection at head version 1, authored
+   *  by the caller. (A slug someone ELSE created is "cannot tell", not success.) */
+  private reconcileCreate(site: SiteRef, collectionKey: string, sub: string, locale: unknown, slug: unknown) {
+    return async (): Promise<ZoneBResult | null> => {
+      if (typeof locale !== "string" || typeof slug !== "string" || slug === "") return null;
+      const { body } = await this.zoneB.read({
+        command: "item.list",
+        path: "/control/v1/tenants/:tenantSlug/sites/:siteId/collections/:key/items",
+        params: { tenantSlug: site.tenantSlug, siteId: site.siteId, key: collectionKey },
+        query: { locale, q: slug, limit: "100" },
+      });
+      const items = isPlainObject(body) && Array.isArray(body.items) ? body.items : [];
+      const hit = items.find((i) => isPlainObject(i) && i.slug === slug && i.locale === locale);
+      if (!isPlainObject(hit) || hit.headVersion !== 1 || hit.headCreatedBy !== sub || typeof hit.itemId !== "string") return null;
+      const h = await this.rawItem(site, hit.itemId);
+      return {
+        status: 201,
+        body: {
+          item: h.item,
+          version: { version: h.version.version, contentHash: h.version.contentHash, createdAt: h.version.createdAt },
+          unchanged: false,
+          lint: h.lint,
+          replayed: false,
+          reconciled: true,
+        },
+      };
     };
   }
 
@@ -666,6 +782,7 @@ export class WebdeskContentService {
       allowed: readonly string[];
       rawBody: unknown;
       idempotencyKey: string;
+      reconcile: (sub: string, body: Record<string, unknown>, before: ItemAttrs) => () => Promise<ZoneBResult | null>;
     },
   ): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", action);
@@ -683,6 +800,7 @@ export class WebdeskContentService {
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
       entity: { type: "webdesk_content_item", id: UUID_RE.test(itemId) ? itemId : null },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId, collectionKey: attrs.collectionKey, locale: attrs.locale },
+      reconcile: spec.reconcile(gate.principal.userId as string, body, attrs),
     });
   }
 
@@ -694,6 +812,7 @@ export class WebdeskContentService {
       allowed: ["baseVersion", "fields", "blocks", "seo", "note"],
       rawBody,
       idempotencyKey,
+      reconcile: (sub, body) => this.reconcileEdit(site, itemId, sub, body.baseVersion),
     });
   }
 
@@ -706,6 +825,7 @@ export class WebdeskContentService {
       allowed: ["version", "baseVersion", "note"],
       rawBody,
       idempotencyKey,
+      reconcile: (sub, body) => this.reconcileEdit(site, itemId, sub, body.baseVersion, body.version),
     });
   }
 
@@ -717,6 +837,11 @@ export class WebdeskContentService {
       allowed: ["expectedPublishedVersion"],
       rawBody,
       idempotencyKey,
+      // Landed iff it WAS live at the expected version (the pre-read) and is unpublished now.
+      reconcile: (_sub, body, before) =>
+        before.publishedVersion !== null && before.publishedVersion === body.expectedPublishedVersion
+          ? this.reconcileState(site, itemId, (i) => i.publishedVersion === null && i.publishState === "unpublished")
+          : async () => null,
     });
   }
 
@@ -728,6 +853,8 @@ export class WebdeskContentService {
       allowed: ["baseVersion"],
       rawBody,
       idempotencyKey,
+      reconcile: (_sub, _body, before) =>
+        before.deletedAt === null ? this.reconcileState(site, itemId, (i) => typeof i.deletedAt === "string") : async () => null,
     });
   }
 
@@ -841,3 +968,63 @@ async function mapPool<T, R>(items: readonly T[], limit: number, fn: (item: T, i
 
 /** The process-wide service. WSK-67's importer imports THIS (and `authorizeContent`), not a second copy. */
 export const webdeskContent = new WebdeskContentService();
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// The WSK-31 control routes that are now REAL: `GET control/sites`, `POST control/sites`,
+// `POST control/schema/apply`. Their controller authorizes against `webdev_provisioned_site`
+// (`read` / `operate`, unchanged) FIRST; these take over from there: the same wall, the same typed
+// errors, the same two ledger rows. Neither write is an editorial command (design §3.1: no editorial
+// assertion), so neither needs the signer, only the channel.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** `GET control/sites`: the company's WebDesk tenants + sites (Zone B `tenant.list?companyRef`). */
+export async function controlListSites(tenantId: string): Promise<ZoneBResult> {
+  return webdeskZoneB.read({ command: "tenant.list", path: "/control/v1/tenants", query: { companyRef: tenantId } });
+}
+
+/** `POST control/schema/apply` body `{tenantSlug, siteId, collectionKey, schema}` (+ optional `Idempotency-Key`).
+ *  Zone B validates the composition (422) and refuses a MAJOR change (409 `contract-major-change`): both pass through. */
+export async function controlApplySchema(principal: Principal, tenantId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
+  const b = strictBody(rawBody, ["tenantSlug", "siteId", "collectionKey", "schema"]);
+  if (typeof b.tenantSlug !== "string" || typeof b.siteId !== "string" || typeof b.collectionKey !== "string" || b.collectionKey === "") {
+    throw invalidRequest("tenantSlug, siteId and collectionKey are required strings");
+  }
+  if (!isPlainObject(b.schema)) throw invalidRequest("schema must be a JSON object (the collection's composition)");
+  await webdeskZoneB.resolveEditableSite(tenantId, b.tenantSlug, b.siteId);
+  return webdeskZoneB.write(principal, tenantId, {
+    command: "schema.apply",
+    verb: "webdesk.schema.apply",
+    method: "POST",
+    path: "/control/v1/tenants/:tenantSlug/sites/:siteId/collections/:collectionKey/schema/apply",
+    params: { tenantSlug: b.tenantSlug, siteId: b.siteId, collectionKey: b.collectionKey },
+    body: { schema: b.schema },
+    idempotencyKey,
+    entity: { type: "webdesk_site", id: UUID_RE.test(b.siteId) ? b.siteId : null },
+    ledger: { tenantSlug: b.tenantSlug, siteId: b.siteId, collectionKey: b.collectionKey },
+  });
+}
+
+/** `POST control/sites` body `{tenantSlug, kind, name}`: provisions a site on one of THIS company's tenants. */
+export async function controlProvisionSite(principal: Principal, tenantId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
+  const b = strictBody(rawBody, ["tenantSlug", "kind", "name"]);
+  if (typeof b.tenantSlug !== "string" || typeof b.kind !== "string" || typeof b.name !== "string" || b.name === "") {
+    throw invalidRequest("tenantSlug, kind and name are required strings");
+  }
+  await webdeskZoneB.resolveEditableTenant(tenantId, b.tenantSlug);
+  try {
+    return await webdeskZoneB.write(principal, tenantId, {
+      command: "site.provision",
+      verb: "webdesk.site.provision",
+      method: "POST",
+      path: "/control/v1/tenants/:tenantSlug/sites",
+      params: { tenantSlug: b.tenantSlug },
+      body: { kind: b.kind, name: b.name },
+      idempotencyKey,
+      entity: { type: "webdesk_site", id: null },
+      ledger: { tenantSlug: b.tenantSlug, kind: b.kind },
+    });
+  } finally {
+    // The wall's answer is stale the moment a site is added; the next call refetches.
+    webdeskZoneB.clearSiteCache(tenantId);
+  }
+}

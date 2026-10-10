@@ -828,9 +828,113 @@ export function registerWebdeskExecutableApprovals(): void {
     registerExecutableApproval({
       toolName,
       lockKey: (args) => webdeskLockKey(args, toolName),
-      precondition: webdeskNotWiredPrecondition,
+      // WSK-59: the two commands whose routes are now REAL carry a real (structural) precondition; the
+      // other eight stay honestly not-wired.
+      precondition: WEBDESK_STRUCTURAL_PRECONDITIONS[toolName] ?? webdeskNotWiredPrecondition,
     });
   }
+  registerWebdeskContentExecutableApprovals();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// WSK-59 — the content editor's MEDIUM tools: `webdesk.content.unpublish` and `webdesk.content.delete`
+// (write-plane design §12 WSK-59), plus the real preconditions for `webdesk.schema.apply` and
+// `webdesk.site.provision` (their routes stopped being 501 stubs in the same change).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THE D14 PAIRING. Both halves land together: these entries AND the tool names in
+// `cerbos/policies/resource_mcp_tool.yaml`'s executable list. An entry without the Cerbos half passes its
+// precondition and is then denied at the hub's door; the Cerbos half without an entry suspends an agent
+// and then does nothing on approval (`not_applicable`). `webdesk.content.create/update/restoreVersion/
+// requestPublish` are `impact:"low"` and never suspend, so they are in neither (the `webdesk.schema.propose`
+// reasoning). There is no publish tool: publish executes only at decide() through WSK-66's in-band path.
+//
+// THE PRECONDITION IS STRUCTURAL ONLY, ON PURPOSE. Zone B's own guards are the atomic re-check:
+// `unpublish` carries `expectedPublishedVersion` (409 `published-version-changed` / `not-live` when the
+// world moved since filing) and `delete` carries `baseVersion` (409 `version-conflict`, `item-is-live`).
+// Re-deriving those here would need a Zone B read inside an open transaction, which a precondition may not
+// do ("must not call out over the network"), and would only be a staler copy of the check Zone B makes
+// atomically. What this CAN refuse before the hub is called is a malformed row: the executor never calls
+// the hub for it, so no grant is spent.
+//
+// RE-DRIVE. On approval `approval-execute.ts` re-drives the tool through the hub as the ORIGINAL filing
+// principal (its OBO envelope, never the approver's); the platform then runs the same BFF route, so Cerbos
+// authorises the requester's CURRENT standing and the editorial assertion is signed for the requester.
+
+const UUID_RE_EXEC = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function nonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+function contentItemArgsOk(a: Record<string, unknown>): string | null {
+  if (!nonEmptyString(a.tenantSlug)) return "tenant_slug_invalid";
+  if (typeof a.siteId !== "string" || !UUID_RE_EXEC.test(a.siteId)) return "site_id_invalid";
+  if (typeof a.itemId !== "string" || !UUID_RE_EXEC.test(a.itemId)) return "item_id_invalid";
+  return null;
+}
+
+async function webdeskUnpublishPrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const bad = contentItemArgsOk(a);
+  if (bad) return { ok: false, reason: bad };
+  const v = a.expectedPublishedVersion;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1) return { ok: false, reason: "expected_published_version_invalid" };
+  return { ok: true };
+}
+
+async function webdeskDeletePrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const bad = contentItemArgsOk(a);
+  if (bad) return { ok: false, reason: bad };
+  const v = a.baseVersion;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) return { ok: false, reason: "base_version_invalid" };
+  return { ok: true };
+}
+
+async function webdeskSchemaApplyPrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  if (!nonEmptyString(a.tenantSlug)) return { ok: false, reason: "tenant_slug_invalid" };
+  if (typeof a.siteId !== "string" || !UUID_RE_EXEC.test(a.siteId)) return { ok: false, reason: "site_id_invalid" };
+  if (!nonEmptyString(a.collectionKey)) return { ok: false, reason: "collection_key_invalid" };
+  if (!isRecord(a.schema)) return { ok: false, reason: "schema_invalid" };
+  return { ok: true };
+}
+
+async function webdeskSiteProvisionPrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  if (!nonEmptyString(a.tenantSlug)) return { ok: false, reason: "tenant_slug_invalid" };
+  if (a.kind !== "astro" && a.kind !== "node" && a.kind !== "wp") return { ok: false, reason: "kind_invalid" };
+  if (!nonEmptyString(a.name)) return { ok: false, reason: "name_invalid" };
+  return { ok: true };
+}
+
+const WEBDESK_STRUCTURAL_PRECONDITIONS: Record<string, (client: PoolClient, a: Record<string, unknown>) => Promise<PreconditionVerdict>> = {
+  "webdesk.schema.apply": webdeskSchemaApplyPrecondition,
+  "webdesk.site.provision": webdeskSiteProvisionPrecondition,
+};
+
+/** The two MEDIUM content tools that can suspend. Mirrored in `resource_mcp_tool.yaml`'s executable list. */
+export const WEBDESK_CONTENT_REGISTRY_TOOLS: readonly string[] = ["webdesk.content.unpublish", "webdesk.content.delete"];
+
+function webdeskContentLockKey(a: Record<string, unknown>, toolName: string): string {
+  // The unit of consistency is the ITEM: two approvals to take the same item down (or delete it) contend.
+  const itemId = a?.itemId;
+  if (typeof itemId === "string" && itemId.trim().length > 0) return `webdesk:content:${itemId}`;
+  return `${toolName}:invalid-args:${JSON.stringify(a)}`;
+}
+
+export function registerWebdeskContentExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "webdesk.content.unpublish",
+    lockKey: (a) => webdeskContentLockKey(a, "webdesk.content.unpublish"),
+    precondition: webdeskUnpublishPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "webdesk.content.delete",
+    lockKey: (a) => webdeskContentLockKey(a, "webdesk.content.delete"),
+    precondition: webdeskDeletePrecondition,
+  });
 }
 
 

@@ -226,6 +226,11 @@ resourcePolicy:
               #    See approval-executables.ts's own block for what the decision rested on and what
               #    still bounds them: the ceiling, the single writer and the self-target DENY are
               #    all unchanged.
+              #  • `webdesk.content.unpublish` / `webdesk.content.delete` — WSK-59's two MEDIUM editor
+              #    tools. D14 pairing with approval-executables.ts (registerWebdeskContentExecutableApprovals):
+              #    an unattended caller suspends, and the executor's branded approvalId call re-enters
+              #    through this bracket as the ORIGINAL principal. (The other `webdesk.content.*` tools are
+              #    low-impact or reads and never reach it; there is no publish tool: HIGH, in-band at decide().)
               - expr: >
                   !request.principal.attr.isUnattended ||
                   ((!request.resource.attr.write ||
@@ -243,7 +248,8 @@ resourcePolicy:
                                                     "webdesk.deploy.staging", "webdesk.site.promote",
                                                     "webdesk.site.rollback", "webdesk.site.setDomain",
                                                     "webdesk.key.mint", "webdesk.key.rotate",
-                                                    "webdesk.key.revoke", "webdesk.site.archive"])))
+                                                    "webdesk.key.revoke", "webdesk.site.archive",
+                                                    "webdesk.content.unpublish", "webdesk.content.delete"])))
               # ── WSK-31 (docs/blueprints/webdesk-design.md §07) — ALWAYS-WS4 CONJUNCT ────────────
               # A SEPARATE, INDEPENDENT `all.of` entry, evaluated for EVERY caller regardless of the
               # `isUnattended` conjunct above — that is the whole point. §07's blueprint C-05 rule
