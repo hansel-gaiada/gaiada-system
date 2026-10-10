@@ -39,12 +39,12 @@ export interface ArtifactHashManifest {
   contractMd: string;
 }
 
-/** The MinIO object keys (bucket = the platform-internal `artifacts` bucket, WSK-07's
+/** The object-store (RustFS) keys (bucket = the platform-internal `artifacts` bucket, WSK-07's
  *  `storageConfig.bucketName("artifacts")`) each artifact body was stored under, tenant-prefixed. */
 export interface ArtifactObjectKeys {
   openapiJson: string;
   sdkTs: string;
-  /** WSK-34 — the PHP SDK's MinIO object key, alongside the TS one. */
+  /** WSK-34 — the PHP SDK's object key, alongside the TS one. */
   sdkPhp: string;
   contractMd: string;
 }

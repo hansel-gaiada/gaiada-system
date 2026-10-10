@@ -1,6 +1,6 @@
 // WSK-15 — orchestrates one deterministic generation: composition -> {openapi.v1.json bytes,
 // sdk.d.ts bytes, CONTENT-CONTRACT.md bytes, the per-artifact hash manifest, contentHash}. Pure —
-// no I/O of its own (fetch-composition.mts and storage-io.mts own the DB/MinIO edges; this file
+// no I/O of its own (fetch-composition.mts and storage-io.mts own the DB/object-store edges; this file
 // only combines their inputs/outputs).
 import { VOCABULARY_VERSION } from "../../../../payload/vocabulary/version.ts";
 import type { TenantComposition } from "../../../../payload/vocabulary/composition.ts";

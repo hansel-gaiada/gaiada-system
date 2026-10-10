@@ -40,6 +40,11 @@ const GEO_SCHEMA: JsonSchema = {
   additionalProperties: false,
 };
 
+// `oneOf` is correct here and deliberately kept (T2 / D-a; contrast the block unions in
+// openapi-builder.mts, which are `anyOf`). The two branches are provably disjoint: one requires JSON
+// type `string`, the other JSON type `object`, and no JSON value has both types. So a valid value
+// matches exactly one branch, which is precisely what `oneOf` asserts.
+// test/codegen-openapi-schema-validation.spec.ts proves it with a real validator.
 const RICHTEXT_SCHEMA: JsonSchema = {
   description:
     "A Lexical-shaped JSON document ({ root: ... }) or a plain string fallback " +

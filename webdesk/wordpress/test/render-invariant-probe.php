@@ -19,9 +19,11 @@ use function GaiadaWebDesk\Theme\gaiada_known_block_types;
 use function GaiadaWebDesk\Theme\gaiada_resolve_blocks;
 
 $failures = 0;
+$checksRun = 0;
 function check(bool $ok, string $label): void
 {
-    global $failures;
+    global $failures, $checksRun;
+    $checksRun++;
     echo ($ok ? 'PASS' : 'FAIL') . "  {$label}\n";
     if (!$ok) {
         $failures++;
@@ -89,7 +91,41 @@ function gaiada_resolve_blocks_with_empty_vocabulary(array $blocks): array
 }
 $forcedUnknown = gaiada_resolve_blocks_with_empty_vocabulary([['type' => 'hero', 'props' => []]]);
 check($forcedUnknown[0]['known'] === false, 'NEGATIVE CONTROL: with the vocabulary list forced empty, a normally-known type ("hero") IS classified unknown — proves the known/unknown branch is a real vocabulary lookup, not a hardcoded true');
-check(count(gaiada_known_block_types()) === 9, 'sanity: the vendored vocabulary still has all 9 known block types (drift check is a separate gate — this just confirms the fixture used here matches it)');
+check(count(gaiada_known_block_types()) === 10, 'sanity: the vendored vocabulary has all 10 known block types (the 9 generic ones plus the composition-typed `fields`; the drift check is a separate gate, this just confirms the fixture used here matches it)');
 
-echo "\n" . ($failures === 0 ? 'ALL PASS' : "{$failures} FAILURE(S)") . " — " . (8 + 2 + 2) . " checks run.\n";
+// ---------------------------------------------------------------------------------------------
+// 4. THE `fields` BLOCK (vocabulary 1.1.0, WSK-64) — KNOWN but NON-VISUAL, as in webdesk/blocks'
+//    renderer. It must render nothing, must NOT throw (the dispatcher throws for a known type with no
+//    template), and must NOT be reported as unknown. Its neighbours must still render.
+// ---------------------------------------------------------------------------------------------
+$withFields = [
+    ['type' => 'fields', 'props' => ['title' => 'WSK64-FIELDS-LEAK-CHECK', 'tags' => ['a', 'b']]],
+    ['type' => 'hero', 'props' => ['heading' => 'WSK64-HERO-MARKER']],
+];
+$fieldsThrew = false;
+$htmlFields = '';
+try {
+    $htmlFields = gaiada_render_blocks($withFields, 'page', 'home');
+} catch (\Throwable $e) {
+    $fieldsThrew = true;
+}
+$reportsFields = gaiada_drain_unknown_block_reports();
+check(in_array('fields', gaiada_known_block_types(), true), '`fields` is a known block type in the vendored vocabulary');
+check($fieldsThrew === false, 'a `fields` block does NOT throw (a template exists for every known type)');
+check(count($reportsFields) === 0, 'a `fields` block is NOT reported as unknown');
+check(!str_contains($htmlFields, 'WSK64-FIELDS-LEAK-CHECK'), 'a `fields` block\'s values never reach the rendered HTML');
+check(str_contains($htmlFields, 'WSK64-HERO-MARKER'), 'the block AFTER a `fields` block still renders');
+check(\GaiadaWebDesk\Theme\gaiada_render_known_block('fields', ['title' => 'x']) === '', 'the `fields` template returns the empty string');
+check(gaiada_render_blocks([['type' => 'fields', 'props' => []]], 'page', 'home') === '', 'a blocks array holding only a `fields` block renders to the empty string');
+gaiada_drain_unknown_block_reports();
+
+// ---------------------------------------------------------------------------------------------
+// 5. TEMPLATE COVERAGE — every name in the vendored vocabulary has a render function, so a future
+//    re-vendor that adds a block type fails HERE, not at render time on a live page.
+// ---------------------------------------------------------------------------------------------
+foreach (gaiada_known_block_types() as $knownType) {
+    check(function_exists('GaiadaWebDesk\Theme\gaiada_render_block_' . $knownType), "template coverage: gaiada_render_block_{$knownType}() exists");
+}
+
+echo "\n" . ($failures === 0 ? 'ALL PASS' : "{$failures} FAILURE(S)") . " — {$checksRun} checks run.\n";
 exit($failures === 0 ? 0 : 1);

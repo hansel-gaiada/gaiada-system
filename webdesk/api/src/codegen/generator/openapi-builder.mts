@@ -25,12 +25,19 @@
 //   - composition `blocks: []` (no generic block may follow; every gaiada.com collection):
 //     `prefixItems: [FieldsBlock_<key>]`, `minItems: 1`, `maxItems: 1`. openapi-typescript emits
 //     the exact tuple `[FieldsBlock_<key>]`.
-//   - generic blocks may follow: FALLBACK to `items.oneOf: [FieldsBlock_<key>, ...generic, unknown]`
+//   - generic blocks may follow: FALLBACK to `items.anyOf: [FieldsBlock_<key>, ...generic, unknown]`
 //     with `minItems: 1` and `x-webdesk-blocks-prefix: "FieldsBlock_<key>"`. Why: openapi-typescript
 //     7.13 renders `prefixItems` as a CLOSED tuple and silently drops `items`, so
 //     `prefixItems: [F], items: {...}` became `[F]` and a valid page carrying a generic block after
 //     the fields block would not type-check. Position is still stated in the description and the
 //     extension; `validateItemContent` (payload/vocabulary/item-fields.ts) enforces it at write time.
+//
+// `anyOf`, never `oneOf`, for every generic block `items` union (T2 / D-a): the unknown-block branch
+// (UNKNOWN_BLOCK_SCHEMA: any string `type` + object `props`) is deliberately permissive, so a VALID
+// known block matches both its own branch and that one. Under `oneOf` ("exactly one") a strict JSON
+// Schema validator rejected every valid known block. `anyOf` ("at least one") accepts it. The branches
+// overlap by design, so they are not disjoint and `oneOf` can never be right here. openapi-typescript
+// renders both keywords as the same TS union, so the generated SDK types are unchanged.
 // List routes strip blocks to `[]` unless `?expand=blocks` (router.ts), so a fields collection's list
 // items use a separate `ListItemEnvelope_<key>` whose `blocks` makes no positional claim. A
 // collection without `fields` produces exactly the 1.0.0 document.
@@ -103,7 +110,7 @@ function collectionBlocksSchema(allowedBlocks: ComposableBlockType[] | undefined
   }
   return {
     type: "array",
-    items: { oneOf: [...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
+    items: { anyOf: [...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
   };
 }
 
@@ -131,7 +138,7 @@ function fieldsCollectionItemBlocksSchema(
     description: `${lead}; the collection's generic blocks may follow it. (Expressed as a union, not prefixItems: see openapi-builder.mts's header.)`,
     "x-webdesk-blocks-prefix": fieldsBlockName,
     minItems: 1,
-    items: { oneOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
+    items: { anyOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
   };
 }
 
@@ -141,7 +148,7 @@ function fieldsCollectionListBlocksSchema(allowedBlocks: ComposableBlockType[] |
   return {
     type: "array",
     description: `[] unless ?expand=blocks (router.ts). When expanded, blocks[0] is the "${FIELDS_BLOCK_TYPE}" block, as on the item route.`,
-    items: { oneOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
+    items: { anyOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
   };
 }
 

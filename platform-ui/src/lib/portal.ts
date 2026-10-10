@@ -147,7 +147,9 @@ export interface PortalTimelineEvent {
   id: string;
   label: string;
   status: string | null;
-  at: string;
+  /** NULL for an undated item (a milestone or deliverable with no due date): the live BFF sends it, so
+   *  every reader must cope. Typed `string` until 2026-10-11, which let a sort crash the whole page. */
+  at: string | null;
   tense: PortalTimelineTense;
   context: string | null;
   projectId: string | null;
@@ -494,8 +496,16 @@ export function splitTimeline(
     if (e.tense === "due" && !isPastDue(e.at, now)) upcoming.push(e);
     else history.push(e);
   }
-  upcoming.sort((a, b) => a.at.localeCompare(b.at));
-  history.sort((a, b) => b.at.localeCompare(a.at));
+  // Undated items sort LAST in both lists. A plain `a.at.localeCompare(b.at)` threw on the live system
+  // ("Cannot read properties of null") and took the whole timeline page down with it.
+  const byAt = (dir: 1 | -1) => (a: PortalTimelineEvent, b: PortalTimelineEvent): number => {
+    if (a.at === b.at) return 0;
+    if (a.at === null) return 1;
+    if (b.at === null) return -1;
+    return dir * a.at.localeCompare(b.at);
+  };
+  upcoming.sort(byAt(1));
+  history.sort(byAt(-1));
   return { upcoming, history };
 }
 

@@ -119,6 +119,19 @@ describe("splitTimeline", () => {
     expect(history).toHaveLength(1);
   });
 
+  it("copes with an undated item (at: null) instead of throwing, and sorts it last", () => {
+    // Live 2026-10-11: the BFF sends `at: null` for an undated milestone, and `a.at.localeCompare`
+    // threw "Cannot read properties of null", taking the whole timeline page to the error boundary.
+    const undatedDue: PortalTimelineEvent = { ...AT("2026-09-01"), id: "undated-due", at: null };
+    const undatedDone: PortalTimelineEvent = { ...AT("2026-01-01"), id: "undated-done", at: null, tense: "happened" };
+    const { upcoming, history } = splitTimeline(
+      [undatedDue, AT("2026-09-01"), undatedDone, { ...AT("2026-07-01"), tense: "happened" }],
+      now,
+    );
+    expect(upcoming.map((e) => e.at)).toEqual(["2026-09-01", null]);
+    expect(history.map((e) => e.at)).toEqual(["2026-07-01", null]);
+  });
+
   it("puts happened items in history, newest first", () => {
     const ev = (at: string): PortalTimelineEvent => ({ ...AT(at), tense: "happened" });
     const { history } = splitTimeline([ev("2026-01-01"), ev("2026-07-01")], now);

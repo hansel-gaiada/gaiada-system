@@ -1497,16 +1497,16 @@ controller (our client) may need to keep. Resolution, landed in
 ### Residency statement (§11 "(d)")
 
 `src/privacy/residency-statement.service.ts` — `ResidencyStatementService.buildFor(tenantSlug,
-backupPhase)`. Under **WSK-D23** (storage fully self-hosted — MinIO primary, no Cloudflare, no R2)
+backupPhase)`. Under **WSK-D23** (storage fully self-hosted — RustFS primary (WSK-D42, amending D23), no Cloudflare, no R2)
 this is answerable in one real sentence, generated from the SAME config the system actually runs on
 (`STORAGE_ENDPOINT`/`STORAGE_PUBLIC_BASE_URL`, `APP_DATABASE_URL`'s own host), not hand-typed policy
 prose:
 
 > All of tenant '\<slug>''s content, form submissions and uploaded media are stored on self-hosted
-> infrastructure we operate — Postgres at \<host> and MinIO (S3-API, self-hosted, never Cloudflare
+> infrastructure we operate — Postgres at \<host> and RustFS (S3-API object storage, self-hosted, never Cloudflare
 > R2 or any third-party object store) at \<host> — with backups going to \<phase-specific target,
-> e.g. "a nightly pull-model backup to a second estate-owned box (Zone B holds no credential for the
-> destination and cannot reach, overwrite, or delete it)">.
+> e.g. "a nightly pull-model backup to a second estate-owned box (the server that hosts the content holds no credential
+> for that box and cannot reach, overwrite, or delete it)">.
 
 Not wired to any HTTP route in this ticket (no design text asks for one) — a plain injectable a
 future control-plane read endpoint, or the WSK-24 console card, can call directly. Proven by
@@ -1744,6 +1744,39 @@ Serves, GET only, with the frozen envelope (design §05):
   moved: read-scope tests now drive the delivery routes; write-scope tests drive media upload
   (`POST /v1/t/:slug/media/:bucket`, `@RequireScope("write")`) — see the comments in
   `api-keys.scope-matrix.spec.ts` and `tenant-quota.spec.ts`.
+
+### Read-path hardening (WebDesk M3 T1)
+
+Five defects on the public `/v1` read path were fixed; no existing 2xx body changed (`envelope-contract.spec.ts`
+is untouched). The one new 2xx is a non-integer `limit`, which used to 500.
+
+- **Reserved collection keys.** `schema.apply` refuses a key that equals (case-insensitively) a fixed
+  segment under `/v1/t/:tenantSlug/`: `forms`, `media` (static routes of other controllers) and
+  `search`, `sitemap.xml` (the router's own endpoints), with `422 collection-key-reserved`, no collections
+  row and no audit row. The list is `src/delivery/reserved-collection-keys.ts`;
+  `test/delivery/reserved-collection-keys.spec.ts` boots the app and reads Fastify's registered routes,
+  so a new static route under that prefix that is not reserved fails the suite. `schema.propose` does not
+  refuse (it never persists).
+- **Percent-decoding.** The router decodes each path segment after `/v1/t/` exactly once with
+  `decodeURIComponent` (non-ASCII slugs such as `kafé-ü` are reachable by their encoded URL; `%2541` is the
+  literal text `%41`, never decoded twice). A malformed escape inside a segment is `400 invalid-path-encoding`.
+  A decoded segment containing `/` or NUL matches nothing: `404 not-found`, before any tenant lookup or SQL.
+- **Cursors and 500s.** `decodeCursor` now accepts only what the encoder writes (a Postgres
+  `timestamptz::text` value and a uuid, validated for real calendar/clock ranges); anything else is
+  `400 invalid-cursor` on list and search (it used to be ignored or to reach SQL and 500 with the database's
+  message). Every catch-all 500 (content query, `resolveApiKey`, and the gateway's request-build fallback)
+  now carries the fixed detail "The server could not complete this request." and the real error goes to the
+  server log (Nest `Logger`), never into the body.
+- **Non-integer `limit`.** `limit` is truncated to an integer before it is clamped to 1-100, so `limit=2.5`
+  lists 2 items. It used to reach `LIMIT $n` as `2.5` and 500.
+- **Undecodable URL.** `createFastifyAdapter()` (`src/app.ts`, used by `buildApp()` and so by `main.ts`)
+  sets Fastify's `frameworkErrors`, so `GET /v1/t/x/%E0%A4%A` (rejected by Fastify before routing,
+  `FST_ERR_BAD_URL`) is `400 application/problem+json` (`invalid-path-encoding`) instead of Fastify's default
+  body. Tests that build the full app with a bare `FastifyAdapter` would not get this; use the factory.
+- **Differential gate.** The new behaviours differ from the old Payload router on a few corpus inputs. They
+  are recorded in `v1-differential.spec.ts` as named, counted divergences (`intended` in
+  `v1-contract/differential.ts`, applied per call in `differential-extra.ts`), each requiring the exact
+  old/new status pair; the comparison is otherwise unchanged. Delete them with the Payload router.
 
 No new env vars: `APP_DATABASE_URL`, `API_KEY_PEPPER` (must equal what the keys were minted with),
 and the optional quota vars are all existing.

@@ -101,3 +101,17 @@ function gaiada_render_block_logoCloud(array $props): string
     }
     return $html . '</div>';
 }
+
+/** The composition-typed `fields` block (vocabulary 1.1.0, WSK-64). It carries an item's typed field
+ *  values for the site's own code to read; it is data, not presentation, so it draws NOTHING and is
+ *  not an unknown block (nothing is reported). Mirrors webdesk/blocks/src/renderer: resolve-blocks.ts
+ *  treats `fields` as known but non-visual (NON_VISUAL_BLOCK_TYPES) and BlockRenderer.astro returns null
+ *  for it. Without this function the dispatcher in block-renderer.php would throw for it, because
+ *  `fields` is in gaiada_known_block_types().
+ *
+ * @param array<string,mixed> $props
+ */
+function gaiada_render_block_fields(array $props): string
+{
+    return '';
+}

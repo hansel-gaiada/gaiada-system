@@ -15,12 +15,18 @@
 //      query, and attach rate-limit headers. With no hook the behaviour is exactly the original's.
 //   3. Vocabulary imports point at the vendored copy (./vocabulary/*), which a drift test pins to
 //      webdesk/payload/vocabulary/*.
-// The order of checks, every status, every problem slug/title/detail, the "unknown tenant and bad key
+//   4. (M3 T1) Hardening of the read path, and ONLY these: each path segment after the tenant prefix
+//      is percent-decoded once (malformed -> 400 problem+json, a decoded segment holding `/` or NUL
+//      -> 404 never reaching SQL); a malformed pagination cursor is a 400 `invalid-cursor`; and the
+//      catch-all 500 carries a fixed detail instead of the thrown error's message (logged here).
+// Apart from item 4, the order of checks, every status, every problem slug/title/detail, the "unknown tenant and bad key
 // return the same 401" doctrine, and every header are unchanged.
 import { randomUUID } from 'node:crypto'
+import { Logger } from '@nestjs/common'
 import { extractBearerKey, type ResolvedApiKey, type ResolvedTenant } from './auth'
 import type { DeliveryDb } from './db'
-import { getItem, listItems, searchItems } from './content-read'
+import { getItem, InvalidCursorError, listItems, searchItems } from './content-read'
+import { SEARCH_SEGMENT, SITEMAP_SEGMENT } from './reserved-collection-keys'
 import { renderSitemapXml } from './redirects'
 import { applyCacheTagHeader, buildCacheTags } from './vocabulary/cache-tags'
 import { problemDetails, problemResponse } from './vocabulary/problem-details'
@@ -41,6 +47,14 @@ export interface V1Deps {
   /** Re-reads api_keys fresh on every call; null for unknown / revoked / orphaned keys. */
   resolveApiKey(tenant: ResolvedTenant, plaintextKey: string): Promise<ResolvedApiKey | null>
   onAuthenticated?(auth: ResolvedApiKey, ctx: { instance: string; requestId: string }): AuthGate | void
+}
+
+const logger = new Logger('DeliveryRouter')
+/** What every unexpected failure tells the client. The thrown message (SQL text, hosts) stays in the log. */
+const INTERNAL_ERROR_DETAIL = 'The server could not complete this request.'
+
+function logInternalError(err: unknown, instance: string, requestId: string): void {
+  logger.error(`internal error on ${instance} (request ${requestId}): ${err instanceof Error ? err.stack ?? err.message : String(err)}`)
 }
 
 function jsonResponse(body: unknown, headers: Headers, status = 200): Response {
@@ -81,8 +95,22 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
       )
     }
 
-    const tenantSlug = segments[2]
-    const rest = segments.slice(3) // [] | [key] | [key,slug] | ['search'] | ['sitemap.xml']
+    // M3 T1: decode each segment exactly once (never twice: `%2541` is the literal text `%41`). A
+    // malformed escape is the caller's error (400). A decoded segment can no longer be trusted to be
+    // one segment: `/` would let `%2F` reach across segments, and NUL cannot be stored in Postgres
+    // text (it would surface as a 500) — neither can match anything, so both are a plain 404.
+    let decoded: string[]
+    try {
+      decoded = segments.slice(2).map((s) => decodeURIComponent(s))
+    } catch {
+      return problem(400, 'invalid-path-encoding', 'Invalid path encoding', 'A path segment is not valid percent-encoding.', instance, requestId)
+    }
+    if (decoded.some((s) => s.includes('/') || s.includes('\u0000'))) {
+      return problem(404, 'not-found', 'Not Found', 'No /v1 route matches this path.', instance, requestId)
+    }
+
+    const tenantSlug = decoded[0]
+    const rest = decoded.slice(1) // [] | [key] | [key,slug] | ['search'] | ['sitemap.xml']
 
     const tenant = await deps.resolveTenantBySlug(tenantSlug)
     if (!tenant || tenant.status !== 'active') {
@@ -100,7 +128,8 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
     try {
       auth = await deps.resolveApiKey(tenant, plaintextKey)
     } catch (err) {
-      return problem(500, 'internal-error', 'Internal error', (err as Error).message, instance, requestId)
+      logInternalError(err, instance, requestId)
+      return problem(500, 'internal-error', 'Internal error', INTERNAL_ERROR_DETAIL, instance, requestId)
     }
     if (!auth) {
       return problem(401, 'invalid-credentials', 'Invalid credentials', 'Unknown tenant or invalid key.', instance, requestId)
@@ -111,12 +140,13 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
 
     const locale = url.searchParams.get('locale')
     const limitParam = Number(url.searchParams.get('limit') || '25')
-    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(1, limitParam), 100) : 25
+    // M3 T1: truncated to an integer. `limit=2.5` used to reach `LIMIT $n` as a non-integer and 500.
+    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(1, Math.trunc(limitParam)), 100) : 25
     const cursor = url.searchParams.get('cursor')
     const expandBlocks = url.searchParams.get('expand') === 'blocks'
 
     try {
-      if (rest.length === 1 && rest[0] === 'search') {
+      if (rest.length === 1 && rest[0] === SEARCH_SEGMENT) {
         const q = url.searchParams.get('q') || ''
         const collectionKey = url.searchParams.get('collection') || null
         const result = await searchItems(db, { auth, locale, q, collectionKey, cursor, limit })
@@ -125,7 +155,7 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
         return withHeaders(jsonResponse(result, headers), gate?.headers)
       }
 
-      if (rest.length === 1 && rest[0] === 'sitemap.xml') {
+      if (rest.length === 1 && rest[0] === SITEMAP_SEGMENT) {
         const xml = await renderSitemapXml(db, { auth, locale })
         const headers = new Headers({ 'content-type': 'application/xml' })
         applyCacheTagHeader(headers, buildCacheTags({ tenantSlug, collectionKey: 'sitemap' }))
@@ -166,7 +196,14 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
         gate?.headers,
       )
     } catch (err) {
-      return withHeaders(problem(500, 'internal-error', 'Internal error', (err as Error).message, instance, requestId), gate?.headers)
+      if (err instanceof InvalidCursorError) {
+        return withHeaders(
+          problem(400, 'invalid-cursor', 'Invalid cursor', 'The cursor is not one this API issued.', instance, requestId),
+          gate?.headers,
+        )
+      }
+      logInternalError(err, instance, requestId)
+      return withHeaders(problem(500, 'internal-error', 'Internal error', INTERNAL_ERROR_DETAIL, instance, requestId), gate?.headers)
     }
   }
 }

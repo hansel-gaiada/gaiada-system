@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.59.0` | IN PROGRESS | WS1 | 2026-10-11 |
-| platform-ui | `0.77.0` | IN PROGRESS | WS5 | 2026-10-11 |
+| platform-ui | `0.78.0` | IN PROGRESS | WS5 | 2026-10-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -47,7 +47,7 @@ versions below; the running build reports it at `GET /health`.
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
-| webdesk | `0.3.0` | DEV-VERIFIED | Web Dev | 2026-10-11 |
+| webdesk | `0.4.0` | DEV-VERIFIED | Web Dev | 2026-10-11 |
 | search-marketing | `0.5.2` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
@@ -168,8 +168,9 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.77.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.78.0` · IN PROGRESS
 
+**0.78.0 (2026-10-11, portal timeline hotfix — PROTOTYPED):** `PortalTimelineEvent.at` is `string | null` and `splitTimeline` sorts undated items last; the live `/portal/timeline` crash (`localeCompare` on null) found by the PV2-08 drive. Linux: ui 228/228, `next build` ok, portal e2e 12/12.
 **0.77.0 (2026-10-11, PV2-07 — PROTOTYPED):** portal projects split Active / Past on the server's `finished`; the project page names the lead (copyable email); People groups your people · your account manager · on our side; the project page's "Was due" now reads `finished`. Linux: ui 228/228, `next build` ok, portal e2e 12/12.
 **0.75.0 (2026-10-11, PV-2 wave 2 — PROTOTYPED):** one portal company resolver over `Me.clientOf` (all 18 call sites, guard test teeth-proven); the header names the serving company, never "Syrowatka"; company switch for contacts of 2+ companies; "Client view" / "Back to workspace" for people who are both; no-client-company callers get the explanation, not "No workspace selected". Linux: ui 218/218, `next build` ok, portal e2e 11/11 (DEMO_MODE).
 **0.74.0 (2026-10-10, PV-2 wave 1 — PROTOTYPED):** the client portal's five areas (Overview · Projects · Business · Contracts & billing · People) with sub-tabs and split badges, **no route moved** (PV-D4); labels Contracts / People / Business; Client Centre views use `<h2>` so each page has one `<h1>`. Linux: ui 213/213, `next build` ok, portal e2e 10/10 (DEMO_MODE). Live drive pending (PV2-08).
@@ -600,9 +601,9 @@ Phase 1; Phase 3 (external wiring — GitHub App, Drive OAuth, Claude Admin usag
 decisions OQ-2/OQ-3; Phase 4 (webdesk + the one-rail contract-snapshot scaffolder) activates once
 webdesk's own P3 codegen lands.
 
-## webdesk — Website Platform · `0.3.0` · DEV-VERIFIED
+## webdesk — Website Platform · `0.4.0` · DEV-VERIFIED
 
-**Current state (2026-10-11):** live on `gda-aicenter` (`/v1` in the api, RustFS, migration 0009, the control channel). The write plane, live reads, the editorial assertion and vocabulary 1.1.0 are Linux-verified; editing from the ERP and the gaiada.com import go live with the 2026-10-11 release. Tracker `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; board `TASKS.md`. The paragraphs below are history.
+**Current state (2026-10-11):** M3 (a complete CMS, Payload removed) is in progress: wave 1 is on main (0.4.0; plan `docs/plans/2026-10-11-webdesk-m3-plan.md`), not yet live. 0.3.0 is live on `gda-aicenter` (`/v1` in the api, RustFS, migration 0009, the control channel). The write plane, live reads, the editorial assertion and vocabulary 1.1.0 are Linux-verified; editing from the ERP and the gaiada.com import go live with the 2026-10-11 release. Tracker `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; board `TASKS.md`. The paragraphs below are history.
 
 **What exists:** blueprint only (approved 2026-07-23) — see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation → P2 Forms+Mail → P3 Contract/codegen → P4 ERP control+envs →
