@@ -11,6 +11,52 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.57.0` - one definition of "finished project"; `/api/me` says which companies the caller is a client of (2026-10-10) - PROTOTYPED
+
+Plan: `docs/plans/2026-10-10-three-perspectives.md`. Tickets PV2-01 and PV2-02 are in
+`docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. Contract: BFF §1 and §16a.
+
+- **Bug fixed: a project marked `completed` counted as active.** The staff project form offers
+  `completed`, but three places only knew `done` and `complete`: the portal overview, the portal
+  projects order and the staff client overview. There is now one list, `src/core/project-status.ts`
+  (`FINISHED_PROJECT_STATUSES`, `DONE_PROJECT_STATUSES`), passed as bind parameters.
+- **`/api/me` gains `clientOf`** (additive). It lists the companies where the caller is an active
+  client contact, sorted by name. It is read under the `principal_lookup` setting inside a
+  transaction; without that setting, RLS returns zero rows with no error (the MON-00i trap).
+- **Tests.** Both were proven on Linux to fail with their fix removed:
+  - `project-status.db.test.ts` covers both overviews and the ordering. All 4 tests fail with
+    `completed` removed.
+  - `me.api.test.ts` covers two companies, a revoked contact and staff. The 2 predicted tests fail
+    without `set_config`.
+- `docs/modules/CAPABILITY-INVENTORY.md` is regenerated: the clients driver-suite count goes from 6
+  to 7.
+- No migrations, no Cerbos changes, no new MCP tools.
+
+### platform-ui `0.74.0` - the client portal's five areas; one heading per Client Centre page (2026-10-10) - PROTOTYPED
+
+Plan: ruling PV-D4 in `docs/plans/2026-10-10-three-perspectives.md`. Tickets PV2-01, PV2-02 and PV2-04.
+
+- **Portal navigation (PV2-04).**
+  - The 11 flat tabs become five areas: Overview · Projects · Business · Contracts & billing ·
+    People. An area with more than one page gets a sub-tab row.
+  - **No route moved.** The six paths sent to clients in notifications still open the same pages.
+  - `src/lib/portalNav.ts` maps every route; its test derives the route list from the page files.
+  - Badges are split: approvals on Projects; unsigned contracts plus overdue invoices on Contracts &
+    billing.
+- **Labels.** "Agreements" becomes Contracts, "Profile" becomes People, and "Business profile"
+  becomes Business.
+- **From PV2-01 and PV2-02.** `statusTone("completed")` now reads as success. `Me.clientOf` gets a
+  type, and there is a demo identity `viceroy-marketing@gaiada.com` (staff of Viceroy, client of
+  Gaiada).
+- **Client Centre: one `<h1>` per page.** The five Client Centre views rendered their own `<h1>`
+  inside pages that already own one (the portal Business page and the staff client hub). They now
+  use `<h2>`, with the same styling. The portal e2e found this.
+- **Verified on Linux:**
+  - the ui suite, 213/213 files;
+  - `next build` ok;
+  - the portal e2e, 10/10 in DEMO_MODE, with desktop and phone screenshots.
+  - The live drive is still pending (PV2-08).
+
 ### platform-nest `0.56.0` - clients get an owner, notes and a history; create keeps its status (2026-09-29) - PROTOTYPED
 
 Plan: `docs/plans/2026-09-29-client-centre.md` (CC-D10). Contract: BFF §26.

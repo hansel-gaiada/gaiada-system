@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.55.0` | IN PROGRESS | WS1 | 2026-09-29 |
-| platform-ui | `0.71.0` | IN PROGRESS | WS5 | 2026-09-29 |
+| platform-nest | `0.57.0` | IN PROGRESS | WS1 | 2026-10-10 |
+| platform-ui | `0.74.0` | IN PROGRESS | WS5 | 2026-10-10 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -63,7 +63,9 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.56.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.57.0` · IN PROGRESS
+
+**0.57.0 (2026-10-10, PV-2 wave 1 — PROTOTYPED):** one `FINISHED_PROJECT_STATUSES` list (`src/core/project-status.ts`) fixes "completed counted as active" in the portal and staff client overviews; additive `/api/me` `clientOf` (companies where the caller is an active client contact, read under `principal_lookup`). Teeth-proven on Linux. Contract: BFF §1, §16a. Plan: `docs/plans/2026-10-10-three-perspectives.md`.
 
 **0.56.0 (2026-09-29, client edit surface — PROTOTYPED):** `clients.owner_user_id` (migration `202609290551`), owner validated as active tenant staff; `POST /clients` stores `status` (was dropped); `PATCH /clients/:id` merges `contact` key by key and logs before/after; new `/clients/:id/notes` (GET/POST/DELETE, on the core `comments` table) and `/clients/:id/history`. Contract: BFF §26 (CC-D10).
 **0.55.0 (2026-09-29, Client Centre backend — PROTOTYPED):** `client_centre_profiles` + staff (`/clients/centre`, `/clients/:id/centre`) and portal (`/portal/centre*`) routes, registry-validated key-level PATCH with value-scanning credential refusal and before/after activity, new Cerbos action `portal.edit_company_profile` (CC-D4). Plan: `docs/plans/2026-09-29-client-centre.md`; contract: BFF §25.
@@ -165,7 +167,9 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.73.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.74.0` · IN PROGRESS
+
+**0.74.0 (2026-10-10, PV-2 wave 1 — PROTOTYPED):** the client portal's five areas (Overview · Projects · Business · Contracts & billing · People) with sub-tabs and split badges, **no route moved** (PV-D4); labels Contracts / People / Business; Client Centre views use `<h2>` so each page has one `<h1>`. Linux: ui 213/213, `next build` ok, portal e2e 10/10 (DEMO_MODE). Live drive pending (PV2-08).
 
 **0.73.0 (2026-09-29, clients editable by staff — PROTOTYPED):** capabilities `client.write` (member+) / `client.delete` (manager+) replace `pm.manage` on every client control; client Edit (name, status, owner, email, phone, address, billing contact), Archive/Restore, a confirm on Delete, archived hidden from the default list, Owner column, and a **Notes & history** tab. Uses BFF §26 (CC-D10).
 
