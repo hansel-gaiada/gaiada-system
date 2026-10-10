@@ -153,6 +153,8 @@ export interface Me {
   companies: { id: string; name: string; type: string | null }[];
   roles: { role: string; scopeType: string; scopeId: string | null }[];
   serviceScopes?: ServiceScope[];
+  /** PV2-02: companies where the caller is an active client contact. Optional: treat missing as []. */
+  clientOf?: { companyId: string; companyName: string }[];
 }
 
 export const getMe = (userId: string) => platformFetch<Me>("/api/me", userId);
