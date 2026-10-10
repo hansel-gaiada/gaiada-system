@@ -21,7 +21,7 @@ http
     let received = null;
     if (typeof h === "string") {
       try {
-        const x = new X509Certificate(Buffer.from(h, "base64").toString("utf8"));
+        const x = new X509Certificate(decodeURIComponent(h));
         received = { subject: x.subject, fingerprint256: x.fingerprint256 };
       } catch (e) {
         received = { unparsable: String(e.message) };

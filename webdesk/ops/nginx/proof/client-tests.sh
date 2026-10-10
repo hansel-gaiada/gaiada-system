@@ -10,7 +10,7 @@ verdict() { # name condition(0=ok)
   if [ "$2" -eq 0 ]; then echo "  => PASS  $1"; else echo "  => FAIL  $1"; FAIL=1; fi
 }
 fp() { openssl x509 -in "$1" -noout -fingerprint -sha256 | sed 's/.*=//'; }
-b64() { base64 -w0 "$1"; }
+urlenc() { curl -Gso /dev/null -w '%{url_effective}' --data-urlencode "x=$(cat "$1")" http://x | sed 's/^[^?]*?x=//'; }
 row() { echo; echo "### $*"; }
 
 REAL_FP=$(fp /certs/client.crt); EVIL_FP=$(fp /certs/evilclient.crt)
@@ -38,7 +38,7 @@ echo "$BODY" | grep -q '"controlGateHeaderPresent":false'; C=$?
 verdict "T3 verified cert delivered, layer1 verified, gate stripped before api" $((A+B+C))
 
 row "T4  valid cert + FORGED inbound x-webdesk-mtls-cert-pem (evil cert) -> upstream receives the VERIFIED cert"
-FORGED=$(b64 /certs/evilclient.crt)
+FORGED=$(urlenc /certs/evilclient.crt)
 BODY=$(curl -s $TLS --cert /certs/client.crt --key /certs/client.key -H "X-Webdesk-Mtls-Cert-Pem: $FORGED" $CTL/control/v1/tenants)
 echo "$BODY"
 echo "$BODY" | grep -q "\"fingerprint256\":\"$REAL_FP\""; A=$?
