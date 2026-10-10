@@ -321,6 +321,67 @@ test("a write that hits an unavailable API keeps the edits and goes stale instea
   await expect(page.locator(P("h1"))).toHaveValue("Typed, then the API died");
 });
 
+test("STATE write outcome unknown (502 webdesk_ambiguous), the write did NOT land: 'couldn't confirm', edits kept, Reload recovers", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await page.locator(P("h1")).fill("Typed, outcome unknown");
+  await stub.config({ ambiguous: "drop" });
+  await page.getByTestId("save").click();
+  const banner = page.getByTestId("unconfirmed-banner");
+  await expect(banner).toContainText("We couldn't confirm the save. Reload to see what happened.");
+  await expect(banner).toHaveAttribute("role", "alert");
+  await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes"); // never "Saved vN"
+  await expect(page.getByTestId("save-error")).toHaveCount(0);                  // never a confident failure
+  await expect(page.getByTestId("save")).toBeDisabled();
+  await expect(page.getByTestId("request-publish")).toBeDisabled();
+  await expect(page.locator(P("h1"))).toHaveValue("Typed, outcome unknown");
+  expect((await stub.item("itm-service-seo-en")).headVersion).toBe(3);
+
+  await stub.config({ ambiguous: null });
+  await page.getByTestId("unconfirmed-reload").click();
+  await expect(banner).toHaveCount(0);
+  await expect(page.getByTestId("save")).toBeEnabled();
+  await expect(page.locator(P("h1"))).toHaveValue("Typed, outcome unknown");
+});
+
+test("STATE write outcome unknown, the write DID land: Reload shows the head moved instead of a false failure", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await page.locator(P("h1")).fill("Landed after all");
+  await stub.config({ ambiguous: "land" });
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("unconfirmed-banner")).toContainText("We couldn't confirm the save");
+  expect((await stub.item("itm-service-seo-en")).headVersion).toBe(4);
+  await stub.config({ ambiguous: null });
+  await page.getByTestId("unconfirmed-reload").click();
+  await expect(page.getByTestId("unconfirmed-banner")).toHaveCount(0);
+  await expect(page.getByTestId("behind-head")).toContainText("v4 was saved since you opened this");
+  await expect(page.locator(P("h1"))).toHaveValue("Landed after all");
+});
+
+test("STATE lint unavailable: the placeholders card says it couldn't check, never 'No unresolved placeholders'", async ({ page }) => {
+  await stub.config({ lintUnavailable: true });
+  await open(page, SERVICE_SEO);
+  const card = page.getByTestId("lint-card");
+  await expect(page.getByTestId("lint-unavailable")).toHaveText("Couldn't check for placeholders. This is not a statement that there are none.");
+  await expect(card).not.toContainText("No unresolved placeholders");
+  await stub.config({ lintUnavailable: false });
+  await page.getByTestId("refresh-now").click();
+  await expect(page.getByTestId("lint-unavailable")).toHaveCount(0);
+});
+
+test("STATE staging rebuild not set up (503 webdesk_not_configured): plain words, no raw slug, no approval filed", async ({ page }) => {
+  await open(page, `${SITE}/service/service.web-design?locale=en`);
+  await page.getByTestId("unpublish").click();
+  await page.getByTestId("confirm-unpublish").click();
+  await expect(page.getByTestId("staging-stale")).toBeVisible();
+  await stub.config({ rebuildNotConfigured: true });
+  await page.getByTestId("request-rebuild").click();
+  const msg = page.getByTestId("publish-message");
+  await expect(msg).toHaveText("Staging rebuild isn't set up for this site.");
+  await expect(msg).not.toContainText("webdesk_not_configured");
+  await expect(page.getByTestId("awaiting-approval")).toHaveCount(0);
+  await expect(page.getByTestId("stale-banner")).toHaveCount(0); // not an outage
+});
+
 // ── publish: pending approval -> rejected | failed | published -> rebuild ──────────────────────────
 
 test("STATE pending approval -> Withdraw; the pending request survives a reload", async ({ page }) => {
