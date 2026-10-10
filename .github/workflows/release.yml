@@ -10,6 +10,20 @@
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 #   cosign verify-attestation --type spdxjson ...   # SBOM
 #   gh attestation verify oci://ghcr.io/<owner>/gaiada-<component>:<tag> --owner <owner>  # SLSA provenance
+#
+# WSK-69 (2026-10-10, ruling WSK-D47) - BUILD ONLY WHAT CHANGED. A `plan` job (scripts/ci/plan.mjs,
+# unit-tested in scripts/ci/plan.test.mjs) decides, per component, BUILD or RE-TAG:
+#   * BUILD  - the component's build context changed since the newest previous release that has a
+#              SIGNED image of it, or release.yml itself changed, or there is no such image, or that
+#              image is older than 30 days (floating base-image tags: refresh them), or force_all.
+#   * RE-TAG - otherwise the previous image's manifest is copied to the new tag BY DIGEST
+#              (`docker buildx imagetools create`). The digest is unchanged, so the cosign signature
+#              and SBOM attestation (stored as sha256-<digest>.sig / .att and keyed by DIGEST, not by
+#              tag) remain valid, and deploy.yml's `cosign verify ghcr.io/<owner>/gaiada-<c>:<tag>`
+#              resolves the new tag to that digest and finds the same signature. Every component
+#              therefore still exists at every release tag, which `docker compose pull` and
+#              rollback-to.sh rely on.
+# Fully-built components still go through the unchanged build -> SBOM -> cosign -> SLSA steps below.
 name: release
 
 on:
@@ -23,6 +37,11 @@ on:
       tag:
         description: "Image tag to publish (defaults to the git ref name)"
         required: false
+      force_all:
+        description: "Rebuild EVERY component instead of re-tagging unchanged ones (WSK-69 escape hatch)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,46 +50,59 @@ permissions:
   attestations: write # actions/attest-build-provenance
 
 jobs:
+  # WSK-69 - decide BUILD vs RE-TAG per component. Needs full history + tags (fetch-depth 0, blobless:
+  # only trees are diffed) and a GHCR login to look for the previous signed images (read-only).
+  plan:
+    runs-on: ubuntu-latest
+    env:
+      OWNER: ${{ github.repository_owner }}
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      FORCE_ALL: ${{ github.event.inputs.force_all }}
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      retag: ${{ steps.plan.outputs.retag }}
+      has_build: ${{ steps.plan.outputs.has_build }}
+      has_retag: ${{ steps.plan.outputs.has_retag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Plan (build vs re-tag)
+        id: plan
+        run: |
+          set -euo pipefail
+          all=""
+          [ "${FORCE_ALL:-false}" = "true" ] && all="--all"
+          node scripts/ci/plan.mjs release --tag "$TAG" --owner "$OWNER" $all
+
   build-sign:
+    needs: plan
+    if: needs.plan.outputs.has_build == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        component:
-          - wa-chat-bot
-          - mcp-hub
-          - ai-agents
-          - ai-gateway-go
-          - sync-engine-go
-          - search-crawl-go
-          - platform-nest
-          - platform-ui
-          - report-renderer
-          # WSK-29 — webdesk/api (Zone B NestJS service) only. Its Dockerfile builds cleanly
-          # (verified 2026-08-27 — see docs/plans/2026-08-26-webdesk-PROGRESS.md's WSK-29 report).
-          # `webdesk-payload` is DELIBERATELY NOT in this matrix yet: its own Dockerfile exists
-          # (webdesk/payload/Dockerfile) but `next build`'s type-check is red today (TS2578, 4
-          # files — reported, not fixed, outside this ticket's file ownership) and `needs: build-sign`
-          # below waits for EVERY matrix leg — one broken leg fails the WHOLE job and skips `deploy`
-          # for every other component too (`fail-fast: false` only stops CANCELLATION of siblings, it
-          # does not make the job overall succeed). Add it only once that build is green.
-          # Neither webdesk component is in deploy.yml's COMPONENTS list or any compose file — there
-          # is no Zone B box yet (A-12), so this closes "nothing builds a webdesk image" without
-          # inventing a deploy path nothing can serve.
-          - webdesk-api
-          # WSK-28 (2026-08-27) — now in the matrix. It was deliberately EXCLUDED because
-          # `next build`'s type-check was red (TS2578 unused @ts-expect-error x5, then TS5097 on 41
-          # .ts-extension imports once those were cleared), and `needs: build-sign` waits for every
-          # matrix leg, so one red leg would have skipped `deploy` for EVERY component in the
-          # estate. Both causes are fixed and the build is green, so it joins. Its context is a
-          # subdirectory like webdesk-api's -- see the `context:` expression below.
-          - webdesk-payload
-          # MON-09f. Unlike every other entry this does NOT live at ./<component> - see the
-          # `context:` expression below. It is here because deploy.yml runs `up -d --no-build`:
-          # a service that exists only as a local `build:` has no image to start, so the deploy
-          # dies at that service. It was previously kept alive by an image built BY HAND on the
-          # box, which survives exactly until the box is rebuilt.
-          - synthetic-prober
+        # WSK-69: the list is no longer hand-maintained here. It is the `build` output of the plan job,
+        # a subset of COMPONENTS in scripts/ci/config.mjs (the single list; add a component THERE).
+        # History that used to live on the entries, kept because it still explains the shape:
+        #   * webdesk-api (WSK-29) - webdesk/api/ Zone B NestJS service. NOT in deploy.yml's COMPONENTS
+        #     and in no compose file on purpose (webdesk/docker-compose.aicenter-release.yml): there is
+        #     no Zone B box yet, so this only closes "nothing builds a webdesk image".
+        #   * webdesk-payload (WSK-28) - joined once its `next build` type-check went green: `needs:
+        #     build-sign` waits for every leg, so one red leg would skip `deploy` for EVERY component.
+        #   * synthetic-prober (MON-09f) - lives under infra/observability/, see `context:` below. It is
+        #     here because deploy.yml runs `up -d --no-build`: a service that exists only as a local
+        #     `build:` has no image to start.
+        component: ${{ fromJSON(needs.plan.outputs.build) }}
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/gaiada-${{ matrix.component }}
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -279,11 +311,56 @@ jobs:
           # as the `GHCR_CLEANUP_TOKEN` secret, and it is used instead.
           token: ${{ secrets.GHCR_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
 
+  # WSK-69 - unchanged components: copy the previous release's signed image to the new tag, by DIGEST.
+  # Nothing is rebuilt, re-signed or re-attested: the signature and SBOM attestation are bound to the
+  # digest, which does not change. The digest is asserted unchanged after every copy, so a registry
+  # that re-encoded the manifest would fail loudly here rather than at deploy.yml's cosign verify.
+  retag:
+    needs: plan
+    if: needs.plan.outputs.has_retag == 'true'
+    runs-on: ubuntu-latest
+    env:
+      OWNER: ${{ github.repository_owner }}
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      RETAG: ${{ needs.plan.outputs.retag }}
+    steps:
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Re-tag unchanged components by digest
+        run: |
+          set -euo pipefail
+          mapfile -t rows < <(printf '%s' "$RETAG" | jq -c '.[]')
+          for row in "${rows[@]}"; do
+            comp="$(jq -r .component <<<"$row")"
+            from="$(jq -r .fromTag <<<"$row")"
+            digest="$(jq -r .digest <<<"$row")"
+            img="ghcr.io/${OWNER}/gaiada-${comp}"
+            echo "::group::re-tag ${comp}: ${from} (${digest}) -> ${TAG}"
+            docker buildx imagetools create --tag "${img}:${TAG}" "${img}@${digest}"
+            got="$(docker buildx imagetools inspect "${img}:${TAG}" --format '{{json .Manifest}}' | jq -r .digest)"
+            if [ "$got" != "$digest" ]; then
+              echo "::error::${img}:${TAG} resolved to ${got}, expected ${digest} - the signature would NOT carry over. Re-run with force_all=true."
+              exit 1
+            fi
+            echo "OK ${img}:${TAG} -> ${digest}"
+            echo "::endgroup::"
+          done
+
   # The single deploy point: once EVERY component is built, signed and attested, hand the
   # tag to deploy.yml. `git push --tags` is therefore the whole release-and-deploy action.
   # Deploy is still independently runnable (workflow_dispatch) for rollback.
   deploy:
-    needs: build-sign
+    # WSK-69: build-sign and retag are each skipped when they have nothing to do, and a skipped `needs`
+    # would skip deploy too - so run unless something FAILED or the run was cancelled. A failed plan,
+    # build leg or re-tag still blocks the deploy exactly as a failed build leg always did.
+    needs: [plan, build-sign, retag]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
     uses: ./.github/workflows/deploy.yml
     with:
       tag: ${{ github.event.inputs.tag || github.ref_name }}
