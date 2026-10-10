@@ -207,7 +207,7 @@ export function seed() {
     build: null,
     stagingStale: false,
     seq: 0,
-    cfg: { approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, drift: null, forceIssues: null, unavailableOnce: 0 },
+    cfg: { approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, drift: null, forceIssues: null, unavailableOnce: 0 },
     log: [],
   };
 }
@@ -274,7 +274,11 @@ function detailBody(S, it, which) {
     group: [...S.items.values()].filter((g) => g.groupId === it.groupId && !g.deletedAt).map((g) => ({
       locale: g.locale, itemId: g.itemId, slug: g.slug, headVersion: head(g).n, publishedVersion: g.publishedVersion, publishState: g.publishState,
     })),
-    lint: lintOf(c, v.blocks),
+    lint: S.cfg.lintUnavailable
+      // `content-reads.service.ts`: when the collection's stored composition is invalid the lint cannot RUN: the report is
+      // empty AND `unavailable` carries the reason. An empty list here is not a finding.
+      ? { placeholders: { unresolvedTokens: [], markers: {} }, unavailable: "the collection's stored composition is invalid" }
+      : lintOf(c, v.blocks),
   };
 }
 
@@ -284,6 +288,15 @@ const problem = (status, slug, title, extra = {}) => R(status, { type: `${PROBLE
 
 // The BFF's own refusals use platform-nest's `{ error }` shape (HttpErrorFilter), not a problem document.
 const forbidden = () => R(403, { error: "forbidden" });
+
+// 502 `webdesk_ambiguous` (cfg.ambiguous = "drop" | "land"): a write whose outcome the BFF could not confirm. "drop" = the
+// write did NOT reach Zone B (`not_observed`), "land" = it DID apply but could not be reconciled (`reconcile_failed`).
+const ambiguousWrite = (S, apply) => {
+  if (!S.cfg.ambiguous) return null;
+  const lands = S.cfg.ambiguous === "land";
+  if (lands) apply();
+  return R(502, { error: "webdesk_ambiguous", reason: lands ? "reconcile_failed" : "not_observed" });
+};
 
 export function handleWebdesk(S, { method, pathname, query, body, userId, company }) {
   const role = roleOf(userId);
@@ -346,7 +359,7 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
       if (!b) return problem(404, "version-not-found", "Version not found");
       return R(200, b);
     }
-    if (method === "PUT") return updateItem(S, it, body, userId);
+    if (method === "PUT") return ambiguousWrite(S, () => updateItem(S, it, body, userId)) ?? updateItem(S, it, body, userId);
   }
   if ((mm = rest.match(/^\/items\/([^/]+)\/versions$/)) && method === "GET") {
     const it = S.items.get(mm[1]);
@@ -363,9 +376,8 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
   if ((mm = rest.match(/^\/items\/([^/]+)\/(restore|unpublish|delete)$/)) && method === "POST") {
     const it = S.items.get(mm[1]);
     if (!it) return problem(404, "item-not-found", "Item not found");
-    if (mm[2] === "restore") return restoreItem(S, it, body, userId);
-    if (mm[2] === "unpublish") return unpublishItem(S, it, body);
-    return deleteItem(S, it, body);
+    const run = () => (mm[2] === "restore" ? restoreItem(S, it, body, userId) : mm[2] === "unpublish" ? unpublishItem(S, it, body) : deleteItem(S, it, body));
+    return ambiguousWrite(S, run) ?? run();
   }
 
   if (rest === "/publish-requests" && method === "POST") return requestPublish(S, body, userId);
@@ -391,7 +403,8 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
     return R(200, { approvalId: a.id, status: "cancelled" });
   }
   if (rest === "/rebuild-requests" && method === "POST") {
-    // PROPOSED (not in WSK-59).
+    // WSK-60. A site with no staging rebuild target is refused up front, before any approval is filed.
+    if (S.cfg.rebuildNotConfigured) return R(503, { error: "webdesk_not_configured: no staging rebuild target is configured for this site", reason: "webdesk_not_configured" });
     const id = `ap-${(++S.seq).toString(16).padStart(4, "0")}-rebuild`;
     S.approvals.set(id, approvalRow(S, id, "content.rebuild", userId, { tenantSlug: TENANT, siteId: SITE, items: [], rebuild: "staging" }, "Rebuild gaiada.com staging"));
     return R(202, { approvalId: id });

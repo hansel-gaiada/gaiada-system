@@ -5,7 +5,7 @@ import tokenRegistry from "../../e2e/webdesk-stub/compositions/token-registry.js
 import company from "../../e2e/webdesk-stub/compositions/company.json";
 import {
   authorLabel, defaultFields, deepEqual, describeReasonToken, diffContent, fieldLabel, fieldPointer, groupCollections,
-  hasNeutralDescendant, hasPendingChanges, humanize, isLive, isNeutral, issuesAt, issuesUnder, moveItem, overlayNeutrals,
+  hasNeutralDescendant, hasPendingChanges, humanize, isLive, isNeutral, isOutcomeUnknown, unconfirmedCopy, issuesAt, issuesUnder, moveItem, overlayNeutrals,
   parseInline, parseMarkdown, parseWebdeskPublishArgs, phaseOf, pointerSegment, publishStateLabel, splitVersionContent,
   toWire, writeNeutralsThrough,
   type CollectionComposition, type CollectionSummary, type EditableContent, type FieldDef,
@@ -285,5 +285,17 @@ describe("markdown preview is built from data, never from HTML (§2.2: source is
   });
   it("an empty source parses to no blocks", () => {
     expect(parseMarkdown("")).toEqual([]);
+  });
+});
+
+describe("isOutcomeUnknown (502 webdesk_ambiguous) / unconfirmedCopy", () => {
+  it("recognises the BFF's ambiguous causes, and nothing else", () => {
+    for (const reason of ["not_observed", "reconcile_failed", "webdesk_ambiguous"]) expect(isOutcomeUnknown({ kind: "unavailable", code: "upstream_error", reason })).toBe(true);
+    expect(isOutcomeUnknown({ kind: "unavailable", code: "upstream_error", reason: "http_500" })).toBe(false);
+    expect(isOutcomeUnknown({ kind: "unavailable", code: "editorial_unavailable", reason: "not_observed" })).toBe(false);
+    expect(isOutcomeUnknown({ kind: "conflict" })).toBe(false);
+  });
+  it("the copy never says saved or failed", () => {
+    expect(unconfirmedCopy("the save")).toBe("We couldn't confirm the save. Reload to see what happened.");
   });
 });

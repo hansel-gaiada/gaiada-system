@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { restoreVersionAction, type SiteScope } from "@/lib/webdeskContentActions";
+import { isOutcomeUnknown, unconfirmedCopy } from "@/lib/webdeskContentModel";
 import "./content.css";
 
 /** "Restore as draft": creates a NEW draft version from an old one (§3.1 `content.restoreVersion` —
@@ -24,6 +25,7 @@ export function RestoreButton({ scope, itemId, version, baseVersion, editorHref 
     setError(
       r.kind === "conflict" ? (r.slug === "version-conflict" ? "The item changed since this page loaded — reload the history and try again." : r.message)
       : r.kind === "forbidden" ? "You don't have permission to restore versions."
+      : isOutcomeUnknown(r) ? unconfirmedCopy("the restore")
       : r.kind === "unavailable" ? "WebDesk can't be reached right now. Nothing was restored."
       : r.kind === "invalid" ? r.message
       : "Couldn't restore that version.",

@@ -252,14 +252,19 @@ function parseBlock(v: unknown, path: string): Block {
 
 export function parseLint(v: unknown, path: string): Lint {
   const o = obj(v, path);
+  // `unavailable` (a reason string) means the lint could not RUN. Kept only when present, so every existing result is
+  // byte-identical. A non-string truthy value still means "could not run" — it must not be read as a clean lint.
+  const flag = "unavailable" in o && o.unavailable !== undefined && o.unavailable !== null && o.unavailable !== false;
+  const unavailable = flag ? (typeof o.unavailable === "string" && o.unavailable !== "" ? o.unavailable : "lint_unavailable") : undefined;
+  const withFlag = (l: Lint): Lint => (unavailable === undefined ? l : { ...l, unavailable });
   if (!("placeholders" in o) || o.placeholders === undefined || o.placeholders === null) {
-    return { unresolvedTokens: [], markers: {} }; // the collection declares no placeholder rules
+    return withFlag({ unresolvedTokens: [], markers: {} }); // the collection declares no placeholder rules
   }
   const p = obj(o.placeholders, `${path}.placeholders`);
-  return {
+  return withFlag({
     unresolvedTokens: key(p, "unresolvedTokens", arr(str), `${path}.placeholders`),
     markers: key(p, "markers", wire.record(int), `${path}.placeholders`),
-  };
+  });
 }
 
 function parseGroupMember(v: unknown, path: string): GroupMember {

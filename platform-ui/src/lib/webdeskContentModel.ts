@@ -147,6 +147,10 @@ export interface Lint {
   unresolvedTokens: string[];
   /** `{ CONFIRM: 3, CLIENT: 1 }` — keyed by the composition's marker labels. */
   markers: Record<string, number>;
+  /** Present ONLY when WebDesk could not run the lint (`item.get` sends `lint.unavailable`, a reason string — e.g. the
+   *  collection's stored composition is invalid). The lists above are then EMPTY BY DEFAULT, not by finding: an empty
+   *  list is a claim, so a reader must check this first and never show "no unresolved placeholders" when it is set. */
+  unavailable?: string;
 }
 
 export interface ItemDetail {
@@ -257,6 +261,27 @@ export type WdResult<T> =
   | { kind: "invalid"; issues: Issue[]; message: string };
 
 export type WdOk<T> = Extract<WdResult<T>, { kind: "ok" }>;
+
+// ── Two failures that need their own words (rendering decisions — the result shapes are unchanged) ─
+// `resultFromError` folds both into `unavailable`, and the nest-side UI contract test pins those shapes, so the
+// components recognise them here instead of the lib re-coding them.
+
+/** `502 webdesk_ambiguous`: a write whose outcome is UNKNOWN (the BFF could not confirm whether Zone B applied it).
+ *  The BFF puts the machine cause (`not_observed` | `reconcile_failed`) in `reason`, which is what `resultFromError`
+ *  keeps (as `unavailable/upstream_error`); `webdesk_ambiguous` itself is accepted too for a problem document that
+ *  carries it as its type. Never "saved", never "failed": the caller re-reads. */
+export const AMBIGUOUS_REASONS: ReadonlySet<string> = new Set(["webdesk_ambiguous", "not_observed", "reconcile_failed"]);
+export function isOutcomeUnknown(r: { kind: string; code?: string; reason?: string }): boolean {
+  return r.kind === "unavailable" && r.code === "upstream_error" && typeof r.reason === "string" && AMBIGUOUS_REASONS.has(r.reason);
+}
+/** `what` is the thing the user tried to do, with its article: "the save", "the publish request". */
+export const unconfirmedCopy = (what: string): string => `We couldn't confirm ${what}. Reload to see what happened.`;
+
+/** `503 webdesk_not_configured` on `POST …/rebuild-requests`: the BFF's `reason` is exactly this token when the site
+ *  has no staging rebuild target. (Other not-configured causes — `control_channel_not_configured`,
+ *  `editorial_signer_not_configured` — carry their own reason and keep the generic notice.) */
+export const REBUILD_NOT_CONFIGURED_REASON = "webdesk_not_configured";
+export const REBUILD_NOT_CONFIGURED_COPY = "Staging rebuild isn't set up for this site.";
 
 // ── Pointers (§2.2: `/blocks/0/props/faq/2/answer`) ──────────────────────────────────────────────
 

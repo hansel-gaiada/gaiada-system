@@ -214,6 +214,105 @@ describe("stale: a failed read after a good load", () => {
   });
 });
 
+describe("unconfirmed (502 webdesk_ambiguous): a write whose outcome is unknown", () => {
+  const ambiguous: WdResult<never> = { kind: "unavailable", code: "upstream_error", reason: "not_observed" };
+
+  it("says it couldn't confirm the save: not 'Saved', not a plain failure; keeps the edit; writes stay off until a re-read", async () => {
+    a.saveItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    const banner = screen.getByTestId("unconfirmed-banner");
+    expect(banner.getAttribute("role")).toBe("alert");
+    expect(banner.textContent).toContain("We couldn't confirm the save. Reload to see what happened.");
+    expect(status()).toBe("Unsaved changes");            // not "Saved vN"
+    expect(screen.queryByTestId("save-error")).toBeNull(); // not the generic failure
+    expect(screen.queryByTestId("stale-banner")).toBeNull();
+    expect(field("h1").value).toBe("Typed");
+    expect(saveBtn().disabled).toBe(true);
+    expect(screen.getByTestId("pb").getAttribute("data-blocked")).toMatch(/reload/i);
+    expect(a.saveItemAction).toHaveBeenCalledTimes(1);     // never retried blind
+  });
+
+  it("Reload re-reads the item: if the save landed the editor says the head moved; either way writes come back", async () => {
+    a.saveItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    a.refreshEditorAction.mockResolvedValue(ok(bundle(detail({ ...SERVICE_FIELDS, h1: "Typed" }, {}, 4))));
+    await click(screen.getByTestId("unconfirmed-reload"));
+    expect(a.refreshEditorAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("unconfirmed-banner")).toBeNull();
+    expect(screen.getByTestId("behind-head").textContent).toContain("v4 was saved since you opened this");
+    expect(field("h1").value).toBe("Typed");
+    expect(saveBtn().disabled).toBe(false);
+  });
+
+  it("a failed reload keeps the notice (nothing is claimed either way)", async () => {
+    a.saveItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    a.refreshEditorAction.mockResolvedValue({ kind: "unavailable", code: "editorial_unavailable", reason: "editorial_unavailable" });
+    await click(screen.getByTestId("unconfirmed-reload"));
+    expect(screen.getByTestId("unconfirmed-banner")).toBeTruthy();
+    expect(saveBtn().disabled).toBe(true);
+  });
+
+  it("a delete whose outcome is unknown says the same, not 'Couldn't delete'", async () => {
+    a.deleteItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS, { item: ref({ publishedVersion: null, publishState: "draft" }) })));
+    await click(screen.getByRole("button", { name: "Delete draft…" }));
+    await click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByTestId("unconfirmed-banner").textContent).toContain("We couldn't confirm the delete. Reload to see what happened.");
+    expect(screen.queryByTestId("editor-banner")).toBeNull();
+  });
+
+  it("an unknown-outcome create has no Reload button (nothing to re-read yet) but still blocks Create", async () => {
+    a.createItemAction.mockResolvedValue(ambiguous);
+    render(<ItemEditor mode="create" scope={SCOPE} routeBase={ROUTE} collection={coll("service", service)} tenant={tenant} site={site} seed={{ locale: "en", twinOf: null, slug: "", fields: {}, seo: {}, extraBlocks: [] }} authors={{}} readOnlyReason={null} />);
+    fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.new" } });
+    await click(saveBtn());
+    expect(screen.getByTestId("unconfirmed-banner").textContent).toContain("We couldn't confirm the new item. Reload to see what happened.");
+    expect(screen.queryByTestId("unconfirmed-reload")).toBeNull();
+    expect(saveBtn().disabled).toBe(true);
+  });
+
+  it("an ordinary unavailable save is still the stale flow, not the unconfirmed notice", async () => {
+    a.saveItemAction.mockResolvedValue({ kind: "unavailable", code: "upstream_error", reason: "http_500" });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    expect(screen.queryByTestId("unconfirmed-banner")).toBeNull();
+    expect(screen.getByTestId("stale-banner")).toBeTruthy();
+  });
+});
+
+describe("placeholders card: an empty list is a claim only when the lint actually ran", () => {
+  it("lint ran and found nothing: the all-clear", () => {
+    mount(bundle(detail(SERVICE_FIELDS)));
+    expect(screen.getByTestId("lint-card").textContent).toContain("No unresolved placeholders.");
+    expect(screen.queryByTestId("lint-unavailable")).toBeNull();
+  });
+  it("lint.unavailable: 'couldn't check', never the all-clear", () => {
+    mount(bundle(detail(SERVICE_FIELDS, { lint: { unresolvedTokens: [], markers: {}, unavailable: "the collection's stored composition is invalid" } })));
+    const card = screen.getByTestId("lint-card");
+    expect(screen.getByTestId("lint-unavailable").textContent).toBe("Couldn't check for placeholders. This is not a statement that there are none.");
+    expect(screen.getByTestId("lint-unavailable").getAttribute("role")).toBe("note");
+    expect(card.textContent).not.toContain("No unresolved placeholders");
+  });
+  it("a refresh that comes back with lint.unavailable flips the card; a later good lint flips it back", async () => {
+    mount(bundle(detail(SERVICE_FIELDS)));
+    a.refreshEditorAction.mockResolvedValueOnce(ok(bundle(detail(SERVICE_FIELDS, { lint: { unresolvedTokens: [], markers: {}, unavailable: "x" } }))));
+    await click(screen.getByTestId("refresh-now"));
+    expect(screen.getByTestId("lint-unavailable")).toBeTruthy();
+    a.refreshEditorAction.mockResolvedValueOnce(ok(bundle(detail(SERVICE_FIELDS))));
+    await click(screen.getByTestId("refresh-now"));
+    expect(screen.queryByTestId("lint-unavailable")).toBeNull();
+    expect(screen.getByTestId("lint-card").textContent).toContain("No unresolved placeholders.");
+  });
+});
+
 describe("read-only", () => {
   it("a 403 on save turns the whole form read-only, says why, and keeps the typed edit", async () => {
     a.saveItemAction.mockResolvedValue({ kind: "forbidden", reason: "forbidden" });

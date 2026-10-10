@@ -4865,11 +4865,17 @@ strict Zone B fake, and pipes every real body through the UI's `parse*` validato
 | `environments[].domain` (`GET …/sites`) | `null` while an environment has no hostname | non-null string: `contract_drift` on the WHOLE sites list | nullable; a null-domain environment never becomes `https://null` |
 | 404 `version-not-found` | typed problem (`?version=live` on a draft, an unknown `n`) | read as `not_enabled/not_served` ("not available on this deployment yet") | `not_found` |
 
-Routes the UI calls that **no ticket has built** (WSK-60 owns them): `GET …/sites/:ts/:site/build-status` and `POST …/sites/:ts/:site/rebuild-requests`. The BFF
-answers a plain Nest 404; the UI maps it to `not_enabled/not_served` ("rebuild status isn't available on this deployment yet"), never to a fabricated build.
+`GET …/sites/:ts/:site/build-status` and `POST …/sites/:ts/:site/rebuild-requests` are WSK-60's (built 2026-10-10; see the automation-approvals row above):
+build-status answers `{build, stagingStale}`, and a rebuild request answers `202 {approvalId}`, or `503 {reason:"webdesk_not_configured"}` when the site has no
+staging rebuild target. On a deployment without those routes the BFF answers a plain Nest 404, which the UI still maps to `not_enabled/not_served`
+("rebuild status isn't available on this deployment yet"), never to a fabricated build.
 The UI reads nothing from `GET …/media` (it has no media reader); its §27 shape is asserted in the same test. A `502 webdesk_ambiguous` reaches the UI as
-`unavailable/upstream_error` with the machine reason (`not_observed` / `reconcile_failed`) kept: the editor goes STALE (Save disabled until a re-read), which is
-the safe behaviour, but it has no dedicated "couldn't confirm the save" copy yet.
+`unavailable/upstream_error` with the machine reason (`not_observed` / `reconcile_failed`) kept. Since 2026-10-11 the editor renders it as its own UNCONFIRMED
+state (`webdeskContentModel.ts#isOutcomeUnknown`): "We couldn't confirm the save. Reload to see what happened." (per action: the save, the new item, the
+delete, the unpublish, the restore, the publish request, the withdrawal, the rebuild request, the `<locale>` twin), never "saved" and never "failed"; edits
+are kept and writes stay off until a successful re-read. `item.get`'s `lint.unavailable` (a reason string: the lint could not RUN) is carried as
+`Lint.unavailable`, and the editor and the approval summary then say "couldn't check" instead of the all-clear. A rebuild request refused with
+`503 {reason:"webdesk_not_configured"}` reads "Staging rebuild isn't set up for this site." The parsed result shapes are unchanged (rendering decisions).
 
 ### Errors the UI must render (each a distinct state, §10 of the design)
 

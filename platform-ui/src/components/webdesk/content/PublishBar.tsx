@@ -6,7 +6,8 @@ import {
   unpublishItemAction, withdrawPublishRequestAction, type SiteScope,
 } from "@/lib/webdeskContentActions";
 import {
-  describeReasonToken, hasPendingChanges, isLive, phaseOf, publishStateLabel,
+  describeReasonToken, hasPendingChanges, isLive, isOutcomeUnknown, phaseOf, publishStateLabel,
+  REBUILD_NOT_CONFIGURED_COPY, REBUILD_NOT_CONFIGURED_REASON, unconfirmedCopy,
   type BuildStatus, type ItemRef, type RequestPhase, type WdResult,
 } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
@@ -22,6 +23,8 @@ import "./content.css";
 //  • "Live on staging" is shown only when the build status says `live`. A rebuild that never confirmed
 //    is "unverified", never "live". If the (proposed) build-status route is not served, the panel says
 //    the status is unavailable — it does not default to anything.
+//  • A write whose outcome is unknown (502 webdesk_ambiguous) is neither "done" nor "failed": it says "We couldn't
+//    confirm …, reload to see what happened" and hands the editor `onUnconfirmed` so writes stay off until a re-read.
 //  • Nothing here renders without the item it describes; a refusal on a poll keeps the last known phase
 //    and says it could not refresh, it does not reset to idle.
 
@@ -60,7 +63,7 @@ function failureCopy(r: Exclude<WdResult<unknown>, { kind: "ok" }>): string {
 
 export function PublishBar({
   scope, item, version, dirty, blocked, initialPending, pendingProblem, initialBuild, buildProblem, stagingUrl,
-  onItemChanged, onUnavailable,
+  onItemChanged, onUnavailable, onUnconfirmed,
 }: {
   scope: SiteScope;
   item: ItemRef;
@@ -77,6 +80,9 @@ export function PublishBar({
   stagingUrl: string | null;
   onItemChanged: (item: ItemRef) => void;
   onUnavailable: (reason: string) => void;
+  /** A write's outcome is unknown (502 webdesk_ambiguous). `what` is the action with its article ("the unpublish").
+   *  The editor shows the notice and blocks writes until a re-read; without it this bar shows the notice itself. */
+  onUnconfirmed?: (what: string) => void;
 }) {
   const [flow, setFlow] = useState<Flow | null>(() => {
     const first = initialPending?.[0];
@@ -167,6 +173,14 @@ export function PublishBar({
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [watchBuild, scope, onUnavailable]);
 
+  /** True (and handled) when `r` is an unknown-outcome write: never rendered as success or as a plain failure. */
+  const unknownOutcome = (r: Exclude<WdResult<unknown>, { kind: "ok" }>, what: string): boolean => {
+    if (!isOutcomeUnknown(r)) return false;
+    if (onUnconfirmed) onUnconfirmed(what);
+    else setMessage({ tone: "bad", text: unconfirmedCopy(what) });
+    return true;
+  };
+
   // ── Actions ────────────────────────────────────────────────────────────────────────────────────
   const requestPublish = async () => {
     setBusy("request"); setMessage(null);
@@ -175,7 +189,7 @@ export function PublishBar({
     setBusy(null);
     if (r.kind === "ok") {
       setFlow({ kind: "publish", approvalId: r.data.approvalId, version, phase: { phase: "pending", approvalId: r.data.approvalId } });
-    } else {
+    } else if (!unknownOutcome(r, "the publish request")) {
       if (r.kind === "unavailable" && r.code !== "contract_drift") onUnavailable(r.reason);
       setMessage({ tone: "bad", text: `Couldn't file the publish request. ${failureCopy(r)}` });
     }
@@ -188,6 +202,7 @@ export function PublishBar({
     if (!mounted.current) return;
     setBusy(null);
     if (r.kind === "ok") { setFlow(null); setMessage({ tone: "info", text: `Request ${shortId(flow.approvalId)} withdrawn.` }); return; }
+    if (unknownOutcome(r, "the withdrawal")) return;
     setMessage({
       tone: "bad",
       text: r.kind === "not_enabled"
@@ -207,7 +222,7 @@ export function PublishBar({
       onItemChanged(r.data.item);
       setStagingStale(true);
       setMessage({ tone: "ok", text: "Unpublished from WebDesk." });
-    } else {
+    } else if (!unknownOutcome(r, "the unpublish")) {
       if (r.kind === "unavailable" && r.code !== "contract_drift") onUnavailable(r.reason);
       setMessage({ tone: "bad", text: `Couldn't unpublish. ${failureCopy(r)}` });
     }
@@ -220,10 +235,14 @@ export function PublishBar({
     setBusy(null);
     if (r.kind === "ok") {
       setFlow({ kind: "rebuild", approvalId: r.data.approvalId, version: null, phase: { phase: "pending", approvalId: r.data.approvalId } });
-    } else {
+    } else if (!unknownOutcome(r, "the rebuild request")) {
       setMessage({
         tone: "bad",
-        text: r.kind === "not_enabled" ? "Requesting a rebuild isn't available on this deployment yet." : `Couldn't request a rebuild. ${failureCopy(r)}`,
+        text: r.kind === "not_enabled" ? "Requesting a rebuild isn't available on this deployment yet."
+          // 503 webdesk_not_configured: the site has no staging rebuild target, so nothing was filed. `reason` is the BFF's
+          // own token for it; the lib's result (`unavailable/editorial_unavailable`) is deliberately left as it is.
+          : r.kind === "unavailable" && r.reason === REBUILD_NOT_CONFIGURED_REASON ? REBUILD_NOT_CONFIGURED_COPY
+          : `Couldn't request a rebuild. ${failureCopy(r)}`,
       });
     }
   };

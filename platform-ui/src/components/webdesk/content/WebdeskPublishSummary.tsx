@@ -63,16 +63,20 @@ export async function WebdeskPublishSummary({
   return <WebdeskPublishSummaryView args={args} rows={rows} unread={args.items.length - slice.length} workflowId={workflowId} deptId={deptId} />;
 }
 
-function sumLint(rows: SummaryRow[]): { tokens: number; markers: Record<string, number>; unreadable: number } {
+function sumLint(rows: SummaryRow[]): { tokens: number; markers: Record<string, number>; unreadable: number; unchecked: number; checked: number } {
   let tokens = 0;
   let unreadable = 0;
+  let unchecked = 0; // read fine, but WebDesk could not RUN the lint: its empty lists are not a finding
+  let checked = 0;
   const markers: Record<string, number> = {};
   for (const r of rows) {
     if (!r.resolved) { unreadable++; continue; }
+    if (r.resolved.lint.unavailable !== undefined) { unchecked++; continue; }
+    checked++;
     tokens += r.resolved.lint.unresolvedTokens.length;
     for (const [k, n] of Object.entries(r.resolved.lint.markers)) markers[k] = (markers[k] ?? 0) + n;
   }
-  return { tokens, markers, unreadable };
+  return { tokens, markers, unreadable, unchecked, checked };
 }
 
 /** Pure view — unit-tested without a backend. */
@@ -121,9 +125,17 @@ export function WebdeskPublishSummaryView({
           rejecting later — only by unpublishing.
         </p>
         <p className="wc-publish__sub" data-testid="summary-lint">
-          Placeholders (advisory, never blocking): {lint.tokens} unresolved token{lint.tokens === 1 ? "" : "s"}{markerLine ? ` · ${markerLine}` : ""}
-          {rows.length < total ? ` — counted over the ${rows.length} item${rows.length === 1 ? "" : "s"} read, not all ${total}` : ""}
-          {lint.unreadable > 0 ? ` (${lint.unreadable} could not be read)` : ""}.
+          {lint.checked === 0 && lint.unchecked > 0 ? (
+            // Every item that was read had a lint that could not run: no count exists, and "0" would be a made-up one.
+            <>Placeholders (advisory, never blocking): couldn&apos;t be checked — this is not a statement that there are none.</>
+          ) : (
+            <>
+              Placeholders (advisory, never blocking): {lint.tokens} unresolved token{lint.tokens === 1 ? "" : "s"}{markerLine ? ` · ${markerLine}` : ""}
+              {rows.length < total ? ` — counted over the ${rows.length} item${rows.length === 1 ? "" : "s"} read, not all ${total}` : ""}
+              {lint.unreadable > 0 ? ` (${lint.unreadable} could not be read)` : ""}
+              {lint.unchecked > 0 ? ` (${lint.unchecked} couldn't be checked, so they are not counted)` : ""}.
+            </>
+          )}
         </p>
       </Card>
 
