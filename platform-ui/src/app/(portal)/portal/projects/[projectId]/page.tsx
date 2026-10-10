@@ -6,6 +6,7 @@ import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalProject } from "@/lib/portal-data";
 import { isPastDue, portalDate, relativeDays } from "@/lib/portal";
 import { Card, Eyebrow } from "@/components/ui";
+import { PortalCopyEmail } from "@/components/portal/PortalCopyEmail";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalBar, PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
@@ -46,6 +47,15 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
 
       <div className="cp-stack">
         <Card title="Where things stand" headerRight={<PortalStatus status={project.status} />}>
+          {/* PV2-07: nothing at all when the backend names no lead; never "Unknown". */}
+          {project.lead && (
+            <div style={{ marginBottom: 14, font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
+              <span style={{ fontWeight: 600, color: "var(--ink-strong)" }}>Project lead</span>
+              {": "}{project.lead.name}
+              {" · "}
+              <PortalCopyEmail email={project.lead.email} />
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
             <span style={{ font: "600 30px/1 var(--font-display)", color: "var(--ink-strong)" }}>
               {project.progressPercent}%

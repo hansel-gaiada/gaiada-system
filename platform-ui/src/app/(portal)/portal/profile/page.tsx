@@ -4,9 +4,11 @@ import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalProfile } from "@/lib/portal-data";
 import { portalDate } from "@/lib/portal";
+import { describeAccess, groupPeople } from "@/lib/portalPeople";
 import { Card, Eyebrow, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalChangeRequestForm, PortalOwnDetailsForm } from "@/components/portal/PortalProfileForms";
+import { PortalCopyEmail } from "@/components/portal/PortalCopyEmail";
 import { PortalFacts, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 
 // CP-15 — who the client is, who their people are, and what this account may do.
@@ -32,6 +34,7 @@ export default async function PortalProfilePage() {
     );
   }
 
+  const groups = groupPeople(profile);
   const client = profile.clients[0] ?? null;
   const contact = (client?.contact ?? {}) as Record<string, unknown>;
   const contactRow = (key: string, label: string) =>
@@ -111,20 +114,20 @@ export default async function PortalProfilePage() {
         )}
 
         <Card
-          title="Who has access"
+          title="Your people"
           hint="Everyone from your organisation who can sign in to this portal. Ask your account manager to add or remove someone."
         >
-          {profile.contacts.length === 0 ? (
+          {groups.yourPeople.length === 0 ? (
             <EmptyNote>No other contacts.</EmptyNote>
           ) : (
             <HairlineTable
-              columns={[{ label: "Name" }, { label: "Email" }, { label: "Can sign" }, { label: "Status" }]}
-              tcols="1fr 1fr 110px 140px"
-              rows={profile.contacts.map((c) => [
+              columns={[{ label: "Name" }, { label: "Email" }, { label: "Access" }, { label: "Status" }]}
+              tcols="1fr 1fr 190px 140px"
+              rows={groups.yourPeople.map((c) => [
                 c.id === profile.me?.id ? `${c.name} (you)` : c.name,
                 c.email,
-                c.capability === "signer" ? "Yes" : "No",
-                // `invited` is a real and confusing state — the person has been sent a link and has not
+                accessText(c),
+                // `invited` is a real and confusing state - the person has been sent a link and has not
                 // used it. Surfacing it lets the client chase their own colleague instead of asking us
                 // why someone cannot get in.
                 <PortalStatus key={c.id} status={c.status === "invited" ? "pending" : c.status} />,
@@ -132,7 +135,42 @@ export default async function PortalProfilePage() {
             />
           )}
         </Card>
+
+        {groups.accountManagers.length > 0 && (
+          <Card title="Your account manager" hint="The person at our company who looks after your account.">
+            <PortalFacts
+              rows={groups.accountManagers.map((m) => ({
+                k: groups.accountManagers.length > 1 ? m.clientName : "Name",
+                v: (
+                  <>
+                    {m.name}
+                    {" · "}
+                    <PortalCopyEmail email={m.email} />
+                  </>
+                ),
+              }))}
+            />
+          </Card>
+        )}
+
+        {groups.onOurSide.length > 0 && (
+          <Card title="On our side">
+            <p style={{ margin: "0 0 12px", font: "400 13px/1.55 var(--font-body)", color: "var(--ink-muted)" }}>
+              People from our company who also hold access to your account.
+            </p>
+            <HairlineTable
+              columns={[{ label: "Name" }, { label: "Email" }, { label: "Access" }]}
+              tcols="1fr 1fr 190px"
+              rows={groups.onOurSide.map((c) => [c.name, c.email, accessText(c)])}
+            />
+          </Card>
+        )}
       </div>
     </>
   );
+}
+
+function accessText(c: { capability: string; projectId: string | null }): string {
+  const a = describeAccess(c);
+  return `${a.capability}, ${a.scope.toLowerCase()}`;
 }
