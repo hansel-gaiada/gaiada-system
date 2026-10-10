@@ -1,0 +1,36 @@
+{
+  "fields": [
+    {
+      "name": "toPath",
+      "primitive": "text",
+      "required": true
+    },
+    {
+      "name": "status",
+      "primitive": "select",
+      "options": [
+        "301",
+        "302",
+        "307",
+        "308"
+      ]
+    },
+    {
+      "name": "active",
+      "primitive": "select",
+      "options": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "blocks": [],
+  "localized": false,
+  "ui": {
+    "label": "Redirects",
+    "description": "TEMPLATE — regenerate from the live gaiada.com sitemap before launch (scripts/build_redirects.py). Every one of the 82 existing URLs must map to a new URL or to the nearest hub; none may 404.",
+    "group": "Globals",
+    "order": 4,
+    "titleField": "toPath"
+  }
+}

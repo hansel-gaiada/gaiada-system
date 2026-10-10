@@ -13,12 +13,18 @@ export class PlatformError extends Error {
   // message is free to reword). `HttpErrorFilter` already forwards `reason` in the response body —
   // it was PlatformError that dropped it on the way in, which would have made the documented field
   // one no caller in this app could actually read. undefined for every other caller.
+  // `body` — WSK-44, additive on the same rule. The WebDesk content BFF passes Zone B's typed
+  // RFC 9457 problems through (409 version-conflict carries `currentHeadVersion`, 422 carries
+  // `issues[]`), and the four fields above cannot carry them: without the raw body a caller cannot
+  // tell `version-conflict` from `slug-taken`. Only `lib/webdeskContent.ts` reads it; undefined
+  // whenever the response had no JSON body.
   constructor(
     public status: number,
     message: string,
     public field?: string,
     public existing?: Record<string, unknown>,
     public reason?: string,
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -38,7 +44,7 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     const { status, json } = getDemoResponse(init.method ?? "GET", path, userId, body);
     if (status < 200 || status >= 300) {
       const body = json as { error?: string; field?: string; existing?: Record<string, unknown>; reason?: string };
-      throw new PlatformError(status, body?.error ?? `platform ${status}`, body?.field, body?.existing, body?.reason);
+      throw new PlatformError(status, body?.error ?? `platform ${status}`, body?.field, body?.existing, body?.reason, json);
     }
     return json as T;
   }
@@ -81,14 +87,16 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     let field: string | undefined;
     let existing: Record<string, unknown> | undefined;
     let reason: string | undefined;
+    let rawBody: unknown;
     try {
       const body = (await res.json()) as { error?: string; field?: string; existing?: Record<string, unknown>; reason?: string };
+      rawBody = body;
       msg = body.error ?? msg;
       field = body.field;
       existing = body.existing;
       reason = body.reason;
     } catch { /* keep default */ }
-    throw new PlatformError(res.status, msg, field, existing, reason);
+    throw new PlatformError(res.status, msg, field, existing, reason, rawBody);
   }
   return (await res.json()) as T;
 }

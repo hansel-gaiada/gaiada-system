@@ -1,0 +1,148 @@
+{
+  "fields": [
+    {
+      "name": "name",
+      "primitive": "text",
+      "required": true
+    },
+    {
+      "name": "legalName",
+      "primitive": "text",
+      "required": true
+    },
+    {
+      "name": "domain",
+      "primitive": "text",
+      "required": true
+    },
+    {
+      "name": "address",
+      "primitive": "group",
+      "required": true,
+      "fields": [
+        {
+          "name": "street",
+          "primitive": "text"
+        },
+        {
+          "name": "locality",
+          "primitive": "text"
+        },
+        {
+          "name": "region",
+          "primitive": "text"
+        },
+        {
+          "name": "country",
+          "primitive": "text"
+        },
+        {
+          "name": "full",
+          "primitive": "text"
+        }
+      ]
+    },
+    {
+      "name": "phone",
+      "primitive": "text"
+    },
+    {
+      "name": "email",
+      "primitive": "text"
+    },
+    {
+      "name": "people",
+      "primitive": "group",
+      "multiple": true,
+      "itemKey": "name",
+      "fields": [
+        {
+          "name": "name",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "role",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "email",
+          "primitive": "text"
+        }
+      ]
+    },
+    {
+      "name": "foundingDate",
+      "primitive": "text"
+    },
+    {
+      "name": "founder",
+      "primitive": "text"
+    },
+    {
+      "name": "certifications",
+      "primitive": "text"
+    },
+    {
+      "name": "aggregateRating",
+      "primitive": "text"
+    },
+    {
+      "name": "sameAs",
+      "primitive": "text",
+      "multiple": true
+    },
+    {
+      "name": "areaServed",
+      "primitive": "text",
+      "multiple": true
+    },
+    {
+      "name": "languages",
+      "primitive": "text",
+      "multiple": true
+    },
+    {
+      "name": "defaultLocale",
+      "primitive": "text"
+    },
+    {
+      "name": "priceCurrency",
+      "primitive": "text",
+      "multiple": true
+    },
+    {
+      "name": "boilerplate_short",
+      "primitive": "text",
+      "ui": {
+        "widget": "textarea"
+      }
+    }
+  ],
+  "blocks": [],
+  "singleton": true,
+  "localized": false,
+  "ui": {
+    "label": "Company",
+    "group": "Globals",
+    "order": 1,
+    "titleField": "name"
+  },
+  "lint": {
+    "placeholders": [
+      {
+        "kind": "marker",
+        "open": "[CONFIRM:",
+        "close": "]",
+        "label": "CONFIRM"
+      },
+      {
+        "kind": "marker",
+        "open": "[CLIENT:",
+        "close": "]",
+        "label": "CLIENT"
+      }
+    ]
+  }
+}

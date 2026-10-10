@@ -1,0 +1,695 @@
+import "server-only";
+// WSK-44 — the ONE module through which the Website workspace reads WebDesk content.
+//
+//   BFF (WSK-59, `platform-nest/src/modules/webdev/webdesk-content.controller.ts` — NOT BUILT YET):
+//     GET  /api/:company/modules/webdev/content/sites
+//     GET  …/sites/:tenantSlug/:siteId/collections
+//     GET  …/sites/:tenantSlug/:siteId/collections/:collectionKey/items[?locale&state&q&cursor&limit]
+//     GET  …/sites/:tenantSlug/:siteId/items/:itemId[?version=head|live|<n>]
+//     GET  …/sites/:tenantSlug/:siteId/items/:itemId/versions[/:n]
+//   existing (core/automation-approvals.controller.ts):
+//     GET  /api/:company/automation-approvals[/:id][?origin=webdesk&status=pending]
+//   PROPOSED — NOT in WSK-59's route list; §10's states table needs them (see the WSK-44 report):
+//     GET  …/sites/:tenantSlug/:siteId/build-status
+//
+// ── THE CONTRACT THIS FILE ENFORCES ──────────────────────────────────────────────────────────────
+// This estate's recurring bug is "frontend-first drift": a console reads a field the backend never
+// sends, renders a confident wrong answer, and nothing throws. Three rules, each one a defence:
+//
+//  1. EVERY read in the Website workspace goes through this module (writes through
+//     `webdeskContentActions.ts`, which uses the same `wdCall`). No component, page or action calls
+//     `platformFetch` for WebDesk content directly, so there is one file to diff against WSK-59's
+//     real responses.
+//  2. EVERY 2xx body is validated against the spec'd shape BEFORE it is returned. A body that does
+//     not match becomes `{ kind: "unavailable", code: "contract_drift", reason: "<path>: expected …" }`
+//     — loud, named, and never rendered as data. There are no `as T` casts on a response here.
+//  3. NO PATH TURNS A REFUSAL INTO `[]`. Results are the discriminated `WdResult<T>`
+//     (`ok | unavailable | forbidden | not_enabled | not_found | conflict | invalid`). `ok` with an
+//     empty list is EVIDENCE of emptiness; anything else is a refusal the page must render as one.
+//     `readResult.ts`'s `absentAsEmpty` is deliberately not used anywhere in this workspace.
+//
+// ── ERRORS (§3.4) ────────────────────────────────────────────────────────────────────────────────
+// WSK-59 passes Zone B's RFC 9457 problems through ("typed 409/422 pass through untouched"), so the
+// body is `{ type: "https://webdesk.gaiada.online/errors/<slug>", title, status, detail?, … }` with
+// the extension members (`currentHeadVersion`, `issues`) at the top level. `PlatformError.body` (an
+// additive field, same rule as `reason`/`existing`) carries it here. If the BFF instead routes the
+// problem through `HttpErrorFilter`'s `{ error, reason?, existing? }` reshape, `problemOf` reads the
+// slug from `reason`/`error` and the extension members from `existing` — the single most likely place
+// for the real BFF to differ from this file; it is isolated in `problemOf` on purpose.
+import { platformFetch, PlatformError } from "./platform";
+import { listMembers } from "./entities";
+import {
+  PRIMITIVE_NAMES,
+  type ApprovalStatus, type BuildStatus, type CollectionComposition, type CollectionSummary,
+  type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail,
+  type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type Page,
+  type PrimitiveName, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
+  type VersionContent, type VersionFull, type VersionListBody, type WdResult,
+  type WebdeskApprovalRow, type Block, parseWebdeskPublishArgs, hasNeutralDescendant, splitVersionContent,
+} from "./webdeskContentModel";
+
+// ── Wire validation (hand-rolled: platform-ui carries four runtime deps and a schema library is not
+// going to be the fifth — see CLAUDE.md "Stack + hard constraints") ────────────────────────────────
+
+export class WireDrift extends Error {
+  constructor(public path: string, public expected: string, public got: unknown) {
+    super(`${path || "<root>"}: expected ${expected}, got ${describeGot(got)}`);
+  }
+}
+
+function describeGot(v: unknown): string {
+  if (v === undefined) return "missing";
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  return typeof v;
+}
+
+type P<T> = (v: unknown, path: string) => T;
+
+const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+export const wire = {
+  str: ((v, path) => { if (typeof v !== "string") throw new WireDrift(path, "string", v); return v; }) as P<string>,
+  num: ((v, path) => { if (typeof v !== "number" || !Number.isFinite(v)) throw new WireDrift(path, "number", v); return v; }) as P<number>,
+  int: ((v, path) => { if (typeof v !== "number" || !Number.isInteger(v)) throw new WireDrift(path, "integer", v); return v; }) as P<number>,
+  bool: ((v, path) => { if (typeof v !== "boolean") throw new WireDrift(path, "boolean", v); return v; }) as P<boolean>,
+  nullable: <T>(p: P<T>): P<T | null> => (v, path) => (v === null ? null : p(v, path)),
+  arr: <T>(p: P<T>): P<T[]> => (v, path) => {
+    if (!Array.isArray(v)) throw new WireDrift(path, "array", v);
+    return v.map((x, i) => p(x, `${path}[${i}]`));
+  },
+  obj: ((v, path) => { if (!isRec(v)) throw new WireDrift(path, "object", v); return v; }) as P<Record<string, unknown>>,
+  /** Required key on an object, parsed. A missing key is drift — never `undefined`. */
+  key: <T>(o: Record<string, unknown>, k: string, p: P<T>, path: string): T => {
+    if (!(k in o)) throw new WireDrift(`${path}.${k}`, "present", undefined);
+    return p(o[k], `${path}.${k}`);
+  },
+  /** Optional key: absent => undefined; present => parsed. */
+  opt: <T>(o: Record<string, unknown>, k: string, p: P<T>, path: string): T | undefined => {
+    if (!(k in o) || o[k] === undefined) return undefined;
+    return p(o[k], `${path}.${k}`);
+  },
+  record: <T>(p: P<T>): P<Record<string, T>> => (v, path) => {
+    if (!isRec(v)) throw new WireDrift(path, "object", v);
+    const out: Record<string, T> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = p(x, `${path}.${k}`);
+    return out;
+  },
+};
+
+const { str, int, bool, nullable, arr, obj, key, opt } = wire;
+const strN = nullable(str);
+
+function parseFieldDef(v: unknown, path: string, depth = 0): FieldDef {
+  const o = obj(v, path);
+  if (depth > 4) throw new WireDrift(path, "group nesting <= 4", v);
+  const name = key(o, "name", str, path);
+  const primitive = key(o, "primitive", str, path);
+  if (!(PRIMITIVE_NAMES as readonly string[]).includes(primitive)) {
+    throw new WireDrift(`${path}.primitive`, `one of ${PRIMITIVE_NAMES.join("|")}`, primitive);
+  }
+  const def: FieldDef = { name, primitive: primitive as PrimitiveName };
+  const required = opt(o, "required", bool, path); if (required !== undefined) def.required = required;
+  const options = opt(o, "options", arr(str), path); if (options !== undefined) def.options = options;
+  const relationTo = opt(o, "relationTo", str, path); if (relationTo !== undefined) def.relationTo = relationTo;
+  const multiple = opt(o, "multiple", bool, path); if (multiple !== undefined) def.multiple = multiple;
+  const itemKey = opt(o, "itemKey", str, path); if (itemKey !== undefined) def.itemKey = itemKey;
+  const localized = opt(o, "localized", bool, path); if (localized !== undefined) def.localized = localized;
+  if ("fields" in o && o.fields !== undefined) def.fields = arr((x, p) => parseFieldDef(x, p, depth + 1))(o.fields, `${path}.fields`);
+  if (def.primitive === "group" && (!def.fields || def.fields.length === 0)) {
+    throw new WireDrift(`${path}.fields`, "non-empty (a group declares its sub-fields)", o.fields);
+  }
+  if ("ui" in o && o.ui !== undefined) {
+    const u = obj(o.ui, `${path}.ui`);
+    def.ui = {};
+    const label = opt(u, "label", str, `${path}.ui`); if (label !== undefined) def.ui.label = label;
+    const help = opt(u, "help", str, `${path}.ui`); if (help !== undefined) def.ui.help = help;
+    const ro = opt(u, "readOnly", bool, `${path}.ui`); if (ro !== undefined) def.ui.readOnly = ro;
+    const widget = opt(u, "widget", str, `${path}.ui`);
+    if (widget !== undefined) {
+      if (widget !== "input" && widget !== "textarea" && widget !== "code") throw new WireDrift(`${path}.ui.widget`, "input|textarea|code", widget);
+      def.ui.widget = widget;
+    }
+  }
+  return def;
+}
+
+export function parseComposition(v: unknown, path = "composition"): CollectionComposition {
+  const o = obj(v, path);
+  const out: CollectionComposition = {};
+  if ("fields" in o && o.fields !== undefined) out.fields = arr((x, p) => parseFieldDef(x, p))(o.fields, `${path}.fields`);
+  const blocks = opt(o, "blocks", arr(str), path); if (blocks !== undefined) out.blocks = blocks;
+  const singleton = opt(o, "singleton", bool, path); if (singleton !== undefined) out.singleton = singleton;
+  const localized = opt(o, "localized", bool, path); if (localized !== undefined) out.localized = localized;
+  if ("ui" in o && o.ui !== undefined) {
+    const u = obj(o.ui, `${path}.ui`);
+    const ui: NonNullable<CollectionComposition["ui"]> = { label: key(u, "label", str, `${path}.ui`) };
+    const description = opt(u, "description", str, `${path}.ui`); if (description !== undefined) ui.description = description;
+    const group = opt(u, "group", str, `${path}.ui`); if (group !== undefined) ui.group = group;
+    const order = opt(u, "order", wire.num, `${path}.ui`); if (order !== undefined) ui.order = order;
+    const titleField = opt(u, "titleField", str, `${path}.ui`); if (titleField !== undefined) ui.titleField = titleField;
+    out.ui = ui;
+  }
+  if ("lint" in o && o.lint !== undefined) out.lint = obj(o.lint, `${path}.lint`) as CollectionComposition["lint"];
+  return out;
+}
+
+function parseEnvironment(v: unknown, path: string): EnvironmentRef {
+  const o = obj(v, path);
+  return { envId: key(o, "envId", str, path), name: key(o, "name", str, path), domain: key(o, "domain", str, path), status: key(o, "status", str, path) };
+}
+function parseSite(v: unknown, path: string): SiteRef {
+  const o = obj(v, path);
+  return {
+    siteId: key(o, "siteId", str, path), name: key(o, "name", str, path), kind: key(o, "kind", str, path),
+    environments: key(o, "environments", arr(parseEnvironment), path),
+  };
+}
+function parseTenant(v: unknown, path: string): TenantRef {
+  const o = obj(v, path);
+  return {
+    slug: key(o, "slug", str, path), status: key(o, "status", str, path),
+    defaultLocale: key(o, "defaultLocale", str, path), locales: key(o, "locales", arr(str), path),
+    sites: key(o, "sites", arr(parseSite), path),
+  };
+}
+export function parseSites(v: unknown): SitesBody {
+  const o = obj(v, "sites");
+  return { tenants: key(o, "tenants", arr(parseTenant), "sites") };
+}
+
+function parseCollection(v: unknown, path: string): CollectionSummary {
+  const o = obj(v, path);
+  const counts = obj(key(o, "counts", obj, path), `${path}.counts`);
+  return {
+    key: key(o, "key", str, path),
+    composition: key(o, "composition", (x, p) => parseComposition(x, p), path),
+    vocabularyVersion: key(o, "vocabularyVersion", str, path),
+    counts: {
+      items: key(counts, "items", int, `${path}.counts`),
+      byLocale: key(counts, "byLocale", wire.record(int), `${path}.counts`),
+      live: key(counts, "live", int, `${path}.counts`),
+      pendingChanges: key(counts, "pendingChanges", int, `${path}.counts`),
+    },
+    updatedAt: key(o, "updatedAt", str, path),
+  };
+}
+export function parseCollections(v: unknown): CollectionSummary[] {
+  const o = obj(v, "collections");
+  return key(o, "collections", arr(parseCollection), "collections");
+}
+
+function parsePage(v: unknown, path: string): Page {
+  const o = obj(v, path);
+  return { cursor: key(o, "cursor", strN, path), hasMore: key(o, "hasMore", bool, path), limit: key(o, "limit", int, path) };
+}
+
+export function parseItemRef(v: unknown, path: string): ItemRef {
+  const o = obj(v, path);
+  return {
+    itemId: key(o, "itemId", str, path), collectionKey: key(o, "collectionKey", str, path),
+    locale: key(o, "locale", str, path), slug: key(o, "slug", str, path),
+    localizationGroupId: key(o, "localizationGroupId", str, path),
+    headVersion: key(o, "headVersion", int, path), publishedVersion: key(o, "publishedVersion", nullable(int), path),
+    publishState: key(o, "publishState", str, path),
+    publishAt: key(o, "publishAt", strN, path), unpublishAt: key(o, "unpublishAt", strN, path),
+    deletedAt: key(o, "deletedAt", strN, path), updatedAt: key(o, "updatedAt", str, path),
+  };
+}
+
+function parseItemSummary(v: unknown, path: string): ItemSummary {
+  const o = obj(v, path);
+  return {
+    itemId: key(o, "itemId", str, path), slug: key(o, "slug", str, path), locale: key(o, "locale", str, path),
+    localizationGroupId: key(o, "localizationGroupId", str, path), title: key(o, "title", strN, path),
+    headVersion: key(o, "headVersion", int, path), publishedVersion: key(o, "publishedVersion", nullable(int), path),
+    publishState: key(o, "publishState", str, path),
+    publishAt: key(o, "publishAt", strN, path), unpublishAt: key(o, "unpublishAt", strN, path),
+    deletedAt: key(o, "deletedAt", strN, path), updatedAt: key(o, "updatedAt", str, path),
+    headCreatedAt: key(o, "headCreatedAt", str, path), headCreatedBy: key(o, "headCreatedBy", strN, path),
+    pendingChanges: key(o, "pendingChanges", bool, path),
+  };
+}
+export function parseItemList(v: unknown): ItemListBody {
+  const o = obj(v, "items");
+  return { items: key(o, "items", arr(parseItemSummary), "items"), page: key(o, "page", parsePage, "items") };
+}
+
+function parseBlock(v: unknown, path: string): Block {
+  const o = obj(v, path);
+  const b: Block = { type: key(o, "type", str, path) };
+  if ("props" in o) b.props = o.props;
+  return b;
+}
+
+export function parseLint(v: unknown, path: string): Lint {
+  const o = obj(v, path);
+  if (!("placeholders" in o) || o.placeholders === undefined || o.placeholders === null) {
+    return { unresolvedTokens: [], markers: {} }; // the collection declares no placeholder rules
+  }
+  const p = obj(o.placeholders, `${path}.placeholders`);
+  return {
+    unresolvedTokens: key(p, "unresolvedTokens", arr(str), `${path}.placeholders`),
+    markers: key(p, "markers", wire.record(int), `${path}.placeholders`),
+  };
+}
+
+function parseGroupMember(v: unknown, path: string): GroupMember {
+  const o = obj(v, path);
+  return {
+    locale: key(o, "locale", str, path), itemId: key(o, "itemId", str, path), slug: key(o, "slug", str, path),
+    headVersion: key(o, "headVersion", int, path), publishedVersion: key(o, "publishedVersion", nullable(int), path),
+    publishState: key(o, "publishState", str, path),
+  };
+}
+
+function parseVersionContent(v: unknown, path: string): VersionContent {
+  const o = obj(v, path);
+  return {
+    n: key(o, "n", int, path), contentHash: key(o, "contentHash", str, path), createdAt: key(o, "createdAt", str, path),
+    createdBy: key(o, "createdBy", strN, path), note: key(o, "note", strN, path),
+    blocks: key(o, "blocks", arr(parseBlock), path),
+    seo: key(o, "seo", obj, path),
+  };
+}
+
+export function parseItemDetail(v: unknown): ItemDetail {
+  const o = obj(v, "item.get");
+  return {
+    item: key(o, "item", parseItemRef, "item.get"),
+    version: key(o, "version", parseVersionContent, "item.get"),
+    group: key(o, "group", arr(parseGroupMember), "item.get"),
+    lint: key(o, "lint", parseLint, "item.get"),
+  };
+}
+
+function parseVersionRow(v: unknown, path: string) {
+  const o = obj(v, path);
+  return {
+    version: key(o, "version", int, path), contentHash: key(o, "contentHash", str, path),
+    createdAt: key(o, "createdAt", str, path), createdBy: key(o, "createdBy", strN, path), note: key(o, "note", strN, path),
+  };
+}
+export function parseVersionList(v: unknown): VersionListBody {
+  const o = obj(v, "versions");
+  return { versions: key(o, "versions", arr(parseVersionRow), "versions"), page: key(o, "page", parsePage, "versions") };
+}
+export function parseVersionFull(v: unknown): VersionFull {
+  const o = obj(v, "version");
+  return { ...parseVersionRow(o, "version"), blocks: key(o, "blocks", arr(parseBlock), "version"), seo: key(o, "seo", obj, "version") };
+}
+
+export function parseItemWriteResult(v: unknown): ItemWriteResult {
+  const o = obj(v, "write");
+  const ver = key(o, "version", obj, "write");
+  return {
+    item: key(o, "item", parseItemRef, "write"),
+    version: { version: key(ver, "version", int, "write.version"), contentHash: key(ver, "contentHash", str, "write.version"), createdAt: key(ver, "createdAt", str, "write.version") },
+    unchanged: key(o, "unchanged", bool, "write"),
+    lint: key(o, "lint", parseLint, "write"),
+    replayed: key(o, "replayed", bool, "write"),
+  };
+}
+export function parseItemOnly(v: unknown): { item: ItemRef } {
+  const o = obj(v, "write");
+  return { item: key(o, "item", parseItemRef, "write") };
+}
+export function parseApprovalId(v: unknown): { approvalId: string } {
+  const o = obj(v, "request");
+  return { approvalId: key(o, "approvalId", str, "request") };
+}
+export function parseWithdraw(v: unknown): { approvalId: string; status: string } {
+  const o = obj(v, "withdraw");
+  return { approvalId: key(o, "approvalId", str, "withdraw"), status: key(o, "status", str, "withdraw") };
+}
+
+export function parseBuildStatus(v: unknown): BuildStatus {
+  const o = obj(v, "build-status");
+  const b = o.build;
+  let build: BuildStatus["build"] = null;
+  if (b !== null) {
+    const bo = obj(b, "build-status.build");
+    const state = key(bo, "state", str, "build-status.build");
+    if (state !== "rebuilding" && state !== "live" && state !== "unverified" && state !== "failed") {
+      throw new WireDrift("build-status.build.state", "rebuilding|live|unverified|failed", state);
+    }
+    const kind = key(bo, "kind", str, "build-status.build");
+    if (kind !== "publish" && kind !== "rebuild") throw new WireDrift("build-status.build.kind", "publish|rebuild", kind);
+    build = {
+      approvalId: key(bo, "approvalId", strN, "build-status.build"), kind,
+      requestedAt: key(bo, "requestedAt", str, "build-status.build"), publishedAt: key(bo, "publishedAt", strN, "build-status.build"),
+      state, stagingUrl: key(bo, "stagingUrl", strN, "build-status.build"), verifiedAt: key(bo, "verifiedAt", strN, "build-status.build"),
+    };
+  } else if (!("build" in o)) {
+    throw new WireDrift("build-status.build", "present", undefined);
+  }
+  return { build, stagingStale: key(o, "stagingStale", bool, "build-status") };
+}
+
+const APPROVAL_STATUSES: readonly string[] = ["pending", "approved", "rejected"];
+const EXEC_STATES: readonly string[] = ["not_applicable", "pending", "executing", "executed", "failed"];
+
+/** `GET /api/:t/automation-approvals/:id` — camelCase detail (APPR-01). Only what the UI reads. */
+export function parseApprovalRow(v: unknown): WebdeskApprovalRow {
+  const o = obj(v, "approval");
+  const status = key(o, "status", str, "approval");
+  if (!APPROVAL_STATUSES.includes(status)) throw new WireDrift("approval.status", "pending|approved|rejected", status);
+  // `executionStatus` is optional-by-history (older rows omit it): absent stays `null` = UNKNOWN,
+  // never coerced to `not_applicable` (`lib/automationApprovals.ts` documents the same rule).
+  let executionStatus: ExecState | null = null;
+  if ("executionStatus" in o && o.executionStatus !== null && o.executionStatus !== undefined) {
+    const es = str(o.executionStatus, "approval.executionStatus");
+    if (!EXEC_STATES.includes(es)) throw new WireDrift("approval.executionStatus", EXEC_STATES.join("|"), es);
+    executionStatus = es as ExecState;
+  }
+  const optStr = (k: string): string | null => (k in o && o[k] !== null && o[k] !== undefined ? str(o[k], `approval.${k}`) : null);
+  return {
+    id: key(o, "id", str, "approval"), workflowId: key(o, "workflowId", str, "approval"),
+    status: status as ApprovalStatus, executionStatus, executionError: optStr("executionError"),
+    requestedBy: optStr("requestedBy"), requestedByName: optStr("requestedByName"),
+    decidedBy: optStr("decidedBy"), decidedByName: optStr("decidedByName"), decidedAt: optStr("decidedAt"),
+    createdAt: key(o, "createdAt", str, "approval"), reason: optStr("reason"),
+    toolArgs: o.toolArgs,
+  };
+}
+
+// ── Problems / errors → results ──────────────────────────────────────────────────────────────────
+
+const PROBLEM_BASE_MARK = "/errors/";
+
+export interface Problem { slug: string | null; message: string; ext: Record<string, unknown> }
+
+/** The ONE place the BFF's error body shape is interpreted (see the header). */
+export function problemOf(e: PlatformError): Problem {
+  const body = isRec(e.body) ? e.body : null;
+  let slug: string | null = null;
+  let message = e.message;
+  let ext: Record<string, unknown> = {};
+  if (body) {
+    if (typeof body.type === "string" && body.type.includes(PROBLEM_BASE_MARK)) slug = body.type.slice(body.type.lastIndexOf("/") + 1);
+    else if (typeof body.reason === "string") slug = body.reason;
+    else if (typeof body.error === "string" && /^[a-z][a-z0-9_-]*$/.test(body.error)) slug = body.error;
+    if (typeof body.detail === "string") message = body.detail;
+    else if (typeof body.title === "string") message = body.title;
+    else if (typeof body.error === "string") message = body.error;
+    ext = { ...body, ...(isRec(body.existing) ? body.existing : {}) };
+  } else if (e.reason) slug = e.reason;
+  return { slug, message, ext };
+}
+
+function parseIssues(ext: Record<string, unknown>): Issue[] | null {
+  if (!Array.isArray(ext.issues)) return null;
+  const out: Issue[] = [];
+  for (const i of ext.issues) {
+    if (!isRec(i) || typeof i.path !== "string" || typeof i.message !== "string") return null;
+    out.push({ path: i.path, message: i.message, ...(typeof i.expected === "string" ? { expected: i.expected } : {}) });
+  }
+  return out;
+}
+
+const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found"]);
+
+export function resultFromError(e: unknown): WdResult<never> {
+  if (e instanceof WireDrift) return { kind: "unavailable", code: "contract_drift", reason: e.message };
+  if (!(e instanceof PlatformError)) {
+    return { kind: "unavailable", code: "network", reason: (e as Error)?.message ?? "unknown error" };
+  }
+  const p = problemOf(e);
+  const s = e.status;
+  // Editorial-assertion refusals are a CONFIGURATION fault (keys, clock, replay), not "you may not".
+  const editorialFault = p.slug?.startsWith("editorial-assertion") ?? false;
+  if (s === 503) {
+    const code: UnavailableCode = "editorial_unavailable";
+    return { kind: "unavailable", code, reason: p.slug ?? p.message };
+  }
+  if (editorialFault) return { kind: "unavailable", code: "upstream_error", reason: p.slug ?? p.message };
+  if (s === 401) return { kind: "unavailable", code: "upstream_error", reason: "session_expired" };
+  if (s === 403) return { kind: "forbidden", reason: p.message };
+  if (s === 404) {
+    if (p.slug && NOT_FOUND_SLUGS.has(p.slug)) return { kind: "not_found", slug: p.slug };
+    if (/module\s+\S+\s+not enabled/i.test(p.message)) return { kind: "not_enabled", reason: "module_disabled" };
+    return { kind: "not_enabled", reason: "not_served" };
+  }
+  if (s === 409) {
+    const head = typeof p.ext.currentHeadVersion === "number" ? p.ext.currentHeadVersion : null;
+    return {
+      kind: "conflict", slug: p.slug ?? "conflict", message: p.message, currentHeadVersion: head,
+      currentContentHash: typeof p.ext.currentContentHash === "string" ? p.ext.currentContentHash : null,
+      updatedAt: typeof p.ext.updatedAt === "string" ? p.ext.updatedAt : null,
+    };
+  }
+  if (s === 422 || s === 400 || s === 413) {
+    const issues = parseIssues(p.ext);
+    return {
+      kind: "invalid",
+      issues: issues ?? [{ path: e.field ? `/blocks/0/props/${e.field}` : "", message: p.message }],
+      message: s === 413 ? "That content is too large to save." : p.message,
+    };
+  }
+  return { kind: "unavailable", code: "upstream_error", reason: p.slug ?? p.message };
+}
+
+/** One BFF call: egress, validate, and fold every failure into a `WdResult`. */
+export async function wdCall<T>(path: string, userId: string, parse: (raw: unknown) => T, init: RequestInit = {}): Promise<WdResult<T>> {
+  let raw: unknown;
+  try {
+    raw = await platformFetch<unknown>(path, userId, init);
+  } catch (e) {
+    return resultFromError(e);
+  }
+  try {
+    return { kind: "ok", data: parse(raw) };
+  } catch (e) {
+    return resultFromError(e);
+  }
+}
+
+// ── Paths ────────────────────────────────────────────────────────────────────────────────────────
+
+const enc = encodeURIComponent;
+export const contentBase = (company: string) => `/api/${enc(company)}/modules/webdev/content`;
+export const siteBase = (company: string, tenantSlug: string, siteId: string) =>
+  `${contentBase(company)}/sites/${enc(tenantSlug)}/${enc(siteId)}`;
+
+// ── Readers ──────────────────────────────────────────────────────────────────────────────────────
+
+export function listSites(userId: string, company: string) {
+  return wdCall(`${contentBase(company)}/sites`, userId, parseSites);
+}
+
+export function listCollections(userId: string, company: string, tenantSlug: string, siteId: string) {
+  return wdCall(`${siteBase(company, tenantSlug, siteId)}/collections`, userId, parseCollections);
+}
+
+export interface ItemListQuery {
+  locale?: string; state?: string; q?: string; cursor?: string; limit?: number;
+}
+
+export function listItems(userId: string, company: string, tenantSlug: string, siteId: string, collectionKey: string, q: ItemListQuery = {}) {
+  const p = new URLSearchParams();
+  if (q.locale) p.set("locale", q.locale);
+  if (q.state) p.set("state", q.state);
+  if (q.q) p.set("q", q.q);
+  if (q.cursor) p.set("cursor", q.cursor);
+  p.set("limit", String(Math.min(q.limit ?? 100, 100)));
+  return wdCall(`${siteBase(company, tenantSlug, siteId)}/collections/${enc(collectionKey)}/items?${p.toString()}`, userId, parseItemList);
+}
+
+export function getItem(userId: string, company: string, tenantSlug: string, siteId: string, itemId: string, version?: "head" | "live" | number) {
+  const qs = version === undefined ? "" : `?version=${version}`;
+  return wdCall(`${siteBase(company, tenantSlug, siteId)}/items/${enc(itemId)}${qs}`, userId, parseItemDetail);
+}
+
+export function listVersions(userId: string, company: string, tenantSlug: string, siteId: string, itemId: string, cursor?: string) {
+  const qs = cursor ? `?cursor=${enc(cursor)}&limit=100` : "?limit=100";
+  return wdCall(`${siteBase(company, tenantSlug, siteId)}/items/${enc(itemId)}/versions${qs}`, userId, parseVersionList);
+}
+
+export function getVersion(userId: string, company: string, tenantSlug: string, siteId: string, itemId: string, n: number) {
+  return wdCall(`${siteBase(company, tenantSlug, siteId)}/items/${enc(itemId)}/versions/${n}`, userId, parseVersionFull);
+}
+
+/** PROPOSED endpoint — see the header. A 404 here is NOT "no build": it is `not_enabled/not_served`,
+ *  and the caller renders "rebuild status isn't available yet", never "live". */
+export function getBuildStatus(userId: string, company: string, tenantSlug: string, siteId: string) {
+  return wdCall(`${siteBase(company, tenantSlug, siteId)}/build-status`, userId, parseBuildStatus);
+}
+
+export function getApprovalRow(userId: string, company: string, approvalId: string) {
+  return wdCall(`/api/${enc(company)}/automation-approvals/${enc(approvalId)}`, userId, parseApprovalRow);
+}
+
+/** The pending publish requests that name `itemId`. Uses the existing list route's `origin` filter
+ *  (accepted for `webdesk` once WSK-66's migration widens the origin set). Rows are the LIST's
+ *  snake_case shape; only `id`, `status` and `tool_args` are read. */
+export async function findPendingPublishRequests(userId: string, company: string, itemId: string): Promise<WdResult<{ approvalId: string }[]>> {
+  return wdCall(
+    `/api/${enc(company)}/automation-approvals?origin=webdesk&status=pending`,
+    userId,
+    (raw) => {
+      if (!Array.isArray(raw)) throw new WireDrift("automation-approvals", "array", raw);
+      const out: { approvalId: string }[] = [];
+      raw.forEach((row, i) => {
+        const o = obj(row, `automation-approvals[${i}]`);
+        const id = key(o, "id", str, `automation-approvals[${i}]`);
+        const status = key(o, "status", str, `automation-approvals[${i}]`);
+        if (status !== "pending") return;
+        const args = parseWebdeskPublishArgs(o.tool_args);
+        if (args?.items.some((it) => it.itemId === itemId)) out.push({ approvalId: id });
+      });
+      return out;
+    },
+  );
+}
+
+// ── Composite: resolve a slug to its item, page by page ──────────────────────────────────────────
+// The route table is `…/[collection]/[slug]?locale=en` but WSK-59 has no read-by-slug (items are
+// addressed by `itemId`). `item.list` is ordered by `slug, locale, id` and filters by locale; this
+// walks it until the slug appears. Capped so a bad slug cannot loop. FOLLOW-UP for WSK-59: a
+// `?slug=` filter (or by-slug get) would make this one call.
+const SLUG_SCAN_MAX_PAGES = 20;
+
+export async function resolveItemBySlug(
+  userId: string, company: string, tenantSlug: string, siteId: string, collectionKey: string, slug: string, locale: string,
+): Promise<WdResult<ItemSummary>> {
+  let cursor: string | undefined;
+  for (let i = 0; i < SLUG_SCAN_MAX_PAGES; i++) {
+    const r = await listItems(userId, company, tenantSlug, siteId, collectionKey, { locale, cursor, limit: 100 });
+    if (r.kind !== "ok") return r;
+    const hit = r.data.items.find((it) => it.slug === slug && it.locale === locale);
+    if (hit) return { kind: "ok", data: hit };
+    if (!r.data.page.hasMore || !r.data.page.cursor) break;
+    cursor = r.data.page.cursor;
+  }
+  // The default list hides deleted items. A deleted item's URL must still open (read-only, with the
+  // reason), so look in the `deleted` state before concluding it does not exist.
+  cursor = undefined;
+  for (let i = 0; i < SLUG_SCAN_MAX_PAGES; i++) {
+    const r = await listItems(userId, company, tenantSlug, siteId, collectionKey, { locale, state: "deleted", cursor, limit: 100 });
+    if (r.kind !== "ok") return r;
+    const hit = r.data.items.find((it) => it.slug === slug && it.locale === locale);
+    if (hit) return { kind: "ok", data: hit };
+    if (!r.data.page.hasMore || !r.data.page.cursor) break;
+    cursor = r.data.page.cursor;
+  }
+  return { kind: "not_found", slug: "item-not-found" };
+}
+
+// ── Composite: everything the editor page needs, in one result ──────────────────────────────────
+
+export interface EditorBundle {
+  tenant: TenantRef;
+  site: SiteRef;
+  collection: CollectionSummary;
+  detail: ItemDetail;
+  /** The DEFAULT-locale twin's stored fields — only loaded for a non-default locale whose composition
+   *  has locale-neutral members (§2.5 rule 2). `null` + `authoritativeProblem` when it could not be. */
+  authoritative: { locale: string; fields: Record<string, unknown> } | null;
+  authoritativeProblem: string | null;
+  /** Pending publish requests that name this item. `null` + problem when the lookup failed. */
+  pendingRequests: { approvalId: string }[] | null;
+  pendingProblem: string | null;
+  /** `null` until/unless the proposed build-status route answers. */
+  build: BuildStatus | null;
+  buildProblem: string | null;
+  loadedAt: string;
+}
+
+
+export async function loadEditorBundle(
+  userId: string, company: string, tenantSlug: string, siteId: string, collectionKey: string, slug: string, requestedLocale: string | null,
+): Promise<WdResult<EditorBundle>> {
+  const [sites, collections] = await Promise.all([
+    listSites(userId, company),
+    listCollections(userId, company, tenantSlug, siteId),
+  ]);
+  if (sites.kind !== "ok") return sites;
+  if (collections.kind !== "ok") return collections;
+  const tenant = sites.data.tenants.find((t) => t.slug === tenantSlug);
+  const site = tenant?.sites.find((s) => s.siteId === siteId);
+  if (!tenant || !site) return { kind: "not_found", slug: "site-not-found" };
+  const collection = collections.data.find((c) => c.key === collectionKey);
+  if (!collection) return { kind: "not_found", slug: "collection-not-found" };
+
+  // No `?locale=` means the tenant default. A locale-neutral collection only exists in the default locale.
+  const locale = collection.composition.localized === false ? tenant.defaultLocale : (requestedLocale ?? tenant.defaultLocale);
+  const summary = await resolveItemBySlug(userId, company, tenantSlug, siteId, collectionKey, slug, locale);
+  if (summary.kind !== "ok") return summary;
+  const detail = await getItem(userId, company, tenantSlug, siteId, summary.data.itemId, "head");
+  if (detail.kind !== "ok") return detail;
+
+  const [authoritative, pending, build] = await Promise.all([
+    (async (): Promise<{ value: EditorBundle["authoritative"]; problem: string | null }> => {
+      const defs = collection.composition.fields ?? [];
+      if (locale === tenant.defaultLocale || !defs.some(hasNeutralDescendant)) return { value: null, problem: null };
+      const twin = detail.data.group.find((g) => g.locale === tenant.defaultLocale);
+      if (!twin) return { value: null, problem: `There is no ${tenant.defaultLocale} version yet, so locale-neutral fields show this item's own copy.` };
+      const r = await getItem(userId, company, tenantSlug, siteId, twin.itemId, "head");
+      if (r.kind !== "ok") return { value: null, problem: `The ${tenant.defaultLocale} version could not be read (${describeFailure(r)}), so locale-neutral fields show this item's own copy.` };
+      return { value: { locale: tenant.defaultLocale, fields: splitVersionContent(collectionKey, r.data.version.blocks, r.data.version.seo).fields }, problem: null };
+    })(),
+    findPendingPublishRequests(userId, company, detail.data.item.itemId),
+    getBuildStatus(userId, company, tenantSlug, siteId),
+  ]);
+
+  return {
+    kind: "ok",
+    data: {
+      tenant, site, collection, detail: detail.data,
+      authoritative: authoritative.value, authoritativeProblem: authoritative.problem,
+      pendingRequests: pending.kind === "ok" ? pending.data : null,
+      pendingProblem: pending.kind === "ok" ? null : describeFailure(pending),
+      build: build.kind === "ok" ? build.data : null,
+      buildProblem: build.kind === "ok" ? null : describeFailure(build),
+      loadedAt: new Date().toISOString(),
+    },
+  };
+}
+
+/** One honest sentence for a non-ok result — for the secondary reads that must not take the page down. */
+export function describeFailure(r: Exclude<WdResult<unknown>, { kind: "ok" }>): string {
+  switch (r.kind) {
+    case "unavailable": return r.code === "contract_drift" ? `unexpected response — ${r.reason}` : r.reason;
+    case "forbidden": return "you do not have access";
+    case "not_enabled": return r.reason === "module_disabled" ? "the module is switched off" : "not available on this deployment yet";
+    case "not_found": return "not found";
+    case "conflict": return r.message;
+    case "invalid": return r.message;
+  }
+}
+
+export function stagingBaseUrl(site: SiteRef): string | null {
+  const env = site.environments.find((e) => e.name.toLowerCase() === "staging");
+  return env ? `https://${env.domain}` : null;
+}
+
+/** Best-effort id -> display name from the company directory, for version authors. COSMETIC: a failure
+ *  yields an empty map and  falls back to a short id — the one place in this module where
+ *  a failed read is deliberately not surfaced, because it decorates an author column and states nothing
+ *  about content. */
+export async function resolveAuthorNames(userId: string, company: string): Promise<Record<string, string>> {
+  try {
+    const members = await listMembers(userId, company);
+    const out: Record<string, string> = {};
+    if (Array.isArray(members)) for (const m of members) if (m && typeof m.user_id === "string" && typeof m.name === "string") out[m.user_id] = m.name;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** The site + its collections: what every list/history page resolves before anything else. */
+export interface SiteContext { tenant: TenantRef; site: SiteRef; collections: CollectionSummary[] }
+
+export async function loadSiteContext(userId: string, company: string, tenantSlug: string, siteId: string): Promise<WdResult<SiteContext>> {
+  const [sites, collections] = await Promise.all([
+    listSites(userId, company),
+    listCollections(userId, company, tenantSlug, siteId),
+  ]);
+  if (sites.kind !== "ok") return sites;
+  if (collections.kind !== "ok") return collections;
+  const tenant = sites.data.tenants.find((t) => t.slug === tenantSlug);
+  const site = tenant?.sites.find((s) => s.siteId === siteId);
+  if (!tenant || !site) return { kind: "not_found", slug: "site-not-found" };
+  return { kind: "ok", data: { tenant, site, collections: collections.data } };
+}

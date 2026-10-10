@@ -1,0 +1,65 @@
+{
+  "fields": [
+    {
+      "name": "primary",
+      "primitive": "group",
+      "multiple": true,
+      "itemKey": "url",
+      "required": true,
+      "fields": [
+        {
+          "name": "label",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "hub",
+          "primitive": "text"
+        },
+        {
+          "name": "url",
+          "primitive": "text",
+          "required": true,
+          "localized": false
+        },
+        {
+          "name": "children",
+          "primitive": "text",
+          "multiple": true,
+          "localized": false
+        }
+      ]
+    },
+    {
+      "name": "cta",
+      "primitive": "group",
+      "required": true,
+      "fields": [
+        {
+          "name": "label",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "url",
+          "primitive": "text",
+          "required": true,
+          "localized": false
+        }
+      ]
+    },
+    {
+      "name": "footer_extra",
+      "primitive": "text",
+      "multiple": true,
+      "localized": false
+    }
+  ],
+  "blocks": [],
+  "singleton": true,
+  "ui": {
+    "label": "Navigation",
+    "group": "Globals",
+    "order": 2
+  }
+}
