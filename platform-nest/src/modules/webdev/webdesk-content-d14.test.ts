@@ -96,6 +96,9 @@ describe.skipIf(!live)("WSK-59 · D14: an unattended agent's unpublish/delete su
     await addMembership(A, requester);
     await grantRole(admin, await createRole("company_admin"), "company", A);
     await grantRole(requester, await createRole("webdev_manager"), "company", A);
+    // A real employee also holds the base `member` role: filing a suspension (automation_approval:create) is
+    // a `member`-tier action, and a module-manager-only identity could not even ask for a review.
+    await grantRole(requester, await createRole("member"), "company", A);
     await linkIdentity(requester, "telegram", REQUESTER_LINK, true);
     zb = new FakeZoneB(A, "00000000-0000-4000-8000-00000000000b");
     app = await buildApp();
@@ -218,6 +221,7 @@ describe.skipIf(!live)("WSK-59 · D14: an unattended agent's unpublish/delete su
       expect(liveItem.publishState).toBe("published");
     } finally {
       await grantRole(requester, await createRole("webdev_manager"), "company", A);
+      await grantRole(requester, await createRole("member"), "company", A);
     }
   });
 

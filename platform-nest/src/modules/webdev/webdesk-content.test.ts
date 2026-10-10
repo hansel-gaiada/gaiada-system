@@ -254,7 +254,7 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
   describe("the cross-company wall (resolveEditableSite): company A's user can never reach company B's site", () => {
     // Every one of the 12 routes, addressed at B's tenant/site through A's own (authorized) company path.
     const itemId = "11111111-1111-4111-8111-111111111111";
-    const routes = (slug: string, sid: string, id: string): Array<[string, "GET" | "POST" | "PUT", string, unknown?]> => {
+    const routes = (slug: string, sid: string, id: string, liveId = id): Array<[string, "GET" | "POST" | "PUT", string, unknown?]> => {
       const s = `/sites/${slug}/${sid}`;
       return [
         ["listCollections", "GET", `${s}/collections`],
@@ -267,7 +267,7 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
         ["update", "PUT", `${s}/items/${id}`, { baseVersion: 1, fields: { h1: "y" } }],
         ["restore", "POST", `${s}/items/${id}/restore`, { version: 1, baseVersion: 1 }],
         ["publish-requests", "POST", `${s}/publish-requests`, { items: [{ itemId: id, version: 1 }] }],
-        ["unpublish", "POST", `${s}/items/${id}/unpublish`, { expectedPublishedVersion: 1 }],
+        ["unpublish", "POST", `${s}/items/${liveId}/unpublish`, { expectedPublishedVersion: 1 }],
         ["delete", "POST", `${s}/items/${id}/delete`, { baseVersion: 1 }],
       ];
     };
@@ -291,7 +291,7 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
     });
 
     it("POSITIVE CONTROL: the identical requests against A's OWN site are not 404 (the wall refuses only the foreign pair)", async () => {
-      for (const [name, method, path, body] of routes(GAIADA_SLUG, GAIADA_SITE, item.itemId)) {
+      for (const [name, method, path, body] of routes(GAIADA_SLUG, GAIADA_SITE, item.itemId, live1.itemId)) {
         const r = await call(method, `${base(A)}${path}`, adminA, name === "restore" ? { version: 1, baseVersion: 2 } : body);
         expect([200, 201, 202], `${name}: ${r.body}`).toContain(r.statusCode);
       }
