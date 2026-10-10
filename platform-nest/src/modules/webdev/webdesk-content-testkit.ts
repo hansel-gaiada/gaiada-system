@@ -226,10 +226,27 @@ export class FakeZoneB {
     }
 
     switch (req.command) {
-      case "collection.list":
-        return ok({ collections: [{ key: "service", composition: this.compositions.get("service") ?? { ui: { label: "Service pages" } }, vocabularyVersion: "1.1.0", counts: { items: this.items.size, byLocale: {}, live: 0, pendingChanges: 0 }, updatedAt: new Date().toISOString() }] });
+      case "collection.list": {
+        const keys = [...new Set(["service", ...this.compositions.keys()])];
+        return ok({
+          collections: keys.map((key) => {
+            const its = [...this.items.values()].filter((i) => i.siteId === p.siteId && i.collectionKey === key && !i.deletedAt);
+            const byLocale: Record<string, number> = {};
+            for (const i of its) byLocale[i.locale] = (byLocale[i.locale] ?? 0) + 1;
+            return {
+              key,
+              composition: this.compositions.get(key) ?? { ui: { label: "Service pages" } },
+              vocabularyVersion: "1.1.0",
+              counts: { items: its.length, byLocale, live: its.filter((i) => i.publishedVersion !== null).length, pendingChanges: its.filter((i) => i.headVersion > (i.publishedVersion ?? 0)).length },
+              updatedAt: new Date().toISOString(),
+            };
+          }),
+        });
+      }
       case "collection.get":
-        return p.key === "service" ? ok({ key: "service", composition: {}, vocabularyVersion: "1.1.0", updatedAt: new Date().toISOString() }) : problem(404, "collection-not-found");
+        return p.key === "service" || this.compositions.has(p.key)
+          ? ok({ key: p.key, composition: this.compositions.get(p.key) ?? {}, vocabularyVersion: "1.1.0", updatedAt: new Date().toISOString() })
+          : problem(404, "collection-not-found");
       case "item.list": {
         const q = req.query ?? {};
         const rows = [...this.items.values()].filter(

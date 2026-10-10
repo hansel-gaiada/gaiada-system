@@ -415,7 +415,8 @@ function parseIssues(ext: Record<string, unknown>): Issue[] | null {
   return out;
 }
 
-const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found", "version-not-found"]);
+// `approval_not_found` is the withdraw route's 404 (an id that is not a publish request for THIS site): a real answer, not "not served".
+const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found", "version-not-found", "approval_not_found"]);
 
 export function resultFromError(e: unknown): WdResult<never> {
   if (e instanceof WireDrift) return { kind: "unavailable", code: "contract_drift", reason: e.message };
