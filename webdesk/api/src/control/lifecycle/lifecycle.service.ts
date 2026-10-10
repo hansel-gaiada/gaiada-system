@@ -10,6 +10,11 @@
 // commit. Ids of the rows being created are generated before the transaction, because the audit row
 // that names them is its first statement.
 //
+// The two ARCHIVE commands resolve their tenant WHATEVER ITS STATUS (M3 T8): a retry of an archive
+// (same Idempotency-Key, response lost) arrives when the tenant is already archived, and must reach the
+// envelope so begin() answers it from the stored record. Only a FRESH run needs an active tenant, and it
+// is refused inside the effect with the same 404 as before.
+//
 // site.archive is the exception: it has no effect (the `sites` table has no status column, so it only
 // ever answers 501), takes no idempotency key, and records its audit row through CommandAuditService.
 // It consumes no approval and changes nothing, so there is nothing to claim.
@@ -42,10 +47,22 @@ export class LifecycleService {
   ) {}
 
   private async resolveActiveTenant(slug: string) {
-    const tenant = await this.tenants.bySlug(slug);
-    if (!tenant || tenant.status !== "active") {
+    const tenant = await this.resolveTenant(slug);
+    if (tenant.status !== "active") {
       throw new NotFoundException("tenant not found");
     }
+    return tenant;
+  }
+
+  /**
+   * The tenant whatever its status. The two ARCHIVE commands use this, not resolveActiveTenant: once the
+   * tenant is archived, a retry of the same archive (same Idempotency-Key, response lost) must reach the
+   * envelope so begin() can answer it from the stored record. Whether the tenant must be active is
+   * then decided only for a FRESH run, inside the effect (see requireActive).
+   */
+  private async resolveTenant(slug: string) {
+    const tenant = await this.tenants.bySlug(slug);
+    if (!tenant) throw new NotFoundException("tenant not found");
     return tenant;
   }
 
@@ -84,7 +101,8 @@ export class LifecycleService {
   }
 
   async archiveTenant(input: { slug: string; actor: string; idempotencyKey: string; ws4ApprovalId: string | null }) {
-    const tenant = await this.resolveActiveTenant(input.slug);
+    // Any status: an archived tenant must still reach the envelope so a replay is answered (see resolveTenant).
+    const tenant = await this.resolveTenant(input.slug);
     const args = { slug: input.slug };
 
     return this.envelope.run<{ tenant: { id: string; slug: string; status: string } }>({
@@ -96,8 +114,10 @@ export class LifecycleService {
       auditArgs: { ...args, tenantId: tenant.id },
       ws4ApprovalId: input.ws4ApprovalId,
       effect: async (client) => {
+        // A fresh run needs an ACTIVE tenant: the same 404 as before this fix, decided atomically by the
+        // UPDATE itself (an archived tenant matches no row), so the throw rolls the audit row back.
         const { rows } = await client.query<{ id: string; slug: string; status: string }>(
-          `UPDATE tenants SET status = 'archived' WHERE slug = $1 RETURNING id, slug, status`,
+          `UPDATE tenants SET status = 'archived' WHERE slug = $1 AND status = 'active' RETURNING id, slug, status`,
           [input.slug],
         );
         if (!rows[0]) throw new NotFoundException("tenant not found");
@@ -212,7 +232,8 @@ export class LifecycleService {
   }
 
   async archiveEnvironment(input: { tenantSlug: string; envId: string; actor: string; idempotencyKey: string; ws4ApprovalId: string | null }) {
-    const tenant = await this.resolveActiveTenant(input.tenantSlug);
+    // Any status: same reason as archiveTenant. A replay after the tenant itself was archived still answers.
+    const tenant = await this.resolveTenant(input.tenantSlug);
     const args = { tenantSlug: input.tenantSlug, envId: input.envId };
 
     return this.envelope.run<{ environment: { id: string; name: string; status: string } }>({
@@ -224,6 +245,8 @@ export class LifecycleService {
       auditArgs: args,
       ws4ApprovalId: input.ws4ApprovalId,
       effect: async (client) => {
+        // Fresh run only: an archived tenant gets the same 404 as before this fix.
+        if (tenant.status !== "active") throw new NotFoundException("tenant not found");
         const { rows } = await client.query<{ id: string; name: string; status: string }>(
           `UPDATE environments SET status = 'archived' WHERE id = $1 AND tenant_id = $2
            RETURNING id, name, status`,
