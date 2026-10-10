@@ -7,16 +7,18 @@
 // Drives the REAL production code path — `S3StorageAdapter.presignGetObject` (webdesk/api/src/
 // storage/s3-storage.adapter.ts, WSK-07), the exact class `ContractReadService.readLatest`
 // (WSK-15) calls to mint the `sdkTsUrl`/`openapiUrl`/`contractMdUrl` a tenant's control-plane
-// contract response carries — against a REAL, throwaway MinIO container. Not a mock, not a
-// unit-level assertion on the SDK's signature-generation math: an actual HTTP GET against an
-// actual presigned URL, observed to succeed before its TTL and to be refused after it.
+// contract response carries — against a REAL, throwaway RustFS container (WSK-52 replaced MinIO;
+// WSK-D42 ruling). Not a mock, not a unit-level assertion on the SDK's signature-generation math:
+// an actual HTTP GET against an actual presigned URL, observed to succeed before its TTL and to be
+// refused after it. Observed on rustfs/rustfs:1.0.0 (2026-10-11, --docker): 200 before the TTL,
+// then 403 `AccessDenied` "Request has expired", and a fresh URL for the same object 200 again.
 //
-// Run for real (spins up its own throwaway `minio/minio` container, tears it down after):
+// Run for real (spins up its own throwaway `rustfs/rustfs:1.0.0` container, tears it down after):
 //   node webdesk/scripts/check-artifact-url-expiry.mjs --docker
-// Against an already-running MinIO (e.g. the dev compose stack):
+// Against an already-running RustFS (e.g. the dev compose stack, port 8385):
 //   STORAGE_ENDPOINT=http://localhost:8385 STORAGE_ACCESS_KEY_ID=... STORAGE_SECRET_ACCESS_KEY=... \
 //     node webdesk/scripts/check-artifact-url-expiry.mjs
-// Selftest (no MinIO/network needed — proves the response-classification logic can fail):
+// Selftest (no RustFS/network needed — proves the response-classification logic can fail):
 //   node webdesk/scripts/check-artifact-url-expiry.mjs --selftest
 
 import { execFileSync } from 'node:child_process'
@@ -31,8 +33,9 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  *  live-fetch code so it can be selftested without a network. */
 export function classifyPresignedGetResponse(status) {
   if (status === 200) return 'valid'
-  // S3-API presign expiry surfaces as 403 (AccessDenied / SignatureDoesNotMatch / RequestTimeTooSkewed
-  // depending on provider) — MinIO's own behavior, confirmed against the real container below.
+  // S3-API presign expiry surfaces as 403 (AccessDenied / SignatureDoesNotMatch /
+  // RequestTimeTooSkewed depending on provider). RustFS 1.0.0 answers 403 AccessDenied "Request has
+  // expired", observed against the real container (see the header).
   if (status === 403) return 'expired-or-refused'
   return `unexpected-status-${status}`
 }
@@ -59,10 +62,12 @@ function sh(cmd) {
   return execFileSync('bash', ['-lc', cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
 }
 
-async function startThrowawayMinio() {
-  const name = 'wsk18-minio-expiry'
+const RUSTFS_IMAGE = 'rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff'
+
+async function startThrowawayRustfs() {
+  const name = 'wsk18-rustfs-expiry'
   sh(`MSYS_NO_PATHCONV=1 docker rm -f ${name} >/dev/null 2>&1 || true`)
-  sh(`MSYS_NO_PATHCONV=1 docker run -d --name ${name} -p 0:9000 -e MINIO_ROOT_USER=wsk18user -e MINIO_ROOT_PASSWORD=wsk18password_min8 minio/minio server /data`)
+  sh(`MSYS_NO_PATHCONV=1 docker run -d --name ${name} -p 0:9000 -e RUSTFS_ROOT_USER=wsk18user -e RUSTFS_ROOT_PASSWORD=wsk18password_min8 ${RUSTFS_IMAGE}`)
   // Discover the host-mapped port docker chose (0:9000 = random free port), and wait for readiness.
   let port
   for (let i = 0; i < 30; i++) {
@@ -73,10 +78,10 @@ async function startThrowawayMinio() {
     } catch { /* container still starting */ }
     await sleep(500)
   }
-  if (!port) throw new Error('could not discover MinIO published port')
+  if (!port) throw new Error('could not discover RustFS published port')
   for (let i = 0; i < 40; i++) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/minio/health/live`)
+      const res = await fetch(`http://127.0.0.1:${port}/health`)
       if (res.status === 200) break
     } catch { /* not ready yet */ }
     await sleep(500)
@@ -85,11 +90,11 @@ async function startThrowawayMinio() {
 }
 
 async function realRun({ useDocker }) {
-  let minio
+  let rustfs
   if (useDocker) {
-    console.log('-- starting a throwaway MinIO container --')
-    minio = await startThrowawayMinio()
-    process.env.STORAGE_ENDPOINT = minio.endpoint
+    console.log('-- starting a throwaway RustFS container --')
+    rustfs = await startThrowawayRustfs()
+    process.env.STORAGE_ENDPOINT = rustfs.endpoint
     process.env.STORAGE_ACCESS_KEY_ID = 'wsk18user'
     process.env.STORAGE_SECRET_ACCESS_KEY = 'wsk18password_min8'
     process.env.STORAGE_FORCE_PATH_STYLE = 'true'
@@ -113,7 +118,7 @@ async function realRun({ useDocker }) {
     // Short on purpose — this run WAITS for real wall-clock expiry. Overridable so this same real
     // (non-mocked) codepath can also demonstrate the FAIL branch for real: set a TTL longer than
     // the wait margin below and the "after" GET will still succeed, which the check correctly
-    // reports as a failure — the deliberate-break proof for this condition, using real MinIO
+    // reports as a failure — the deliberate-break proof for this condition, using real RustFS
     // rather than a synthetic classifier input (see the ticket report for the transcript).
     const TTL_SECONDS = Number(process.env.WSK18_PRESIGN_TTL_SECONDS ?? 2)
 
@@ -159,7 +164,7 @@ async function realRun({ useDocker }) {
     for (const f of failures) console.error(`  - ${f}`)
     return 1
   } finally {
-    if (minio) sh(`MSYS_NO_PATHCONV=1 docker rm -f ${minio.name} >/dev/null 2>&1 || true`)
+    if (rustfs) sh(`MSYS_NO_PATHCONV=1 docker rm -f ${rustfs.name} >/dev/null 2>&1 || true`)
   }
 }
 

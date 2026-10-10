@@ -13,7 +13,7 @@
 // HONEST SCOPE LIMIT, stated once here rather than buried: `mediaAssets` carries METADATA ONLY
 // (bucket_key/mime/size_bytes/scan_status). Design D-13 ("bulk media moves via per-promotion
 // short-lived pre-signed URLs") describes the real object-bytes transfer mechanism; building that
-// needs a live MinIO on both ends of a promotion, which this ticket does not have and must not
+// needs a live RustFS (S3) on both ends of a promotion, which this ticket does not have and must not
 // fake. `applyBundle` therefore never inserts a media_assets row that claims bytes exist locally
 // when they do not — see that file's own comment on `mediaAssetKeysNotTransferred`.
 

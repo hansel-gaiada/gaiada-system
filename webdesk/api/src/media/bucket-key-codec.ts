@@ -1,6 +1,6 @@
 // WSK-07 — FLAGGED SCHEMA GAP (reported in the ticket output, not fixed here — migrations are out
 // of this ticket's owned scope): `media_assets` (0002_content.sql) has exactly one storage
-// column, `bucket_key text NOT NULL`, described only as "MinIO object key". It carries NO column
+// column, `bucket_key text NOT NULL`, described only as "MinIO object key" (the 0002 comment; the store is RustFS since WSK-52). It carries NO column
 // naming which of the four buckets (media/video/uploads/artifacts) the object lives in — yet the
 // S3 API requires the bucket name as a parameter distinct from the object key on every operation
 // (put/get/head/delete/presign).

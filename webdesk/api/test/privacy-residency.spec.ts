@@ -4,13 +4,15 @@ import { describe, expect, it } from "vitest";
 import { ResidencyStatementService } from "../src/privacy/residency-statement.service";
 
 describe("residency statement (design §11 / WSK-D23)", () => {
-  it("names self-hosted Postgres + MinIO explicitly, never Cloudflare/R2, for the default (now) backup phase", () => {
+  it("names self-hosted Postgres + RustFS explicitly, never Cloudflare/R2, for the default (now) backup phase", () => {
     const svc = new ResidencyStatementService();
     const statement = svc.buildFor("acme");
 
     expect(statement.sentence).toContain("acme");
     expect(statement.sentence).toContain("self-hosted");
-    expect(statement.sentence).toContain("MinIO");
+    expect(statement.sentence).toContain("RustFS");
+    expect(statement.sentence).not.toContain("MinIO");
+    expect(statement.sentence).not.toContain("Zone B");
     // The sentence explicitly REASSURES "never Cloudflare R2" — it names Cloudflare only to rule
     // it out, so the real assertion is that it never claims we USE it.
     expect(statement.sentence.toLowerCase()).toContain("never cloudflare r2");

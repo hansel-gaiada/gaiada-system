@@ -1,4 +1,4 @@
-// WSK-15 — the ONLY file in this directory that talks to MinIO. Reuses WSK-07's `StorageAdapter`
+// WSK-15 — the ONLY file in this directory that talks to the object store (RustFS). Reuses WSK-07's `StorageAdapter`
 // interface/`S3StorageAdapter` implementation directly (`../../storage/s3-storage.adapter.ts` — a
 // plain class with no NestJS-DI or vocabulary dependency of its own, so it is safe to construct
 // outside a Nest application context here) — per this ticket's brief, no second S3 client is

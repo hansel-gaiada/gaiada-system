@@ -4,7 +4,7 @@
 // `latest.json` — the gate's job is proving artifact-BYTE determinism for a given composition
 // input, not exercising the live versioning ledger; both runs must therefore land on the same
 // baseline `1.0.0` regardless of what has or has not been published before), and writes the four
-// determinism-checked files to `--out`. No storage/event I/O — this script never touches MinIO or
+// determinism-checked files to `--out`. No storage/event I/O — this script never touches the object store or
 // the event bridge.
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
