@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **48%** · 84/175<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 84/176<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -168,7 +168,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `████░░░░░░░░░░░░░░░░` **20%** · 3/15<!-- /bar -->
+<!-- bar -->🟡 `████░░░░░░░░░░░░░░░░` **18%** · 3/16<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `████░░░░░░` **42%** · 3/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
@@ -179,12 +179,13 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [ ] Re-verified against the REAL BFF once WSK-59 lands (every field the UI reads diffed against a live response — built on a stub first)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
 - [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
 - [ ] Owner: install the `gaiada-erp` GitHub App on `gaiadabali/gaiada-web-revamp` (actions:write, metadata:read) and add the repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY`
 - [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo; build ledger + `build-status` / `rebuild-requests` routes in the ERP
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
 - [ ] Cost per run measured and recorded
+- [ ] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (built in WSK-60; not yet wired from WSK-59)
 
 ### P2 proof gate <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change

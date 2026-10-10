@@ -144,3 +144,12 @@ content-package generator that is not in the repo, and the bodies have changed s
 travel as a read-only `manifest` group on each page and cannot be regenerated. `/v1` does not serve
 compositions, so the pull reads the content model from git.
 
+**2026-10-10, WSK-60 merged as PROTOTYPED.** Built and tested against stubs: the GitHub dispatch through
+the real App code, the stamp poll, the forced-command deploy script (53 refusals in a real sshd), and the
+`build-status` / `rebuild-requests` routes. It has never touched real GitHub, delphi or a live `/v1`.
+It also fixed the shared GitHub client, which treated every 403 as a rate limit and so hid a missing
+`actions:write` behind three 60 s backoffs. Cost is estimated at ~3 billed min per rebuild. Owner steps
+(App install, repo secrets and variables, merging the workflow to `astro-site`) and the delphi deploy
+user are in `infra/runbooks/webdesk-staging-rebuild.md`. A self-approved `content.rebuild` is allowed
+(it reuses `github_repo:deploy`); a rebuild changes no content.
+
