@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████░░░░░░░░░░░░░░░░░░░░░░░░` **19%** · 24/124<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████░░░░░░░░░░░░░░░░░░░░░░░` **24%** · 31/128<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -31,7 +31,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk (delivery half)
-<!-- bar -->🟡 `████████░░░░░░░░░░░░` **39%** · 18/46<!-- /bar -->
+<!-- bar -->🟡 `██████████░░░░░░░░░░` **51%** · 25/49<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -85,13 +85,16 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Parity gate: both builds, `dist/` differs on 0 pages
 - [ ] The site's own build gates pass on the CMS build
 
-### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
-- [ ] Backup of the WebDesk database and volumes
-- [ ] `wsk05-*` verification tenants removed
-- [ ] RustFS up and bootstrapped; MinIO removed
-- [ ] New api live; `payload-gateway` removed
-- [ ] `/v1` answers on the loopback proxy
+### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **77%** · 7/9<!-- /bar -->
+- [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
+- [x] Verification tenants removed (250 `wsk<n>-*` fixtures; none other existed)
+- [x] RustFS up from the pinned digest and bootstrapped (16 changes, then 0); MinIO container removed
+- [x] New api live; `payload-gateway` removed; proxy recreated onto the new Caddyfile
+- [x] Defect fixed: compose gave the api `DATABASE_URL` but it reads `APP_DATABASE_URL` — the live api had never had a database
+- [x] Defect fixed: every table was owned by `postgres` and `webdesk_app` had 0 grants — DB rebuilt as the repo intends (migrator-owned, 74 app grants, revokes intact, RLS integrity 19/19)
+- [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
 - [ ] `api.gaiada.online` vhost enabled with TLS (after the A record)
+- [ ] The api image on the box rebuilt from LF sources off the live box, then signed via a release
 
 ### WSK-57 · Provision the gaiada tenant <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Tenant `gaiada`, site `gaiada-com`, staging + production environments
@@ -170,7 +173,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M4 · WebDesk production-ready
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/13<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/14<!-- /bar -->
 
 ### P1 · Linux verification of everything that survives <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/2<!-- /bar -->
 - [ ] Every provisional green from August 2026 re-run on Linux (minus what D37 deletes)
@@ -184,7 +187,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `--remove-orphans` on the ERP project cannot reach `webdesk`
 - [ ] Egress sweep: no ERP credential, no route to an ERP service
 
-### Operations <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
+### Operations <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
+- [ ] Deploy procedure committed: LF-safe shipping (`git -c core.autocrlf=false archive`), images built off the live box
 - [ ] WSK-63 · backup role, nightly backup producing a real dump
 - [ ] Restore drill from a backup, timed
 - [ ] OTel to sumopod; status page live

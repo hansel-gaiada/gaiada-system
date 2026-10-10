@@ -75,3 +75,30 @@ copy.
 file; D41–D43 are today's owner rulings). The replatform plan's colliding "D37" was renumbered to
 "next free". Live probe found `/v1` down for a month and the authoring path absent rather than
 merely unfinished — publish does not exist. Wave 1 dispatched: WSK-52, WSK-48a, WSK-53, WSK-62.
+
+**2026-10-10, deploy (WSK-56).** WSK-52 + WSK-48a merged; the combined Linux gate was green
+(418/0/1, differential 696/710, contract 60/60). They were deployed to gda-aicenter inside the
+`webdesk` project. The deploy surfaced **two defects that had made the live api useless since
+the 0.2.0 deploy**, plus a deploy-tooling trap:
+1. **Wrong env name.** Compose passed the api's connection string as `DATABASE_URL`, but
+   `src/config.ts` reads `APP_DATABASE_URL`. The api connected to an empty string, so `pg` dialled
+   localhost. Every DB-backed route had failed on the box since 0.2.0. No suite could see it,
+   because tests set the variable themselves. Fixed in `42a855c4`: compose passes the right name
+   and refuses to resolve without it, and the api refuses an empty URL in production.
+2. **Wrong owner.** The live database had every table owned by `postgres` (migrations applied
+   as the superuser), so `webdesk_app` held **0 grants** and the role split existed only in the
+   repo. The DB held nothing of value, so it was rebuilt the intended way: fresh volume,
+   `init-roles.sh`, 8 migrations as `webdesk_migrator` (idempotent re-run 0). Result:
+   `webdesk_migrator` owns the tables, `webdesk_app` has 74 grants, the deliberate REVOKEs hold,
+   and RLS integrity is OK on 19 tables.
+3. **CRLF trap.** `git archive` run from this Windows checkout applies `core.autocrlf` and
+   shipped every file with CRLF. `init-roles.sh` died on `set: -: invalid option`, and the
+   Postgres entrypoint carried on without the roles. Fixed by shipping with
+   `git -c core.autocrlf=false archive`.
+
+Also: the api image build on the live box pushed its load to **16.4 on 4 cores** for about a
+minute; the ERP stayed up (0.1 s responses). Future WebDesk images are built on sumopod. Payload's
+admin container was not restarted after the rebuild (WSK-D37 removes it; it holds nothing). Live
+`/v1` answers again: 401 problem+json for an unknown tenant, lockdown 404s intact. Next: WSK-57
+(tenant provisioning) waits on WSK-62's loader-principal answer.
+
