@@ -16,7 +16,8 @@
 // Run for real (spins up its own throwaway `rustfs/rustfs:1.0.0` container, tears it down after):
 //   node webdesk/scripts/check-artifact-url-expiry.mjs --docker
 // Against an already-running RustFS (e.g. the dev compose stack, port 8385):
-//   STORAGE_ENDPOINT=http://localhost:8385 STORAGE_ACCESS_KEY_ID=... STORAGE_SECRET_ACCESS_KEY=... \n//     node webdesk/scripts/check-artifact-url-expiry.mjs
+//   STORAGE_ENDPOINT=http://localhost:8385 STORAGE_ACCESS_KEY_ID=... STORAGE_SECRET_ACCESS_KEY=... \
+//     node webdesk/scripts/check-artifact-url-expiry.mjs
 // Selftest (no RustFS/network needed — proves the response-classification logic can fail):
 //   node webdesk/scripts/check-artifact-url-expiry.mjs --selftest
 
