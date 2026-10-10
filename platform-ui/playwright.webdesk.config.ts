@@ -28,7 +28,7 @@ export default defineConfig({
   retries: 0,
   reporter: process.env.CI ? [["line"]] : [["list"]],
   expect: { timeout: 15_000 },
-  timeout: 90_000,
+  timeout: 150_000,
   use: {
     baseURL: `http://localhost:${APP_PORT}`,
     trace: "retain-on-failure",

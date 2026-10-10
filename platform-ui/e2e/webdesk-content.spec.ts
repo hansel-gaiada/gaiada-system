@@ -81,10 +81,13 @@ test("the Website group sits in the Web Dev strip; one site redirects straight i
 
 test("STATE loading: a skeleton shows while the content API is slow, then the page replaces it", async ({ page }) => {
   await page.goto(DEPT);
-  await stub.config({ delayMs: 2500 });
-  await page.getByRole("navigation", { name: "Department sections" }).getByRole("link", { name: "Website" }).click();
+  const link = page.getByRole("navigation", { name: "Department sections" }).getByRole("link", { name: "Website" });
+  await hydrated(link); // a click before hydration is a full page load, not the soft navigation under test
+  await stub.config({ delayMs: 2000 });
+  await link.click();
   await expect(page.getByTestId("wd-skeleton")).toBeVisible();
-  await expect(page.getByTestId("collections")).toBeVisible({ timeout: 30_000 });
+  // three sequential BFF calls at 2 s each, on a shared and sometimes loaded host: generous on purpose
+  await expect(page.getByTestId("collections")).toBeVisible({ timeout: 90_000 });
   await expect(page.getByTestId("wd-skeleton")).toHaveCount(0);
 });
 
