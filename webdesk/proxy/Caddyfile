@@ -92,11 +92,15 @@
 	}
 
 	# --- PUBLIC content surface ---------------------------------------------------------------
-	# The frozen /v1 envelope (WSK-06). Routed to the Payload public GATEWAY — a process that
-	# imports neither next nor payload and carries its own hardcoded denylist — never to the
-	# internal listener.
+	# The frozen /v1 envelope (WSK-06). WSK-48a rehomed it: it is served by the api's `delivery`
+	# module (webdesk/api/src/delivery/), no longer by the Payload app's public gateway (that process
+	# was killed on the live box on 2026-09-09 and /v1 was down until this move; Payload is removed
+	# per WSK-D37). Note /v1/t/:tenantSlug/forms/* and /v1/t/:tenantSlug/media/* are ALSO api routes
+	# (WSK-10 / WSK-07) and are now reachable through this one rule — both are public-by-design
+	# surfaces whose own guards (API key + scope, PublicTenantGuard) decide; nothing under /internal/*
+	# or /control/* is routed here.
 	handle /v1/* {
-		reverse_proxy payload-gateway:3000
+		reverse_proxy api:3000
 	}
 
 	# Public form submission (WSK-10). Scoped per-tenant by API key; never the control plane.

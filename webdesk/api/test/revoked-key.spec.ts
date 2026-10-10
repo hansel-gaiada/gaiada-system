@@ -31,7 +31,7 @@ describe("WSK-05 revoked-key probe", () => {
 
     const before = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenant.slug}/content`,
+      url: `/v1/t/${tenant.slug}/${tenant.collectionKey}?locale=en-US`,
       headers: { authorization: `Bearer ${minted.key}` },
     });
     expect(before.statusCode).toBe(200);
@@ -46,7 +46,7 @@ describe("WSK-05 revoked-key probe", () => {
     // No sleep, no cache-bust header, no retry loop — the very next call, immediately.
     const after = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenant.slug}/content`,
+      url: `/v1/t/${tenant.slug}/${tenant.collectionKey}?locale=en-US`,
       headers: { authorization: `Bearer ${minted.key}` },
     });
     expect(after.statusCode).toBe(401);

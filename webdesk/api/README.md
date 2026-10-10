@@ -17,9 +17,9 @@ is WSK-01's; see the ticket report for why and what changes it needs).
 - `src/auth/` — `ApiKeyAuthGuard` (resolves the key, sets tenant context) + `ScopeGuard` +
   `RequireScope` decorator.
 - `src/rate-limit/` — `TenantQuotaService` (in-memory fixed window, per tenant) + `TenantQuotaGuard`.
-- `src/content/` — a minimal read/write content route wired behind the three guards above, to
-  prove the middleware actually gates a "content route" end to end. The real `/v1` envelope
-  (vocabulary, blocks, locale) is WSK-06's frozen design — this is not it.
+- `src/content/` — RETIRED by WSK-48a (was a demo read/write route that existed to prove the guards
+  gate a "content route"; the guard coverage now runs against `src/delivery/` and media upload — see
+  "Delivery (WSK-48a)" at the end of this file).
 - `src/tenants/tenant-lookup.service.ts` — resolves a tenant slug to an id under
   `webdesk.platform_ctx` (the one legitimate cross-tenant read in this service).
 - `test/` — the scope matrix, revoked-key probe, no-key probe, plaintext dump-grep proof, per-tenant
@@ -1675,3 +1675,62 @@ re-pointing that one assertion at it; both `DELETE` and `UPDATE` are now proven 
 real runtime role, and the row is proven still present and unmodified afterward. Containers torn
 down (`docker rm -f wsk38-runner wsk38-db wsk38-minio && docker network rm wsk38-net`) after the
 run.
+
+## Delivery (WSK-48a) — the public `/v1` read path, `src/delivery/**`
+
+Status: **DEV-VERIFIED** on `sumopod` (Linux containers; numbers below). Rehomed from the Payload
+Next.js app (`webdesk/payload/collections/{router,content-read,redirects,auth,db}.ts` +
+`app/(payload)/v1/[...slug]/route.ts` + `src/public-gateway.mjs`) into this service, per owner ruling
+WSK-D37 (Payload is removed) and design OQ-3.5's default. The read code never needed Payload — it is
+our own SQL (WSK-D24) — and the `payload-gateway` process that served it was down on the live box from
+2026-09-09 until this move. Payload itself is untouched (WSK-48b deletes it).
+
+Serves, GET only, with the frozen envelope (design §05):
+`/v1/t/:tenantSlug/{:collection | :collection/:slug | search | sitemap.xml}`.
+
+- `router.ts` — `createV1Handler(deps)`: the original `handleV1Request`, still a plain Web
+  `Request -> Response` function, now taking the tenant lookup / key resolution / tenant pool as
+  dependencies. Same check order, same statuses, same RFC 9457 problem bodies, same
+  "unknown tenant and bad key are the same 401 shape" doctrine.
+- `content-read.ts`, `redirects.ts` (sitemap only) — moved SQL, mechanical edits only (the pool).
+- `delivery.gateway.ts` — the HTTP edge: one **raw Fastify route** (`/v1/*`, encapsulated plugin), not a
+  Nest controller. It builds a Web `Request`, calls the router, and writes the `Response` to the Node
+  socket itself (`reply.hijack()`), so Nest's exception filter, Fastify's charset suffixing, and
+  Fastify's own 404/405/415/400-on-body cannot alter a byte. See the file header for each trap.
+- `delivery-auth.service.ts` — tenant lookup (`DbService.withPlatformCtx`) + `ApiKeysService.resolve()`.
+  **One key-hash implementation** (`crypto/api-key-hash.ts`); WSK-D24's "hash duplicated in two
+  services" cost is retired. `db.ts` adapts `DbService.withTenant` to the one-client-per-request shape
+  the read code needs; there is no second pool.
+- Per-tenant read quota: the api's `TenantQuotaService` counter (same budget the guarded routes use),
+  applied after the key resolves. In-quota responses are byte-identical and gain `X-RateLimit-*`
+  headers; over quota is a `429` in the frozen problem+json envelope (slug `rate-limited`, `Retry-After`).
+  Default is 300 requests/min/tenant (`WEBDESK_READ_QUOTA_PER_MIN`) — check that against a site build's
+  fetch burst before enabling publicly.
+- `vocabulary/` — **vendored, mechanically**, from `webdesk/payload/vocabulary/` (this package is
+  CommonJS and cannot import the ESM `.ts` files). `node src/delivery/vocabulary/vendor.mjs`
+  regenerates; `test/delivery/vocabulary-vendor-drift.spec.ts` fails if any copy diverges. When
+  WSK-48b deletes `webdesk/payload/`, delete that spec + `vendor.mjs` and treat the copy as source.
+- WSK-05's demo `content` controller/module/service is **retired** (it owned `GET|POST
+  /v1/t/:tenantSlug/content` and would have shadowed a collection keyed `content`). Its guard coverage
+  moved: read-scope tests now drive the delivery routes; write-scope tests drive media upload
+  (`POST /v1/t/:slug/media/:bucket`, `@RequireScope("write")`) — see the comments in
+  `api-keys.scope-matrix.spec.ts` and `tenant-quota.spec.ts`.
+
+No new env vars: `APP_DATABASE_URL`, `API_KEY_PEPPER` (must equal what the keys were minted with),
+and the optional quota vars are all existing.
+
+### Verify
+
+In-repo (needs only Postgres, like the rest of the suite): `npx vitest run test/delivery` —
+`delivery-routes.spec.ts` (byte-level adapter promises, router error shapes surviving the framework,
+route precedence against media/forms, the quota) and `vocabulary-vendor-drift.spec.ts`.
+
+The **byte-identity gate** against the old Payload-hosted router lives in
+`webdesk/payload/test/` (it needs the Payload tree, so it is not in CI): `run-v1-differential.mjs`
+replays every request of `envelope-contract.test.mjs` (unmodified except one import swap) plus ~670
+error-path/edge-case requests (`v1-differential-extra.test.mjs`) against BOTH the old router (behind a
+plain Node http.Server) and a running api, and compares status, body bytes, `content-type` and
+`cache-tag`. Recipe: Postgres (roles via `webdesk/postgres/init-roles.sh`) + `npm run migrate`, then in
+`webdesk/api`: `npm ci && npx tsc -p tsconfig.json`, start `WEBDESK_READ_QUOTA_PER_MIN=1000000 node
+dist/src/main.js`, then `V1_NEW_URL=http://127.0.0.1:3000 DATABASE_URI=<app url> MIGRATE_DATABASE_URL=<migrator url> API_KEY_PEPPER=<same> node
+--import tsx ../payload/test/run-v1-differential.mjs` (`webdesk/` needs `npm ci` too, for `pg`).

@@ -58,7 +58,7 @@ describe("WSK-05 scope matrix", () => {
   it("a staging read key sees BOTH draft and published items for its own tenant/site", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: auth(aStagingRead.key),
     });
     expect(res.statusCode).toBe(200);
@@ -69,7 +69,7 @@ describe("WSK-05 scope matrix", () => {
   it("a production read key sees ONLY published items — env gates publish visibility", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: auth(aProductionRead.key),
     });
     expect(res.statusCode).toBe(200);
@@ -77,39 +77,45 @@ describe("WSK-05 scope matrix", () => {
     expect(slugs).toEqual(["a-published"]);
   });
 
+  // WSK-48a: these two cases used to drive WSK-05's demo `POST /v1/t/:slug/content`, which is retired
+  // (it collided with the envelope router). The write-scope proof moves to the api's other
+  // write-scoped route: media upload (`@RequireScope("write")`, `POST /v1/t/:slug/media/:bucket`).
+  // ScopeGuard runs BEFORE the handler and before any storage/ClamAV is touched, so a 403 proves the
+  // scope refusal, and a write key getting the handler's own 400 (an empty upload body) proves the
+  // key passed auth + scope and reached the route — without needing MinIO/ClamAV in this file.
   it("a read-scoped key is refused on a write route (403, not 401 — the key IS valid)", async () => {
     const res = await app.inject({
       method: "POST",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/media/media`,
       headers: auth(aStagingRead.key),
-      payload: { collectionKey: tenantA.collectionKey, locale: "en-US", slug: "should-not-be-created" },
+      payload: { filename: "x.png", contentType: "image/png", contentBase64: "AA==" },
     });
     expect(res.statusCode).toBe(403);
   });
 
-  it("a write-scoped key can create content, and write implies read on the same key", async () => {
-    const createRes = await app.inject({
+  it("a write-scoped key passes the write route's scope guard, and write implies read on the same key", async () => {
+    const writeRes = await app.inject({
       method: "POST",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/media/media`,
       headers: auth(aStagingWrite.key),
-      payload: { collectionKey: tenantA.collectionKey, locale: "en-US", slug: "a-created-by-write-key" },
+      payload: {}, // deliberately incomplete: the handler's own validation answers, not the guards
     });
-    expect(createRes.statusCode).toBe(201);
+    expect(writeRes.statusCode).toBe(400);
 
     const readRes = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: auth(aStagingWrite.key),
     });
     expect(readRes.statusCode).toBe(200);
     const slugs = readRes.json<{ items: { slug: string }[] }>().items.map((i) => i.slug);
-    expect(slugs).toContain("a-created-by-write-key");
+    expect(slugs).toContain("a-published");
   });
 
   it("tenant A's key is refused against tenant B's route (cross-tenant key use)", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantB.slug}/content`,
+      url: `/v1/t/${tenantB.slug}/${tenantB.collectionKey}?locale=en-US`,
       headers: auth(aStagingRead.key),
     });
     expect(res.statusCode).toBe(401);
@@ -118,7 +124,7 @@ describe("WSK-05 scope matrix", () => {
   it("tenant B's key is refused against tenant A's route (symmetric cross-tenant refusal)", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: auth(bStagingRead.key),
     });
     expect(res.statusCode).toBe(401);
@@ -127,7 +133,7 @@ describe("WSK-05 scope matrix", () => {
   it("tenant B's own key sees only tenant B's content, never leaking A's rows", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantB.slug}/content`,
+      url: `/v1/t/${tenantB.slug}/${tenantB.collectionKey}?locale=en-US`,
       headers: auth(bStagingRead.key),
     });
     expect(res.statusCode).toBe(200);
@@ -147,14 +153,14 @@ describe("WSK-05 scope matrix", () => {
 
     const withOldKey = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: auth(aProductionRead.key),
     });
     expect(withOldKey.statusCode).toBe(401);
 
     const withNewKey = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: auth(rotated.key),
     });
     expect(withNewKey.statusCode).toBe(200);
