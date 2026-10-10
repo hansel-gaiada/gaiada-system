@@ -25,25 +25,48 @@ export interface MtlsVerificationResult {
   reason?: string;
 }
 
+const PEM_BEGIN = "-----BEGIN CERTIFICATE-----";
+
 /**
- * `certPemBase64` is expected to be a base64-encoded PEM certificate, forwarded by the proxy as
- * the `x-webdesk-mtls-cert-pem` header (see real-control-channel-authenticator.ts) ONLY after its
- * own mTLS handshake already required + verified a client cert. Absence of this header means "no
- * cert" — Layer 1's first and most basic refusal.
+ * `certHeader` is the `x-webdesk-mtls-cert-pem` header value: the URL-encoded PEM of the client
+ * certificate, exactly what host nginx's `$ssl_client_escaped_cert` produces (WSK-63a: nginx has no
+ * base64 primitive, and installing a module into the live ERP's nginx to get one was ruled out).
+ * The control vhost sets it ONLY after its own mTLS handshake verified a client cert, and overwrites
+ * any inbound value. Absence means "no cert" - Layer 1's first and most basic refusal.
+ *
+ * ONE encoding is accepted on purpose (URL-encoded only; the old base64 form is no longer parsed).
+ * The only sender is our own proxy chain, so a second accepted form would just be a second parsing
+ * path an attacker could probe. A raw (unescaped) PEM is refused with its own reason: legitimate
+ * escaped values never contain whitespace, and accepting raw text would let a lazily-built client or
+ * a misconfigured proxy pass without the encoding contract being honoured.
  */
 export function verifyClientCertificate(
-  certPemBase64: string | undefined,
+  certHeader: string | undefined,
   pinnedCaPem: string,
   allowedCommonNames: readonly string[],
 ): MtlsVerificationResult {
-  if (!certPemBase64) {
+  if (!certHeader) {
     return { verified: false, reason: "no client certificate presented (x-webdesk-mtls-cert-pem absent)" };
+  }
+  if (/\s/.test(certHeader)) {
+    return {
+      verified: false,
+      reason: "client certificate header is not URL-encoded (raw PEM with whitespace) - expected nginx $ssl_client_escaped_cert",
+    };
   }
 
   let leaf: X509Certificate;
   let ca: X509Certificate;
   try {
-    const pem = Buffer.from(certPemBase64, "base64").toString("utf8");
+    let pem: string;
+    try {
+      pem = decodeURIComponent(certHeader);
+    } catch {
+      return { verified: false, reason: "client certificate header has malformed percent-encoding" };
+    }
+    if (!pem.startsWith(PEM_BEGIN)) {
+      return { verified: false, reason: "client certificate header does not decode to a PEM certificate (no BEGIN CERTIFICATE marker)" };
+    }
     leaf = new X509Certificate(pem);
     ca = new X509Certificate(pinnedCaPem);
   } catch (err) {

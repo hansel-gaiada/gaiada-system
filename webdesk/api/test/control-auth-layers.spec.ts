@@ -57,8 +57,8 @@ import { mintWs4Assertion, computeCommandHash } from "../src/control/auth/ws4-as
 //   go run ./cmd/synccert -init -ca-cert <ca> -ca-key <key> -cn platform-nest-webdesk \
 //     -out-cert client-good.crt -out-key client-good.key
 // (and a second, separate `-init` CA for client-rogue-ca; a third cert off the SAME good CA with
-// -cn some-other-client for client-wrong-cn). Embedded as base64 exactly as the app expects the
-// `x-webdesk-mtls-cert-pem` header to carry them.
+// -cn some-other-client for client-wrong-cn). Embedded as base64; converted to the URL-encoded
+// header form below (see toEscapedHeader).
 // ------------------------------------------------------------------------------------------
 const PINNED_CA_PEM = `-----BEGIN CERTIFICATE-----
 MIIBczCCARigAwIBAgIIMzOmmLHpzT4wCgYIKoZIzj0EAwIwHTEbMBkGA1UEAxMS
@@ -81,6 +81,13 @@ const ROGUE_CA_CERT_B64 =
 /** Signed by the PINNED CA (chains fine) but CN "some-other-client" is not allow-listed. */
 const WRONG_CN_CERT_B64 =
   "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJuekNDQVVXZ0F3SUJBZ0lJR3ZsUW0yVVQ1SmN3Q2dZSUtvWkl6ajBFQXdJd0hURWJNQmtHQTFVRUF4TVMKWjJGcFlXUmhMV2x1ZEdWeWJtRnNMV05oTUI0WERUSTJNRGd5TmpFME5EVXlNMW9YRFRJM01EZ3lOakUxTkRVeQpNMW93SERFYU1CZ0dBMVVFQXhNUmMyOXRaUzF2ZEdobGNpMWpiR2xsYm5Rd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxCmhrak9QUU1CQndOQ0FBVDMrWGlIajMwd093c3RQVmJ4N1VTQndZZzBGRFUvV1lGQUNMdnZjelZ0SGZyWlpUbUkKbjJhSFExTTJTaVVNdjVvbS9pZUloMzRSd1k0UXVyTDVjdlYvbzNBd2JqQU9CZ05WSFE4QkFmOEVCQU1DQjRBdwpIUVlEVlIwbEJCWXdGQVlJS3dZQkJRVUhBd0lHQ0NzR0FRVUZCd01CTUI4R0ExVWRJd1FZTUJhQUZQT3M2eDRxCitqWnYrcW5jMjdYK2pXbmtVL2RiTUJ3R0ExVWRFUVFWTUJPQ0VYTnZiV1V0YjNSb1pYSXRZMnhwWlc1ME1Bb0cKQ0NxR1NNNDlCQU1DQTBnQU1FVUNJSDd4R1IvK0ZSVEE0TzFTOTI3dW9DLy9BYks3VjR3dlBjbmtlR2RDaThCRQpBaUVBZ1Z2TWdpR0R6NFF3NWM2TDlJTVpOWXMyYlRpUHo2VEZ0ZmNaR1l0SE5sND0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=";
+
+// WSK-63a: the header now carries the URL-encoded PEM (nginx $ssl_client_escaped_cert), not base64.
+// The fixtures above stay as embedded; this converts them to the wire form the proxy produces.
+const toEscapedHeader = (b64: string) => encodeURIComponent(Buffer.from(b64, "base64").toString("utf8"));
+const GOOD_CERT_HDR = toEscapedHeader(GOOD_CERT_B64);
+const ROGUE_CA_CERT_HDR = toEscapedHeader(ROGUE_CA_CERT_B64);
+const WRONG_CN_CERT_HDR = toEscapedHeader(WRONG_CN_CERT_B64);
 
 const ASSERTION_KEY = "wsk22-test-ws4-assertion-key-never-used-outside-this-suite";
 
@@ -142,7 +149,7 @@ function freshSlug() {
 /** Full "legitimate caller" header set — mTLS + a valid fixture-signed token with every scope. */
 function baseHeaders(token: string, idempotencyKey?: string) {
   const h: Record<string, string> = {
-    "x-webdesk-mtls-cert-pem": GOOD_CERT_B64,
+    "x-webdesk-mtls-cert-pem": GOOD_CERT_HDR,
     authorization: `Bearer ${token}`,
   };
   if (idempotencyKey) h["idempotency-key"] = idempotencyKey;
@@ -218,7 +225,7 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
       const res = await app.inject({
         method: "POST",
         url: "/control/v1/tenants",
-        headers: { "x-webdesk-mtls-cert-pem": ROGUE_CA_CERT_B64, authorization: `Bearer ${goodToken}` },
+        headers: { "x-webdesk-mtls-cert-pem": ROGUE_CA_CERT_HDR, authorization: `Bearer ${goodToken}` },
         payload: { slug: freshSlug(), companyRef: randomUUID() },
       });
       expect(res.statusCode).toBe(401);
@@ -229,7 +236,7 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
       const res = await app.inject({
         method: "POST",
         url: "/control/v1/tenants",
-        headers: { "x-webdesk-mtls-cert-pem": WRONG_CN_CERT_B64, authorization: `Bearer ${goodToken}` },
+        headers: { "x-webdesk-mtls-cert-pem": WRONG_CN_CERT_HDR, authorization: `Bearer ${goodToken}` },
         payload: { slug: freshSlug(), companyRef: randomUUID() },
       });
       expect(res.statusCode).toBe(401);
@@ -245,7 +252,7 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
       const res = await app.inject({
         method: "POST",
         url: "/control/v1/tenants",
-        headers: { "x-webdesk-mtls-cert-pem": GOOD_CERT_B64 },
+        headers: { "x-webdesk-mtls-cert-pem": GOOD_CERT_HDR },
         payload: { slug: freshSlug(), companyRef: randomUUID() },
       });
       expect(res.statusCode).toBe(401);

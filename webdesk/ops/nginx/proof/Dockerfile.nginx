@@ -1,0 +1,6 @@
+# WSK-63a proof image: the SAME nginx versions as gda-aicenter (Debian 12: nginx 1.22.1-9).
+# Test-only. Never deployed.
+FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends nginx gettext-base curl openssl iproute2 ca-certificates \
+ && rm -rf /var/lib/apt/lists/* /etc/nginx/sites-enabled/default
