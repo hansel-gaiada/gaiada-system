@@ -8,7 +8,7 @@ is executed by the orchestrator, in order. Design: `docs/plans/2026-10-10-webdes
 
     platform (ERP)  --mTLS+Bearer-->  host nginx 172.17.0.1:9443  (vhost control.webdesk.internal)
                                         verifies client cert against the internal CA, then adds:
-                                          X-Webdesk-Mtls-Cert-Pem = base64(verified cert)   (overwrites any inbound value)
+                                          X-Webdesk-Mtls-Cert-Pem = $ssl_client_escaped_cert (URL-encoded PEM)   (overwrites any inbound value)
                                           X-Webdesk-Control-Gate  = <secret>
                                       --> Caddy 127.0.0.1:8380 : /control/* routed to api ONLY if the gate matches
                                       --> api: Layer 1 re-verifies the cert, Layer 2 verifies the Keycloak token offline
@@ -19,14 +19,14 @@ No new host port is published (compose still publishes only `proxy` on `127.0.0.
 
 | Fact | Value | Consequence |
 |---|---|---|
-| Host nginx | `1.22.1-9+deb12u10`, Debian 12, **no njs/perl module installed** (`/etc/nginx/modules-enabled` empty) | nginx cannot base64 the cert header natively; step 3 installs `libnginx-mod-http-js` (candidate `0.7.9-2`) |
+| Host nginx | `1.22.1-9+deb12u10`, Debian 12, no extra modules; used stock (no njs/perl): the verified cert is forwarded as `$ssl_client_escaped_cert` | nothing to install into the live nginx; the api (Layer 1) decodes the URL-encoded form instead (step 4) |
 | nginx boot order | unit is `After=network-online.target` only, NOT docker | a bind to `172.17.0.1` fails if docker0 is not up yet, taking down **every** vhost; step 2 sets `ip_nonlocal_bind=1` |
 | `host-gateway` | `172.17.0.1` (docker0); `host.docker.internal` already resolves to it in `gaiada-platform-1`; Postgres/Redis/:4310 already listen there | the vhost listens on `172.17.0.1:9443` |
 | Listeners today | `0.0.0.0:443`, `0.0.0.0:80`, `127.0.0.1:8380` ... nothing on `:9443` | pick `:9443`, not `:443` (a shared wildcard `:443` would expose the mTLS vhost publicly) |
-| Internal CA | **exists**: `gaiada_gateway-data` volume, `ca-cert.pem` + `ca-key.pem` (0600 root), `CN=gaiada-internal-ca`, 2026-08-30 to 2036-08-27, sha256 `52:87:84:2B:D1:1A:D4:D2:1B:6C:70:39:4A:B7:98:CB:C7:4C:29:2F:F0:E1:E1:A3:4C:8C:94:65:EC:BB:F6:88` | `infra/runbooks/internal-ca.md` still says "DOES NOT EXIST" - that header is stale |
-| Client cert | **already issued**: `platform-nest-webdesk.crt/.key` in the same volume, `CN=platform-nest-webdesk`, EKU clientAuth only, no SAN, valid to 2028-12-02 | step 4b reuses it; no re-issue needed |
-| Server cert | does not exist | step 4a issues it (`SAN DNS:control.webdesk.internal`, EKU serverAuth) |
-| api pinned CA | `webdesk-api-1` has `WEBDESK_CONTROL_MTLS_CA_FILE=/etc/webdesk/certs/ca-cert.pem` (host dir is 0700, unreadable without sudo). **Unknown whether it is still the placeholder CA** (hardening runbook says the placeholder's key was destroyed). | step 4c compares and swaps if it differs. Without it Layer 1 refuses every real cert |
+| Internal CA | **exists**: `gaiada_gateway-data` volume, `ca-cert.pem` + `ca-key.pem` (0600 root), `CN=gaiada-internal-ca`, 2026-08-30 to 2036-08-27, sha256 `52:87:84:2B:D1:1A:D4:D2:1B:6C:70:39:4A:B7:98:CB:C7:4C:29:2F:F0:E1:E1:A3:4C:8C:94:65:EC:BB:F6:88` | **`infra/runbooks/internal-ca.md` is stale**: its status header still says the CA "DOES NOT EXIST YET" (flagged here, not edited by WSK-63a) |
+| Client cert | **already issued**: `platform-nest-webdesk.crt/.key` in the same volume, `CN=platform-nest-webdesk`, EKU clientAuth only, no SAN, valid to 2028-12-02 | step 3b reuses it; no re-issue needed |
+| Server cert | does not exist | step 3a issues it (`SAN DNS:control.webdesk.internal`, EKU serverAuth) |
+| api pinned CA | `webdesk-api-1` has `WEBDESK_CONTROL_MTLS_CA_FILE=/etc/webdesk/certs/ca-cert.pem` (host dir is 0700, unreadable without sudo). **Unknown whether it is still the placeholder CA** (hardening runbook says the placeholder's key was destroyed). | step 4 compares and swaps if it differs. Without it Layer 1 refuses every real cert |
 | api env | `WEBDESK_CONTROL_OIDC_ISSUER=https://erp.gaiada.online/idp/realms/gaiada`, `..._AUDIENCE=webdesk-control-plane`, `..._ALLOWED_CN=platform-nest-webdesk` already live (from `.env.control`) | no `.env.control` edit needed |
 | Control routes | `ControlModule` is wired; `/control/v1/...` routes are mapped in the running api | positive tests can reach a real controller |
 | NTP | `timedatectl`: `NTP=yes`, `NTPSynchronized=yes`, UTC (no `chronyc`; systemd-timesyncd) | still re-check in step 10 |
@@ -59,17 +59,17 @@ No new host port is published (compose still publishes only `proxy` on `127.0.0.
 
 ## Step 1 - get the repo files onto the box
 
-The commit with the five repo files must be on `/home/Hansel/gaiada-webdesk` (route: the hand-built deploy runbook / normal pull; no
+The WSK-63a commit (Caddyfile, overlay, `.env.example`, nginx vhost, runbook, and the api Layer 1 change) must be on `/home/Hansel/gaiada-webdesk` (route: the hand-built deploy runbook / normal pull; no
 push is done by the WSK-63a author). Verify the working tree has them and back up what they replace:
 
     cd /home/Hansel/gaiada-webdesk/webdesk
-    for f in proxy/Caddyfile docker-compose.aicenter.yml .env.example; do cp -a $f $f.bak-wsk63a-$TS; done   # BEFORE pulling
+    for f in proxy/Caddyfile docker-compose.aicenter.yml .env.example api/src/control/auth/mtls-verifier.ts; do cp -a $f $f.bak-wsk63a-$TS; done   # BEFORE pulling
     # ... pull/checkout the WSK-63a commit ...
     git log -1 --oneline
-    ls ops/nginx/control.webdesk.internal.conf ops/nginx/webdesk-control-cert.js
+    ls ops/nginx/control.webdesk.internal.conf
     grep -c 'X-Webdesk-Control-Gate' proxy/Caddyfile        # expect 4+ lines
 
-**Rollback:** restore the three `.bak-wsk63a-$TS` files (or `git checkout <previous-commit> -- <files>`).
+**Rollback:** restore the four `.bak-wsk63a-$TS` files (or `git checkout <previous-commit> -- <files>`).
 
 ## Step 2 - make nginx boot-safe on `172.17.0.1` (do this BEFORE any vhost mentions that address)
 
@@ -80,24 +80,11 @@ push is done by the WSK-63a author). Verify the working tree has them and back u
 configured yet; nothing else on the box depends on it being off.
 **Rollback:** `sudo rm /etc/sysctl.d/60-wsk63a-nonlocal-bind.conf; sudo sysctl -w net.ipv4.ip_nonlocal_bind=0` (only after the vhost is removed).
 
-## Step 3 - install the njs module (base64 for the forwarded cert)
-
-    sudo nginx -t                                   # must already be green
-    dpkg -l | grep -E 'nginx' > ~/dpkg-nginx.before-wsk63a.txt
-    sudo apt-get install -y libnginx-mod-http-js    # the package may reload nginx itself; with no config using it that is benign
-    ls -l /etc/nginx/modules-enabled/               # expect a *http-js* conf symlink
-    sudo nginx -t
-
-**Check:** `nginx -t` successful, ERP still 200: `curl -s -o /dev/null -w '%{http_code}\n' https://erp.gaiada.online/`.
-**Rollback:** `sudo apt-get remove -y libnginx-mod-http-js && sudo nginx -t && sudo systemctl reload nginx`.
-**Alternative if the package cannot be installed:** `libnginx-mod-http-perl` (also available) with a `perl_set` that base64s the cert, or have the
-api accept the URL-escaped `$ssl_client_escaped_cert` (a one-line change in `webdesk/api/src/control/auth/mtls-verifier.ts`, outside this ticket's paths).
-
-## Step 4 - certificates (the CA key never leaves the host; it is only mounted read-only into a throwaway container on this host)
+## Step 3 - certificates (the CA key never leaves the host; it is only mounted read-only into a throwaway container on this host)
 
 Image: `alpine/openssl` (already on the box, id `61cec9c1f221`; use the id so the tag cannot move). Work dir `~/wsk63a-certs` (0700).
 
-### 4a - server cert for `control.webdesk.internal`
+### 3a - server cert for `control.webdesk.internal`
 
     install -d -m 0700 ~/wsk63a-certs
     docker run --rm --entrypoint sh -v gaiada_gateway-data:/ca:ro -v "$HOME/wsk63a-certs:/out" 61cec9c1f221 -c '
@@ -117,7 +104,7 @@ Image: `alpine/openssl` (already on the box, id `61cec9c1f221`; use the id so th
 **Check:** `server.crt: OK`, subject `CN=control.webdesk.internal`, SAN and `serverAuth` present, issuer `CN=gaiada-internal-ca`.
 **Rollback:** `rm -rf ~/wsk63a-certs` (nothing was changed on any live system).
 
-### 4b - the platform client cert (already issued; verify, do not re-issue)
+### 3b - the platform client cert (already issued; verify, do not re-issue)
 
     docker run --rm --entrypoint sh -v gaiada_gateway-data:/ca:ro 61cec9c1f221 -c '
     openssl verify -CAfile /ca/ca-cert.pem /ca/platform-nest-webdesk.crt
@@ -125,7 +112,7 @@ Image: `alpine/openssl` (already on the box, id `61cec9c1f221`; use the id so th
     openssl x509 -in /ca/platform-nest-webdesk.crt -noout -pubkey | sha256sum; openssl pkey -in /ca/platform-nest-webdesk.key -pubout | sha256sum'
 
 **Check:** `OK`, `CN=platform-nest-webdesk`, `TLS Web Client Authentication`, the two pubkey hashes are identical (cert matches key), `notAfter` Dec 2028.
-If any check fails, re-issue with `internal-ca.md` section 2 (same `-set_serial` pattern as 4a, `extendedKeyUsage=clientAuth`, CN exactly `platform-nest-webdesk`).
+If any check fails, re-issue with `internal-ca.md` section 2 (same `-set_serial` pattern as 3a, `extendedKeyUsage=clientAuth`, CN exactly `platform-nest-webdesk`).
 
 Stage the material where platform's mount (WSK-63b) will read it (container user is uid 0, so 0600 root works):
 
@@ -138,24 +125,32 @@ Stage the material where platform's mount (WSK-63b) will read it (container user
 The client private key is the one sensitive copy that leaves the CA volume (the CA key does not). Do not copy it anywhere else; it must not enter git, logs or chat.
 **Rollback:** `sudo rm -rf /etc/gaiada/webdesk-control`.
 
-### 4c - make the api pin the REAL CA (the swap `internal-ca.md` section 3 describes)
+## Step 4 - api: pin the REAL CA and deploy the Layer 1 change (URL-encoded cert header)
 
     docker run --rm --entrypoint sha256sum -v gaiada_gateway-data:/ca:ro 61cec9c1f221 /ca/ca-cert.pem
     sudo sha256sum /etc/webdesk/certs/ca-cert.pem
     docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem
 
-- All three equal: nothing to do, skip to step 5.
-- Otherwise swap IN PLACE, keeping owner/mode:
+First the CA pin (the swap `internal-ca.md` section 3 describes). All three equal: skip the swap lines. Otherwise swap IN PLACE, keeping owner/mode:
 
       sudo cp -a /etc/webdesk/certs/ca-cert.pem /etc/webdesk/certs/ca-cert.pem.bak-wsk63a-$TS
       sudo sh -c 'cat /home/Hansel/wsk63a-certs/ca-cert.pem > /etc/webdesk/certs/ca-cert.pem'
-      docker restart webdesk-api-1           # restart, not `compose up` (stale-tag footgun)
-      sleep 8; docker logs webdesk-api-1 --tail 3        # expect: [webdesk:api] listening on :3000
       docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem    # must equal the CA volume's hash
 
-**Check:** the api container's hash equals the CA's; `curl -s http://127.0.0.1:8380/healthz` still `webdesk proxy ok`; a public `/v1` smoke still answers.
-**Rollback:** `sudo sh -c 'cat /etc/webdesk/certs/ca-cert.pem.bak-wsk63a-'$TS' > /etc/webdesk/certs/ca-cert.pem'; docker restart webdesk-api-1`.
-(If the api crash-loops after a swap, the file is not a valid PEM - roll back at once; the boot check refuses a truncated CA.)
+
+Then deploy the api with the WSK-63a Layer 1 change (`mtls-verifier.ts` now accepts ONLY the URL-encoded PEM that nginx `$ssl_client_escaped_cert` produces; the old
+base64 form is refused). This must be live before the vhost is enabled in step 7. The api image is built from `./api` by the aicenter overlay (no registry tag involved):
+
+    cd /home/Hansel/gaiada-webdesk/webdesk
+    docker compose -f docker-compose.yml -f docker-compose.aicenter.yml build api
+    docker compose -f docker-compose.yml -f docker-compose.aicenter.yml up -d --no-deps api      # this also picks up the swapped CA file
+    sleep 8; docker logs webdesk-api-1 --tail 3                                                   # expect: [webdesk:api] listening on :3000
+    docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem                            # must equal the CA volume's hash
+    docker exec webdesk-api-1 grep -c 'decodeURIComponent' /app/dist/control/auth/mtls-verifier.js    # >=1 (path may differ; locate with find /app -name mtls-verifier.js)
+
+**Check:** hashes equal; `curl -s http://127.0.0.1:8380/healthz` still `webdesk proxy ok`; a public `/v1` smoke still answers.
+**Rollback:** CA: `sudo sh -c 'cat /etc/webdesk/certs/ca-cert.pem.bak-wsk63a-'$TS' > /etc/webdesk/certs/ca-cert.pem'`; code: check out the previous commit's `api/` and repeat the build + `up -d --no-deps api`.
+(If the api crash-loops after a CA swap, the file is not a valid PEM - roll back at once; the boot check refuses a truncated CA.)
 
 ## Step 5 - the gate secret, Caddy and the overlay (WebDesk side)
 
@@ -183,7 +178,9 @@ The client private key is the one sensitive copy that leaves the CA volume (the 
 **Rollback:** `cp -a Caddyfile/overlay/.env .bak-wsk63a-$TS` back over the three files (`proxy/Caddyfile`, `docker-compose.aicenter.yml`, `.env`) and
 re-run the same `up -d --no-deps proxy`.
 
-## Step 6 - strip both headers on the PUBLIC vhost (staged file, not yet enabled, so this edit is safe)
+## Step 6 - the PUBLIC vhost strips both headers (staged file, not yet enabled, so this edit is safe)
+
+Purpose: `api.gaiada.online` must never be able to deliver `X-Webdesk-Control-Gate` or `X-Webdesk-Mtls-Cert-Pem` to Caddy. This step makes that vhost strip BOTH (Caddy also strips both on its public routes and 404s `/control/*` without the gate).
 
 `/etc/nginx/sites-available/api.gaiada.online.conf` forwards everything. Add, inside its `location /` block, next to the other `proxy_set_header` lines:
 
@@ -203,11 +200,10 @@ The file is not in `sites-enabled`, so `nginx -t` does not read it yet; its synt
 
 ## Step 7 - install and enable the control vhost
 
-    sudo install -d -m 0755 /etc/nginx/webdesk-control /etc/nginx/njs
+    sudo install -d -m 0755 /etc/nginx/webdesk-control
     sudo install -m 0644 ~/wsk63a-certs/ca-cert.pem /etc/nginx/webdesk-control/ca-cert.pem
     sudo install -m 0644 ~/wsk63a-certs/server.crt  /etc/nginx/webdesk-control/server.crt
     sudo install -m 0600 -o root -g root ~/wsk63a-certs/server.key /etc/nginx/webdesk-control/server.key
-    sudo install -m 0644 /home/Hansel/gaiada-webdesk/webdesk/ops/nginx/webdesk-control-cert.js /etc/nginx/njs/webdesk-control-cert.js
     # render the vhost with the SAME secret Caddy has; the secret is read from .env, never printed
     set -a; . <(grep '^WEBDESK_CONTROL_GATE_SECRET=' /home/Hansel/gaiada-webdesk/webdesk/.env); set +a
     ( umask 077; sudo -E sh -c "envsubst '\${WEBDESK_CONTROL_GATE_SECRET}' < /home/Hansel/gaiada-webdesk/webdesk/ops/nginx/control.webdesk.internal.conf > /etc/nginx/sites-available/control.webdesk.internal" )
@@ -326,7 +322,7 @@ Observed 2026-10-10: `NTP=yes`, `NTPSynchronized=yes`, UTC. If not synchronized:
 | 1 | `curl -s -o /dev/null -w '%{http_code}\n' $T $U/control/v1/tenants` | `400` (nginx 496, handshake completes, request never proxied) | no client cert refused |
 | 2 | Same with a cert from ANOTHER CA: `openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj /CN=platform-nest-webdesk -keyout /tmp/bad.key -out /tmp/bad.crt -days 1; curl -s -o /dev/null -w '%{http_code}\n' $T --cert /tmp/bad.crt --key /tmp/bad.key $U/control/v1/tenants; rm /tmp/bad.*` | `400` | a foreign cert is refused |
 | 3 | `curl -s -w ' %{http_code}\n' $T --cert $D/client.crt --key $D/client.key $U/control/v1/tenants` | `401` and a body mentioning `Layer 2 (service token) refused: no Bearer token presented` (**not** a Layer 1 message) | transport OK, Layer 1 accepted the forwarded cert, gate accepted by Caddy |
-| 4 | Same as 3 plus a forged `-H 'X-Webdesk-Mtls-Cert-Pem: <base64 of /tmp/bad.crt>'` and `-H 'X-Webdesk-Control-Gate: wrong'` | identical to 3 (still `401` Layer 2, never Layer 1) | nginx overwrites both headers |
+| 4 | Same as 3 plus a forged `-H "X-Webdesk-Mtls-Cert-Pem: $(python3 -c 'import urllib.parse;print(urllib.parse.quote(open("/tmp/bad.crt").read(),safe=""))')"` (needs /tmp/bad.crt kept from row 2) and `-H 'X-Webdesk-Control-Gate: wrong'` | identical to 3 (still `401` Layer 2, never Layer 1) | nginx overwrites both headers |
 | 5 | `curl -s -o /dev/null -w '%{http_code}\n' $T --cert $D/client.crt --key $D/client.key $U/v1/t/x/content` | `404` | the control vhost serves only `/control/` |
 | 6 | `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8380/control/v1/tenants` and again with `-H 'X-Webdesk-Control-Gate: wrong'` | `404` / `404` | Caddy refuses without the gate |
 | 7 | Public host: `curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: api.gaiada.online' http://127.0.0.1/control/v1/tenants` (only once the public vhost is enabled; before that this hits the default site) and, once DNS exists, `https://api.gaiada.online/control/v1/tenants` | `404`, also with `-H 'X-Webdesk-Control-Gate: <real secret>'` | public `/control/*` stays dead |
@@ -337,20 +333,21 @@ Observed 2026-10-10: `NTP=yes`, `NTPSynchronized=yes`, UTC. If not synchronized:
 Rows 1, 2, 5, 6 and 10 must not appear in the api log: `docker logs webdesk-api-1 --since 5m | grep -c '/control/v1'` should only count rows 3, 4, 8, 9.
 (The api README reports an unknown I could not resolve from the repo: whether row 8 needs an existing tenant slug to reach `501`; use a real slug from the DB if it returns `404`.)
 
-If row 3 returns a **Layer 1** refusal, the api is pinning a different CA than nginx verified against: redo step 4c.
+If row 3 returns a **Layer 1** refusal, the api is pinning a different CA than nginx verified against: redo step 4.
 If row 3 returns `404` from Caddy, the gate does not match: the `.env` secret and the rendered vhost secret differ - re-render step 7 from `.env`.
 
 ## Rotation / removal
 
 - **Gate secret rotation:** change `.env` (step 5, `cp` backup first), `up -d --no-deps proxy`, re-render step 7, `nginx -t`, reload. Both must change together; between the two moves the channel 404s (fail closed).
-- **Server cert expiry (825 days from issue):** re-run 4a, reinstall the three files, `nginx -t`, reload.
-- **Full removal:** step 7 rollback, step 8 rollback, step 5 rollback, then steps 4c/3/2 rollbacks if wanted. Compose publishes nothing new, so nothing to unpublish.
+- **Server cert expiry (825 days from issue):** re-run 3a, reinstall the three files, `nginx -t`, reload.
+- **Full removal:** step 7 rollback, step 8 rollback, step 5 rollback, then steps 4/3/2 rollbacks if wanted. Compose publishes nothing new, so nothing to unpublish.
 
 ## Proof (what was run, where, with what result)
 
 Harness: `webdesk/ops/nginx/proof/run.sh` (Dockerfile.nginx, gen-certs.sh, echo.mjs, nginx-entry.sh, client-tests.sh, public-vhost.test.conf). It was run on sumopod, containers only, network
-`gate-wsk63a`, no host ports, torn down afterwards. nginx 1.22.1 + njs 0.7.9 (the aicenter versions), `caddy:2-alpine`, the real unmodified Caddyfile and the real `mtls-verifier.ts` inside the echo upstream.
+`gate-wsk63a`, no host ports, torn down afterwards. nginx 1.22.1 with no extra modules (the aicenter version), `caddy:2-alpine`, the real unmodified Caddyfile and the real `mtls-verifier.ts` inside the echo upstream.
 Test-only substitutions: `172.17.0.1` was added to the loopback device so the production `listen` line is used unmodified; the `proxy_pass` port was 8380 -> 80.
+The api's Layer 1 specs also ran there (`node:22-bookworm`, throwaway Postgres): 29 tests pass (19 in `control-auth-layers.spec.ts`, 10 in `mtls-verifier.spec.ts`).
 Result: T1-T9 plus a fail-closed empty-secret case and the resolved-config port audit all passed; the real output is in the WSK-63a report (and re-runnable with `bash webdesk/ops/nginx/proof/run.sh`).
 
-Not proved by the harness (needs the live box): the box's own `nginx -t`, the njs package install, docker0 reachability from `gaiada-platform-1`, the real Keycloak client and a real token, NTP on the host.
+Not proved by the harness (needs the live box): the box's own `nginx -t`, docker0 reachability from `gaiada-platform-1`, the real Keycloak client and a real token, NTP on the host.
