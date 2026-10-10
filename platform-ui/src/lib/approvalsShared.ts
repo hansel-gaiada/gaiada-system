@@ -7,11 +7,14 @@
 // `search` added 2026-09-03 for probe-consent requests. This union MIRRORS the backend's
 // `core/approvals-urgency.ts`; an origin missing here has no facet chip and no label, so the rows
 // arrive from the API and land under a blank filter — which is how a request becomes unfindable.
-export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search";
+// `webdesk` (WSK-44) — a WebDesk publish/rebuild request (write-plane design §6: `fileAutomationApproval`
+// with `origin:'webdesk'`, executed in-band at `decide()`). Same rule as `search` above: an origin missing
+// here has no chip and no label.
+export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk";
 export type ApprovalStatus = "pending" | "decided";
 export type ApprovalSort = "urgency" | "age";
 
-export const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search"];
+export const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search", "webdesk"];
 export const ORIGIN_LABEL: Record<ApprovalOrigin, string> = {
   agency: "Agency",
   pipeline: "Pipeline",
@@ -22,6 +25,7 @@ export const ORIGIN_LABEL: Record<ApprovalOrigin, string> = {
   // record that we may probe a client's domain, and the chip has to say what the reader is being
   // asked to decide. The module that owns the column is an implementation detail here.
   search: "Probe consent",
+  webdesk: "Website publish",
 };
 
 // Matches the backend's UnifiedApprovalItem (approvals.controller.ts) exactly —
@@ -54,7 +58,7 @@ export interface ExecutionInfo {
 }
 
 export function originCounts(items: Pick<UnifiedApprovalItem, "origin">[]): Record<ApprovalOrigin, number> {
-  const counts = { agency: 0, pipeline: 0, hr: 0, automation: 0, agent: 0 } as Record<ApprovalOrigin, number>;
+  const counts = { agency: 0, pipeline: 0, hr: 0, automation: 0, agent: 0, search: 0, webdesk: 0 } as Record<ApprovalOrigin, number>;
   for (const item of items) counts[item.origin] += 1;
   return counts;
 }

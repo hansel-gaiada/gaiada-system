@@ -1,0 +1,71 @@
+{
+  "fields": [
+    {
+      "name": "instructions",
+      "primitive": "text",
+      "ui": {
+        "widget": "textarea"
+      }
+    },
+    {
+      "name": "tokens",
+      "primitive": "group",
+      "multiple": true,
+      "itemKey": "token",
+      "required": true,
+      "fields": [
+        {
+          "name": "token",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "value",
+          "primitive": "text"
+        },
+        {
+          "name": "occurrences",
+          "primitive": "number",
+          "required": true,
+          "ui": {
+            "readOnly": true
+          }
+        },
+        {
+          "name": "pages",
+          "primitive": "text",
+          "multiple": true,
+          "ui": {
+            "readOnly": true
+          }
+        },
+        {
+          "name": "page_count",
+          "primitive": "number",
+          "required": true,
+          "ui": {
+            "readOnly": true
+          }
+        },
+        {
+          "name": "source",
+          "primitive": "select",
+          "required": true,
+          "options": [
+            "factsheet",
+            "operator",
+            "pricelist"
+          ]
+        }
+      ]
+    }
+  ],
+  "blocks": [],
+  "singleton": true,
+  "localized": false,
+  "ui": {
+    "label": "Token registry",
+    "group": "Globals",
+    "order": 3
+  }
+}

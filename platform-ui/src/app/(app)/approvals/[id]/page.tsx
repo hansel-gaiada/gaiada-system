@@ -8,6 +8,7 @@ import { decideApprovalItem, type ApprovalDecideOrigin } from "../../actions";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
+import { WebdeskPublishSummary } from "@/components/webdesk/content/WebdeskPublishSummary";
 import { formatDateTime } from "@/lib/format";
 
 // APPR-01 — the per-approval detail route emailed approval links actually land on now. Before
@@ -126,7 +127,7 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Approvals", href: "/approvals" }, { label: title }]} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <Eyebrow style={{ color: "var(--erp-accent)" }}>
-            {detail.kind === "automation_approval" ? detail.origin : "Agency"}
+            {detail.kind === "automation_approval" ? (detail.origin === "webdesk" ? "Website publish" : detail.origin) : "Agency"}
           </Eyebrow>
           <StatusBadge label={detail.data.status.replace(/_/g, " ")} />
         </div>
@@ -179,6 +180,13 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
             )}
           </div>
         </Card>
+
+        {/* WSK-44 — an approval filed by the Website workspace (write-plane design §6/§10): what is being
+            published, to which site, which versions against what is live, lint counts and the rebuild
+            target. `toolArgs` is validated inside the component — never trusted as typed. */}
+        {detail.kind === "automation_approval" && detail.origin === "webdesk" && (
+          <WebdeskPublishSummary userId={userId} company={resolvedTenant} toolArgs={detail.data.toolArgs} workflowId={detail.data.workflowId} />
+        )}
 
         {mayDecide && (
           <Card title="Decide">

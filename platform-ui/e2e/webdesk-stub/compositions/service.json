@@ -1,0 +1,175 @@
+{
+  "fields": [
+    {
+      "name": "url",
+      "primitive": "text",
+      "required": true
+    },
+    {
+      "name": "source_path",
+      "primitive": "text",
+      "required": true,
+      "ui": {
+        "readOnly": true
+      }
+    },
+    {
+      "name": "template",
+      "primitive": "select",
+      "required": true,
+      "options": [
+        "core",
+        "service",
+        "industry-location",
+        "case-study",
+        "article",
+        "glossary",
+        "mirror"
+      ]
+    },
+    {
+      "name": "section",
+      "primitive": "text",
+      "required": true
+    },
+    {
+      "name": "language",
+      "primitive": "text",
+      "required": true
+    },
+    {
+      "name": "h1",
+      "primitive": "text"
+    },
+    {
+      "name": "primary_keyword",
+      "primitive": "text"
+    },
+    {
+      "name": "phase",
+      "primitive": "select",
+      "required": true,
+      "options": [
+        "L",
+        "P2",
+        "P3"
+      ]
+    },
+    {
+      "name": "schema",
+      "primitive": "text",
+      "multiple": true
+    },
+    {
+      "name": "hreflang_id",
+      "primitive": "text"
+    },
+    {
+      "name": "hreflang_en",
+      "primitive": "text"
+    },
+    {
+      "name": "author",
+      "primitive": "text"
+    },
+    {
+      "name": "last_updated",
+      "primitive": "text"
+    },
+    {
+      "name": "publish_ready",
+      "primitive": "boolean",
+      "required": true
+    },
+    {
+      "name": "schema_notes",
+      "primitive": "text",
+      "ui": {
+        "widget": "code"
+      }
+    },
+    {
+      "name": "image_alt_texts",
+      "primitive": "text",
+      "multiple": true
+    },
+    {
+      "name": "visibility",
+      "primitive": "select",
+      "required": true,
+      "options": [
+        "shown",
+        "seo-only",
+        "held",
+        "hidden"
+      ]
+    },
+    {
+      "name": "plan",
+      "primitive": "group",
+      "required": true,
+      "fields": [
+        {
+          "name": "action",
+          "primitive": "select",
+          "required": true,
+          "options": [
+            "SHOW",
+            "KEEP",
+            "HOLD",
+            "LATER",
+            "MERGE",
+            "CUT"
+          ]
+        },
+        {
+          "name": "to",
+          "primitive": "text"
+        },
+        {
+          "name": "why",
+          "primitive": "text"
+        }
+      ]
+    },
+    {
+      "name": "body",
+      "primitive": "markdown",
+      "required": true
+    }
+  ],
+  "blocks": [],
+  "ui": {
+    "label": "Service pages",
+    "group": "Pages",
+    "order": 20,
+    "titleField": "h1"
+  },
+  "lint": {
+    "placeholders": [
+      {
+        "kind": "token",
+        "open": "{{",
+        "close": "}}",
+        "registry": {
+          "collection": "token-registry",
+          "listField": "tokens",
+          "keyField": "token",
+          "valueField": "value"
+        }
+      },
+      {
+        "kind": "marker",
+        "open": "[CONFIRM:",
+        "close": "]",
+        "label": "CONFIRM"
+      },
+      {
+        "kind": "marker",
+        "open": "[CLIENT:",
+        "close": "]",
+        "label": "CLIENT"
+      }
+    ]
+  }
+}

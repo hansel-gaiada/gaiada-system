@@ -168,6 +168,21 @@ const WEB_DEV: DeptToolkit = {
         { key: "portfolio", label: "Portfolio", path: "sites/portfolio", icon: "server", blurb: "Every site we build or operate, by client and project - including the ones we only track. Live health lives in Monitoring.", fullBleed: true },
       ],
     },
+    // WSK-44 — Website: the ERP screen where staff edit the content of the sites WebDesk serves
+    // (gaiada.com first). Write-plane design §10 / Decision H: Home · Work · Build · **Website** ·
+    // Connections. One tab today, **Content** (site -> collection -> item editor -> history). Writers'
+    // room, SEO & AI search, Analytics, Leads and Governance are later tabs of THIS group, so the group
+    // key is "website" and the tab key "content" — neither will change when they arrive. The tab's
+    // `path` carries the whole sub-tree (`website/content/[tenant]/[site]/…`); DeptTabs lights it by
+    // deepest-prefix match, so the editor and history pages keep this tab active.
+    {
+      key: "website",
+      label: "Website",
+      icon: "sitemap",
+      tabs: [
+        { key: "content", label: "Content", path: "website/content", icon: "box", blurb: "Edit the content of the websites WebDesk serves: pages, globals and settings. Saved as drafts; publishing is requested and approved separately." },
+      ],
+    },
     CONNECTIONS_GROUP,
   ],
   launchers: [

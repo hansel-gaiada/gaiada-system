@@ -1,0 +1,121 @@
+// WSK-44 — the stub BFF as an HTTP server, for the Playwright run (e2e/webdesk-content.spec.ts).
+//
+//   node e2e/webdesk-stub/server.mjs            # listens on $WD_STUB_PORT (default 3991)
+//
+// `next start` runs with PLATFORM_URL pointing here and DEMO_MODE UNSET, so the app exercises its real
+// `platformFetch` egress, its real session cookie and its real server components against this process.
+// Two halves:
+//   • the WebDesk content BFF (WSK-59), the approvals reads it needs, and `/__stub/*` scenario controls
+//     — all in `wd.mjs`, transcribed from the spec;
+//   • everything ELSE the ERP shell asks for (`/api/me`, org structure, the dept rail's queue, …) is
+//     answered by the app's OWN demo fixtures (`src/lib/demoFixtures.ts`), bundled here with esbuild.
+//     That is why the shell renders normally without this file re-implementing a single shell endpoint.
+// Test fixture only. Nothing under `src/` imports this directory.
+
+import http from "node:http";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { build } from "esbuild";
+import { COMPANY, concurrentSave, decideApproval, handleWebdesk, listApprovals, seed, setBuild } from "./wd.mjs";
+
+const ROOT = path.resolve(import.meta.dirname, "../..");
+const PORT = Number(process.env.WD_STUB_PORT ?? 3991);
+
+// ── bundle the app's demo fixtures (the shell's data) ─────────────────────────────────────────────
+const out = fs.mkdtempSync(path.join(os.tmpdir(), "wd-stub-"));
+await build({
+  entryPoints: { demoFixtures: path.join(ROOT, "src/lib/demoFixtures.ts"), demoIdentity: path.join(ROOT, "src/lib/demoIdentity.ts") },
+  outdir: out,
+  bundle: true, platform: "node", format: "esm", logLevel: "error",
+  outExtension: { ".js": ".mjs" },
+  alias: { "@": path.join(ROOT, "src"), "server-only": path.join(ROOT, "e2e/webdesk-stub/empty.mjs") },
+});
+const { getDemoResponse } = await import(pathToFileURL(path.join(out, "demoFixtures.mjs")).href);
+const { demoIdentityFor } = await import(pathToFileURL(path.join(out, "demoIdentity.mjs")).href);
+
+let S = seed();
+
+function send(res, status, json) {
+  const body = JSON.stringify(json);
+  res.writeHead(status, { "content-type": status >= 400 && json && json.type ? "application/problem+json" : "application/json", "content-length": Buffer.byteLength(body) });
+  res.end(body);
+}
+
+const readBody = (req) => new Promise((resolve) => {
+  const chunks = [];
+  req.on("data", (c) => chunks.push(c));
+  req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+});
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url ?? "/", "http://stub");
+    const pathname = url.pathname;
+    const method = (req.method ?? "GET").toUpperCase();
+    const raw = await readBody(req);
+    const userId = String(req.headers["x-user-id"] ?? "demo-hansel");
+    let body;
+    try { body = raw ? JSON.parse(raw) : undefined; } catch { body = undefined; }
+
+    // ── scenario controls ───────────────────────────────────────────────────────────────────────
+    if (pathname.startsWith("/__stub/")) {
+      const cmd = pathname.slice("/__stub/".length);
+      if (cmd === "reset") { S = seed(); return send(res, 200, { ok: true }); }
+      if (cmd === "config") { Object.assign(S.cfg, body ?? {}); return send(res, 200, S.cfg); }
+      if (cmd === "state") {
+        return send(res, 200, {
+          items: [...S.items.values()].map((i) => ({ itemId: i.itemId, slug: i.slug, locale: i.locale, headVersion: i.versions.at(-1).n, publishedVersion: i.publishedVersion, publishState: i.publishState, deletedAt: i.deletedAt, versions: i.versions.map((v) => ({ n: v.n, createdBy: v.createdBy, note: v.note, props: v.blocks[0]?.props, seo: v.seo })) })),
+          approvals: [...S.approvals.values()], build: S.build, stagingStale: S.stagingStale,
+        });
+      }
+      if (cmd === "decide") { const r = decideApproval(S, body.id, body.outcome, body.by); return send(res, r.status, r.json); }
+      if (cmd === "corrupt-args") { const a = S.approvals.get(body.id); if (a) a.toolArgs = { unexpected: true }; return send(res, 200, { ok: !!a }); }
+      if (cmd === "build") { setBuild(S, body.state, body.stagingStale); return send(res, 200, { build: S.build, stagingStale: S.stagingStale }); }
+      if (cmd === "concurrent-save") { return send(res, 200, concurrentSave(S, body.itemId, body.fields ?? {}, body.by)); }
+      return send(res, 404, { error: `unknown stub command ${cmd}` });
+    }
+
+    // ── login: the dev path's email -> user id lookup ───────────────────────────────────────────
+    if (pathname === "/dev/user-by-email") return send(res, 200, { id: demoIdentityFor(url.searchParams.get("email") ?? "") });
+
+    // ── WebDesk content BFF ─────────────────────────────────────────────────────────────────────
+    const wd = pathname.match(/^\/api\/([^/]+)\/modules\/webdev\/content(\/.*)?$/);
+    if (wd) {
+      if (S.cfg.delayMs) await sleep(S.cfg.delayMs);
+      const r = handleWebdesk(S, { method, pathname, query: url.searchParams, body, userId, company: decodeURIComponent(wd[1]) });
+      return send(res, r.status, r.json);
+    }
+
+    // ── approvals the content workspace files / reads (origin `webdesk`) ─────────────────────────
+    const ap = pathname.match(/^\/api\/([^/]+)\/automation-approvals(?:\/([^/]+))?$/);
+    if (ap && method === "GET") {
+      const company = decodeURIComponent(ap[1]);
+      if (!ap[2]) {
+        if (url.searchParams.get("origin") === "webdesk") return send(res, 200, company === COMPANY ? listApprovals(S, url.searchParams) : []);
+      } else if (S.approvals.has(ap[2])) {
+        // Approvals live in one company; every other tenant gets the 404 a cross-tenant id gets (RLS).
+        return company === COMPANY ? send(res, 200, S.approvals.get(ap[2])) : send(res, 404, { error: "not found" });
+      }
+    }
+    // The unified inbox's decide façade, for an approval this stub owns.
+    const dec = pathname.match(/^\/api\/([^/]+)\/approvals\/([^/]+)\/decide$/);
+    if (dec && method === "POST" && S.approvals.has(dec[2])) {
+      const r = decideApproval(S, dec[2], body?.decision === "rejected" ? "reject" : "approve", userId);
+      return send(res, r.status, r.json);
+    }
+
+    // ── everything else: the app's own demo fixtures ────────────────────────────────────────────
+    const demo = getDemoResponse(method, `${pathname}${url.search}`, userId, raw || undefined);
+    return send(res, demo.status, demo.json);
+  } catch (e) {
+    console.error("[wd-stub]", e);
+    return send(res, 500, { error: String(e?.message ?? e) });
+  }
+});
+
+server.listen(PORT, "127.0.0.1", () => console.log(`[wd-stub] listening on http://127.0.0.1:${PORT}`));
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { server.close(); fs.rmSync(out, { recursive: true, force: true }); process.exit(0); });
