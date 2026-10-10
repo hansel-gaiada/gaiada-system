@@ -618,3 +618,32 @@ describe.skipIf(!live)("WSK-67 · the gaiada.com importer", () => {
       const rest = code.replace(/workflow_id = 'content.publish'/g, "").replace(/command: "content.publish"/g, "");
       expect(rest).not.toMatch(/content.publish/);
 
+      expect(code).toMatch(/fileWebdeskCommandApproval\(/);
+    });
+  });
+
+  // ── the mirror of WebDesk's assembly, pinned against WebDesk's own functions ──────────────────
+  describe("parity · assembledContent/contentHashOf equal WebDesk's assembleItemContent/contentHash", () => {
+    it.skipIf(!REAL_BUNDLE)("on every item of the real bundle (skipped when the webdesk sources are not shipped)", async () => {
+      const mod = join(__dirname, "..", "..", "..", "webdesk", "api", "src", "control", "content", "content-projection.ts");
+      let wd: { assembleItemContent: Function; contentHash: Function } | null = null;
+      try {
+        wd = await import(/* @vite-ignore */ mod);
+      } catch (err) {
+        console.log(`parity: webdesk sources not importable here (${(err as Error).message.slice(0, 120)}); skipped`);
+      }
+      if (!wd) return;
+      const bundle = loadBundle(REAL_BUNDLE);
+      let checked = 0;
+      for (const i of bundle.items) {
+        const comp = bundle.compositions[i.collectionKey];
+        const theirs = wd.assembleItemContent(i.collectionKey, comp, { fields: i.fields, blocks: i.blocks, seo: i.seo }) as { blocks: unknown; seo: unknown; issues: unknown[] };
+        const mine = assembledContent(i, comp);
+        expect(canonicalize(mine), `${i.collectionKey}/${i.locale}/${i.slug}`).toBe(canonicalize({ blocks: theirs.blocks, seo: theirs.seo }));
+        expect(contentHashOf(mine.blocks, mine.seo)).toBe(wd.contentHash(theirs.blocks, theirs.seo));
+        checked++;
+      }
+      expect(checked).toBe(bundle.items.length);
+    });
+  });
+});
