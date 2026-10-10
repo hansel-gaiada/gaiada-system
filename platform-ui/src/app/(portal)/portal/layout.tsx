@@ -6,6 +6,7 @@ import { PortalCompanySwitch } from "@/components/portal/PortalCompanySwitch";
 import { getPortalOverview } from "@/lib/portal-data";
 import { PortalShell } from "@/components/portal/PortalShell";
 import { portalBadges } from "@/lib/portalNav";
+import { isStaff } from "@/lib/rbac";
 
 // CP-7 — the client portal's own route group.
 //
@@ -65,6 +66,7 @@ export default async function PortalLayout({ children }: { children: React.React
       userInitials={initials}
       projectsBadge={projectsBadge}
       billingBadge={billingBadge}
+      staff={isStaff(me)}
     >
       {children}
     </PortalShell>

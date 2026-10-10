@@ -18,7 +18,7 @@ import "./portal.css";
 // `prefers-color-scheme` block, so it is still dark-mode-correct without a control the client would
 // have to discover.
 export function PortalShell({
-  children, companyName, companySwitch, clientName, userName, userInitials, projectsBadge, billingBadge,
+  children, companyName, companySwitch, clientName, userName, userInitials, projectsBadge, billingBadge, staff = false,
 }: {
   children: React.ReactNode;
   /** The serving company's name, the brand (PV-D13: never our holding's name). Null renders
@@ -33,6 +33,9 @@ export function PortalShell({
   projectsBadge: number;
   /** Unsigned contracts plus overdue invoices, badged onto Contracts & billing. */
   billingBadge: number;
+  /** PV2-06: the viewer also holds a staff role (`isStaff(me)`), so the user menu offers "Back to
+   *  workspace". Navigation only; the portal's authorization does not read it. */
+  staff?: boolean;
 }) {
   return (
     <div className="cp-shell">
@@ -59,7 +62,7 @@ export function PortalShell({
             <div className="cp-head__who-name">{userName}</div>
             {clientName && <div className="cp-head__who-org">{clientName}</div>}
           </div>
-          <PortalUserMenu initials={userInitials} />
+          <PortalUserMenu initials={userInitials} staff={staff} />
         </div>
         <PortalTabs projectsBadge={projectsBadge} billingBadge={billingBadge} />
       </header>

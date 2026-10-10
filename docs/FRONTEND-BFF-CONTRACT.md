@@ -1656,6 +1656,19 @@ were built together, so every row below is ✅ on both sides. That is deliberate
 (the console reading fields the backend never sends) is this repo's recurring bug class, and the
 portal is read by people outside the company where a confidently-wrong number costs the most.
 
+**Which company's portal (PV2-05, 2026-10-10).** Every portal page, the layout and
+`portalActions.ts` take the `:t` in `/api/:t/portal/*` from ONE resolver,
+`platform-ui/src/lib/portal-company.ts` (`getActivePortalCompany`).
+
+- It reads only `Me.clientOf` (§1): the companies the caller is an active client contact of. It
+  never reads `Me.companies`, so a person employed by one group company is never shown that
+  company's portal.
+- The choice is kept in its own cookie, `gaiada_portal_tenant`, separate from the staff
+  `gaiada_tenant`.
+- A guard test (`portal-company.guard.test.ts`) fails if any portal file calls `getActiveTenant`.
+- One request still targets one company, so isolation is unchanged; this only decides which company
+  a request names.
+
 ### Isolation model — read this before adding a portal route
 
 Four layers, and only the third is per-client:
