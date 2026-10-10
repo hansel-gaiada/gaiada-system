@@ -63,7 +63,8 @@ export interface CollectionComposition {
 
 // ── Read projections (§4) ────────────────────────────────────────────────────────────────────────
 
-export interface EnvironmentRef { envId: string; name: string; domain: string; status: string }
+/** `domain` is nullable in WebDesk (`environments.domain`): an environment can exist before it has a hostname. */
+export interface EnvironmentRef { envId: string; name: string; domain: string | null; status: string }
 export interface SiteRef { siteId: string; name: string; kind: string; environments: EnvironmentRef[] }
 export interface TenantRef {
   slug: string; status: string; defaultLocale: string; locales: string[]; sites: SiteRef[];
@@ -116,7 +117,8 @@ export interface ItemSummary {
   unpublishAt: string | null;
   deletedAt: string | null;
   updatedAt: string;
-  headCreatedAt: string;
+  /** `null` for a pre-0009 row: it has no version row, so no head author or time (WebDesk `headRow ? … : null`). */
+  headCreatedAt: string | null;
   headCreatedBy: string | null;
   pendingChanges: boolean;
 }
@@ -193,7 +195,8 @@ export interface BuildStatus {
 
 // ── The approval row behind "Awaiting approval #…" (existing `GET /api/:t/automation-approvals/:id`)
 
-export type ApprovalStatus = "pending" | "approved" | "rejected";
+/** `cancelled` = the requester withdrew it while pending (WSK-59 withdraw; migration 0083 widened the CHECK). */
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "cancelled";
 export type ExecState = "not_applicable" | "pending" | "executing" | "executed" | "failed";
 
 export interface WebdeskApprovalRow {
@@ -210,6 +213,15 @@ export interface WebdeskApprovalRow {
   createdAt: string;
   reason: string | null;
   toolArgs: unknown;
+}
+
+/** One row of `GET …/publish-requests` (WSK-44b): the caller's own publish/schedule approvals for a site. */
+export interface PublishRequestRow {
+  approvalId: string;
+  status: ApprovalStatus;
+  createdAt: string;
+  itemIds: string[];
+  executionStatus: ExecState | null;
 }
 
 /** §6: `tool_args:{tenantSlug,siteId,items[{itemId,version,contentHash}],publishAt?,rebuild:'staging'}`;
@@ -527,6 +539,7 @@ export type RequestPhase =
   | { phase: "approved_publishing"; approvalId: string; decidedByName: string | null }
   | { phase: "executed"; approvalId: string; decidedByName: string | null }
   | { phase: "rejected"; approvalId: string; decidedByName: string | null }
+  | { phase: "withdrawn"; approvalId: string }
   | { phase: "failed"; approvalId: string; reason: string; decidedByName: string | null };
 
 /** The one mapping from the approval row to the UI phase. Pure so it is table-testable. */
@@ -534,6 +547,8 @@ export function phaseOf(row: Pick<WebdeskApprovalRow, "id" | "status" | "executi
   const decidedByName = row.decidedByName ?? row.decidedBy ?? null;
   if (row.status === "pending") return { phase: "pending", approvalId: row.id };
   if (row.status === "rejected") return { phase: "rejected", approvalId: row.id, decidedByName };
+  // The requester withdrew it: nobody with authority refused it (that is `rejected`), and nothing ran.
+  if (row.status === "cancelled") return { phase: "withdrawn", approvalId: row.id };
   // approved
   switch (row.executionStatus) {
     case "executed": return { phase: "executed", approvalId: row.id, decidedByName };

@@ -11,9 +11,9 @@ vi.mock("./entities", () => ({ listMembers: vi.fn() }));
 import { platformFetch, PlatformError } from "./platform";
 import { listMembers } from "./entities";
 import {
-  findPendingPublishRequests, getApprovalRow, getBuildStatus, getItem, getVersion, listCollections, listItems, listSites,
+  findPendingPublishRequests, getApprovalRow, getBuildStatus, getItem, getVersion, listCollections, listItems, listOwnPublishRequests, listSites,
   listVersions, loadEditorBundle, loadSiteContext, parseApprovalRow, parseBuildStatus, parseCollections, parseComposition,
-  parseItemDetail, parseItemList, parseItemWriteResult, parseLint, parseSites, problemOf, resolveAuthorNames,
+  parseItemDetail, parseItemList, parseItemWriteResult, parseLint, parsePublishRequests, parseSites, pollApproval, problemOf, resolveAuthorNames,
   resolveItemBySlug, resultFromError, stagingBaseUrl, wdCall, WireDrift,
 } from "./webdeskContent";
 
@@ -53,6 +53,18 @@ describe("wire validation: a 2xx body that does not match the spec is DRIFT, nev
     expect(parseItemList({ items: [summary()], page: { cursor: null, hasMore: false, limit: 100 } }).items[0].pendingChanges).toBe(true);
     expect(parseItemDetail(detail()).lint).toEqual({ unresolvedTokens: ["{{X}}"], markers: { CONFIRM: 1 } });
     expect(parseItemWriteResult(writeResult()).lint).toEqual({ unresolvedTokens: [], markers: {} });
+  });
+
+  it("WSK-44b: the three nullable/enum drifts the real BFF exposed are accepted, not drift", () => {
+    // headCreatedAt is null for a pre-0009 row (no version row)
+    const pre = parseItemList({ items: [summary({ headCreatedAt: null, headCreatedBy: null })], page: { cursor: null, hasMore: false, limit: 100 } });
+    expect(pre.items[0].headCreatedAt).toBeNull();
+    // environments.domain is nullable in WebDesk
+    const t = tenants(); (t.tenants[0].sites[0].environments[0] as Record<string, unknown>).domain = null;
+    expect(parseSites(t).tenants[0].sites[0].environments[0].domain).toBeNull();
+    // a withdrawn approval reads `cancelled`
+    expect(parseApprovalRow({ id: "a", workflowId: "content.publish", status: "cancelled", createdAt: "t", executionStatus: "not_applicable" }).status).toBe("cancelled");
+    expect(() => parseApprovalRow({ id: "a", workflowId: "w", status: "withdrawn", createdAt: "t" })).toThrow(WireDrift);
   });
 
   it.each([
@@ -120,6 +132,9 @@ describe("resultFromError: every failure is a typed result (§3.4 / §10)", () =
     const r = resultFromError(new PlatformError(409, "version conflict", undefined, { currentHeadVersion: 5 }, "version-conflict", { error: "version conflict", reason: "version-conflict", existing: { currentHeadVersion: 5 } }));
     expect(r).toMatchObject({ kind: "conflict", slug: "version-conflict", currentHeadVersion: 5 });
   });
+  it("404 version-not-found is a not_found (a real answer), not 'not served on this deployment'", () => {
+    expect(resultFromError(problem(404, "version-not-found"))).toEqual({ kind: "not_found", slug: "version-not-found" });
+  });
   it("other 409 slugs stay distinct from version-conflict", () => {
     expect(resultFromError(problem(409, "slug-taken"))).toMatchObject({ kind: "conflict", slug: "slug-taken", currentHeadVersion: null });
   });
@@ -153,7 +168,8 @@ describe("NO path turns a refusal into []  (the library's one rule)", () => {
     ["getVersion", () => getVersion("u", "c", "gaiada", "s1", "i1", 2)],
     ["getBuildStatus", () => getBuildStatus("u", "c", "gaiada", "s1")],
     ["getApprovalRow", () => getApprovalRow("u", "c", "a1")],
-    ["findPendingPublishRequests", () => findPendingPublishRequests("u", "c", "i1")],
+    ["findPendingPublishRequests", () => findPendingPublishRequests("u", "c", "gaiada", "s1", "i1")],
+    ["listOwnPublishRequests", () => listOwnPublishRequests("u", "c", "gaiada", "s1", "all")],
     ["resolveItemBySlug", () => resolveItemBySlug("u", "c", "gaiada", "s1", "service", "service.seo", "en")],
     ["loadSiteContext", () => loadSiteContext("u", "c", "gaiada", "s1")],
     ["loadEditorBundle", () => loadEditorBundle("u", "c", "gaiada", "s1", "service", "service.seo", "en")],
@@ -176,9 +192,9 @@ describe("NO path turns a refusal into []  (the library's one rule)", () => {
     fetchMock.mockResolvedValue({ items: [], page: { cursor: null, hasMore: false, limit: 100 } });
     expect(await listItems("u", "c", "gaiada", "s1", "service", {})).toEqual({ kind: "ok", data: { items: [], page: { cursor: null, hasMore: false, limit: 100 } } });
   });
-  it("findPendingPublishRequests: an unrecognised origin (400 before WSK-66) is a refusal, never 'none pending'", async () => {
-    fetchMock.mockRejectedValue(new PlatformError(400, "invalid origin"));
-    const r = await findPendingPublishRequests("u", "c", "i1");
+  it("findPendingPublishRequests: a 403 is a refusal, never 'none pending'", async () => {
+    fetchMock.mockRejectedValue(new PlatformError(403, "not authorized"));
+    const r = await findPendingPublishRequests("u", "c", "gaiada", "s1", "i1");
     expect(r.kind).not.toBe("ok");
     expect("data" in r).toBe(false);
   });
@@ -240,7 +256,7 @@ describe("loadEditorBundle", () => {
       if (p.endsWith("/collections")) return collections();
       if (p.includes("/collections/service/items") || p.includes("/collections/navigation/items")) return { items: [summary({ itemId: "i1" }), summary({ itemId: "i1id", locale: "id" })], page: { cursor: null, hasMore: false, limit: 100 } };
       if (p.includes("/items/i1")) return detail();
-      if (p.includes("automation-approvals")) return [];
+      if (p.includes("/publish-requests")) return { requests: [] };
       if (p.endsWith("/build-status")) return { build: null, stagingStale: false };
       throw new PlatformError(404, `unrouted ${p}`);
     });
@@ -266,12 +282,12 @@ describe("loadEditorBundle", () => {
   });
 
   it("a failed SECONDARY read (pending lookup, build status) degrades that panel only and says why", async () => {
-    route({ "automation-approvals": () => { throw new PlatformError(400, "invalid origin"); }, "/build-status": () => { throw new PlatformError(404, "Cannot GET"); } });
+    route({ "/publish-requests": () => { throw new PlatformError(403, "not authorized"); }, "/build-status": () => { throw new PlatformError(404, "Cannot GET"); } });
     const r = await loadEditorBundle("u", "c", "gaiada", "s1", "service", "service.seo", "en");
     expect(r.kind).toBe("ok");
     if (r.kind !== "ok") return;
     expect(r.data.pendingRequests).toBeNull();
-    expect(r.data.pendingProblem).toMatch(/invalid origin/);
+    expect(r.data.pendingProblem).toMatch(/do not have access/);
     expect(r.data.build).toBeNull();
     expect(r.data.buildProblem).toMatch(/not available/);
   });
@@ -316,20 +332,58 @@ describe("loadEditorBundle", () => {
   });
 });
 
-describe("findPendingPublishRequests", () => {
-  it("keeps only pending rows whose tool_args name the item, and ignores rows that do not parse", async () => {
-    fetchMock.mockResolvedValue([
-      { id: "a1", status: "pending", tool_args: { tenantSlug: "g", siteId: "s", items: [{ itemId: "i1", version: 3 }] } },
-      { id: "a2", status: "pending", tool_args: { tenantSlug: "g", siteId: "s", items: [{ itemId: "other", version: 1 }] } },
-      { id: "a3", status: "approved", tool_args: { tenantSlug: "g", siteId: "s", items: [{ itemId: "i1", version: 3 }] } },
-      { id: "a4", status: "pending", tool_args: "garbage" },
-    ]);
-    expect(await findPendingPublishRequests("u", "c", "i1")).toEqual({ kind: "ok", data: [{ approvalId: "a1" }] });
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/c/automation-approvals?origin=webdesk&status=pending");
+const reqRow = (over: Record<string, unknown> = {}) => ({ approvalId: "a1", status: "pending", createdAt: "2026-10-10T08:00:00Z", itemIds: ["i1"], executionStatus: "not_applicable", ...over });
+
+describe("findPendingPublishRequests (WSK-44b: the caller's OWN requests route, not the generic approvals list)", () => {
+  it("keeps only pending requests that name the item", async () => {
+    fetchMock.mockResolvedValue({ requests: [
+      reqRow(),
+      reqRow({ approvalId: "a2", itemIds: ["other"] }),
+      reqRow({ approvalId: "a3", status: "approved", itemIds: ["i1"] }),
+    ] });
+    expect(await findPendingPublishRequests("u", "c", "gaiada", "s1", "i1")).toEqual({ kind: "ok", data: [{ approvalId: "a1" }] });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/c/modules/webdev/content/sites/gaiada/s1/publish-requests?status=pending");
   });
-  it("a non-array body is drift", async () => {
-    fetchMock.mockResolvedValue({ rows: [] });
-    expect(await findPendingPublishRequests("u", "c", "i1")).toMatchObject({ kind: "unavailable", code: "contract_drift" });
+  it("a body that is not {requests:[...]} is drift", async () => {
+    fetchMock.mockResolvedValue([]);
+    expect(await findPendingPublishRequests("u", "c", "gaiada", "s1", "i1")).toMatchObject({ kind: "unavailable", code: "contract_drift" });
+    expect(() => parsePublishRequests({ requests: [reqRow({ itemIds: "i1" })] })).toThrow(WireDrift);
+    expect(() => parsePublishRequests({ requests: [reqRow({ status: "withdrawn" })] })).toThrow(WireDrift);
+    expect(() => parsePublishRequests({ requests: [reqRow({ executionStatus: undefined })] })).toThrow(WireDrift);
+  });
+  it("accepts every status the BFF can send, and a null executionStatus", () => {
+    const rows = parsePublishRequests({ requests: ["pending", "approved", "rejected", "cancelled"].map((status) => reqRow({ status, executionStatus: null })) });
+    expect(rows.map((r) => r.status)).toEqual(["pending", "approved", "rejected", "cancelled"]);
+  });
+});
+
+describe("pollApproval: the detail route needs automation_approval:read, so a requester falls back to their own requests", () => {
+  const detailRow = { id: "a1", workflowId: "content.publish", status: "approved", executionStatus: "executed", createdAt: "t", toolArgs: {} };
+  it("uses the detail row when it is readable", async () => {
+    fetchMock.mockResolvedValue(detailRow);
+    expect(await pollApproval("u", "c", "gaiada", "s1", "a1")).toMatchObject({ kind: "ok", data: { id: "a1", status: "approved" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("on 403 reads the requester's own request (status + executionStatus survive; names do not)", async () => {
+    fetchMock.mockImplementation(async (p: string) => {
+      if (String(p).includes("/automation-approvals/")) throw new PlatformError(403, "not authorized");
+      return { requests: [reqRow({ status: "approved", executionStatus: "executed" })] };
+    });
+    const r = await pollApproval("u", "c", "gaiada", "s1", "a1");
+    expect(r).toMatchObject({ kind: "ok", data: { id: "a1", status: "approved", executionStatus: "executed", decidedByName: null, executionError: null } });
+    expect(String(fetchMock.mock.calls[1][0])).toBe("/api/c/modules/webdev/content/sites/gaiada/s1/publish-requests?status=all");
+  });
+  it("on 403 for an id that is not the caller's own request: still forbidden, never a fabricated row", async () => {
+    fetchMock.mockImplementation(async (p: string) => {
+      if (String(p).includes("/automation-approvals/")) throw new PlatformError(403, "not authorized");
+      return { requests: [reqRow({ approvalId: "someone-elses" })] };
+    });
+    expect(await pollApproval("u", "c", "gaiada", "s1", "a1")).toMatchObject({ kind: "forbidden" });
+  });
+  it("a 404 or 5xx on the detail is NOT retried through the list", async () => {
+    fetchMock.mockRejectedValue(new PlatformError(404, "approval not found"));
+    expect((await pollApproval("u", "c", "gaiada", "s1", "a1")).kind).not.toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

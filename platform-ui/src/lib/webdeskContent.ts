@@ -1,16 +1,24 @@
 import "server-only";
 // WSK-44 — the ONE module through which the Website workspace reads WebDesk content.
 //
-//   BFF (WSK-59, `platform-nest/src/modules/webdev/webdesk-content.controller.ts` — NOT BUILT YET):
+//   BFF (WSK-59, `platform-nest/src/modules/webdev/webdesk-content.controller.ts` — BUILT; FRONTEND-BFF-CONTRACT §27):
 //     GET  /api/:company/modules/webdev/content/sites
 //     GET  …/sites/:tenantSlug/:siteId/collections
 //     GET  …/sites/:tenantSlug/:siteId/collections/:collectionKey/items[?locale&state&q&cursor&limit]
 //     GET  …/sites/:tenantSlug/:siteId/items/:itemId[?version=head|live|<n>]
 //     GET  …/sites/:tenantSlug/:siteId/items/:itemId/versions[/:n]
-//   existing (core/automation-approvals.controller.ts):
-//     GET  /api/:company/automation-approvals[/:id][?origin=webdesk&status=pending]
-//   PROPOSED — NOT in WSK-59's route list; §10's states table needs them (see the WSK-44 report):
+//     GET  …/sites/:tenantSlug/:siteId/publish-requests[?status=…]   (WSK-44b: the caller's OWN requests)
+//   existing (core/automation-approvals.controller.ts; needs `automation_approval:read`, so a requester
+//   without it gets 403 — `pollApproval` falls back to the publish-requests route above):
+//     GET  /api/:company/automation-approvals/:id
+//   STILL PROPOSED — NOT served (WSK-60 owns them); a 404 here is `not_enabled/not_served`, never drift:
 //     GET  …/sites/:tenantSlug/:siteId/build-status
+//     POST …/sites/:tenantSlug/:siteId/rebuild-requests
+//
+//   WSK-44b re-verified every parser below against the REAL controller (platform-nest
+//   `webdesk-content-ui-contract.test.ts` pipes each real response through these functions); the four drifts
+//   it found are fixed here: `cancelled` approvals, nullable `headCreatedAt`, nullable `environments.domain`,
+//   and a 404 `version-not-found` (it is a not-found, not "not served").
 //
 // ── THE CONTRACT THIS FILE ENFORCES ──────────────────────────────────────────────────────────────
 // This estate's recurring bug is "frontend-first drift": a console reads a field the backend never
@@ -43,9 +51,9 @@ import {
   type ApprovalStatus, type BuildStatus, type CollectionComposition, type CollectionSummary,
   type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail,
   type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type Page,
-  type PrimitiveName, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
+  type PrimitiveName, type PublishRequestRow, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
   type VersionContent, type VersionFull, type VersionListBody, type WdResult,
-  type WebdeskApprovalRow, type Block, parseWebdeskPublishArgs, hasNeutralDescendant, splitVersionContent,
+  type WebdeskApprovalRow, type Block, hasNeutralDescendant, splitVersionContent,
 } from "./webdeskContentModel";
 
 // ── Wire validation (hand-rolled: platform-ui carries four runtime deps and a schema library is not
@@ -156,7 +164,7 @@ export function parseComposition(v: unknown, path = "composition"): CollectionCo
 
 function parseEnvironment(v: unknown, path: string): EnvironmentRef {
   const o = obj(v, path);
-  return { envId: key(o, "envId", str, path), name: key(o, "name", str, path), domain: key(o, "domain", str, path), status: key(o, "status", str, path) };
+  return { envId: key(o, "envId", str, path), name: key(o, "name", str, path), domain: key(o, "domain", strN, path), status: key(o, "status", str, path) };
 }
 function parseSite(v: unknown, path: string): SiteRef {
   const o = obj(v, path);
@@ -226,7 +234,7 @@ function parseItemSummary(v: unknown, path: string): ItemSummary {
     publishState: key(o, "publishState", str, path),
     publishAt: key(o, "publishAt", strN, path), unpublishAt: key(o, "unpublishAt", strN, path),
     deletedAt: key(o, "deletedAt", strN, path), updatedAt: key(o, "updatedAt", str, path),
-    headCreatedAt: key(o, "headCreatedAt", str, path), headCreatedBy: key(o, "headCreatedBy", strN, path),
+    headCreatedAt: key(o, "headCreatedAt", strN, path), headCreatedBy: key(o, "headCreatedBy", strN, path),
     pendingChanges: key(o, "pendingChanges", bool, path),
   };
 }
@@ -346,14 +354,14 @@ export function parseBuildStatus(v: unknown): BuildStatus {
   return { build, stagingStale: key(o, "stagingStale", bool, "build-status") };
 }
 
-const APPROVAL_STATUSES: readonly string[] = ["pending", "approved", "rejected"];
+const APPROVAL_STATUSES: readonly string[] = ["pending", "approved", "rejected", "cancelled"];
 const EXEC_STATES: readonly string[] = ["not_applicable", "pending", "executing", "executed", "failed"];
 
 /** `GET /api/:t/automation-approvals/:id` — camelCase detail (APPR-01). Only what the UI reads. */
 export function parseApprovalRow(v: unknown): WebdeskApprovalRow {
   const o = obj(v, "approval");
   const status = key(o, "status", str, "approval");
-  if (!APPROVAL_STATUSES.includes(status)) throw new WireDrift("approval.status", "pending|approved|rejected", status);
+  if (!APPROVAL_STATUSES.includes(status)) throw new WireDrift("approval.status", APPROVAL_STATUSES.join("|"), status);
   // `executionStatus` is optional-by-history (older rows omit it): absent stays `null` = UNKNOWN,
   // never coerced to `not_applicable` (`lib/automationApprovals.ts` documents the same rule).
   let executionStatus: ExecState | null = null;
@@ -407,7 +415,7 @@ function parseIssues(ext: Record<string, unknown>): Issue[] | null {
   return out;
 }
 
-const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found"]);
+const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found", "version-not-found"]);
 
 export function resultFromError(e: unknown): WdResult<never> {
   if (e instanceof WireDrift) return { kind: "unavailable", code: "contract_drift", reason: e.message };
@@ -519,27 +527,57 @@ export function getApprovalRow(userId: string, company: string, approvalId: stri
   return wdCall(`/api/${enc(company)}/automation-approvals/${enc(approvalId)}`, userId, parseApprovalRow);
 }
 
-/** The pending publish requests that name `itemId`. Uses the existing list route's `origin` filter
- *  (accepted for `webdesk` once WSK-66's migration widens the origin set). Rows are the LIST's
- *  snake_case shape; only `id`, `status` and `tool_args` are read. */
-export async function findPendingPublishRequests(userId: string, company: string, itemId: string): Promise<WdResult<{ approvalId: string }[]>> {
-  return wdCall(
-    `/api/${enc(company)}/automation-approvals?origin=webdesk&status=pending`,
-    userId,
-    (raw) => {
-      if (!Array.isArray(raw)) throw new WireDrift("automation-approvals", "array", raw);
-      const out: { approvalId: string }[] = [];
-      raw.forEach((row, i) => {
-        const o = obj(row, `automation-approvals[${i}]`);
-        const id = key(o, "id", str, `automation-approvals[${i}]`);
-        const status = key(o, "status", str, `automation-approvals[${i}]`);
-        if (status !== "pending") return;
-        const args = parseWebdeskPublishArgs(o.tool_args);
-        if (args?.items.some((it) => it.itemId === itemId)) out.push({ approvalId: id });
-      });
-      return out;
+/** `GET …/publish-requests` — the CALLER'S OWN publish/schedule approvals for one site (WSK-44b). The
+ *  generic approvals list needs `automation_approval:read` (company_admin/manager), which an editor does
+ *  not hold; this route is authorised as the right that filed the request. */
+export function parsePublishRequests(v: unknown): PublishRequestRow[] {
+  const o = obj(v, "publish-requests");
+  return key(o, "requests", arr((row, path) => {
+    const r = obj(row, path);
+    const status = key(r, "status", str, path);
+    if (!APPROVAL_STATUSES.includes(status)) throw new WireDrift(`${path}.status`, APPROVAL_STATUSES.join("|"), status);
+    const es = key(r, "executionStatus", strN, path);
+    if (es !== null && !EXEC_STATES.includes(es)) throw new WireDrift(`${path}.executionStatus`, EXEC_STATES.join("|"), es);
+    return {
+      approvalId: key(r, "approvalId", str, path), status: status as ApprovalStatus, createdAt: key(r, "createdAt", str, path),
+      itemIds: key(r, "itemIds", arr(str), path), executionStatus: es as ExecState | null,
+    };
+  }), "publish-requests");
+}
+
+export function listOwnPublishRequests(
+  userId: string, company: string, tenantSlug: string, siteId: string, status: "pending" | "approved" | "rejected" | "cancelled" | "all" = "pending",
+) {
+  return wdCall(`${siteBase(company, tenantSlug, siteId)}/publish-requests?status=${status}`, userId, parsePublishRequests);
+}
+
+/** The caller's pending publish requests that name `itemId` (the editor's "pending request after reload"). */
+export async function findPendingPublishRequests(
+  userId: string, company: string, tenantSlug: string, siteId: string, itemId: string,
+): Promise<WdResult<{ approvalId: string }[]>> {
+  const r = await listOwnPublishRequests(userId, company, tenantSlug, siteId, "pending");
+  if (r.kind !== "ok") return r;
+  return { kind: "ok", data: r.data.filter((q) => q.status === "pending" && q.itemIds.includes(itemId)).map((q) => ({ approvalId: q.approvalId })) };
+}
+
+/** One approval for the editor's poll. The detail route needs `automation_approval:read`; a requester
+ *  without it (webdev_staff) gets 403 there, so on `forbidden` fall back to their OWN requests for this site.
+ *  The fallback row has no decider name or execution error (the route does not carry them): the phase is
+ *  still right, the copy is just less specific. */
+export async function pollApproval(userId: string, company: string, tenantSlug: string, siteId: string, approvalId: string): Promise<WdResult<WebdeskApprovalRow>> {
+  const detail = await getApprovalRow(userId, company, approvalId);
+  if (detail.kind !== "forbidden") return detail;
+  const own = await listOwnPublishRequests(userId, company, tenantSlug, siteId, "all");
+  if (own.kind !== "ok") return own;
+  const hit = own.data.find((q) => q.approvalId === approvalId);
+  if (!hit) return detail;
+  return {
+    kind: "ok",
+    data: {
+      id: hit.approvalId, workflowId: "content.publish", status: hit.status, executionStatus: hit.executionStatus, executionError: null,
+      requestedBy: userId, requestedByName: null, decidedBy: null, decidedByName: null, decidedAt: null, createdAt: hit.createdAt, reason: null, toolArgs: undefined,
     },
-  );
+  };
 }
 
 // ── Composite: resolve a slug to its item, page by page ──────────────────────────────────────────
@@ -628,7 +666,7 @@ export async function loadEditorBundle(
       if (r.kind !== "ok") return { value: null, problem: `The ${tenant.defaultLocale} version could not be read (${describeFailure(r)}), so locale-neutral fields show this item's own copy.` };
       return { value: { locale: tenant.defaultLocale, fields: splitVersionContent(collectionKey, r.data.version.blocks, r.data.version.seo).fields }, problem: null };
     })(),
-    findPendingPublishRequests(userId, company, detail.data.item.itemId),
+    findPendingPublishRequests(userId, company, tenantSlug, siteId, detail.data.item.itemId),
     getBuildStatus(userId, company, tenantSlug, siteId),
   ]);
 
@@ -659,8 +697,8 @@ export function describeFailure(r: Exclude<WdResult<unknown>, { kind: "ok" }>): 
 }
 
 export function stagingBaseUrl(site: SiteRef): string | null {
-  const env = site.environments.find((e) => e.name.toLowerCase() === "staging");
-  return env ? `https://${env.domain}` : null;
+  const env = site.environments.find((e) => e.name.toLowerCase() === "staging" && e.domain);
+  return env && env.domain ? `https://${env.domain}` : null;
 }
 
 /** Best-effort id -> display name from the company directory, for version authors. COSMETIC: a failure

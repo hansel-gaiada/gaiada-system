@@ -95,8 +95,12 @@ const server = http.createServer(async (req, res) => {
     if (ap && method === "GET") {
       const company = decodeURIComponent(ap[1]);
       if (!ap[2]) {
-        if (url.searchParams.get("origin") === "webdesk") return send(res, 200, company === COMPANY ? listApprovals(S, url.searchParams) : []);
+        // `automation_approval:read` (company_admin/manager) — the editor no longer calls the list (WSK-44b).
+        if (url.searchParams.get("origin") === "webdesk") return send(res, S.cfg.approvalReadForbidden ? 403 : 200, S.cfg.approvalReadForbidden ? { error: "forbidden" } : company === COMPANY ? listApprovals(S, url.searchParams) : []);
       } else if (S.approvals.has(ap[2])) {
+        // A requester without `automation_approval:read` (webdev_staff) is refused here: the REAL detail route has no
+        // requester carve-out, which is why the editor's poll falls back to `…/publish-requests`.
+        if (S.cfg.approvalReadForbidden) return send(res, 403, { error: "forbidden" });
         // Approvals live in one company; every other tenant gets the 404 a cross-tenant id gets (RLS).
         return company === COMPANY ? send(res, 200, S.approvals.get(ap[2])) : send(res, 404, { error: "not found" });
       }

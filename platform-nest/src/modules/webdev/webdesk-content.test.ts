@@ -266,6 +266,7 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
         ["update", "PUT", `${s}/items/${id}`, { baseVersion: 1, fields: { h1: "y" } }],
         ["restore", "POST", `${s}/items/${id}/restore`, { version: 1, baseVersion: 1 }],
         ["publish-requests", "POST", `${s}/publish-requests`, { items: [{ itemId: id, version: 1 }] }],
+        ["publish-requests-list", "GET", `${s}/publish-requests`],
         ["unpublish", "POST", `${s}/items/${liveId}/unpublish`, { expectedPublishedVersion: 1 }],
         ["delete", "POST", `${s}/items/${id}/delete`, { baseVersion: 1 }],
       ];
@@ -335,6 +336,7 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
       { name: "update", method: "PUT", path: () => `${site()}/items/${item.itemId}`, body: () => ({ baseVersion: 1, fields: { h1: "b" } }), allowed: () => editorA, denied: () => [memberA] },
       { name: "restore", method: "POST", path: () => `${site()}/items/${item.itemId}/restore`, body: () => ({ version: 1, baseVersion: 1 }), allowed: () => editorA, denied: () => [memberA] },
       { name: "publish-requests", method: "POST", path: () => `${site()}/publish-requests`, body: () => ({ items: [{ itemId: item.itemId, version: 1 }] }), allowed: () => editorA, denied: () => [memberA] },
+      { name: "publish-requests-list", method: "GET", path: () => `${site()}/publish-requests`, allowed: () => editorA, denied: () => [memberA] },
       // unpublish / delete are the PUBLISHER tier: the editor is denied, the publisher (and admin) allowed
       { name: "unpublish", method: "POST", path: () => `${site()}/items/${live1.itemId}/unpublish`, body: () => ({ expectedPublishedVersion: 1 }), allowed: () => publisherA, denied: () => [editorA, memberA] },
       { name: "delete", method: "POST", path: () => `${site()}/items/${item.itemId}/delete`, body: () => ({ baseVersion: 1 }), allowed: () => publisherA, denied: () => [editorA, memberA] },
@@ -820,6 +822,88 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
          VALUES ($1,$2,'wf:x','x.y','{}','medium','pending',$3,'automation','main')`, [other, A, editorA],
       );
       expect((await withdraw(editorA, other)).statusCode).toBe(404);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("own publish requests (WSK-44b): GET …/publish-requests: the requester reads their OWN approvals", () => {
+    const list = (as: string, qs = "", s = site()) => call("GET", `${s}/publish-requests${qs}`, as);
+    async function fileAs(as: string, it: FakeItem = item): Promise<string> {
+      const r = await call("POST", `${site()}/publish-requests`, as, { items: [{ itemId: it.itemId, version: 1 }] });
+      expect(r.statusCode).toBe(202);
+      return r.json().approvalId;
+    }
+
+    it("🔴 a webdev_staff editor reads the request they filed: {requests:[{approvalId,status,createdAt,itemIds,executionStatus}]}, exactly", async () => {
+      const id = await fileAs(editorA);
+      const r = await list(editorA, "?status=pending");
+      expect(r.statusCode).toBe(200);
+      expect(r.headers["content-type"]).toContain("application/json");
+      expect(r.json()).toEqual({
+        requests: [{ approvalId: id, status: "pending", createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/), itemIds: [item.itemId], executionStatus: "not_applicable" }],
+      });
+      // no ?status means pending
+      expect((await list(editorA)).json().requests.map((q: { approvalId: string }) => q.approvalId)).toEqual([id]);
+      // reads reach Zone B only for the wall (tenant.list), never as a write
+      expect(zb.writes).toHaveLength(0);
+    });
+
+    it("OWN rows only: another editor/publisher/admin of the same company never sees them (and sees their own)", async () => {
+      const mine = await fileAs(editorA);
+      const theirs = await fileAs(publisherA, live1);
+      const ids = async (as: string) => (await list(as)).json().requests.map((q: { approvalId: string }) => q.approvalId);
+      expect(await ids(editorA)).toEqual([mine]);
+      expect(await ids(publisherA)).toEqual([theirs]);
+      expect(await ids(adminA)).toEqual([]);
+    });
+
+    it("scoped to THIS site and to webdesk publish/schedule rows: another site's, another origin's and other workflows' are not returned", async () => {
+      const mine = await fileAs(editorA);
+      const ins = (id: string, origin: string, workflow: string, args: unknown) =>
+        adminPool().query(
+          `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, origin, origin_site)
+           VALUES ($1,$2,$3,'x.y',$4::jsonb,'high','pending',$5,$6,'main')`,
+          [id, A, workflow, JSON.stringify(args), editorA, origin],
+        );
+      await ins(randomUUID(), "webdesk", "content.publish", { tenantSlug: GAIADA_SLUG, siteId: randomUUID(), items: [{ itemId: item.itemId, version: 1 }] });
+      await ins(randomUUID(), "automation", "content.publish", { tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, items: [{ itemId: item.itemId, version: 1 }] });
+      await ins(randomUUID(), "webdesk", "content.rebuild", { tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, items: [] });
+      expect((await list(editorA)).json().requests.map((q: { approvalId: string }) => q.approvalId)).toEqual([mine]);
+    });
+
+    it("?status= filters by the approval's status; a withdrawn request is `cancelled`, a decided one carries its executionStatus; newest first", async () => {
+      const a = await fileAs(editorA);
+      const b = await fileAs(editorA, live1);
+      const c = await fileAs(editorA);
+      expect((await call("POST", `${site()}/publish-requests/${a}/withdraw`, editorA)).statusCode).toBe(200);
+      await adminPool().query(`UPDATE automation_approvals SET status = 'approved', execution_status = 'executed' WHERE id = $1`, [b]);
+      const ids = (r: { json: () => { requests: Array<{ approvalId: string }> } }) => r.json().requests.map((q) => q.approvalId);
+      expect(ids(await list(editorA, "?status=pending"))).toEqual([c]);
+      expect(ids(await list(editorA, "?status=cancelled"))).toEqual([a]);
+      const approved = (await list(editorA, "?status=approved")).json().requests;
+      expect(approved).toEqual([expect.objectContaining({ approvalId: b, status: "approved", executionStatus: "executed", itemIds: [live1.itemId] })]);
+      expect((await list(editorA, "?status=rejected")).json().requests).toEqual([]);
+      const all = (await list(editorA, "?status=all")).json().requests as Array<{ approvalId: string; status: string }>;
+      expect(all.map((q) => q.approvalId).sort()).toEqual([a, b, c].sort());
+      expect(all.find((q) => q.approvalId === a)!.status).toBe("cancelled");
+    });
+
+    it("strict: an unknown status or query key is 400 (after authorization: a member is 403 on the same URL), and a foreign site is the wall's 404", async () => {
+      expect((await list(editorA, "?status=bogus")).statusCode).toBe(400);
+      expect((await list(editorA, "?status=pending&x=1")).statusCode).toBe(400);
+      expect((await list(memberA, "?status=bogus")).statusCode).toBe(403);
+      const foreign = await list(adminA, "", site(A, OTHER_SLUG, OTHER_SITE));
+      expect(foreign.statusCode).toBe(404);
+      expect(foreign.json()).toMatchObject({ type: "https://webdesk.gaiada.online/errors/site-not-found" });
+    });
+
+    it("FINDING (pinned, not widened): the generic approvals routes still refuse a webdev_staff requester, which is WHY this route exists", async () => {
+      const id = await fileAs(editorA);
+      // the list the editor used before WSK-44b, and the detail the editor's poll and /approvals/[id] use
+      expect((await call("GET", `/api/${A}/automation-approvals?origin=webdesk&status=pending`, editorA)).statusCode).toBe(403);
+      expect((await call("GET", `/api/${A}/automation-approvals/${id}`, editorA)).statusCode).toBe(403);
+      // an approver (company_admin) reads both
+      expect((await call("GET", `/api/${A}/automation-approvals/${id}`, adminA)).statusCode).toBe(200);
     });
   });
 

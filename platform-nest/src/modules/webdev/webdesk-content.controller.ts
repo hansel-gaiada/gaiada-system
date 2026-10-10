@@ -166,6 +166,17 @@ export class WebdeskContentController {
     return (await webdeskContent.requestPublish(gate, { tenantSlug, siteId }, body)).body;
   }
 
+  /** The caller's OWN publish/schedule approvals for this site (WSK-44b): the editor's "pending request after reload". */
+  @Get("sites/:tenantSlug/:siteId/publish-requests")
+  async listPublishRequests(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "request_publish");
+    send(reply, await webdeskContent.listOwnPublishRequests(gate, { tenantSlug, siteId }, query));
+  }
+
   /** The REQUESTER cancels their own pending publish approval (status `cancelled`). */
   @Post("sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw")
   @HttpCode(200)

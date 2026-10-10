@@ -346,7 +346,7 @@ export function ItemEditor({
   };
 
   // ── render ─────────────────────────────────────────────────────────────────────────────────────
-  const stagingBase = site.environments.find((e) => e.name.toLowerCase() === "staging");
+  const stagingBase = site.environments.find((e) => e.name.toLowerCase() === "staging" && e.domain);
   const urlField = typeof (nonDefaultLocale ? draft.fields.url : baseline.fields.url) === "string" ? (baseline.fields.url as string) : null;
   const stagingItemUrl = stagingBase && urlField && urlField.startsWith("/") && item && isLive(item) ? `https://${stagingBase.domain}${urlField}` : null;
 

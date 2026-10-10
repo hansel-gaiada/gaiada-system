@@ -137,6 +137,30 @@ describe("PublishBar: request -> approval -> published -> staging", () => {
     expect(screen.getByTestId("awaiting-approval").textContent).toContain("#ap-2");
   });
 
+  it("withdrawn elsewhere (status cancelled): says Withdrawn, stops polling, and Request again files a new one", async () => {
+    a.requestPublishAction.mockResolvedValueOnce(ok({ approvalId: "ap-1" })).mockResolvedValueOnce(ok({ approvalId: "ap-2" }));
+    a.pollApprovalAction.mockResolvedValue(ok(row({ id: "ap-1", status: "cancelled", executionStatus: "not_applicable" }) as never));
+    setup();
+    await act(async () => { fireEvent.click(screen.getByTestId("request-publish")); });
+    await flush();
+    expect(screen.getByTestId("request-withdrawn").textContent).toMatch(/Withdrawn.*withdrawn by its requester.*Nothing was published/);
+    expect(screen.queryByTestId("request-rejected")).toBeNull();
+    const polls = a.pollApprovalAction.mock.calls.length;
+    await flush(10_000);
+    expect(a.pollApprovalAction.mock.calls.length).toBe(polls); // terminal: no further polling
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Request again" })); });
+    expect(a.requestPublishAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("the poll names the SITE (so a requester without approval-read can fall back to their own requests)", async () => {
+    a.requestPublishAction.mockResolvedValue(ok({ approvalId: "ap-1" }));
+    a.pollApprovalAction.mockResolvedValue(ok(row({ id: "ap-1", status: "pending" }) as never));
+    setup();
+    await act(async () => { fireEvent.click(screen.getByTestId("request-publish")); });
+    await flush();
+    expect(a.pollApprovalAction).toHaveBeenCalledWith(SCOPE, "ap-1");
+  });
+
   it("failed: shows the reason token in plain words", async () => {
     a.requestPublishAction.mockResolvedValue(ok({ approvalId: "ap-1" }));
     a.pollApprovalAction.mockResolvedValue(ok(row({ id: "ap-1", status: "approved", executionStatus: "failed", executionError: "version-conflict" }) as never));
@@ -156,7 +180,7 @@ describe("PublishBar: request -> approval -> published -> staging", () => {
   });
 
   it("finds a pending request after a reload (initialPending) and can withdraw it", async () => {
-    a.withdrawPublishRequestAction.mockResolvedValue(ok({ approvalId: "ap-9", status: "withdrawn" }));
+    a.withdrawPublishRequestAction.mockResolvedValue(ok({ approvalId: "ap-9", status: "cancelled" }));
     setup({ initialPending: [{ approvalId: "ap-9" }] });
     expect(screen.getByTestId("awaiting-approval").textContent).toContain("#ap-9");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Withdraw" })); });
