@@ -6,7 +6,14 @@
 // make them nowhere except index.ts; a new file is the additive path WSK-12 already established for
 // exactly this situation (see zoneb-events.controller.ts's own header for the precedent).
 //
-// ── EVERY ROUTE HERE IS AN HONEST STUB, AND THAT IS DELIBERATE ─────────────────────────────────────
+// ── WSK-59 UPDATE (2026-10-10): THREE OF THESE ARE NOW REAL ──────────────────────────────────────
+// `GET sites`, `POST sites` and `POST schema/apply` run over the real control channel
+// (`webdesk-control-client.ts`, via `webdesk-content.service.ts`: the cross-company wall, typed errors,
+// two ledger rows per write). They keep this controller's Cerbos gate (`webdev_provisioned_site` read /
+// operate) as their first statement. Every OTHER route below is still an honest 501, and the notes that
+// follow describe those.
+//
+// ── EVERY ROUTE HERE (EXCEPT THE THREE ABOVE) IS AN HONEST STUB, AND THAT IS DELIBERATE ─────────────────────────────────────
 // WSK-23 (the ERP module egress client + BFF — mTLS + KC client-credentials + the §03 Layer-4 WS4
 // assertion into Zone B) has not landed (PROGRESS.md Part D, 2026-08-27: still ⬜ NOT DONE, and this
 // ticket's own dependency line names it: "WSK-21–23"). So there is genuinely no live channel from
