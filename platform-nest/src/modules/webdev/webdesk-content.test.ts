@@ -828,6 +828,10 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
   // ═══════════════════════════════════════════════════════════════════════════════════════════════
   describe("own publish requests (WSK-44b): GET …/publish-requests: the requester reads their OWN approvals", () => {
     const list = (as: string, qs = "", s = site()) => call("GET", `${s}/publish-requests${qs}`, as);
+    // approvals are not cleared between tests (only the ledger is), and earlier suites filed rows as editorA/publisherA
+    beforeEach(async () => {
+      await adminPool().query(`DELETE FROM automation_approvals WHERE tenant_id = $1 AND origin = 'webdesk'`, [A]);
+    });
     async function fileAs(as: string, it: FakeItem = item): Promise<string> {
       const r = await call("POST", `${site()}/publish-requests`, as, { items: [{ itemId: it.itemId, version: 1 }] });
       expect(r.statusCode).toBe(202);

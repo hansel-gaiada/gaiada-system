@@ -215,7 +215,7 @@ export function ItemEditor({
       case "invalid":
         setIssues(r.issues);
         setSaveState({ s: "error", message: r.issues.length ? `${r.issues.length} problem${r.issues.length === 1 ? "" : "s"} to fix before it can be ${verb}.` : r.message, issues: r.issues });
-        requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-pointer][aria-invalid='true']")?.scrollIntoView({ block: "center" }));
+        requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-pointer][aria-invalid='true']")?.scrollIntoView?.({ block: "center" }));
         return;
       case "forbidden":
         setForbidden(true);
