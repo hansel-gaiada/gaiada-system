@@ -492,7 +492,7 @@ describe("WSK-41 content commands (real DB + real PDP)", () => {
   // ==============================================================================================
   // schedule (HIGH): the read path honours time; the two documented refusals
   // ==============================================================================================
-  it("schedule: a future publishAt goes live by time alone; a live item -> 409 schedule-live-item-requires-worker; a takedown of a non-live item -> 409 not-live", async () => {
+  it("schedule: a future publishAt goes live by time alone; a live item gets a pending swap row (200, projection untouched; WSK-61 replaced the 409 schedule-live-item-requires-worker); a takedown of a non-live item -> 409 not-live", async () => {
     const c = (await createItem(app, fx, { collectionKey: "service", locale: "en", slug: "service.sched", fields: serviceFields({ h1: "S1" }) })).json();
     const itemId = c.item.itemId as string;
     const publishAt = new Date(Date.now() + 2500).toISOString();
@@ -504,15 +504,21 @@ describe("WSK-41 content commands (real DB + real PDP)", () => {
     expect((await v1Get(app, fx, keys.production, "service", "service.sched")).statusCode).toBe(404);
     await waitFor(async () => (await v1Get(app, fx, keys.production, "service", "service.sched")).statusCode === 200, 8000, 250);
 
+    // The item is live now, so a future publishAt is a pending swap (content_schedules), not a refusal.
+    // Its execution (and cancellation) is covered by scheduler-content-tick.spec.ts.
     const body2 = { items: [{ itemId, version: 1 }], publishAt: new Date(Date.now() + 60_000).toISOString() };
-    const liveRefused = await app.inject({
+    const liveSwap = await app.inject({
       method: "POST",
       url: `${base(fx)}/schedule`,
       headers: hdr({ ws4: ws4For("content.schedule", { tenantSlug: fx.slug, siteId: fx.siteId }, body2) }),
       payload: body2,
     });
-    expect(liveRefused.statusCode).toBe(409);
-    expect(liveRefused.json().type).toBe(`${PROBLEM}schedule-live-item-requires-worker`);
+    expect(liveSwap.statusCode).toBe(200);
+    expect(liveSwap.json().scheduled[0]).toMatchObject({ itemId, version: 1, publishAt: body2.publishAt });
+    const pendingSwaps = await asTenant(fx.tenantId, async (db) =>
+      (await db.query(`SELECT version, executed_at, cancelled_at, failed_at FROM content_schedules WHERE content_item_id = $1`, [itemId])).rows,
+    );
+    expect(pendingSwaps).toEqual([{ version: 1, executed_at: null, cancelled_at: null, failed_at: null }]);
 
     const d = (await createItem(app, fx, { collectionKey: "service", locale: "en", slug: "service.sched-draft", fields: serviceFields() })).json();
     const body3 = { items: [{ itemId: d.item.itemId, version: 1 }], unpublishAt: new Date(Date.now() + 60_000).toISOString() };
