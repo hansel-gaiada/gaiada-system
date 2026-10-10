@@ -1,4 +1,5 @@
 import "server-only";
+import { isDemoPortalClient } from "./demoPortalClients";
 // TEMP DEMO MODE — stateful in-memory store for the WS11 delivery pipeline (mirrors demoMeetings.ts
 // exactly). Lets /pipeline, /pipeline/[runId], and the PRD Studio tab (WD-02) exercise real run
 // data — three tracks, gates, artifacts, a pending beat — with NO backend. Wired from
@@ -401,7 +402,7 @@ export function portalDemo(method: string, p: string, userId: string): DemoResul
   if (!isPortalRoute) return null;
   // Mirrors the real BFF's refusal for anyone who is not a portal contact. Without this the demo
   // would show staff a client's dashboard and the staff teach-state would be dead code.
-  if (userId !== "demo-client") return { status: 403, json: { error: "not a portal client" } };
+  if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
   const mine = RUNS.filter((r) => r.client_id === DEMO_PORTAL_CLIENT_ID);
   const clientGates = (runId: string) =>

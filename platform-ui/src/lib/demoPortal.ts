@@ -20,6 +20,7 @@ import "server-only";
 // the dev session, so the flows are drivable end to end (and by Playwright) rather than resetting on
 // every navigation.
 import type { DemoResult } from "./demoFixtures";
+import { isDemoPortalClient } from "./demoPortalClients";
 
 const CLIENT_ID = "cl-1";              // Northwind Traders — the client `demo-client` represents
 const DEMO_CLIENT_USER = "demo-client";
@@ -419,7 +420,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
   const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|profile|stream|files|change-requests)(\/|$)/;
   if (!OWNED.test(seg)) return null;
-  if (userId !== DEMO_CLIENT_USER) return { status: 403, json: { error: "not a portal client" } };
+  if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
   const parsed: Record<string, unknown> = (() => {
     if (!body) return {};

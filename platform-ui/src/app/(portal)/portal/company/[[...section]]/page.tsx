@@ -26,7 +26,7 @@ export default async function PortalCompanyPage({
   const { section } = await params;
 
   if (!tenant) {
-    return (<><PortalPageHead eyebrow="Your business" title="Business" /><EmptyNote>No workspace selected.</EmptyNote></>);
+    return (<><PortalPageHead eyebrow="Your business" title="Business" /><EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote></>);
   }
 
   const scope = await listPortalCentres(userId, tenant);

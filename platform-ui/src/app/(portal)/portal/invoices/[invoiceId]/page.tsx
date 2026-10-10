@@ -21,7 +21,7 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = (await getActivePortalCompany(me))?.id ?? null;
-  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
+  if (!tenant) return <EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote>;
 
   const invoice = await getPortalInvoice(userId, tenant, invoiceId);
   // 404 for "not yours" and "does not exist" alike — the BFF makes them indistinguishable on purpose.

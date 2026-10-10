@@ -1,4 +1,5 @@
 import "server-only";
+import { isDemoPortalClient } from "./demoPortalClients";
 import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
@@ -1455,7 +1456,7 @@ const DEMO_CLIENT_ID = "cl-1"; // Northwind Traders — the client `demo-client`
 export function socialClientReviewPortalDemo(method: string, p: string, userId: string, body?: string): DemoResult | null {
   const match = p.match(/^\/api\/[^/]+\/portal\/social-reviews(?:\/([^/]+)\/decide)?$/);
   if (!match) return null;
-  if (userId !== DEMO_CLIENT_USER) return err(403, "not a portal client");
+  if (!isDemoPortalClient(userId)) return err(403, "not a portal client");
   const m = method.toUpperCase();
 
   if (!match[1] && m === "GET") {

@@ -26,7 +26,7 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = (await getActivePortalCompany(me))?.id ?? null;
-  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
+  if (!tenant) return <EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote>;
 
   const project = await getPortalProject(userId, tenant, projectId);
   if (!project) notFound();
