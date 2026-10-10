@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 84/176<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 86/180<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `████████████████░░░░` **79%** · 71/89<!-- /bar -->
+<!-- bar -->🟡 `████████████████░░░░` **80%** · 72/89<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -139,12 +139,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] `key.mint` plaintext only in the `decide()` response, never persisted (DB + log scans)
 
 - [x] Fix the platform_admin parity sweep (`authz-permissions.controller.test.ts`) that WSK-47's deny-without-approval rule turned red (31/31; negative control red on a broken unrelated grant; full nest 7453 passed)
-### Wave C · WSK-59 · ERP content BFF + MCP tools <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
+### Wave C · WSK-59 · ERP content BFF + MCP tools <!-- bar -->✅ `██████████` **100%** · 4/4<!-- /bar -->
 - [x] Routes with `authorize()` first; cross-company 404 wall with a positive control (12 routes; full nest 7564 passed)
 - [x] Every editor action is an MCP tool with an impact class; both D14 halves for unpublish/delete (13 tools; unattended unpublish suspends + re-drives as the requester)
 - [x] BFF contract §27; breaker open → `editorial_unavailable`; ambiguous writes reconcile by reading
 
-- [ ] Editors can read their own pending publish request (today `automation_approval:read` is admin/manager only → 403 after a reload)
+- [x] Editors can read their own pending publish request (new `GET …/publish-requests`, own rows only, behind the wall)
 ### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Tenant `gaiada`, site `gaiada-com`, staging + production environments
 - [ ] Build key (production read) minted through an approval; preview key (staging read)
@@ -168,16 +168,16 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `████░░░░░░░░░░░░░░░░` **18%** · 3/16<!-- /bar -->
+<!-- bar -->🟡 `█████░░░░░░░░░░░░░░░` **25%** · 4/16<!-- /bar -->
 
-### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `████░░░░░░` **42%** · 3/7<!-- /bar -->
+### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **57%** · 4/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
 - [x] Editor generated from the composition: text, Markdown, groups, lists (drag and keyboard reorder) — on gaiada.com's real compositions
 - [ ] Publish with the approval state shown inline
 - [ ] Version history with restore as draft
 - [x] Unavailable / stale / conflict states (never a confident empty editor — structural: refusal renders before any data)
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
-- [ ] Re-verified against the REAL BFF once WSK-59 lands (every field the UI reads diffed against a live response — built on a stub first)
+- [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
 ### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
 - [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
@@ -195,7 +195,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/29<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/33<!-- /bar -->
 
 ### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
@@ -210,7 +210,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] WSK-64 · CDN cache purge on publish
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/20<!-- /bar -->
+### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/24<!-- /bar -->
 - [ ] Reserved collection keys (`media`, `forms` collide with api routes)
 - [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
 - [ ] A bad cursor returns 500 with the raw database message
@@ -220,6 +220,10 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `check-artifact-url-expiry.mjs` still starts a MinIO container
 - [ ] In-memory read quota and idempotency under-enforce with more than one api replica
 - [ ] Defence in depth: a Cerbos rule denying `publish`/`schedule` to automation principals (today only the importer's code prevents it)
+- [ ] Approvals DETAIL page dead-ends for a requester (`automation_approval:read` 403) — needs a requester-own read rule in Cerbos
+- [ ] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim)
+- [ ] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale)
+- [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too)
 - [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
 - [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
 - [ ] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever (senior-db decision)
