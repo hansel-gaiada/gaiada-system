@@ -208,6 +208,27 @@ SELECT occurred_at, metadata->>'outcome' AS outcome, metadata->>'approvalId' AS 
   FROM activities WHERE verb = 'github.deploy' ORDER BY occurred_at DESC LIMIT 10;
 ```
 
-## Cost per run
+## Cost
 
-See "Cost" below (measured on the gate host; the estimate and how it was made are written down there).
+**How it was estimated.** WSK-55 recorded no build time (the laptop build is not written down anywhere), so this was measured: on sumopod, in a
+`node:22-bookworm` container limited to **2 CPUs and 7 GB** (the shape of a GitHub-hosted `ubuntu-latest` runner), cold, with the host's load average
+at about 7 (other tenants running, so this errs slow):
+
+| Step | Measured |
+|---|---|
+| `npm ci` (cold, no npm cache) | 20 s |
+| `npm run build` (`astro build`, 82 pages; the git-content build, which is the same work as the build after the pull) | 52 s |
+| `tar -czf dist` (22 MB to a 9.8 MB tarball) | 1 s |
+| **Sum of what was measured** | **73 s** |
+
+Not measured, so budgeted: checkout and `setup-node` with the npm cache restore about 15 s, the `/v1` pull (about 330 items in 2 locales through the paginated list, assumed 20 s), the checks 3 s, the
+SSH upload of 9.8 MB about 5 s, the post-deploy stamp check about 5 s. That is **about 2 min 10 s of wall time, which GitHub bills as 3 minutes** (per-job minute rounding), inside the design's
+"2 to 4 min" assumption. Latency from approval to live is dominated by the same figure plus the first stamp poll (at most 30 s), so **about 3 to 4 minutes**.
+
+At the design's $0.008 per Linux 2-core minute that is **about $0.024 per run if the repo is private, $0 if it is public**. At 20 to 60 publishes a month that is **$0.48 to $1.44 a month**,
+and 60 runs is 180 of a private repo's included 2,000 minutes (Free plan) or 3,000 (Team), so the out-of-pocket cost is $0 in practice. Cancelled runs (coalesced bursts) bill only the
+minutes they ran. **Re-measure on the first real run** (the Actions run page shows the billed time) and correct this section.
+
+## As executed (sumopod gate, 2026-10-10; DEV-VERIFIED only where a real run is named in "Owner steps")
+
+*(filled in at the end of this change; see the ticket report for the exact counts)*
