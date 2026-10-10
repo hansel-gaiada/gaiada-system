@@ -325,14 +325,15 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       recs.push({ method: "GET", path: `/api/${A}/modules/webdev/content/sites/${GAIADA_SLUG}/${GAIADA_SITE}/media`, status: 200, body, user: editorA });
     });
 
-    it("the editor bundle (page load + Refresh): site, composition, item, own pending requests and the (unbuilt) build status assemble from real bodies", async () => {
+    it("the editor bundle (page load + Refresh): site, composition, item, own pending requests and the build status assemble from real bodies", async () => {
       const b = okData(await step("refreshEditorAction", () => actions.refreshEditorAction(SCOPE, "service", "service.seo", "en")));
       expect(b.detail.item.itemId).toBe(item.itemId);
       expect(b.pendingRequests).toEqual([]);
       expect(b.pendingProblem).toBeNull();
-      // build-status is WSK-60's and not built: the BFF's 404 must degrade to "not available", never to a fabricated build
-      expect(b.build).toBeNull();
-      expect(b.buildProblem).toMatch(/not available/);
+      // build-status is WSK-60's real route now: a site that has never been rebuilt reads as "no build yet", not stale,
+      // and not as a problem. (Before WSK-60 merged, the BFF's 404 degraded to "not available".)
+      expect(b.build).toEqual({ build: null, stagingStale: false });
+      expect(b.buildProblem).toBeNull();
       okData(await step("loadSiteContext", () => ui.loadSiteContext(editorA, A, GAIADA_SLUG, GAIADA_SITE)));
     });
   });
@@ -501,12 +502,19 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       expect(await step("withdraw (unknown id)", () => actions.withdrawPublishRequestAction(SCOPE, randomUUID()))).toEqual({ kind: "not_found", slug: "approval_not_found" });
     });
 
-    it("routes WSK-44 proposed that no ticket has built yet (build-status, rebuild-requests): the BFF's 404 is `not_enabled/not_served`, never drift", async () => {
+    it("WSK-60's build routes through the UI's own parsers: a build with no staging target reads as failed, never live; a rebuild request is a typed 503 refusal, never drift", async () => {
       const bs = await step("pollBuildStatusAction", () => actions.pollBuildStatusAction(SCOPE));
-      expect(bs).toEqual({ kind: "not_enabled", reason: "not_served" });
-      expect(await step("getBuildStatus", () => ui.getBuildStatus(editorA, A, GAIADA_SLUG, GAIADA_SITE))).toEqual({ kind: "not_enabled", reason: "not_served" });
-      expect(await step("requestRebuildAction", () => actions.requestRebuildAction(SCOPE))).toEqual({ kind: "not_enabled", reason: "not_served" });
+      expect(bs).toMatchObject({ kind: "ok", data: { stagingStale: false } });
+      // An earlier test in this file approves a publish. With no WEBDESK_REBUILD_TARGETS, WSK-60 records that publish's
+      // build as `failed`: no staging URL, never verified, never "live on staging". Before any publish there is no build.
+      const build = okData(bs).build;
+      if (build !== null) expect(build).toMatchObject({ kind: "publish", state: "failed", stagingUrl: null, verifiedAt: null });
+      expect(await step("getBuildStatus", () => ui.getBuildStatus(editorA, A, GAIADA_SLUG, GAIADA_SITE))).toEqual(bs);
+      // This suite configures no WEBDESK_REBUILD_TARGETS, so the route refuses before filing an approval that could only fail.
+      const rb = await step("requestRebuildAction", () => actions.requestRebuildAction(SCOPE));
+      expect(rb).toEqual({ kind: "unavailable", code: "editorial_unavailable", reason: "webdesk_not_configured" });
       notDrift(bs);
+      notDrift(rb);
     });
 
     it("the module switched off for the company: 404 → not_enabled (a refusal the page renders as one)", async () => {

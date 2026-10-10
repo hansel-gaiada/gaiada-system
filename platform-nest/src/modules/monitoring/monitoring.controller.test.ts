@@ -878,10 +878,13 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
     let windowId: string;
 
     it("a manager schedules a monitor-scoped window, and it round-trips through GET", async () => {
+      // Relative to now: GET lists only windows that ended within the last 7 days, so a fixed date
+      // (2026-09-10 here until 2026-10-11) silently fell out of the list from 2026-09-17 on.
+      const hoursFromNow = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
       const res = await app.inject({
         method: "POST", url: `/api/${coA}/monitoring/maintenance`, headers: asUser(manager),
         payload: {
-          scope: `monitor:${monitorA}`, startsAt: "2026-09-10T00:00:00Z", endsAt: "2026-09-10T02:00:00Z",
+          scope: `monitor:${monitorA}`, startsAt: hoursFromNow(24), endsAt: hoursFromNow(26),
           reason: "planned upgrade",
         },
       });

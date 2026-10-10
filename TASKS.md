@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 87/182<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **48%** · 89/183<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `████████████████░░░░` **80%** · 72/89<!-- /bar -->
+<!-- bar -->🟡 `█████████████████░░░` **83%** · 74/89<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -44,14 +44,14 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Full `webdesk/api` suite on Linux: 396 passed / 0 failed / 1 skipped
 - [ ] CI `webdesk-api` job green on GitHub with RustFS
 
-### WSK-48a · `/v1` moved out of Payload into `webdesk/api` <!-- bar -->🟡 `█████████░` **85%** · 6/7<!-- /bar -->
+### WSK-48a · `/v1` moved out of Payload into `webdesk/api` <!-- bar -->✅ `██████████` **100%** · 7/7<!-- /bar -->
 - [x] `delivery` module serves `/v1` byte-identically (raw Fastify route, router unchanged)
 - [x] One API-key hash implementation; vocabulary vendored with a drift test
 - [x] WSK-05 demo `content` controller retired with no loss of guard coverage
 - [x] Caddy `/v1/*` → `api`; `payload-gateway` retired from compose and the status page
 - [x] Differential gate on Linux: 696/710 pairs identical, 14 classified, 0 unexplained; contract 60/60; api suite 409/0/1
 - [x] Combined suite after merging WSK-52 + WSK-48a green on Linux (418/0/1; differential 696/710, 0 unexplained; contract 60/60)
-- [ ] Envelope + differential tests ported into `webdesk/api` and wired into CI
+- [x] Envelope + differential tests ported into `webdesk/api` and wired into CI (release gate on sumopod 2026-10-11: webdesk-api 643/0/2 incl. the ported specs)
 
 ### WSK-53 · gaiada.com content inventory <!-- bar -->✅ `██████████` **100%** · 5/5<!-- /bar -->
 - [x] 33 config modules classified field by field
@@ -162,8 +162,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `dist/` parity, preview-held mode — BLOCKED by a pre-existing site route bug (since `cef4b5b`, the git build fails too); 0 differ with a 2-file route patch in the gate only. Site owner to fix
 - [x] The site's own gates pass; negative control (one FAQ edit → exactly one page differs: `services/seo/index.html`)
 
-### WSK-58 · Linux gate for the proof's suites <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
-- [ ] `webdesk/api`, `webdesk/blocks`, `webdesk` root and vocabulary suites green on sumopod after every merge
+### WSK-58 · Linux gate for the proof's suites <!-- bar -->✅ `██████████` **100%** · 1/1<!-- /bar -->
+- [x] `webdesk/api`, `webdesk/blocks`, `webdesk` root and vocabulary suites green on sumopod after every merge (`webdesk/qa/linux-gate.sh`; release gate 2026-10-11: root 12, blocks 32, api 643/0/2, vocabulary 247)
 
 ---
 
@@ -197,7 +197,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/33<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/34<!-- /bar -->
 
 ### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
@@ -212,7 +212,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] WSK-64 · CDN cache purge on publish
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/24<!-- /bar -->
+### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/25<!-- /bar -->
 - [ ] Reserved collection keys (`media`, `forms` collide with api routes)
 - [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
 - [ ] A bad cursor returns 500 with the raw database message
@@ -225,6 +225,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Approvals DETAIL page dead-ends for a requester (`automation_approval:read` 403) — needs a requester-own read rule in Cerbos
 - [ ] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim)
 - [ ] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale)
+- [ ] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state
 - [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too)
 - [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
 - [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
