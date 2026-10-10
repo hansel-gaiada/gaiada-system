@@ -213,7 +213,7 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
     ["write", writeA],
   ]) {
     for (const q of ["", "?locale=en-US", "?locale=id-ID", "?locale=fr-FR", "?locale=xx-YY", "?locale=", "?locale=%20", "?expand=blocks", "?expand=nope", "?expand=blocks&locale=en-US"]) {
-      await get(`${a}/case-study${q}`, bearer(key), { note: label, intended: lim === "2.5" ? M3_T1_FIXED_500_DETAIL : undefined });
+      await get(`${a}/case-study${q}`, bearer(key), { note: label });
     }
     for (const col of ["post", "redirect", "empty", "nonexistent-collection"]) await get(`${a}/${col}`, bearer(key), { note: label });
     for (const lim of ["0", "-5", "1", "2", "3", "25", "100", "101", "1000", "abc", "2.5", "", "1e1", "%20"]) await get(`${a}/post?limit=${lim}`, bearer(key), { note: label, intended: lim === "2.5" ? M3_T1_FIXED_500_DETAIL : undefined });
