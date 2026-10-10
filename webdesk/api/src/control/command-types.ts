@@ -35,7 +35,26 @@ export type CommandName =
   | "release.triggerRebuild"
   | "job.get"
   | "job.list"
-  | "contract.read";
+  | "contract.read"
+  // WSK-41 — the content authoring commands (write-plane design §3.1). Every one carries an
+  // editorial principal (EDITORIAL_COMMANDS below).
+  | "content.create"
+  | "content.update"
+  | "content.restoreVersion"
+  | "content.publish"
+  | "content.schedule"
+  | "content.unpublish"
+  | "content.delete"
+  // WSK-51 — the editor read commands (design §4). Registered here by WSK-41 so the registry is
+  // one change; WSK-51 builds their handlers.
+  | "tenant.list"
+  | "collection.list"
+  | "collection.get"
+  | "item.list"
+  | "item.get"
+  | "item.versions"
+  | "item.versionGet"
+  | "media.list";
 
 export interface CommandMeta {
   readonly command: CommandName;
@@ -104,7 +123,46 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "job.get": { command: "job.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "job.list": { command: "job.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "contract.read": { command: "contract.read", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // WSK-41 (design §3.1, rulings WSK-D45/D46). Draft writes are MEDIUM/operate: a draft is never
+  // live (content_items is the live projection; a version is the working copy). publish/schedule
+  // are HIGH for EVERY principal class, so the PolicyDecisionPoint demands a WS4 assertion.
+  // unpublish/delete are MEDIUM under the promote scope: they reduce exposure and are restorable,
+  // and a takedown must not wait for a second person (D46).
+  "content.create": { command: "content.create", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.update": { command: "content.update", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.restoreVersion": { command: "content.restoreVersion", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.publish": { command: "content.publish", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  "content.schedule": { command: "content.schedule", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  "content.unpublish": { command: "content.unpublish", impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
+  "content.delete": { command: "content.delete", impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
+  // WSK-51 (design §4): live editor reads. read/webdesk:read, no editorial assertion, not audited.
+  "tenant.list": { command: "tenant.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "collection.list": { command: "collection.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "collection.get": { command: "collection.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.list": { command: "item.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.get": { command: "item.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.versions": { command: "item.versions", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "item.versionGet": { command: "item.versionGet", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "media.list": { command: "media.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
 });
+
+/**
+ * WSK-41 (design §3.1) — the commands that write content and therefore carry an editorial
+ * principal (WSK-40's signed assertion; a dev-mode header in tests). EditorialAssertionGuard refuses
+ * to run on a route whose command is not in this set, and every ContentCommandsService method takes
+ * an EditorialCommandContext (which holds the EditorialPrincipal), so a content route that forgets
+ * the guard has no principal to hand the service and does not compile.
+ * test/control-command-registry.spec.ts pins the exact membership.
+ */
+export const EDITORIAL_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
+  "content.create",
+  "content.update",
+  "content.restoreVersion",
+  "content.publish",
+  "content.schedule",
+  "content.unpublish",
+  "content.delete",
+]);
 
 export function commandMeta(command: CommandName): CommandMeta {
   return COMMAND_REGISTRY[command];

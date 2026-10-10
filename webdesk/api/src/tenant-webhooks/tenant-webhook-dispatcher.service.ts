@@ -17,7 +17,16 @@ import { DbService } from "../db/db.service";
 import { TenantWebhooksRepository } from "./tenant-webhooks.repository";
 import { tenantWebhooksConfig } from "./tenant-webhooks.config";
 import { redisConnectionOptions } from "../queue/redis-connection";
-import type { TenantWebhookEnvelope, TenantWebhookFormReceivedData } from "./tenant-webhook-event.types";
+import type {
+  TenantWebhookContentData,
+  TenantWebhookContentEventKind,
+  TenantWebhookEnvelope,
+  TenantWebhookEventKind,
+  TenantWebhookFormReceivedData,
+} from "./tenant-webhook-event.types";
+
+/** WSK-41 (design §3.3): at most this many item refs per content event; a bigger batch is split. */
+export const MAX_CONTENT_REFS_PER_EVENT = 100;
 import type { TenantWebhookJobData } from "./tenant-webhook-job";
 
 @Injectable()
@@ -64,12 +73,54 @@ export class TenantWebhookDispatcherService {
     }
   }
 
+  /**
+   * WSK-41 — fans a content event (`content.published` / `content.unpublished` /
+   * `content.scheduled`) out to every ENABLED webhook this tenant registered for that kind, one
+   * delivery per webhook per chunk of at most MAX_CONTENT_REFS_PER_EVENT item refs. Same fail-soft
+   * contract as dispatchFormReceived: called AFTER the command's transaction committed, it never
+   * rejects, so a webhook outage can never undo or fail a publish. Same tenant isolation: the
+   * lookup runs under this tenant's own context only.
+   *
+   * Returns how many deliveries were enqueued (for logging and tests); 0 when none are registered.
+   */
+  async dispatchContentEvent(
+    tenantId: string,
+    kind: TenantWebhookContentEventKind,
+    data: TenantWebhookContentData,
+  ): Promise<number> {
+    if (data.items.length === 0) return 0;
+    let webhooks;
+    try {
+      webhooks = await this.repo.findEnabledForKind(tenantId, kind);
+    } catch (err) {
+      this.logger.warn(`tenant webhook lookup failed for tenant ${tenantId}: ${String(err)}`);
+      return 0;
+    }
+    if (webhooks.length === 0) return 0;
+
+    const chunks: TenantWebhookContentData[] = [];
+    for (let i = 0; i < data.items.length; i += MAX_CONTENT_REFS_PER_EVENT) {
+      chunks.push({ ...data, items: data.items.slice(i, i + MAX_CONTENT_REFS_PER_EVENT) });
+    }
+    let enqueued = 0;
+    for (const webhook of webhooks) {
+      for (const chunk of chunks) {
+        try {
+          if (await this.enqueueOne(tenantId, webhook.id, kind, chunk as unknown as Record<string, unknown>)) enqueued++;
+        } catch (err) {
+          this.logger.warn(`tenant webhook enqueue failed for webhook ${webhook.id}: ${String(err)}`);
+        }
+      }
+    }
+    return enqueued;
+  }
+
   private async enqueueOne(
     tenantId: string,
     webhookId: string,
-    kind: "form.received",
+    kind: TenantWebhookEventKind,
     data: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const eventId = randomUUID();
     const envelope: TenantWebhookEnvelope = {
       eventId,
@@ -86,7 +137,7 @@ export class TenantWebhookDispatcherService {
       this.logger.warn(
         `tenant webhook payload for webhook ${webhookId} exceeds ${tenantWebhooksConfig.maxPayloadBytes} bytes — not enqueued`,
       );
-      return;
+      return false;
     }
 
     const delivery = await this.db.withTenant(tenantId, (db) =>
@@ -102,6 +153,7 @@ export class TenantWebhookDispatcherService {
       removeOnComplete: true,
       removeOnFail: false, // keep failed jobs inspectable — same reasoning as mail.service.ts
     });
+    return true;
   }
 
   async onModuleDestroy(): Promise<void> {

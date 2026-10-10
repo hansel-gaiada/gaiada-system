@@ -266,15 +266,18 @@ describe("control-plane commands — idempotency + audit (lifecycle / schema / k
       method: "POST",
       url: `/control/v1/tenants/${slug}/sites/${siteId}/collections/case-study/schema/apply`,
       headers: applyHeaders,
-      payload: { schema: { title: { type: "text" } } },
+      // WSK-41: schema.apply now validates the composition (422 otherwise), so this is a real one.
+      payload: { schema: { fields: [{ name: "title", primitive: "text" }] } },
     });
     const apply2 = await app.inject({
       method: "POST",
       url: `/control/v1/tenants/${slug}/sites/${siteId}/collections/case-study/schema/apply`,
       headers: applyHeaders,
-      payload: { schema: { title: { type: "text" } } },
+      // WSK-41: schema.apply now validates the composition (422 otherwise), so this is a real one.
+      payload: { schema: { fields: [{ name: "title", primitive: "text" }] } },
     });
     expect(apply1.statusCode).toBe(201);
+    expect(apply1.json().bump).toBe("minor"); // WSK-41: a new collection is rated MINOR
     expect(apply2.json().collection.id).toBe(apply1.json().collection.id);
 
     const collectionRows = await withTenant(tenantId, async (client) => {
@@ -285,7 +288,7 @@ describe("control-plane commands — idempotency + audit (lifecycle / schema / k
       return rows;
     });
     expect(collectionRows).toHaveLength(1);
-    expect(collectionRows[0].schema).toEqual({ title: { type: "text" } });
+    expect(collectionRows[0].schema).toEqual({ fields: [{ name: "title", primitive: "text" }] });
   });
 
   it("key.mint requires WS4 (HIGH), delegates to ApiKeysService, and is idempotent under double-fire", async () => {

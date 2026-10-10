@@ -3,7 +3,7 @@ import { BadRequestException } from "@nestjs/common";
 import type { TenantWebhookEventKind } from "./tenant-webhook-event.types";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SUPPORTED_EVENT_KINDS: TenantWebhookEventKind[] = ["form.received"];
+const SUPPORTED_EVENT_KINDS: TenantWebhookEventKind[] = ["form.received", "content.published", "content.unpublished", "content.scheduled"];
 
 export function assertUuid(value: unknown, field: string): string {
   if (typeof value !== "string" || !UUID_RE.test(value)) {

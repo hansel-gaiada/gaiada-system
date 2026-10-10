@@ -10,6 +10,10 @@ import { TenantsModule } from "../tenants/tenants.module";
 // final report for why editing control.module.ts (rather than only contract.controller.ts) was
 // necessary despite the ticket's ownership list naming only the controller file.
 import { CodegenModule } from "../codegen/codegen.module";
+// WSK-41 — the content commands fan their post-commit events out through the tenant-webhook
+// dispatcher (TenantWebhooksModule exports it). AppModule already imports TenantWebhooksModule;
+// Nest modules are singletons, so this adds no second queue or worker in the real app.
+import { TenantWebhooksModule } from "../tenant-webhooks/tenant-webhooks.module";
 
 import { CommandAuditService } from "./command-audit.service";
 import { IdempotencyStore } from "./idempotency/idempotency-store";
@@ -38,6 +42,15 @@ import { ReleasesCommandService } from "./releases/releases-command.service";
 import { ReleasesController } from "./releases/releases.controller";
 import { JobsController } from "./jobs/jobs.controller";
 import { ContractController } from "./contract/contract.controller";
+
+// WSK-41 — content authoring commands + the editorial principal seam + the durable idempotency store.
+import { PgIdempotencyStore } from "./idempotency/pg-idempotency-store";
+import { EDITORIAL_PRINCIPAL_RESOLVER } from "./auth/editorial-principal";
+import { EditorialAssertionGuard } from "./auth/editorial-assertion.guard";
+import { DevModeEditorialPrincipalResolver } from "./auth/dev-mode-editorial-principal-resolver";
+import { NotConfiguredEditorialPrincipalResolver } from "./auth/not-configured-editorial-principal-resolver";
+import { ContentCommandsService } from "./content/content-commands.service";
+import { ContentCommandsController } from "./content/content-commands.controller";
 
 /**
  * ============================================================================================
@@ -77,9 +90,25 @@ const controlChannelAuthenticatorClass =
   process.env.NODE_ENV === "test" ? DevModeControlChannelAuthenticator : RealControlChannelAuthenticator;
 const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicyDecisionPoint : RealPolicyDecisionPoint;
 
+// WSK-41 — the editorial principal (Layer 2e, write-plane design §5). Same environment-conditional
+// pattern as the two bindings above: the dev-mode header stub under NODE_ENV=test, and everywhere
+// else a resolver that refuses every content write with 503 editorial-keys-not-configured, because
+// there is nothing to verify an assertion against until WSK-40 lands. WSK-40 SWAPS THE NEXT LINE
+// ONLY (NotConfiguredEditorialPrincipalResolver -> its real Ed25519 verifier); nothing else in this
+// file needs to change for it.
+const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevModeEditorialPrincipalResolver : NotConfiguredEditorialPrincipalResolver;
+
 @Module({
-  imports: [DbModule, AuditModule, ApiKeysModule, TenantsModule, CodegenModule],
-  controllers: [LifecycleController, SchemaController, KeysController, ReleasesController, JobsController, ContractController],
+  imports: [DbModule, AuditModule, ApiKeysModule, TenantsModule, CodegenModule, TenantWebhooksModule],
+  controllers: [
+    LifecycleController,
+    SchemaController,
+    KeysController,
+    ReleasesController,
+    JobsController,
+    ContractController,
+    ContentCommandsController,
+  ],
   providers: [
     CommandAuditService,
     IdempotencyStore,
@@ -90,9 +119,13 @@ const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicy
     SchemaService,
     KeysCommandService,
     ReleasesCommandService,
+    PgIdempotencyStore,
+    EditorialAssertionGuard,
+    ContentCommandsService,
     { provide: CONTROL_CHANNEL_AUTHENTICATOR, useClass: controlChannelAuthenticatorClass },
     { provide: POLICY_DECISION_POINT, useClass: policyDecisionPointClass },
     { provide: RELEASE_TRANSPORT, useClass: NotYetAvailableReleaseTransport },
+    { provide: EDITORIAL_PRINCIPAL_RESOLVER, useClass: editorialPrincipalResolverClass },
   ],
   // WSK-32 (coordinator edit) — `ControlAuthGuard` is exported so a SIBLING module can gate its
   // own routes with the REAL control-channel authenticator instead of standing up a second,
