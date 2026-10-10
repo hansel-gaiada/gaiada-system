@@ -46,7 +46,7 @@ const EXPECTED = {
     "invalid % escape in the path -> 400 problem+json (M3 T1 D4)": 14,
     "percent-decoded path segment (M3 T1 D2)": 58,
     "invalid pagination cursor -> 400 (M3 T1 D3)": 14,
-    "500 detail is fixed text, not the thrown message (M3 T1 D3)": 3,
+    "non-integer limit is truncated, not a 500 (M3 T1)": 3,
   } as Record<string, number>,
 };
 

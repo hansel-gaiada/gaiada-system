@@ -140,7 +140,8 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
 
     const locale = url.searchParams.get('locale')
     const limitParam = Number(url.searchParams.get('limit') || '25')
-    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(1, limitParam), 100) : 25
+    // M3 T1: truncated to an integer. `limit=2.5` used to reach `LIMIT $n` as a non-integer and 500.
+    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(1, Math.trunc(limitParam)), 100) : 25
     const cursor = url.searchParams.get('cursor')
     const expandBlocks = url.searchParams.get('expand') === 'blocks'
 

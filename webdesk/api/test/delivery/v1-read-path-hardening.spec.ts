@@ -214,6 +214,18 @@ describe("M3 T1 — over real HTTP", () => {
     });
   });
 
+  describe("limit", () => {
+    it("a non-integer limit is truncated, never a 500 (it used to reach LIMIT $n as 2.5)", async () => {
+      const res = await get("/case-study?locale=en-US&limit=2.5");
+      expect(res.statusCode).toBe(200);
+      expect(res.json().page.limit).toBe(2);
+      expect(res.json().items).toHaveLength(2);
+      const tiny = await get("/case-study?locale=en-US&limit=0.5");
+      expect(tiny.statusCode).toBe(200);
+      expect(tiny.json().page.limit).toBe(1);
+    });
+  });
+
   describe("D3 cursors", () => {
     it("a valid cursor still pages (the encoder's own output round-trips through the strict decoder)", async () => {
       const first = await get("/case-study?locale=en-US&limit=2");

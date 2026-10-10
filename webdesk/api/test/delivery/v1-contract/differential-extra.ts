@@ -48,9 +48,9 @@ async function asMigrator(tenant: V1Tenant, sql: string, params: unknown[] = [])
 //   D2: path segments are percent-decoded once (the old router looked the raw text up), and a decoded
 //       `/` or NUL matches nothing (404 before auth), so these inputs answer differently.
 const M3_T1_DECODED_SEGMENT: IntendedDivergence = { name: "percent-decoded path segment (M3 T1 D2)", old: [200, 401, 404], new: [200, 404] };
-//   D3: a 500 no longer carries the thrown message. The corpus has exactly one 500 trigger: `limit=2.5`
-//       (a non-integer reaches `LIMIT $n` as bigint). Same status, same problem type; only `detail` differs.
-const M3_T1_FIXED_500_DETAIL: IntendedDivergence = { name: "500 detail is fixed text, not the thrown message (M3 T1 D3)", old: [500], new: [500] };
+//   A non-integer `limit` is truncated (`2.5` -> 2). The old router passed it to `LIMIT $n` and 500ed; it was the
+//   corpus's only 500 trigger, so the fixed-500-detail rule (D3) is proven by the hardening spec instead.
+const M3_T1_INTEGER_LIMIT: IntendedDivergence = { name: "non-integer limit is truncated, not a 500 (M3 T1)", old: [500], new: [200] };
 //   D3: a cursor the api never issued is a 400 invalid-cursor (old: ignored -> 200, or a Postgres error -> 500).
 const M3_T1_INVALID_CURSOR: IntendedDivergence = { name: "invalid pagination cursor -> 400 (M3 T1 D3)", old: [200, 500], new: [400] };
 // The path-anomaly inputs D2 changes (the other anomalies must stay identical): an escaped letter in the
@@ -216,7 +216,7 @@ export async function runExtraCorpus(comparePair: ComparePair): Promise<string[]
       await get(`${a}/case-study${q}`, bearer(key), { note: label });
     }
     for (const col of ["post", "redirect", "empty", "nonexistent-collection"]) await get(`${a}/${col}`, bearer(key), { note: label });
-    for (const lim of ["0", "-5", "1", "2", "3", "25", "100", "101", "1000", "abc", "2.5", "", "1e1", "%20"]) await get(`${a}/post?limit=${lim}`, bearer(key), { note: label, intended: lim === "2.5" ? M3_T1_FIXED_500_DETAIL : undefined });
+    for (const lim of ["0", "-5", "1", "2", "3", "25", "100", "101", "1000", "abc", "2.5", "", "1e1", "%20"]) await get(`${a}/post?limit=${lim}`, bearer(key), { note: label, intended: lim === "2.5" ? M3_T1_INTEGER_LIMIT : undefined });
   }
   await get(`${b}/article`, bearer(prodB));
   await get(`${b}/article`, bearer(stgB));

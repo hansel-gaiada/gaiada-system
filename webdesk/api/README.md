@@ -1747,8 +1747,8 @@ Serves, GET only, with the frozen envelope (design §05):
 
 ### Read-path hardening (WebDesk M3 T1)
 
-Four defects on the public `/v1` read path were fixed; no 2xx body changed (`envelope-contract.spec.ts`
-is untouched).
+Five defects on the public `/v1` read path were fixed; no existing 2xx body changed (`envelope-contract.spec.ts`
+is untouched). The one new 2xx is a non-integer `limit`, which used to 500.
 
 - **Reserved collection keys.** `schema.apply` refuses a key that equals (case-insensitively) a fixed
   segment under `/v1/t/:tenantSlug/`: `forms`, `media` (static routes of other controllers) and
@@ -1767,6 +1767,8 @@ is untouched).
   message). Every catch-all 500 (content query, `resolveApiKey`, and the gateway's request-build fallback)
   now carries the fixed detail "The server could not complete this request." and the real error goes to the
   server log (Nest `Logger`), never into the body.
+- **Non-integer `limit`.** `limit` is truncated to an integer before it is clamped to 1-100, so `limit=2.5`
+  lists 2 items. It used to reach `LIMIT $n` as `2.5` and 500.
 - **Undecodable URL.** `createFastifyAdapter()` (`src/app.ts`, used by `buildApp()` and so by `main.ts`)
   sets Fastify's `frameworkErrors`, so `GET /v1/t/x/%E0%A4%A` (rejected by Fastify before routing,
   `FST_ERR_BAD_URL`) is `400 application/problem+json` (`invalid-path-encoding`) instead of Fastify's default
