@@ -112,7 +112,10 @@ services:
       MAIL_QUEUE_MAX_ATTEMPTS: ${MAIL_QUEUE_MAX_ATTEMPTS:-5}
       MAIL_QUEUE_BACKOFF_DELAY_MS: ${MAIL_QUEUE_BACKOFF_DELAY_MS:-2000}
       NODE_ENV: ${NODE_ENV:-development}
-      DATABASE_URL: ${APP_DATABASE_URL}
+      # The api reads APP_DATABASE_URL (src/config.ts). Until 2026-10-10 this line passed it as
+      # DATABASE_URL, a name nothing in the api reads, so every compose-booted api ran with an empty
+      # connection string and pg fell back to localhost: no DB-backed route ever worked on a box.
+      APP_DATABASE_URL: ${APP_DATABASE_URL:?APP_DATABASE_URL is required - the webdesk_app connection string}
       REDIS_URL: ${REDIS_URL}
       STORAGE_ENDPOINT: ${STORAGE_ENDPOINT}
       # ── THE PASSTHROUGH TRAP, closed 2026-08-29 (found by the first real production boot) ──
@@ -206,7 +209,7 @@ services:
       - "echo '[webdesk] worker stub — queue consumers land at WSK-07/11' && sleep infinity"
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      DATABASE_URL: ${APP_DATABASE_URL}
+      APP_DATABASE_URL: ${APP_DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       TENANT_GUC_NAME: ${TENANT_GUC_NAME}
     depends_on:

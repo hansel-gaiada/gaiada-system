@@ -39,7 +39,13 @@ export const config = {
   },
 
   get appDatabaseUrl() {
-    return process.env.APP_DATABASE_URL ?? "";
+    const url = process.env.APP_DATABASE_URL ?? "";
+    // An empty connection string makes pg silently dial localhost:5432, which on a compose box is
+    // nothing at all — that is how the live api ran without a database from 0.2.0 to 2026-10-10.
+    if (!url && process.env.NODE_ENV === "production") {
+      throw new Error("[webdesk:api] APP_DATABASE_URL is not set — refusing to boot in production.");
+    }
+    return url;
   },
   get dbPoolMax() {
     return Number(process.env.WEBDESK_API_DB_POOL_MAX ?? 10);
