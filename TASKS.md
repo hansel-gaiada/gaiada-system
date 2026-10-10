@@ -80,7 +80,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
 - [ ] CI runs only the jobs whose component changed; superseded runs are cancelled
-- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact
+- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags
 - [ ] Dependency and Docker layer caching
 - [ ] Billed minutes for a WebDesk-only change measured after, and recorded
 
