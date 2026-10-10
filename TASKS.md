@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 82/174<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **48%** · 84/175<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `████████████████░░░░` **77%** · 69/89<!-- /bar -->
+<!-- bar -->🟡 `████████████████░░░░` **79%** · 71/89<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -150,9 +150,9 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Build key (production read) minted through an approval; preview key (staging read)
 - [ ] Read quota sized for a full site build
 
-### Wave C · WSK-67 · Importer CLI <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Dry run prints the plan; `--apply` twice → second run writes 0 versions
-- [ ] Refuses human principals; imports no publish/unpublish/delete function
+### Wave C · WSK-67 · Importer CLI <!-- bar -->🟡 `███████░░░` **66%** · 2/3<!-- /bar -->
+- [x] Dry run prints the plan; `--apply` twice → second run writes 0 versions (real 326-item bundle; in-process Zone B fake)
+- [x] Refuses human principals; imports no publish/unpublish/delete function (static test; Cerbos probe)
 - [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1`
 
 ### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **80%** · 4/5<!-- /bar -->
@@ -194,7 +194,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/28<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/29<!-- /bar -->
 
 ### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
@@ -209,7 +209,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] WSK-64 · CDN cache purge on publish
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/19<!-- /bar -->
+### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/20<!-- /bar -->
 - [ ] Reserved collection keys (`media`, `forms` collide with api routes)
 - [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
 - [ ] A bad cursor returns 500 with the raw database message
@@ -218,6 +218,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] The privacy residency statement still names MinIO to customers
 - [ ] `check-artifact-url-expiry.mjs` still starts a MinIO container
 - [ ] In-memory read quota and idempotency under-enforce with more than one api replica
+- [ ] Defence in depth: a Cerbos rule denying `publish`/`schedule` to automation principals (today only the importer's code prevents it)
 - [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
 - [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
 - [ ] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever (senior-db decision)
