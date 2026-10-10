@@ -27,7 +27,21 @@ import { ContentBundleService } from "./content-bundle.service";
 import { PromotionSnapshotService } from "./promotion-snapshot.service";
 import { PromotionAuditService } from "./promotion-audit.service";
 import { FRONTEND_DEPLOY_DRIVER, type FrontendDeployDriver } from "./frontend-deploy-driver";
-import type { ContentBundle } from "./content-bundle.types";
+import type { BundleWriter, ContentBundle } from "./content-bundle.types";
+import { ControlProblem } from "../control/content/content-problem";
+
+/**
+ * What the failed run's error_detail records. A ControlProblem (409 slug-taken, 409
+ * bundle-group-collection-mismatch, ...) is an HttpException whose own `message` is just
+ * "Control Problem"; the useful text is its slug and detail.
+ */
+function describeError(err: unknown): string {
+  if (err instanceof ControlProblem) {
+    const detail = (err.getResponse() as { detail?: string }).detail;
+    return detail ? `${err.slug}: ${detail}` : err.slug;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
 
 interface ResolvedTarget {
   tenant: { id: string; slug: string };
@@ -59,6 +73,8 @@ export interface PromoteInput {
   /** Caller-supplied export (e.g. from a prior content.export call against a DIFFERENT Zone B instance — see this ticket's report for why Zone B never fetches this itself). Omitted => self-export from this same instance's current content (first-launch/no-op-content case). */
   bundle?: ContentBundle;
   actor: string;
+  /** "automation" for an automation-initiated control call (ControlPrincipal.automation), else "human": the version attribution's `pk`. */
+  actorKind: "human" | "automation";
   idempotencyKey: string;
   ws4ApprovalId: string | null;
 }
@@ -69,6 +85,8 @@ export interface RollbackInput {
   targetEnvId: string;
   version?: string;
   actor: string;
+  /** See PromoteInput.actorKind. */
+  actorKind: "human" | "automation";
   idempotencyKey: string;
   ws4ApprovalId: string | null;
 }
@@ -154,14 +172,24 @@ export class PromotionCommandService {
 
       // --- STEP 2: migrate + content import (one atomic transaction; a failure here rolls back --
       //     entirely and leaves the target's content exactly as the snapshot just captured it).
+      //     The transaction is db.transaction's: ANY error from applyBundle (a 409 slug-taken, a CHECK
+      //     violation, ...) ROLLBACKs it whole and rethrows, so a refused bundle changes nothing. The
+      //     rethrown error reaches the client as-is: a ControlProblem as a 409 problem+json (see
+      //     PromotionController's ControlProblemFilter), anything else as before.
       const bundleToApply = input.bundle ?? (await this.bundles.exportBundle(tenant.id, siteId));
+      const writer: BundleWriter = {
+        actor: input.actor,
+        actorKind: input.actorKind,
+        ws4ApprovalId: input.ws4ApprovalId,
+        note: `promotion ${run.id}`,
+      };
       let applyResult;
       try {
         applyResult = await this.db.withTenant(tenant.id, (db) =>
-          db.transaction((client) => this.bundles.applyBundle(client, tenant.id, siteId, bundleToApply, "merge")),
+          db.transaction((client) => this.bundles.applyBundle(client, tenant.id, siteId, bundleToApply, "merge", writer)),
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = describeError(err);
         await this.db.withTenant(tenant.id, (db) =>
           db.transaction((client) =>
             client.query(
@@ -271,13 +299,19 @@ export class PromotionCommandService {
         }),
       );
 
+      const writer: BundleWriter = {
+        actor: input.actor,
+        actorKind: input.actorKind,
+        ws4ApprovalId: input.ws4ApprovalId,
+        note: `rollback ${run.id}`,
+      };
       let applyResult;
       try {
         applyResult = await this.db.withTenant(tenant.id, (db) =>
-          db.transaction((client) => this.bundles.applyBundle(client, tenant.id, siteId, snapshot.bundle, "restore")),
+          db.transaction((client) => this.bundles.applyBundle(client, tenant.id, siteId, snapshot.bundle, "restore", writer)),
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = describeError(err);
         await this.db.withTenant(tenant.id, (db) =>
           db.transaction((client) =>
             client.query(

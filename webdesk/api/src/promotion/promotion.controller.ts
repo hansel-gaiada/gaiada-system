@@ -8,7 +8,7 @@
 // Caddy already 404s `/control/*` on the public vhost (WSK-21/22's existing rule) — same
 // loud-warning posture as every sibling controller: not reachable through the public proxy until
 // the real control channel is fully live end-to-end.
-import { Body, Controller, Headers, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Headers, Param, Post, Req, UseFilters, UseGuards } from "@nestjs/common";
 import { PromotionCommandService } from "./promotion-command.service";
 import { ControlAuthGuard } from "../control/auth/control-auth.guard";
 import { requireControlContext, type ControlRequest } from "../control/auth/control-request";
@@ -20,8 +20,15 @@ import { requireControlContext, type ControlRequest } from "../control/auth/cont
 import { CommandAuthorizationGuard } from "../control/policy/command-authorization.guard";
 import { Command } from "../control/command.decorator";
 import { assertUuid, assertTenantSlug, assertIdempotencyKey, assertOptionalVersion, assertContentBundle } from "./dto";
+import { ControlProblemFilter } from "../control/content/content-problem";
 
+// ControlProblemFilter: the bundle import refuses with typed 409 problems (slug-taken,
+// bundle-group-collection-mismatch, twin-locale-taken). The filter renders a ControlProblem as
+// application/problem+json with exactly the body it carries; every other exception keeps Nest's
+// default handling, so the existing refusals (400/404/409 messages, 500 for a real database error)
+// are unchanged.
 @Controller("control/v1/tenants")
+@UseFilters(ControlProblemFilter)
 @UseGuards(ControlAuthGuard, CommandAuthorizationGuard)
 export class PromotionController {
   constructor(private readonly promotion: PromotionCommandService) {}
@@ -61,6 +68,7 @@ export class PromotionController {
       version,
       bundle,
       actor: ctx.principal.subject,
+      actorKind: ctx.principal.automation ? "automation" : "human",
       idempotencyKey,
       ws4ApprovalId: ctx.ws4ApprovalId,
     });
@@ -89,6 +97,7 @@ export class PromotionController {
       targetEnvId,
       version,
       actor: ctx.principal.subject,
+      actorKind: ctx.principal.automation ? "automation" : "human",
       idempotencyKey,
       ws4ApprovalId: ctx.ws4ApprovalId,
     });
