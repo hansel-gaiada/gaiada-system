@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.78.0` - the portal timeline no longer crashes on an undated item (2026-10-11) - PROTOTYPED
+
+Found by the PV2-08 live drive on `v1.0.0-alpha.344`: `/portal/timeline` hit the error boundary for every client tested.
+
+- **Cause:** the BFF sends `at: null` for an undated milestone or deliverable, but `PortalTimelineEvent.at` was typed `string`,
+  so `splitTimeline`'s sort called `localeCompare` on null. This is pre-existing (the sort predates PV-2). The demo data had no
+  undated item, so the portal e2e never reached it.
+- **Fix:** `at` is `string | null` (tsc confirms no other reader assumed a date), and `splitTimeline` sorts undated items
+  last in both lists. The new test is red on the old code with the exact live TypeError, and green on the fix.
+- **Demo:** the demo timeline carries one undated milestone, so the portal e2e covers this path from now on.
+- **Verified on Linux:** ui 228/228 files (4,517 tests); `next build` ok; portal e2e 12/12.
+
 ### platform-ui `0.77.0` - the portal splits active and past projects, names the project lead, and groups People by side (2026-10-11) - PROTOTYPED
 
 Ticket PV2-07 in `docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. It renders PV2-03's fields (platform-nest 0.58.0); no backend change.
