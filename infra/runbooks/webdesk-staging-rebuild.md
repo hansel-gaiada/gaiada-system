@@ -78,7 +78,10 @@ no other key. The *reason* a build failed is deliberately not on that wire (it i
 
 The App is `gaiada-erp` (App id `4777424`, installation `157879245` on the org `gaiadabali`), already holding `Actions: Read and write`,
 `Contents: write`, `Metadata: read` (blueprint `github-integration-foundation.md` section 2.2). Whether it can see **this** repo
-is the unknown: the repo is private and no account used in these sessions can see the org's repository list.
+was the unknown. **Verified 2026-10-11: it can.** `gaiadabali/gaiada-web-revamp` is a live, private row in the ERP's `github_repos`
+sweep cache (last synced 2026-10-10 11:03 UTC), and the sweep lists only what the installation sees. Steps 1 and 2 are therefore already
+satisfied. `Actions: write` is still proven only by the first dispatch (step F). Neither ERP `gh` account can see the private repo, so
+step B needs an account with admin on it.
 
 1. As an org owner: `https://github.com/organizations/gaiadabali/settings/installations/157879245`.
 2. **Repository access**: if "All repositories", nothing to do. If "Only select repositories", add `gaiada-web-revamp`. Save.

@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 86/180<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 87/182<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -168,7 +168,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `█████░░░░░░░░░░░░░░░` **25%** · 4/16<!-- /bar -->
+<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **27%** · 5/18<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **57%** · 4/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
@@ -179,9 +179,11 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `█░░░░░░░░░` **12%** · 1/8<!-- /bar -->
 - [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
-- [ ] Owner: install the `gaiada-erp` GitHub App on `gaiadabali/gaiada-web-revamp` (actions:write, metadata:read) and add the repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY`
+- [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
+- [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
+- [ ] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (needs an account with admin on the private repo; neither ERP `gh` account can see it)
 - [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo; build ledger + `build-status` / `rebuild-requests` routes in the ERP
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
 - [ ] Cost per run measured and recorded
