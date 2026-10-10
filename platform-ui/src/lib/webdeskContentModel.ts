@@ -266,6 +266,14 @@ export type WdOk<T> = Extract<WdResult<T>, { kind: "ok" }>;
 // `resultFromError` folds both into `unavailable`, and the nest-side UI contract test pins those shapes, so the
 // components recognise them here instead of the lib re-coding them.
 
+/** Next's redirect error. A server action that calls `redirect()` (the `…AndOpenAction` writes) has ALREADY navigated
+ *  when its awaited promise rejects with this; the caller treats it as "done", never as a failure. Next 15 marks it with
+ *  a `digest` beginning `NEXT_REDIRECT;` (next/dist/client/components/redirect-error). */
+export function isNextRedirect(e: unknown): boolean {
+  const digest = typeof e === "object" && e !== null ? (e as { digest?: unknown }).digest : undefined;
+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+}
+
 /** `502 webdesk_ambiguous`: a write whose outcome is UNKNOWN (the BFF could not confirm whether Zone B applied it).
  *  The BFF puts the machine cause (`not_observed` | `reconcile_failed`) in `reason`, which is what `resultFromError`
  *  keeps (as `unavailable/upstream_error`); `webdesk_ambiguous` itself is accepted too for a problem document that

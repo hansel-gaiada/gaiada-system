@@ -3,11 +3,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createItemAction, deleteItemAction, getItemHeadAction, refreshEditorAction, saveItemAction, type SiteScope,
+  createItemAndOpenAction, deleteItemAction, getItemHeadAction, refreshEditorAction, saveItemAction, type SiteScope,
 } from "@/lib/webdeskContentActions";
 import type { EditorBundle } from "@/lib/webdeskContent";
 import {
-  authorLabel, collectionLabel, deepEqual, defaultFields, isLive, isOutcomeUnknown, issuesAt, overlayNeutrals, publishStateLabel,
+  authorLabel, collectionLabel, deepEqual, defaultFields, isLive, isNextRedirect, isOutcomeUnknown, issuesAt, overlayNeutrals, publishStateLabel,
   SEO_CARRIER_COLLECTIONS, splitVersionContent, toWire, unconfirmedCopy, writeNeutralsThrough,
   type Block, type CollectionSummary, type EditableContent, type Issue, type ItemDetail, type ItemRef, type Lint,
   type SiteRef, type TenantRef, type WdResult,
@@ -261,13 +261,16 @@ export function ItemEditor({
         setSaveState({ s: "error", message: "The slug isn't valid." });
         return;
       }
-      const r = await createItemAction(scope, { collectionKey: collection.key, locale, slug, twinOf: seed?.twinOf ?? null, fields: sentFields, blocks: extraBlocks, seo: sentSeo, note });
-      if (!mounted.current) return;
-      if (r.kind === "ok") {
-        setBaseline({ fields: draft.fields, seo: draft.seo });
-        router.push(`${routeBase}/${encodeURIComponent(collection.key)}/${encodeURIComponent(r.data.item.slug)}?locale=${encodeURIComponent(r.data.item.locale)}`);
-        return;
+      // Success opens the new item from the SERVER (`createItemAndOpenAction` redirects; see webdeskContentActions.ts):
+      // a client push here was sometimes dropped by the router. Only a failure comes back, typed as before.
+      let r: Awaited<ReturnType<typeof createItemAndOpenAction>>;
+      try {
+        r = await createItemAndOpenAction(scope, { collectionKey: collection.key, locale, slug, twinOf: seed?.twinOf ?? null, fields: sentFields, blocks: extraBlocks, seo: sentSeo, note }, routeBase);
+      } catch (e) {
+        if (isNextRedirect(e)) return; // created, and already on its editor
+        throw e;
       }
+      if (!mounted.current) return;
       handleWriteFailure(r, "created");
       return;
     }
@@ -323,16 +326,18 @@ export function ItemEditor({
     if (!item) return;
     if (dirty && !window.confirm("You have unsaved changes. Create the twin from the last saved version?")) return;
     setBanner(null);
-    const r = await createItemAction(scope, {
-      collectionKey: collection.key, locale: target, slug: item.slug, twinOf: item.itemId,
-      fields: toWire(baseline.fields), blocks: extraBlocks, seo: toWire(baseline.seo),
-    });
-    if (!mounted.current) return;
-    if (r.kind === "ok") {
-      setBaseline(draft); // leaving the page: nothing left to warn about
-      router.push(`${routeBase}/${encodeURIComponent(collection.key)}/${encodeURIComponent(r.data.item.slug)}?locale=${encodeURIComponent(target)}`);
-      return;
+    // Success opens the twin from the SERVER (see `save` above); only a failure comes back.
+    let r: Awaited<ReturnType<typeof createItemAndOpenAction>>;
+    try {
+      r = await createItemAndOpenAction(scope, {
+        collectionKey: collection.key, locale: target, slug: item.slug, twinOf: item.itemId,
+        fields: toWire(baseline.fields), blocks: extraBlocks, seo: toWire(baseline.seo),
+      }, routeBase);
+    } catch (e) {
+      if (isNextRedirect(e)) return; // created, and already on the twin's editor
+      throw e;
     }
+    if (!mounted.current) return;
     if (r.kind === "invalid") {
       setBanner({ tone: "bad", text: `The ${target} twin couldn't be created: ${r.issues.map((i) => i.message).slice(0, 3).join("; ") || r.message}` });
     } else if (r.kind === "conflict") {
