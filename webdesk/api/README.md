@@ -1812,3 +1812,105 @@ DATABASE_URI=<app url> MIGRATE_DATABASE_URL=<migrator url> API_KEY_PEPPER=<same>
 tree. **WSK-48b:** delete `v1-differential.spec.ts`, `v1-contract/differential*.ts` and the
 `webdesk/payload/collections/` + `webdesk/payload/src/tenant-p` prefixes in `scripts/ci/config.mjs`
 together with Payload; keep `envelope-contract.spec.ts`.
+
+## Scheduler (WSK-61) — `src/scheduler/**`
+
+The read path already honours `publish_at` / `unpublish_at` by time (a `scheduled` item is live once
+`publish_at <= now()`, any item stops being live at `unpublish_at`), so **visibility needs no worker**. The
+scheduler exists for what time alone cannot do: make the stored state catch up with what production already
+sees, swap a new version into an item that is live right now, and run two maintenance sweeps that had no caller.
+
+Three BullMQ **job schedulers** on one queue (`webdesk-scheduler`), one worker (concurrency 1), all in the api
+process. Every replica registers on boot (`upsertJobScheduler` is idempotent) and runs a worker; BullMQ creates
+one job per tick per scheduler id however many replicas run. Registration retries in the background until Redis
+answers, so a Redis outage delays the schedule instead of failing the boot.
+
+| Scheduler id (= job name) | Every | Runs |
+|---|---|---|
+| `content-tick` | `WEBDESK_SCHEDULER_TICK_SECONDS` (60) | `ContentTickService.runContentTick(now = new Date())` |
+| `forms-retention-purge` | `WEBDESK_SCHEDULER_HOURLY_SECONDS` (3600) | `MaintenanceJobsService.runFormsPurge()` → `SubmissionsPurgeService.purgeDueSubmissions()` |
+| `idempotency-sweep` | `WEBDESK_SCHEDULER_HOURLY_SECONDS` (3600) | `MaintenanceJobsService.runIdempotencySweep()` → `PgIdempotencyStore.sweepExpired()` |
+
+The first job of each scheduler runs right after registration, so a fresh deploy makes one catch-up pass.
+
+### Config
+
+| Variable | Default | Allowed |
+|---|---|---|
+| `WEBDESK_SCHEDULER_ENABLED` | on, **except** under `NODE_ENV=test` | `true`/`false` (`1`/`0`/`yes`/`no`) |
+| `WEBDESK_SCHEDULER_TICK_SECONDS` | 60 | whole seconds, 15 to 300 |
+| `WEBDESK_SCHEDULER_HOURLY_SECONDS` | 3600 | whole seconds, 300 to 86400 |
+| `WEBDESK_SCHEDULER_QUEUE_NAME` | `webdesk-scheduler` | any (a spec uses it to have a queue to itself) |
+
+An **empty** variable means the default, never 0 (compose passes `${VAR:-}` through as an empty string; the
+estate has been bitten by `Number("")` before). A value outside its range, or malformed, **refuses to boot** with a
+message naming the variable, the value and the range. The check runs whether or not the scheduler is enabled.
+The specs never start a worker implicitly: `NODE_ENV=test` defaults it off, and `test/scheduler-wiring.spec.ts`
+enables it explicitly with its own queue name. Because of the compose pass-through rule, a variable set only in
+`.env` reaches the container only if the service's `environment:` block names it; the defaults need nothing.
+
+### What the content tick does
+
+Per active tenant, under that tenant's `webdesk.tenant_ctx`, in this order, **one transaction per item**:
+
+1. **Due publishes.** `publish_state = 'scheduled' AND publish_at <= now AND deleted_at IS NULL` becomes
+   `published`; `updated_at = greatest(updated_at, publish_at)`. The projection and `last_published_*` were set
+   when the item was scheduled and are not touched.
+2. **Due version swaps** (`content_schedules`, migration 0012). A pending row with `publish_at <= now`: lock the
+   item; if it is deleted or no longer live the row is cancelled (`item-deleted` / `item-not-live`); the version is
+   re-validated against the collection's *current* composition and, if it fails, the row is `failed` and nothing
+   else changes; otherwise the projection takes the version (exactly `content.publish(v)`'s effect, from the same
+   function) with `last_published_at = publish_at`, `last_published_by = requested_by` and `unpublish_at` from the
+   row, and the row is `executed`.
+3. **Due takedowns.** `publish_state IN ('published','scheduled') AND unpublish_at <= now AND deleted_at IS NULL`
+   gets exactly `content.unpublish`'s effect (same function), and any pending swap of the item is cancelled.
+
+`applyPublishEffect` / `applyUnpublishEffect` / `adoptLegacyItem` / `cancelPendingSwap` /
+`announceContentEvent` live in `src/control/content/content-transitions.ts` and are the ONLY implementation:
+`content-commands.service.ts` and the tick both call them.
+
+Every executed transition writes one audit row `control.content.schedule.executed`, actor `system:scheduler`, in
+the item's own transaction, with `ws4_approval_id` **NULL** (0009's single-use index must never see a second use of
+an approval). The args hash covers `{kind: 'publish'|'swap'|'takedown', itemId, version, approvalId?}`; a swap's
+original approval id goes there. After the commit, fail-soft, the tenant webhook goes out through the same path the
+commands use (`content.published` for a publish or a swap, `content.unpublished` for a takedown, item refs only).
+
+### `content.schedule` on a live item
+
+A future `publishAt` on a **live** item no longer returns 409 `schedule-live-item-requires-worker` (the slug is
+retired). It validates the version exactly as the non-live path does and inserts a pending `content_schedules` row
+(`requested_by` = the principal, `ws4_approval_id` = the command's approval); the projection is untouched and the
+response and `content.scheduled` webhook are unchanged. An earlier pending swap of the same item is cancelled
+`superseded` in the same transaction (the newest approved decision wins). `content.publish`, `content.unpublish`
+and `content.delete` cancel the item's pending swap in their own transaction (`superseded-by-publish`,
+`unpublished`, `deleted`); `update` and `restoreVersion` do not, they never change what is live. Two more
+cases keep the newest decision from being silently undone: scheduling a non-live item cancels a swap it left behind
+(`superseded`), and a scheduled takedown written over a pending swap either becomes the swap's own `unpublish_at`
+(takedown after the swap is due) or cancels the swap (takedown before it).
+
+### Safe with more than one replica
+
+- A tick claims each item with `FOR UPDATE OF ci SKIP LOCKED LIMIT 1` in its own transaction, so two ticks never
+  process one item; at READ COMMITTED a row the first tick already committed is re-evaluated against its new state
+  by the lock and drops out of the second tick's result. A swap row is read only after its item is locked, the
+  same item-first order every command uses, so the tick cannot deadlock with `schedule`/`publish`/`unpublish`/`delete`.
+- An item whose transaction throws rolls back alone, is logged and counted in `errors`, is not retried within the
+  tick, and is still due next tick. A step is capped at 500 items per tenant per tick.
+- `upsertJobScheduler` is idempotent; the two maintenance jobs are idempotent (an `UPDATE ... WHERE status <> 'purged'`
+  and a `DELETE` of expired rows), so an overlap is wasted work, never a wrong result. Failures are logged and
+  rethrown so BullMQ records the job as failed; nothing crashes the process.
+- Shutdown closes the worker (it finishes a running job), then the queue, both awaited. `DbService.onBeforeEnd`
+  makes that run before the pool ends (Nest destroys the deeper `DbModule` first otherwise).
+
+### Not built here
+
+The **static-site rebuild at publish time** (gaiada.com is static) is the ERP's half: a new Zone B event kind and a
+WSK-60 dispatch under the schedule's original approval, after WSK-60 is live. Today a swap or a due publish only
+produces the tenant webhook.
+
+### Verify
+
+`test/scheduler-content-tick.spec.ts` (behaviour, injected clock), `test/scheduler-wiring.spec.ts` (job schedulers,
+boot, shutdown, config) and `migrations/tests/0012_content_schedules.test.mjs` (also in `qa/linux-gate.sh`'s
+`migrations` suite and the CI `webdesk-api` job). They need Postgres and Redis like the rest of the suite.
+
