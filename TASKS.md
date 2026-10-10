@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `█████████████████░░░░░░░░░░░░░` **55%** · 108/194<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████████░░░░░░░░░░░░░░` **53%** · 108/201<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -199,7 +199,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **28%** · 12/42<!-- /bar -->
+<!-- bar -->🟡 `█████░░░░░░░░░░░░░░░` **24%** · 12/49<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -209,8 +209,11 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source
 - [ ] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted
 
-### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **14%** · 1/7<!-- /bar -->
-- [ ] WSK-46 · preview links for drafts
+### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **10%** · 1/10<!-- /bar -->
+- [ ] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52; ticked when on main)
+- [ ] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved
+- [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
+- [ ] WSK-46 · site repo (gaiada-web-revamp): `/preview/` page renders the draft with the site's own components (coordinate with the site owner; needs `api.gaiada.com` public)
 - [ ] WSK-61 · scheduled publish worker (+ the forms retention purge schedule, + the idempotency expiry sweep: `sweepExpired()` exists and nothing calls it)
 - [ ] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live)
 - [x] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, recorded in webdesk-design-v2.md §14 on main)
@@ -218,7 +221,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43 · media library
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `████░░░░░░` **35%** · 11/31<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `███░░░░░░░` **31%** · 11/35<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
@@ -249,6 +252,10 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [ ] WebDesk migration tests (0009, 0010) were never run by the gate or CI; T4 wired a `migrations` suite into `linux-gate.sh` and the `webdesk-api` CI job (found 2026-10-11)
+- [ ] `tenant.archive` can never replay: the tenant lookup runs before the envelope and 404s once archived, so a lost-response retry gets 404 (found by T5a)
+- [ ] `site.archive` is HIGH but always 501 and consumes no approval; decide whether it claims one or leaves the registry (found by T5a)
+- [ ] `content-commands.service.ts` keeps a private copy of the command envelope; adopt `CommandEnvelope` (T5a follow-up)
 - [ ] Not ours, flagged: `agency-lead-convert-race.db.test.ts` is flaky (failed 1 of 3 identical runs) and `monitoring.controller.test.ts` is a date time bomb (red since ~09-17) — both red on main, owners elsewhere
 
 ---
