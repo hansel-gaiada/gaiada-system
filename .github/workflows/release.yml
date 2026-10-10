@@ -272,7 +272,13 @@ jobs:
       #
       # `continue-on-error`: a retention failure must never fail a release whose image is already
       # pushed, signed and attested. Storage creeping back up is a smaller problem than a red release.
+      # ⛔ DISABLED 2026-10-11: "untagged" is NOT "unreferenced". On GHCR the CHILD manifests of an image INDEX are
+      # untagged versions, so `delete-only-untagged-versions` deleted the child of a still-tagged index:
+      # report-renderer's index sha256:249e5e4c (tagged v1.0.0-alpha.303 … .348, a reproducible build) lost its child
+      # sha256:f627854c, the tag became unpullable from GHCR (only the box's cache still had it), and 349's retag
+      # failed copying it. Re-enable only as a REFERENCE-AWARE prune (never delete a digest any tagged index lists).
       - name: Prune old GHCR versions (keep the last 3 releases = 9 versions)
+        if: ${{ false }}
         uses: actions/delete-package-versions@v5
         continue-on-error: true
         with:
