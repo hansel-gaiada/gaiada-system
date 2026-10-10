@@ -1,4 +1,4 @@
-// VENDORED — copied verbatim from webdesk/payload/vocabulary/version.ts (WSK-06/WSK-14,
+// VENDORED — copied verbatim from webdesk/delivery/vocabulary/version.ts (WSK-06/WSK-14,
 // frozen per webdesk-design.md §05). DO NOT HAND-EDIT THIS FILE.
 //
 // Regenerate with `npm run vendor:vocabulary` from webdesk/blocks/. Check for drift with
@@ -6,7 +6,7 @@
 //
 // Why a copy exists at all instead of a relative import: this package ships as an installable
 // tarball to sites OUTSIDE this repo (WSK-16, OQ-6 — no registry infra), where
-// `../../payload/vocabulary` will not exist. See scripts/vendor-vocabulary.mjs's header for
+// `../../delivery/vocabulary` will not exist. See scripts/vendor-vocabulary.mjs's header for
 // the full reasoning. The vocabulary source above this banner is byte-identical to the real
 // file — this script has never rewritten a single line of it.
 

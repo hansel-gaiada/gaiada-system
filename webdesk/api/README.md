@@ -988,7 +988,7 @@ real response for `GET /control/v1/tenants/:slug/contract` (replacing WSK-21's d
 zero vocabulary imports — the NestJS-facing read side.
 
 `src/codegen/generator/*.mts` are ESM, run via `tsx` (`node --import tsx ...`, same tool
-`webdesk/payload/scripts/*.mjs` already uses), and DO import `webdesk/payload/vocabulary/**`
+`webdesk/delivery/test/*.mjs` run under), and DO import `webdesk/delivery/vocabulary/**`
 directly (WSK-06/WSK-14, frozen — this ticket builds ON it, never re-derives it). The `.mts`
 extension is load-bearing: `tsconfig.json`'s `include` is `["src/**/*.ts", "test/**/*.ts"]`, which
 does not match `.mts`, so these files never enter `tsc`'s commonjs compilation graph (which would
@@ -1712,7 +1712,7 @@ Next.js app (`webdesk/payload/collections/{router,content-read,redirects,auth,db
 `app/(payload)/v1/[...slug]/route.ts` + `src/public-gateway.mjs`) into this service, per owner ruling
 WSK-D37 (Payload is removed) and design OQ-3.5's default. The read code never needed Payload — it is
 our own SQL (WSK-D24) — and the `payload-gateway` process that served it was down on the live box from
-2026-09-09 until this move. Payload itself is untouched (WSK-48b deletes it).
+2026-09-09 until this move. Payload itself was deleted afterwards by WSK-48b (`webdesk/payload/` is gone; the vocabulary lives in `webdesk/delivery/`, migration `0011_drop_payload.sql` drops its tables).
 
 Serves, GET only, with the frozen envelope (design §05):
 `/v1/t/:tenantSlug/{:collection | :collection/:slug | search | sitemap.xml}`.
@@ -1735,10 +1735,11 @@ Serves, GET only, with the frozen envelope (design §05):
   headers; over quota is a `429` in the frozen problem+json envelope (slug `rate-limited`, `Retry-After`).
   Default is 300 requests/min/tenant (`WEBDESK_READ_QUOTA_PER_MIN`) — check that against a site build's
   fetch burst before enabling publicly.
-- `vocabulary/` — **vendored, mechanically**, from `webdesk/payload/vocabulary/` (this package is
+- `vocabulary/` — **vendored, mechanically**, from `webdesk/delivery/vocabulary/` (this package is
   CommonJS and cannot import the ESM `.ts` files). `node src/delivery/vocabulary/vendor.mjs`
-  regenerates; `test/delivery/vocabulary-vendor-drift.spec.ts` fails if any copy diverges. When
-  WSK-48b deletes `webdesk/payload/`, delete that spec + `vendor.mjs` and treat the copy as source.
+  regenerates; `test/delivery/vocabulary-vendor-drift.spec.ts` fails if any copy diverges.
+  `webdesk/delivery/` stays the single source (WSK-48b renamed it from `webdesk/payload/vocabulary`
+  rather than promoting this copy); see `webdesk/delivery/README.md`.
 - WSK-05's demo `content` controller/module/service is **retired** (it owned `GET|POST
   /v1/t/:tenantSlug/content` and would have shadowed a collection keyed `content`). Its guard coverage
   moved: read-scope tests now drive the delivery routes; write-scope tests drive media upload
@@ -1773,10 +1774,10 @@ is untouched). The one new 2xx is a non-integer `limit`, which used to 500.
   sets Fastify's `frameworkErrors`, so `GET /v1/t/x/%E0%A4%A` (rejected by Fastify before routing,
   `FST_ERR_BAD_URL`) is `400 application/problem+json` (`invalid-path-encoding`) instead of Fastify's default
   body. Tests that build the full app with a bare `FastifyAdapter` would not get this; use the factory.
-- **Differential gate.** The new behaviours differ from the old Payload router on a few corpus inputs. They
-  are recorded in `v1-differential.spec.ts` as named, counted divergences (`intended` in
-  `v1-contract/differential.ts`, applied per call in `differential-extra.ts`), each requiring the exact
-  old/new status pair; the comparison is otherwise unchanged. Delete them with the Payload router.
+- **Differential gate (retired in WSK-48b).** The new behaviours differed from the old Payload router on a few
+  corpus inputs; they were recorded as named, counted divergences. The old router is gone: those requests
+  are annotated `intended` in `test/delivery/v1-contract/golden-corpus.ts` and the api's answers are in the
+  golden files (see Verify).
 
 No new env vars: `APP_DATABASE_URL`, `API_KEY_PEPPER` (must equal what the keys were minted with),
 and the optional quota vars are all existing.
@@ -1786,29 +1787,21 @@ and the optional quota vars are all existing.
 In-repo (needs only Postgres, like the rest of the suite): `npx vitest run test/delivery` —
 `delivery-routes.spec.ts` (byte-level adapter promises, router error shapes surviving the framework,
 route precedence against media/forms, the quota), `vocabulary-vendor-drift.spec.ts`, and the two
-gates ported from `webdesk/payload/test/` (WSK-48a's last box, 2026-10-11), which run in CI's
-`webdesk-api` job as part of `npm test`:
+/v1 contract gates, which run in CI's `webdesk-api` job as part of `npm test`:
 
 - `envelope-contract.spec.ts` — the WSK-06 envelope contract (60 checks, names verbatim) against this
-  service's `/v1` over real HTTP (`buildApp()` + `listen`, exactly what `main.ts` does). This is the gate
-  that outlives Payload.
-- `v1-differential.spec.ts` — the **byte-identity gate** against the old Payload-hosted router, the
-  port of `run-v1-differential.mjs`. Three passes: the contract replayed through a tee (assertions on
-  the api's responses), the same with assertions on the old router's (the baseline proving the tee is
-  neutral), and ~670 error-path/edge-case requests. Each request goes to BOTH the old router (imported
-  at run time from `webdesk/payload/collections/router.ts`, behind a plain Node http.Server) and the
-  api, and status, body bytes, `content-type` and `cache-tag` are compared. Pinned: 24+1 / 24+1 /
-  662+6 pairs (byte-compared + status-only) and 14 classified divergences (a raw `%` without two hex
-  digits in the path, which Fastify refuses with `400 FST_ERR_BAD_URL`), 0 unexplained. The old
-  router needs `pg` from `webdesk/node_modules`: run `npm ci` in `webdesk/` first (CI's migration
-  step does). Its pool reads `DATABASE_URI`, which the spec points at `APP_DATABASE_URL`.
+  service's `/v1` over real HTTP (`buildApp()` + `listen`, exactly what `main.ts` does).
+- `v1-golden.spec.ts` (WSK-48b) — replaces the old byte-identity differential. WSK-48a had replayed two
+  corpora against the old Payload router and this api and compared them byte for byte: the contract's own
+  requests (24 + 1 outside `/v1/`) and an extra corpus of error paths and edge cases (662 + 6; the only
+  coverage of `/v1`'s error paths), proving them identical apart from the named M3 T1 divergences. The
+  Payload router is deleted, so the same requests now go to the api alone and each answer is compared with
+  a committed golden recorded from the api: `test/delivery/v1-contract/golden/{contract,extra}.json`
+  (status, `content-type`, `cache-tag`, and the normalised body, per request). Volatile values (ids,
+  timestamps, tenant slug suffixes, keys, cursors) are normalised by the rules documented in
+  `v1-contract/golden.ts`. To change `/v1`'s bytes on purpose, re-record with
+  `WEBDESK_V1_GOLDEN_RECORD=1 npx vitest run test/delivery/v1-golden.spec.ts` and review the golden diff.
+  The recording is deterministic (two recordings on two fresh databases are byte-identical).
 
-The shared pieces are in `test/delivery/v1-contract/` (the suite as a function, the tee, the extra
-corpus, the fixtures). The originals in `webdesk/payload/test/` are kept until WSK-48b, and
-`run-v1-differential.mjs` still works the old way against a separately started api
-(`WEBDESK_READ_QUOTA_PER_MIN=1000000 node dist/src/main.js`, then `V1_NEW_URL=http://127.0.0.1:3000
-DATABASE_URI=<app url> MIGRATE_DATABASE_URL=<migrator url> API_KEY_PEPPER=<same> node --import tsx
-../payload/test/run-v1-differential.mjs`). Both harnesses reported the same per-pass numbers on one
-tree. **WSK-48b:** delete `v1-differential.spec.ts`, `v1-contract/differential*.ts` and the
-`webdesk/payload/collections/` + `webdesk/payload/src/tenant-p` prefixes in `scripts/ci/config.mjs`
-together with Payload; keep `envelope-contract.spec.ts`.
+The shared pieces are in `test/delivery/v1-contract/` (the contract suite as a function, the golden
+recorder and normaliser, the extra corpus `golden-corpus.ts`, the fixtures).

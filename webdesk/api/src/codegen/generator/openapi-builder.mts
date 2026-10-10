@@ -3,7 +3,7 @@
 // code constructs directly; the TS SDK (sdk-ts.mts) and CONTENT-CONTRACT.md
 // (content-contract-md.mts) are DERIVED from what this file builds, by standard tooling.
 //
-// This document must describe EXACTLY what `webdesk/payload/collections/router.ts` (WSK-06,
+// This document must describe EXACTLY what `webdesk/api/src/delivery/router.ts` (WSK-06,
 // frozen, DEV-VERIFIED) actually returns — per this ticket's brief ("the OpenAPI you author must
 // describe exactly what these routes actually return") — not an aspirational or convenience
 // shape. The correspondence, read directly off `router.ts` + `content-read.ts` + `redirects.ts`:
@@ -30,7 +30,7 @@
 //     7.13 renders `prefixItems` as a CLOSED tuple and silently drops `items`, so
 //     `prefixItems: [F], items: {...}` became `[F]` and a valid page carrying a generic block after
 //     the fields block would not type-check. Position is still stated in the description and the
-//     extension; `validateItemContent` (payload/vocabulary/item-fields.ts) enforces it at write time.
+//     extension; `validateItemContent` (delivery/vocabulary/item-fields.ts) enforces it at write time.
 //
 // `anyOf`, never `oneOf`, for every generic block `items` union (T2 / D-a): the unknown-block branch
 // (UNKNOWN_BLOCK_SCHEMA: any string `type` + object `props`) is deliberately permissive, so a VALID
@@ -41,10 +41,10 @@
 // List routes strip blocks to `[]` unless `?expand=blocks` (router.ts), so a fields collection's list
 // items use a separate `ListItemEnvelope_<key>` whose `blocks` makes no positional claim. A
 // collection without `fields` produces exactly the 1.0.0 document.
-import type { ComposableBlockType } from "../../../../payload/vocabulary/blocks.ts";
-import { BLOCKS, COMPOSABLE_BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE } from "../../../../payload/vocabulary/blocks.ts";
-import { ENVELOPE_VERSION } from "../../../../payload/vocabulary/version.ts";
-import type { TenantComposition } from "../../../../payload/vocabulary/composition.ts";
+import type { ComposableBlockType } from "../../../../delivery/vocabulary/blocks.ts";
+import { BLOCKS, COMPOSABLE_BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE } from "../../../../delivery/vocabulary/blocks.ts";
+import { ENVELOPE_VERSION } from "../../../../delivery/vocabulary/version.ts";
+import type { TenantComposition } from "../../../../delivery/vocabulary/composition.ts";
 import { fieldsToObjectSchema, type JsonSchema } from "./vocabulary-field-schema.mts";
 
 export interface OpenApiBuilderInput {
@@ -155,7 +155,7 @@ function fieldsCollectionListBlocksSchema(allowedBlocks: ComposableBlockType[] |
 function itemEnvelopeSchema(allowedBlocks: ComposableBlockType[] | undefined, blocksOverride?: JsonSchema): JsonSchema {
   return {
     type: "object",
-    description: "webdesk/payload/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 (\"the /v1 envelope is frozen\").",
+    description: "webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 (\"the /v1 envelope is frozen\").",
     properties: {
       collection: { type: "string" },
       slug: { type: "string" },
@@ -184,7 +184,7 @@ function itemEnvelopeSchema(allowedBlocks: ComposableBlockType[] | undefined, bl
 function listEnvelopeSchema(itemRef: string): JsonSchema {
   return {
     type: "object",
-    description: "webdesk/payload/vocabulary/envelope.ts's ListEnvelope. `items[].blocks` is `[]` unless `?expand=blocks` (router.ts).",
+    description: "webdesk/delivery/vocabulary/envelope.ts's ListEnvelope. `items[].blocks` is `[]` unless `?expand=blocks` (router.ts).",
     properties: {
       collection: { type: "string" },
       locale: { type: "string" },
@@ -340,7 +340,7 @@ export function buildOpenApiDocument(input: OpenApiBuilderInput): Record<string,
       version: input.contractVersion,
       description:
         `Hand-authored per design §05/§06 (WSK-D19) from tenant "${input.tenantSlug}"'s composition × ` +
-        `vocabulary v${input.vocabularyVersion}. Describes exactly what webdesk/payload/collections/router.ts ` +
+        `vocabulary v${input.vocabularyVersion}. Describes exactly what webdesk/api/src/delivery/router.ts ` +
         `serves under the frozen ${ENVELOPE_VERSION} envelope path — see that file for the source of truth.`,
       "x-webdesk-contract": {
         tenantSlug: input.tenantSlug,

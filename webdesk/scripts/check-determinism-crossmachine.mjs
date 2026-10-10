@@ -134,7 +134,7 @@ function runOnFreshContainer(containerName, repoRoot, tenant, outSubdir) {
   dockerRun(`docker rm -f ${containerName} >/dev/null 2>&1 || true`)
   dockerRun(`docker run -d --name ${containerName} -w /work node:22-bookworm-slim sleep 3600`)
   try {
-    dockerRun(`docker exec ${containerName} mkdir -p /work/webdesk/api /work/webdesk/payload /work/webdesk/qa`)
+    dockerRun(`docker exec ${containerName} mkdir -p /work/webdesk/api /work/webdesk/delivery /work/webdesk/qa`)
 
     // node_modules is NEVER copied from this (Windows) checkout — esbuild/tsx ship native
     // platform binaries, and a Windows-built node_modules copied verbatim into a Linux container
@@ -148,14 +148,14 @@ function runOnFreshContainer(containerName, repoRoot, tenant, outSubdir) {
     dockerRun(`docker exec -w /work/webdesk/api ${containerName} npm ci --no-audit --no-fund`)
 
     dockerRun(`docker cp "${repoRoot}/webdesk/api/src" ${containerName}:/work/webdesk/api/src`)
-    // payload/package.json (`"type": "module"`) MUST come along with vocabulary/ — Node resolves
+    // delivery/package.json (`"type": "module"`; it was payload/package.json before WSK-48b) MUST come along with vocabulary/ — Node resolves
     // a bare .ts file's module system (CJS vs ESM) from the NEAREST ancestor package.json, and
     // without this file present the vocabulary's .ts files silently resolve as CommonJS under
     // tsx, producing "does not provide an export named ..." for every named import. Confirmed:
     // this script's first real container run hit exactly that, on Linux only — the Windows smoke
     // run never surfaced it because the real package.json is on disk there.
-    dockerRun(`docker cp "${repoRoot}/webdesk/payload/package.json" ${containerName}:/work/webdesk/payload/package.json`)
-    dockerRun(`docker cp "${repoRoot}/webdesk/payload/vocabulary" ${containerName}:/work/webdesk/payload/vocabulary`)
+    dockerRun(`docker cp "${repoRoot}/webdesk/delivery/package.json" ${containerName}:/work/webdesk/delivery/package.json`)
+    dockerRun(`docker cp "${repoRoot}/webdesk/delivery/vocabulary" ${containerName}:/work/webdesk/delivery/vocabulary`)
     dockerRun(`docker cp "${repoRoot}/webdesk/qa/p3-gate" ${containerName}:/work/webdesk/qa/p3-gate`)
     dockerRun(
       `docker exec -w /work/webdesk/api ${containerName} node --import tsx ../qa/p3-gate/generate-fixture-artifacts.mts --tenant ${tenant} --out /work/out/${tenant}`,

@@ -8,7 +8,7 @@
 //   1. validates the composition with the vocabulary's own validateCollectionComposition
 //      (422 composition-violation, with the validator's issues);
 //   2. rates the change with the vocabulary's own tenant-contract classifier
-//      (classifyTenantContractChange, vendored from payload/vocabulary/breaking-change.ts) by
+//      (classifyTenantContractChange, vendored from delivery/vocabulary/breaking-change.ts) by
 //      diffing the stored composition against the new one for this collection, and returns
 //      `{bump, reasons}`;
 //   3. REFUSES a `major` change (409 contract-major-change) until WSK-42 governs MAJOR contract

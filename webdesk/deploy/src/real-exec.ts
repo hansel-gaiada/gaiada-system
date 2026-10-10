@@ -2,7 +2,7 @@
 // package imports the TYPE from ./types and supplies its own fake; only scripts/probe-live.mjs and
 // a real future caller import this file. Isolating it here means `grep -L real-exec src/*.test.ts`
 // is a one-line proof that no test spawns a process — the same style of static, grep-provable
-// guarantee webdesk/payload/src/public-gateway.mjs's own header uses for its denylist.
+// guarantee the former Payload public gateway's own header used for its denylist (webdesk/payload, deleted in WSK-48b).
 import { spawn } from "node:child_process";
 import type { ExecFn, ExecResult } from "./types";
 

@@ -195,7 +195,7 @@ export interface paths {
 }
 export interface components {
     schemas: {
-        /** @description webdesk/payload/vocabulary/envelope.ts's ItemEnvelope — frozen. */
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen. */
         ItemEnvelope_article: {
             collection: string;
         };

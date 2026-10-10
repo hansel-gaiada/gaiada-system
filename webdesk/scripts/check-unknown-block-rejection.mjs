@@ -49,8 +49,8 @@
 // import transform choked on a computed specifier when this file first ran (confirmed while
 // building this check), and every other consumer in this repo (openapi-builder.mts,
 // resolve-blocks.ts's own test suite) reaches the vocabulary the same static way.
-import { validateCollectionComposition, validateTenantComposition } from '../payload/vocabulary/composition.ts'
-import { BLOCK_TYPE_NAMES, isBlockType } from '../payload/vocabulary/blocks.ts'
+import { validateCollectionComposition, validateTenantComposition } from '../delivery/vocabulary/composition.ts'
+import { BLOCK_TYPE_NAMES, isBlockType } from '../delivery/vocabulary/blocks.ts'
 import { resolveBlocks } from '../blocks/src/renderer/resolve-blocks.ts'
 
 const UNKNOWN_BLOCK_TYPE = 'pricingTable' // same probe value WSK-16's own demo used — an

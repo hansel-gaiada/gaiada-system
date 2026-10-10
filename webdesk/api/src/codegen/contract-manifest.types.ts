@@ -4,7 +4,7 @@
 //
 //   1. the NestJS control-plane side (contract-read.service.ts, contract.controller.ts) — plain
 //      commonjs, compiled by `tsc -p tsconfig.json`, MUST NOT transitively import anything from
-//      `webdesk/payload/vocabulary/**` (those files use ESM `.ts`-extension relative imports
+//      `webdesk/delivery/vocabulary/**` (those files use ESM `.ts`-extension relative imports
 //      among themselves — e.g. blocks.ts's `from './primitives.ts'` — which `tsc` under this
 //      project's `"module": "commonjs"` setting cannot resolve without `allowImportingTsExtensions`,
 //      a flag that itself forces `noEmit: true` and would break `npm run build`);

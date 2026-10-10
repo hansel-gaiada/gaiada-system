@@ -1,5 +1,5 @@
 // WSK-48a (tests port) — the /v1 envelope-contract fixtures, ported from
-// webdesk/payload/test/v1-fixtures.mjs so the contract and the differential live in this package
+// webdesk/payload/test/v1-fixtures.mjs so the contract and the golden suite live in this package
 // and survive WSK-48b deleting Payload. Same SQL, same GUCs, same defaults: a raw pg client
 // connected as webdesk_migrator (NOBYPASSRLS), platform_ctx for the tenant row, tenant_ctx for
 // everything that belongs to one. Fresh random slugs/ids per call; nothing is cleaned up — the

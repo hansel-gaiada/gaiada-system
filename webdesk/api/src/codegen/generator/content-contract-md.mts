@@ -6,10 +6,10 @@
 // WSK-64 (vocabulary 1.1.0): a collection that declares `fields` carries them in the composition-
 // typed `fields` block at blocks[0]; group sub-fields are listed nested, and `multiple`, `itemKey`
 // and `localized: false` are stated per field. Editor-only `ui` hints are not part of the contract.
-import type { ComposableBlockType } from "../../../../payload/vocabulary/blocks.ts";
-import { BLOCKS } from "../../../../payload/vocabulary/blocks.ts";
-import type { FieldDef } from "../../../../payload/vocabulary/primitives.ts";
-import type { TenantComposition } from "../../../../payload/vocabulary/composition.ts";
+import type { ComposableBlockType } from "../../../../delivery/vocabulary/blocks.ts";
+import { BLOCKS } from "../../../../delivery/vocabulary/blocks.ts";
+import type { FieldDef } from "../../../../delivery/vocabulary/primitives.ts";
+import type { TenantComposition } from "../../../../delivery/vocabulary/composition.ts";
 import type { OpenApiBuilderInput } from "./openapi-builder.mts";
 
 function fieldLine(f: FieldDef, depth = 0): string {
@@ -42,7 +42,7 @@ export function renderContentContractMd(input: OpenApiBuilderInput): string {
   lines.push(
     "Derived from `openapi.v1.json` in the same generation run (WSK-D19: OpenAPI is the one " +
       "hand-authored source; this file and the TS SDK are both derived from it/its input, never " +
-      "hand-maintained separately). Describes exactly what `webdesk/payload/collections/router.ts` " +
+      "hand-maintained separately). Describes exactly what `webdesk/api/src/delivery/router.ts` " +
       "(design §06) serves under the frozen `/v1` envelope — see design §05 for the envelope's full shape.",
   );
   lines.push("");

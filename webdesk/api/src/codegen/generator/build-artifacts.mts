@@ -2,10 +2,10 @@
 // sdk.d.ts bytes, CONTENT-CONTRACT.md bytes, the per-artifact hash manifest, contentHash}. Pure —
 // no I/O of its own (fetch-composition.mts and storage-io.mts own the DB/object-store edges; this file
 // only combines their inputs/outputs).
-import { VOCABULARY_VERSION } from "../../../../payload/vocabulary/version.ts";
-import type { TenantComposition } from "../../../../payload/vocabulary/composition.ts";
-import { validateTenantComposition } from "../../../../payload/vocabulary/composition.ts";
-import type { TenantContractSnapshot } from "../../../../payload/vocabulary/breaking-change.ts";
+import { VOCABULARY_VERSION } from "../../../../delivery/vocabulary/version.ts";
+import type { TenantComposition } from "../../../../delivery/vocabulary/composition.ts";
+import { validateTenantComposition } from "../../../../delivery/vocabulary/composition.ts";
+import type { TenantContractSnapshot } from "../../../../delivery/vocabulary/breaking-change.ts";
 import { buildOpenApiDocument } from "./openapi-builder.mts";
 import { renderContentContractMd } from "./content-contract-md.mts";
 import { generateTsSdk } from "./sdk-ts.mts";

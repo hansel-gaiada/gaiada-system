@@ -9,7 +9,7 @@
 // composed tenants" pattern (never one fixture alone — a single-tenant fixture cannot catch a bug
 // that only shows up when a second collection or a closed block-list is present).
 //
-// Shapes match `webdesk/payload/vocabulary/composition.ts`'s `TenantComposition`
+// Shapes match `webdesk/delivery/vocabulary/composition.ts`'s `TenantComposition`
 // (`Record<collectionKey, { fields?: FieldDef[], blocks?: BlockType[] }>`) exactly — these are
 // fed straight into `buildContractArtifacts`, which itself calls `validateTenantComposition` and
 // throws on anything invalid, so an invalid fixture here fails loudly at generation time, not

@@ -2,18 +2,21 @@
 # WSK-58 -- one Linux gate script for the WebDesk proof's suites.
 #
 # Runs, in throwaway containers, the same steps CI runs (.github/workflows/ci.yml: jobs
-# `webdesk-light`, `webdesk-api`) plus the WSK-64 vocabulary suites that CI does not run:
+# `webdesk-light`, `webdesk-api`):
 #   webdesk-root    npm ci; npm test (migration lint + RLS selftest); compose port gate (+selftest)
 #   webdesk-blocks  webdesk/blocks: npm ci; npm run build
 #   webdesk-api     Postgres(init-roles.sh)+Redis+RustFS(digest-pinned)+ClamAV+Mailpit; npm ci;
 #                   storage-bootstrap; npm ci + migrate in webdesk/; typecheck; npm test (full CI env)
-#   vocabulary      payload/test: wsk64-classifier, wsk64-item-fields, vocabulary, envelope-contract
-#                   (run from webdesk/api so `--import tsx` resolves from webdesk/api/node_modules;
-#                   needs the DB prepared for webdesk-api)
-#   migrations      webdesk/migrations/tests: 0009_content_write_plane, 0009_v1_bytes,
-#                   0010_slug_release_and_ledger (WSK-D51). Each builds throwaway scratch databases next
-#                   to the migrated one and drives the REAL runner, so it connects as the cluster
-#                   superuser too (SUPERUSER_DATABASE_URL). CI runs the same three in the webdesk-api job.
+#   vocabulary      webdesk/delivery/test: wsk64-classifier, wsk64-item-fields, vocabulary (WSK-48b: moved
+#                   from payload/test, envelope-contract dropped with the old router; the api's own
+#                   envelope-contract.spec.ts covers the contract). Run from webdesk/api so `--import tsx`
+#                   resolves from webdesk/api/node_modules (they need no database, only that `npm ci`).
+#                   CI runs the same three in the webdesk-api job.
+#   migrations      webdesk/migrations/tests: 0009_content_write_plane, 0010_slug_release_and_ledger (WSK-D51),
+#                   0011_drop_payload (WSK-48b; 0009_v1_bytes is retired, it drove the deleted Payload router).
+#                   Each builds throwaway scratch databases next to the migrated one and drives the REAL
+#                   runner, so it connects as the cluster superuser too (SUPERUSER_DATABASE_URL). CI runs
+#                   the same three in the webdesk-api job.
 #
 # Design: no host paths, no host ports. The source tar is untarred into a per-run docker VOLUME that
 # every container mounts; one docker network per run; services are reached by container DNS name.
@@ -308,28 +311,27 @@ npm test'
   report_skips webdesk-api "$LOGDIR/webdesk-api.log"
 fi
 
-# ---- vocabulary: WSK-64 suites + envelope-contract ---------------------------------------------
+# ---- vocabulary: the WSK-64 suites + the WSK-06 vocabulary unit suite (webdesk/delivery/test) ----
 if selected vocabulary && [ "$DB_READY" = 1 ]; then
-  RENV=(-e "DATABASE_URI=$APP_URL" -e "MIGRATE_DATABASE_URL=$MIG_URL" -e API_KEY_PEPPER=ci-throwaway-pepper)
-  # cwd = webdesk/api so `--import tsx` resolves from its node_modules; `pg` resolves from webdesk/node_modules.
+  RENV=()
+  # cwd = webdesk/api so `--import tsx` resolves from its node_modules. No database or env needed.
   run_suite vocabulary webdesk/api 'rc=0
-for t in wsk64-classifier wsk64-item-fields vocabulary envelope-contract; do
+for t in wsk64-classifier wsk64-item-fields vocabulary; do
   echo "##### $t"
-  node --import tsx ../payload/test/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
+  node --import tsx ../delivery/test/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
 done
 exit $rc'
 fi
 
 # ---- migrations: the migration test files ------------------------------------------------------
-# Run from webdesk/api: 0009_v1_bytes.test.mjs needs that directory's tsx to load the .ts router, and
-# `pg` resolves from webdesk/node_modules for all three. Last on purpose: each file creates and drops
+# Run from webdesk/api like the rest of the gate (and CI's step); `pg` resolves from webdesk/node_modules. Last on purpose: each file creates and drops
 # its own scratch databases on the shared Postgres (the migrated `webdesk` database is only read, or
 # written inside a rolled-back transaction).
 if selected migrations && [ "$DB_READY" = 1 ]; then
   RENV=(-e "SUPERUSER_DATABASE_URL=$SUPER_URL" -e "MIGRATE_DATABASE_URL=$MIG_URL" -e "APP_DATABASE_URL=$APP_URL"
         -e API_KEY_PEPPER=ci-throwaway-pepper)
   run_suite migrations webdesk/api 'rc=0
-for t in 0009_content_write_plane 0009_v1_bytes 0010_slug_release_and_ledger; do
+for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload; do
   echo "##### $t"
   node --import tsx ../migrations/tests/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
 done

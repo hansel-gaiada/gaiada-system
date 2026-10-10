@@ -9,7 +9,7 @@
 // (node:22-bookworm-slim, the standing rule) before trusting it there too.
 //
 // WSK-35 — vendors ONLY the block-TYPE-NAME list (`BLOCK_TYPE_NAMES`) from
-// `webdesk/payload/vocabulary/blocks.ts` (WSK-06/WSK-14, frozen) into a plain PHP array,
+// `webdesk/delivery/vocabulary/blocks.ts` (WSK-06/WSK-14, frozen) into a plain PHP array,
 // `theme/gaiada-webdesk/inc/block-vocabulary.php`. This is the SAME class of problem WSK-16
 // solved for `webdesk/blocks` (see that package's own `scripts/vendor-vocabulary.mjs` header,
 // vendored verbatim reasoning): PHP cannot `import` a `.ts` file at all, ESM or otherwise, so
@@ -24,7 +24,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import url from 'node:url'
-import { BLOCK_TYPE_NAMES } from '../../payload/vocabulary/blocks.ts'
+import { BLOCK_TYPE_NAMES } from '../../delivery/vocabulary/blocks.ts'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 const DEST = path.resolve(__dirname, '..', 'theme', 'gaiada-webdesk', 'inc', 'block-vocabulary.php')
@@ -34,7 +34,7 @@ function render(names) {
   const phpArray = names.map((n) => `    '${n}',`).join('\n')
   return (
     `<?php\n` +
-    `// VENDORED — copied from webdesk/payload/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (WSK-06/\n` +
+    `// VENDORED — copied from webdesk/delivery/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (WSK-06/\n` +
     `// WSK-14, frozen per webdesk-design.md §05). DO NOT HAND-EDIT.\n` +
     `//\n` +
     `// PHP cannot import a TypeScript module, so this is a vendored copy of the NAME LIST only\n` +
@@ -59,13 +59,13 @@ const expected = render(BLOCK_TYPE_NAMES)
 if (CHECK) {
   const actual = fs.existsSync(DEST) ? fs.readFileSync(DEST, 'utf8') : null
   if (actual !== expected) {
-    console.error(`DRIFT    ${DEST} does not match webdesk/payload/vocabulary/blocks.ts's BLOCK_TYPE_NAMES — run \`node scripts/vendor-block-vocabulary.mjs\``)
+    console.error(`DRIFT    ${DEST} does not match webdesk/delivery/vocabulary/blocks.ts's BLOCK_TYPE_NAMES — run \`node scripts/vendor-block-vocabulary.mjs\``)
     if (actual !== null) {
       console.error(`  vendored has ${(actual.match(/'\w+',/g) ?? []).length} names, source has ${BLOCK_TYPE_NAMES.length}`)
     }
     process.exit(1)
   }
-  console.log(`OK       ${DEST} matches webdesk/payload/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (${BLOCK_TYPE_NAMES.length} types)`)
+  console.log(`OK       ${DEST} matches webdesk/delivery/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (${BLOCK_TYPE_NAMES.length} types)`)
   process.exit(0)
 }
 

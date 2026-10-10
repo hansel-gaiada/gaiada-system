@@ -1,6 +1,6 @@
 // webdesk/api/src/delivery/content-read.ts
 //
-// WSK-48a — MOVED from webdesk/payload/collections/content-read.ts (WSK-06; design decision WSK-D24: the
+// WSK-48a — MOVED from webdesk/payload/collections/content-read.ts (WSK-06; that tree was deleted in WSK-48b; design decision WSK-D24: the
 // read path is our own SQL and never needed Payload). The SQL, the cursor encoding and the envelope
 // assembly are byte-for-byte the originals; the only changes are mechanical: the tenant pool is now
 // the api's own (`DeliveryDb`, a view over DbService.withTenant) passed in as `db`, instead of a

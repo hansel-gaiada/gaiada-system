@@ -14,7 +14,7 @@
 // but two things keep it from silently drifting out of sync with the real vocabulary:
 //
 //   1. Every field here is a 1:1 transcription of `BLOCKS[type].fields` in
-//      ./vocabulary/blocks.ts (vendored verbatim from webdesk/payload/vocabulary/blocks.ts —
+//      ./vocabulary/blocks.ts (vendored verbatim from webdesk/delivery/vocabulary/blocks.ts —
 //      see scripts/vendor-vocabulary.mjs) — same name, same required-ness, same multiplicity.
 //   2. test/unit/props-coherence.test.mjs mechanically diffs `BLOCKS[type].fields` against the
 //      `EXPECTED_FIELDS` table at the bottom of this file and FAILS if they disagree, and

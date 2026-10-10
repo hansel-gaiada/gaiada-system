@@ -1,6 +1,6 @@
 # webdesk/deploy — WSK-29 frontend-deploy driver seam
 
-Zone A tooling. Not the WebDesk backend (that's `webdesk/api`/`webdesk/payload`, Zone B) — this
+Zone A tooling. Not the WebDesk backend (that's `webdesk/api`, Zone B) — this
 package deploys the STATIC frontend artifacts WebDesk's own pipeline produces (WSK-15/16/17) to the
 two non-WordPress hosting targets named in WSK-D26: `delphi` (staging) and `helios` (production).
 WordPress sites stay on Hostinger and are out of scope here.
