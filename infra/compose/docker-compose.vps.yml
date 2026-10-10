@@ -633,6 +633,14 @@ services:
       WEBDESK_EDITORIAL_SIGNING_KID: ${WEBDESK_EDITORIAL_SIGNING_KID:-}
       WEBDESK_EDITORIAL_SIGNING_KEY_FILE: /run/webdesk-editorial/editorial-signing.${WEBDESK_EDITORIAL_SIGNING_KID:-unset}.pk8.pem
       WEBDESK_EDITORIAL_TTL_SEC: ${WEBDESK_EDITORIAL_TTL_SEC:-}
+      # WSK-60 — publish -> rebuild -> staging. WEBDESK_REBUILD_TARGETS is ONE-LINE JSON naming the site repo,
+      # workflow, ref and staging URL per WebDesk site (shape and example: infra/runbooks/webdesk-staging-rebuild.md).
+      # EMPTY ON PURPOSE: unset means every rebuild is recorded `failed: rebuild_not_configured` and the stamp
+      # poller never starts -- never a dispatch aimed at a repo nobody chose. The GitHub App identity and the
+      # org tenant it dispatches under are the GITHUB_ERP_* / GITHUB_REPO_SYNC_TENANT_ID rows below.
+      WEBDESK_REBUILD_TARGETS: ${WEBDESK_REBUILD_TARGETS:-}
+      WEBDESK_REBUILD_POLL_INTERVAL_MS: ${WEBDESK_REBUILD_POLL_INTERVAL_MS:-}
+      WEBDESK_REBUILD_POLL_WINDOW_MS: ${WEBDESK_REBUILD_POLL_WINDOW_MS:-}
       # The SAME omission again, and this one had been silently disabling THREE shipped features on
       # this box: a 43-char value sat in .env while the container saw an empty string, because no row
       # forwarded it. It signs W0 client-invite tokens (`core/client-invites.ts`), signs SEO's Google
