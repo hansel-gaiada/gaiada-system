@@ -1,5 +1,5 @@
 // WSK-32 — proves src/schema-draft/vocabulary-vendor.ts still matches the REAL source of truth
-// (webdesk/payload/vocabulary/*.ts), by reading those files as TEXT (never importing them — see
+// (webdesk/delivery/vocabulary/*.ts), by reading those files as TEXT (never importing them — see
 // vocabulary-vendor.ts's header for why importing is off the table under this project's commonjs
 // tsconfig). If the vocabulary changes and the api is not re-vendored, THIS test goes red rather
 // than the vendor silently drifting.
@@ -19,7 +19,7 @@ import {
 } from "../../src/schema-draft/vocabulary-vendor";
 import * as vendoredComposition from "../../src/delivery/vocabulary/composition";
 
-const VOCAB_DIR = join(__dirname, "..", "..", "..", "payload", "vocabulary");
+const VOCAB_DIR = join(__dirname, "..", "..", "..", "delivery", "vocabulary");
 
 /** Some vocabulary source files carry CRLF line endings (git-autocrlf artifact) and some don't —
  *  observed directly while running this test (primitives.ts needed this, blocks.ts happened not

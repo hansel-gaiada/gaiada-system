@@ -1,4 +1,4 @@
-// WSK-15 — maps ONE vocabulary FieldDef (webdesk/payload/vocabulary/primitives.ts, WSK-06/frozen)
+// WSK-15 — maps ONE vocabulary FieldDef (webdesk/delivery/vocabulary/primitives.ts, WSK-06/frozen)
 // to a JSON Schema fragment. This is the "hand-authored" half of WSK-D19: every other artifact is
 // DERIVED by standard tooling from the document this file helps build, but the mapping from "the
 // 8 vocabulary primitives" to "JSON Schema" is our own domain knowledge, written once, here.
@@ -9,7 +9,7 @@
 // FieldDef keys (`ui`) never reach the wire schema. `itemKey` and `localized: false` are carried as
 // `x-webdesk-*` annotations: JSON Schema cannot express "unique by this sub-field", and locale
 // neutrality is advisory (write-plane design §2.5 rule 2), so neither is a validation keyword here.
-import type { FieldDef, PrimitiveName } from "../../../../payload/vocabulary/primitives.ts";
+import type { FieldDef, PrimitiveName } from "../../../../delivery/vocabulary/primitives.ts";
 
 export type JsonSchema = Record<string, unknown>;
 

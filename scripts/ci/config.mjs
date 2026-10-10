@@ -30,13 +30,12 @@ export const CI_GROUPS = {
   report_renderer: ["report-renderer/"],
   // webdesk root: migration lint + RLS selftest + compose port gate.
   webdesk_root: ["webdesk/migrations/", "webdesk/scripts/", "webdesk/package", "webdesk/docker-compose", "webdesk/postgres/", "infra/runbooks/webdesk"],
-  // webdesk/api: migrations runner, storage-bootstrap, role bootstrap, payload vocabulary, and the
-  // OLD /v1 router (payload/collections + its tenant pool) that test/delivery/v1-differential.spec.ts
-  // byte-compares the api against, until WSK-48b deletes Payload.
-  webdesk_api: ["webdesk/api/", "webdesk/migrations/", "webdesk/scripts/", "webdesk/postgres/", "webdesk/package", "webdesk/payload/vocabulary/", "webdesk/payload/collections/", "webdesk/payload/src/tenant-p"],
-  // blocks vendors payload/vocabulary and fails on drift.
-  webdesk_blocks: ["webdesk/blocks/", "webdesk/payload/vocabulary/"],
-  webdesk_payload: ["webdesk/payload/"],
+  // webdesk/api: migrations runner, storage-bootstrap, role bootstrap, and webdesk/delivery/ (the
+  // vocabulary the api vendors, plus the vocabulary tests this job runs; WSK-48b renamed it from
+  // webdesk/payload/ when Payload was deleted).
+  webdesk_api: ["webdesk/api/", "webdesk/migrations/", "webdesk/scripts/", "webdesk/postgres/", "webdesk/package", "webdesk/delivery/"],
+  // blocks vendors delivery/vocabulary and fails on drift.
+  webdesk_blocks: ["webdesk/blocks/", "webdesk/delivery/vocabulary/"],
   webdesk_deploy: ["webdesk/deploy/"],
   obs: ["infra/observability/", "infra/scripts/"],
 };
@@ -58,7 +57,6 @@ export const COMPONENTS = [
   { name: "platform-ui", path: "platform-ui/" },
   { name: "report-renderer", path: "report-renderer/" },
   { name: "webdesk-api", path: "webdesk/api/" },
-  { name: "webdesk-payload", path: "webdesk/payload/" },
   { name: "synthetic-prober", path: "infra/observability/synthetic-prober/" },
 ];
 

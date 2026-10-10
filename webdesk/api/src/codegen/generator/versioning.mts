@@ -1,15 +1,15 @@
 // WSK-15 — tenant contract semver, computed via WSK-14's OWN classifier
-// (webdesk/payload/vocabulary/breaking-change.ts's `classifyTenantContractChange`/`bumpVersion`).
+// (webdesk/delivery/vocabulary/breaking-change.ts's `classifyTenantContractChange`/`bumpVersion`).
 // Per this ticket's brief ("use them, do not reimplement version logic"), this file contains NO
 // version-bump rules of its own — it only adapts a `TenantComposition` (composition.ts's shape,
 // what this ticket's DB query produces) into the `TenantContractSnapshot` shape
 // `classifyTenantContractChange` expects, and calls straight through.
-import type { TenantComposition } from "../../../../payload/vocabulary/composition.ts";
+import type { TenantComposition } from "../../../../delivery/vocabulary/composition.ts";
 import {
   classifyTenantContractChange,
   bumpVersion,
   type TenantContractSnapshot,
-} from "../../../../payload/vocabulary/breaking-change.ts";
+} from "../../../../delivery/vocabulary/breaking-change.ts";
 
 /** `TenantComposition` (`{ fields?, blocks?, singleton?, localized?, ui?, lint? }`) ->
  *  `TenantContractSnapshot` (`{ fields: [], blocks?, singleton?, localized?, ui?, lint? }`)

@@ -1,4 +1,4 @@
-// VENDORED — generated from webdesk/payload/vocabulary/cache-tags.ts (WSK-06/WSK-14, frozen per
+// VENDORED — generated from webdesk/delivery/vocabulary/cache-tags.ts (WSK-06/WSK-14, frozen per
 // webdesk-design.md §05) by webdesk/api/src/delivery/vocabulary/vendor.mjs. DO NOT HAND-EDIT.
 // The only transform: LF line endings and relative '.ts' import extensions stripped (this
 // package is CommonJS). Re-vendor with `node src/delivery/vocabulary/vendor.mjs`; drift is

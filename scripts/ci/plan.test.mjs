@@ -53,16 +53,16 @@ const names = (a) => [...a].sort();
 
 // ------------------------------------------------------------------ release plan
 
-test("release: a webdesk-only diff builds only webdesk-api + webdesk-payload and re-tags the other 10", () => {
+test("release: a webdesk-only diff builds only webdesk-api and re-tags the other 10", () => {
   const r = makeRepo();
   try {
     r.commit("base", T0, { "x": "1" });
     r.tag("v1.0.0-alpha.1");
     r.commit("webdesk api change", T0 + DAY, { "webdesk/api/src/a.ts": "a" });
-    r.commit("webdesk payload change", T0 + DAY, { "webdesk/payload/collections/b.ts": "b" });
+    r.commit("webdesk api change 2", T0 + DAY, { "webdesk/api/src/b.ts": "b" });
     r.commit("a markdown note", T0 + DAY, { "docs/note.md": "n" }); // docs never reach an image
     const plan = planRelease({ head: r.head(), currentTag: "v1.0.0-alpha.2", now: (T0 + 2 * DAY) * 1000, git: gitAdapter(r.dir), registry: registry() });
-    assert.deepEqual(names(plan.build), ["webdesk-api", "webdesk-payload"]);
+    assert.deepEqual(names(plan.build), ["webdesk-api"]);
     assert.equal(plan.retag.length, 10);
     assert.ok(plan.retag.every((x) => x.fromTag === "v1.0.0-alpha.1" && x.digest.startsWith("sha256:")));
     assert.deepEqual(plan.removed, []);
@@ -188,13 +188,10 @@ const on = (o) => Object.entries(o).filter(([k, v]) => v === true && !k.startsWi
 test("ci: a webdesk-only change runs only webdesk groups", () => {
   const { outputs } = planCi({ files: ["webdesk/api/src/a.ts"] });
   assert.deepEqual(on(outputs), ["webdesk_api"]);
-  const both = planCi({ files: ["webdesk/payload/vocabulary/primitives.ts"] }).outputs;
-  assert.deepEqual(on(both), ["webdesk_api", "webdesk_blocks", "webdesk_payload"]);
-  // The api's differential spec imports the OLD /v1 router from the Payload tree (until WSK-48b).
-  for (const f of ["webdesk/payload/collections/router.ts", "webdesk/payload/src/tenant-pg.mjs", "webdesk/payload/src/tenant-pool.mjs"]) {
-    assert.deepEqual(on(planCi({ files: [f] }).outputs), ["webdesk_api", "webdesk_payload"], f);
-  }
-  assert.deepEqual(on(planCi({ files: ["webdesk/payload/app/(payload)/layout.tsx"] }).outputs), ["webdesk_payload"]);
+  const both = planCi({ files: ["webdesk/delivery/vocabulary/primitives.ts"] }).outputs;
+  assert.deepEqual(on(both), ["webdesk_api", "webdesk_blocks"]);
+  // The vocabulary tests (webdesk/delivery/test/) run in the webdesk-api job; the blocks package only vendors vocabulary/.
+  assert.deepEqual(on(planCi({ files: ["webdesk/delivery/test/vocabulary.test.mjs"] }).outputs), ["webdesk_api"]);
 });
 
 test("ci: a platform-nest-only change runs the nest group (+ nothing else); migrations also run sync-engine", () => {

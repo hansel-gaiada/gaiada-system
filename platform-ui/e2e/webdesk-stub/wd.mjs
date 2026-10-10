@@ -60,7 +60,7 @@ function lintOf(composition, blocks) {
   return { placeholders: { unresolvedTokens: tokens, markers } };
 }
 
-// ── validation (a faithful subset of payload/vocabulary/item-fields.ts) ─────────────────────────────
+// ── validation (a faithful subset of delivery/vocabulary/item-fields.ts) ─────────────────────────────
 const seg = (k) => String(k).replace(/~/g, "~0").replace(/\//g, "~1");
 function validateField(def, v, ptr, out, depth = 1) {
   if (v === undefined || v === null) {

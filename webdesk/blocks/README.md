@@ -14,7 +14,7 @@ it against a live `/v1` response, not just fixtures.
 
 Nine `.astro` components (`Hero`, `RichText`, `Gallery`, `Cta`, `FeatureGrid`, `Form`,
 `Testimonial`, `Faq`, `LogoCloud`) — one per block type in
-[`webdesk/payload/vocabulary/blocks.ts`](../payload/vocabulary/blocks.ts) — plus two renderer
+[`webdesk/delivery/vocabulary/blocks.ts`](../delivery/vocabulary/blocks.ts) — plus two renderer
 components (`BlockRenderer`, `ItemRenderer`) that take a `/v1` item envelope and render its
 `blocks` array in order. `BlockRenderer` is where the invariant lives: it resolves every block
 against the vocabulary's own `isBlockType`, renders the known ones through their component, and
@@ -26,18 +26,18 @@ serving the wrong language is worse than an honest fallback flag").
 
 ## Why it vendors a copy of the vocabulary (read this before touching `src/vocabulary/`)
 
-The ticket instruction is "import the block prop schemas [from `webdesk/payload/vocabulary`] — do
+The ticket instruction is "import the block prop schemas [from `webdesk/delivery/vocabulary`] — do
 not restate them." That is exactly right for every other consumer shipped so far (WSK-15's codegen
 imports the vocabulary with a relative path, because it runs inside this repo forever). This
 package is different: constraint 3 of WSK-16 requires `npm pack` to produce a tarball a
 **scaffolded site outside this repo** can install by path (OQ-6 — no registry infra). Once
 installed into some other project's `node_modules`, a relative import like
-`../../payload/vocabulary/blocks.ts` resolves to nothing.
+`../../delivery/vocabulary/blocks.ts` resolves to nothing.
 
 So `src/vocabulary/*.ts` is a **byte-identical, mechanically-verified copy** of four files from
-`webdesk/payload/vocabulary/` (`primitives.ts`, `blocks.ts`, `envelope.ts`, `version.ts`),
+`webdesk/delivery/vocabulary/` (`primitives.ts`, `blocks.ts`, `envelope.ts`, `version.ts`),
 produced by `scripts/vendor-vocabulary.mjs`. The single source of truth stays
-`webdesk/payload/vocabulary` — this script has never hand-edited a line of what it copies, and
+`webdesk/delivery/vocabulary` — this script has never hand-edited a line of what it copies, and
 `npm run vendor:check` (wired into `prepack` and `build`) fails loudly the moment the two drift.
 See the script's own header comment for the full reasoning, and the "Needed changes / open items"
 section below for the longer-term recommendation this constraint points at.
@@ -50,7 +50,7 @@ command below is exactly what CI or a developer would run; nothing is abbreviate
 ```sh
 # from webdesk/blocks/
 npm install               # installs astro + @astrojs/check + typescript (devDependencies only)
-npm run vendor:vocabulary # (re)copies webdesk/payload/vocabulary/{primitives,blocks,envelope,version}.ts
+npm run vendor:vocabulary # (re)copies webdesk/delivery/vocabulary/{primitives,blocks,envelope,version}.ts
 npm run vendor:check      # fails (exit 1) if the vendored copies have drifted — CI gate
 npm run test:unit         # node --test test/unit/*.test.mjs — 26 assertions, no Astro build needed
 npm run typecheck         # astro check — typechecks every .astro/.ts file, 0 errors expected
@@ -63,7 +63,7 @@ invariant's decision logic) is deliberately plain TypeScript with zero Astro dep
 `node --test`-able directly. Node's native TypeScript type-stripping (stable by default since
 Node ~22.18/23.6, confirmed here on both v24.18.0 and v22.23.2) is what lets `.ts` files run
 without `tsx` or a build step; if an older Node is ever the target, prefix with
-`node --import tsx` (already a devDependency one level up in `webdesk/api` and `webdesk/payload`,
+`node --import tsx` (already a devDependency one level up in `webdesk/api`,
 not pulled in here to keep this package's own dependency list minimal — add it if needed).
 
 ## The tarball-install proof (`demo/`)
@@ -128,7 +128,7 @@ for pricingTable", the same QA report JSON, and the same console.warn line as th
 
 - `src/renderer/resolve-blocks.ts` — pure logic, no Astro. `resolveBlocks()` walks a raw `blocks`
   array and tags each entry `known: true|false` using the vendored vocabulary's own `isBlockType`
-  (the same function `webdesk/payload/vocabulary/blocks.ts`'s `validateBlock` uses server-side —
+  (the same function `webdesk/delivery/vocabulary/blocks.ts`'s `validateBlock` uses server-side —
   this renderer's notion of "known" can never diverge from the vocabulary's). Never throws, even
   on a non-string `type` or a missing `props` — proven in `test/unit/resolve-blocks.test.mjs`.
 - `src/renderer/report.ts` — the report hook's shape (`UnknownBlockReportHook`) and its default
@@ -161,7 +161,7 @@ assertion in a comment:
 
 ### A real vocabulary gap this round-trip test found (reported, not fixed here)
 
-`webdesk/payload/vocabulary/primitives.ts`'s `validate()` for the `media` primitive never consults
+`webdesk/delivery/vocabulary/primitives.ts`'s `validate()` for the `media` primitive never consults
 `field.multiple` — unlike `relation`, whose validator branches on `field?.multiple` and validates
 each array item. A field declared `{ primitive: 'media', multiple: true }` — `gallery.items` and
 `logoCloud.logos`, both genuinely declared that way in `blocks.ts` — can therefore never pass
@@ -172,9 +172,9 @@ runtime validator disagrees with its own declaration. `Gallery.astro` / `LogoClo
 the *declared* (array) shape, since that is what the vocabulary actually specifies — the test suite
 documents the gap as a named regression guard (`KNOWN_MULTIPLE_MEDIA_VALIDATION_GAP` in
 `test/unit/props-coherence.test.mjs`) rather than silently working around it, so it starts failing
-(and says exactly what to do) the moment `webdesk/payload/vocabulary` fixes it upstream.
-**This file cannot be edited from this ticket (`webdesk/payload/**` is out of scope) — reported to
-the coordinator for the vocabulary-owning ticket to pick up.**
+(and says exactly what to do) the moment `webdesk/delivery/vocabulary` fixes it upstream.
+**This file cannot be edited from this ticket (`webdesk/delivery/**` — formerly `webdesk/payload/` —
+is out of scope) — reported to the coordinator for the vocabulary-owning ticket to pick up.**
 
 ## §05 items that could not be built exactly as specified
 
@@ -200,9 +200,9 @@ the coordinator for the vocabulary-owning ticket to pick up.**
 
 ## Needed changes / open items for the coordinator (not done here — out of `webdesk/blocks/**`)
 
-1. **The `media`+`multiple` validation gap** in `webdesk/payload/vocabulary/primitives.ts`
-   (above) — belongs to whichever ticket owns `webdesk/payload/vocabulary/**` next.
-2. **Longer term, `payload/vocabulary` becoming its own publishable package** (rather than each
+1. **The `media`+`multiple` validation gap** in `webdesk/delivery/vocabulary/primitives.ts`
+   (above) — belongs to whichever ticket owns `webdesk/delivery/vocabulary/**` next.
+2. **Longer term, `delivery/vocabulary` becoming its own publishable package** (rather than each
    downstream consumer inventing its own answer to "how do I reach code across a package boundary
    that may or may not survive an install") would remove the need for `scripts/vendor-vocabulary.mjs`
    entirely and let this package (and WSK-34's future PHP SDK) depend on it formally. That is a
@@ -220,6 +220,6 @@ Package version `0.1.0` — pre-1.0 while WSK-17 has not yet exercised it agains
 as `classifyRendererChange()` in the vendored `src/vocabulary/version.ts`'s sibling
 `breaking-change.ts` — not vendored here (renderer-axis classification is a WSK-14/19 concern about
 *this* library's own version number, not something the render components themselves need at
-runtime); see `webdesk/payload/vocabulary/breaking-change.ts` for the real one this package's own
+runtime); see `webdesk/delivery/vocabulary/breaking-change.ts` for the real one this package's own
 future version bumps should be checked against by hand until a ticket wires that check up
 mechanically.

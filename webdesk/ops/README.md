@@ -67,9 +67,9 @@ one of them:
   base file gates services behind the `dev` profile and a production overlay must be unconditional.
 - **Audit the RESOLVED config, never the overlay.** `docker compose ... config | grep -A3 ports:`
   and confirm the only published port is the proxy's, bound to `127.0.0.1`.
-- **Topology to reproduce:** one public listener only; `postgres`, `redis`, `minio`, the Payload
-  internal listener, the public gateway and `api` all on the private compose network with **no host
-  ports at all**; the Payload admin reachable only through an SSH tunnel (design D-5 / WSK-D20).
+- **Topology to reproduce:** one public listener only; `postgres`, `redis`, `minio` and `api`
+  all on the private compose network with **no host ports at all** (the Payload admin and public gateway
+  this topology once also carried are gone: WSK-48b).
 - **Say what is deliberately absent.** That overlay omitted `worker` (no worker entrypoint exists
   yet — shipping the base file's `sleep infinity` stub to production would be a container that
   prints a sentence), plus `clamav`, `imgproxy`, `otel-collector` and `status-page`. Absence stated

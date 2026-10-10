@@ -1,5 +1,5 @@
 // WSK-48a (tests port) — the /v1 envelope-contract fixtures, ported from
-// webdesk/payload/test/v1-fixtures.mjs so the contract and the differential live in this package
+// webdesk/payload/test/v1-fixtures.mjs so the contract and the golden suite live in this package
 // and survive WSK-48b deleting Payload. Same SQL, same GUCs, same defaults: a raw pg client
 // connected as webdesk_migrator (NOBYPASSRLS), platform_ctx for the tenant row, tenant_ctx for
 // everything that belongs to one. Fresh random slugs/ids per call; nothing is cleaned up — the
@@ -123,10 +123,12 @@ export async function seedContentItem(
     seo?: Record<string, unknown>;
     localizationGroupId?: string;
     createdAt?: string;
+    /** Fixed id, for rows that tie on created_at: the cursor's id tie-break then orders them deterministically. */
+    id?: string;
   },
 ): Promise<{ id: string; localizationGroupId: string }> {
   return inTenant(tenant, async (c) => {
-    const id = randomUUID();
+    const id = opts.id ?? randomUUID();
     const groupId = opts.localizationGroupId ?? randomUUID();
     await c.query(
       `INSERT INTO content_items
@@ -203,7 +205,7 @@ export async function createRedirect(
     await c.query(
       `INSERT INTO content_items (tenant_id, site_id, collection_id, locale, slug, blocks, seo, publish_state)
        VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, 'published')
-       ON CONFLICT (collection_id, locale, slug) DO UPDATE SET seo = EXCLUDED.seo`,
+       ON CONFLICT (collection_id, locale, slug) WHERE deleted_at IS NULL DO UPDATE SET seo = EXCLUDED.seo`,
       [
         tenant.tenantId,
         tenant.siteId,

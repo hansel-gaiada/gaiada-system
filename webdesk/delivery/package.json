@@ -1,0 +1,6 @@
+{
+  "name": "webdesk-delivery",
+  "private": true,
+  "type": "module",
+  "description": "WebDesk's delivery vocabulary: the single source of the /v1 envelope, the block and field primitives, and their tests (WSK-D37/D38: the former webdesk/payload/vocabulary). No dependencies; see README.md."
+}

@@ -61,9 +61,9 @@ Cloudflare's edge and the origin is never directly reachable.
 ### The route target is a security decision, not a detail
 
 The route MUST target **`proxy`** — Caddy, the single listener, which already 404s `/admin`,
-`/api/*`, `/api/graphql` and `/control/*`. Pointing a tunnel route at `payload`,
-`payload-gateway` or `api` directly routes *around* that denylist and hands the internet Payload's
-admin panel. The tunnel does not bypass the proxy; it must terminate on it.
+`/api/*`, `/api/graphql` and `/control/*`. Pointing a tunnel route at `api`
+directly routes *around* that denylist (Payload's admin panel this once also exposed is gone since WSK-48b,
+but the api's `/control/*` and the rest of the denylist are not meant to be public). The tunnel does not bypass the proxy; it must terminate on it.
 
 ### Start, verify, stop
 
@@ -172,7 +172,7 @@ Run as the provider's initial root/admin access, then immediately stop using it.
 6. **Docker daemon hardening.** No `-p 0.0.0.0:...` publishes beyond `:443` on the proxy service
    — mirrors the estate's `onboard-server.md` §2.6 "never publish on 0.0.0.0" rule, restated here
    because it is exactly as easy to get wrong on a fresh box as on a monitored one. Every other
-   compose service (`payload`, `api`, `postgres`, `minio`, `redis`, `clamav`, `otel-collector`)
+   compose service (`api`, `postgres`, `minio`, `redis`, `clamav`, `otel-collector`)
    stays on the compose-internal network only, same as the dev topology in
    `webdesk/docker-compose.yml` today — this hardening step changes nothing about that shape,
    it just makes the OS firewall agree with what compose already does.

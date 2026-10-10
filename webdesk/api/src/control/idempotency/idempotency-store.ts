@@ -1,3 +1,7 @@
+// M3 T5a: no longer used by the keys, lifecycle, schema.apply or release commands (they run on
+// ./pg-idempotency-store.ts through ../command-envelope.ts). Only the promotion and privacy commands
+// still call it, until T5b moves them; everything below describes how it behaves for those two.
+//
 // WSK-21 — the idempotency mechanism the ticket AC requires: "every command double-fired must
 // produce one effect. Use a caller-supplied idempotency key."
 //

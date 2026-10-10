@@ -3,19 +3,15 @@
  * WSK-04 — the tenancy wall's consolidated cross-path probe suite.
  *
  * ONE command proving ZERO rows via EVERY access path a real request can take into Zone B's
- * tenant-scoped data (webdesk-design.md §12's WSK-04 row): raw SQL as `webdesk_app`, Payload Local
- * API, Payload REST, the `webdesk/api` service's guarded content routes, and (see "jobs path"
- * below) the jobs path. This file does not reinvent any of those probes — it runs the ones WSK-01/
+ * tenant-scoped data (webdesk-design.md §12's WSK-04 row): raw SQL as `webdesk_app` and the
+ * `webdesk/api` service's guarded content routes (WSK-48b: the Payload Local API / REST / jobs
+ * paths this suite also ran are gone with Payload). This file does not reinvent any of those probes — it runs the ones WSK-01/
  * 02/03/05 and this ticket already built and proved individually, together, with one pass/fail
  * verdict per path and one process exit code, so this is a permanent regression suite rather than
  * six scripts someone has to remember to run in the right order.
  *
  * Every check inside each path-probe still runs and still gets reported — this file does not
- * relax any of them. The one deliberate exception is documented in "condition 4" below: the
- * admin-SSR-first-paint assertion inside boot-rest-admin.test.mjs is a KNOWN, LABELED gap
- * (fails closed, root-caused, not fixed this ticket — see the ticket report), so this suite
- * asserts that failure is EXACTLY the expected one and no other, rather than either hiding it or
- * letting it permanently red the whole suite.
+ * relax any of them.
  *
  * USAGE — five connection strings, one per role/purpose (all point at the SAME database):
  *
@@ -23,10 +19,7 @@
  *                            — migrations/tests/rls.spec.sql needs SET ROLE freely, same as its
  *                            own header documents.
  *   MIGRATE_DATABASE_URL     webdesk_migrator — used by webdesk/api's test fixtures.
- *   APP_DATABASE_URL         webdesk_app — used by webdesk/api's own tests (WSK05_TEST_DATABASE_URL)
- *                            and as this file's DATABASE_URI for Payload.
- *   PAYLOAD_INTERNAL_PORT    optional, default 34401 — must be free (see this ticket's report for
- *                            which ports are already in use on this box; do not reuse them).
+ *   APP_DATABASE_URL         webdesk_app — used by webdesk/api's own tests (WSK05_TEST_DATABASE_URL).
  *
  * Run (from webdesk/):
  *   SUPERUSER_DATABASE_URL=postgres://postgres:...@localhost:PORT/webdesk \
@@ -34,11 +27,10 @@
  *   APP_DATABASE_URL=postgres://webdesk_app:...@localhost:PORT/webdesk \
  *   node scripts/wsk04-cross-path-suite.mjs
  *
- * Prerequisite: migrations/migrate.mjs (0001-0004) AND payload/scripts/setup-schema.mjs (or
- * webdesk/scripts/reapply-and-verify-rls.mjs after a push) already applied to the target database
- * — this suite tests access paths, not schema setup.
+ * Prerequisite: migrations/migrate.mjs already applied to the target database — this suite tests
+ * access paths, not schema setup.
  *
- * Exit 0 = every path's evidence matches its expected shape (including the one labeled gap).
+ * Exit 0 = every path's evidence matches its expected shape.
  * Exit 1 = a path produced evidence that does NOT match what this ticket found and reported.
  */
 import { spawnSync } from 'node:child_process';
@@ -53,7 +45,6 @@ const WEBDESK_ROOT = path.resolve(__dirname, '..');
 const SUPERUSER_DATABASE_URL = process.env.SUPERUSER_DATABASE_URL;
 const MIGRATE_DATABASE_URL = process.env.MIGRATE_DATABASE_URL;
 const APP_DATABASE_URL = process.env.APP_DATABASE_URL;
-const PAYLOAD_INTERNAL_PORT = process.env.PAYLOAD_INTERNAL_PORT || '34401';
 
 for (const [name, value] of [
   ['SUPERUSER_DATABASE_URL', SUPERUSER_DATABASE_URL],
@@ -123,83 +114,6 @@ function record(pathName, status, detail) {
 }
 
 // ------------------------------------------------------------------------------------------
-// PATH 2 — Payload Local API (payload.find/create/update, in-process, no HTTP).
-// ------------------------------------------------------------------------------------------
-{
-  const res = spawnSync(
-    process.execPath,
-    ['--import', 'tsx', path.join('test', 'boot-local-api.test.mjs')],
-    {
-      cwd: path.join(WEBDESK_ROOT, 'payload'),
-      env: { ...process.env, DATABASE_URI: APP_DATABASE_URL },
-      encoding: 'utf8',
-    },
-  );
-  const out = (res.stdout || '') + (res.stderr || '');
-  const fails = (out.match(/^\s*FAIL\s/gm) || []).length;
-  const ok = res.status === 0 && fails === 0;
-  record('Payload Local API (payload/test/boot-local-api.test.mjs)', ok ? 'PASS' : 'FAIL', out);
-}
-
-// ------------------------------------------------------------------------------------------
-// PATH 3 — Payload REST + admin SSR (spawns its own `next dev` child; slow — allow real time).
-// The admin-SSR-first-paint assertion is a KNOWN, LABELED, non-blocking gap (condition 4 — see
-// this ticket's report). Every OTHER assertion in this path, including REST's own cross-tenant
-// checks, must still pass with zero exceptions.
-// ------------------------------------------------------------------------------------------
-{
-  const res = spawnSync(
-    process.execPath,
-    ['--import', 'tsx', path.join('test', 'boot-rest-admin.test.mjs')],
-    {
-      cwd: path.join(WEBDESK_ROOT, 'payload'),
-      env: { ...process.env, DATABASE_URI: APP_DATABASE_URL, PAYLOAD_INTERNAL_PORT },
-      encoding: 'utf8',
-      timeout: 180_000,
-    },
-  );
-  const out = (res.stdout || '') + (res.stderr || '');
-  const failLines = (out.match(/^\s*FAIL\s.*$/gm) || []);
-  const KNOWN_GAP_MARKER = 'admin SSR first paint shows the row just created via REST for tenant A';
-  const unexpectedFails = failLines.filter((l) => !l.includes(KNOWN_GAP_MARKER));
-
-  if (unexpectedFails.length > 0) {
-    record('Payload REST + admin SSR (payload/test/boot-rest-admin.test.mjs)', 'FAIL', `Unexpected failures:\n${unexpectedFails.join('\n')}\n\nFull output:\n${out}`);
-  } else if (failLines.length === 1) {
-    record(
-      'Payload REST (clean) + Payload admin SSR first paint (condition 4)',
-      'LABELED-GAP',
-      'REST: all cross-tenant/fail-closed assertions PASS. Admin SSR first paint: KNOWN gap, ' +
-        'fails CLOSED (renders zero rows for every tenant, never leaks) — root-caused to a ' +
-        "Next.js App Router internal (see this ticket's report, condition 4). Left labelled, " +
-        'not fixed, per this ticket\'s explicit permission to do so.\n' + out,
-    );
-  } else {
-    // failLines.length === 0 would mean condition 4 got closed — good news, not a failure.
-    record('Payload REST + admin SSR (payload/test/boot-rest-admin.test.mjs)', 'PASS', `All assertions pass, INCLUDING the previously-known admin-SSR gap — condition 4 may now be closed; verify before updating this suite's KNOWN_GAP_MARKER expectation.\n${out}`);
-  }
-}
-
-// ------------------------------------------------------------------------------------------
-// PATH 2b/3b (condition 2) — the pool-subclass pin, on the same live Payload instance.
-// ------------------------------------------------------------------------------------------
-{
-  const res = spawnSync(
-    process.execPath,
-    ['--import', 'tsx', path.join('test', 'wsk04-pool-subclass-pin.test.mjs')],
-    {
-      cwd: path.join(WEBDESK_ROOT, 'payload'),
-      env: { ...process.env, DATABASE_URI: APP_DATABASE_URL },
-      encoding: 'utf8',
-    },
-  );
-  const out = (res.stdout || '') + (res.stderr || '');
-  const fails = (out.match(/^\s*FAIL\s/gm) || []).length;
-  const ok = res.status === 0 && fails === 0;
-  record('Payload pool-subclass pin — condition 2 (payload/test/wsk04-pool-subclass-pin.test.mjs)', ok ? 'PASS' : 'FAIL', out);
-}
-
-// ------------------------------------------------------------------------------------------
 // PATH 4 — webdesk/api's guarded content routes (real HTTP via Fastify inject, real Postgres).
 //
 // Deliberately an EXPLICIT file list, not a bare `vitest run` of the whole `test/` directory.
@@ -236,26 +150,11 @@ function record(pathName, status, detail) {
 }
 
 // ------------------------------------------------------------------------------------------
-// PATH 5 — jobs. NOT WIRED into the real webdesk/payload service today: `payload.config.ts` (out
-// of this ticket's scope to edit — another worker owns it right now) has no `jobs` block, so
-// there is no jobs collection/task to drive on the real service. WSK-00's spike DID prove the
-// mechanism at the pool level (FINDINGS.md P11, 2/2: a task that re-threads tenant context from
-// job.input sees only its own rows; a task that omits this fails closed). That evidence is prior,
-// frozen, and out of this ticket's scope to re-run (spike-rls is read-only and its port 55432 is
-// another worker's). Recorded here as an explicit, honest gap, not silently skipped.
+// (WSK-48b) The Payload paths this suite used to run -- Payload Local API, Payload REST + admin SSR,
+// the pool-subclass pin, and the jobs path -- went with Payload (rulings WSK-D37/D38). What remains
+// is every path a request can take into Zone B's tenant data today: raw SQL, the api's guarded
+// content routes, and the RLS-integrity gate.
 // ------------------------------------------------------------------------------------------
-record(
-  'jobs / queue path',
-  'SKIPPED',
-  'webdesk/payload/payload.config.ts has no `jobs` config today — out of this ticket\'s scope to ' +
-    'add (payload.config.ts is frozen for this ticket; another worker owns it). The underlying ' +
-    'mechanism jobs would rely on (the SAME TenantAwarePool, proven by condition 2\'s pin test ' +
-    'above to be genuinely on Payload\'s connection path) is not path-specific, so the residual ' +
-    'risk is purely "does the future jobs task handler re-thread tenant context from job.input," ' +
-    'an app-code responsibility for whoever wires jobs, not a gap in this suite\'s mechanism. ' +
-    'WSK-00\'s frozen spike (FINDINGS.md P11, 2/2) is the prior evidence for the pattern. ' +
-    'Reported as a required payload.config.ts change, not applied.',
-);
 
 // ------------------------------------------------------------------------------------------
 // Condition 1 — the RLS-integrity gate itself, as part of one command covering the whole wall.

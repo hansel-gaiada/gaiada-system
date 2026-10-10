@@ -10,7 +10,7 @@ live (no running proxy container in this session — see §3 for what was and wa
 ## 1. What the status page is, and is not
 
 **Is:** a small, public, static page reporting Zone B's **own** service health — proxy reachable,
-api reachable, payload-gateway reachable, database reachable, queue reachable — refreshed on an
+api reachable, database reachable, queue reachable — refreshed on an
 interval. Modeled on the ordinary "status.example.com" pattern: no auth, no secrets, safe to be
 public by design, because it says only "up/down/degraded" per component, never *why* in operator
 detail.
@@ -27,7 +27,7 @@ relaxation of an existing one.
 ## 2. Design
 
 - **Generator** (`webdesk/ops/scripts/gen-status-page.mjs`): polls each Zone B service's own
-  `/healthz` (proxy already serves one; `api`/`payload-gateway` will once WSK-06/21 land real
+  `/healthz` (proxy already serves one; `api` will once WSK-06/21 land real
   ones — until then the generator degrades a target to `unknown` rather than fabricating `up`,
   per the estate's "an empty list is a claim" discipline: a probe that can't reach its target
   reports that honestly, it does not default to green). Writes `status.json` (machine-readable)

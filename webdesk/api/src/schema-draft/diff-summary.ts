@@ -1,5 +1,5 @@
 // WSK-32 — the human-readable diff a WS4 reviewer approves. Deliberately a NARROWER, purpose-built
-// diff rather than a reuse of WSK-14's `classifyTenantContractChange` (payload/vocabulary/
+// diff rather than a reuse of WSK-14's `classifyTenantContractChange` (delivery/vocabulary/
 // breaking-change.ts): that classifier cannot be imported here for the same commonjs/ESM-.ts
 // boundary reason documented in ./vocabulary-vendor.ts's header, and vendoring its full ~150-line
 // MAJOR/MINOR/PATCH machinery (three axes, vocabulary-change propagation, renderer diffs — none of

@@ -1,5 +1,5 @@
 <?php
-// VENDORED — copied from webdesk/payload/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (WSK-06/
+// VENDORED — copied from webdesk/delivery/vocabulary/blocks.ts's BLOCK_TYPE_NAMES (WSK-06/
 // WSK-14, frozen per webdesk-design.md §05). DO NOT HAND-EDIT.
 //
 // PHP cannot import a TypeScript module, so this is a vendored copy of the NAME LIST only

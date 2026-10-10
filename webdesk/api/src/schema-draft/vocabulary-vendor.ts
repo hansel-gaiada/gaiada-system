@@ -1,7 +1,7 @@
 // WSK-32 — the vocabulary constants + Layer-2 composition validator the AI drafting flow checks
-// every proposal against (webdesk/payload/vocabulary/{primitives,blocks,composition,version}.ts).
+// every proposal against (webdesk/delivery/vocabulary/{primitives,blocks,composition,version}.ts).
 //
-// Why not a direct import of webdesk/payload/vocabulary: webdesk/api/src/codegen/contract-manifest.types.ts
+// Why not a direct import of webdesk/delivery/vocabulary: webdesk/api/src/codegen/contract-manifest.types.ts
 // documents the constraint — the NestJS api is plain commonjs, compiled by `tsc -p tsconfig.json`,
 // and the vocabulary files use ESM `.ts`-extension relative imports among themselves, which `tsc`
 // under `"module": "commonjs"` cannot resolve without `allowImportingTsExtensions` (a flag that

@@ -54,6 +54,7 @@ import {
   type ContentInput,
 } from "./content-projection";
 import { extractSearchText } from "./search-text";
+import { attributionOf, insertContentVersion, nextVersionNumber } from "./content-versions";
 import { lintPlaceholders, type LintReport } from "./content-lint";
 import { ControlProblem, problems, type ProblemIssue } from "./content-problem";
 
@@ -205,14 +206,6 @@ function toState(row: Pick<ItemRow, Exclude<keyof ItemRow, "composition" | "bloc
   };
 }
 
-function attributionOf(p: EditorialPrincipal): Record<string, string> {
-  const a: Record<string, string> = { pk: p.pk };
-  if (p.agt) a.agt = p.agt;
-  if (p.req) a.req = p.req;
-  if (p.apr) a.apr = p.apr;
-  return a;
-}
-
 function compositionOf(collectionKey: string, raw: unknown): CollectionComposition {
   const v = validateCollectionComposition(collectionKey, raw);
   if (!v.valid) {
@@ -226,8 +219,13 @@ function compositionOf(collectionKey: string, raw: unknown): CollectionCompositi
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Translates the database's own backstops into the documented problems (design §3.4). */
-function mapDbError(err: unknown): unknown {
+/**
+ * Translates the database's own backstops into the documented problems (design §3.4). Exported so a
+ * spec can pin the constraint names: 0010 (WSK-D51) replaced the table-wide UNIQUE
+ * `content_items_collection_id_locale_slug_key` with the partial unique index
+ * `ux_content_items_slug_live` (live rows only), so only the new name can ever arrive here.
+ */
+export function mapDbError(err: unknown): unknown {
   const e = err as { code?: string; constraint?: string };
   if (e?.code !== "23505") return err;
   switch (e.constraint) {
@@ -238,7 +236,7 @@ function mapDbError(err: unknown): unknown {
         "WS4 approval already used",
         "This WS4 approval has already authorised a command; an approval is single-use. Nothing was changed.",
       );
-    case "content_items_collection_id_locale_slug_key":
+    case "ux_content_items_slug_live":
       return problems.conflict("slug-taken", "Slug taken", "An item with this slug already exists in this collection and locale.");
     case "ux_content_items_group_locale":
       return problems.conflict("twin-locale-taken", "Twin locale taken", "The localization group already has a live item in this locale.");
@@ -416,28 +414,18 @@ export class ContentCommandsService {
   private async adopt(client: PoolClient, ctx: EditorialCommandContext, item: ItemRow): Promise<ItemRow> {
     if (item.head_version > 0) return item;
     const seo = item.seo ?? {};
-    const { rows: maxRows } = await client.query<{ next: number }>(
-      `SELECT COALESCE(MAX(version), 0) + 1 AS next FROM content_versions WHERE content_item_id = $1`,
-      [item.id],
-    );
-    const v = maxRows[0].next;
-    await client.query(
-      `INSERT INTO content_versions
-         (tenant_id, content_item_id, version, blocks, seo, publish_state, created_by, content_hash, note, attribution)
-       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10::jsonb)`,
-      [
-        ctx.tenant.id,
-        item.id,
-        v,
-        JSON.stringify(item.blocks ?? []),
-        JSON.stringify(seo),
-        item.publish_state,
-        ctx.principal.sub,
-        contentHash(item.blocks ?? [], seo),
-        "adopted: the projection as it stood before the write plane",
-        JSON.stringify(attributionOf(ctx.principal)),
-      ],
-    );
+    const v = await nextVersionNumber(client, item.id);
+    await insertContentVersion(client, {
+      tenantId: ctx.tenant.id,
+      itemId: item.id,
+      version: v,
+      blocks: item.blocks ?? [],
+      seo,
+      publishState: item.publish_state,
+      createdBy: ctx.principal.sub,
+      note: "adopted: the projection as it stood before the write plane",
+      attribution: attributionOf(ctx.principal),
+    });
     const isPublishedState = item.publish_state === "published" || item.publish_state === "scheduled";
     await client.query(
       `UPDATE content_items SET head_version = $2, published_version = $3 WHERE id = $1`,
@@ -459,14 +447,17 @@ export class ContentCommandsService {
     note: string | undefined,
   ): Promise<{ state: ItemState; version: VersionRef }> {
     const v = item.head_version + 1;
-    const hash = contentHash(blocks, seo);
-    const { rows: vrows } = await client.query<{ created_at: Date }>(
-      `INSERT INTO content_versions
-         (tenant_id, content_item_id, version, blocks, seo, publish_state, created_by, content_hash, note, attribution)
-       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'draft', $6, $7, $8, $9::jsonb)
-       RETURNING created_at`,
-      [ctx.tenant.id, item.id, v, JSON.stringify(blocks), JSON.stringify(seo), ctx.principal.sub, hash, note ?? null, JSON.stringify(attributionOf(ctx.principal))],
-    );
+    const stored = await insertContentVersion(client, {
+      tenantId: ctx.tenant.id,
+      itemId: item.id,
+      version: v,
+      blocks,
+      seo,
+      publishState: "draft",
+      createdBy: ctx.principal.sub,
+      note: note ?? null,
+      attribution: attributionOf(ctx.principal),
+    });
     const { rows } = await client.query<ItemRow>(
       `UPDATE content_items ci SET
           head_version = $2,
@@ -480,7 +471,7 @@ export class ContentCommandsService {
     );
     return {
       state: toState({ ...rows[0], collection_key: item.collection_key }),
-      version: { version: v, contentHash: hash, createdAt: iso(vrows[0].created_at) as string },
+      version: { version: v, contentHash: stored.contentHash, createdAt: iso(stored.createdAt) as string },
     };
   }
 
@@ -597,7 +588,9 @@ export class ContentCommandsService {
           }
         }
         const { rows: slugRows } = await client.query(
-          `SELECT 1 FROM content_items WHERE collection_id = $1 AND locale = $2 AND slug = $3`,
+          // Live rows only (WSK-D51): a soft-deleted item releases its slug, exactly as
+          // ux_content_items_slug_live (0010) does. The index stays the race-proof backstop.
+          `SELECT 1 FROM content_items WHERE collection_id = $1 AND locale = $2 AND slug = $3 AND deleted_at IS NULL`,
           [col.id, input.locale, input.slug],
         );
         if (slugRows.length > 0) {
@@ -625,7 +618,6 @@ export class ContentCommandsService {
         }
 
         // -- effect --------------------------------------------------------------------------------
-        const hash = contentHash(assembled.blocks, assembled.seo);
         const { rows } = await client.query<ItemRow>(
           `INSERT INTO content_items AS ci
              (id, tenant_id, site_id, collection_id, locale, slug, localization_group_id, blocks, seo,
@@ -634,18 +626,22 @@ export class ContentCommandsService {
            RETURNING ${ITEM_COLUMNS}`,
           [itemId, ctx.tenant.id, ctx.siteId, col.id, input.locale, input.slug, groupId, JSON.stringify(assembled.blocks), JSON.stringify(assembled.seo), extractSearchText(assembled.blocks)],
         );
-        const { rows: vrows } = await client.query<{ created_at: Date }>(
-          `INSERT INTO content_versions
-             (tenant_id, content_item_id, version, blocks, seo, publish_state, created_by, content_hash, note, attribution)
-           VALUES ($1, $2, 1, $3::jsonb, $4::jsonb, 'draft', $5, $6, $7, $8::jsonb)
-           RETURNING created_at`,
-          [ctx.tenant.id, itemId, JSON.stringify(assembled.blocks), JSON.stringify(assembled.seo), ctx.principal.sub, hash, input.note ?? null, JSON.stringify(attributionOf(ctx.principal))],
-        );
+        const stored = await insertContentVersion(client, {
+          tenantId: ctx.tenant.id,
+          itemId,
+          version: 1,
+          blocks: assembled.blocks,
+          seo: assembled.seo,
+          publishState: "draft",
+          createdBy: ctx.principal.sub,
+          note: input.note ?? null,
+          attribution: attributionOf(ctx.principal),
+        });
         const lint = await this.lint(client, ctx, composition, assembled.blocks, input.locale);
         return {
           result: {
             item: toState({ ...rows[0], collection_key: col.key }),
-            version: { version: 1, contentHash: hash, createdAt: iso(vrows[0].created_at) as string },
+            version: { version: 1, contentHash: stored.contentHash, createdAt: iso(stored.createdAt) as string },
             unchanged: false,
             lint,
           },

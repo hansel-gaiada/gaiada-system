@@ -10,7 +10,7 @@
 # =============================================================================================
 # WHY AN OVERLAY, AND WHY `!reset` ON EVERY `ports:`
 # =============================================================================================
-# The base file is a DEV skeleton: `payload`, `payload-gateway`, `api` and `worker` run
+# The base file is a DEV skeleton: `api` and `worker` run
 # `echo … && sleep infinity` on a bare node image, and every backing service PUBLISHES a host
 # port on 0.0.0.0. Both are wrong here, and the second is dangerous:
 #
@@ -38,17 +38,16 @@
 # TOPOLOGY THIS ENFORCES
 # =============================================================================================
 #   127.0.0.1:8380 -> proxy (Caddy)
-#                       |- /v1     -> payload-gateway   (public read path, WSK-D24)
+#                       |- /v1     -> api               (public read path, the delivery module)
 #                       |- /forms  -> api
 #                       |- /media  -> api
 #                       |- /healthz
 #                       `- 404: /admin* /api/* /control/*
 #
 #   private compose network, NO host ports at all:
-#     postgres  redis  rustfs  payload (admin/internal)  payload-gateway  api
+#     postgres  redis  rustfs  api
 #
-# Payload's admin panel is reachable ONLY from inside the Docker network — i.e. over an SSH
-# tunnel. That is design D-5 / WSK-D20 ("Payload admin is never public").
+# (Payload's admin panel, once reachable over an SSH tunnel, is gone: WSK-48b deleted the app.)
 #
 # NOTHING is published to the internet by this file. Exposing Zone B publicly needs a vhost on
 # the box's existing web listener plus a TLS decision, and that is a separate, deliberate step.
@@ -79,23 +78,8 @@ services:
       resources:
         limits: { cpus: "0.50", memory: 256M }
 
-  # --- Payload: admin + authoring ONLY. Not the read path (WSK-D24). ----------------------------
-  payload:
-    profiles: !reset []
-    image: !reset null
-    build:
-      context: ./payload
-      dockerfile: Dockerfile
-    command: !override ["node", "server.js"]
-    environment:
-      PORT: "3000"
-      NODE_ENV: production
-    ports: !reset []
-    deploy:
-      resources:
-        limits: { cpus: "1.00", memory: 1024M }
-
-  # --- payload-gateway: RETIRED by WSK-48a (/v1 is served by the api's `delivery` module) ---
+  # --- payload and payload-gateway: RETIRED (WSK-48a: /v1 is served by the api's `delivery` module;
+  # --- WSK-48b: the Payload app and its `payload` service are deleted, WSK-D37) ---
 
   # --- forms · mail · media · control plane -----------------------------------------------------
   api:
@@ -218,8 +202,8 @@ services:
   #
   # The tunnel's public hostname must map to `http://proxy:80` — that is Caddy, the one listener,
   # which already 404s /admin, /api/*, /api/graphql and /control/*. The tunnel does NOT bypass it.
-  # Never point a tunnel route at `payload`, `payload-gateway` or `api` directly: that would route
-  # around the denylist and hand the internet Payload's admin panel.
+  # Never point a tunnel route at `api` directly: that would route around the proxy's denylist
+  # (/admin, /api/*, /control/*).
   cloudflared:
     image: cloudflare/cloudflared:latest
     profiles: ["public"]

@@ -6,7 +6,7 @@
 // `codegen-double-run-gate.spec.ts` + this ticket's report (verbatim transcript).
 import { describe, expect, it } from "vitest";
 import { buildContractArtifacts } from "../src/codegen/generator/build-artifacts.mts";
-import type { TenantComposition } from "../../payload/vocabulary/composition.ts";
+import type { TenantComposition } from "../../delivery/vocabulary/composition.ts";
 
 const composition: TenantComposition = {
   "case-study": { blocks: ["hero", "richText", "testimonial"] },

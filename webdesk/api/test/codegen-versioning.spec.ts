@@ -1,11 +1,11 @@
 // WSK-15 — proves `computeNextContractVersion`/`toContractSnapshot` do not reimplement any
 // version-bump rule of their own: they only adapt shapes and call straight through to WSK-14's
-// OWN `classifyTenantContractChange`/`bumpVersion` (webdesk/payload/vocabulary/breaking-change.ts,
+// OWN `classifyTenantContractChange`/`bumpVersion` (webdesk/delivery/vocabulary/breaking-change.ts,
 // frozen/DEV-VERIFIED). No DB/storage — pure.
 import { describe, expect, it } from "vitest";
 import { computeNextContractVersion, toContractSnapshot } from "../src/codegen/generator/versioning.mts";
-import type { TenantComposition } from "../../payload/vocabulary/composition.ts";
-import { classifyTenantContractChange } from "../../payload/vocabulary/breaking-change.ts";
+import type { TenantComposition } from "../../delivery/vocabulary/composition.ts";
+import { classifyTenantContractChange } from "../../delivery/vocabulary/breaking-change.ts";
 
 describe("versioning — first generation", () => {
   it("with no previous state, always lands on 1.0.0", () => {

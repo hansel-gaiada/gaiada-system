@@ -17,7 +17,7 @@ import pg from "pg";
 import { fetchTenantComposition } from "./fetch-composition.mts";
 import { buildContractArtifacts } from "./build-artifacts.mts";
 import { createGeneratorStorageAdapter, readLatestPointer, publishArtifacts } from "./storage-io.mts";
-import type { TenantContractSnapshot } from "../../../../payload/vocabulary/breaking-change.ts";
+import type { TenantContractSnapshot } from "../../../../delivery/vocabulary/breaking-change.ts";
 // Resolved via `cjs-interop.mts` — see storage-io.mts's header comment for why (the `tsx` vs
 // `vitest`/Vite CJS/ESM interop mismatch across the module-system boundary this ticket straddles).
 import type * as ZoneBEventEmitterNs from "../../events/zoneb-event-emitter.service";

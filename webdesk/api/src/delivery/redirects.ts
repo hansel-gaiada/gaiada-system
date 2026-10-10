@@ -1,6 +1,6 @@
 // webdesk/api/src/delivery/redirects.ts
 //
-// WSK-48a — the READ half of webdesk/payload/collections/redirects.ts (WSK-06), moved verbatim: the
+// WSK-48a — the READ half of webdesk/payload/collections/redirects.ts (WSK-06; deleted in WSK-48b), moved verbatim: the
 // sitemap.xml renderer and the fixed redirect collection's key. The WRITE half
 // (ensureRedirectCollection / createRedirect / listRedirects) is deliberately NOT moved: nothing on
 // the /v1 read path calls it (it only exists for the envelope-contract test's seeding), and

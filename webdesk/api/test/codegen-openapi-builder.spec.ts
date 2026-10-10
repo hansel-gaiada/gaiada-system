@@ -1,5 +1,5 @@
 // WSK-15 — unit coverage for `buildOpenApiDocument` (pure, no DB/storage). Proves the document
-// (a) validates structurally, (b) describes the REAL routes `webdesk/payload/collections/router.ts`
+// (a) validates structurally, (b) describes the REAL routes `webdesk/api/src/delivery/router.ts`
 // serves (design §06's AC: "describe exactly what these routes actually return"), and (c) honours
 // composition.ts's own documented interpretation of the `blocks` axis (absent = unrestricted,
 // present-including-empty = a closed set) plus the renderer invariant (an unknown block type is
