@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████░░░░░░░░░░░░░░░░░░` **39%** · 67/170<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████░░░░░░░░░░░░░░░░░░` **41%** · 71/171<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████████░░░░░░░` **66%** · 57/86<!-- /bar -->
+<!-- bar -->🟡 `██████████████░░░░░░` **70%** · 61/87<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -153,11 +153,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Refuses human principals; imports no publish/unpublish/delete function
 - [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1`
 
-### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] Two git builds of one commit give an identical `dist/` (determinism first)
-- [ ] Source parity on all 315 files
-- [ ] `dist/` parity: empty diff in default and preview-held modes
-- [ ] The site's own gates pass; negative control (one FAQ edit → exactly one page differs)
+### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **80%** · 4/5<!-- /bar -->
+- [x] Two git builds of one commit give an identical `dist/` (determinism first) — 303 files, 0 differ
+- [x] Source parity on all 315 files (Astro's parser; globals byte-identical; site `webdesk-parity` @ `b49b40a`)
+- [x] `dist/` parity, default mode: 302 files, 0 differ
+- [ ] `dist/` parity, preview-held mode — BLOCKED by a pre-existing site route bug (since `cef4b5b`, the git build fails too); 0 differ with a 2-file route patch in the gate only. Site owner to fix
+- [x] The site's own gates pass; negative control (one FAQ edit → exactly one page differs: `services/seo/index.html`)
 
 ### WSK-58 · Linux gate for the proof's suites <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
 - [ ] `webdesk/api`, `webdesk/blocks`, `webdesk` root and vocabulary suites green on sumopod after every merge

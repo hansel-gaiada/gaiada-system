@@ -130,3 +130,17 @@ an idempotent re-run applied 0, RLS integrity OK on 20 tables, `/v1` unchanged (
 tenant). Backup `~/webdesk-backups/20261010T051357Z`. WSK-63b (ERP egress client) merged. Its live probe
 needs the platform image that carries it, so it waits for the first release.
 
+**2026-10-10, WSK-55: the delivery half is proven against a dev stack.** In default mode, gaiada.com built from
+WebDesk's `/v1` matches the git build exactly: 302 files, 0 differ. Source parity is 315/315 under Astro's own
+parser, and the globals are byte-identical. The site's gates pass. The negative control holds: one FAQ edit in
+WebDesk changes exactly `services/seo/index.html`. The work is on the site repo's `webdesk-parity` branch
+(`b49b40a`, not pushed). A live run changes only `WEBDESK_API_URL` and the read key.
+
+**Two findings.** (1) The site's preview-held build has failed since `cef4b5b`, from git too:
+`/about/[...slug]` refuses the held `/about/team/<role>/` standard pages. A 2-file route patch, used only
+inside the gate, makes preview parity 0-diff as well. The fix belongs to the site owner (gaiada-web-revamp);
+the candidate patch is in the scratchpad `gate55/pvpatch/`. (2) `pages.json`'s derived counts come from a
+content-package generator that is not in the repo, and the bodies have changed since it ran. They therefore
+travel as a read-only `manifest` group on each page and cannot be regenerated. `/v1` does not serve
+compositions, so the pull reads the content model from git.
+
