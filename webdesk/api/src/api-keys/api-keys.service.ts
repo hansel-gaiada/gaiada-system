@@ -3,6 +3,7 @@
 // call and is returned to the caller ONCE; nothing in this file logs it, and the only thing that
 // ever reaches the database is its sha256(+pepper) hash (crypto/api-key-hash.ts).
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
@@ -43,108 +44,126 @@ export class ApiKeysService {
 
   async mint(tenantId: string, envId: string, scope: ApiKeyScope, actor: string): Promise<MintedApiKey> {
     return this.db.withTenant(tenantId, async (db) =>
-      db.transaction(async (client) => {
-        const env = await loadEnvironment(client, tenantId, envId);
-        if (!env) throw new NotFoundException("environment not found for this tenant");
-
-        const plaintext = generateApiKey();
-        const keyHash = hashApiKey(plaintext, config.apiKeyPepper);
-
-        const { rows } = await client.query<{ id: string; created_at: string }>(
-          `INSERT INTO api_keys (env_id, tenant_id, key_hash, scope)
-           VALUES ($1, $2, $3, $4)
-           RETURNING id, created_at`,
-          [envId, tenantId, keyHash, scope],
-        );
-
-        await this.audit.record(client, {
-          tenantId,
-          actor,
-          action: "webdesk.apiKey.mint",
-          args: { envId, scope, apiKeyId: rows[0].id },
-        });
-
-        return {
-          id: rows[0].id,
-          key: plaintext,
-          scope,
-          envId,
-          tenantId,
-          createdAt: rows[0].created_at,
-        };
-      }),
+      db.transaction((client) => this.mintInTx(client, { tenantId, envId, scope, actor })),
     );
+  }
+
+  /**
+   * mint() on a caller-supplied transaction (M3 T5a: the control-plane command envelope runs the
+   * effect inside ITS transaction, so a HIGH command's approval claim, this write and the idempotent
+   * replay record commit together). `client` must already carry the tenant context. `id` lets the
+   * caller fix the key's id before the write, so an audit row written first can name it.
+   */
+  async mintInTx(
+    client: PoolClient,
+    input: { tenantId: string; envId: string; scope: ApiKeyScope; actor: string; id?: string },
+  ): Promise<MintedApiKey> {
+    const { tenantId, envId, scope, actor } = input;
+    const env = await loadEnvironment(client, tenantId, envId);
+    if (!env) throw new NotFoundException("environment not found for this tenant");
+
+    const plaintext = generateApiKey();
+    const keyHash = hashApiKey(plaintext, config.apiKeyPepper);
+
+    const { rows } = await client.query<{ id: string; created_at: string }>(
+      `INSERT INTO api_keys (id, env_id, tenant_id, key_hash, scope)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, created_at`,
+      [input.id ?? randomUUID(), envId, tenantId, keyHash, scope],
+    );
+
+    await this.audit.record(client, {
+      tenantId,
+      actor,
+      action: "webdesk.apiKey.mint",
+      args: { envId, scope, apiKeyId: rows[0].id },
+    });
+
+    return {
+      id: rows[0].id,
+      key: plaintext,
+      scope,
+      envId,
+      tenantId,
+      createdAt: rows[0].created_at,
+    };
   }
 
   /** Rotate replaces the secret material in place — same row id, same scope/env, new hash. */
   async rotate(tenantId: string, apiKeyId: string, actor: string): Promise<MintedApiKey> {
     return this.db.withTenant(tenantId, async (db) =>
-      db.transaction(async (client) => {
-        const { rows: existingRows } = await client.query<{ id: string; env_id: string; scope: ApiKeyScope; revoked_at: string | null }>(
-          `SELECT id, env_id, scope, revoked_at FROM api_keys WHERE id = $1 AND tenant_id = $2`,
-          [apiKeyId, tenantId],
-        );
-        const existing = existingRows[0];
-        if (!existing) throw new NotFoundException("api key not found for this tenant");
-        if (existing.revoked_at) throw new NotFoundException("api key is revoked — cannot rotate a revoked key");
-
-        const plaintext = generateApiKey();
-        const keyHash = hashApiKey(plaintext, config.apiKeyPepper);
-
-        const { rows } = await client.query<{ created_at: string }>(
-          `UPDATE api_keys SET key_hash = $1 WHERE id = $2 AND tenant_id = $3 RETURNING created_at`,
-          [keyHash, apiKeyId, tenantId],
-        );
-
-        await this.audit.record(client, {
-          tenantId,
-          actor,
-          action: "webdesk.apiKey.rotate",
-          args: { apiKeyId },
-        });
-
-        return {
-          id: apiKeyId,
-          key: plaintext,
-          scope: existing.scope,
-          envId: existing.env_id,
-          tenantId,
-          createdAt: rows[0].created_at,
-        };
-      }),
+      db.transaction((client) => this.rotateInTx(client, tenantId, apiKeyId, actor)),
     );
+  }
+
+  /** rotate() on a caller-supplied transaction; see mintInTx. */
+  async rotateInTx(client: PoolClient, tenantId: string, apiKeyId: string, actor: string): Promise<MintedApiKey> {
+    const { rows: existingRows } = await client.query<{ id: string; env_id: string; scope: ApiKeyScope; revoked_at: string | null }>(
+      `SELECT id, env_id, scope, revoked_at FROM api_keys WHERE id = $1 AND tenant_id = $2`,
+      [apiKeyId, tenantId],
+    );
+    const existing = existingRows[0];
+    if (!existing) throw new NotFoundException("api key not found for this tenant");
+    if (existing.revoked_at) throw new NotFoundException("api key is revoked — cannot rotate a revoked key");
+
+    const plaintext = generateApiKey();
+    const keyHash = hashApiKey(plaintext, config.apiKeyPepper);
+
+    const { rows } = await client.query<{ created_at: string }>(
+      `UPDATE api_keys SET key_hash = $1 WHERE id = $2 AND tenant_id = $3 RETURNING created_at`,
+      [keyHash, apiKeyId, tenantId],
+    );
+
+    await this.audit.record(client, {
+      tenantId,
+      actor,
+      action: "webdesk.apiKey.rotate",
+      args: { apiKeyId },
+    });
+
+    return {
+      id: apiKeyId,
+      key: plaintext,
+      scope: existing.scope,
+      envId: existing.env_id,
+      tenantId,
+      createdAt: rows[0].created_at,
+    };
   }
 
   async revoke(tenantId: string, apiKeyId: string, actor: string): Promise<{ id: string; revokedAt: string }> {
     return this.db.withTenant(tenantId, async (db) =>
-      db.transaction(async (client) => {
-        const { rows } = await client.query<{ id: string; revoked_at: string }>(
-          `UPDATE api_keys SET revoked_at = now()
-             WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL
-             RETURNING id, revoked_at`,
-          [apiKeyId, tenantId],
-        );
-        if (!rows[0]) {
-          // Either it never existed for this tenant, or it was already revoked — both refuse the
-          // same way (no information about which, and no "un-revoking" via double-call).
-          const { rows: check } = await client.query(`SELECT 1 FROM api_keys WHERE id = $1 AND tenant_id = $2`, [
-            apiKeyId,
-            tenantId,
-          ]);
-          if (!check[0]) throw new NotFoundException("api key not found for this tenant");
-          throw new NotFoundException("api key is already revoked");
-        }
-
-        await this.audit.record(client, {
-          tenantId,
-          actor,
-          action: "webdesk.apiKey.revoke",
-          args: { apiKeyId },
-        });
-
-        return { id: rows[0].id, revokedAt: rows[0].revoked_at };
-      }),
+      db.transaction((client) => this.revokeInTx(client, tenantId, apiKeyId, actor)),
     );
+  }
+
+  /** revoke() on a caller-supplied transaction; see mintInTx. */
+  async revokeInTx(client: PoolClient, tenantId: string, apiKeyId: string, actor: string): Promise<{ id: string; revokedAt: string }> {
+    const { rows } = await client.query<{ id: string; revoked_at: string }>(
+      `UPDATE api_keys SET revoked_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+         RETURNING id, revoked_at`,
+      [apiKeyId, tenantId],
+    );
+    if (!rows[0]) {
+      // Either it never existed for this tenant, or it was already revoked — both refuse the
+      // same way (no information about which, and no "un-revoking" via double-call).
+      const { rows: check } = await client.query(`SELECT 1 FROM api_keys WHERE id = $1 AND tenant_id = $2`, [
+        apiKeyId,
+        tenantId,
+      ]);
+      if (!check[0]) throw new NotFoundException("api key not found for this tenant");
+      throw new NotFoundException("api key is already revoked");
+    }
+
+    await this.audit.record(client, {
+      tenantId,
+      actor,
+      action: "webdesk.apiKey.revoke",
+      args: { apiKeyId },
+    });
+
+    return { id: rows[0].id, revokedAt: rows[0].revoked_at };
   }
 
   /**

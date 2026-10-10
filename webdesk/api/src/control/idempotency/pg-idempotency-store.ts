@@ -1,6 +1,7 @@
 // WSK-41 — the DURABLE idempotency store (migration 0009's control_idempotency_keys), replacing the
-// in-memory IdempotencyStore for the content commands (write-plane design §3.3). The older commands
-// keep ./idempotency-store.ts until they are moved over; nothing here changes them.
+// in-memory IdempotencyStore for the content commands (write-plane design §3.3). M3 T5a moved the
+// keys, lifecycle, schema.apply and release commands onto it too, through command-envelope.ts. Only
+// the promotion and privacy commands still use ./idempotency-store.ts (T5b moves them).
 //
 // LIFECYCLE (per scope key):
 //   begin()    — claims the key in its OWN short committed transaction: a row with status
