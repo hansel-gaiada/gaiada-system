@@ -48,7 +48,8 @@ import { PgIdempotencyStore } from "./idempotency/pg-idempotency-store";
 import { EDITORIAL_PRINCIPAL_RESOLVER } from "./auth/editorial-principal";
 import { EditorialAssertionGuard } from "./auth/editorial-assertion.guard";
 import { DevModeEditorialPrincipalResolver } from "./auth/dev-mode-editorial-principal-resolver";
-import { NotConfiguredEditorialPrincipalResolver } from "./auth/not-configured-editorial-principal-resolver";
+// WSK-40 — the real Ed25519 editorial assertion verifier (pinned JWKS file + jti replay store).
+import { RealEditorialPrincipalResolver } from "./auth/real-editorial-principal-resolver";
 import { ContentCommandsService } from "./content/content-commands.service";
 import { ContentCommandsController } from "./content/content-commands.controller";
 // WSK-51 — the editor's live read commands (design §4): tenant.list + the content reads.
@@ -98,10 +99,11 @@ const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicy
 // WSK-41 — the editorial principal (Layer 2e, write-plane design §5). Same environment-conditional
 // pattern as the two bindings above: the dev-mode header stub under NODE_ENV=test, and everywhere
 // else a resolver that refuses every content write with 503 editorial-keys-not-configured, because
-// there is nothing to verify an assertion against until WSK-40 lands. WSK-40 SWAPS THE NEXT LINE
-// ONLY (NotConfiguredEditorialPrincipalResolver -> its real Ed25519 verifier); nothing else in this
-// file needs to change for it.
-const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevModeEditorialPrincipalResolver : NotConfiguredEditorialPrincipalResolver;
+// there is nothing to verify an assertion against until WSK-40 lands. WSK-40 SWAPPED THE NEXT LINE
+// ONLY: RealEditorialPrincipalResolver verifies the Ed25519 assertion against the pinned JWKS file and
+// consumes its jti; with no JWKS file it still answers 503 editorial-keys-not-configured, exactly as
+// NotConfiguredEditorialPrincipalResolver did (that class stays, used by the WSK-41 gate spec).
+const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevModeEditorialPrincipalResolver : RealEditorialPrincipalResolver;
 
 @Module({
   imports: [DbModule, AuditModule, ApiKeysModule, TenantsModule, CodegenModule, TenantWebhooksModule],
