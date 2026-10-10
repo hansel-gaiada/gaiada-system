@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████░░░░░░░░░░░░░░░░░░░░░░░` **24%** · 31/128<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████░░░░░░░░░░░░░░░░░░░░░░░` **24%** · 38/155<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -12,26 +12,27 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M0 · Decisions and record
-<!-- bar -->🟡 `████████████░░░░░░░░` **60%** · 6/10<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **90%** · 10/11<!-- /bar -->
 
-### Rulings in the decision log <!-- bar -->✅ `██████████` **100%** · 6/6<!-- /bar -->
+### Rulings in the decision log <!-- bar -->✅ `██████████` **100%** · 7/7<!-- /bar -->
 - [x] WSK-D37–D40 (2026-09-21: Payload removed, ERP identity for editors, the name, no per-seat tools) landed in v2.3 §14
 - [x] WSK-D41 — gaiada.com is the P2 proof site
 - [x] WSK-D42 — RustFS replaces MinIO
 - [x] WSK-D43 — authority inside the `webdesk` project on gda-aicenter; `/v1` at `api.gaiada.online`
+- [x] WSK-D44–D48 — `fields` block contract, draft ≠ live, publishing rules, channel + release authority, proof defaults
 - [x] The colliding "D37" proposal in the replatform plan renumbered to next-free
 - [x] Working tracker + this task board created
 
-### Owner inputs <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+### Owner inputs <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
 - [ ] GoDaddy A record `api.gaiada.online → 35.240.135.48` (owner)
-- [ ] Content-model questions from the inventory: import scope (Q3), visibility states (Q4), default locale (Q11)
-- [ ] Owner questions from the write-plane design (WSK-62)
-- [ ] Backup role: approve a read-only `BYPASSRLS` role for `pg_dump` in the WebDesk database (WSK-68)
+- [x] Content-model questions answered: all 315 pages import, visibility states, locales `en` + `id` (D44, D48)
+- [x] Write-plane design questions answered: self-publish, rebuild authority, channel steps, releases, defaults (D46–D48)
+- [x] Read-only `BYPASSRLS` backup role approved (D48, WSK-68)
 
 ---
 
-## M1 · gaiada.com served from WebDesk (delivery half)
-<!-- bar -->🟡 `██████████░░░░░░░░░░` **51%** · 25/49<!-- /bar -->
+## M1 · gaiada.com served from WebDesk
+<!-- bar -->🟡 `███████░░░░░░░░░░░░░` **33%** · 28/83<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -59,31 +60,9 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] 16 vocabulary gaps with evidence
 - [x] Stable ids for every page, home section, CTA and form
 
-### WSK-62 · Write-plane design pass <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/2<!-- /bar -->
-- [ ] Design doc: content-model contract, authoring + read commands, editorial assertion, Cerbos kinds, loader principal, rebuild path
-- [ ] Reviewed and accepted; rulings landed in §14
-
-### WSK-41 · Authoring commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
-- [ ] Field-value storage: migration + additive envelope member, rated by `breaking-change.ts`
-- [ ] `FieldDef` extensions the site needs (group, list, boolean, scalar lists, Markdown)
-- [ ] create · update · publish · unpublish · schedule · delete, each with an impact class
-- [ ] `content_versions`, audit, cache tags and the `content.published` webhook event
-- [ ] Tests with negative controls, green on Linux
-
-### WSK-51 · Read commands for the editor <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/2<!-- /bar -->
-- [ ] Collections, items, item detail with drafts, versions, media
-- [ ] Green on Linux
-
-### WSK-54 · Importer <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Site repo → deterministic bundle (EN + ID, stable ids)
-- [ ] Loader through the authoring commands, idempotent
-- [ ] Round trip: bundle → WebDesk → bundle is identical
-
-### WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] Generated SDK for the `gaiada` tenant
-- [ ] `CONTENT_SOURCE=webdesk|git` content loader
-- [ ] Parity gate: both builds, `dist/` differs on 0 pages
-- [ ] The site's own build gates pass on the CMS build
+### WSK-62 · Write-plane design pass <!-- bar -->✅ `██████████` **100%** · 2/2<!-- /bar -->
+- [x] Design doc: contract, draft/live, authoring + read commands, editorial assertion, Cerbos, loader principal, rebuild path, control channel
+- [x] Reviewed (claims checked against `breaking-change.ts` and the contract test); rulings landed as D44–D48
 
 ### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **77%** · 7/9<!-- /bar -->
 - [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
@@ -96,51 +75,113 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `api.gaiada.online` vhost enabled with TLS (after the A record)
 - [ ] The api image on the box rebuilt from LF sources off the live box, then signed via a release
 
-### WSK-57 · Provision the gaiada tenant <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
+### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
+- [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
+- [ ] CI runs only the jobs whose component changed; superseded runs are cancelled
+- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact
+- [ ] Dependency and Docker layer caching
+- [ ] Billed minutes for a WebDesk-only change measured after, and recorded
+
+### Wave A · WSK-64 · Vocabulary 1.1.0 <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+- [ ] Classifier extended (group recursion, scalar `multiple`, `localized`, `ui`) with negative controls
+- [ ] 1.0.0 → 1.1.0 computes MINOR; `envelope.ts` untouched; contract test unchanged and green
+- [ ] `validateItemContent` (≥ 40 cases) and the composition validator
+- [ ] Codegen + every vendored copy (api delivery, schema-draft, blocks) re-vendored; drift checks green on Linux
+
+### Wave A · WSK-65 · Migration 0009 (write plane) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
+- [ ] Applies on 0001–0008, idempotent; fails loudly on seeded duplicates (negative controls)
+- [ ] RLS integrity includes `control_idempotency_keys`; cross-tenant probe with a positive control
+- [ ] Every existing suite green after 0009
+
+### Wave A · WSK-63 · The control channel made real <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+- [ ] Internal vhost `control.webdesk.internal`: mTLS, verified-cert header overwrite, Caddy gate header; no new host port
+- [ ] On the box: Keycloak client `webdesk-control`, client + server certs from the internal CA, NTP offset < 1 s
+- [ ] ERP egress client: shared hash vectors, single-flight token cache, circuit breaker, no secret in logs
+- [ ] Live: a contract read passes all four layers; the same call without a client cert fails at Layer 1
+
+### Wave A · WSK-47 · Cerbos kinds <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+- [ ] `webdesk_content_item` + `webdesk_collection`; maker ≠ checker, single-item self-publish (D46)
+- [ ] Six artifacts and re-derived pinned counts in one change
+- [ ] `src/rbac` suite green on Linux with Cerbos reachable
+- [ ] Live Cerbos restarted; the probe matrix matches
+
+### Wave A · WSK-54 · Bundle export (site repo) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
+- [ ] Two exports of one commit are byte-identical
+- [ ] Every page and global round-trips to what the site's own loader reads
+- [ ] Every item validates against vocabulary 1.1.0
+
+### Wave B · WSK-41 · Authoring commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
+- [ ] Seven commands with impact classes in the registry; real `AppModule` boots
+- [ ] Draft isolation: publish is the only way to change what a production key sees
+- [ ] Concurrency (1×200, 9×409) and durable idempotency across a restart
+- [ ] Gate order proven with valid bodies; WS4 single-use under concurrency
+- [ ] `content.published` webhook event without prop values
+
+### Wave B · WSK-41b · The read path hides deleted drafts <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
+- [ ] Deleted draft 404 on item, list, search; localizations exclude it; envelope gate unchanged
+
+### Wave B · WSK-51 · Read commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/2<!-- /bar -->
+- [ ] Eight reads; cross-tenant 404 with a positive control
+- [ ] No audit rows written; pagination stable under a concurrent update
+
+### Wave B · WSK-40 · Editorial assertion <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
+- [ ] Adversarial matrix of ≥ 20 rows, each with its exact problem slug
+- [ ] Signer and verifier pin the same vectors, both directions
+- [ ] Key rotation runbook executed once (overlap accepted, old kid refused after)
+
+### Wave B · WSK-66 · Publish and key mint executed at approval <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+- [ ] Origin migration unions `webdesk` into the live CHECK (no value lost)
+- [ ] Requester ≠ approver, except a single-item self-publish (D46)
+- [ ] Approve → exactly one publish carrying WS4 + editorial assertions; failures typed, never retried blind
+- [ ] `key.mint` plaintext only in the `decide()` response, never persisted
+
+### Wave C · WSK-59 · ERP content BFF + MCP tools <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
+- [ ] Routes with `authorize()` first; cross-company 404 wall with a positive control
+- [ ] Every editor action is an MCP tool with an impact class; both D14 halves for unpublish/delete
+- [ ] BFF contract §27; breaker open → `editorial_unavailable`
+
+### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Tenant `gaiada`, site `gaiada-com`, staging + production environments
-- [ ] Build key (production read) and preview key (staging read)
+- [ ] Build key (production read) minted through an approval; preview key (staging read)
 - [ ] Read quota sized for a full site build
+
+### Wave C · WSK-67 · Importer CLI <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
+- [ ] Dry run prints the plan; `--apply` twice → second run writes 0 versions
+- [ ] Refuses human principals; imports no publish/unpublish/delete function
+- [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1`
+
+### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+- [ ] Two git builds of one commit give an identical `dist/` (determinism first)
+- [ ] Source parity on all 315 files
+- [ ] `dist/` parity: empty diff in default and preview-held modes
+- [ ] The site's own gates pass; negative control (one FAQ edit → exactly one page differs)
 
 ### WSK-58 · Linux gate for the proof's suites <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
 - [ ] `webdesk/api`, `webdesk/blocks`, `webdesk` root and vocabulary suites green on sumopod after every merge
 
 ---
 
-## M2 · Editing gaiada.com from the ERP (authoring half)
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/21<!-- /bar -->
-
-### WSK-40 · Editorial identity seam <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] EdDSA key custody and minting in platform-nest
-- [ ] Verification by public key + `jti` replay store in WebDesk
-- [ ] Clock-skew and failure-mode tests
-
-### WSK-47 · Cerbos kinds (six artifacts each) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] Policies for `webdesk_content_item`, `webdesk_collection`, `webdesk_media_asset`
-- [ ] Resource-attribute allow-list, permission catalog, role bundles in both resolvers
-- [ ] Pinned count tests updated
-- [ ] Live Cerbos restarted and the new decisions proven by a probe
-
-### WSK-59 · ERP BFF + MCP tools <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] BFF routes + `FRONTEND-BFF-CONTRACT.md` section
-- [ ] Every editor action is also an MCP tool with an impact class
-- [ ] Tests green on Linux
+## M2 · Editing gaiada.com from the ERP
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/13<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
-- [ ] Section and page list for gaiada.com
-- [ ] Editor for fields, lists and Markdown
+- [ ] Sites → collections → items for gaiada.com
+- [ ] Editor generated from the composition: text, Markdown, groups, lists (drag and keyboard reorder)
 - [ ] Publish with the approval state shown inline
-- [ ] Version history
+- [ ] Version history with restore as draft
 - [ ] Unavailable / stale / conflict states (never a confident empty editor)
-- [ ] Driven end to end in a browser
+- [ ] Every state reachable in Playwright; `next build` passes
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/2<!-- /bar -->
-- [ ] Where the build runs (P-2), decided
-- [ ] `content.published` → site build → deploy to `24-pyevq.gaiada.com`
+### WSK-60 · Publish → rebuild → staging <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+- [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
+- [ ] ERP GitHub App on the site repo; `webdesk-rebuild` workflow
+- [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
+- [ ] Cost per run measured and recorded
 
 ### P2 proof gate <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change
 - [ ] Page-for-page parity holds after the edit cycle
-- [ ] Evidence recorded in the tracker
+- [ ] The editor cannot approve a batch; the same approval re-presented is refused; `/control/*` is 404 publicly
 
 ---
 
