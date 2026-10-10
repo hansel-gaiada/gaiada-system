@@ -427,6 +427,50 @@ describe("WSK-63b control client — retries: transport only", () => {
     expect(good.seen).toHaveLength(1);
   });
 
+  it("WSK-59: a read carries a query string (encoded, not part of any hash); a write may not", async () => {
+    const c = makeClient({ retryAttempts: 1 });
+    good.seen.length = 0;
+    const res = await c.send({ command: "tenant.list", method: "GET", path: "/control/v1/tenants", query: { companyRef: "a b&c=d" } });
+    expect(res.status).toBe(200);
+    expect(good.seen[0].url).toBe("/control/v1/tenants?companyRef=a+b%26c%3Dd");
+    await expect(
+      c.send({ command: "content.create", method: "POST", path: "/control/v1/tenants", body: {}, query: { a: "b" } }),
+    ).rejects.toThrow(/query string belongs on a read/);
+  });
+
+  it("WSK-59: an EDITORIAL-assertion write that died AFTER delivery is NOT resent either (single-use jti), but a pre-delivery drop still is", async () => {
+    const jws = "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ4In0.c2ln";
+    const send = (c: WebdeskControlClient) =>
+      c.send({
+        command: "content.update",
+        method: "PUT",
+        path: "/control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:itemId",
+        params: { tenantSlug: "acme", siteId: "s1", itemId: "i1" },
+        body: { baseVersion: 1 },
+        idempotencyKey: "idem-wsk59-0001",
+        editorialAssertion: jws,
+      });
+    const c = makeClient({ retryAttempts: 3 });
+    good.seen.length = 0;
+    good.handler = (req) => req.socket.destroy();
+    const err = await send(c).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WebdeskControlTransportError);
+    expect((err as WebdeskControlTransportError).maybeDelivered).toBe(true);
+    expect((err as WebdeskControlTransportError).attempts).toBe(1);
+    expect(good.seen).toHaveLength(1);
+
+    // Positive control: the same request dropped BEFORE the handshake never reached Zone B, so it is resent.
+    const c2 = makeClient({ retryAttempts: 3 });
+    good.seen.length = 0;
+    good.handler = (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{}");
+    };
+    good.dropNext = 1;
+    expect((await send(c2)).status).toBe(200);
+    expect(good.seen).toHaveLength(1);
+  });
+
   it("the same post-delivery failure IS retried for a GET, and for an idempotent write without WS4", async () => {
     const c = makeClient({ retryAttempts: 3 });
     let n = 0;

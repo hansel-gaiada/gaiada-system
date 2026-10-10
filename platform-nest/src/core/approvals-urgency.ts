@@ -13,7 +13,9 @@
 // it those rows are invisible in the unified inbox: `approvals.controller.ts` filters
 // `origin = ANY($1)` from `ALL_ORIGINS`, so an unlisted origin files a request nobody can find.
 // Caught by driving the flow, not by a type error — the origin is a plain string column.
-export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search";
+// `webdesk` added 2026-10-10 (WSK-59): WSK-66 files origin='webdesk' rows for content publish/schedule; unlisted here
+// they were invisible in the unified inbox and un-decidable through the façade.
+export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk";
 
 /** Base tier per origin. Pipeline gates (client/delivery-blocking sign-off) and agency
  *  creative-review sit above automation/agent write-suspensions, which sit above hr leave asks
@@ -28,6 +30,9 @@ export const ORIGIN_BASE_WEIGHT: Record<ApprovalOrigin, number> = {
   // people-decisions: important, not urgent. It DOES carry an `impact` (filed 'high'), so the
   // IMPACT_BONUS still lifts it above a routine row of the same age.
   search: 70,
+  // A publish request is a suspended outbound-public write: it ranks with automation/agent suspensions (and is
+  // always filed impact 'high', so IMPACT_BONUS lifts it above a routine one).
+  webdesk: 80,
   hr: 70,
 };
 

@@ -94,6 +94,15 @@ import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-as
  *  because every table below is a `Record<WebdeskApprovedCommand, …>` and fails to compile without it. */
 export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint";
 
+/** WSK-59: the editorial writes the BFF executes immediately (not through an approval). They sign through the
+ *  SAME registered signer as the approved commands; only the command name differs (design §3.1). */
+export type WebdeskBffEditorialCommand =
+  | "content.create"
+  | "content.update"
+  | "content.restoreVersion"
+  | "content.unpublish"
+  | "content.delete";
+
 /** `automation_approvals.origin` for these rows (migration 202610101500). */
 export const WEBDESK_APPROVAL_ORIGIN = "webdesk";
 
@@ -216,7 +225,9 @@ export interface EditorialAssertionRequest {
   agt?: string;
   ten: string;
   site: string;
-  cmd: WebdeskApprovedCommand;
+  /** WSK-59 widened this from `WebdeskApprovedCommand` to also carry the five MEDIUM editorial writes the
+   *  BFF signs directly (design §3.1). Every signer implementation takes the string verbatim into `cmd`. */
+  cmd: WebdeskApprovedCommand | WebdeskBffEditorialCommand;
   /** The FILED command hash (see this file's header): what the human approved. */
   cmh: string;
   /** The original requester (maker). */
@@ -272,6 +283,18 @@ export function setWebdeskApprovedCommandDepsForTests(
 
 function controlClient(): WebdeskControlClient {
   return clientOverride ?? getWebdeskControlClient();
+}
+
+/** WSK-59: the registered signer, for the BFF's direct editorial writes. One seam, one registration
+ *  (`registerEditorialAssertionSigner`), so approved commands and BFF writes can never sign differently. */
+export function getEditorialAssertionSigner(): EditorialAssertionSigner {
+  return editorialSigner;
+}
+
+/** WSK-59: the control client the approved-command executor uses (the process singleton, or a test
+ *  double). Throws `WebdeskControlNotConfiguredError` when the channel is not configured. */
+export function getWebdeskCommandControlClient(): WebdeskControlClient {
+  return controlClient();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

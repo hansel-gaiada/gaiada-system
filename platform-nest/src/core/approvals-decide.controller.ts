@@ -33,7 +33,9 @@ import type { ApprovalOrigin } from "./approvals-urgency";
 // controller applies the probe-consent authority gate. Listing it here is not cosmetic — the guard
 // above 400s any origin absent from this array, so without it the inbox can SHOW the request and
 // then refuse every attempt to decide it.
-const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search"];
+// `webdesk` (WSK-59): publish/schedule approvals filed by WSK-66. Same branch as `search`: the row's REAL origin is
+// re-derived by automation-approvals.controller.ts decide(), which also runs WSK-66's in-band executor.
+const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search", "webdesk"];
 
 // None of the three origin controllers take constructor dependencies (their helpers — withTenants,
 // authorize, writeActivity, notify, emitEvent, config — are module-level imports, not injected), so
@@ -53,7 +55,7 @@ export class ApprovalsDecideController {
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
     @Body() body: { origin?: string; decision?: string; note?: string },
-  ): Promise<{ ok: true }> {
+  ): Promise<{ ok: true; webdesk?: unknown }> {
     const { origin, decision, note } = body ?? {};
     if (!origin || !ORIGINS.includes(origin as ApprovalOrigin)) {
       throw new BadRequestException(`origin must be one of ${ORIGINS.join(",")}`);
@@ -77,7 +79,8 @@ export class ApprovalsDecideController {
       case "automation":
       case "agent":
       case "hr":
-      case "search": {
+      case "search":
+      case "webdesk": {
         // automation-approvals.controller.ts's own decide() re-derives the row's REAL origin from
         // the DB before authorizing (WSD-4) — so whichever of these four the caller believes the
         // item is, the underlying handler still authorizes against the row's true origin. The
@@ -85,7 +88,12 @@ export class ApprovalsDecideController {
         // controller, not to pre-judge which of the sub-origins it is. That property is what makes
         // adding `search` here safe: a caller cannot claim `automation` to dodge the probe-consent
         // property gate, because the gate is chosen from the stored row, not from this body.
-        await automationApprovalsController.decide(req, tenantId, id, { decision: decision as "approved" | "rejected" });
+        const decided = await automationApprovalsController.decide(req, tenantId, id, { decision: decision as "approved" | "rejected" });
+        // WSK-66's in-band outcome (`{command, executionStatus, error?, ...}`) is additive and present only for a
+        // webdesk row; every other origin keeps the byte-identical `{ok:true}`.
+        if (origin === "webdesk" && decided && typeof decided === "object" && "webdesk" in decided) {
+          return { ok: true, webdesk: (decided as { webdesk?: unknown }).webdesk };
+        }
         break;
       }
     }

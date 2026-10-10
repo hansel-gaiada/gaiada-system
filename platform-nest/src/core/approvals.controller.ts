@@ -48,7 +48,7 @@ type Sort = "urgency" | "age";
 // automation/agent/hr — it is an `automation_approvals` row with `origin='search'`, exactly as
 // WSD-4 made hr-origin rows. It MUST be listed here: the leg filters `origin = ANY($1)`, so an
 // unlisted origin produces a request that is filed, decidable by id, and invisible in the inbox.
-const ALL_ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search"];
+const ALL_ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search", "webdesk"];
 
 function parseOrigins(raw: string | undefined): ApprovalOrigin[] {
   if (!raw) return ALL_ORIGINS;
@@ -186,7 +186,8 @@ async function automationLeg(
   subOrigins: ApprovalOrigin[],
 ): Promise<{ items: UnifiedApprovalItem[]; readable: boolean }> {
   const wantsHr = subOrigins.includes("hr");
-  const wantsOther = subOrigins.some((o) => o === "automation" || o === "agent");
+  // `webdesk` (WSK-59) rides the automation_approvals leg like `search`: read under the generic action.
+  const wantsOther = subOrigins.some((o) => o === "automation" || o === "agent" || o === "webdesk");
 
   const readableHr = wantsHr && (await canDo(principal, tenantId, "automation_approval", "read", "hr"));
   const readableOther = wantsOther && (await canDo(principal, tenantId, "automation_approval", "read"));
@@ -274,7 +275,9 @@ export class ApprovalsController {
         let anyReadable = false;
         const wantsAgency = origins.includes("agency");
         const wantsPipeline = origins.includes("pipeline");
-        const automationSubOrigins = origins.filter((o) => o === "automation" || o === "agent" || o === "hr");
+        // `webdesk` (WSK-59) is routed here: without it the row is filed and decidable by id but never listed.
+        // (`search` is NOT in this filter today: a pre-existing gap, reported and left alone.)
+        const automationSubOrigins = origins.filter((o) => o === "automation" || o === "agent" || o === "hr" || o === "webdesk");
 
         if (wantsAgency) {
           const leg = await agencyLeg(req.principal, tenantId, companyName, status);

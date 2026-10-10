@@ -135,6 +135,11 @@ export interface WebdeskControlRequest {
   /** Every `:name` in `path`, and nothing else (a stray param would never reach WebDesk's
    *  `request.params`, and the WS4 hash would then disagree). */
   params?: Record<string, string>;
+  /** Query string (reads only): WSK-59 added this for `tenant.list?companyRef=` (REQUIRED by Zone B) and
+   *  the item-list filters. Values are strings, appended with `URLSearchParams` (so they are encoded, never
+   *  concatenated). It is NOT part of the WS4/editorial command hash: Zone B hashes `{...params, ...body}`
+   *  only (see `webdesk-ws4-assertion.ts`), so a query can never move a signature. A write may not carry one. */
+  query?: Record<string, string>;
   /** JSON body (a plain object). Omitted ⇒ no body is sent. */
   body?: Record<string, unknown>;
   /** WebDesk requires one on mutating commands; also what makes an ambiguous write safe to resend. */
@@ -556,7 +561,11 @@ export class WebdeskControlClient {
     if (req.editorialAssertion !== undefined) headers["x-webdesk-editorial-assertion"] = req.editorialAssertion;
 
     const safeMethod = req.method === "GET" || req.method === "HEAD";
-    const ambiguousIsSafe = safeMethod || (req.idempotencyKey !== undefined && !req.ws4);
+    // WSK-59: an editorial assertion carries a single-use `jti` that Zone B consumes on the FIRST delivery,
+    // exactly like a WS4 approval. A resend after an ambiguous failure could only come back 401
+    // `editorial-assertion-replayed`, which hides whether the first attempt landed. So it follows the WS4
+    // rule: never resent once it may have been delivered (the caller reconciles by reading).
+    const ambiguousIsSafe = safeMethod || (req.idempotencyKey !== undefined && !req.ws4 && req.editorialAssertion === undefined);
 
     let last: AttemptFailure | null = null;
     let attempt = 0;
@@ -614,6 +623,15 @@ export class WebdeskControlClient {
         throw new Error("webdesk-control: editorialAssertion must be a compact JWS");
       }
     }
+    if (req.query !== undefined) {
+      if (req.method !== "GET") throw new Error("webdesk-control: a query string belongs on a read, not a write");
+      if (req.query === null || typeof req.query !== "object" || Array.isArray(req.query)) {
+        throw new Error("webdesk-control: query must be a plain object of strings");
+      }
+      for (const [k, v] of Object.entries(req.query)) {
+        if (typeof v !== "string") throw new Error(`webdesk-control: query value '${k}' must be a string`);
+      }
+    }
     const params = req.params ?? {};
     const used = new Set<string>();
     const path = req.path.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_m, name: string) => {
@@ -628,6 +646,7 @@ export class WebdeskControlClient {
     const basePath = this.#base.pathname.replace(/\/+$/, "");
     const url = new URL(this.#base.origin);
     url.pathname = `${basePath}${path}`;
+    for (const [k, v] of Object.entries(req.query ?? {})) url.searchParams.set(k, v);
     const bodyText = req.body === undefined ? null : JSON.stringify(req.body);
     return { url, args: commandArgsAsZoneBSeesThem(params, req.body), bodyText };
   }

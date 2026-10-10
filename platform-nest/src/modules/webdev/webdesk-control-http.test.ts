@@ -87,17 +87,16 @@ describe.skipIf(!TEST_URL)("WSK-31 · WebdeskControlController (HTTP, isolated a
     expect(r.statusCode).not.toBe(500);
   });
 
-  it("a company_admin CAN read — the positive control proving read authz genuinely loaded", async () => {
+  it("a company_admin CAN read — the positive control proving read authz genuinely loaded (WSK-59: the route is LIVE, and with no channel configured here it answers a typed 503, never a 501 or a 500)", async () => {
     const r = await app.inject({
       method: "GET", url: `/api/${tenant}/modules/webdev/control/sites`, headers: asUser(admin),
     });
-    expect(r.statusCode).toBe(501); // routed, authorized, honestly not-yet-wired
-    expect(r.json()).toMatchObject({ error: "webdesk_control_plane_not_wired" });
+    expect(r.statusCode).toBe(503);
+    expect(r.json()).toMatchObject({ error: "webdesk_not_configured", reason: "control_channel_not_configured" });
   });
 
   describe("the three read routes (Cerbos action: read)", () => {
     for (const [method, path] of [
-      ["GET", "sites"],
       ["GET", "sites/s1/status"],
       ["GET", "sites/s1/submissions"],
     ] as const) {
@@ -113,8 +112,6 @@ describe.skipIf(!TEST_URL)("WSK-31 · WebdeskControlController (HTTP, isolated a
   describe("the four MEDIUM/LOW write routes (Cerbos action: operate)", () => {
     for (const [path, body] of [
       ["schema/propose", { siteId: "s1" }],
-      ["schema/apply", { siteId: "s1" }],
-      ["sites", { slug: "acme", kind: "astro" }],
       ["sites/s1/deploy/staging", {}],
     ] as const) {
       it(`POST ${path}: member DENIED, admin 501`, async () => {
@@ -127,6 +124,23 @@ describe.skipIf(!TEST_URL)("WSK-31 · WebdeskControlController (HTTP, isolated a
         });
         expect(allowed.statusCode).toBe(501);
         expect(allowed.json()).toMatchObject({ error: "webdesk_control_plane_not_wired" });
+      });
+    }
+
+    // WSK-59: these two stopped being stubs. Denied for a member; for an admin a VALID body reaches the egress
+    // seam, which (no channel configured in this isolated app) answers a typed 503, and an INVALID body is a 400.
+    for (const [path, body] of [
+      ["schema/apply", { tenantSlug: "acme", siteId: "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4", collectionKey: "service", schema: {} }],
+      ["sites", { tenantSlug: "acme", kind: "astro", name: "Main" }],
+    ] as const) {
+      it(`POST ${path} (LIVE): member DENIED with a VALID body; admin with the identical body reaches the channel (503 not configured); a bad body is 400`, async () => {
+        const denied = await app.inject({ method: "POST", url: `/api/${tenant}/modules/webdev/control/${path}`, headers: asUser(member), payload: body });
+        expect(denied.statusCode).toBe(403);
+        const allowed = await app.inject({ method: "POST", url: `/api/${tenant}/modules/webdev/control/${path}`, headers: asUser(admin), payload: body });
+        expect(allowed.statusCode).toBe(503);
+        expect(allowed.json()).toMatchObject({ error: "webdesk_not_configured" });
+        const bad = await app.inject({ method: "POST", url: `/api/${tenant}/modules/webdev/control/${path}`, headers: asUser(admin), payload: { nonsense: 1 } });
+        expect(bad.statusCode).toBe(400);
       });
     }
 

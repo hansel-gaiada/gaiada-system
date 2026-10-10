@@ -4752,3 +4752,137 @@ route below uses the existing `client` resource.
 
 UI mirror: capabilities `client.write` (company_admin, manager, member, owner) and `client.delete`
 (company_admin, manager, owner) in `platform-ui/src/lib/rbac.ts`, matching `resource_client.yaml`.
+
+## 27. WebDesk content BFF — the "Website" editor's backend (WSK-59, 2026-10-10) — `src/modules/webdev/webdesk-content.{controller,service}.ts`, `platform-ui/src/lib/webdeskContent.ts` (WSK-44) — **STATUS: BACKEND DEV-VERIFIED (Linux, see the ticket report); UI: WSK-44 builds against this section**
+
+**§27 claimed at write time** (`grep -n "^## 27"` found nothing; §26 was the last). Design:
+`docs/plans/2026-10-10-webdesk-write-plane-design.md` §12 WSK-59 (routes, tools, done-when), §3.2 and §4 (the
+shapes Zone B returns, which this BFF passes through), §6 (publish), §10 (the states the UI renders). Rulings:
+`docs/blueprints/webdesk-design-v2.md` §14 WSK-D45/D46/D47. Every route is under
+`/api/:tenantId/modules/webdev/content/` and 404s unless the company has `webdev` enabled.
+
+**The BFF adds no data of its own.** It authorizes the caller, proves the site belongs to the caller's company,
+signs an editorial assertion as the caller, forwards to WebDesk over the control channel, and passes the answer
+back. Response bodies are WebDesk's own (`webdesk/api/src/control/content/*`), so the shapes below are the real
+ones, not a restatement. The caller is identified by the BFF's normal auth (session / OBO); the **editorial
+assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `created_by`.
+
+### Routes (all `AuthGuard` + `ModuleEnabledGuard("webdev")`; `authorize()` is the first statement of every handler)
+
+`:ts` = `:tenantSlug` (the WebDesk tenant slug), `:site` = `:siteId` (uuid). Both come from `GET …/content/sites`.
+
+| Method | Path (after `/api/:tenantId/modules/webdev/content`) | Cerbos (as the caller) | Success |
+|---|---|---|---|
+| GET | `/sites` | `webdesk_collection:read` | 200 `{tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,environments:[{envId,name,domain,status}]}]}]}`: only THIS company's tenants |
+| GET | `/sites/:ts/:site/collections` | `webdesk_collection:read` | 200 `{collections:[{key,composition,vocabularyVersion,counts:{items,byLocale,live,pendingChanges},updatedAt}]}` |
+| GET | `/sites/:ts/:site/collections/:collectionKey/items?locale&state&q&includeDeleted&cursor&limit&slug` | `webdesk_content_item:read` | 200 `{items:[ItemSummary],page:{cursor,hasMore,limit}}`, editor order (slug, locale, id). `state` = draft·live·scheduled·unpublished·deleted·pending; `limit` 1..100. **`slug=` (BFF-side)** returns only the EXACT-slug matches (all locales, or the one `locale` asks for): WebDesk has no slug filter, so the BFF asks for `q=<slug>` at limit 100 and keeps the exact matches, following the cursor up to 5 pages; `page.hasMore:true` with no match means *not found yet*, never *does not exist*. Not combinable with `q` |
+| GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint}` |
+| GET | `/sites/:ts/:site/items/:itemId/versions?cursor&limit` | `webdesk_content_item:read` | 200 `{versions:[{version,contentHash,createdAt,createdBy,attribution,note}],page}`, newest first |
+| GET | `/sites/:ts/:site/items/:itemId/versions/:n` | `webdesk_content_item:read` | 200 one full version (`blocks`, `seo`, …) |
+| GET | `/sites/:ts/:site/media?mime&cursor&limit` | `webdesk_content_item:read` | 200 `{assets:[{assetId,bucketKey,mime,sizeBytes,scanStatus,createdAt}],page}` |
+| POST | `/sites/:ts/:site/collections/:collectionKey/items` | `…:create` | **201** `ItemWriteResult` |
+| PUT (and `PATCH`, the MCP hub's alias) | `/sites/:ts/:site/items/:itemId` | `…:update` | 200 `ItemWriteResult` |
+| POST | `/sites/:ts/:site/items/:itemId/restore` | `…:update` | 200 `ItemWriteResult` |
+| POST | `/sites/:ts/:site/publish-requests` | `…:request_publish` | **202** `{approvalId,command,itemCount}` |
+| POST | `/sites/:ts/:site/publish-requests/:approvalId/withdraw` | `…:request_publish` (the right that filed it) | 200 `{approvalId, status:"cancelled"}` |
+| POST | `/sites/:ts/:site/items/:itemId/unpublish` | `…:unpublish` | 200 `{item,replayed}` |
+| POST | `/sites/:ts/:site/items/:itemId/delete` | `…:delete` | 200 `{item,replayed}` |
+
+`ItemWriteResult` = `{item:ItemState, version:{version,contentHash,createdAt}, unchanged, lint, replayed}`
+(`ItemState` = `{itemId,collectionKey,locale,slug,localizationGroupId,headVersion,publishedVersion,publishState,publishAt,unpublishAt,deletedAt,updatedAt}`).
+`ItemSummary` = `{itemId,slug,locale,localizationGroupId,title,headVersion,publishedVersion,publishState,publishAt,unpublishAt,deletedAt,updatedAt,headCreatedAt,headCreatedBy,pendingChanges}`.
+
+**Request bodies** (strict: an unknown key is 400 `invalid_request`):
+
+| Route | Body |
+|---|---|
+| create | `{locale, slug, twinOf?, fields?, blocks?, seo?, note?}`. `collectionKey` comes from the PATH; a `collectionKey` in the body is accepted only if it equals the path's |
+| update | `{baseVersion, fields?, blocks?, seo?, note?}` (full replacement) |
+| restore | `{version, baseVersion, note?}` |
+| publish-requests | `{items:[{itemId,version}] (1..1000), note?}` **or** `{items, publishAt?, unpublishAt?}` for a scheduled publish/takedown (no note) |
+| unpublish | `{expectedPublishedVersion}` |
+| delete | `{baseVersion}` (a non-live item only) |
+
+Writes accept an optional `Idempotency-Key` header (8..200 printable ASCII); without one the BFF generates a fresh
+uuid. **A retry of the same logical write must resend the SAME key**: WebDesk then answers `replayed:true` instead of
+writing twice. Route params `tenantSlug`/`siteId`/`itemId` never appear in a body.
+
+### Publish is a request, never an action (WSK-D46)
+
+`publish-requests` reads each requested item version from WebDesk (it must exist on this site and not be deleted:
+typed 404 `item-not-found`/`version-not-found`, 409 `item-deleted`), authorizes `request_publish` with the item's REAL
+`collectionKey`/`locale` (from WebDesk, never the body), then files **exactly one** HIGH WS4 approval through
+`fileWebdeskCommandApproval` (origin `webdesk`, workflow `content.publish`, or `content.schedule` when `publishAt`/
+`unpublishAt` is given) and returns **202 `{approvalId}`**. It **never calls WebDesk's publish**. Execution happens at
+`decide()` in the Approvals inbox, as the decider (maker ≠ checker; a publisher may approve their own single-item,
+non-scheduled publish, R4); see §9 row `automation-approvals` (WSK-66). The UI shows "Awaiting approval #…" and polls the approval.
+
+### Withdrawing a request, and the approvals façade
+
+`…/publish-requests/:approvalId/withdraw` lets the REQUESTER cancel their own PENDING publish/schedule approval. The row becomes
+`status:"cancelled"` (the loan-withdraw precedent: nobody with authority refused it; `rejected` would say they did), `execution_status`
+stays `not_applicable`, and one `activities` row (`cancelled`, `outcome:"withdrawn_by_requester"`) is written. Nothing is sent to
+WebDesk. Another user's row is **403**, an id that is not a publish request for THIS site (unknown, another site, another origin) is
+**404 `approval_not_found`**, and a row no longer pending is **409 `approval_not_pending`**. **The UI's approval-status parser must
+accept `cancelled`** (the CHECK admits `pending|approved|rejected|cancelled`).
+
+`POST /api/:t/approvals/:id/decide` (the unified façade) now accepts `origin:"webdesk"`, and `GET /api/approvals` lists webdesk rows. For a
+webdesk row the response is `{ok:true, webdesk:{command, executionStatus:"executed"|"failed", error?, …}}` (WSK-66's in-band outcome;
+every other origin is byte-unchanged `{ok:true}`). The editor's "pending request after reload" reads
+`GET /api/:t/automation-approvals?origin=webdesk&status=pending`, which needs `automation_approval:read` (company_admin/manager): a
+`webdev_staff`/`webdev_manager` caller without it gets 403 there (see the ticket report).
+
+### Errors the UI must render (each a distinct state, §10 of the design)
+
+| Status + body | Meaning | UI state |
+|---|---|---|
+| **503 `{error:"editorial_unavailable", reason}`** | The control channel's circuit breaker is open (`reason:"circuit_open"`), WebDesk is unreachable (`webdesk_unreachable`) or the token endpoint failed (`webdesk_token_unavailable`). **On reads AND writes.** | Full-page "Editing is unavailable"; never an empty list; Save/Publish disabled |
+| **503 `{error:"webdesk_not_configured", reason}`** | No control channel (`control_channel_not_configured`) or no editorial signer (`editorial_signer_not_configured`/`_failed`) is configured on this deployment. Writes are refused before anything is sent; nothing was attempted. | Same as unavailable, with the cause |
+| **502 `{error:"webdesk_ambiguous", reason}`** | A write may have landed and its outcome could not be established (`not_observed`, `reconcile_failed`). **Never retry blind**: re-read the item, and retry only with the SAME `Idempotency-Key`. | "Couldn't confirm the save": re-read, then offer retry |
+| 502 `{error:"webdesk_refused"\|"webdesk_error", reason}` | WebDesk refused OUR credentials or signing (its 401/403) or answered 5xx. A platform fault, so it is **never forwarded as 401/403** (the UI would read that as a session expiry). | "Something is wrong on our side" |
+| **Zone B problems, passed through untouched** (`application/problem+json`, WebDesk's own body, same status) | 400 `invalid-request` · 404 `item-not-found`/`collection-not-found`/`version-not-found` · **409** `version-conflict {currentHeadVersion,currentContentHash,updatedAt}` · `slug-taken` · `twin-locale-taken` · `singleton-exists` · `item-is-live` · `item-deleted` · `not-live` · `published-version-changed` · `contract-major-change` · 413 `payload-too-large` · **422** `composition-violation {issues:[{path,message,expected}]}` | conflict dialog · inline errors by JSON pointer |
+| **404 problem `…/errors/site-not-found`** | `(tenantSlug, siteId)` is not an ACTIVE site of THIS company: unknown slug, another tenant's site, **another company's** tenant, or an archived tenant. One answer for all (no existence oracle), and the SAME problem type WebDesk itself uses, so the UI has one not-found shape. | not-found page |
+| 403 `{error:"not authorized: …"}` · 401 | Cerbos denied the caller (or no/expired session) | `ReadRefusal` / sign-in |
+| 400 `{error:"invalid_request: …", reason:"invalid_request"}` | Strict body/query validation (after authorization) | inline |
+
+**Reconciliation.** When the link dies after a write was fully sent, the BFF does NOT resend (a single-use editorial
+`jti` makes a resend unsafe) and does NOT guess: it READS WebDesk (`item.get`, or the collection list for a create) and
+returns the write's real result with an extra **`reconciled:true`** (200/201, same shape) when it provably landed
+(update/restore: the head moved to `baseVersion+1` authored by the caller, and a restore's hash equals the source
+version's; create: that slug at v1 authored by the caller; unpublish/delete: the item is now unpublished/deleted).
+Anything else is the 502 above.
+
+### Tenancy, authorization, audit
+
+* **The wall.** Every `:ts/:site` route resolves the pair through WebDesk's `tenant.list?companyRef=<this company>`
+  (filtered in WebDesk's SQL; cached 60 s, a miss re-reads once the answer is 5 s old). Company A's user addressing company
+  B's site gets 404 on all 12 routes; B's admin on A's company path is 403 before any lookup.
+* **Cerbos kinds** `webdesk_content_item` (`read create update request_publish unpublish delete`; `publish`/`schedule` only at
+  decide()) and `webdesk_collection` (`read`, `apply_schema`), module `webdev`, as the caller. Editor tier (`webdev_staff`):
+  read/create/update/restore/request_publish. Publisher tier (`webdev_manager`, company_admin): also unpublish/delete.
+  Item-targeted writes authorize twice: generically first, then with the `collectionKey`/`locale` read from WebDesk.
+* **Ledger.** Every write that reaches WebDesk writes two `activities` rows around the call, verb `webdesk.content.<cmd>`
+  (`create`/`update`/`restoreVersion`/`unpublish`/`delete`, and `webdesk.schema.apply`/`webdesk.site.provision`), actor = the ERP user
+  (the same id as the editorial `sub`), `target_entity_type` `webdesk_content_item` (or `webdesk_site`), metadata
+  `{outcome: attempted → succeeded|reconciled|refused|failed|ambiguous, status, problem?, tenantSlug, siteId, itemId?, collectionKey?, locale?, idempotencyKey}`;
+  never content values. Reads write nothing.
+
+### MCP tools (impact classes) — the same capabilities for a human, n8n and an agent
+
+Declared in `modules/webdev/index.ts` and aggregated by the hub from `GET /mcp/tool-defs` (nothing hub-side). Reads:
+`webdesk.content.listSites` · `listCollections` · `listItems` · `getItem` · `listVersions` · `getVersion` · `listMedia`
+(free). Writes: `webdesk.content.create` · `update` (PATCH) · `restoreVersion` · `requestPublish`, `write:true, impact:"low"`
+(never suspend: a draft, or only files an approval); `webdesk.content.unpublish` · `delete`, `write:true, impact:"medium"`:
+an unattended caller (agent / n8n) **suspends** into an approval and is re-driven as the original requester on approval
+(D14: `core/approval-executables.ts` + `resource_mcp_tool.yaml`, both). **There is no publish tool.** Hub limitation: a GET tool
+passes only path args, so the list tools return the default first page with no filter or cursor over MCP.
+
+### Control routes re-pointed (WSK-31 stubs → real; same paths, same Cerbos `webdev_provisioned_site` gate)
+
+| Method | Path | Now |
+|---|---|---|
+| GET | `/api/:t/modules/webdev/control/sites` | **LIVE**: same answer as `…/content/sites` (was 501) |
+| POST | `/api/:t/modules/webdev/control/sites` | **LIVE**: body `{tenantSlug, kind: astro\|node\|wp, name}` provisions a site on one of THIS company's tenants (was 501) |
+| POST | `/api/:t/modules/webdev/control/schema/apply` | **LIVE**: body `{tenantSlug, siteId, collectionKey, schema}`; WebDesk validates (422) and refuses a MAJOR change (409 `contract-major-change`) (was 501) |
+
+The other `control/*` routes remain honest 501s.

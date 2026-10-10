@@ -207,8 +207,8 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.listSites",
       description:
-        "List WebDesk (Zone B) sites for this tenant — kind, envs, domains, status. STUB: WSK-23's "
-        + "Zone B egress client has not landed; answers 501 webdesk_control_plane_not_wired.",
+        "List WebDesk (Zone B) tenants and sites for this company — kind, envs, domains, status. "
+        + "LIVE since WSK-59 (Zone B `tenant.list`, filtered to this company). Same answer as webdesk.content.listSites.",
       minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/control/sites",
@@ -258,8 +258,9 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.schema.apply",
       description:
-        "Apply an approved composition change to a WebDesk tenant's schema. MEDIUM write — WS4 for "
-        + "automation principals (§07). STUB: 501 webdesk_control_plane_not_wired.",
+        "Apply a composition (field definitions) to one collection of a WebDesk site. MEDIUM write — WS4 for "
+        + "automation principals (§07). LIVE since WSK-59: Zone B validates the composition (typed 422) and "
+        + "refuses a MAJOR vocabulary change (typed 409 contract-major-change).",
       minAssurance: "low",
       write: true,
       impact: "medium",
@@ -267,8 +268,12 @@ export const webdevModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/webdev/control/schema/apply",
       inputSchema: {
         type: "object",
-        properties: { tenantId: { type: "string" }, siteId: { type: "string" }, proposalId: { type: "string" } },
-        required: ["tenantId", "siteId"],
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          tenantSlug: { type: "string" }, siteId: { type: "string" }, collectionKey: { type: "string" },
+          schema: { type: "object", description: "The collection's composition." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "collectionKey", "schema"],
       },
     },
     {
@@ -277,7 +282,7 @@ export const webdevModule: ModuleContract = {
         "Provision a new WebDesk (Zone B) site — Payload tenant + environments. DISTINCT from "
         + "webdev.provisionSite (that tool provisions a Web Dev delivery-pipeline repo+hosting; this "
         + "one provisions a WebDesk content-platform tenant). MEDIUM write — WS4 for automation "
-        + "principals (§07). STUB: 501 webdesk_control_plane_not_wired.",
+        + "principals (§07). LIVE since WSK-59: adds a site to one of THIS company's WebDesk tenants.",
       minAssurance: "low",
       write: true,
       impact: "medium",
@@ -285,8 +290,11 @@ export const webdevModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/webdev/control/sites",
       inputSchema: {
         type: "object",
-        properties: { tenantId: { type: "string" }, slug: { type: "string" }, kind: { type: "string", enum: ["astro", "node", "wp"] } },
-        required: ["tenantId", "slug", "kind"],
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" },
+          kind: { type: "string", enum: ["astro", "node", "wp"] }, name: { type: "string" },
+        },
+        required: ["tenantId", "tenantSlug", "kind", "name"],
       },
     },
     {
@@ -408,6 +416,236 @@ export const webdevModule: ModuleContract = {
         type: "object",
         properties: { tenantId: { type: "string" }, siteId: { type: "string" } },
         required: ["tenantId", "siteId"],
+      },
+    },
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // WSK-59 — the content editor's MCP tools (write-plane design §12 WSK-59). EVERY editor action is a
+    // tool, so a capability works identically under a human (the Website workspace), n8n and an agent;
+    // the BFF routes behind them are `webdesk-content.controller.ts` (`/api/:tenantId/modules/webdev/content/…`).
+    //
+    // IMPACT CLASSES. Reads are free. create / update / restoreVersion / requestPublish are `low` writes:
+    // each only creates a DRAFT or files an approval, and changes nothing a production key can see (design
+    // §3.1). unpublish / delete are `medium`: an unattended caller (n8n or an agent) SUSPENDS into a WS4
+    // approval and is re-driven as the ORIGINAL principal on approval (D14); an attended human is not
+    // suspended (a takedown must not wait for a second person, WSK-D46). There is deliberately NO publish
+    // tool: publish is HIGH for every principal and executes only at decide() of the approval that
+    // `webdesk.content.requestPublish` files (WSK-66).
+    //
+    // D14 PAIRING (the standing lesson): unpublish and delete are registered in BOTH
+    // `core/approval-executables.ts` AND `resource_mcp_tool.yaml`'s executable list, in this same change.
+    //
+    // ASSURANCE. `low`, like every other WebDesk tool: the hub mints only `low` for an n8n workflow or a chat-surface
+    // agent (principal.ts), and `verified` would lock exactly the unattended callers this program exists for out of
+    // the capability. The real authority is the platform's Cerbos decision on the resolved human, not this floor.
+    //
+    // HUB LIMITATION, reported not worked around: `mcp-hub/src/module-tools.ts` sends only PATH args for a
+    // GET (a GET's other args are dropped), so the list tools return Zone B's DEFAULT first page (50) with no
+    // filters or cursor, and `getItem` reads the head. `getVersion` reads any one version. A hub change
+    // (opt-in `queryParams` on the def) would lift it; it is not in this ticket's paths. `update` is a PATCH
+    // here because the hub's method union has no PUT; the BFF accepts both on the same path.
+    {
+      name: "webdesk.content.listSites",
+      description: "List the WebDesk tenants and sites this company can edit (tenant slug, site id, kind, environments).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites",
+      inputSchema: { type: "object", properties: { tenantId: { type: "string", description: "Company id (route scope)." } }, required: ["tenantId"] },
+    },
+    {
+      name: "webdesk.content.listCollections",
+      description: "List a site's collections with their compositions (field definitions) and counts (items, live, pending changes).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/collections",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId"],
+      },
+    },
+    {
+      name: "webdesk.content.listItems",
+      description:
+        "List items of one collection (id, slug, locale, title, head/published version, state, pending changes), editor order. "
+        + "Returns the first page only (hub limitation: no filters or cursor over MCP yet).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/collections/:collectionKey/items",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, collectionKey: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId", "collectionKey"],
+      },
+    },
+    {
+      name: "webdesk.content.getItem",
+      description: "Read one item at its HEAD (draft) version: fields/blocks/seo, the live version if any, its locale group and lint.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId"],
+      },
+    },
+    {
+      name: "webdesk.content.listVersions",
+      description: "List an item's version history, newest first (version, content hash, author id, note).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId"],
+      },
+    },
+    {
+      name: "webdesk.content.getVersion",
+      description: "Read one historical version of an item in full (blocks, seo, hash, author, note).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions/:n",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          n: { type: "integer", minimum: 1, description: "Version number." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId", "n"],
+      },
+    },
+    {
+      name: "webdesk.content.listMedia",
+      description: "List a site's media library assets (id, key, mime, size, scan status).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId"],
+      },
+    },
+    {
+      name: "webdesk.content.create",
+      description:
+        "Create a DRAFT item in a collection (version 1). Nothing a production key sees changes. `fields` is required when the "
+        + "collection's composition declares fields. Typed 409 (slug-taken, twin-locale-taken, singleton-exists) / 422 "
+        + "(composition-violation with issues) come back unchanged.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/collections/:collectionKey/items",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, collectionKey: { type: "string" },
+          locale: { type: "string" }, slug: { type: "string" },
+          twinOf: { type: ["string", "null"], description: "Item id in the same collection and another locale, to join its localization group." },
+          fields: { type: "object" }, blocks: { type: "array" }, seo: { type: "object" }, note: { type: "string", maxLength: 500 },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "collectionKey", "locale", "slug"],
+      },
+    },
+    {
+      name: "webdesk.content.update",
+      description:
+        "Save a new DRAFT version of an item (full replacement of fields/blocks/seo). `baseVersion` must equal the item's head "
+        + "version, else a typed 409 version-conflict. Live content is untouched until a publish is approved.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          baseVersion: { type: "integer", minimum: 0 },
+          fields: { type: "object" }, blocks: { type: "array" }, seo: { type: "object" }, note: { type: "string", maxLength: 500 },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId", "baseVersion"],
+      },
+    },
+    {
+      name: "webdesk.content.restoreVersion",
+      description: "Create a new DRAFT version from an old version of an item (history is kept). `baseVersion` must equal the head version.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/restore",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          version: { type: "integer", minimum: 1 }, baseVersion: { type: "integer", minimum: 0 }, note: { type: "string", maxLength: 500 },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId", "version", "baseVersion"],
+      },
+    },
+    {
+      name: "webdesk.content.requestPublish",
+      description:
+        "Request publication of 1..1000 item versions: files ONE approval (HIGH, WS4) that a human decides in the Approvals inbox. "
+        + "Never publishes anything itself; returns {approvalId}. `publishAt`/`unpublishAt` (ISO) request a scheduled publish/takedown instead.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/publish-requests",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" },
+          items: {
+            type: "array", minItems: 1, maxItems: 1000,
+            items: { type: "object", properties: { itemId: { type: "string" }, version: { type: "integer", minimum: 1 } }, required: ["itemId", "version"] },
+          },
+          publishAt: { type: ["string", "null"] }, unpublishAt: { type: ["string", "null"] }, note: { type: "string", maxLength: 500 },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "items"],
+      },
+    },
+    {
+      name: "webdesk.content.unpublish",
+      description:
+        "Take a published item down from production. MEDIUM write: an unattended caller (agent / n8n) is suspended for human "
+        + "approval and re-driven as the original requester. `expectedPublishedVersion` must be the live version (typed 409 otherwise).",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/unpublish",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          expectedPublishedVersion: { type: "integer", minimum: 1 },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId", "expectedPublishedVersion"],
+      },
+    },
+    {
+      name: "webdesk.content.delete",
+      description:
+        "Soft-delete a NON-live item (history is kept; a live item is a typed 409 item-is-live: unpublish it first). MEDIUM write: "
+        + "an unattended caller is suspended for human approval and re-driven as the original requester.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/delete",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          baseVersion: { type: "integer", minimum: 0 },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId", "baseVersion"],
       },
     },
   ],

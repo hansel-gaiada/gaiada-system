@@ -6,7 +6,14 @@
 // make them nowhere except index.ts; a new file is the additive path WSK-12 already established for
 // exactly this situation (see zoneb-events.controller.ts's own header for the precedent).
 //
-// ── EVERY ROUTE HERE IS AN HONEST STUB, AND THAT IS DELIBERATE ─────────────────────────────────────
+// ── WSK-59 UPDATE (2026-10-10): THREE OF THESE ARE NOW REAL ──────────────────────────────────────
+// `GET sites`, `POST sites` and `POST schema/apply` run over the real control channel
+// (`webdesk-control-client.ts`, via `webdesk-content.service.ts`: the cross-company wall, typed errors,
+// two ledger rows per write). They keep this controller's Cerbos gate (`webdev_provisioned_site` read /
+// operate) as their first statement. Every OTHER route below is still an honest 501, and the notes that
+// follow describe those.
+//
+// ── EVERY ROUTE HERE (EXCEPT THE THREE ABOVE) IS AN HONEST STUB, AND THAT IS DELIBERATE ─────────────────────────────────────
 // WSK-23 (the ERP module egress client + BFF — mTLS + KC client-credentials + the §03 Layer-4 WS4
 // assertion into Zone B) has not landed (PROGRESS.md Part D, 2026-08-27: still ⬜ NOT DONE, and this
 // ticket's own dependency line names it: "WSK-21–23"). So there is genuinely no live channel from
@@ -52,11 +59,15 @@
 // hub ever calls this endpoint, so this controller does not (and structurally cannot, today) verify
 // WS4 status itself, matching every other MCP-fronted write tool in the estate (e.g.
 // `webdev.provisionSite`'s own endpoint trusts the hub's gate + Cerbos the same way).
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
-import type { FastifyRequest } from "fastify";
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Param, Post, Req, Res, UseFilters, UseGuards } from "@nestjs/common";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
+// WSK-59: `GET sites`, `POST sites` and `POST schema/apply` are re-pointed from the 501 stubs to the real
+// control channel (the wall, typed errors and ledger rows live in the service). Everything else stays 501.
+import { WebdeskProblemFilter } from "./webdesk-content.controller";
+import { controlApplySchema, controlListSites, controlProvisionSite, idempotencyKeyOf } from "./webdesk-content.service";
 
 /** The one honest answer every route below gives. A typed `error` token (this estate's error
  *  envelope, `http-error.filter.ts`), not prose alone, so a caller (the hub, a future console) can
@@ -75,13 +86,14 @@ function siteResource(tenantId: string) {
 
 @Controller("api/:tenantId/modules/webdev/control")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
+@UseFilters(WebdeskProblemFilter)
 export class WebdeskControlController {
   // ── reads (§07: "read", Cerbos gate: `read`) ──────────────────────────────────────────────────
   @Get("sites")
-  @HttpCode(501)
-  async listSites(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async listSites(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Res() reply: FastifyReply) {
     await authorize(req.principal, siteResource(tenantId), "read");
-    return NOT_WIRED;
+    const r = await controlListSites(tenantId);
+    void reply.status(r.status).header("content-type", "application/json; charset=utf-8").send(r.body);
   }
 
   @Get("sites/:siteId/status")
@@ -109,19 +121,25 @@ export class WebdeskControlController {
 
   // ── medium writes (§07: WS4 for automation principals; Cerbos gate: `operate`) ────────────────
   @Post("schema/apply")
-  @HttpCode(501)
-  async applySchema(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown) {
+  async applySchema(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown,
+    @Headers("idempotency-key") idem: string | undefined, @Res() reply: FastifyReply,
+  ) {
     await authorize(req.principal, siteResource(tenantId), "operate");
     requireObjectBody(body);
-    return NOT_WIRED;
+    const r = await controlApplySchema(req.principal, tenantId, body, idempotencyKeyOf(idem));
+    void reply.status(r.status).header("content-type", "application/json; charset=utf-8").send(r.body);
   }
 
   @Post("sites")
-  @HttpCode(501)
-  async provisionSite(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown) {
+  async provisionSite(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown,
+    @Headers("idempotency-key") idem: string | undefined, @Res() reply: FastifyReply,
+  ) {
     await authorize(req.principal, siteResource(tenantId), "operate");
     requireObjectBody(body);
-    return NOT_WIRED;
+    const r = await controlProvisionSite(req.principal, tenantId, body, idempotencyKeyOf(idem));
+    void reply.status(r.status).header("content-type", "application/json; charset=utf-8").send(r.body);
   }
 
   @Post("sites/:siteId/deploy/staging")
