@@ -33,7 +33,11 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
   if (!project) notFound();
 
   const now = new Date();
-  const overdue = isPastDue(project.dueDate, now) && !["done", "complete"].includes(project.status);
+  // `finished` is the server's one definition (FINISHED_PROJECT_STATUSES, PV2-01/03). The old local list
+  // lacked "completed", so a completed project past its due date read "Was due". Undefined (an older
+  // backend) falls back to that list, now including "completed".
+  const finished = project.finished ?? ["done", "complete", "completed", "archived", "cancelled"].includes(project.status);
+  const overdue = isPastDue(project.dueDate, now) && !finished;
   const w = project.workload ?? {};
   const inFlight = (w.in_progress ?? 0) + (w.blocked ?? 0);
 
