@@ -978,12 +978,19 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
       expect(foreign.json()).toMatchObject({ type: "https://webdesk.gaiada.online/errors/site-not-found" });
     });
 
-    it("FINDING (pinned, not widened): the generic approvals routes still refuse a webdev_staff requester, which is WHY this route exists", async () => {
+    it("RESOLVED by WebDesk M3 T7 (was a pinned FINDING): the generic approvals routes let a webdev_staff requester read their OWN approval, and nobody else's", async () => {
       const id = await fileAs(editorA);
-      // the list the editor used before WSK-44b, and the detail the editor's poll and /approvals/[id] use
-      expect((await call("GET", `/api/${A}/automation-approvals?origin=webdesk&status=pending`, editorA)).statusCode).toBe(403);
-      expect((await call("GET", `/api/${A}/automation-approvals/${id}`, editorA)).statusCode).toBe(403);
-      // an approver (company_admin) reads both
+      // The list the editor used before WSK-44b now answers the requester with their own rows only,
+      // and the detail the editor's poll and /approvals/[id] use reads their own row.
+      const list = await call("GET", `/api/${A}/automation-approvals?origin=webdesk&status=pending`, editorA);
+      expect(list.statusCode).toBe(200);
+      const rows = list.json() as Array<{ id: string; requestedBy?: string }>;
+      expect(rows.map((r) => r.id)).toContain(id);
+      expect(rows.every((r) => r.requestedBy === undefined || r.requestedBy === editorA)).toBe(true);
+      expect((await call("GET", `/api/${A}/automation-approvals/${id}`, editorA)).statusCode).toBe(200);
+      // Someone else's approval stays refused for a plain member of the same company.
+      expect((await call("GET", `/api/${A}/automation-approvals/${id}`, memberA)).statusCode).toBe(403);
+      // An approver (company_admin) reads it, as before.
       expect((await call("GET", `/api/${A}/automation-approvals/${id}`, adminA)).statusCode).toBe(200);
     });
   });
