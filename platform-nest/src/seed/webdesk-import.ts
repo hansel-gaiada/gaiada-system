@@ -27,6 +27,7 @@ import { authorize } from "../core/http";
 import { closePool, withGlobal, withTenants } from "../db";
 import { assemblePrincipal, type Principal } from "../rbac/principal";
 import { fileWebdeskCommandApproval } from "../modules/webdev/webdesk-approved-command";
+import { wireWebdeskEditorialSigner } from "../modules/webdev/webdesk-editorial-signer";
 import {
   WebdeskProblem,
   authorizeContent,
@@ -686,6 +687,9 @@ export function parseArgs(argv: string[]): ImportOptions {
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   try {
+    // A CLI is its own process: the editorial signer main.ts wires at boot is not registered here, so every
+    // write would be refused unsent (503 editorial_signer_not_configured). Found on the live import, 2026-10-11.
+    wireWebdeskEditorialSigner();
     const report = await runImport(parseArgs(argv));
     for (const l of report.lines) console.log(l);
     if (report.publishPreview) console.log(`publish request preview: ${JSON.stringify(report.publishPreview)}`);

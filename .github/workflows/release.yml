@@ -341,7 +341,10 @@ jobs:
             digest="$(jq -r .digest <<<"$row")"
             img="ghcr.io/${OWNER}/gaiada-${comp}"
             echo "::group::re-tag ${comp}: ${from} (${digest}) -> ${TAG}"
-            docker buildx imagetools create --tag "${img}:${TAG}" "${img}@${digest}"
+            # --prefer-index=false: a CARBON COPY. Without it, a single-manifest source (no attestation index)
+            # is re-wrapped into a NEW index with a new digest, so the cosign signature cannot carry over
+            # (346's first run, 2026-10-11; reproduced against a local registry, and the flag keeps the digest).
+            docker buildx imagetools create --prefer-index=false --tag "${img}:${TAG}" "${img}@${digest}"
             got="$(docker buildx imagetools inspect "${img}:${TAG}" --format '{{json .Manifest}}' | jq -r .digest)"
             if [ "$got" != "$digest" ]; then
               echo "::error::${img}:${TAG} resolved to ${got}, expected ${digest} - the signature would NOT carry over. Re-run with force_all=true."
