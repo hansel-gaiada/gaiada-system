@@ -22,7 +22,8 @@ import * as net from "node:net";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { Logger } from "@nestjs/common";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
@@ -32,7 +33,7 @@ import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/s
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
 import { EditorialUnavailableError, WebdeskControlClient, WebdeskControlTransportError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests, NOT_CONFIGURED_EDITORIAL_SIGNER } from "./webdesk-approved-command";
-import { WebdeskProblem, webdeskZoneB } from "./webdesk-content.service";
+import { WebdeskProblem, setStagingStaleMarkerForTests, webdeskZoneB } from "./webdesk-content.service";
 import { webdevModule } from "./index";
 import { FakeZoneB, GAIADA_SITE, GAIADA_SLUG, OTHER_SITE, OTHER_SLUG, makeTestSigner, problem, type FakeItem } from "./webdesk-content-testkit";
 
@@ -629,6 +630,82 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
       const r = await call("PUT", `${site()}/items/${item.itemId}`, editorA, { baseVersion: 1, fields: { h1: "x" } });
       expect(r.statusCode).toBe(502);
       expect(r.json()).toMatchObject({ error: "webdesk_ambiguous", reason: "reconcile_failed" });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("WSK-60: a takedown of LIVE content marks staging stale (the editor's banner), best-effort", () => {
+    /** What the editor reads: the real build-status route. */
+    async function stagingStale(): Promise<boolean> {
+      const r = await call("GET", `${site()}/build-status`, editorA);
+      expect(r.statusCode).toBe(200);
+      return r.json<{ stagingStale: boolean }>().stagingStale;
+    }
+    const marks = async () =>
+      (await adminPool().query<{ site_id: string }>(`SELECT site_id FROM webdev_site_staging_marks WHERE tenant_id = $1 AND stale_since IS NOT NULL`, [A])).rows;
+
+    beforeEach(async () => {
+      await adminPool().query(`DELETE FROM webdev_site_staging_marks WHERE tenant_id = $1`, [A]);
+    });
+    afterEach(() => setStagingStaleMarkerForTests(null));
+
+    it("unpublishing a live item marks staging stale, under the site id the build-status route reads", async () => {
+      expect(await stagingStale()).toBe(false);
+      const r = await call("POST", `${site()}/items/${live1.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 });
+      expect(r.statusCode).toBe(200);
+      expect(await stagingStale()).toBe(true);
+      expect(await marks()).toEqual([{ site_id: GAIADA_SITE.toLowerCase() }]);
+    });
+
+    it("an ambiguous unpublish that reconciles as landed marks it too", async () => {
+      zb.dropAfterApply = true;
+      const r = await call("POST", `${site()}/items/${live1.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 });
+      expect(r.json()).toMatchObject({ reconciled: true });
+      expect(await stagingStale()).toBe(true);
+    });
+
+    it("a refused unpublish (409 not-live, the item was never live) and an unpublish that never landed (502) do not mark", async () => {
+      const refused = await call("POST", `${site()}/items/${item.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 });
+      expect(refused.statusCode).toBe(409);
+      zb.dropBeforeApply = true;
+      const lost = await call("POST", `${site()}/items/${live1.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 });
+      expect(lost.statusCode).toBe(502);
+      expect(await stagingStale()).toBe(false);
+    });
+
+    it("deleting a draft-only item changes nothing staging serves: 200, not stale", async () => {
+      const r = await call("POST", `${site()}/items/${item.itemId}/delete`, publisherA, { baseVersion: 1 });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().item.deletedAt).toEqual(expect.any(String));
+      expect(await stagingStale()).toBe(false);
+    });
+
+    it("a LIVE item cannot be deleted (409 item-is-live: unpublish first), so a delete never takes live content down", async () => {
+      const r = await call("POST", `${site()}/items/${live1.itemId}/delete`, publisherA, { baseVersion: 1 });
+      expect(r.statusCode).toBe(409);
+      expect(await stagingStale()).toBe(false);
+      // The real sequence: unpublish (marks), then delete the now non-live item (the mark stays).
+      expect((await call("POST", `${site()}/items/${live1.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 })).statusCode).toBe(200);
+      expect((await call("POST", `${site()}/items/${live1.itemId}/delete`, publisherA, { baseVersion: 1 })).statusCode).toBe(200);
+      expect(await stagingStale()).toBe(true);
+    });
+
+    it("best-effort: when the mark cannot be written the unpublish still succeeds (200, ledger 'succeeded') and the failure is logged", async () => {
+      setStagingStaleMarkerForTests(async () => {
+        throw new Error("staging marks unavailable");
+      });
+      const errors = vi.spyOn(Logger.prototype, "error").mockImplementation(() => {});
+      try {
+        const r = await call("POST", `${site()}/items/${live1.itemId}/unpublish`, publisherA, { expectedPublishedVersion: 1 });
+        expect(r.statusCode).toBe(200);
+        expect(r.json().item).toMatchObject({ publishState: "unpublished", publishedVersion: null });
+        expect((await ledger("webdesk.content.unpublish")).map((row) => row.metadata.outcome)).toEqual(["attempted", "succeeded"]);
+        const logged = errors.mock.calls.map((c) => String(c[0]));
+        expect(logged.some((m) => m.includes("content.unpublish: staging could not be marked stale") && m.includes("staging marks unavailable"))).toBe(true);
+      } finally {
+        errors.mockRestore();
+      }
+      expect(await stagingStale()).toBe(false);
     });
   });
 

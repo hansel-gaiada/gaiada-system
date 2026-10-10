@@ -155,11 +155,24 @@ describe.skipIf(!TEST_URL)("WSK-31 · WebdeskControlController (HTTP, isolated a
   });
 
   describe("🔴 the seven HIGH write routes (Cerbos action: promote — §07 always-WS4 commands)", () => {
+    // 2026-10-11: `sites/:siteId/keys` FILES a key.mint approval now (webdesk-key-mint.test.ts covers it end to
+    // end); here it keeps only the gate-first pairing: member 403, admin past the gate into body validation.
+    it("POST sites/s1/keys: member DENIED; admin passes the gate and an incomplete body is a typed 400 (not 501, not 500)", async () => {
+      const body = { scope: "read" };
+      const denied = await app.inject({
+        method: "POST", url: `/api/${tenant}/modules/webdev/control/sites/s1/keys`, headers: asUser(member), payload: body,
+      });
+      expect(denied.statusCode).toBe(403);
+      const allowed = await app.inject({
+        method: "POST", url: `/api/${tenant}/modules/webdev/control/sites/s1/keys`, headers: asUser(admin), payload: body,
+      });
+      expect(allowed.statusCode).toBe(400);
+      expect(allowed.json()).toMatchObject({ reason: "invalid_request" });
+    });
     for (const [path, body] of [
       ["sites/s1/promote", {}],
       ["sites/s1/rollback", {}],
       ["sites/s1/domain", { domain: "example.com" }],
-      ["sites/s1/keys", { scope: "read" }],
       ["keys/k1/rotate", {}],
       ["keys/k1/revoke", {}],
       ["sites/s1/archive", {}],

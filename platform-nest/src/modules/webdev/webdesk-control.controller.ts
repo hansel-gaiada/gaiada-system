@@ -11,7 +11,13 @@
 // (`webdesk-control-client.ts`, via `webdesk-content.service.ts`: the cross-company wall, typed errors,
 // two ledger rows per write). They keep this controller's Cerbos gate (`webdev_provisioned_site` read /
 // operate) as their first statement. Every OTHER route below is still an honest 501, and the notes that
-// follow describe those.
+// follow describe those, except one:
+//
+// ── 2026-10-11: `POST sites/:siteId/keys` FILES A key.mint APPROVAL ──────────────────────────────────
+// It keeps the `promote` gate as its first statement, then the wall, an environment-belongs-to-this-site
+// check and one-open-request de-dup (`controlRequestKeyMint`), and answers 202 `{approvalId}`. The mint
+// itself is WSK-66's: executed at decide() by a DIFFERENT authorised user, the plaintext returned once in
+// that response and nowhere else.
 //
 // ── EVERY ROUTE HERE (EXCEPT THE THREE ABOVE) IS AN HONEST STUB, AND THAT IS DELIBERATE ─────────────────────────────────────
 // WSK-23 (the ERP module egress client + BFF — mTLS + KC client-credentials + the §03 Layer-4 WS4
@@ -65,9 +71,10 @@ import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 // WSK-59: `GET sites`, `POST sites` and `POST schema/apply` are re-pointed from the 501 stubs to the real
-// control channel (the wall, typed errors and ledger rows live in the service). Everything else stays 501.
+// control channel (the wall, typed errors and ledger rows live in the service). `POST sites/:siteId/keys` FILES a
+// key.mint approval (WSK-66 mints at decide()). Everything else stays 501.
 import { WebdeskProblemFilter } from "./webdesk-content.controller";
-import { controlApplySchema, controlListSites, controlProvisionSite, idempotencyKeyOf } from "./webdesk-content.service";
+import { controlApplySchema, controlListSites, controlProvisionSite, controlRequestKeyMint, idempotencyKeyOf } from "./webdesk-content.service";
 
 /** The one honest answer every route below gives. A typed `error` token (this estate's error
  *  envelope, `http-error.filter.ts`), not prose alone, so a caller (the hub, a future console) can
@@ -172,12 +179,15 @@ export class WebdeskControlController {
     return NOT_WIRED;
   }
 
+  /** Files ONE key.mint approval and answers 202 `{approvalId}`; nothing is minted until a DIFFERENT
+   *  authorised user approves it (WSK-66), and the plaintext is shown once, in that decide response. */
   @Post("sites/:siteId/keys")
-  @HttpCode(501)
-  async mintKey(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown) {
+  @HttpCode(202)
+  async mintKey(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("siteId") siteId: string, @Body() body: unknown,
+  ): Promise<{ approvalId: string }> {
     await authorize(req.principal, siteResource(tenantId), "promote");
-    requireObjectBody(body);
-    return NOT_WIRED;
+    return controlRequestKeyMint(req.principal, tenantId, siteId, body);
   }
 
   @Post("keys/:keyId/rotate")
