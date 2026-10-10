@@ -2,10 +2,9 @@
 // error shapes surviving the framework, and coexistence with the other routes that share the /v1
 // prefix. Driven over real HTTP (Fastify `app.inject`) against real Postgres under real RLS.
 //
-// The BYTE-identity proof against the old Payload-hosted router is NOT here (that needs the Payload
-// tree and a second process) — it is the differential harness in webdesk/payload/test/
-// (run-v1-differential.sh), described in webdesk/api/README.md. This file pins the properties that
-// must keep holding inside the api itself, where only this repo's CI runs.
+// The BYTE-identity proof against the old Payload-hosted router is v1-differential.spec.ts, and the
+// frozen envelope contract is envelope-contract.spec.ts (both ported from webdesk/payload/test/; see
+// webdesk/api/README.md). This file pins the properties that must keep holding inside the api itself.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { Client } from "pg";

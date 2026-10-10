@@ -1752,14 +1752,30 @@ and the optional quota vars are all existing.
 
 In-repo (needs only Postgres, like the rest of the suite): `npx vitest run test/delivery` —
 `delivery-routes.spec.ts` (byte-level adapter promises, router error shapes surviving the framework,
-route precedence against media/forms, the quota) and `vocabulary-vendor-drift.spec.ts`.
+route precedence against media/forms, the quota), `vocabulary-vendor-drift.spec.ts`, and the two
+gates ported from `webdesk/payload/test/` (WSK-48a's last box, 2026-10-11), which run in CI's
+`webdesk-api` job as part of `npm test`:
 
-The **byte-identity gate** against the old Payload-hosted router lives in
-`webdesk/payload/test/` (it needs the Payload tree, so it is not in CI): `run-v1-differential.mjs`
-replays every request of `envelope-contract.test.mjs` (unmodified except one import swap) plus ~670
-error-path/edge-case requests (`v1-differential-extra.test.mjs`) against BOTH the old router (behind a
-plain Node http.Server) and a running api, and compares status, body bytes, `content-type` and
-`cache-tag`. Recipe: Postgres (roles via `webdesk/postgres/init-roles.sh`) + `npm run migrate`, then in
-`webdesk/api`: `npm ci && npx tsc -p tsconfig.json`, start `WEBDESK_READ_QUOTA_PER_MIN=1000000 node
-dist/src/main.js`, then `V1_NEW_URL=http://127.0.0.1:3000 DATABASE_URI=<app url> MIGRATE_DATABASE_URL=<migrator url> API_KEY_PEPPER=<same> node
---import tsx ../payload/test/run-v1-differential.mjs` (`webdesk/` needs `npm ci` too, for `pg`).
+- `envelope-contract.spec.ts` — the WSK-06 envelope contract (60 checks, names verbatim) against this
+  service's `/v1` over real HTTP (`buildApp()` + `listen`, exactly what `main.ts` does). This is the gate
+  that outlives Payload.
+- `v1-differential.spec.ts` — the **byte-identity gate** against the old Payload-hosted router, the
+  port of `run-v1-differential.mjs`. Three passes: the contract replayed through a tee (assertions on
+  the api's responses), the same with assertions on the old router's (the baseline proving the tee is
+  neutral), and ~670 error-path/edge-case requests. Each request goes to BOTH the old router (imported
+  at run time from `webdesk/payload/collections/router.ts`, behind a plain Node http.Server) and the
+  api, and status, body bytes, `content-type` and `cache-tag` are compared. Pinned: 24+1 / 24+1 /
+  662+6 pairs (byte-compared + status-only) and 14 classified divergences (a raw `%` without two hex
+  digits in the path, which Fastify refuses with `400 FST_ERR_BAD_URL`), 0 unexplained. The old
+  router needs `pg` from `webdesk/node_modules`: run `npm ci` in `webdesk/` first (CI's migration
+  step does). Its pool reads `DATABASE_URI`, which the spec points at `APP_DATABASE_URL`.
+
+The shared pieces are in `test/delivery/v1-contract/` (the suite as a function, the tee, the extra
+corpus, the fixtures). The originals in `webdesk/payload/test/` are kept until WSK-48b, and
+`run-v1-differential.mjs` still works the old way against a separately started api
+(`WEBDESK_READ_QUOTA_PER_MIN=1000000 node dist/src/main.js`, then `V1_NEW_URL=http://127.0.0.1:3000
+DATABASE_URI=<app url> MIGRATE_DATABASE_URL=<migrator url> API_KEY_PEPPER=<same> node --import tsx
+../payload/test/run-v1-differential.mjs`). Both harnesses reported the same per-pass numbers on one
+tree. **WSK-48b:** delete `v1-differential.spec.ts`, `v1-contract/differential*.ts` and the
+`webdesk/payload/collections/` + `webdesk/payload/src/tenant-p` prefixes in `scripts/ci/config.mjs`
+together with Payload; keep `envelope-contract.spec.ts`.
