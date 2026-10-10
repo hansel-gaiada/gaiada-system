@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **61%** · 125/203<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **60%** · 125/205<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -199,7 +199,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `███████████░░░░░░░░░` **56%** · 29/51<!-- /bar -->
+<!-- bar -->🟡 `███████████░░░░░░░░░` **54%** · 29/53<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -221,7 +221,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43 · media library
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `██████░░░░` **62%** · 23/37<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `██████░░░░` **58%** · 23/39<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
@@ -240,7 +240,9 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
 - [x] Approving a `key.mint` on `/approvals/[id]` discards the once-only plaintext (the UI's decide action ignores the response body): until the fix lands (`webdesk/key-request-ui`), approve key mints through the API and read `webdesk.plaintextOnce` — FIXED for 349 (`webdesk/key-request-ui` @ `81040b05`: `KeyMintDecide` shows it once, component state only; Linux: ui vitest 234/4661, build; e2e custody STATE passes on a quiet box)
 - [ ] `editorial-assertion-matrix.spec.ts` can leak 2 unhandled `ioredis` "Connection is closed" rejections when an app instance closes mid-command: the api suite exits 1 with 0 failures (1 of 2 runs on sumopod, 2026-10-11)
-- [ ] PRODUCT BUG, mechanism found (a6 probe, 2026-10-11): after a server action the App Router (Next 15.5.20) refetches the page the action started on, unprompted (the action itself revalidates nothing: `x-action-revalidated=[[],0,0]`), and races a navigation issued right after; when the refetch wins, the navigation is DISCARDED (URL never changes). Hits the editor's create / twin / restore pushes and a link click after Approve. Waiting does not fix it. Next: (b) find a Next release that fixes it, (a) `redirect()` inside the editor's own actions
+- [ ] PRODUCT BUG, mechanism found (a6 probe, 2026-10-11): after a server action the App Router (Next 15.5.20) refetches the page the action started on, unprompted (the action itself revalidates nothing: `x-action-revalidated=[[],0,0]`), and races a navigation issued right after; when the refetch wins, the navigation is DISCARDED (URL never changes). Hits the editor's create / twin / restore pushes and a link click after Approve. Waiting does not fix it. Next: (b) find a Next release that fixes it, (a) `redirect()` inside the editor's own actions. UPSTREAM: fixed in next@16.3.0 (vercel/next.js#95391, issue #88343; regressed in 15.5.1 via #82674; NOT backported to 15.5.x)
+- [ ] Editor create / twin / restore navigate via `redirect()` inside the server action (`webdesk/redirect-after-write`; measuring ×12 vs base)
+- [ ] OWNER DECISION: upgrade platform-ui Next 15.5 → 16.3+ to fix dropped navigations after ANY server action ERP-wide (a major upgrade; its own ticket and full UI gate)
 - [x] WSK-21 HIGH commands (keys, lifecycle, releases) claim the WS4 approval in the same transaction as the effect, through a shared envelope; a reused approval is 403 before any effect (T5a; 10-racer tests) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [ ] WSK-25 promotion and WSK-38 privacy commands still write the audit row after the side effect — move them onto the envelope (T5b)
 - [x] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
