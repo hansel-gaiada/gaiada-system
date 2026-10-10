@@ -5,7 +5,10 @@ import { TenantsModule } from "./tenants/tenants.module";
 import { AuditModule } from "./audit/audit.module";
 import { ApiKeysModule } from "./api-keys/api-keys.module";
 import { AuthModule } from "./auth/auth.module";
-import { ContentModule } from "./content/content.module";
+// WSK-48a — the public /v1 content-read path (envelope router), rehomed from the Payload app.
+// Replaces WSK-05's demonstration ContentModule (retired: it owned GET/POST /v1/t/:tenantSlug/content,
+// which would have shadowed a collection keyed `content`).
+import { DeliveryModule } from "./delivery/delivery.module";
 // WSK-07 (wired by coordinator; the ticket reported this rather than editing a shared file).
 // MediaModule pulls StorageModule in with it.
 import { MediaModule } from "./media/media.module";
@@ -41,7 +44,7 @@ import { PromotionModule } from "./promotion/promotion.module";
     AuditModule,
     ApiKeysModule,
     AuthModule,
-    ContentModule,
+    DeliveryModule,
     MediaModule,
     MailModule,
     FormsModule,

@@ -59,7 +59,7 @@ describe("WSK-05 per-tenant read quota", () => {
 
   it("shares ONE budget across different keys for the same tenant, then refuses with 429", async () => {
     const get = (key: string) =>
-      app.inject({ method: "GET", url: `/v1/t/${tenantA.slug}/content`, headers: { authorization: `Bearer ${key}` } });
+      app.inject({ method: "GET", url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`, headers: { authorization: `Bearer ${key}` } });
 
     const r1 = await get(keyA1); // 1/3
     const r2 = await get(keyA2); // 2/3 — a DIFFERENT key, same tenant
@@ -73,20 +73,23 @@ describe("WSK-05 per-tenant read quota", () => {
   it("tenant B's quota is completely untouched by tenant A exhausting its own — the noisy-neighbour property", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantB.slug}/content`,
+      url: `/v1/t/${tenantB.slug}/${tenantB.collectionKey}?locale=en-US`,
       headers: { authorization: `Bearer ${keyB}` },
     });
     expect(res.statusCode).toBe(200);
   });
 
   it("the write route is NOT gated by the read quota (AC scope: content READS)", async () => {
-    // Tenant A's read budget is already exhausted from the first test in this file.
+    // Tenant A's read budget is already exhausted from the first test in this file. WSK-48a: the
+    // write route is now media upload (the retired demo POST /content used to stand here); an empty
+    // body makes the handler answer its own 400, which proves the request got PAST the guards
+    // (a quota refusal would be 429) without touching storage.
     const res = await app.inject({
       method: "POST",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/media/media`,
       headers: { authorization: `Bearer ${keyA1}` },
-      payload: { collectionKey: tenantA.collectionKey, locale: "en-US", slug: "still-writable-under-read-quota" },
+      payload: {},
     });
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(400);
   });
 });

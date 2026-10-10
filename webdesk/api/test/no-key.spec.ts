@@ -20,14 +20,14 @@ describe("WSK-05 no-key probe", () => {
   });
 
   it("no Authorization header at all -> 401", async () => {
-    const res = await app.inject({ method: "GET", url: `/v1/t/${tenant.slug}/content` });
+    const res = await app.inject({ method: "GET", url: `/v1/t/${tenant.slug}/${tenant.collectionKey}?locale=en-US` });
     expect(res.statusCode).toBe(401);
   });
 
   it("empty Authorization header -> 401", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenant.slug}/content`,
+      url: `/v1/t/${tenant.slug}/${tenant.collectionKey}?locale=en-US`,
       headers: { authorization: "" },
     });
     expect(res.statusCode).toBe(401);
@@ -36,7 +36,7 @@ describe("WSK-05 no-key probe", () => {
   it("malformed scheme (not Bearer) -> 401", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenant.slug}/content`,
+      url: `/v1/t/${tenant.slug}/${tenant.collectionKey}?locale=en-US`,
       headers: { authorization: "Basic dGVzdDp0ZXN0" },
     });
     expect(res.statusCode).toBe(401);
@@ -45,7 +45,7 @@ describe("WSK-05 no-key probe", () => {
   it("well-formed but entirely unknown key -> 401, not 500", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenant.slug}/content`,
+      url: `/v1/t/${tenant.slug}/${tenant.collectionKey}?locale=en-US`,
       headers: { authorization: "Bearer wdsk_this-key-was-never-minted-by-anyone" },
     });
     expect(res.statusCode).toBe(401);
@@ -54,7 +54,7 @@ describe("WSK-05 no-key probe", () => {
   it("unknown tenant slug -> 401 (same shape as an unknown key, no tenant-existence oracle)", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/this-tenant-does-not-exist-at-all/content`,
+      url: `/v1/t/this-tenant-does-not-exist-at-all/case-study?locale=en-US`,
       headers: { authorization: "Bearer wdsk_anything" },
     });
     expect(res.statusCode).toBe(401);

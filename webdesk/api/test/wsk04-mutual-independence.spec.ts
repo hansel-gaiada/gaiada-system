@@ -3,19 +3,21 @@
 // OTHER must still return zero cross-tenant rows on its own. A GUC gap becomes a bug, not a
 // breach, only if the app-layer half of that sentence is independently load-bearing — this file
 // is that proof, on the one real service (`webdesk/api`) where both layers currently exist and
-// are testable end to end (`ContentController`/`ContentService`'s explicit `WHERE site_id = $1`
-// predicate is the app-layer half; the `content_items` RLS policy from
+// are testable end to end (the delivery module's site-scoped collection lookup — `SELECT id FROM
+// collections WHERE site_id = $1 AND key = $2` in src/delivery/content-read.ts, from which every
+// content query descends — is the app-layer half; WSK-48a re-pointed this file from the retired demo
+// ContentController/ContentService `WHERE site_id = $1` onto it; the `content_items` RLS policy from
 // `webdesk/migrations/0002_content.sql` is the DB-layer half).
 //
 // Two tests, each disabling ONE layer and driving the request through the layer left standing:
 //
 //   1. "RLS OFF, app layer alone" — content_items' RLS is disabled for the duration of this test
 //      (as the migrator role, the table's real owner — see 0001's own note on why webdesk_owner
-//      cannot do this), then real HTTP requests go through the REAL ContentController/
-//      ContentService code, unmodified. If cross-tenant isolation still holds, it is because of
-//      `WHERE site_id = $1`, not the database.
+//      cannot do this), then real HTTP requests go through the REAL delivery route/router/
+//      content-read code, unmodified. If cross-tenant isolation still holds, it is because of the
+//      site-scoped collection lookup (`collections.site_id = $1`), not the database.
 //
-//   2. "App layer OFF, RLS alone" — this file cannot literally disable ContentService's own SQL
+//   2. "App layer OFF, RLS alone" — this file cannot literally disable the delivery module's own SQL
 //      (api/src is out of this ticket's scope to edit), so it simulates the realistic failure
 //      mode WSK-D16 is actually defending against: a query that OMITS the app-layer site_id
 //      predicate entirely (the exact shape of bug the defense-in-depth clause exists for),
@@ -92,14 +94,14 @@ describe("WSK-04 — app-layer scoping and RLS are INDEPENDENTLY sufficient (WSK
   it("baseline: with BOTH layers active, each tenant sees only its own row (sanity check before disabling anything)", async () => {
     const resA = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: { authorization: `Bearer ${keyA.key}` },
     });
     expect(resA.statusCode).toBe(200);
     expect(resA.json<{ items: { slug: string }[] }>().items.map((i) => i.slug)).toEqual([slugA]);
   });
 
-  describe("layer 1 disabled: RLS OFF, real app-layer code (ContentService's WHERE site_id = $1) alone", () => {
+  describe("layer 1 disabled: RLS OFF, real app-layer code (the delivery module's site-scoped collection lookup) alone", () => {
     beforeAll(async () => {
       // The migrator is content_items' real OWNER (0002_content.sql runs as webdesk_migrator,
       // same as 0001) — only an owner can toggle RLS, which is itself an invariant WSK-04
@@ -134,10 +136,10 @@ describe("WSK-04 — app-layer scoping and RLS are INDEPENDENTLY sufficient (WSK
       expect(rows[0]?.relrowsecurity).toBe(false);
     });
 
-    it("tenant A's real HTTP request STILL sees only its own content — app-layer site_id filter alone holds", async () => {
+    it("tenant A's real HTTP request STILL sees only its own content — app-layer site-scoped lookup alone holds", async () => {
       const res = await app.inject({
         method: "GET",
-        url: `/v1/t/${tenantA.slug}/content`,
+        url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
         headers: { authorization: `Bearer ${keyA.key}` },
       });
       expect(res.statusCode).toBe(200);
@@ -149,7 +151,7 @@ describe("WSK-04 — app-layer scoping and RLS are INDEPENDENTLY sufficient (WSK
     it("tenant B's real HTTP request STILL sees only its own content — symmetric", async () => {
       const res = await app.inject({
         method: "GET",
-        url: `/v1/t/${tenantB.slug}/content`,
+        url: `/v1/t/${tenantB.slug}/${tenantB.collectionKey}?locale=en-US`,
         headers: { authorization: `Bearer ${keyB.key}` },
       });
       expect(res.statusCode).toBe(200);
@@ -186,7 +188,7 @@ describe("WSK-04 — app-layer scoping and RLS are INDEPENDENTLY sufficient (WSK
         await appClient.query("SELECT set_config('webdesk.tenant_ctx', $1, true)", [tenantA.tenantId]);
         // Deliberately the buggy shape: no `WHERE site_id = ...`, not even a WHERE clause at all
         // beyond the slug filter used to keep the result set small and deterministic — this is
-        // exactly what ContentService.list() would look like if someone deleted its own
+        // exactly what the delivery read path would look like if someone deleted its own
         // `WHERE site_id = $1 AND (...)` predicate by mistake.
         const { rows } = await appClient.query<{ slug: string }>(
           `SELECT slug FROM content_items WHERE slug = ANY($1)`,
@@ -234,7 +236,7 @@ describe("WSK-04 — app-layer scoping and RLS are INDEPENDENTLY sufficient (WSK
   it("sanity: both layers restored, back to baseline behavior (proves the RLS-OFF block's cleanup actually ran)", async () => {
     const res = await app.inject({
       method: "GET",
-      url: `/v1/t/${tenantA.slug}/content`,
+      url: `/v1/t/${tenantA.slug}/${tenantA.collectionKey}?locale=en-US`,
       headers: { authorization: `Bearer ${keyA.key}` },
     });
     expect(res.statusCode).toBe(200);
