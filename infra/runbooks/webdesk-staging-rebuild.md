@@ -112,12 +112,12 @@ default branch (a `workflow_dispatch` workflow is listed from there).
 
 The unit of risk is one staging site: the key can run `deploy-tarball` and nothing else, as a user with no sudo and no shell access.
 Test the exact script first on any Linux host with Docker: `bash scripts/delphi/test/run.sh` in the site repo
-(32 assertions; it must end `RESULT: N passed, 0 failed`).
+(53 assertions; it must end `RESULT: N passed, 0 failed`).
 
 ```bash
 # 1. the user. It joins the SITE user's group; it is not root and has no sudo.
 useradd --create-home --shell /bin/bash --groups u24pyevq gdeploy
-passwd -l gdeploy
+usermod -p '*' gdeploy          # no password login, but NOT a locked ('!') account: sshd refuses even a valid key for a locked one when UsePAM is off
 install -d -o gdeploy -g gdeploy -m 0750 /home/gdeploy/releases/24-pyevq
 
 # 2. the deploy user owns the docroot's CONTENTS (the script swaps them); the site group and nginx can read them.
