@@ -36,7 +36,7 @@ for anyone who already has an ERP identity.
 |---|---|---|---|---|---|
 | PostgreSQL 16/17 + pgvector | PostgreSQL | No | — (no reason to leave) | n/a | 🟢 |
 | Valkey 8 *(swapped in from Redis 2026-09-21; server verification pending)* | BSD | No | Redis ≤7.2, KeyDB, Dragonfly | days | 🟢 |
-| MinIO | AGPL-3.0 | No | **Cloudflare R2 / NAS via A-13's storage abstraction** — the abstraction and its test already exist | 1–2 wk | 🟡 |
+| RustFS *(replaces MinIO in WebDesk, WSK-D42, 2026-10-10; swap in progress)* | Apache-2.0 | No | **Cloudflare R2 / NAS / MinIO via A-13's storage abstraction** — the abstraction and its test already exist | 1–2 wk | 🟢 |
 | OpenBao | MPL-2.0 | No | Infisical, SOPS+age | 2–4 wk | 🟡 |
 | Caddy · nginx | Apache-2.0 · BSD | No | each other | days | 🟢 |
 | Docker engine | Apache-2.0 | No | Podman | 2–4 wk | 🟡 |

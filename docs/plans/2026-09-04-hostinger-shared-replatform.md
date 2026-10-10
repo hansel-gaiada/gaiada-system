@@ -24,6 +24,11 @@ Per this program's own standing rule — *no ruling exists outside the decision 
 above is not in force until it is written into `webdesk-design-v2.md` §14. Proposed entry, next
 free id:
 
+> **⚠ Renumbering (2026-10-10).** The id below collided with the Payload-removal ruling, which
+> landed as **WSK-D37** in `webdesk-design-v2.md` v2.3 §14 together with D38–D43. This proposal is
+> still unratified and takes **the next free number** when it lands. Every "D37" in this document
+> means *this proposal*, not the ruling of that number in the log.
+
 > **WSK-D37 — Client delivery is shared hosting only; `delphi`/`helios` are retired
 > (owner-ruled 2026-09-04). Amends WSK-D32.** The *role zoning* of WSK-D32 stands — control plane
 > (`gda-aicenter`), client project delivery, observation (`sumopod`). What changes is **which

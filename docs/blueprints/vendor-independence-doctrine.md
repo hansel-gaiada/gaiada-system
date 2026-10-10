@@ -100,7 +100,7 @@ not necessarily take it) · **IRREDUCIBLE** (§4).
 |---|---|---|---|---|
 | PostgreSQL 16/17 + pgvector | PostgreSQL | No | Green | **KEEP** — the estate's single best dependency |
 | **`redis:7-alpine`** (several files) | ⚠️ **RSALv2/SSPL ≥ 7.4** | No | Green | **ACT** — `7-alpine` floats onto source-available tags. One file already pins `7.2-alpine` correctly; the rest do not. **Swap all to Valkey 8 (BSD)** — drop-in for BullMQ, hours of work, ends the question permanently |
-| MinIO | ⚠️ AGPL-3.0, community build stripped since 2025 | No | Amber | **KEEP+RULE** — never patch; A-13's storage abstraction + R2/NAS config swap *is* the written exit; keep its abstraction test green |
+| MinIO → **RustFS** (WebDesk, WSK-D42, 2026-10-10) | MinIO ⚠️ AGPL-3.0, community build stripped since 2025 · RustFS Apache-2.0 | No | Green once swapped | **REPLACE in WebDesk** (owner 2026-10-10) — RustFS `1.0.0`, pinned by digest. A-13's storage abstraction + R2/NAS config swap stays the written exit; keep its abstraction test green. Any other estate MinIO keeps the never-patch rule until ruled separately |
 | OpenBao | MPL-2.0 | No | Green | **KEEP** — already the right call over BUSL Vault |
 | Caddy · nginx | Apache-2.0 · BSD | No | Green | **KEEP** |
 | Docker / runc | Apache-2.0 | No | Amber | **KEEP** — note Docker *Desktop* is per-seat for business use; the estate runs the engine, not Desktop. Keep it that way |

@@ -1,5 +1,10 @@
 # WebDesk — PROGRESS (source of truth)
 
+> **⚠ Superseded as the working tracker on 2026-10-10.** This file stopped moving on 2026-08-27 and
+> its rows describe that day. Live work — the gaiada.com P2 proof, the Payload removal track and
+> the RustFS swap — is tracked in [`2026-10-10-webdesk-gaiada-proof.md`](./2026-10-10-webdesk-gaiada-proof.md);
+> rulings are in `webdesk-design-v2.md` v2.3 §14. Kept for history.
+
 **Started:** 2026-08-26 · **Design (build from this):** [`webdesk-design.md`](../blueprints/webdesk-design.md) **v1.1** ·
 **Reassessment:** [`webdesk-design-reassessment.md`](../blueprints/webdesk-design-reassessment.md) v1.0
 

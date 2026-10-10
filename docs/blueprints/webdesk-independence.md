@@ -1,6 +1,8 @@
 # WebDesk — Independence: replacing Payload, the third-party sweep, the naming ruling, and the market assessment
 
 > **Status:** `PROPOSED` — design and direction. No code changed by this document.
+> **§8's four decisions are LANDED** as WSK-D37…D40 in `webdesk-design-v2.md` v2.3 §14
+> (2026-10-10). **§4.1's MinIO row is amended by WSK-D42:** WebDesk moves to RustFS (Apache-2.0).
 > **Date:** 2026-09-21 · **Owner conversation:** web@gaiada.com
 > **Reads with:** [`webdesk-design-v2.md`](./webdesk-design-v2.md) v2.2 (AUTHORITATIVE — this
 > document amends §05, §09 and §13 of it, and proposes WSK-D37…D40 for its §14) ·
