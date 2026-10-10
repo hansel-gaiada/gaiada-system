@@ -143,6 +143,51 @@ describe("SchemaDraftService.draftFromPrd", () => {
   });
 });
 
+describe("SchemaDraftService.draftFromPrd — vocabulary 1.1.0 model replies (T2)", () => {
+  const ARGS = { tenantSlug: "acme", siteId: "11111111-1111-1111-1111-111111111111", collectionKey: "faq-page", prd: "an FAQ page", actor: "human:qa" };
+
+  it("a reply using a group with nested fields and itemKey passes validation", async () => {
+    const { completer, service } = build(null);
+    completer.nextText = JSON.stringify({
+      singleton: true,
+      fields: [
+        {
+          name: "faq",
+          primitive: "group",
+          multiple: true,
+          itemKey: "question",
+          fields: [
+            { name: "question", primitive: "text", required: true },
+            { name: "answer", primitive: "markdown" },
+            { name: "links", primitive: "group", multiple: true, fields: [{ name: "href", primitive: "text" }] },
+          ],
+        },
+      ],
+      blocks: ["hero"],
+    });
+    const result = await service.draftFromPrd(ARGS);
+    expect(result.validation.issues).toEqual([]);
+    expect(result.validation.valid).toBe(true);
+  });
+
+  it("a reply that lists `fields` in `blocks` is refused", async () => {
+    const { completer, service } = build(null);
+    completer.nextText = '{"fields":[{"name":"t","primitive":"text"}],"blocks":["fields","hero"]}';
+    const result = await service.draftFromPrd(ARGS);
+    expect(result.validation.valid).toBe(false);
+    expect(result.validation.issues[0].message).toMatch(/composition-typed block/);
+    expect(result.diff).toBeNull();
+  });
+
+  it("a group without sub-fields, or an itemKey on a non-list group, is still refused (validation unchanged)", async () => {
+    const { completer, service } = build(null);
+    completer.nextText = '{"fields":[{"name":"g","primitive":"group"}]}';
+    expect((await service.draftFromPrd(ARGS)).validation.valid).toBe(false);
+    completer.nextText = '{"fields":[{"name":"g","primitive":"group","itemKey":"k","fields":[{"name":"k","primitive":"text","required":true}]}]}';
+    expect((await service.draftFromPrd(ARGS)).validation.valid).toBe(false);
+  });
+});
+
 describe("SchemaDraftService.validateAndDiff", () => {
   it("is usable directly without a gateway call, for a human-edited counter-proposal", () => {
     const { service } = build();
