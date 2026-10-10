@@ -78,15 +78,40 @@ type ContentRow = {
 function encodeCursor(row: { created_at_raw: string; id: string }): string {
   return Buffer.from(`${row.created_at_raw}|${row.id}`, 'utf8').toString('base64url')
 }
-function decodeCursor(cursor: string): { createdAt: string; id: string } | null {
-  try {
-    const decoded = Buffer.from(cursor, 'base64url').toString('utf8')
-    const sep = decoded.indexOf('|')
-    if (sep < 0) return null
-    return { createdAt: decoded.slice(0, sep), id: decoded.slice(sep + 1) }
-  } catch {
-    return null
+/** A cursor this API could not have issued. The router answers it as 400 `invalid-cursor`. */
+export class InvalidCursorError extends Error {
+  constructor() {
+    super('invalid cursor')
+    this.name = 'InvalidCursorError'
   }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+// Postgres `timestamptz::text` under an ISO DateStyle: `2026-10-11 09:30:00.123456+00`, with a
+// whole-hour (`+07`), hour:minute (`+05:30`) or, for historical zones, hour:minute:second offset.
+const PG_TIMESTAMPTZ_RE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?[+-](\d{2})(?::(\d{2}))?(?::(\d{2}))?$/
+
+function isPgTimestamptzText(value: string): boolean {
+  const m = PG_TIMESTAMPTZ_RE.exec(value)
+  if (!m) return false
+  const [year, month, day, hour, minute, second, offH, offM, offS] = [m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9]].map((x) =>
+    x === undefined ? 0 : Number(x),
+  )
+  if (month < 1 || month > 12) return false
+  if (day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return false
+  if (hour > 23 || minute > 59 || second > 59) return false
+  return offH <= 15 && offM <= 59 && offS <= 59
+}
+
+/** Strict: either both parts are exactly what encodeCursor writes, or the cursor is refused. */
+export function decodeCursor(cursor: string): { createdAt: string; id: string } {
+  const decoded = Buffer.from(cursor, 'base64url').toString('utf8')
+  const sep = decoded.indexOf('|')
+  if (sep < 0) throw new InvalidCursorError()
+  const createdAt = decoded.slice(0, sep)
+  const id = decoded.slice(sep + 1)
+  if (!isPgTimestamptzText(createdAt) || !UUID_RE.test(id)) throw new InvalidCursorError()
+  return { createdAt, id }
 }
 
 async function loadCollectionId(client: PoolClient, siteId: string, collectionKey: string): Promise<string | null> {
@@ -198,6 +223,8 @@ export async function listItems(db: DeliveryDb, args: ListItemsArgs): Promise<Li
   const productionOnly = args.auth.envName === 'production'
   const servedLocale = resolveRequestedLocale(args.locale, args.auth.tenantDefaultLocale)
 
+  // Validated BEFORE any query, so a malformed cursor is a 400 and never reaches SQL.
+  const cur = args.cursor ? decodeCursor(args.cursor) : null
   return db.withTenant(args.auth.tenantId, async (client) => {
     const collectionId = await loadCollectionId(client, args.auth.siteId, args.collectionKey)
     if (!collectionId) {
@@ -211,7 +238,6 @@ export async function listItems(db: DeliveryDb, args: ListItemsArgs): Promise<Li
       })
     }
 
-    const cur = args.cursor ? decodeCursor(args.cursor) : null
     const params: unknown[] = [collectionId, servedLocale, productionOnly]
     let cursorClause = ''
     if (cur) {
@@ -280,6 +306,8 @@ export async function searchItems(db: DeliveryDb, args: SearchItemsArgs): Promis
   const productionOnly = args.auth.envName === 'production'
   const servedLocale = resolveRequestedLocale(args.locale, args.auth.tenantDefaultLocale)
 
+  // Validated BEFORE any query, so a malformed cursor is a 400 and never reaches SQL.
+  const cur = args.cursor ? decodeCursor(args.cursor) : null
   return db.withTenant(args.auth.tenantId, async (client) => {
     const params: unknown[] = [args.auth.siteId, servedLocale, productionOnly, args.q]
     let collectionFilter = ''
@@ -287,7 +315,6 @@ export async function searchItems(db: DeliveryDb, args: SearchItemsArgs): Promis
       params.push(args.collectionKey)
       collectionFilter = `AND c.key = $${params.length}`
     }
-    const cur = args.cursor ? decodeCursor(args.cursor) : null
     let cursorClause = ''
     if (cur) {
       params.push(cur.createdAt, cur.id)

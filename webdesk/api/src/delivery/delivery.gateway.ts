@@ -18,7 +18,7 @@
 // Route precedence (find-my-way): the more specific Nest routes that also live under /v1
 // (`/v1/t/:tenantSlug/forms/...`, `/v1/t/:tenantSlug/media/...`) win over this wildcard; everything
 // else under /v1 is the router's. See test/delivery/delivery-routing.spec.ts.
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { HttpAdapterHost } from "@nestjs/core";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { DbService } from "../db/db.service";
@@ -27,6 +27,8 @@ import { DeliveryAuthService } from "./delivery-auth.service";
 import { deliveryDbFrom } from "./db";
 import { createV1Handler, type AuthGate } from "./router";
 import { problemDetails, problemResponse } from "./vocabulary/problem-details";
+
+const logger = new Logger("DeliveryGateway");
 
 // Every method Fastify 4 can route. The router (not Fastify) decides that all but GET are 405.
 const ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
@@ -111,13 +113,15 @@ export class DeliveryGateway implements OnModuleInit {
         body = Buffer.from(await response.arrayBuffer());
       } catch (err) {
         // The router answers its own failures as problem+json; this is only reachable if building
-        // the Request itself threw. Same shape, same status the router uses for "internal error".
+        // the Request itself threw. Same shape, same status the router uses for "internal error" —
+        // and, like the router, never the thrown message (M3 T1): that goes to the server log.
+        logger.error(`delivery edge failure on ${String(req.raw.url ?? "/").split("?")[0]}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
         const response = problemResponse(
           problemDetails({
             slug: "internal-error",
             title: "Internal error",
             status: 500,
-            detail: (err as Error).message,
+            detail: "The server could not complete this request.",
             instance: String(req.raw.url ?? "/").split("?")[0],
             requestId: String(req.headers["x-request-id"] ?? req.id),
           }),

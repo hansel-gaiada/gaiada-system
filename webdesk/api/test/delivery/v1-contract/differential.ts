@@ -14,6 +14,13 @@
 // KNOWN FRAMEWORK DIVERGENCE (listed, counted separately): a raw '%' not followed by two hex digits
 // in the PATH. Fastify refuses such a URL itself (400 FST_ERR_BAD_URL) before any route runs; the
 // bare router function never saw that input class (Next.js sat in front of it in production).
+// Since M3 T1 the api answers it as 400 problem+json (slug invalid-path-encoding), via `frameworkErrors`.
+// INTENDED DIVERGENCES (M3 T1, named, counted with the known divergences): behaviours the api
+// changed ON PURPOSE after the port, which the OLD Payload router (deleted in a later ticket) does
+// not have. A pair is classified as one ONLY when its call names it (`PairOptions.intended`) AND the
+// old status is one of the listed `old` statuses AND the new status is one of the listed `new` ones;
+// anything else stays a mismatch. A pair that is still byte-identical stays "identical". The bad-'%'
+// path case above is one of them too, now answered as problem+json.
 // NOT compared (reported as informational header-NAME diffs): date, connection, keep-alive,
 // framing headers, and the api's added x-ratelimit-*. Per-request values are neutralised by sending
 // the SAME explicit `x-request-id` to both sides, so nothing in any body is ignored or rewritten —
@@ -28,7 +35,9 @@ import type { V1Handle } from "./envelope-contract";
 
 export type WireResponse = { status: number; body: Buffer; headers: Record<string, string> };
 export type PairSpec = { method?: string; pathAndQuery: string; headers?: Record<string, string>; body?: string };
-export type PairOptions = { normalizeRequestId?: boolean; note?: string };
+/** A named, intended divergence from the old router (M3 T1): which old and new statuses it may show. */
+export type IntendedDivergence = { name: string; old: number[]; new: number[] };
+export type PairOptions = { normalizeRequestId?: boolean; note?: string; intended?: IntendedDivergence };
 export type Pair = { old: WireResponse; neu: WireResponse; same: boolean };
 export type ComparePair = (spec: PairSpec | Request, opts?: PairOptions) => Promise<Pair>;
 
@@ -37,7 +46,7 @@ export type DiffStats = {
   identical: number;
   statusOnlyPairs: number;
   statusOnlyIdentical: number;
-  knownDivergent: { request: string; old: number; new: number }[];
+  knownDivergent: { request: string; old: number; new: number; name: string }[];
   mismatches: { request: string; note?: string; diffs: string[] }[];
   headerNameDiffs: Map<string, number>;
   byStatus: Map<string, number>;
@@ -110,7 +119,7 @@ export function createV1Differential(opts: { oldUrl: string; newUrl: string; tar
   };
   let seq = 0;
 
-  const comparePair: ComparePair = async (requestOrSpec, { normalizeRequestId = false, note } = {}) => {
+  const comparePair: ComparePair = async (requestOrSpec, { normalizeRequestId = false, note, intended } = {}) => {
     const spec = specFrom(requestOrSpec);
     spec.headers = { ...spec.headers };
     if (!normalizeRequestId && !Object.keys(spec.headers).some((h) => h.toLowerCase() === "x-request-id")) {
@@ -149,8 +158,11 @@ export function createV1Differential(opts: { oldUrl: string; newUrl: string; tar
     stats.byStatus.set(key, (stats.byStatus.get(key) ?? 0) + 1);
     const badEscape = /%(?![0-9A-Fa-f]{2})/.test(spec.pathAndQuery.split("?")[0]);
     if (diffs.length === 0) stats.identical++;
-    else if (badEscape && neu.status === 400 && neu.body.toString("utf8").includes("FST_ERR_BAD_URL")) {
-      stats.knownDivergent.push({ request: `${spec.method} ${spec.pathAndQuery}`, old: old.status, new: neu.status });
+    else if (badEscape && neu.status === 400 && neu.headers["content-type"] === "application/problem+json" && neu.body.toString("utf8").includes("/errors/invalid-path-encoding")) {
+      // M3 T1 D4: the api now answers an undecodable path escape as problem+json (was Fastify's default body).
+      stats.knownDivergent.push({ request: `${spec.method} ${spec.pathAndQuery}`, old: old.status, new: neu.status, name: "invalid % escape in the path -> 400 problem+json (M3 T1 D4)" });
+    } else if (intended && intended.old.includes(old.status) && intended.new.includes(neu.status)) {
+      stats.knownDivergent.push({ request: `${spec.method} ${spec.pathAndQuery}`, old: old.status, new: neu.status, name: intended.name });
     } else stats.mismatches.push({ request: `${spec.method} ${spec.pathAndQuery}`, note, diffs });
 
     const names = (h: Record<string, string>) => new Set(Object.keys(h).filter((n) => !IGNORED_HEADER_NAMES.has(n)));
@@ -176,7 +188,7 @@ export function createV1Differential(opts: { oldUrl: string; newUrl: string; tar
       `[v1-diff] ${label}: status mix (method status -> count): ${[...stats.byStatus].map(([k, v]) => `${k}=${v}`).sort().join(" ")}`,
       `[v1-diff] ${label}: informational response-header-name differences (not compared): ${[...stats.headerNameDiffs].map(([k, v]) => `${k}x${v}`).join(" ") || "none"}`,
     ];
-    for (const k of stats.knownDivergent) lines.push(`[v1-diff] KNOWN-DIVERGENCE (invalid % escape -> Fastify FST_ERR_BAD_URL) ${k.request}: old status ${k.old}, new ${k.new}`);
+    for (const k of stats.knownDivergent) lines.push(`[v1-diff] KNOWN-DIVERGENCE (${k.name}) ${k.request}: old status ${k.old}, new ${k.new}`);
     for (const m of stats.mismatches) lines.push(`[v1-diff] MISMATCH ${m.request}${m.note ? ` (${m.note})` : ""}\n    ${m.diffs.join("\n    ")}`);
     return lines;
   }

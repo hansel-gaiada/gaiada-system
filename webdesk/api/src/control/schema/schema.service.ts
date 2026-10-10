@@ -29,6 +29,7 @@ import {
   type TenantContractSnapshot,
 } from "../../delivery/vocabulary/breaking-change";
 import { ControlProblem } from "../content/content-problem";
+import { isReservedCollectionKey, RESERVED_COLLECTION_KEYS } from "../../delivery/reserved-collection-keys";
 
 /**
  * A stored or proposed `collections.schema` value -> the classifier's per-collection snapshot. The
@@ -122,6 +123,18 @@ export class SchemaService {
   async applySchema(input: { tenantSlug: string; siteId: string; collectionKey: string; schema: unknown; actor: string; idempotencyKey: string }) {
     const tenant = await this.resolveActiveTenant(input.tenantSlug);
     const schema = assertPlainObject(input.schema, "schema");
+    // M3 T1: a key that collides with a static /v1/t/:tenantSlug/<segment> route (media, forms) or a
+    // router-owned endpoint (search, sitemap.xml) would create a collection no request can reach.
+    // Refused before anything is stored or audited, like the composition refusal below.
+    if (isReservedCollectionKey(input.collectionKey)) {
+      throw new ControlProblem(
+        422,
+        "collection-key-reserved",
+        "Collection key reserved",
+        `"${input.collectionKey}" is reserved: it is a fixed /v1/t/:tenantSlug/ path segment, so a collection with this key could never be served.`,
+        { reservedKeys: RESERVED_COLLECTION_KEYS },
+      );
+    }
     // WSK-41: the composition must be one the vocabulary accepts before anything is stored.
     const validation = validateCollectionComposition(input.collectionKey, schema);
     if (!validation.valid) {
