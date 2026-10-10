@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalCentres, getPortalCentre } from "@/lib/clientCentre-data";
 import { patchPortalCentreAction } from "@/lib/clientCentreActions";
 import { getActivePortalClient, switchPortalClient } from "@/lib/portalCentreClient";
@@ -22,11 +22,11 @@ export default async function PortalCompanyPage({
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
   const { section } = await params;
 
   if (!tenant) {
-    return (<><PortalPageHead eyebrow="Your business" title="Business" /><EmptyNote>No workspace selected.</EmptyNote></>);
+    return (<><PortalPageHead eyebrow="Your business" title="Business" /><EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote></>);
   }
 
   const scope = await listPortalCentres(userId, tenant);

@@ -20,6 +20,7 @@ import "server-only";
 // the dev session, so the flows are drivable end to end (and by Playwright) rather than resetting on
 // every navigation.
 import type { DemoResult } from "./demoFixtures";
+import { isDemoPortalClient } from "./demoPortalClients";
 
 const CLIENT_ID = "cl-1";              // Northwind Traders — the client `demo-client` represents
 const DEMO_CLIENT_USER = "demo-client";
@@ -51,21 +52,27 @@ interface DemoPayment {
 
 const PROJECTS = [
   {
-    id: "proj-nw-site", name: "Website relaunch", status: "active",
+    id: "proj-nw-site", name: "Website relaunch", status: "active", finished: false,
     startDate: day(-45), dueDate: day(30), clientId: CLIENT_ID, clientName: "Northwind Traders",
     progressPercent: 62, milestoneCount: 4, milestonesDone: 2, deliverableCount: 5, nextMilestoneDue: day(9),
   },
   {
-    id: "proj-nw-brand", name: "Brand refresh", status: "active",
+    id: "proj-nw-brand", name: "Brand refresh", status: "active", finished: false,
     startDate: day(-20), dueDate: day(60), clientId: CLIENT_ID, clientName: "Northwind Traders",
     progressPercent: 18, milestoneCount: 3, milestonesDone: 0, deliverableCount: 2, nextMilestoneDue: day(21),
   },
   {
-    id: "proj-nw-2025", name: "Campaign — Q4 2025", status: "complete",
+    id: "proj-nw-2025", name: "Campaign — Q4 2025", status: "complete", finished: true,
     startDate: day(-240), dueDate: day(-120), clientId: CLIENT_ID, clientName: "Northwind Traders",
     progressPercent: 100, milestoneCount: 2, milestonesDone: 2, deliverableCount: 4, nextMilestoneDue: null,
   },
 ];
+
+/** Project leads (`projects.owner_id` → users) as the portal payload exposes them: name + email only. */
+const PROJECT_LEADS: Record<string, { name: string; email: string }> = {
+  "proj-nw-site": { name: "Putu Wirawan", email: "putu@gaiada.example" },
+  "proj-nw-brand": { name: "Sari Anggraini", email: "sari@gaiada.example" },
+};
 
 const MILESTONES = [
   { id: "ms-1", name: "Discovery complete", status: "done", dueDate: day(-30), projectId: "proj-nw-site", projectName: "Website relaunch", itemCount: 6, itemsDone: 6 },
@@ -413,7 +420,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
   const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|profile|stream|files|change-requests)(\/|$)/;
   if (!OWNED.test(seg)) return null;
-  if (userId !== DEMO_CLIENT_USER) return { status: 403, json: { error: "not a portal client" } };
+  if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
   const parsed: Record<string, unknown> = (() => {
     if (!body) return {};
@@ -455,6 +462,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
     if (!proj) return notFound("project not found");
     return ok({
       ...proj,
+      lead: PROJECT_LEADS[proj.id] ?? null,
       milestones: MILESTONES.filter((x) => x.projectId === proj.id),
       deliverables: DELIVERABLES.filter((x) => x.projectId === proj.id),
       runs: proj.id === "proj-nw-site"
@@ -570,11 +578,14 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       clients: [{
         id: CLIENT_ID, name: "Northwind Traders", status: "active", projectCount: PROJECTS.length,
         contact: { email: "accounts@northwind.example", phone: "+62 361 555 0134", address: "Jl. Raya Seminyak 12, Bali" },
+        accountManager: { name: "Made Prabowo", email: "made@gaiada.example" },
       }],
       contacts: [
-        { id: DEMO_CLIENT_USER, name: profileName, email: "dana@northwind.example", capability: "signer", status: "active", clientId: CLIENT_ID, projectId: null },
-        { id: "nw-2", name: "Erica Boonstra", email: "erica@northwind.example", capability: "viewer", status: "active", clientId: CLIENT_ID, projectId: "proj-nw-site" },
-        { id: "nw-3", name: "Marco Halim", email: "marco@northwind.example", capability: "viewer", status: "invited", clientId: CLIENT_ID, projectId: null },
+        { id: DEMO_CLIENT_USER, name: profileName, email: "dana@northwind.example", capability: "signer", status: "active", clientId: CLIENT_ID, projectId: null, side: "client" },
+        { id: "nw-2", name: "Erica Boonstra", email: "erica@northwind.example", capability: "viewer", status: "active", clientId: CLIENT_ID, projectId: "proj-nw-site", side: "client" },
+        { id: "nw-3", name: "Marco Halim", email: "marco@northwind.example", capability: "viewer", status: "invited", clientId: CLIENT_ID, projectId: null, side: "client" },
+        // Staff holding a contact row (e.g. a placeholder signer): visible, labelled as our side.
+        { id: "nw-4", name: "Made Prabowo", email: "made@gaiada.example", capability: "signer", status: "active", clientId: CLIENT_ID, projectId: null, side: "provider" },
       ],
       access: {
         canSign: true, wholeClient: true,

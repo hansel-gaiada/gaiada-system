@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalChangeRequests, listPortalProjects, getPortalProfile } from "@/lib/portal-data";
 import { changeRequestFormProps, changeRequestKindLabel, portalDate, type PortalChangeRequest } from "@/lib/portal";
 import { Card } from "@/components/ui";
@@ -23,8 +23,8 @@ export default async function PortalRequestsPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
-  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
+  if (!tenant) return <EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote>;
 
   const { requests, isPortalClient } = await listPortalChangeRequests(userId, tenant);
 

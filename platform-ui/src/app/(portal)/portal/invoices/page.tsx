@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { listPortalInvoices } from "@/lib/portal-data";
 import { money, portalDate } from "@/lib/portal";
 import { Card, Eyebrow } from "@/components/ui";
@@ -22,8 +22,8 @@ export default async function PortalInvoicesPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
-  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
+  if (!tenant) return <EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote>;
 
   const invoices = await listPortalInvoices(userId, tenant);
   const open = invoices.filter((i) => i.balance > 0 && i.status !== "void");

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalOverview } from "@/lib/portal-data";
 import { money, overallProgress, portalDate, relativeDays } from "@/lib/portal";
 import { isClientOnly } from "@/lib/rbac";
@@ -24,10 +24,15 @@ export default async function PortalOverviewPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
-  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
 
-  const { overview, isPortalClient } = await getPortalOverview(userId, tenant);
+  // No company resolved (PV2-05) means the caller is a client contact of NO company, so they are not a
+  // portal client. They get the same explanation as the BFF's 403 below, never a bare "no workspace":
+  // before PV2-05 a staff member reached the 403 through their own employer, and the teach-state was
+  // what told them why the page is empty.
+  const { overview, isPortalClient } = tenant
+    ? await getPortalOverview(userId, tenant)
+    : { overview: null, isPortalClient: false };
 
   // The BFF answers 403 for TWO different people and they need different words.
   //

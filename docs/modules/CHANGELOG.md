@@ -45,6 +45,52 @@ Plan and tracker: `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; design `docs/
 - **WSK-69:** `ci.yml` plans per-component jobs from the diff against the last green run; `release.yml` builds only changed components and re-tags the rest by digest, so their cosign signatures still verify. Estimated WebDesk-only cycle: ~58 → ~14 billed minutes. First real run: this release.
 - `docker-compose.vps.yml` (platform): the WebDesk control-channel and editorial-key file mounts, `extra_hosts: control.webdesk.internal`, and the staging-rebuild targets. Runbooks: `webdesk-control-channel.md` (executed live), `webdesk-editorial-keys.md`, `webdesk-staging-rebuild.md`.
 
+### platform-nest `0.58.0` - portal payloads say what is finished, who leads, who manages the account, and whose side a contact is on (2026-10-11) - PROTOTYPED
+
+Plan: `docs/plans/2026-10-10-three-perspectives.md`. Ticket PV2-03 is in
+`docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. Contract: BFF §16a and §16c.
+
+- **Additive fields:**
+  - `finished` on `GET /portal/projects` and `/portal/projects/:id`. It uses the same
+    `FINISHED_PROJECT_STATUSES` list as the ordering.
+  - `lead {name, email} | null` on the project detail, from `projects.owner_id`, for an active,
+    non-deleted user.
+  - `clients[].accountManager` on `GET /portal/profile`, from `clients.owner_user_id`.
+  - `contacts[].side`, either `"client"` or `"provider"`, from `users.kind`. Nobody is filtered out.
+- **Isolation is unchanged.** Every query keeps its `portal-scope.ts` predicate. An owner's `users`
+  row is read only for a project or client row already in scope.
+- **Tests:** `portal-payloads.db.test.ts` (5 tests). On Linux the scoping was proven to bite: 2 of
+  5 tests fail when the account-manager lookup ignores its own client row, and all pass restored.
+- **Linux gate:** green, except `monitoring.controller.test.ts`, which also fails on clean main.
+
+### platform-ui `0.75.0` - the portal names the company serving you, and people who are both staff and client reach the right portal (2026-10-11) - PROTOTYPED
+
+Tickets PV2-03, PV2-05 and PV2-06.
+
+- **One portal company resolver (PV2-05).**
+  - `src/lib/portal-company.ts` reads only `Me.clientOf`, and keeps its own cookie,
+    `gaiada_portal_tenant`.
+  - All 18 call sites (16 pages, the layout and `portalActions`) use it.
+  - A guard test fails if any portal file calls `getActiveTenant`. On Linux, with one page given that
+    call, the guard fails.
+  - A Viceroy employee who is a Gaiada contact now lands on Gaiada's portal, not on their employer's.
+- **The header names the serving company** (PV-D13), never "Syrowatka".
+- **The company switch** appears only for a contact of two or more companies. No e2e covers
+  switching yet, because no demo identity is a contact of two companies.
+- **"Client view"** in the staff user menu and **"Back to workspace"** in the portal user menu, for
+  people who are both (PV2-06).
+- **A caller who is a client of no company** sees the "This is what your clients see" explanation
+  (or "isn't linked yet" for an unlinked client), never a bare "No workspace selected". The other
+  portal pages say no client account is linked. Found by the portal e2e.
+- **DEMO_MODE.** `demo-viceroy-marketing` holds the `client` role at co-agency, and every demo portal
+  fixture reads one allow-list (`demoPortalClients.ts`).
+- **Portal types** for PV2-03's fields, plus demo data.
+- **Verified on Linux:**
+  - the ui suite, 218/218 files (4,287 tests);
+  - `next build` ok;
+  - the portal e2e, 11/11 in DEMO_MODE, with desktop and phone screenshots.
+  - The live drive is still pending (PV2-08).
+
 ### platform-nest `0.57.0` - one definition of "finished project"; `/api/me` says which companies the caller is a client of (2026-10-10) - PROTOTYPED
 
 Plan: `docs/plans/2026-10-10-three-perspectives.md`. Tickets PV2-01 and PV2-02 are in

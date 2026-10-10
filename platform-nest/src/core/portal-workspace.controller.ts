@@ -267,7 +267,7 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const { args } = scoped(scope);
       const rows = await c.query(
-        `SELECT p.id, p.name, p.status,
+        `SELECT p.id, p.name, p.status, (p.status = ANY($3::text[])) AS "finished",
                 to_char(p.start_date, 'YYYY-MM-DD') AS "startDate",
                 to_char(p.due_date, 'YYYY-MM-DD') AS "dueDate",
                 p.client_id AS "clientId", cl.name AS "clientName",
@@ -305,14 +305,18 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const args: unknown[] = [scope.clientIds, scope.projectIds, projectId];
       const project = await c.query(
-        `SELECT p.id, p.name, p.status,
+        `SELECT p.id, p.name, p.status, (p.status = ANY($4::text[])) AS "finished",
                 to_char(p.start_date, 'YYYY-MM-DD') AS "startDate",
                 to_char(p.due_date, 'YYYY-MM-DD') AS "dueDate",
                 p.client_id AS "clientId", cl.name AS "clientName",
+                -- The owner's users row is read only for a project row ALREADY admitted by PROJECT_SCOPE.
+                -- NULL when there is no owner or the owner is disabled/deleted.
+                (SELECT jsonb_build_object('name', u.name, 'email', u.email) FROM users u
+                  WHERE u.id = p.owner_id AND u.deleted_at IS NULL AND u.status = 'active') AS "lead",
                 ${PROJECT_PROGRESS_SQL}
            FROM projects p LEFT JOIN clients cl ON cl.id = p.client_id
           WHERE ${PROJECT_SCOPE} AND p.id = $3`,
-        args,
+        [...args, [...FINISHED_PROJECT_STATUSES]],
       );
       // Same 404 for "does not exist" and "not yours" — the isolation boundary must not distinguish
       // them, or the response becomes an existence oracle for other clients' project ids.

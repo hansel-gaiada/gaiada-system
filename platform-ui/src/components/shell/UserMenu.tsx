@@ -8,7 +8,8 @@ import { logout } from "@/app/(app)/account/actions";
 // `compact` is the TOP-BAR placement the design uses: avatar + chevron only,
 // with the popover opening DOWNWARD. The default (sidebar floor) opens upward
 // and shows name + role. Same component, same menu items, same actions.
-export function UserMenu({ name, secondary, initials, compact = false }: { name: string; secondary: string; initials: string; compact?: boolean }) {
+// `clientView` (PV2-06) adds a "Client view" link to /portal for staff who are also client contacts.
+export function UserMenu({ name, secondary, initials, compact = false, clientView = false }: { name: string; secondary: string; initials: string; compact?: boolean; clientView?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -35,6 +36,11 @@ export function UserMenu({ name, secondary, initials, compact = false }: { name:
           <Link href="/account" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
             Account settings
           </Link>
+          {clientView && (
+            <Link href="/portal" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
+              Client view
+            </Link>
+          )}
           <form action={logout}>
             <button type="submit" role="menuitem" className="erp-usermenu__item erp-usermenu__item--danger">
               Sign out

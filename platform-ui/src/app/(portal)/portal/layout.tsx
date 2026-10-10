@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany, getPortalCompanies } from "@/lib/portal-company";
+import { PortalCompanySwitch } from "@/components/portal/PortalCompanySwitch";
 import { getPortalOverview } from "@/lib/portal-data";
 import { PortalShell } from "@/components/portal/PortalShell";
 import { portalBadges } from "@/lib/portalNav";
+import { isStaff } from "@/lib/rbac";
 
 // CP-7 — the client portal's own route group.
 //
@@ -33,7 +35,9 @@ export default async function PortalLayout({ children }: { children: React.React
   if (!userId) redirect("/login");
   const me = await getMe(userId).catch(() => null);
   if (!me) redirect("/login");
-  const tenant = await getActiveTenant(me);
+  const company = await getActivePortalCompany(me);
+  const tenant = company?.id ?? null;
+  const companies = getPortalCompanies(me);
 
   // The header needs the client's name and the pending count, and the overview call already returns
   // both. Fetched HERE rather than in each page so the badge is present on every tab — and it costs
@@ -55,11 +59,14 @@ export default async function PortalLayout({ children }: { children: React.React
 
   return (
     <PortalShell
+      companyName={company?.name ?? null}
+      companySwitch={companies.length > 1 ? <PortalCompanySwitch companies={companies} activeId={tenant} /> : null}
       clientName={overview?.client?.name ?? null}
       userName={me.name ?? me.email ?? "You"}
       userInitials={initials}
       projectsBadge={projectsBadge}
       billingBadge={billingBadge}
+      staff={isStaff(me)}
     >
       {children}
     </PortalShell>

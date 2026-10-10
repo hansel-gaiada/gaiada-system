@@ -49,13 +49,17 @@ export class PortalProfileController {
         ),
         c.query(
           `SELECT cl.id, cl.name, cl.status, cl.contact,
+                  -- Only the owner of a client row already admitted by the WHERE below (cl.id = ANY of the scope) is read.
+                  (SELECT jsonb_build_object('name', u.name, 'email', u.email) FROM users u
+                    WHERE u.id = cl.owner_user_id AND u.deleted_at IS NULL AND u.status = 'active') AS "accountManager",
                   (SELECT count(*) FROM projects p WHERE p.client_id = cl.id AND p.deleted_at IS NULL) AS "projectCount"
              FROM clients cl WHERE cl.id = ANY($1::uuid[]) AND cl.deleted_at IS NULL ORDER BY cl.name`,
           [scope.clientIds],
         ),
         c.query(
           `SELECT DISTINCT u.id, u.name, u.email, cc.capability, cc.status, cc.client_id AS "clientId",
-                  cc.project_id AS "projectId"
+                  cc.project_id AS "projectId",
+                  CASE WHEN u.kind = 'client' THEN 'client' ELSE 'provider' END AS "side"
              FROM client_contacts cc JOIN users u ON u.id = cc.user_id
             WHERE cc.client_id = ANY($1::uuid[]) AND cc.deleted_at IS NULL AND cc.status <> 'revoked'
             ORDER BY u.name`,

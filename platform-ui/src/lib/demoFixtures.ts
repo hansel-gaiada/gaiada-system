@@ -160,7 +160,13 @@ const ME_VICEROY_MARKETING = {
   title: "Marketing Coordinator, Viceroy",
   assurance: "high",
   companies: [{ id: "co-resort", name: "Viceroy", type: "resort" }],
-  roles: [{ role: "member", scopeType: "company", scopeId: "co-resort" }],
+  // `member` at Viceroy (their job) + `client` at the agency: accepting a client invite grants the global
+  // `client` role at that company's scope (client-contacts.controller), so a real person in this position
+  // holds both. isStaff() stays true, so they keep the staff shell; the portal resolves via clientOf.
+  roles: [
+    { role: "member", scopeType: "company", scopeId: "co-resort" },
+    { role: "client", scopeType: "company", scopeId: "co-agency" },
+  ],
 };
 
 // PV2-02: per-identity `clientOf` for the /api/me route (the route overrides `companies` for everyone).

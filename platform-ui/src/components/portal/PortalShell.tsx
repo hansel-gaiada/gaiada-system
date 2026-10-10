@@ -8,8 +8,8 @@ import "./portal.css";
 // 2026-08-04), reusing the design system and none of the staff layout.
 //
 // What is deliberately ABSENT, and why each absence is a decision rather than an omission:
-//   * The company switcher. A client belongs to the one company that serves them. A switcher would at
-//     best be a dropdown of one and at worst leak the existence of other tenants.
+//   * The STAFF company switcher. The portal has its own (PV2-05, `PortalCompanySwitch`), offered only
+//     to a contact of more than one company and listing only those companies, never workspaces.
 //   * Global search. It searches internal entities.
 //   * The approvals inbox, notifications bell, departments rail, module consoles. All internal.
 //   * Density and width preferences. The staff shell reads `gaiada_prefs` for people who live in the
@@ -18,9 +18,14 @@ import "./portal.css";
 // `prefers-color-scheme` block, so it is still dark-mode-correct without a control the client would
 // have to discover.
 export function PortalShell({
-  children, clientName, userName, userInitials, projectsBadge, billingBadge,
+  children, companyName, companySwitch, clientName, userName, userInitials, projectsBadge, billingBadge, staff = false,
 }: {
   children: React.ReactNode;
+  /** The serving company's name, the brand (PV-D13: never our holding's name). Null renders
+   *  "Client Portal" alone. */
+  companyName: string | null;
+  /** `PortalCompanySwitch`, passed only when the caller is a client of more than one company. */
+  companySwitch?: React.ReactNode;
   clientName: string | null;
   userName: string;
   userInitials: string;
@@ -28,6 +33,9 @@ export function PortalShell({
   projectsBadge: number;
   /** Unsigned contracts plus overdue invoices, badged onto Contracts & billing. */
   billingBadge: number;
+  /** PV2-06: the viewer also holds a staff role (`isStaff(me)`), so the user menu offers "Back to
+   *  workspace". Navigation only; the portal's authorization does not read it. */
+  staff?: boolean;
 }) {
   return (
     <div className="cp-shell">
@@ -36,18 +44,25 @@ export function PortalShell({
           {/* The brand links to the portal root, not to `/` — `/` is the staff dashboard and would
               bounce a client through a redirect back to here. */}
           <Link href="/portal" className="cp-brand">
-            <span className="cp-brand__mark">Syrowatka</span>
-            <span className="cp-brand__sub">Client Portal</span>
+            {companyName ? (
+              <>
+                <span className="cp-brand__mark">{companyName}</span>
+                <span className="cp-brand__sub">Client Portal</span>
+              </>
+            ) : (
+              <span className="cp-brand__mark">Client Portal</span>
+            )}
           </Link>
           <span className="cp-head__spacer" />
           {/* Unfiltered on purpose: the header is present on every page, so it must react to anything,
               not only to the topics of the page beneath it. */}
           <PortalLive />
+          {companySwitch}
           <div className="cp-head__who">
             <div className="cp-head__who-name">{userName}</div>
             {clientName && <div className="cp-head__who-org">{clientName}</div>}
           </div>
-          <PortalUserMenu initials={userInitials} />
+          <PortalUserMenu initials={userInitials} staff={staff} />
         </div>
         <PortalTabs projectsBadge={projectsBadge} billingBadge={billingBadge} />
       </header>

@@ -92,6 +92,23 @@
   text-overflow: ellipsis;
 }
 
+/* PV2-05: company switch, rendered only for a contact of more than one company. */
+.cp-switch { display: flex; align-items: center; gap: 8px; }
+.cp-switch__label { font: 400 11px/1 var(--font-body); color: var(--ink-subtle); }
+.cp-switch__select { width: auto; padding: 6px 10px; font-size: 13px; }
+.cp-switch__go {
+  font: 600 12px/1 var(--font-body);
+  color: var(--ink-strong);
+  background: var(--surface-page);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.cp-switch__go:hover { border-color: var(--line-strong); }
+.cp-switch__go:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+@media (max-width: 640px) { .cp-switch__label { display: none; } }
+
 /* ── Tabs ──────────────────────────────────────────────────────────────────────────────────────── */
 .cp-tabs {
   max-width: 1120px;

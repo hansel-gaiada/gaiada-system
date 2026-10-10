@@ -1,7 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { getActiveTenant } from "@/lib/tenant";
+import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalContract } from "@/lib/portal-data";
 import { clientStatus, money, portalDate } from "@/lib/portal";
 import { Card, Eyebrow } from "@/components/ui";
@@ -29,8 +29,8 @@ export default async function PortalContractPage({ params }: { params: Promise<{
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
-  const tenant = await getActiveTenant(me);
-  if (!tenant) return <EmptyNote>No workspace selected.</EmptyNote>;
+  const tenant = (await getActivePortalCompany(me))?.id ?? null;
+  if (!tenant) return <EmptyNote>No client account is linked to your sign-in, so there is nothing to show here. Overview explains why.</EmptyNote>;
 
   const k = await getPortalContract(userId, tenant, contractId);
   if (!k) notFound();

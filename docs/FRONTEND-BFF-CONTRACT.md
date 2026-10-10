@@ -1656,6 +1656,19 @@ were built together, so every row below is ✅ on both sides. That is deliberate
 (the console reading fields the backend never sends) is this repo's recurring bug class, and the
 portal is read by people outside the company where a confidently-wrong number costs the most.
 
+**Which company's portal (PV2-05, 2026-10-10).** Every portal page, the layout and
+`portalActions.ts` take the `:t` in `/api/:t/portal/*` from ONE resolver,
+`platform-ui/src/lib/portal-company.ts` (`getActivePortalCompany`).
+
+- It reads only `Me.clientOf` (§1): the companies the caller is an active client contact of. It
+  never reads `Me.companies`, so a person employed by one group company is never shown that
+  company's portal.
+- The choice is kept in its own cookie, `gaiada_portal_tenant`, separate from the staff
+  `gaiada_tenant`.
+- A guard test (`portal-company.guard.test.ts`) fails if any portal file calls `getActiveTenant`.
+- One request still targets one company, so isolation is unchanged; this only decides which company
+  a request names.
+
 ### Isolation model — read this before adding a portal route
 
 Four layers, and only the third is per-client:
@@ -1679,8 +1692,8 @@ becomes an existence oracle for another client's ids.
 | Status | Method | Path | Notes |
 |---|---|---|---|
 | ✅ | GET | `/api/:t/portal/overview` | The whole landing payload in ONE request: `{clients[], client, viewOnly, progress{projects,activeProjects,completedProjects,percent}, deliverables{total,delivered,overdue}, nextMilestone, needsYou[], finance{byCurrency[],primary}}`. `needsYou[]` = `{kind:'gate'\|'contract', id, requires:'signature'\|'feedback', label, context, href, since}`. Progress is the mean of PROJECT progress (not of pooled tasks), each project weighted by `pm_tasks.progress` with `done` counting 100. Finished projects = status done, complete, completed, archived, cancelled (`core/project-status.ts`); `activeProjects` = not finished, `completedProjects` = done, complete, completed. |
-| ✅ | GET | `/api/:t/portal/projects` | `PortalProject[]` — progress, milestone counts, deliverable count, next milestone due. |
-| ✅ | GET | `/api/:t/portal/projects/:projectId` | Adds `milestones[]`, `deliverables[]`, `runs[]`, `workload{todo,in_progress,blocked,done}`. **Never returns individual tasks** — `workload` is aggregate counts only. 404 for another client's or another project-scope's project. |
+| ✅ | GET | `/api/:t/portal/projects` | `PortalProject[]` — progress, milestone counts, deliverable count, next milestone due. **Additive (PV2-03):** `finished: boolean` — `status` is one of `FINISHED_PROJECT_STATUSES` (`core/project-status.ts`), the same constant the sort order uses; the UI must not re-derive it. |
+| ✅ | GET | `/api/:t/portal/projects/:projectId` | Adds `milestones[]`, `deliverables[]`, `runs[]`, `workload{todo,in_progress,blocked,done}`. **Additive (PV2-03):** `finished: boolean` (as on the list) and `lead: {name,email} \| null` — `projects.owner_id` → `users`; null when there is no owner or the owner is deleted/disabled. **Never returns individual tasks** — `workload` is aggregate counts only. 404 for another client's or another project-scope's project. |
 | ✅ | GET | `/api/:t/portal/milestones` | Commitment calendar across visible projects. |
 | ✅ | GET | `/api/:t/portal/timeline` | `?limit` (clamped 1–400, default 120). `PortalTimelineEvent[]` = `{kind, id, label, status, at, tense:'due'\|'happened', context, projectId}`. Composed as a UNION over client-visible OBJECTS — **never** from `activities`, so a new internal event type cannot leak into a client's feed by default. |
 | ✅ | GET | `/api/:t/portal/deliverables` | `?projectId`. Attachment metadata batched in one query (`files[]` per deliverable). |
@@ -1701,7 +1714,7 @@ becomes an existence oracle for another client's ids.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/portal/profile` | `{me, clients[], contacts[], access{canSign,wholeClient,grants[]}}`. `contacts[]` = fellow contacts of THEIR clients only. |
+| ✅ | GET | `/api/:t/portal/profile` | `{me, clients[], contacts[], access{canSign,wholeClient,grants[]}}`. `contacts[]` = fellow contacts of THEIR clients only. **Additive (PV2-03):** `clients[].accountManager: {name,email} \| null` (`clients.owner_user_id` → active, non-deleted `users`; read only for clients in the caller's scope) and `contacts[].side: 'client' \| 'provider'` (`users.kind = 'client'` → `client`, anything else → `provider`; `side` labels, it never filters anyone out). |
 | ✅ | PATCH | `/api/:t/portal/profile` | `{name?, title?}` — the caller's own `users` row, two columns, nothing else. **Never `email`** (the IdP identity and the invite's bound address) or `status`. Action `update_profile`. |
 | ✅ | POST | `/api/:t/portal/profile/change-request` | `{message, clientId?}` → **202**. Records an activity + notifies the account owners. Mutates NOTHING: `clients.name`/`contact` appear on issued invoices and signed contracts, so a client editing them would change what frozen documents appear to say. |
 
