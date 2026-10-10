@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `█████████████░░░░░░░░░░░░░░░░░` **42%** · 73/171<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `█████████████░░░░░░░░░░░░░░░░░` **44%** · 76/172<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████░░░░░░` **72%** · 63/87<!-- /bar -->
+<!-- bar -->🟡 `███████████████░░░░░` **75%** · 66/88<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -126,11 +126,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Eight reads; cross-tenant 404 with a positive control (38/38; negative control 16 red; WSK-66 reconcile fields pinned)
 - [x] No audit rows written; pagination stable under a concurrent update (api 568/0/1)
 
-### Wave B · WSK-40 · Editorial assertion <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Adversarial matrix of ≥ 20 rows, each with its exact problem slug
-- [ ] Signer and verifier pin the same vectors, both directions
-- [ ] Key rotation runbook executed once (overlap accepted, old kid refused after)
+### Wave B · WSK-40 · Editorial assertion <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
+- [x] Adversarial matrix of ≥ 20 rows, each with its exact problem slug (32 rows; JWKS loader 25 cases)
+- [x] Signer and verifier pin the same vectors, both directions (+ end-to-end: an approved publish lands through real mTLS)
+- [x] Key rotation runbook executed once on a dev stack (overlap accepted, old kid refused after)
 
+- [ ] Live keys provisioned on gda-aicenter (ERP signing key + WebDesk JWKS) and probes P1/P2 pass
 ### Wave B · WSK-66 · Publish and key mint executed at approval <!-- bar -->✅ `██████████` **100%** · 5/5<!-- /bar -->
 - [x] Origin migration unions `webdesk` into the live CHECK (no value lost; planted-value regression test)
 - [x] Requester ≠ approver, except a single-item self-publish (D46); 0 Zone B calls on every denial
