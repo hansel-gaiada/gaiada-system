@@ -434,6 +434,10 @@ export const webdevModule: ModuleContract = {
     // D14 PAIRING (the standing lesson): unpublish and delete are registered in BOTH
     // `core/approval-executables.ts` AND `resource_mcp_tool.yaml`'s executable list, in this same change.
     //
+    // ASSURANCE. `low`, like every other WebDesk tool: the hub mints only `low` for an n8n workflow or a chat-surface
+    // agent (principal.ts), and `verified` would lock exactly the unattended callers this program exists for out of
+    // the capability. The real authority is the platform's Cerbos decision on the resolved human, not this floor.
+    //
     // HUB LIMITATION, reported not worked around: `mcp-hub/src/module-tools.ts` sends only PATH args for a
     // GET (a GET's other args are dropped), so the list tools return Zone B's DEFAULT first page (50) with no
     // filters or cursor, and `getItem` reads the head. `getVersion` reads any one version. A hub change
@@ -442,7 +446,7 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.content.listSites",
       description: "List the WebDesk tenants and sites this company can edit (tenant slug, site id, kind, environments).",
-      minAssurance: "verified",
+      minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites",
       inputSchema: { type: "object", properties: { tenantId: { type: "string", description: "Company id (route scope)." } }, required: ["tenantId"] },
@@ -450,7 +454,7 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.content.listCollections",
       description: "List a site's collections with their compositions (field definitions) and counts (items, live, pending changes).",
-      minAssurance: "verified",
+      minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/collections",
       inputSchema: {
@@ -464,7 +468,7 @@ export const webdevModule: ModuleContract = {
       description:
         "List items of one collection (id, slug, locale, title, head/published version, state, pending changes), editor order. "
         + "Returns the first page only (hub limitation: no filters or cursor over MCP yet).",
-      minAssurance: "verified",
+      minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/collections/:collectionKey/items",
       inputSchema: {
@@ -476,7 +480,7 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.content.getItem",
       description: "Read one item at its HEAD (draft) version: fields/blocks/seo, the live version if any, its locale group and lint.",
-      minAssurance: "verified",
+      minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId",
       inputSchema: {
@@ -488,7 +492,7 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.content.listVersions",
       description: "List an item's version history, newest first (version, content hash, author id, note).",
-      minAssurance: "verified",
+      minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions",
       inputSchema: {
@@ -500,7 +504,7 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.content.getVersion",
       description: "Read one historical version of an item in full (blocks, seo, hash, author, note).",
-      minAssurance: "verified",
+      minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions/:n",
       inputSchema: {
@@ -515,7 +519,7 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.content.listMedia",
       description: "List a site's media library assets (id, key, mime, size, scan status).",
-      minAssurance: "verified",
+      minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media",
       inputSchema: {
@@ -530,7 +534,7 @@ export const webdevModule: ModuleContract = {
         "Create a DRAFT item in a collection (version 1). Nothing a production key sees changes. `fields` is required when the "
         + "collection's composition declares fields. Typed 409 (slug-taken, twin-locale-taken, singleton-exists) / 422 "
         + "(composition-violation with issues) come back unchanged.",
-      minAssurance: "verified",
+      minAssurance: "low",
       write: true,
       impact: "low",
       method: "POST",
@@ -551,7 +555,7 @@ export const webdevModule: ModuleContract = {
       description:
         "Save a new DRAFT version of an item (full replacement of fields/blocks/seo). `baseVersion` must equal the item's head "
         + "version, else a typed 409 version-conflict. Live content is untouched until a publish is approved.",
-      minAssurance: "verified",
+      minAssurance: "low",
       write: true,
       impact: "low",
       method: "PATCH",
@@ -569,7 +573,7 @@ export const webdevModule: ModuleContract = {
     {
       name: "webdesk.content.restoreVersion",
       description: "Create a new DRAFT version from an old version of an item (history is kept). `baseVersion` must equal the head version.",
-      minAssurance: "verified",
+      minAssurance: "low",
       write: true,
       impact: "low",
       method: "POST",
@@ -588,7 +592,7 @@ export const webdevModule: ModuleContract = {
       description:
         "Request publication of 1..1000 item versions: files ONE approval (HIGH, WS4) that a human decides in the Approvals inbox. "
         + "Never publishes anything itself; returns {approvalId}. `publishAt`/`unpublishAt` (ISO) request a scheduled publish/takedown instead.",
-      minAssurance: "verified",
+      minAssurance: "low",
       write: true,
       impact: "low",
       method: "POST",
@@ -611,7 +615,7 @@ export const webdevModule: ModuleContract = {
       description:
         "Take a published item down from production. MEDIUM write: an unattended caller (agent / n8n) is suspended for human "
         + "approval and re-driven as the original requester. `expectedPublishedVersion` must be the live version (typed 409 otherwise).",
-      minAssurance: "verified",
+      minAssurance: "low",
       write: true,
       impact: "medium",
       method: "POST",
@@ -630,7 +634,7 @@ export const webdevModule: ModuleContract = {
       description:
         "Soft-delete a NON-live item (history is kept; a live item is a typed 409 item-is-live: unpublish it first). MEDIUM write: "
         + "an unattended caller is suspended for human approval and re-driven as the original requester.",
-      minAssurance: "verified",
+      minAssurance: "low",
       write: true,
       impact: "medium",
       method: "POST",
