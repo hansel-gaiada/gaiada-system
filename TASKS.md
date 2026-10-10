@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **51%** · 97/190<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **50%** · 97/192<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -153,7 +153,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ### Wave C · WSK-67 · Importer CLI <!-- bar -->🟡 `███████░░░` **66%** · 2/3<!-- /bar -->
 - [x] Dry run prints the plan; `--apply` twice → second run writes 0 versions (real 326-item bundle; in-process Zone B fake)
 - [x] Refuses human principals; imports no publish/unpublish/delete function (static test; Cerbos probe)
-- [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1`
+- [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1` — FILED 2026-10-11: 326 items imported live as drafts (re-run wrote 0), approval `01a12715-c98e-70ae-81a6-7f5ab5ad0192` awaits the owner
 
 ### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **83%** · 5/6<!-- /bar -->
 - [x] Two git builds of one commit give an identical `dist/` (determinism first) — 303 files, 0 differ
@@ -199,7 +199,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `█░░░░░░░░░░░░░░░░░░░` **2%** · 1/38<!-- /bar -->
+<!-- bar -->🟡 `█░░░░░░░░░░░░░░░░░░░` **2%** · 1/40<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md) (branch `webdesk/m3-rulings` until merged). Rulings WSK-D49–D51.
 
@@ -218,7 +218,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43 · media library
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `░░░░░░░░░░` **3%** · 1/27<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `░░░░░░░░░░` **3%** · 1/29<!-- /bar -->
 - [ ] Reserved collection keys (`media`, `forms` collide with api routes)
 - [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
 - [ ] A bad cursor returns 500 with the raw database message
@@ -232,6 +232,8 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim)
 - [ ] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale)
 - [ ] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state
+- [ ] Importer CLI never wired the editorial signer (own process): the live run refused every write with 503 `editorial_signer_not_configured` — fixed on the proof branch (`f52f9a27`), verify in the next release gate
+- [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
 - [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too)
 - [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
 - [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
