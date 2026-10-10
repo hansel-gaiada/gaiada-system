@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `█████████░░░░░░░░░░░░░░░░░░░░░` **31%** · 51/163<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████░░░░░░░░░░░░░░░░░░░░` **33%** · 56/167<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████░░░░░░░░░░` **48%** · 41/85<!-- /bar -->
+<!-- bar -->🟡 `███████████░░░░░░░░░` **54%** · 46/85<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -84,11 +84,11 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Dependency and Docker layer caching
 - [ ] Billed minutes for a WebDesk-only change measured after, and recorded
 
-### Wave A · WSK-64 · Vocabulary 1.1.0 <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] Classifier extended (group recursion, scalar `multiple`, `localized`, `ui`) with negative controls
-- [ ] 1.0.0 → 1.1.0 computes MINOR; `envelope.ts` untouched; contract test unchanged and green
-- [ ] `validateItemContent` (≥ 40 cases) and the composition validator
-- [ ] Codegen + every vendored copy (api delivery, schema-draft, blocks) re-vendored; drift checks green on Linux
+### Wave A · WSK-64 · Vocabulary 1.1.0 <!-- bar -->✅ `██████████` **100%** · 4/4<!-- /bar -->
+- [x] Classifier extended (group recursion, scalar `multiple`, `localized`, `ui`) with negative controls (1.0.0 rated them PATCH; now MAJOR)
+- [x] 1.0.0 → 1.1.0 computes MINOR; `envelope.ts` untouched; contract test unchanged and green (60/60)
+- [x] `validateItemContent` (52 table cases; 108/108) and the composition validator
+- [x] Codegen + every vendored copy (api delivery, schema-draft, blocks) re-vendored; drift checks green on Linux (api 428/0/1; codegen determinism gate passed)
 
 ### Wave A · WSK-65 · Migration 0009 (write plane) <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
 - [x] Applies on 0001–0008, idempotent; fails loudly on seeded duplicates (negative controls) — 96/96 checks; refuses non-migrator-owned tables
@@ -107,10 +107,10 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] `src/rbac` suite green on Linux with Cerbos reachable (849/849, 0 skipped; 41-row probe matrix)
 - [ ] Live Cerbos restarted; the probe matrix matches
 
-### Wave A · WSK-54 · Bundle export (site repo) <!-- bar -->🟡 `███████░░░` **66%** · 2/3<!-- /bar -->
+### Wave A · WSK-54 · Bundle export (site repo) <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
 - [x] Two exports of one commit are byte-identical (site `webdesk-importer` @ `10c2d21`; content sha256 `3a23fc70…` twice)
 - [x] Every page and global round-trips to what the site's own loader reads (315/315 exact against Astro's `getEntryInfo`; 22/22 tests on Linux)
-- [ ] Every item validates against vocabulary 1.1.0
+- [x] Every item validates against vocabulary 1.1.0 (326 items, 17 compositions, 0 invalid, 0 disagreements — Linux, site `5b4476a`)
 
 ### Wave B · WSK-41 · Authoring commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
 - [ ] Seven commands with impact classes in the registry; real `AppModule` boots
@@ -188,7 +188,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/23<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/27<!-- /bar -->
 
 ### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
@@ -203,7 +203,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] WSK-64 · CDN cache purge on publish
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/14<!-- /bar -->
+### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/18<!-- /bar -->
 - [ ] Reserved collection keys (`media`, `forms` collide with api routes)
 - [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
 - [ ] A bad cursor returns 500 with the raw database message
@@ -218,6 +218,10 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] Idempotency expiry sweep must run per tenant + once at platform scope; reads treat expired rows as absent
 - [ ] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written
 - [ ] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration
+- [ ] Codegen `versioning.mts` drops `singleton`/`localized`/`ui`/`lint` from the tenant-contract snapshot (flips go unrated)
+- [ ] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields`
+- [ ] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf`
+- [ ] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today)
 
 ---
 
