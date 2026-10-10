@@ -51,6 +51,11 @@ import { DevModeEditorialPrincipalResolver } from "./auth/dev-mode-editorial-pri
 import { NotConfiguredEditorialPrincipalResolver } from "./auth/not-configured-editorial-principal-resolver";
 import { ContentCommandsService } from "./content/content-commands.service";
 import { ContentCommandsController } from "./content/content-commands.controller";
+// WSK-51 — the editor's live read commands (design §4): tenant.list + the content reads.
+import { ContentReadsService } from "./content/content-reads.service";
+import { ContentReadsController } from "./content/content-reads.controller";
+import { TenantReadsService } from "./tenants/tenant-reads.service";
+import { TenantReadsController } from "./tenants/tenant-reads.controller";
 
 /**
  * ============================================================================================
@@ -108,6 +113,8 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     JobsController,
     ContractController,
     ContentCommandsController,
+    ContentReadsController,
+    TenantReadsController,
   ],
   providers: [
     CommandAuditService,
@@ -122,6 +129,8 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     PgIdempotencyStore,
     EditorialAssertionGuard,
     ContentCommandsService,
+    ContentReadsService,
+    TenantReadsService,
     { provide: CONTROL_CHANNEL_AUTHENTICATOR, useClass: controlChannelAuthenticatorClass },
     { provide: POLICY_DECISION_POINT, useClass: policyDecisionPointClass },
     { provide: RELEASE_TRANSPORT, useClass: NotYetAvailableReleaseTransport },
