@@ -227,7 +227,10 @@ async function partB() {
     check('tenant A sees exactly its own 1 row and no platform rows', aTotal === 1 && aSeesNull === 0, { aTotal, aSeesNull })
 
     await setCtx(c, { platform: true })
-    const pNull = (await one(c, `SELECT count(*)::int AS n FROM control_idempotency_keys WHERE tenant_id IS NULL`)).n
+    // Scoped to THIS test's key: the main db may already hold committed platform-level rows (the api
+    // suite's tenant.provision runs before this file in the Linux gate), and a bare count would then
+    // read 2. Platform ctx must still see exactly the one row this transaction inserted.
+    const pNull = (await one(c, `SELECT count(*)::int AS n FROM control_idempotency_keys WHERE tenant_id IS NULL AND scope_key = 'k1'`)).n
     const pTenant = (await one(c, `SELECT count(*)::int AS n FROM control_idempotency_keys WHERE tenant_id IS NOT NULL`)).n
     console.log(`        probe: platform-ctx NULL rows=${pNull}, tenant rows=${pTenant}`)
     check('platform ctx reads only tenant_id IS NULL rows (0 tenant rows)', pTenant === 0, pTenant)
