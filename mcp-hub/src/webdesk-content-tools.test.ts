@@ -113,7 +113,7 @@ function mintVerified(toolName: string, args: Record<string, unknown>): Verified
 }
 
 describe.skipIf(!liveReachable)("WSK-59 — LIVE resource_mcp_tool.yaml: the D14 pairing for unpublish/delete", () => {
-  const ARGS = { tenantId: "t", tenantSlug: "gaiada", siteId: "s", itemId: "i", expectedPublishedVersion: 1 };
+  const ARGS = { tenantId: "tenant-1", tenantSlug: "gaiada", siteId: "s", itemId: "i", expectedPublishedVersion: 1 };
 
   beforeAll(() => {
     (AUTOMATION_ALLOWLIST as Record<string, readonly string[]>)[N8N_WF] = [...MEDIUM_WRITES, "webdesk.content.notListed"];
