@@ -366,7 +366,7 @@ export const webdevModule: ModuleContract = {
       name: "webdesk.key.mint",
       description:
         "Request a new WebDesk environment API key: files ONE key.mint approval (HIGH, WS4) for one of the site's "
-        + "environments and returns {approvalId} (a pending request for the same site, environment and scope is returned "
+        + "environments and returns {approvalId} (a pending request for the same site, environment and scope is returned, with alreadyPending:true, "
         + "instead of a second one). Nothing is minted until a DIFFERENT authorised user approves it; the plaintext key "
         + "is shown ONCE, in that decide response, and only its hash is kept. HIGH write — ALWAYS WS4, every principal class (§07).",
       minAssurance: "low",

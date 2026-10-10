@@ -227,6 +227,16 @@ export const CAPABILITIES = [
   // to be un-collapsed later. Gates: `provisionSiteAction`, `reconcileSiteAction` (both in
   // `webdevProvisionedSitesActions.ts`).
   "webdev.provision",
+  // `webdev.promote` — ASK for a HIGH-impact WebDesk control-plane command: today the Website workspace's
+  // "Request an API key" (`POST …/modules/webdev/control/sites/:siteId/keys`, which FILES a key.mint approval
+  // and mints nothing). Verified against resource_webdev_provisioned_site.yaml's `promote` rule:
+  // `["operate","promote"] -> company_admin, manager` (+ the unmirrored `module_manager` webdev tier) on the
+  // in-tenant tier, and `platform_admin` by wildcard; the catalog bundles agree (`webdev.provisioned_site.promote`
+  // is held by platform_admin, company_admin, manager, owner and webdev_manager). A member and a webdev EDITOR
+  // (module_staff) are denied. Same role set as `webdev.provision` TODAY and kept as its OWN capability for the
+  // same reason that one is kept apart from `pipeline.manage`: a different Cerbos action that will not
+  // necessarily move with it. Gate: `RequestKeyPanel` (cosmetic — the BFF's `authorize()` is the authority).
+  "webdev.promote",
   // `github.link` — link/unlink a `github_repos` row to a `webdev_site_id`/`project_id` (GH-08/GH-10).
   // Verified directly against `resource_github_repo.yaml` (GH-03, shipped 2026-08-31): its `link`/
   // `unlink` rule is `derivedRoles: ["company_admin", "manager"]`, in-tenant, with NO `approvalId`
@@ -443,7 +453,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // resource_webdev_provisioned_site.yaml), same as it always did for `approvals.decide`'s own
     // three policies. Nothing changes for company_admin here — it already had these via the old
     // over-broad `approvals.decide` mapping; this just keeps them held under the correctly-split name.
-    "pipeline.write", "pipeline.manage", "webdev.provision", "github.link",
+    "pipeline.write", "pipeline.manage", "webdev.provision", "webdev.promote", "github.link",
     "hr.view", "hr.manage",
     // HR-FULL: company_admin is named in every rule of all three new policies, ratify included.
     // LMS: company_admin is named in every rule of both LMS policies.
@@ -517,7 +527,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   manager: [
     "pm.manage", "pm.contribute", "people.directory",
     "client.write", "client.delete", // CC-D10 — resource_client.yaml create/update/delete
-    "pipeline.write", "pipeline.manage", "webdev.provision", "github.link",
+    "pipeline.write", "pipeline.manage", "webdev.provision", "webdev.promote", "github.link",
     // Gap 3 (2026-08 sweep): resource_integration_connection.yaml's "company.manage tier" rule
     // (its own header's name for the rule) explicitly lists `company_admin` AND `manager` for
     // managing company-owned connection rows / other people's seats — `departments/[deptId]/
@@ -799,7 +809,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.client_review.request", "social.client_review.withdraw", "social.inbox.assign",
     "social.inbox.escalate", "social.inbox.read", "social.inbox.reply", "social.ledger.read",
     "social.manage", "social.post.delete", "social.scope.write", "social.view", "webdev.provision",
-    "github.link",
+    "webdev.promote", "github.link",
     // AD-11 — GRANTED, and the reasoning that first withheld them was wrong. Reading only the ROLE
     // arm of `resource_agency_lead.yaml` (`company_admin`/`manager`/`member`/`viewer`, plus the
     // `platform_admin` wildcard — never `owner`) says owner has no reach here. But AD-7 also added

@@ -1,13 +1,17 @@
 import { loadSiteContext } from "@/lib/webdeskContent";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CollectionsPanel } from "@/components/webdesk/content/CollectionsPanel";
+import { RequestKeyPanel } from "@/components/webdesk/content/RequestKeyPanel";
+import { can } from "@/lib/rbac";
 import { WdRefusal } from "@/components/webdesk/content/WdRefusal";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 
 type Params = Promise<{ deptId: string; tenant: string; site: string }>;
 
 // Website → Content → site: the collections, grouped by `composition.ui.group`, with items by locale,
-// live count and PENDING CHANGES per collection.
+// live count and PENDING CHANGES per collection. Below them, "API keys": ask for a read/write key for one of the site's environments
+// (files an approval; nothing is created until someone else approves). The control renders only for a user whose role can pass the
+// BFF's gate (`webdev.promote` mirrors Cerbos `promote` on `webdev_provisioned_site`); everyone else sees nothing, not a disabled button.
 export default async function WebsiteSitePage({ params }: { params: Params }) {
   const { deptId, tenant, site } = await params;
   const c = await requireWebsiteCtx(deptId);
@@ -22,6 +26,11 @@ export default async function WebsiteSitePage({ params }: { params: Params }) {
         {ctx.data.site.name} · locales {ctx.data.tenant.locales.join(", ")} (default {ctx.data.tenant.defaultLocale}). Pending changes are drafts whose head differs from what is live.
       </p>
       <CollectionsPanel collections={ctx.data.collections} siteBase={here} />
+      <RequestKeyPanel
+        allowed={can(c.me, "webdev.promote", c.company)}
+        scope={{ tenantSlug: tenant, siteId: site }}
+        environments={ctx.data.site.environments}
+      />
     </div>
   );
 }

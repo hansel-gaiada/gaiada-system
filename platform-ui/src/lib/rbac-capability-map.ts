@@ -303,6 +303,16 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // WSK-31's `promote` action on the same kind (`resource_webdev_provisioned_site.yaml`: `["operate","promote"]`
+  // -> company_admin, manager, module_manager; platform_admin by wildcard). The catalog key exists
+  // (`webdev.provisioned_site.promote`) and its bundles (platform_admin, company_admin, manager, owner,
+  // webdev_manager) are the same set `webdev.provision` has, so the biconditional holds with no exception.
+  // Only `promote` is named: `operate` is a different, MEDIUM-impact action this capability does not gate.
+  "webdev.promote": {
+    permissions: ["webdev.provisioned_site.promote"],
+    semantics: "all",
+  },
+
   // GH-03 (2026-08-31): `resource_github_repo.yaml`'s `link`/`unlink` rule is
   // `derivedRoles: ["company_admin", "manager"]`, in-tenant, no `approvalId` condition — unlike
   // `deploy`/`secret_write`/`create_repo`/`delete_repo` on the same kind, which ARE D14-gated. Bundled
