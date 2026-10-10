@@ -251,7 +251,7 @@ test.describe("client portal", () => {
     await page.waitForURL("**/portal");
     await expect(page.locator(".cp-brand__mark")).toHaveText("Gaia Digital Agency");
 
-    await page.locator(".erp-usermenu__trigger").click();
+    await page.getByRole("button", { name: "Account menu" }).click();
     const back = page.getByRole("menuitem", { name: "Back to workspace" });
     await expect(back).toHaveAttribute("href", "/");
     await back.click();
@@ -261,8 +261,10 @@ test.describe("client portal", () => {
 
   test("a client who is not staff has no way into the workspace from the portal menu @portal", async ({ page }) => {
     await signInAsClient(page);
-    await page.locator(".erp-usermenu__trigger").click();
-    await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+    await page.getByRole("button", { name: "Account menu" }).click();
+    // In the viewport, not merely "visible": the menu once opened upward, off the top of the screen.
+    await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeInViewport();
+    await expect(page.getByRole("menuitem", { name: "Your profile" })).toBeInViewport();
     await expect(page.getByRole("menuitem", { name: "Back to workspace" })).toHaveCount(0);
   });
 });

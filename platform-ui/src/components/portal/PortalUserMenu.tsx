@@ -13,7 +13,9 @@ import { logout } from "@/app/(app)/account/actions";
 //
 // Not a reuse of `shell/UserMenu`: that one links to `/account` (staff preferences: density, width,
 // theme) and carries the sidebar's name/role card. This links to `/portal/profile` and is a bare icon
-// button, because the header already shows who the person is.
+// button, because the header already shows who the person is. Styled only by portal.css's `.cp-usermenu*`:
+// shell.css never loads for a client, so borrowing its classes left the menu unstyled (or, after a hop
+// from the workspace, opening upward off the screen).
 export function PortalUserMenu({ initials, staff = false }: { initials: string; staff?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -35,19 +37,19 @@ export function PortalUserMenu({ initials, staff = false }: { initials: string; 
   }, [open]);
 
   return (
-    <div className="erp-usermenu" ref={ref}>
+    <div className="cp-usermenu" ref={ref}>
       {open && (
-        <div className="erp-usermenu__pop" role="menu" aria-label="Account menu">
-          <Link href="/portal/profile" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
+        <div className="cp-usermenu__pop" role="menu" aria-label="Account menu">
+          <Link href="/portal/profile" role="menuitem" className="cp-usermenu__item" onClick={() => setOpen(false)}>
             Your profile
           </Link>
           {staff && (
-            <Link href="/" role="menuitem" className="erp-usermenu__item" onClick={() => setOpen(false)}>
+            <Link href="/" role="menuitem" className="cp-usermenu__item" onClick={() => setOpen(false)}>
               Back to workspace
             </Link>
           )}
           <form action={logout}>
-            <button type="submit" role="menuitem" className="erp-usermenu__item erp-usermenu__item--danger">
+            <button type="submit" role="menuitem" className="cp-usermenu__item cp-usermenu__item--danger">
               Sign out
             </button>
           </form>
@@ -55,7 +57,7 @@ export function PortalUserMenu({ initials, staff = false }: { initials: string; 
       )}
       <button
         type="button"
-        className="erp-side__avatar erp-usermenu__trigger"
+        className="cp-usermenu__trigger"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Account menu"
