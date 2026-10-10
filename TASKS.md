@@ -24,7 +24,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Working tracker + this task board created
 
 ### Owner inputs <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
-- [ ] GoDaddy A record `api.gaiada.online → 35.240.135.48` (owner)
+- [ ] Hostinger DNS A record `api.gaiada.com → 35.240.135.48` (owner; D43 amended 2026-10-11 — was `api.gaiada.online` at GoDaddy, never created)
 - [x] Content-model questions answered: all 315 pages import, visibility states, locales `en` + `id` (D44, D48)
 - [x] Write-plane design questions answered: self-publish, rebuild authority, channel steps, releases, defaults (D46–D48)
 - [x] Read-only `BYPASSRLS` backup role approved (D48, WSK-68)
@@ -72,7 +72,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Defect fixed: compose gave the api `DATABASE_URL` but it reads `APP_DATABASE_URL` — the live api had never had a database
 - [x] Defect fixed: every table was owned by `postgres` and `webdesk_app` had 0 grants — DB rebuilt as the repo intends (migrator-owned, 74 app grants, revokes intact, RLS integrity 19/19)
 - [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
-- [ ] `api.gaiada.online` vhost enabled with TLS (after the A record)
+- [ ] `api.gaiada.com` vhost enabled with TLS (rename the staged `api.gaiada.online.conf`; after the A record)
 - [x] The api image on the box built off the live box (sumopod `webdesk-api:1cbee520`, transferred in 30 s)
 - [ ] The api image signed via a release
 - [ ] ERP egress client's own live probe from `gaiada-platform-1` (needs the release that ships WSK-63b + its compose `extra_hosts`)
