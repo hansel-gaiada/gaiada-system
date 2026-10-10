@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **45%** · 79/173<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████░░░░░░░░░░░░░░░░` **47%** · 82/174<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `███████████████░░░░░` **75%** · 66/88<!-- /bar -->
+<!-- bar -->🟡 `████████████████░░░░` **77%** · 69/89<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -139,11 +139,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] `key.mint` plaintext only in the `decide()` response, never persisted (DB + log scans)
 
 - [x] Fix the platform_admin parity sweep (`authz-permissions.controller.test.ts`) that WSK-47's deny-without-approval rule turned red (31/31; negative control red on a broken unrelated grant; full nest 7453 passed)
-### Wave C · WSK-59 · ERP content BFF + MCP tools <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Routes with `authorize()` first; cross-company 404 wall with a positive control
-- [ ] Every editor action is an MCP tool with an impact class; both D14 halves for unpublish/delete
-- [ ] BFF contract §27; breaker open → `editorial_unavailable`
+### Wave C · WSK-59 · ERP content BFF + MCP tools <!-- bar -->🟡 `████████░░` **75%** · 3/4<!-- /bar -->
+- [x] Routes with `authorize()` first; cross-company 404 wall with a positive control (12 routes; full nest 7564 passed)
+- [x] Every editor action is an MCP tool with an impact class; both D14 halves for unpublish/delete (13 tools; unattended unpublish suspends + re-drives as the requester)
+- [x] BFF contract §27; breaker open → `editorial_unavailable`; ambiguous writes reconcile by reading
 
+- [ ] Editors can read their own pending publish request (today `automation_approval:read` is admin/manager only → 403 after a reload)
 ### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] Tenant `gaiada`, site `gaiada-com`, staging + production environments
 - [ ] Build key (production read) minted through an approval; preview key (staging read)
