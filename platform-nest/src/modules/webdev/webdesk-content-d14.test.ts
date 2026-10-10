@@ -136,7 +136,7 @@ describe.skipIf(!live)("WSK-59 · D14: an unattended agent's unpublish/delete su
         reason: `agent asked to ${tool} a page`, origin: "agent", agentName: "wsk59-ops",
       },
     });
-    expect(filed.statusCode).toBe(201);
+    expect(filed.statusCode, filed.body).toBe(201);
     return (filed.json() as { id: string }).id;
   }
   const decide = (id: string) =>
