@@ -352,3 +352,128 @@ describe.skipIf(!live)("PRV-03 Cerbos matrix — webdev_provisioned_site (manage
     }
   });
 });
+
+// ══════════ WSK-47 (2026-10-10) — the WebDesk editorial kinds: webdesk_content_item + webdesk_collection ══
+// docs/plans/2026-10-10-webdesk-write-plane-design.md §7, owner ruling WSK-D46 (R4: a publisher may approve
+// their OWN publish of exactly ONE item; batches and schedules keep maker != checker).
+// "editor" = webdev_staff (module_staff), "publisher" = webdev_manager (module_manager).
+describe.skipIf(!live)("WSK-47 Cerbos matrix — webdesk_content_item / webdesk_collection", () => {
+  const item: Resource = { kind: "webdesk_content_item", tenantId: T1, module: "webdev", id: "item-1", collectionKey: "page", locale: "en" };
+  const coll: Resource = { kind: "webdesk_collection", tenantId: T1, module: "webdev", id: "page", collectionKey: "page" };
+  const EDIT = ["read", "create", "update", "request_publish"];
+  const TAKEDOWN = ["unpublish", "delete"];
+  // An approved publish as WSK-66's decide() executor will present it.
+  const approved = (creatorId: string, itemCount: number): Resource => ({ ...item, approvalId: "appr-1", creatorId, itemCount });
+  const editor = () => principal("webdev_staff", "company", T1);
+  const publisher = (userId = ME) => principal("webdev_manager", "company", T1, userId);
+  const platformAdmin: Principal = { userId: ME, assurance: "high", companies: [], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+
+  it("editor (webdev_staff): edit tier + collection read; no takedown, no schema, no publish even with an approval", async () => {
+    const p = editor();
+    for (const a of EDIT) expect(await allow(p, item, a), a).toBe(true);
+    for (const a of TAKEDOWN) expect(await allow(p, item, a), a).toBe(false);
+    expect(await allow(p, coll, "read")).toBe(true);
+    expect(await allow(p, coll, "apply_schema")).toBe(false);
+    expect(await allow(p, approved(OTHER_USER, 2), "publish")).toBe(false);
+    expect(await allow(p, approved(OTHER_USER, 2), "schedule")).toBe(false);
+  });
+
+  it("manager: edit tier + collection read only", async () => {
+    const p = principal("manager", "company", T1);
+    for (const a of EDIT) expect(await allow(p, item, a), a).toBe(true);
+    for (const a of TAKEDOWN) expect(await allow(p, item, a), a).toBe(false);
+    expect(await allow(p, coll, "read")).toBe(true);
+    expect(await allow(p, coll, "apply_schema")).toBe(false);
+    expect(await allow(p, approved(OTHER_USER, 2), "publish")).toBe(false);
+  });
+
+  it("publisher (webdev_manager): everything role-tier, takedown immediate, schema apply", async () => {
+    const p = publisher();
+    for (const a of [...EDIT, ...TAKEDOWN]) expect(await allow(p, item, a), a).toBe(true);
+    expect(await allow(p, coll, "read")).toBe(true);
+    expect(await allow(p, coll, "apply_schema")).toBe(true);
+  });
+
+  for (const [label, mk] of [
+    ["publisher (webdev_manager)", () => publisher()],
+    ["company_admin", () => principal("company_admin", "company", T1)],
+  ] as const) {
+    it(`${label}: publish needs an approval id and a known creator; maker != checker for batches`, async () => {
+      const p = mk();
+      expect(await allow(p, approved(OTHER_USER, 5), "publish")).toBe(true);
+      expect(await allow(p, approved(OTHER_USER, 1), "publish")).toBe(true);
+      expect(await allow(p, { ...item, creatorId: OTHER_USER, itemCount: 1 }, "publish"), "no approvalId").toBe(false);
+      expect(await allow(p, { ...item, approvalId: "", creatorId: OTHER_USER, itemCount: 1 }, "publish"), "empty approvalId").toBe(false);
+      expect(await allow(p, { ...item, approvalId: "appr-1", itemCount: 2 }, "publish"), "unknown creator").toBe(false);
+      expect(await allow(p, approved(ME, 2), "publish"), "self, batch").toBe(false);
+    });
+
+    it(`${label}: R4 — self-approve of exactly ONE item is allowed; absent itemCount fails closed`, async () => {
+      const p = mk();
+      expect(await allow(p, approved(ME, 1), "publish"), "self, single").toBe(true);
+      expect(await allow(p, approved(ME, 0), "publish"), "self, count 0").toBe(false);
+      expect(await allow(p, { ...item, approvalId: "appr-1", creatorId: ME }, "publish"), "self, count omitted").toBe(false);
+    });
+
+    it(`${label}: schedule keeps STRICT maker != checker (R4 is non-scheduled)`, async () => {
+      const p = mk();
+      expect(await allow(p, approved(OTHER_USER, 3), "schedule")).toBe(true);
+      expect(await allow(p, approved(ME, 1), "schedule"), "self, single").toBe(false);
+      expect(await allow(p, { ...item, creatorId: OTHER_USER, itemCount: 1 }, "schedule"), "no approvalId").toBe(false);
+    });
+  }
+
+  it("platform_admin: the wildcard still loses to the self-approval DENY (batch + schedule), R4 single allowed", async () => {
+    expect(await allow(platformAdmin, approved(OTHER_USER, 4), "publish")).toBe(true);
+    expect(await allow(platformAdmin, approved(ME, 4), "publish"), "self, batch").toBe(false);
+    expect(await allow(platformAdmin, approved(ME, 1), "publish"), "self, single").toBe(true);
+    expect(await allow(platformAdmin, approved(ME, 1), "schedule"), "self schedule").toBe(false);
+    expect(await allow(platformAdmin, coll, "apply_schema")).toBe(true);
+  });
+
+  it("HIGH for every principal (WSK-D46): no approval id means no publish/schedule, platform_admin wildcard included", async () => {
+    const noApproval = (creatorId: string, itemCount: number, approvalId?: string): Resource => ({ ...item, creatorId, itemCount, approvalId });
+    for (const p of [platformAdmin, principal("company_admin", "company", T1), publisher()]) {
+      for (const a of ["publish", "schedule"]) {
+        expect(await allow(p, noApproval(OTHER_USER, 1), a), `${a} approvalId omitted`).toBe(false);
+        expect(await allow(p, noApproval(OTHER_USER, 1, ""), a), `${a} approvalId empty`).toBe(false);
+        // positive control: the same request WITH an approval id
+        expect(await allow(p, noApproval(OTHER_USER, 1, "appr-1"), a), `${a} with approvalId`).toBe(true);
+      }
+      // R4 self single-item still needs the approval id
+      expect(await allow(p, noApproval(ME, 1), "publish"), "self single, no approvalId").toBe(false);
+      expect(await allow(p, noApproval(ME, 1, "appr-1"), "publish"), "self single, with approvalId").toBe(true);
+    }
+    // takedown stays immediate: the approval DENY is scoped to publish/schedule only
+    expect(await allow(platformAdmin, item, "unpublish")).toBe(true);
+    expect(await allow(publisher(), item, "delete")).toBe(true);
+  });
+
+  it("member, client, group_executive and a T1 admin on T2: nothing on either kind", async () => {
+    const ALL_ITEM = [...EDIT, ...TAKEDOWN, "publish", "schedule"];
+    const exec: Principal = { userId: ME, assurance: "high", companies: [T1], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    for (const p of [principal("member", "company", T1), principal("client", "company", T1), exec]) {
+      for (const a of ALL_ITEM) expect(await allow(p, approved(OTHER_USER, 1), a), a).toBe(false);
+      for (const a of ["read", "apply_schema"]) expect(await allow(p, coll, a), a).toBe(false);
+    }
+    const t1Admin = principal("company_admin", "company", T1);
+    const t2Item: Resource = { ...approved(OTHER_USER, 1), tenantId: T2 };
+    for (const a of ALL_ITEM) expect(await allow(t1Admin, t2Item, a), a).toBe(false);
+  });
+
+  it("the module tier is pinned to webdev: another module's staff/manager reaches nothing, and webdev staff on a non-webdev resource neither", async () => {
+    const hrItem: Resource = { ...item, module: "hr" };
+    const hrManager = principal("hr_manager", "company", T1);
+    for (const a of EDIT) expect(await allow(hrManager, hrItem, a), a).toBe(false);
+    expect(await allow(hrManager, { ...approved(OTHER_USER, 1), module: "hr" }, "publish")).toBe(false);
+    expect(await allow(publisher(), { ...item, module: "" }, "read")).toBe(false);
+    expect(await allow(editor(), { ...coll, module: "hr" }, "read")).toBe(false);
+  });
+
+  it("low assurance (every automation principal) is denied the module and company tiers", async () => {
+    for (const role of ["webdev_manager", "webdev_staff", "company_admin"]) {
+      const p: Principal = { userId: ME, assurance: "low", companies: [T1], roles: [{ role, scopeType: "company", scopeId: T1 }], sessionVersion: 1 };
+      for (const a of EDIT) expect(await allow(p, item, a), `${role} ${a}`).toBe(false);
+    }
+  });
+});

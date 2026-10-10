@@ -15,11 +15,11 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1768,
+      "totalPairs": 1818,
       "perRole": {
-        "platform_admin": 391,
-        "company_admin": 357,
-        "manager": 172,
+        "platform_admin": 401,
+        "company_admin": 367,
+        "manager": 177,
         "member": 88,
         "viewer": 31,
         "org_unit_lead": 16,
@@ -34,8 +34,8 @@
         "search_manager": 40,
         "reports_staff": 4,
         "reports_manager": 3,
-        "webdev_staff": 9,
-        "webdev_manager": 16,
+        "webdev_staff": 14,
+        "webdev_manager": 26,
         "social_staff": 19,
         "social_manager": 33,
         "monitoring_staff": 10,
@@ -44,7 +44,7 @@
         "finance_manager": 43,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 357
+        "owner": 367
       },
       "selfScopedPairs": 28
     }
@@ -440,6 +440,16 @@
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",
+      "webdev.webdesk_collection.apply_schema",
+      "webdev.webdesk_collection.read",
+      "webdev.webdesk_content_item.create",
+      "webdev.webdesk_content_item.delete",
+      "webdev.webdesk_content_item.publish",
+      "webdev.webdesk_content_item.read",
+      "webdev.webdesk_content_item.request_publish",
+      "webdev.webdesk_content_item.schedule",
+      "webdev.webdesk_content_item.unpublish",
+      "webdev.webdesk_content_item.update",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ],
@@ -799,6 +809,16 @@
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",
+      "webdev.webdesk_collection.apply_schema",
+      "webdev.webdesk_collection.read",
+      "webdev.webdesk_content_item.create",
+      "webdev.webdesk_content_item.delete",
+      "webdev.webdesk_content_item.publish",
+      "webdev.webdesk_content_item.read",
+      "webdev.webdesk_content_item.request_publish",
+      "webdev.webdesk_content_item.schedule",
+      "webdev.webdesk_content_item.unpublish",
+      "webdev.webdesk_content_item.update",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ],
@@ -973,6 +993,11 @@
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",
+      "webdev.webdesk_collection.read",
+      "webdev.webdesk_content_item.create",
+      "webdev.webdesk_content_item.read",
+      "webdev.webdesk_content_item.request_publish",
+      "webdev.webdesk_content_item.update",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ],
@@ -1325,7 +1350,12 @@
       "core.service_assignment.read",
       "webdev.change_request.read",
       "webdev.contract_snapshot.read",
-      "webdev.provisioned_site.read"
+      "webdev.provisioned_site.read",
+      "webdev.webdesk_collection.read",
+      "webdev.webdesk_content_item.create",
+      "webdev.webdesk_content_item.read",
+      "webdev.webdesk_content_item.request_publish",
+      "webdev.webdesk_content_item.update"
     ],
     "webdev_manager": [
       "core.github_repo.deploy",
@@ -1343,7 +1373,17 @@
       "webdev.provisioned_site.promote",
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
-      "webdev.provisioned_site.reconcile"
+      "webdev.provisioned_site.reconcile",
+      "webdev.webdesk_collection.apply_schema",
+      "webdev.webdesk_collection.read",
+      "webdev.webdesk_content_item.create",
+      "webdev.webdesk_content_item.delete",
+      "webdev.webdesk_content_item.publish",
+      "webdev.webdesk_content_item.read",
+      "webdev.webdesk_content_item.request_publish",
+      "webdev.webdesk_content_item.schedule",
+      "webdev.webdesk_content_item.unpublish",
+      "webdev.webdesk_content_item.update"
     ],
     "social_staff": [
       "core.member.read",
@@ -1871,6 +1911,16 @@
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",
+      "webdev.webdesk_collection.apply_schema",
+      "webdev.webdesk_collection.read",
+      "webdev.webdesk_content_item.create",
+      "webdev.webdesk_content_item.delete",
+      "webdev.webdesk_content_item.publish",
+      "webdev.webdesk_content_item.read",
+      "webdev.webdesk_content_item.request_publish",
+      "webdev.webdesk_content_item.schedule",
+      "webdev.webdesk_content_item.unpublish",
+      "webdev.webdesk_content_item.update",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ]

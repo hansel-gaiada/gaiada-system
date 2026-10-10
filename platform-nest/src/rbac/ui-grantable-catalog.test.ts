@@ -83,8 +83,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // `webdev.change_request.verify` on the EXISTING webdev_change_request kind. 404 -> 405 / 389 -> 390.
     // CLIENT-CENTRE CC-D4 (2026-09-29): +1 grantable / +1 total — `portal.edit_company_profile` on
     // the EXISTING `portal` kind. 405 -> 406 / 390 -> 391.
-    expect(permissions.length).toBe(406);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(391);
+    // WSK-47 (2026-10-10): +10 grantable / +10 total on 2 NEW kinds (webdesk_content_item x8,
+    // webdesk_collection x2), all uiGrantable:true. 406 -> 416 / 391 -> 401.
+    expect(permissions.length).toBe(416);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(401);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

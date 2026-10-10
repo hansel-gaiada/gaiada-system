@@ -1,0 +1,191 @@
+# WSK-47 (docs/plans/2026-10-10-webdesk-write-plane-design.md §6 + §7; owner ruling WSK-D46 in
+# docs/blueprints/webdesk-design-v2.md §14) — authz for the NEW `webdesk_content_item` resource kind:
+# one editorial item (a page, post, guide …) in a WebDesk site, authored from the ERP and carried to
+# Zone B over the control channel. Nothing existed for this kind before this file; an unlisted
+# kind/action is a SILENT DENY that reads exactly like a logic bug. Restart `gaiada-test-cerbos` and
+# the live sidecar after adding this file — the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"webdesk_content_item", tenantId, module:"webdev", id?,
+#   collectionKey, locale,                  ← from ZONE B's read (WSK-51), never from the request body
+#   approvalId, creatorId, itemCount}       ← publish/schedule only, set by WSK-66's decide() executor
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read · create · update · request_publish — the editor tier (§7). request_publish files ONE WS4
+#                approval (impact HIGH); it changes nothing a production key can see.
+#   unpublish · delete — MEDIUM, the publisher tier, run immediately (a takedown must not wait for a
+#                second person — WSK-D46).
+#   publish · schedule — HIGH for every principal class. Reachable ONLY at decide() of an approved
+#                WS4 row: the approval id must be present (a DENY enforces this for every principal,
+#                platform_admin included), and maker ≠ checker applies (below).
+#
+# ── MAKER ≠ CHECKER, AND THE R4 SELF-PUBLISH EXCEPTION (WSK-D46) ────────────────────────────────
+# `creatorId` is the approval row's `requested_by` (the maker); `principal.id` is the decider (the
+# checker). Default: they must differ. The owner adopted R4: a publisher may approve their OWN
+# `publish` when it covers exactly ONE item. Batches always need a second person. R4 as proposed and
+# adopted was "single-item, NON-SCHEDULED", so `schedule` keeps strict maker ≠ checker.
+#   `itemCount` = the number of items in the approval's tool_args.items, computed by the executor
+#   from the stored approval row (never client-supplied). It defaults to 0 in resourcePayload(), so
+#   a caller that forgets it falls into the strict two-person rule — fail CLOSED.
+# Two layers, the invoice precedent (resource_invoice.yaml):
+#   1. the ALLOW rules for company_admin/module_manager carry the maker-checker test INLINE (never a
+#      `variables.local` — that factoring mis-routes IAM overrides, cerbos-local-variables trap);
+#   2. an EFFECT_DENY on `roles: ["user"]` that every principal carries, so the platform_admin
+#      wildcard (and any future ALLOW) loses to it under deny-overrides. It fires only when the
+#      creator is KNOWN and equals the caller, and the R4 exception does not apply.
+# An unknown/empty creatorId never satisfies an ALLOW below (fail closed); the DENY ignores it, so
+# only the platform_admin wildcard can act on such a row — the same posture as a legacy invoice.
+#
+# ── THE INVARIANTS THIS FILE MUST NOT BREAK ─────────────────────────────────────────────────────
+#  - `client` appears NOWHERE: editorial drafts are staff-only. `member` appears nowhere either (§7).
+#  - NO perm_* mirror (IAM-04c): publish/schedule are attribute-instance checks (approvalId, creator
+#    vs decider) that a flat `perms` array cannot express; a mirror would hand a self-approving maker
+#    the publish right (iam-04-reg1-mirror-reach-invariant.test.ts's over-grant class).
+#  - group_executive is NOT folded into any rule (TRAP #4, resource_webdev_contract_snapshot.yaml).
+#  - Module-tier rules pin `module == "webdev"`: module_staff/module_manager compose the role name
+#    from resource.attr.module, so without the pin a handler passing another module would arm that
+#    module's staff. With it, the bundle resolvers' webdev_staff/webdev_manager mapping is literal.
+#  - `collectionKey`/`locale` are carried but read by NO rule yet; the later writer/translator roles
+#    (IAM data-driven roles program, not WSK-47) will. Both default to "" (fail closed).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: webdesk_content_item
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    # Operator tier. Subject to the DENY rules at the bottom of this file (deny-overrides): no
+    # publish/schedule without an approval id, and no self-approval outside R4.
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # ══════════ editor tier — read / create / update / request_publish ══════════════════════════
+    - actions: ["read", "create", "update", "request_publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "create", "update", "request_publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "module_staff"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+
+    # ══════════ publisher tier — unpublish / delete (MEDIUM, immediate) ═════════════════════════
+    - actions: ["unpublish", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["unpublish", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+
+    # ══════════ publish — HIGH: approval id required; maker ≠ checker unless exactly ONE item ═══
+    - actions: ["publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != "" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            (request.resource.attr.creatorId != request.principal.id ||
+              (has(request.resource.attr.itemCount) && request.resource.attr.itemCount == 1))
+    - actions: ["publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev" &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != "" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            (request.resource.attr.creatorId != request.principal.id ||
+              (has(request.resource.attr.itemCount) && request.resource.attr.itemCount == 1))
+
+    # ══════════ schedule — HIGH: approval id required; STRICT maker ≠ checker (R4 excludes it) ══
+    - actions: ["schedule"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != "" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId != request.principal.id
+    - actions: ["schedule"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev" &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != "" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId != request.principal.id
+
+    # ══════════ the self-approval DENYs — every principal, platform_admin included ══════════════
+    # `roles: ["user"]` matches every principal Cerbos evaluates (principalPayload() sets the base
+    # role unconditionally). These name no derived role, so the static reach computations
+    # (iam-215-boundary-pin, role-permission-parity, generate-role-bundles) ignore them by
+    # construction; they bite only at decision time.
+    - actions: ["publish"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId == request.principal.id &&
+            !(has(request.resource.attr.itemCount) && request.resource.attr.itemCount == 1)
+    - actions: ["schedule"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId == request.principal.id
+
+    # ══════════ HIGH for EVERY principal (WSK-D46): no approval id, no publish/schedule ═════════
+    # Without this, the platform_admin wildcard at the top of this file would publish with no WS4
+    # approval at all. `roles: ["user"]` (the invoice precedent) matches every principal, so under
+    # deny-overrides this beats the wildcard and any future ALLOW. resourcePayload() always sends
+    # approvalId ("" when unset), so the has()/type() arms are defence against a raw caller.
+    - actions: ["publish", "schedule"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.resource.attr.approvalId) ||
+            type(request.resource.attr.approvalId) != string ||
+            request.resource.attr.approvalId == ""
