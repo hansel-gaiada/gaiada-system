@@ -12,7 +12,7 @@
 // pre-0009 item (`headVersion: 0`, no version row) has `headCreatedAt/headCreatedBy: null`, write results' `lint`
 // is `{placeholders:{unresolvedTokens,markers}}`, and a collection's composition can be set per test. The UI
 // contract test (webdesk-content-ui-contract.test.ts) is only as good as these shapes.
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   WebdeskControlTransportError,
   type WebdeskControlClient,
@@ -26,6 +26,9 @@ export const GAIADA_SLUG = "gaiada";
 export const GAIADA_SITE = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
 export const OTHER_SLUG = "othertenant";
 export const OTHER_SITE = "5d6e7f80-91a2-4b3c-8d4e-5f6a7b8c9d0e";
+/** Each fake site's two environments. Stable, so a caller can name one (key.mint takes an `envId`). */
+export const GAIADA_ENV = { production: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", staging: "2b3c4d5e-6f70-4b8c-9d0e-1f2a3b4c5d6e" } as const;
+export const OTHER_ENV = { production: "3c4d5e6f-7081-4c9d-8e0f-2a3b4c5d6e7f", staging: "4d5e6f70-8192-4dae-9f10-3b4c5d6e7f80" } as const;
 
 const b64 = (v: unknown): string => Buffer.from(typeof v === "string" ? v : JSON.stringify(v)).toString("base64url");
 
@@ -67,7 +70,7 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "schema.apply", "site.provision"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "schema.apply", "site.provision", "key.mint"]);
 const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete"]);
 
 export function problem(status: number, slug: string, extra: Record<string, unknown> = {}): WebdeskControlResponse {
@@ -90,7 +93,11 @@ export class FakeZoneB {
   /** collectionKey → the composition `collection.list` returns (default: `{ui:{label}}`). */
   readonly compositions = new Map<string, unknown>();
   /** companyRef → tenant entry; `tenant.list` filters on it, as the real SQL does. */
-  readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string }> = [];
+  /** `env`: the site's two environment ids. Optional so a test can push a bare tenant; one is assigned (once,
+   *  then stable) the first time the tenant is listed or a key is minted for it. */
+  readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string; env?: { production: string; staging: string } }> = [];
+  /** Every plaintext `key.mint` returned, in order (so a test can scan storage and logs for it). */
+  readonly mintedKeys: string[] = [];
   /** Throw this from the NEXT `send` (a breaker-open, a transport failure, ...). Persistent until cleared. */
   failWith: Error | null = null;
   /** Respond to the NEXT write with this instead of applying it. */
@@ -101,8 +108,13 @@ export class FakeZoneB {
   dropBeforeApply = false;
 
   constructor(readonly companyA: string, readonly companyB: string) {
-    this.tenants.push({ companyRef: companyA, slug: GAIADA_SLUG, status: "active", siteId: GAIADA_SITE });
-    this.tenants.push({ companyRef: companyB, slug: OTHER_SLUG, status: "active", siteId: OTHER_SITE });
+    this.tenants.push({ companyRef: companyA, slug: GAIADA_SLUG, status: "active", siteId: GAIADA_SITE, env: GAIADA_ENV });
+    this.tenants.push({ companyRef: companyB, slug: OTHER_SLUG, status: "active", siteId: OTHER_SITE, env: OTHER_ENV });
+  }
+
+  private envOf(t: FakeZoneB["tenants"][number]): { production: string; staging: string } {
+    t.env ??= { production: randomUUID(), staging: randomUUID() };
+    return t.env;
   }
 
   get writes(): FakeCall[] {
@@ -110,6 +122,7 @@ export class FakeZoneB {
   }
   reset(): void {
     this.calls.length = 0;
+    this.mintedKeys.length = 0;
     this.items.clear();
     this.failWith = null;
     this.nextWriteResponse = null;
@@ -213,16 +226,17 @@ export class FakeZoneB {
             siteId: t.siteId, name: "Main", kind: "astro",
             // `environments.domain` is nullable in WebDesk (a site with no hostname yet): one of each.
             environments: [
-              { envId: randomUUID(), name: "production", domain: null, status: "pending" },
-              { envId: randomUUID(), name: "staging", domain: "staging.gaiada.test", status: "active" },
+              { envId: this.envOf(t).production, name: "production", domain: null, status: "pending" },
+              { envId: this.envOf(t).staging, name: "staging", domain: "staging.gaiada.test", status: "active" },
             ],
           }],
         })),
       });
     }
     // Zone B resolves tenant+site itself; an unknown pair is a typed 404.
+    // (key.mint is tenant-scoped, like Zone B's keys controller: no siteId in its path.)
     if (p.tenantSlug !== undefined && !this.tenants.some((t) => t.slug === p.tenantSlug && t.siteId === p.siteId)) {
-      if (req.command !== "site.provision") return problem(404, "site-not-found");
+      if (req.command !== "site.provision" && req.command !== "key.mint") return problem(404, "site-not-found");
     }
 
     switch (req.command) {
@@ -366,6 +380,17 @@ export class FakeZoneB {
         if (i.publishedVersion !== null) return problem(409, "item-is-live");
         i.deletedAt = now;
         return ok({ item: this.stateJson(i), replayed: false });
+      }
+      case "key.mint": {
+        // WebDesk keys-command.service#mint: the env must be one of THIS tenant's (else 404), and the plaintext
+        // appears once, in this response; only its hash is stored there.
+        const t = this.tenants.find((x) => x.slug === p.tenantSlug);
+        if (!t) return problem(404, "tenant-not-found");
+        const env = this.envOf(t);
+        if (b.envId !== env.production && b.envId !== env.staging) return problem(404, "not-found", { detail: "environment not found for this tenant" });
+        const key = `wdsk_${randomBytes(24).toString("base64url")}`;
+        this.mintedKeys.push(key);
+        return ok({ id: randomUUID(), key, scope: b.scope, envId: b.envId, tenantId: randomUUID(), createdAt: now, replayed: false }, 201);
       }
       case "content.publish": {
         // WSK-66's in-band publish (WS4 + editorial `apr`); the fake only needs to flip the state.

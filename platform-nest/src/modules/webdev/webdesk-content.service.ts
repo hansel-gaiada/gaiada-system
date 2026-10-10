@@ -36,6 +36,16 @@
 // the ERP ledger can resolve the opaque `sub` Zone B stores in `content_versions.created_by`. The rows
 // carry identifiers and the typed outcome, never content values.
 //
+// ── A TAKEDOWN OF LIVE CONTENT MARKS STAGING STALE (WSK-60) ──────────────────────────────────────
+// Staging is built from a PRODUCTION read key, so it keeps serving an item until the next rebuild. Every
+// successful unpublish/delete whose pre-read showed a live version (`publishedVersion !== null`) records
+// that (`noteStagingStale`), which is what raises the editor's stale-staging banner. A draft-only delete
+// changes nothing staging serves, so it never does; and Zone B refuses to delete a live item anyway
+// (409 item-is-live), so in practice only unpublish marks. The mark is BEST-EFFORT: the WebDesk write has
+// already happened, so a failed mark is logged and never fails (or "rolls back") the editor's action.
+// Scheduled takedowns (`content.schedule` with `unpublishAt`) take effect inside Zone B later and are not
+// marked here.
+//
 // ── DEGRADED, NEVER EMPTY ────────────────────────────────────────────────────────────────────────
 // A failed read is a typed 503, never `[]` (an empty list is a claim). A write with no signer or no
 // channel is a typed 503, never a silent failure: writes are refused BEFORE any ledger row, because
@@ -72,8 +82,17 @@ import {
   type WebdeskBffEditorialCommand,
 } from "./webdesk-approved-command";
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
+import { noteStagingStale } from "./site-builds.service";
 
 const logger = new Logger("WebdeskContent");
+
+/** What a takedown of live content calls (WSK-60). Swappable so a test can make the mark fail. */
+let markStagingStale: (tenantId: string, siteId: string) => Promise<void> = noteStagingStale;
+
+/** Tests: replace the stale-staging marker (null restores the real one). */
+export function setStagingStaleMarkerForTests(fn: ((tenantId: string, siteId: string) => Promise<void>) | null): void {
+  markStagingStale = fn ?? noteStagingStale;
+}
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // Typed errors the BFF throws (shaped by the global HttpErrorFilter, except WebdeskProblem)
@@ -819,7 +838,7 @@ export class WebdeskContentService {
     await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
     const body = strictBody(spec.rawBody, spec.allowed);
     const attrs = await this.authorizeOnItem(gate, site, itemId, action);
-    return this.zoneB.write(gate.principal, gate.tenantId, {
+    const result = await this.zoneB.write(gate.principal, gate.tenantId, {
       command: spec.command,
       verb: `webdesk.${spec.command}`,
       method: spec.method,
@@ -832,6 +851,24 @@ export class WebdeskContentService {
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId, collectionKey: attrs.collectionKey, locale: attrs.locale },
       reconcile: spec.reconcile(gate.principal.userId as string, body, attrs),
     });
+    // Reached only on success (a plain 2xx, a replay, or a reconciled ambiguous write): every failure threw above.
+    if ((action === "unpublish" || action === "delete") && attrs.publishedVersion !== null) {
+      await this.noteTakedown(gate.tenantId, site.siteId, spec.command);
+    }
+    return result;
+  }
+
+  /** WSK-60, best-effort (see the header): the takedown already happened in Zone B, so a failed mark is logged, never thrown. */
+  private async noteTakedown(tenantId: string, siteId: string, command: string): Promise<void> {
+    try {
+      // The build-status route reads the mark under the lowercased site id; write it under the same one.
+      await markStagingStale(tenantId, siteId.toLowerCase());
+    } catch (err) {
+      logger.error(
+        `${command}: staging could not be marked stale (${(err as Error)?.message ?? "error"}); ` +
+          "the editor will not show the stale-staging banner until the next rebuild",
+      );
+    }
   }
 
   updateItem(gate: ContentGate, site: SiteRef, itemId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
@@ -1157,4 +1194,61 @@ export async function controlProvisionSite(principal: Principal, tenantId: strin
     // The wall's answer is stale the moment a site is added; the next call refetches.
     webdeskZoneB.clearSiteCache(tenantId);
   }
+}
+
+/**
+ * `POST control/sites/:siteId/keys` body `{tenantSlug, envId, scope}`: FILES one key.mint approval (HIGH, WS4)
+ * and answers `{approvalId}`. It never mints. WSK-66's executor mints at decide(), as the DECIDER (a key mint
+ * is never self-approvable), and the plaintext appears ONCE, in that decide response; it is never stored,
+ * ledgered or logged on this side. The controller has already authorized `promote` on
+ * `webdev_provisioned_site`; the filer authorizes it again (it is also the importer's entry point).
+ *
+ * The environment must be one of THIS site's, read from the wall's own answer, so an approval can only name a
+ * real target and its title tells the approver which one ("production read key"). One open request per
+ * (site, environment, scope): filing again returns the pending request's id instead of queueing a second
+ * mint (the same rule as `rebuild-requests`; two simultaneous first filings can still both land).
+ */
+export async function controlRequestKeyMint(principal: Principal, tenantId: string, siteIdParam: string, rawBody: unknown): Promise<{ approvalId: string }> {
+  const b = strictBody(rawBody, ["tenantSlug", "envId", "scope"]);
+  if (typeof b.tenantSlug !== "string" || b.tenantSlug === "") throw invalidRequest("tenantSlug is a required string");
+  if (typeof b.envId !== "string" || !UUID_RE.test(b.envId)) throw invalidRequest("envId must be a uuid");
+  if (b.scope !== "read" && b.scope !== "write") throw invalidRequest('scope must be "read" or "write"');
+  const scope = b.scope;
+  const envId = b.envId.toLowerCase();
+
+  const { site } = await webdeskZoneB.resolveEditableSite(tenantId, b.tenantSlug, siteIdParam);
+  const env = site.environments.find(
+    (e): e is { envId: string; name?: unknown } => isPlainObject(e) && typeof e.envId === "string" && e.envId.toLowerCase() === envId,
+  );
+  if (!env) {
+    throw new WebdeskProblem(404, {
+      type: "https://webdesk.gaiada.online/errors/environment-not-found",
+      title: "Environment not found",
+      status: 404,
+      detail: "No such environment on this site.",
+    });
+  }
+  const envName = typeof env.name === "string" && env.name !== "" ? env.name : "environment";
+  const siteId = site.siteId.toLowerCase();
+
+  const open = await withTenants([tenantId], async (c) => {
+    const r = await c.query<{ id: string }>(
+      `SELECT id FROM automation_approvals
+        WHERE tenant_id = $1 AND origin = 'webdesk' AND workflow_id = 'key.mint'
+          AND status = 'pending' AND deleted_at IS NULL
+          AND tool_args->>'siteId' = $2 AND tool_args->>'envId' = $3 AND tool_args->>'scope' = $4
+        ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, siteId, envId, scope],
+    );
+    return r.rows[0] ?? null;
+  });
+  if (open) return { approvalId: open.id };
+
+  return fileWebdeskCommandApproval(principal, tenantId, {
+    command: "key.mint",
+    tenantSlug: b.tenantSlug,
+    siteId,
+    args: { envId, scope },
+    summary: { title: `Mint a ${envName} ${scope} API key for ${b.tenantSlug} (site "${site.name}")` },
+  });
 }

@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████░░░░░░░░░░░░░░░` **50%** · 93/183<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████████░░░░░░░░░░░░░░` **53%** · 108/201<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████████░░` **87%** · 78/89<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **88%** · 80/90<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -80,7 +80,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
 - [ ] CI runs only the jobs whose component changed; superseded runs are cancelled
-- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact
+- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags
 - [ ] Dependency and Docker layer caching
 - [ ] Billed minutes for a WebDesk-only change measured after, and recorded
 
@@ -145,21 +145,22 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] BFF contract §27; breaker open → `editorial_unavailable`; ambiguous writes reconcile by reading
 
 - [x] Editors can read their own pending publish request (new `GET …/publish-requests`, own rows only, behind the wall)
-### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Tenant `gaiada`, site `gaiada-com`, staging + production environments
+### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->🟡 `███░░░░░░░` **33%** · 1/3<!-- /bar -->
+- [x] Tenant `gaiada`, site `gaiada-com`, staging + production environments (live 2026-10-11 over the control channel: tenant `b8ed45ee…` → ERP company Gaia Digital Agency; site `fc19fb0c-bc1d-4be0-af8b-b2ff9ce34c43`; staging `24-pyevq.gaiada.com`, production domain unset until the real-domain cutover)
 - [ ] Build key (production read) minted through an approval; preview key (staging read)
 - [ ] Read quota sized for a full site build
 
 ### Wave C · WSK-67 · Importer CLI <!-- bar -->🟡 `███████░░░` **66%** · 2/3<!-- /bar -->
 - [x] Dry run prints the plan; `--apply` twice → second run writes 0 versions (real 326-item bundle; in-process Zone B fake)
 - [x] Refuses human principals; imports no publish/unpublish/delete function (static test; Cerbos probe)
-- [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1`
+- [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1` — FILED 2026-10-11: 326 items imported live as drafts (re-run wrote 0), approval `01a12715-c98e-70ae-81a6-7f5ab5ad0192` awaits the owner
 
-### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **80%** · 4/5<!-- /bar -->
+### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **83%** · 5/6<!-- /bar -->
 - [x] Two git builds of one commit give an identical `dist/` (determinism first) — 303 files, 0 differ
 - [x] Source parity on all 315 files (Astro's parser; globals byte-identical; site `webdesk-parity` @ `b49b40a`)
 - [x] `dist/` parity, default mode: 302 files, 0 differ
-- [ ] `dist/` parity, preview-held mode — BLOCKED by a pre-existing site route bug (since `cef4b5b`, the git build fails too); 0 differ with a 2-file route patch in the gate only. Site owner to fix
+- [x] `dist/` parity, preview-held mode: 380 files, 0 differ, gates PASS on the REAL route fix (site `fix/about-team-preview-held` @ `bd258c2`, merged onto `webdesk-rebuild` in the gate; sumopod 2026-10-11; default mode still 302/0)
+- [ ] Site owner merges `fix/about-team-preview-held` into `astro-site` (default `dist/` byte-identical before/after; the site repo has an active redesign program)
 - [x] The site's own gates pass; negative control (one FAQ edit → exactly one page differs: `services/seo/index.html`)
 
 ### WSK-58 · Linux gate for the proof's suites <!-- bar -->✅ `██████████` **100%** · 1/1<!-- /bar -->
@@ -168,7 +169,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **27%** · 5/18<!-- /bar -->
+<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **31%** · 6/19<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **57%** · 4/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
@@ -179,7 +180,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `█░░░░░░░░░` **12%** · 1/8<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `██░░░░░░░░` **22%** · 2/9<!-- /bar -->
 - [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
 - [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
 - [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
@@ -187,7 +188,8 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
 - [ ] Cost per run measured and recorded
-- [ ] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (built in WSK-60; not yet wired from WSK-59)
+- [x] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (only when the item had a live version; best-effort; Linux: webdev 29 files/484, negative control fails exactly 6)
+- [ ] Scheduled takedowns (`content.schedule` with `unpublishAt`) also mark staging stale (they take effect inside Zone B later: needs a Zone B event or a check at build-status time)
 
 ### P2 proof gate <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
 - [ ] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change
@@ -197,46 +199,63 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/34<!-- /bar -->
+<!-- bar -->🟡 `█████░░░░░░░░░░░░░░░` **24%** · 12/49<!-- /bar -->
 
-### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
+Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
+
+### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
 - [ ] Payload app, dependencies and the `payload` service removed
 - [ ] Forward migration drops `pages`, `users`, `payload_*`
 - [ ] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source
+- [ ] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted
 
-### CMS features <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/6<!-- /bar -->
-- [ ] WSK-46 · preview links for drafts
-- [ ] WSK-61 · scheduled publish worker (+ the forms retention purge schedule)
-- [ ] WSK-45 · rich-text editor; storage format ruled (OQ-3.1)
+### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **10%** · 1/10<!-- /bar -->
+- [ ] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52; ticked when on main)
+- [ ] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved
+- [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
+- [ ] WSK-46 · site repo (gaiada-web-revamp): `/preview/` page renders the draft with the site's own components (coordinate with the site owner; needs `api.gaiada.com` public)
+- [ ] WSK-61 · scheduled publish worker (+ the forms retention purge schedule, + the idempotency expiry sweep: `sweepExpired()` exists and nothing calls it)
+- [ ] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live)
+- [x] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, recorded in webdesk-design-v2.md §14 on main)
+- [ ] WSK-45 · WYSIWYG editor (TipTap) on the `markdown` primitive; an unchanged body saves byte-identical
 - [ ] WSK-43 · media library
-- [ ] WSK-64 · CDN cache purge on publish
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/25<!-- /bar -->
-- [ ] Reserved collection keys (`media`, `forms` collide with api routes)
-- [ ] Slugs are never percent-decoded (non-ASCII slugs unreachable)
-- [ ] A bad cursor returns 500 with the raw database message
-- [ ] Undecodable `%` in a path gets Fastify's 400, not a problem+json body
+### Defects found on the way <!-- bar -->🟡 `███░░░░░░░` **31%** · 11/35<!-- /bar -->
+- [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] Undecodable `%` in a path gets Fastify's 400, not a problem+json body (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] A non-integer `limit` (`limit=2.5`) reached `LIMIT $n` and 500ed — now truncated (found and fixed in M3 T1) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes)
-- [ ] The privacy residency statement still names MinIO to customers
-- [ ] `check-artifact-url-expiry.mjs` still starts a MinIO container
+- [x] The privacy residency statement still names MinIO to customers (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] `check-artifact-url-expiry.mjs` still starts a MinIO container (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [ ] In-memory read quota and idempotency under-enforce with more than one api replica
 - [ ] Defence in depth: a Cerbos rule denying `publish`/`schedule` to automation principals (today only the importer's code prevents it)
 - [ ] Approvals DETAIL page dead-ends for a requester (`automation_approval:read` 403) — needs a requester-own read rule in Cerbos
 - [ ] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim)
 - [ ] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale)
 - [ ] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state
+- [ ] Importer CLI never wired the editorial signer (own process): the live run refused every write with 503 `editorial_signer_not_configured` — fixed on the proof branch (`f52f9a27`), verify in the next release gate
+- [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
+- [ ] `editorial-assertion-matrix.spec.ts` can leak 2 unhandled `ioredis` "Connection is closed" rejections when an app instance closes mid-command: the api suite exits 1 with 0 failures (1 of 2 runs on sumopod, 2026-10-11)
 - [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too)
 - [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
 - [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
-- [ ] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever (senior-db decision)
-- [ ] Idempotency expiry sweep must run per tenant + once at platform scope; reads treat expired rows as absent
+- [ ] Promotion export includes soft-deleted items, so a promotion resurrects them as live (found 2026-10-11)
+- [ ] Promotion writes the live projection without appending a version, so `published_version` points at content that is no longer live (found 2026-10-11)
+- [ ] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever. Ruled 2026-10-11: a deleted item releases its slug; a restore onto a taken slug is 409 (WSK-D51)
+- [ ] Idempotency expiry sweep must run per tenant + once at platform scope; reads treat expired rows as absent (both already true in `pg-idempotency-store.ts`; what is missing is a caller: lands with WSK-61)
 - [ ] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written
 - [ ] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration
-- [ ] Codegen `versioning.mts` drops `singleton`/`localized`/`ui`/`lint` from the tenant-contract snapshot (flips go unrated)
-- [ ] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields`
-- [ ] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf`
-- [ ] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today)
+- [x] Codegen `versioning.mts` drops `singleton`/`localized`/`ui`/`lint` from the tenant-contract snapshot (flips go unrated) — already fixed by WSK-41 (`toContractSnapshot`); pinned by `codegen-versioning.spec.ts`, green in the 2026-10-11 Linux release gate (api 643/0/2)
+- [x] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [x] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
+- [ ] WebDesk migration tests (0009, 0010) were never run by the gate or CI; T4 wired a `migrations` suite into `linux-gate.sh` and the `webdesk-api` CI job (found 2026-10-11)
+- [ ] `tenant.archive` can never replay: the tenant lookup runs before the envelope and 404s once archived, so a lost-response retry gets 404 (found by T5a)
+- [ ] `site.archive` is HIGH but always 501 and consumes no approval; decide whether it claims one or leaves the registry (found by T5a)
+- [ ] `content-commands.service.ts` keeps a private copy of the command envelope; adopt `CommandEnvelope` (T5a follow-up)
 - [ ] Not ours, flagged: `agency-lead-convert-race.db.test.ts` is flaky (failed 1 of 3 identical runs) and `monitoring.controller.test.ts` is a date time bomb (red since ~09-17) — both red on main, owners elsewhere
 
 ---
@@ -293,7 +312,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M6 · WebDesk platform phases after the proof (v2.3 §12)
-<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
+<!-- bar -->⬜ `░░░░░░░░░░░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
 
 ### P3 · Portfolio <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
 - [ ] SM-70 import → SM-74 hosting topology → MON-01 probes → registry console
@@ -303,6 +322,9 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 
 ### P5 · Headless WordPress <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
 - [ ] A WordPress site renders entirely from `/v1`
+
+### CDN · cache purge <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
+- [ ] WSK-70 · CDN cache purge on publish — deferred until a CDN fronts `/v1` or a delivered site; for a static site the rebuild is the purge (WSK-D50; was mislabelled WSK-64, which is vocabulary 1.1.0)
 
 ### P6 · Client delivery <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/1<!-- /bar -->
 - [ ] Deploy identity and hosting for client frontends
