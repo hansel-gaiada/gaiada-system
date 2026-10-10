@@ -146,6 +146,9 @@ import { ConsoleReadsController } from "./modules/webdev/console-reads.controlle
 // file's own header). NEW FILE under src/modules/webdev/ (this ticket's hard constraint permits new
 // files there; it forbids editing an EXISTING one other than index.ts).
 import { WebdeskControlController } from "./modules/webdev/webdesk-control.controller";
+// WSK-60: /api/:t/modules/webdev/content/sites/:slug/:siteId/{build-status,rebuild-requests} — the
+// publish → rebuild → staging ledger's read and the editor's "request a rebuild".
+import { SiteBuildsController } from "./modules/webdev/site-builds.controller";
 import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
@@ -217,6 +220,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     ConsoleReadsController,
     // WSK-31: /api/:t/modules/webdev/control/* (the §07 MCP tool set's Zone A surface; honest 501s).
     WebdeskControlController,
+    // WSK-60: build-status + rebuild-requests (the staging rebuild ledger).
+    SiteBuildsController,
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,
     // not /api/:t/modules/reports/*, so it is listed with the verticals but mounts top-level.
     ReportsController,

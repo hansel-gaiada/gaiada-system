@@ -32,6 +32,13 @@ const APPROVED_EGRESS: Record<string, string> = {
     "WebDesk control channel (Zone B, host-nginx vhost from WEBDESK_CONTROL_BASE_URL): https.request "
     + "with an mTLS agent (file-mounted cert/key/CA) to /control/v1/**, plus a fetch to the Keycloak "
     + "token endpoint (client-credentials, `webdesk-control`). config.webdeskControl only.",
+  // WSK-60 — the third far side, and the only one that is a PUBLIC website: a GET of
+  // `<stagingUrl>/webdesk-build.json` (the build stamp), from config.webdeskRebuild's operator-set target.
+  // No credential travels with it. (The GitHub dispatch is NOT here: it goes through the core/github
+  // chokepoint, whose own inventory pins http-client.ts as its single egress file.)
+  "site-build-stamp.ts":
+    "the staging site's build stamp: GET <stagingUrl>/webdesk-build.json (config.webdeskRebuild target only, "
+    + "no redirects, 8 KiB cap, no credential).",
 };
 
 /** Namespaces that would indicate cross-contamination if this module referenced them. */

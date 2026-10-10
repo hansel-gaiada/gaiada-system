@@ -713,6 +713,27 @@ const configBase = {
     /** Assertion lifetime. §5: 60 s; WebDesk refuses anything over 120 s, so the signer refuses to configure above it. */
     ttlSec: positiveIntFromEnv("WEBDESK_EDITORIAL_TTL_SEC", 60),
   },
+  // WSK-60 — publish → rebuild → staging (write-plane design §9). A publish approval's id authorises ONE
+  // `workflow_dispatch` of the site repo's `webdesk-rebuild.yml` through the GitHub chokepoint; the ERP
+  // then polls the staging site's `webdesk-build.json` stamp. NO DEFAULT TARGET, EVER (the PRV-02 rule):
+  // a guessed repo or URL would aim a build, or a verification, at the wrong site. Unset ⇒ every rebuild
+  // is recorded `failed: rebuild_not_configured`, loudly, and the poller never starts.
+  //
+  // `WEBDESK_REBUILD_TARGETS` is a JSON array, one entry per WebDesk site that has a staging rebuild:
+  //   [{"tenantSlug":"gaiada","siteId":"<uuid>","repo":"gaiadabali/gaiada-web-revamp",
+  //     "workflow":"webdesk-rebuild.yml","ref":"astro-site","stagingUrl":"https://24-pyevq.gaiada.com"}]
+  // Parsed and validated by modules/webdev/site-builds.service.ts (a bad entry is dropped and logged).
+  webdeskRebuild: {
+    targetsJson: process.env.WEBDESK_REBUILD_TARGETS ?? "",
+    /** §9: the stamp is polled every 30 s ... */
+    pollIntervalMs: positiveIntFromEnv("WEBDESK_REBUILD_POLL_INTERVAL_MS", 30_000),
+    /** ... for up to 20 min from the dispatch, then the build is `unverified`, never `live`. */
+    pollWindowMs: positiveIntFromEnv("WEBDESK_REBUILD_POLL_WINDOW_MS", 20 * 60_000),
+    /** One stamp fetch's own deadline. */
+    stampTimeoutMs: positiveIntFromEnv("WEBDESK_REBUILD_STAMP_TIMEOUT_MS", 10_000),
+    /** The whole dispatch (token mint + ledger + GitHub call + the 404 probe) may not hold decide() longer than this. */
+    dispatchDeadlineMs: positiveIntFromEnv("WEBDESK_REBUILD_DISPATCH_DEADLINE_MS", 30_000),
+  },
   // ASST-06 — the assistant's send->stream engine. Reuses `services.gateway` above for the actual
   // ai-gateway-go URL/token (already the one place GATEWAY_URL/GATEWAY_TOKEN are wired from env,
   // same binding admin-systems.controller.ts and search's providers/gateway-client.ts read) —
