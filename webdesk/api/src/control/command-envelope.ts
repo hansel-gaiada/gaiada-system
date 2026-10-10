@@ -24,6 +24,14 @@
 // connection out of the pool while it holds this transaction's one: ten blocked approvals would
 // hold ten connections, and an effect waiting for an eleventh would never get it.
 //
+// T5b (promotion, privacy) uses this envelope too, with two small generic extensions:
+//   - `impactClass`: a command that is not in COMMAND_REGISTRY (the privacy commands live in their own
+//     shadow registry) names its own impact class. Without it the class comes from COMMAND_REGISTRY, and
+//     a command in neither is refused loudly rather than treated as unguarded.
+//   - `resolveReplay`: a command whose stored record is a REFERENCE (promotion stores a run id, then the
+//     saga continues after the envelope's transaction) turns the stored record into the replay body, or
+//     refuses (409 promotion-in-progress). It runs before the replay audit row, so a refusal writes none.
+//
 // WITHHELD RESPONSES. key.mint / key.rotate return the plaintext api key exactly once. WSK-66's rule
 // is that the key plaintext is never persisted, so those commands pass `withhold`: the replay record
 // stores the response WITHOUT the secret (and nothing recoverable from it, no ciphertext either), plus
@@ -35,7 +43,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
 import { AuditService, type AuditArgs } from "../audit/audit.service";
-import { COMMAND_REGISTRY, type CommandName } from "./command-types";
+import { COMMAND_REGISTRY, type CommandName, type ImpactClass } from "./command-types";
 import { PgIdempotencyStore } from "./idempotency/pg-idempotency-store";
 import { ControlProblem } from "./content/content-problem";
 
@@ -67,6 +75,18 @@ export interface EnvelopeInput<R extends object> {
    * `secretWithheld: true`. The caller still receives the full result on the fresh run.
    */
   withhold?: (result: R) => { stored: object };
+  /** What a replay of a withheld response says (409 detail). Defaults to the one-time-secret wording. */
+  withheldDetail?: string;
+  /**
+   * For a command that is not in COMMAND_REGISTRY: its impact class. Refused loudly when absent and
+   * the command is unregistered, so a missing class can never read as "not HIGH".
+   */
+  impactClass?: ImpactClass;
+  /**
+   * Turns a stored record into the replay body (or throws to refuse the replay). Default: the stored
+   * record is the body. Runs BEFORE the replay audit row, so a refusal writes no row.
+   */
+  resolveReplay?: (stored: unknown) => R | Promise<R>;
 }
 
 /** The single-use refusal. Also what a concurrent reuse of one approval gets when it loses the race. */
@@ -112,9 +132,10 @@ export class CommandEnvelope {
   }
 
   async run<R extends object>(input: EnvelopeInput<R>): Promise<R & { replayed: boolean }> {
-    const meta = COMMAND_REGISTRY[input.command];
-    const ws4ApprovalId = meta.impactClass === "high" ? input.ws4ApprovalId : null;
-    if (meta.impactClass === "high" && !ws4ApprovalId) {
+    const impactClass = input.impactClass ?? COMMAND_REGISTRY[input.command]?.impactClass;
+    if (!impactClass) throw new Error(`command envelope: ${input.command} is not in COMMAND_REGISTRY and names no impactClass`);
+    const ws4ApprovalId = impactClass === "high" ? input.ws4ApprovalId : null;
+    if (impactClass === "high" && !ws4ApprovalId) {
       // Defence in depth: CommandAuthorizationGuard already refuses a HIGH command without a
       // verified WS4 assertion; the service never runs one without an approval id to claim. This
       // is before begin(), so it claims no idempotency key and writes no audit row.
@@ -135,10 +156,11 @@ export class CommandEnvelope {
           409,
           "idempotency-response-withheld",
           "Response withheld",
-          "This command's response carried a one-time secret, which is never stored. Nothing was changed. Mint or rotate again under a new approval.",
+          input.withheldDetail ??
+            "This command's response carried a one-time secret, which is never stored. Nothing was changed. Mint or rotate again under a new approval.",
         );
       }
-      const stored = begin.response as R;
+      const stored = input.resolveReplay ? await input.resolveReplay(begin.response) : (begin.response as R);
       // A replay changes nothing; it is recorded as such (`.replay` rows are outside the WS4
       // single-use index).
       await this.transact(input.scope, (client) =>

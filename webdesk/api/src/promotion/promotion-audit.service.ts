@@ -6,6 +6,12 @@
 // touching). Writes to the SAME `audit_entries` table (../audit/audit.service.ts, unmodified) —
 // `control.content.*` action rows sit alongside every other command's `control.*` row, filterable
 // the same way.
+//
+// M3 T5b: only `content.export` (a read, no WS4 approval) is audited here now. content.promote and
+// content.rollback are HIGH: their audit row CLAIMS the WS4 approval inside the command envelope's
+// transaction, before any side effect (promotion-command.service.ts's header). Writing one here, after
+// the fact, would be a second non-replay row for the same approval, which ux_audit_entries_ws4_once
+// rejects; the type below no longer admits them.
 import { Injectable } from "@nestjs/common";
 import { DbService } from "../db/db.service";
 import { AuditService, type AuditArgs } from "../audit/audit.service";
@@ -19,20 +25,17 @@ export class PromotionAuditService {
 
   async record(opts: {
     tenantId: string;
-    command: "content.export" | "content.promote" | "content.rollback";
+    command: "content.export";
     actor: string;
     args: AuditArgs;
-    ws4ApprovalId?: string | null;
-    replayed?: boolean;
   }): Promise<void> {
     await this.db.withTenant(opts.tenantId, (db) =>
       db.transaction((client) =>
         this.audit.record(client, {
           tenantId: opts.tenantId,
           actor: opts.actor,
-          action: opts.replayed ? `control.${opts.command}.replay` : `control.${opts.command}`,
+          action: `control.${opts.command}`,
           args: opts.args,
-          ws4ApprovalId: opts.ws4ApprovalId ?? null,
         }),
       ),
     );
