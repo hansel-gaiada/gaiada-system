@@ -102,3 +102,11 @@ admin container was not restarted after the rebuild (WSK-D37 removes it; it hold
 `/v1` answers again: 401 problem+json for an unknown tenant, lockdown 404s intact. Next: WSK-57
 (tenant provisioning) waits on WSK-62's loader-principal answer.
 
+**2026-10-10, WSK-54.** The bundle exporter lives in the site repo on branch `webdesk-importer`
+(`10c2d21`, not pushed): 326 items (315 pages, 235 EN + 80 ID, 68 twin pairs; plus the company,
+navigation, token-registry and redirect globals). The export is byte-identical across runs. All 315
+pages round-trip exactly against Astro's own loader on Linux. **Visibility mapping accepted as the
+default** (the owner ruled the states, not the mapping): SHOW/KEEP → shown (78); HOLD/LATER → held (78);
+MERGE/CUT → hidden (158); `/glossary/` → seo-only (1). The plan rows travel with the items, so the
+routing decisions are not lost. Validation against WSK-64's real 1.1.0 validator runs when WSK-64 merges.
+

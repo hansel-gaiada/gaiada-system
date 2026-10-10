@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████░░░░░░░░░░░░░░░░░░░░░░░` **24%** · 38/155<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████░░░░░░░░░░░░░░░░░░░░░░` **25%** · 40/155<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `███████░░░░░░░░░░░░░` **33%** · 28/83<!-- /bar -->
+<!-- bar -->🟡 `███████░░░░░░░░░░░░░` **36%** · 30/83<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -105,9 +105,9 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [ ] `src/rbac` suite green on Linux with Cerbos reachable
 - [ ] Live Cerbos restarted; the probe matrix matches
 
-### Wave A · WSK-54 · Bundle export (site repo) <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] Two exports of one commit are byte-identical
-- [ ] Every page and global round-trips to what the site's own loader reads
+### Wave A · WSK-54 · Bundle export (site repo) <!-- bar -->🟡 `███████░░░` **66%** · 2/3<!-- /bar -->
+- [x] Two exports of one commit are byte-identical (site `webdesk-importer` @ `10c2d21`; content sha256 `3a23fc70…` twice)
+- [x] Every page and global round-trips to what the site's own loader reads (315/315 exact against Astro's `getEntryInfo`; 22/22 tests on Linux)
 - [ ] Every item validates against vocabulary 1.1.0
 
 ### Wave B · WSK-41 · Authoring commands <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/5<!-- /bar -->
