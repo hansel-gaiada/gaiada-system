@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.81.0` - staff can click the top bar's menus again; the portal's account menu is styled and drops down (2026-10-11) - PROTOTYPED
+
+Two live defects, both found by the new PV2-05/PV2-06 identity e2e.
+
+- **Staff shell (live since gold-glass Phase 4, 2026-08-30):** the sidebar, top bar and main were each `position: relative; z-index: 1`, so three equal stacking contexts. Main is last in the DOM and painted over everything that opened out of the chrome. The top bar's account and New menus dropped under the page: "Account settings", "Client view" and "Sign out" did not respond where they overlapped page content. The top bar is now at 2 and the sidebar at 3 (its flyouts cross both); the mobile drawer keeps its own 100.
+- **Portal (live since the portal got its own interface, 2026-08-04):** `PortalUserMenu` borrowed the staff shell's `.erp-usermenu*` / `.erp-side__avatar` classes, which only shell.css defines, and only the staff Shell imports it. A client got an unstyled button and menu. Someone arriving from the workspace got the sidebar's popover, which opens upward, off the top of the screen. It now has portal-owned `.cp-usermenu*` styles in portal.css: an accent avatar, and a popover below the header.
+- **Identity e2e (PV2-05, PV2-06):**
+  - A new demo identity, `demo-two-company-client` (two-companies@deity-labs.example), is a client of co-agency and co-resort; it sees the switch, changes company, and the choice holds on the next page.
+  - Staff+client goes workspace → Client view → portal → Back to workspace.
+  - A pure client's menu has no way back, and its items are asserted to be in the viewport.
+- **Teeth:** with the switch cookie, "Client view" and the portal staff flag broken, all three new tests fail. With the portal popover flipped upward, both menu tests fail.
+- **Verified on Linux:** ui 230/230 files (4,525 tests); `next build` ok; portal e2e 17/17. Screenshots of the open menu taken in light desktop and dark phone.
+
 ### platform-ui `0.80.0` - the portal passes an axe sweep in both themes, and every link sent to a client is pinned to a real page (2026-10-11) - PROTOTYPED
 
 PV2-08's two remaining QA checks, as tests that stay.
