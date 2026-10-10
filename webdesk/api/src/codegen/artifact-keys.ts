@@ -1,4 +1,4 @@
-// WSK-15 — the MinIO object-key naming convention for generated contract artifacts (design §06:
+// WSK-15 — the RustFS (S3) object-key naming convention for generated contract artifacts (design §06:
 // "stores the bundle in MinIO under the tenant prefix"). Deliberately zero-dependency (no
 // `.ts`-extension imports, no vocabulary import) so this ONE file can be imported unmodified by
 // both sides of the module-system split this ticket straddles — see

@@ -1,5 +1,5 @@
 // WSK-38 — design §11's "(d) A residency statement per tenant says where content, media, and
-// backups physically sit." Under WSK-D23 (fully self-hosted storage — MinIO primary, no
+// backups physically sit." Under WSK-D23 (fully self-hosted storage — RustFS primary, no
 // Cloudflare, no R2), this is answerable in ONE real sentence per environment, not an abstract
 // policy doc — so that is exactly what this returns: a plain-language statement plus the concrete
 // facts it is built from (`STORAGE_ENDPOINT`/`STORAGE_PUBLIC_BASE_URL`, this Postgres connection's
@@ -28,10 +28,10 @@ export type ResidencyStatement = {
   };
 };
 
-/** design §11a: "MinIO / R2 / Cloudflare split needs one real answer" — under WSK-D23 the answer
+/** design §11a: "object store / R2 / Cloudflare split needs one real answer" — under WSK-D23 the answer
  *  is that there IS no split: everything is self-hosted. */
 const BACKUP_TARGET_BY_PHASE: Record<BackupPhase, string> = {
-  now: "a nightly pull-model backup to a second estate-owned box (Zone B holds no credential for the destination and cannot reach, overwrite, or delete it)",
+  now: "a nightly pull-model backup to a second estate-owned box (the source estate holds no credential for the destination and cannot reach, overwrite, or delete it)",
   staging: "a nightly pull-model backup to the company's own Google Workspace (Drive/Shared Drive via a dedicated service account) — encrypted before upload",
   "target-state": "a local server + NAS with RAID for redundancy, plus the same offsite pull-model copy (RAID alone is never treated as a backup)",
 };
@@ -39,13 +39,13 @@ const BACKUP_TARGET_BY_PHASE: Record<BackupPhase, string> = {
 @Injectable()
 export class ResidencyStatementService {
   buildFor(tenantSlug: string, backupPhase: BackupPhase = "now"): ResidencyStatement {
-    const dbHost = safeHost(config.appDatabaseUrl) ?? "the Zone B Postgres instance (self-hosted)";
-    const storageHost = safeHost(storageConfig.publicObjectBaseUrl || storageConfig.endpoint) ?? "the Zone B MinIO instance (self-hosted)";
+    const dbHost = safeHost(config.appDatabaseUrl) ?? "our self-hosted Postgres instance";
+    const storageHost = safeHost(storageConfig.publicObjectBaseUrl || storageConfig.endpoint) ?? "our self-hosted RustFS object store";
     const backupTarget = BACKUP_TARGET_BY_PHASE[backupPhase];
 
     const sentence =
       `All of tenant '${tenantSlug}''s content, form submissions and uploaded media are stored on ` +
-      `self-hosted infrastructure we operate — Postgres at ${dbHost} and MinIO (S3-API, self-hosted, ` +
+      `self-hosted infrastructure we operate — Postgres at ${dbHost} and RustFS (S3-API object storage, self-hosted, ` +
       `never Cloudflare R2 or any third-party object store) at ${storageHost} — with backups going to ${backupTarget}.`;
 
     return {

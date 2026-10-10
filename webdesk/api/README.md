@@ -1497,15 +1497,15 @@ controller (our client) may need to keep. Resolution, landed in
 ### Residency statement (§11 "(d)")
 
 `src/privacy/residency-statement.service.ts` — `ResidencyStatementService.buildFor(tenantSlug,
-backupPhase)`. Under **WSK-D23** (storage fully self-hosted — MinIO primary, no Cloudflare, no R2)
+backupPhase)`. Under **WSK-D23** (storage fully self-hosted — RustFS primary (WSK-D42, amending D23), no Cloudflare, no R2)
 this is answerable in one real sentence, generated from the SAME config the system actually runs on
 (`STORAGE_ENDPOINT`/`STORAGE_PUBLIC_BASE_URL`, `APP_DATABASE_URL`'s own host), not hand-typed policy
 prose:
 
 > All of tenant '\<slug>''s content, form submissions and uploaded media are stored on self-hosted
-> infrastructure we operate — Postgres at \<host> and MinIO (S3-API, self-hosted, never Cloudflare
+> infrastructure we operate — Postgres at \<host> and RustFS (S3-API object storage, self-hosted, never Cloudflare
 > R2 or any third-party object store) at \<host> — with backups going to \<phase-specific target,
-> e.g. "a nightly pull-model backup to a second estate-owned box (Zone B holds no credential for the
+> e.g. "a nightly pull-model backup to a second estate-owned box (the source estate holds no credential for the
 > destination and cannot reach, overwrite, or delete it)">.
 
 Not wired to any HTTP route in this ticket (no design text asks for one) — a plain injectable a
