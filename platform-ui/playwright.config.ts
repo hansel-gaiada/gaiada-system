@@ -26,7 +26,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -36,6 +36,14 @@ export default defineConfig({
       name: "portal",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /portal\.spec\.ts/,
+    },
+    {
+      // PV1-07 — the staff menu follows the company (verticals, Group, Platform). Signs in per test as a
+      // specific demo identity (the group owner, a member), so NO stored session, for the same reason as
+      // the portal project.
+      name: "company-context",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /company-context\.spec\.ts/,
     },
     {
       // Anonymous flows (login, step-up, sign-out) — no stored session.
