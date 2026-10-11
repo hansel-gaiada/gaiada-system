@@ -161,7 +161,8 @@
 **Owner:** senior-be. **Wave 1.**
 
 **Owned paths:** `PN/cerbos/policies/resource_contract.yaml` and its Cerbos test matrix;
-`PN/src/core/contracts.controller.ts` (`GET` list and detail only: the new `canCountersign` field);
+`PN/src/core/contracts.controller.ts` (`GET` contract list and detail only: the new `canCountersign`
+field, and the list's `clientId` filter, so one ticket owns that handler);
 `docs/FRONTEND-BFF-CONTRACT.md` §16e; `docs/PERMISSION-CONTRACT.md` (a dated note).
 
 **Change:**
@@ -180,6 +181,9 @@
     batch limit is 50);
   - the status is `sent`;
   - no `provider` signature exists.
+- `GET /:t/contracts` parses `clientId` with `parseClientFilter(raw, true)` and `clientFilterSql`, as
+  PV3-03 does for the other lists: `internal` means `client_id IS NULL`, and a non-uuid gets a 400
+  instead of today's 500 (finding 9).
 - Correct BFF §16e's countersign note.
 
 **Tests:**
@@ -189,6 +193,8 @@
     every `core.contract.*` key all get 403;
   - `platform_admin` gets 200.
 - `canCountersign` is true for that owner and false for a `company_admin`.
+- `GET contracts?clientId=`: a uuid returns only that client's rows, `internal` returns only clientless
+  rows, and garbage returns 400.
 - Teeth: delete the rule and the owner case fails. Widen `scopeId` to any company and the
   other-company case fails.
 
@@ -234,14 +240,15 @@ lines) in `PN/src/core/portal-workspace.controller.ts`, `portal-commerce.control
 **Owner:** senior-be. **Wave 1.**
 
 **Owned paths:**
-- the list filters in `PN/src/core/contracts.controller.ts` (`GET contracts`, `GET invoice-payments`),
+- the list filters in `PN/src/core/contracts.controller.ts` (`GET invoice-payments` only; PV3-01 owns
+  `GET contracts`),
   `client-work.controller.ts` (`GET deliverables`), `pipeline.controller.ts` (`GET pipeline/runs`),
   `meetings.controller.ts` (`GET meetings/recordings`), `webdev-change-requests.controller.ts`
   (`GET webdev/change-requests`), and the staff post-review list in `PN/src/modules/social/`;
 - `docs/FRONTEND-BFF-CONTRACT.md` §16e and §22a.
 
 **Change:**
-- Each of these lists parses `clientId` with `parseClientFilter(raw, true)` and filters with
+- Each of these lists (and `GET contracts`, in PV3-01) parses `clientId` with `parseClientFilter(raw, true)` and filters with
   `clientFilterSql`:
   - `internal` means `client_id IS NULL`;
   - a non-uuid gets a 400, not today's 500;
