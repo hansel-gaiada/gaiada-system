@@ -18,7 +18,7 @@ guard_otlp() { sudo -n env WEBDESK_NETWORK="$NET" WEBDESK_RESOLVER="$RES" WEBDES
 cleanup() {
   guard remove >/dev/null 2>&1
   docker rm -f "$NET-srv" "$NET-pub" "$NET-otlp" "$NET-other" >/dev/null 2>&1
-  docker network rm "$NET" >/dev/null 2>&1
+  docker network rm "$NET" "$NET-ctl" >/dev/null 2>&1
 }
 trap cleanup EXIT
 
@@ -96,10 +96,19 @@ $DOCKER0 $OTHER"
 $ALT $OTLP
 $ALT $OTHER"
   echo "== otlp exception: stand-ins on docker0=$DOCKER0 ports $OTLP (the exception) and $OTHER, other address=${ALT:-none}"
-  # Control: unguarded (the default bridge), every stand-in answers, so a block below is the guard's doing.
-  echo "$OT" | PROBE_NET=bridge probe | tee /tmp/$NET.otlp.ctl | sed 's/^/    ctl  /'
+  # Control: from a SECOND throwaway network the guard never touches, every stand-in answers, so a block
+  # below is the guard's doing. Same cross-bridge path (DNAT -> FORWARD) as the guarded probes; NOT the
+  # default bridge, where reaching your own gateway's published port is a hairpin Docker does not
+  # reliably do (that was a false FAIL on sumopod, 2026-10-11). Waits for the stand-ins under load.
+  docker network create "$NET-ctl" >/dev/null
   C=/tmp/$NET.otlp.ctl
-  if state "$DOCKER0:$OTLP" $C && state "$DOCKER0:$OTHER" $C; then ok "control: both stand-ins answer from the default bridge (unguarded)"; else bad "control: stand-ins do not answer unguarded; the OTLP checks prove nothing"; fi
+  for _ in 1 2 3 4 5 6 7 8; do
+    echo "$OT" | PROBE_NET="$NET-ctl" probe > $C
+    state "$DOCKER0:$OTLP" $C && state "$DOCKER0:$OTHER" $C && break
+    sleep 2
+  done
+  sed 's/^/    ctl  /' $C
+  if state "$DOCKER0:$OTLP" $C && state "$DOCKER0:$OTHER" $C; then ok "control: both stand-ins answer from an unguarded throwaway network"; else bad "control: stand-ins do not answer unguarded; the OTLP checks prove nothing"; fi
   # Exception OFF (the guard is applied without it above): the very same port is blocked.
   echo "$OT" | probe | tee /tmp/$NET.otlp.off | sed 's/^/    off  /'
   O=/tmp/$NET.otlp.off
