@@ -7,6 +7,15 @@
 // Pure. The caller loads the registry (a list field of a singleton collection) and passes it as a
 // Map from token key to value; `null` means "no registry available".
 import type { PlaceholderRule } from "../../delivery/vocabulary/composition";
+import type { ContentLintReport } from "./lint-rules/run";
+
+// M5-W3: the editorial content checks (h1, meta, alt, sources, links, ID twin, AEO) live in ./lint-rules
+// and are re-exported here so callers have one import. They are advisory exactly like the placeholders.
+export { lintContent, type ContentLintReport } from "./lint-rules/run";
+export { DEFAULT_CONTENT_RULES, resolveContentRules, type ContentRulesConfig } from "./lint-rules/config";
+export type { ContentFinding, FindingSeverity } from "./lint-rules/rules";
+export type { AeoScore, AeoFactor } from "./lint-rules/aeo";
+export type { ContentLintInput } from "./lint-rules/extract";
 
 export interface LintReport {
   placeholders: {
@@ -15,6 +24,8 @@ export interface LintReport {
     /** Occurrences per marker label, e.g. { CONFIRM: 3, CLIENT: 1 }. */
     markers: Record<string, number>;
   };
+  /** M5-W3, additive: absent when the content checks are switched off. See ContentLintReport. */
+  content?: ContentLintReport;
 }
 
 function stringLeaves(value: unknown, out: string[]): void {

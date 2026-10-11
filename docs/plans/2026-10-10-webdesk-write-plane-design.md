@@ -407,6 +407,24 @@ body (`command-authorization.guard.ts:43-46`), and a colliding key would make th
 * **Validation:** `validateItemContent`, the slug grammar, `locale ∈ tenant.locales` (and `= default` when `localized:false`),
   singleton (lock the collection row), `twinOf` (same collection, a free locale in the group), size caps (props ≤ 512 KiB per
   item, ≤ 256 KiB per markdown value). Lint is computed and returned, never fatal.
+* **Lint `content` member (M5-W3, additive; PROTOTYPED).** Beside `placeholders`, `lint` may carry
+  `content: { findings, aeo, unavailable }`, computed by `control/content/lint-rules/` on every save. Absent when the
+  checks are switched off in the rule config. Advisory like the rest: it never blocks or changes a save and never throws
+  into it.
+  - `findings[]`: `{ code, severity: "info"|"warn", path, message }`. `path` is JSON-pointer-ish (`/seo/title`,
+    `/blocks/0/props/body`) or `/` for the whole item. Codes: `h1.multiple|missing`, `meta.title.missing|too-long`,
+    `meta.description.missing|too-long|too-short`, `images.alt.missing|field-empty`, `sources.missing`,
+    `links.internal.few`, `twin.missing.<lang>`, `answer-first.missing|length`, `headings.question-share`,
+    `keyword.placement`, `language.banned-phrase|exclamation`. New codes may be added; consumers must ignore unknown ones.
+  - `aeo`: `{ score: 0-100, factors: [{ id, label, points, max, detail }] }`, or `null` when there is no long-form body
+    (no score, not a score of 0). Six factors: answer-first 25, question headings 25, FAQ 15, short paragraphs 15,
+    structure (2+ h2 and a list or table) 10, citations 10. An explainable structural heuristic, not a ranking prediction.
+  - `unavailable[]`: `{ rule, reason }` for each check that could not run (a failing rule, an unreadable localization
+    group). Its findings are unknown, not absent: an empty `findings` with a non-empty `unavailable` is NOT a clean bill.
+  - Rule values live in `ContentRulesConfig` (`lint-rules/config.ts`); `DEFAULT_CONTENT_RULES` are gaiada.com's
+    (title <= 60, description 120-155, answer paragraph 40-60 words, >= 30% question headings, EN<->ID twin). The save
+    path passes the defaults today; a per-tenant override needs a composition `lint.content` key (a vocabulary MINOR,
+    not part of this change).
 * **Content hash** is `sha256(canonicalize({blocks, seo}))` using `ws4-assertion.ts`'s `canonicalize`.
   **search_text** is the string leaves of `blocks`, ≤ 64 KiB.
 * **After commit (fail-soft):** tenant-webhook kinds `content.published`, `content.unpublished` and `content.scheduled`, with ≤ 100 item
