@@ -43,7 +43,7 @@
 // answers with the original instants), and an unspent upload token simply expires (ten minutes).
 import { BadGatewayException, Logger } from "@nestjs/common";
 import { config } from "../../config";
-import { principalPayload } from "../../rbac/cerbos";
+import { checkActions } from "../../rbac/cerbos";
 import {
   UUID_RE,
   WebdeskProblem,
@@ -89,34 +89,14 @@ const logger = new Logger("WebdeskMedia");
  */
 export async function mediaCapabilities(gate: ContentGate): Promise<MediaCapabilities | null> {
   try {
-    const res = await fetch(`${config.cerbosUrl}/api/check/resources`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        requestId: "platform",
-        principal: principalPayload(gate.principal),
-        resources: [
-          {
-            actions: [...MEDIA_ACTIONS],
-            resource: {
-              kind: "webdesk_media_asset",
-              id: "new",
-              attr: {
-                id: "", tenantId: gate.tenantId, ownerId: "", projectId: "", teamId: "", module: "webdev", subjectUserId: "", origin: "",
-                unitAncestors: [], creatorId: "", subKind: "", targetUserId: "", published: false, panelistUserIds: [],
-                hiringManagerUserId: "", recruiterUserId: "", approvalId: "", collectionKey: "", locale: "", itemCount: 0,
-                clientId: gate.client?.clientId ?? "",
-              },
-            },
-          },
-        ],
-      }),
-    });
-    if (!res.ok) throw new Error(`cerbos ${res.status}`);
-    const data = (await res.json()) as { results?: Array<{ actions?: Record<string, string> }> };
-    const actions = data.results?.[0]?.actions ?? {};
-    const allowed = (a: (typeof MEDIA_ACTIONS)[number]): boolean => actions[a] === "EFFECT_ALLOW";
-    return { read: allowed("read"), upload: allowed("upload"), update: allowed("update"), delete: gate.client ? false : allowed("delete") };
+    // Through rbac/cerbos.ts (the approved egress and the one resource-attribute allow-list), with exactly the resource
+    // the real handlers authorize: kind, tenant, module, and the client on a client gate.
+    const got = await checkActions(
+      gate.principal,
+      { kind: "webdesk_media_asset", tenantId: gate.tenantId, module: "webdev", ...(gate.client ? { clientId: gate.client.clientId } : {}) },
+      MEDIA_ACTIONS,
+    );
+    return { read: got.read === true, upload: got.upload === true, update: got.update === true, delete: gate.client ? false : got.delete === true };
   } catch (err) {
     logger.warn(`media capabilities unavailable: ${(err as Error).message}`);
     return null;

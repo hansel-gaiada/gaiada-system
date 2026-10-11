@@ -250,6 +250,27 @@ export async function check(p: Principal, r: Resource, action: string): Promise<
   return effect === "EFFECT_ALLOW" ? { allow: true } : { allow: false, reason: `cerbos denied ${action} on ${r.kind}` };
 }
 
+/**
+ * Several actions on ONE resource in a single CheckResources call: the same request `check` makes, with the same
+ * principal and resource payloads (so the attribute allow-list in `resourcePayload` cannot drift), for a UI capabilities
+ * answer such as WebDesk media. ADVISORY for the caller: each real action still runs its own `check`.
+ */
+export async function checkActions(p: Principal, r: Resource, actions: readonly string[]): Promise<Record<string, boolean>> {
+  const res = await fetch(`${config.cerbosUrl}/api/check/resources`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requestId: "platform",
+      principal: principalPayload(p),
+      resources: [{ actions: [...actions], resource: resourcePayload(r) }],
+    }),
+  });
+  if (!res.ok) throw new Error(`cerbos ${res.status}`);
+  const data = (await res.json()) as { results?: Array<{ actions?: Record<string, string> }> };
+  const got = data.results?.[0]?.actions ?? {};
+  return Object.fromEntries(actions.map((a) => [a, got[a] === "EFFECT_ALLOW"]));
+}
+
 export interface QueryPlan {
   kind: "always-allowed" | "always-denied" | "conditional";
   /** For conditional plans: the raw Cerbos AST (the RLS layer maps the parts it supports). */
