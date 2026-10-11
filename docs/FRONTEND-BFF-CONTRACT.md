@@ -1892,6 +1892,82 @@ grants only) and `attr.clientAdminOf: [{tenantId, clientId}]`; `resourcePayload`
 nothing). A handler feeding `clientId` must take it from a row it loaded in the request's tenant, never from a request body. The UI
 gets the same facts from the two list endpoints above (`isAdmin`, `websiteEditor`); no `Me` shape changed.
 
+### 16j. Client website editing (WSK-49c, WSK-D58 / D59 / D60 / D62, 2026-10-11) — `src/modules/webdev/webdesk-client-website.{controller,service}.ts`, `webdesk-client-guard.ts`, `webdesk-site-clients.{controller,service}.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (tested on local Linux containers: Postgres + Redis + Cerbos 0.54.0; no server gate yet; platform-nest only; the portal UI is WSK-49d)**
+
+A client editor edits THEIR client's WebDesk site through the portal. It is the staff content BFF (§27) **in client mode**, not a second
+implementation: every immediate write, the preview, the publish filing and the media calls are the staff service's, handed a gate opened
+for the client. What is specific to a client is below. Base path: `/api/:t/portal/clients/:clientId/website` (`:t` = the serving company,
+`:clientId` = `clients.id`).
+
+**The order on EVERY route (the security property).** (1) Cerbos, as the caller, under the client-editor rules (`client_website_editor`
+for the URL's client; **the first statement of every handler**, so a denial is 403 whatever the body), (2) the site wall: the caller's
+portal scope (`resolvePortalScope`) must contain that client AND the site must be LINKED to it (`webdesk_site_clients`, loaded in the
+request's tenant); anything else is a uniform `404 site-not-found` problem (unknown slug, another client's site, an unlinked site,
+another company's site, a malformed id: no existence oracle), (3) the strict body, (4) the D59 / D62 PRE-CHECK against what WebDesk
+holds (below), (5) only then the call to WebDesk, signed with the client marker `ce: true`. Staff roles pass step 1 (they hold the
+staff editor tier) and fail step 2 (`403 not a portal client`), so a staff member gets nothing here and WebDesk is never called.
+The URL's `clientId` only reaches Cerbos, which matches it against the caller's OWN server-derived grants; the link row, not the URL,
+is the authority for which site belongs to which client.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/website` | → `{clientId, sites:[{tenantSlug, siteId, name, kind, defaultLocale, locales, linkedAt}]}`: THIS client's linked sites (a link whose site WebDesk no longer lists is omitted; a WebDesk outage is `503 editorial_unavailable`, never `[]`). Authz `webdesk_content_item · read`. |
+| ✅ | GET | `/website/sites/:slug/:siteId/collections` | Zone B's `collection.list` body, each collection with a computed **`clientEditable`** map (below). Authz `webdesk_content_item · read` (a client never reads `webdesk_collection`: schema is the agency's). |
+| ✅ | GET | `/website/sites/:slug/:siteId/collections/:key/items` | The staff list; query allow-list `locale, state, q, cursor, limit, slug`. `?includeDeleted` or `?state=deleted` → `400` (a client never sees a deleted item). |
+| ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId[?version=]` | `{item, version, live, group, lint}` PLUS **`composition`** and **`clientEditable`** (below). A deleted item is `404 item-not-found`. |
+| ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId/versions[/:n]` | The staff version reads. |
+| ✅ | POST | `/website/sites/:slug/:siteId/collections/:key/items` | Create. Body `{locale, slug, twinOf?, fields?, blocks?, note?}`; **no `seo`**. `201` as the staff create. D59 pre-check (below). |
+| ✅ | PUT | `/website/sites/:slug/:siteId/items/:itemId` | Update. Body `{baseVersion, fields?, blocks?, note?}`; **no `seo`**. The BFF fills what you omit FROM THE HEAD (fields, generic blocks, and always the existing `seo`) so a partial edit never removes what the client cannot see; a stale `baseVersion` is WebDesk's `409 version-conflict`. |
+| ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/restore` | Body `{version, baseVersion, note?}`. The restored version may differ from the head only in client-editable paths. |
+| ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/preview` | WSK-46's one-time preview link (§27), authorised as the item's `update`. `200 {previewUrl, expiresAt, version}`. |
+| ✅ | POST | `/website/sites/:slug/:siteId/publish-requests` | Body `{items:[{itemId, version}], note?}` → `202 {approvalId, command:'content.publish', itemCount}`. Files ONE WS4 approval with the client on the row; publishes nothing. `publishAt` / `unpublishAt` → `403 client-command-not-allowed` (a client never schedules). D62 pre-check (below). |
+| ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/publish` | **Self-publish ONE item (D58).** Body `{version?}` (default: the head). Files the request and approves it as the same person in one call → the approve body below. If the approval step fails, the request it filed is withdrawn so no orphan is left. |
+| ✅ | GET | `/website/publish-requests[?status=pending\|approved\|rejected\|cancelled\|all]` | This CLIENT's publish requests, every client editor's (default `pending`, newest first, <= 100): `{requests:[{approvalId, status, createdAt, tenantSlug, siteId, itemCount, itemIds, requestedBy:{userId, name}, requestedByMe, canApprove, executionStatus}]}`. A request STAFF filed, another client's, or one whose site was re-pointed never appears. `canApprove` is a UI hint (`pending && (!requestedByMe \|\| itemCount == 1)`); Cerbos decides. |
+| ✅ | POST | `/website/publish-requests/:approvalId/approve` | **Decide AND execute (D58).** → `200 {approvalId, status:'approved', executionStatus:'executed'\|'failed', selfPublish?, reconciled?, items?, error?}` (the staging-rebuild internals are not shown). `403` for a self-approved BATCH (Cerbos; the request stays pending, nothing is sent); `404` for a request that is not this client's publish (incl. staff-filed); `409 approval_not_pending` the second time; `422 publish-not-client-editable` when the D62 check fails now (the live page may have moved since filing; the request stays pending). |
+| ✅ | GET | `/website/sites/:slug/:siteId/media[?mime&q&tag&cursor&limit]` | The staff media list minus `includeDeleted` (`400`). Authz `webdesk_media_asset · read`. |
+| ✅ | POST | `/website/sites/:slug/:siteId/media/upload-token` | Body `{bucket, maxBytes?, mime?}` → `201 {uploadUrl, expiresAt, maxBytes, allowedMimes}` (`no-store`; the URL carries a one-time secret). Authz `upload`. |
+| ✅ | PATCH | `/website/sites/:slug/:siteId/media/:assetId` | Body `{title?, alt?, tags?}`. Authz `update`. **There is NO route to delete media, delete / unpublish / schedule an item, or touch schema or keys.** |
+
+**`clientEditable` (what 49d renders read-only fields from).** Computed by the vendored `isClientEditable` (never restated):
+`{ fields: {"<name>": bool, "<group>.<member>": bool, ...}, blocks: bool, seo: false, create: {allowed, reason, blockedBy} }`.
+`fields` has one entry per declared field at every depth (a multiple group's members share one dotted path); `blocks` is the generic
+blocks (editable iff the collection is); `seo` is always false (D59 design default: the agency keeps SEO-critical fields). `create.reason`
+is `null | 'system-collection' | 'nothing-editable' | 'required-fields-not-editable'`; **a REQUIRED field that is not client-editable
+makes a client create impossible**, so `create.allowed` is false and `blockedBy` names the field(s): hide or disable "New" and say why.
+
+**The D59 / D62 pre-check (refused BEFORE any WebDesk write, with WebDesk's own problem slugs; WebDesk's check stays the authority).**
+`422 field-not-client-editable` (`issues[].path` = RFC 6901 pointers such as `/blocks/0/props/slugLabel`, `total`; `/seo` for any `seo`;
+`/collectionKey` when nothing in the collection is editable) for a create/update/restore that changes a non-editable path; ONE bad path
+refuses the whole write. `409 item-deleted` for a deleted item. `422 publish-not-client-editable` (`issues[].path` = `/items/<index>` +
+pointer) for a publish whose version differs from what is LIVE in any non-editable path or in `seo` (a never-published item is judged
+against an empty baseline; re-publishing what is live is a no-change publish and passes); a batch with one bad item publishes none.
+Every problem leaves as `application/problem+json`, byte-for-byte as WebDesk's. The rule is WebDesk's one function
+(`webdesk/delivery/vocabulary/client-editable.ts`), **vendored** into `src/modules/webdev/vocabulary/` by
+`scripts/vendor-webdesk-vocabulary.mjs` (`npm run vendor:check` and `vocabulary-vendor.test.ts` fail on any drift); the only restated
+piece is how a request becomes the stored `{blocks, seo}` (WebDesk's `assembleItemContent`).
+
+**The `ce` claim.** Every WebDesk write made from this surface (create, update, restore, preview, upload token, media update, and the
+`content.publish` a client approves) is signed with `ce: true` between `apr` and `iat` (WebDesk vector v4, pinned byte-for-byte in
+`webdesk-editorial-signer.test.ts`); no staff write carries it. The two-row ledger of a client write records `clientEditor: true, clientId`.
+
+**What is deliberately NOT done here (follow-ups).** (1) No notification links into `/portal/...`: the pages are WSK-49d's, so a client
+requester is NOT notified when another client approves their batch (the staff inbox href would dangle); the request list is the read.
+Staff deciders are still notified that a batch awaits (`/approvals/<id>`). (2) A client's publish does not rebuild staging: the
+rebuild dispatch needs `github_repo · deploy`, which a client cannot hold, so the build row records `failed: deploy_denied` and staff
+file a `content.rebuild`. An owner decision is needed if a client publish should rebuild (§27, WSK-60).
+
+#### Site -> client link (staff) — `webdesk_site_clients` (migration `202610111200`)
+
+Which client a WebDesk site serves, in the serving company's tenant. Nothing carried this before (`webdev_sites` / `webdev_provisioned_sites`
+have a `client_id` but no WebDesk slug or site id). One site, one client. Base `/api/:t/modules/webdev/content` (`AuthGuard` + `ModuleEnabledGuard("webdev")`).
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/site-clients` | `{links:[{tenantSlug, siteId, clientId, clientName, linkedBy, linkedAt}]}`. Authz `webdev_provisioned_site · read`. |
+| ✅ | GET | `/sites/:slug/:siteId/client` | `{link}` or `{link:null}`. Authz `read`; the cross-company wall applies (`404` for a site that is not this company's). |
+| ✅ | PUT | `/sites/:slug/:siteId/client` | Body `{clientId}` → `{link, changed, previousClientId}`. Authz `webdev_provisioned_site · operate` (company_admin, manager, webdev_manager). A client of another company or an unknown one is `404 client_not_found`; the same client again is `changed:false` with no audit row; re-pointing is allowed and audited (`webdesk.site_client.linked\|relinked`). |
+| ✅ | DELETE | `/sites/:slug/:siteId/client` | → `{changed, previousClientId}`. The client loses access at once (every portal request reads the link). Audited `webdesk.site_client.unlinked`. |
+
 ## 17. Mail subsystem (MAIL-* program, 2026-08-04) — `src/mail/` — **STATUS: IN PROGRESS**
 
 Design: [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
