@@ -1750,7 +1750,7 @@ a client-recorded payment can never leave `pending`.
 | ✅ | PATCH | `/api/:t/contracts/:contractId` | Draft-only, except `status:'void'`. A sent/signed contract is re-issued via `supersedesId`, never edited. |
 | ✅ | POST | `/api/:t/contracts/:contractId/send` | `draft → sent` + notifies signer contacts. Refuses with no document or `bodyMd`. Action `send`. |
 | ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign` — **owner-only** (`platform_admin`/`group_executive`); company_admin deliberately excluded. |
-| ✅ | GET | `/api/:t/invoice-payments` | `?status` — finance's confirmation queue. Authz: `invoice` read. |
+| ✅ | GET | `/api/:t/invoice-payments` | `?status`, `?clientId=<uuid>\|internal` — finance's confirmation queue. `clientId` is the strict §22a facet (PV3-03, PROTOTYPED): a uuid lists only that client's payments (filters `invoice_payments.client_id`), `internal` lists payments whose invoice names no client (the column is nullable), a non-uuid is **400**. Authz: `invoice` read, checked before `clientId` is validated. |
 | ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update. |
 
 **⚠ STILL NO STAFF UI FOR §16e's WRITES.** Contracts must be created/sent and payments confirmed via
@@ -4386,8 +4386,8 @@ One parameter, one vocabulary, on every staff list that can be narrowed to a cli
 
 ⚠ **This is a CONVENIENCE FILTER, NOT an authorization boundary.** `core/client-filter.ts`; the
 distinction from `core/portal-scope.ts` (which IS a boundary) is spelled out in both files' headers.
-Consequences that are deliberate and must not be "hardened": a malformed value resolves to **every
-row**, never to deny — a filter that fails closed silently hides work and is indistinguishable from
+Consequences that are deliberate and must not be "hardened": on the default (fail-open) lists a
+malformed value resolves to **every row** (the PV3-03 lists below are strict and answer 400 instead; neither ever denies as a boundary would) — a filter that fails closed silently hides work and is indistinguishable from
 "there is nothing here"; and passing another client's id is not an escalation and must not 403, since
 the same caller could already read the list unfiltered. Staff isolation stays RLS (tenant) + Cerbos
 (action). Ids compare **as text**, so a hand-edited query string misses rather than 500ing.
@@ -4401,13 +4401,18 @@ reachable from no scope at all. `is_internal` stays a data-quality signal, not t
 | ✅ NEW | GET | `/api/:t/projects?clientId=` | `core/core.controller.ts`. Was unfiltered; the client page used to fetch the tenant and narrow in the browser. |
 | ✅ NEW | GET | `/api/:t/pm/tasks?clientId=` | `modules/pm/pm.controller.ts`. Joins through `projects` — there is no `pm_tasks.client_id`, by decision (one source of truth, no backfill, no sync trigger). Cheap: the task CTE already joins `projects`. **`pm_tasks.project_id` is `NOT NULL`, so no clientless-task branch is needed and adding one would be dead code.** |
 | ✅ NEW | GET | `/api/:t/invoices?clientId=` | `modules/invoice/invoice.controller.ts`. This list previously accepted no query parameters at all. |
-| ✅ PRE-EXISTING | GET | `/api/:t/{deliverables,contracts,pipeline/runs,meetings/recordings,webdev/change-requests,social/*}?clientId=` | Already had the parameter. **`internal` is NOT yet honoured on these six** — see the gap below. |
+| ✅ PV3-03 | GET | `/api/:t/{deliverables,pipeline/runs,meetings/recordings,webdev/change-requests,invoice-payments}?clientId=` | Honour the full vocabulary (uuid / `internal` / absent) in **strict** mode. `core/client-work.controller.ts`, `pipeline.controller.ts`, `meetings.controller.ts`, `webdev-change-requests.controller.ts`, `contracts.controller.ts` (`invoice-payments` only). `internal` = `client_id IS NULL`. |
+| ✅ PV3-03 | GET | `/api/:t/modules/social/{engagements,accounts}?clientId=` | Same strict facet. `social_engagements.client_id` and `social_accounts.client_id` are NOT NULL, so `internal` is a valid, always-empty selection there. There is no staff "post-review list" endpoint: the per-variant `GET variants/:id/client-review` (§16h) takes no list parameters. |
+| PV3-01 | GET | `/api/:t/contracts?clientId=` | Same strict facet; owned by PV3-01, not this ticket. |
 
-⛔ **KNOWN GAP (slice 2).** The six endpoints that already had `clientId` accept a uuid only; passing
-`internal` to them matches nothing rather than selecting clientless rows. A sentinel honoured on some
-client-filterable lists and silently empty on others is worse than not having one, so this is tracked,
-not left implicit. Still PENDING: `invoice-payments`, `time-entries`, and an `/approvals` list
-endpoint (none exists).
+**Strict mode (PV3-03).** `parseClientFilter(raw, true)`: the lists above answer a non-uuid that is not
+`internal` with **400**, not with every row. A hub page asking for one client must never silently get a
+different list. Authorization still runs first (a denied caller gets 403, not 400). This changes the
+earlier behaviour of these lists, which was a 500 (deliverables, meetings: uuid cast) or a silent empty
+list (pipeline, change requests: text compare), and `internal` previously selected nothing on all of
+them. The three original users (`projects`, `pm/tasks`, `invoices`) keep the fail-open mode above:
+changing that is out of scope. Still PENDING: `time-entries`, and an `/approvals` list endpoint (none
+exists).
 
 ### 22b. The hub aggregate (CC-2)
 

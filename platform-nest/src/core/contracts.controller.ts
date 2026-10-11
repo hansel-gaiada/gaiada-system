@@ -26,6 +26,7 @@ import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
+import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
@@ -333,8 +334,13 @@ export class ContractsController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Query("status") status?: string,
+    @Query("clientId") clientId?: string,
   ) {
     await authorize(req.principal, { kind: "invoice", tenantId }, "read");
+    // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400). Filters on
+    // `invoice_payments.client_id`, the denormalised column the portal's own isolation predicate uses;
+    // `internal` is the payments whose invoice names no client. Parsed after authorize.
+    const clientFilter = clientFilterSql(parseClientFilter(clientId, true), "pp.client_id", 2);
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT pp.id, pp.invoice_id AS "invoiceId", pp.client_id AS "clientId", cl.name AS "clientName",
@@ -347,9 +353,9 @@ export class ContractsController {
            FROM invoice_payments pp
            JOIN invoices i ON i.id = pp.invoice_id
            LEFT JOIN clients cl ON cl.id = pp.client_id
-          WHERE pp.deleted_at IS NULL AND ($1::text IS NULL OR pp.status = $1)
+          WHERE pp.deleted_at IS NULL AND ($1::text IS NULL OR pp.status = $1) AND ${clientFilter.sql}
           ORDER BY (pp.status = 'pending') DESC, pp.paid_on DESC LIMIT 300`,
-        [status ?? null],
+        [status ?? null, ...clientFilter.params],
       ),
     );
     return rows.rows;

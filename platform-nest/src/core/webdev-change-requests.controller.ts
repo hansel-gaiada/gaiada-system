@@ -29,6 +29,7 @@ import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
+import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
@@ -153,9 +154,12 @@ export class WebdevChangeRequestsController {
     const args: unknown[] = [];
     if (status) clauses.push(`cr.status = $${args.push(status)}`);
     if (kind) clauses.push(`cr.kind = $${args.push(kind)}`);
-    // Compared as text, not cast to uuid, so a malformed id from a hand-edited query string matches
-    // nothing instead of 500ing the request on an invalid-uuid cast (listRuns's precedent).
-    if (clientId) clauses.push(`cr.client_id::text = $${args.push(clientId)}`);
+    // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400). `internal` is the
+    // clientless rows, i.e. the staff-logged `source='internal'` requests that name no client. The
+    // id is compared as text inside clientFilterSql.
+    const clientFilter = clientFilterSql(parseClientFilter(clientId, true), "cr.client_id", args.length + 1);
+    args.push(...clientFilter.params);
+    clauses.push(clientFilter.sql);
     if (projectId) clauses.push(`cr.project_id::text = $${args.push(projectId)}`);
     const rows = await withTenants([tenantId], (c) =>
       c.query(
