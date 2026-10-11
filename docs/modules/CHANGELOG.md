@@ -44,14 +44,14 @@ WebDesk M3 follow-ups.
 - **A client publish answers the staging rebuild state** (`build:{state, failureReason}`, never a repo, ref or URL; WSK-D65).
 - **Author labels for clients** on item, version and list reads: a contact of the same client by name, Gaiada staff as "Gaiada", the company's automation accounts by name, anyone else "Someone else". One query per response, in the request's tenant.
 - **Media capabilities** on the media list (staff and client): `{read, upload, update, delete}` from one Cerbos batch; in client mode `delete` is always false; omitted when Cerbos cannot answer.
-- Verified: sumopod gate `m3r359` (platform-nest 8260 passed; its 4 reds, the media egress call and three tests following the new answers, fixed in `7a02d047`; ui 5561/5561, next build, repo checks PASS) and GitHub Actions 38164969216 on the exact merged tree.
+- Verified: sumopod gate `m3r359` (platform-nest 8260 passed; its 4 reds, the media egress call and three tests following the new answers, fixed in `7a02d047`; ui 5561/5561, next build, repo checks PASS) and GitHub Actions 38165681282 green on every job for the exact merged tree (with M4 F1).
 
 ### platform-ui `0.89.0` - owners get the website-access controls; the portal shows requested versions, rebuild state and names; media controls disable up front (2026-10-12) - DEV-VERIFIED
 
 - Staff Contacts page: `owner` gets the Website editor switches and Make/Remove admin, now that the server allows it.
 - Portal Website area: requests read "v<N> of <title>"; after a publish it says what the site is doing ("Your site is rebuilding…", "Live on your site.", "Published. Your site's automatic update isn't set up yet, so Gaiada will update it."); history shows names, with "Gaiada" for staff.
 - Media library and picker disable Upload, edit and Delete on first paint for a role without them, with the reason; the 403 handling stays as the fallback.
-- Verified: sumopod gate `m3r359` (platform-nest 8260 passed; its 4 reds, the media egress call and three tests following the new answers, fixed in `7a02d047`; ui 5561/5561, next build, repo checks PASS) and GitHub Actions 38164969216 on the exact merged tree.
+- Verified: sumopod gate `m3r359` (platform-nest 8260 passed; its 4 reds, the media egress call and three tests following the new answers, fixed in `7a02d047`; ui 5561/5561, next build, repo checks PASS) and GitHub Actions 38165681282 green on every job for the exact merged tree (with M4 F1).
 
 ### automation (n8n) `0.4.3` - n8n receives the Zone B intake's settings (2026-10-12) - PROTOTYPED
 
