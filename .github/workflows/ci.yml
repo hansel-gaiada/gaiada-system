@@ -110,6 +110,7 @@ jobs:
       webdesk_api: ${{ steps.plan.outputs.webdesk_api }}
       webdesk_blocks: ${{ steps.plan.outputs.webdesk_blocks }}
       webdesk_deploy: ${{ steps.plan.outputs.webdesk_deploy }}
+      webdesk_wordpress: ${{ steps.plan.outputs.webdesk_wordpress }}
       obs: ${{ steps.plan.outputs.obs }}
       any_test: ${{ steps.plan.outputs.any_test }}
       any_webdesk_light: ${{ steps.plan.outputs.any_webdesk_light }}
@@ -611,6 +612,22 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+      - name: webdesk-wordpress — php -l, probes, vendored block-list drift
+        if: ${{ !cancelled() && needs.plan.outputs.webdesk_wordpress == 'true' }}
+        # M6-P5b: the headless WordPress theme and its five php-cli probes previously ran only by
+        # hand; CI ran no PHP at all. The runner has no PHP, so the lint and the probes run in the
+        # official php:8.3-cli image pinned by digest. The vendored block-type list is checked
+        # outside the container because it needs node (native TypeScript stripping of blocks.ts).
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/webdesk/wordpress:/w" -w /w php@sha256:aafe21201943a8a6e497ddfb471e2ce68ada76adede38c7d61fede8918b24319 bash -c '
+            set -euo pipefail
+            find theme test -name "*.php" -print0 | xargs -0 -n1 php -l >/dev/null
+            for p in render-invariant router safety vocabulary-fields sdk-timeout; do
+              echo "== $p-probe"
+              php "test/$p-probe.php"
+            done'
+          node webdesk/wordpress/scripts/vendor-block-vocabulary.mjs --check
 
   # webdesk/api (Zone B NestJS service — WSK-05/07/10/11/12/21/37/38/schema-draft/privacy/control).
   # Postgres gets the SAME role bootstrap (init-roles.sh: owner/migrator/app, all NOBYPASSRLS) the

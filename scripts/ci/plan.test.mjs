@@ -189,7 +189,7 @@ test("ci: a webdesk-only change runs only webdesk groups", () => {
   const { outputs } = planCi({ files: ["webdesk/api/src/a.ts"] });
   assert.deepEqual(on(outputs), ["webdesk_api"]);
   const both = planCi({ files: ["webdesk/delivery/vocabulary/primitives.ts"] }).outputs;
-  assert.deepEqual(on(both), ["webdesk_api", "webdesk_blocks"]);
+  assert.deepEqual(on(both), ["nest", "webdesk_api", "webdesk_blocks", "webdesk_wordpress"]);
   // The vocabulary tests (webdesk/delivery/test/) run in the webdesk-api job; the blocks package only vendors vocabulary/.
   assert.deepEqual(on(planCi({ files: ["webdesk/delivery/test/vocabulary.test.mjs"] }).outputs), ["webdesk_api"]);
 });
@@ -218,6 +218,15 @@ test("ci: any_test / any_webdesk_light roll up the merged-job conditions", () =>
   assert.equal(planCi({ files: ["mcp-hub/src/a.ts"] }).outputs.any_webdesk_light, false);
   assert.equal(planCi({ files: ["webdesk/deploy/src/a.ts"] }).outputs.any_webdesk_light, true);
   assert.equal(planCi({ files: ["webdesk/api/src/a.ts"] }).outputs.any_test, false);
+});
+
+test("ci: webdesk_wordpress fires on the theme, the vocabulary and the PHP SDK generator only (M6-P5b)", () => {
+  const wp = (f) => planCi({ files: [f] }).outputs;
+  assert.equal(wp("webdesk/wordpress/test/router-probe.php").webdesk_wordpress, true);
+  assert.equal(wp("webdesk/delivery/vocabulary/blocks.ts").webdesk_wordpress, true);
+  assert.equal(wp("webdesk/api/src/codegen/generator/sdk-php.mts").webdesk_wordpress, true);
+  assert.equal(wp("webdesk/api/src/codegen/generator/sdk-ts.mts").webdesk_wordpress, false);
+  assert.equal(wp("webdesk/wordpress/test/router-probe.php").any_webdesk_light, true);
 });
 
 // ------------------------------------------------------------------ repo coherence guards
