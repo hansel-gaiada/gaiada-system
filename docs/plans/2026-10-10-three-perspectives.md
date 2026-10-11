@@ -587,6 +587,7 @@ code comments.
 | **D11** | A Group area for root owners and a Platform area for `platform_admin`, with holding-level rows moved out of the company nav? | **RULED: PV-D11.** Yes, both. Group shows only while the root company is active; Platform is for `platform_admin` and root owners, with full controls (§5.3, PV-D18 to PV-D20) |
 | **D12** | Viceroy's venues (Apéritif, CasCades, Pinstripe Bar, Akoya Spa) and Bali Catering: separate legal entities (then companies with their own books), or outlets inside Viceroy? | **RULED: PV-D12.** Separate: each is its own company |
 | **D13** | The assessment's open question: an internal operating system or a product to sell? | **RULED: PV-D13.** Internal now, sold much later as a subscription (SaaS and PaaS). See §2.7 |
+| **D21** | PV-D18 gives Platform (our bots, AI gateway, MCP hub, automation, observability) to the owner of ANY root. Today only the Syrowatka root exists. Under PV-D13 a subscriber's root is another root, and its owner would reach our whole deployment's system consoles. Restrict the owner arm to the operator's own root before the first customer root exists? (Raised by PV1-05, 2026-10-11) | **Yes, before any customer root exists:** name the operator root (one setting, never a hard-coded id) and accept owners of that root only. Nothing is exposed today, with one root |
 
 ---
 
