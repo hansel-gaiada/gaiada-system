@@ -1,8 +1,8 @@
 // Pins the Edge-side expiry peek against the Node-side sealer (finding 01, 2026-09-08).
 //
 // THE TEST THAT ACTUALLY MATTERS is the round-trip one. `session.ts` encodes with `Buffer` under
-// node:crypto; `session-expiry.ts` decodes with `atob` + `TextDecoder` because middleware runs on
-// Edge and cannot load Buffer or node:crypto. Those are two independent implementations of the same
+// node:crypto; `session-expiry.ts` decodes with `atob` + `TextDecoder` because the proxy (then
+// `middleware.ts`) ran on Edge and could not load Buffer or node:crypto; it stays runtime-neutral. Those are two independent implementations of the same
 // wire format, written in different files, running in different runtimes.
 //
 // If they ever disagree, `peekSessionExpiry` returns null, `needsRefresh` returns false, and the
@@ -50,7 +50,7 @@ describe("peekSessionExpiry — Edge decoder vs Node encoder", () => {
   });
 
   it("returns null rather than throwing on anything malformed", () => {
-    // Middleware calls this on every request. A throw here is every page down, so the contract is
+    // The proxy calls this on every request. A throw here is every page down, so the contract is
     // "null means do nothing" for every unparseable shape.
     for (const bad of [undefined, "", ".", "nodot", "oidc:!!!not-base64!!!.sig", "oidc:.sig", "dev-payload.sig"]) {
       expect(() => peekSessionExpiry(bad as string | undefined)).not.toThrow();
@@ -84,7 +84,7 @@ describe("needsRefresh", () => {
   });
 
   it("the skew is a real margin, not decorative", () => {
-    // A page render fans out several platformFetch calls; a token valid at middleware time can
+    // A page render fans out several platformFetch calls; a token valid at proxy time can
     // expire mid-render. Zero skew would let exactly that through.
     expect(REFRESH_SKEW_MS).toBeGreaterThanOrEqual(60_000);
   });

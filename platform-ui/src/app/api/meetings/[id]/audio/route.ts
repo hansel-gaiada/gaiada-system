@@ -65,13 +65,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     body = await req.arrayBuffer();
     // A body shorter than the browser declared means something between the browser and here cut it
-    // (Next's `middlewareClientMaxBodySize`, a proxy limit). Refuse loudly rather than hand the
+    // (Next's `proxyClientMaxBodySize`, `middlewareClientMaxBodySize` before Next 16). Refuse loudly rather than hand the
     // platform a truncated multipart it can only report as "exceeds cap".
     const declared = Number(req.headers.get("content-length") ?? NaN);
     if (Number.isFinite(declared) && body.byteLength < declared) {
       console.error(`[meetings/audio] body truncated: received ${body.byteLength} of ${declared} bytes`);
       return NextResponse.json(
-        { error: `The upload arrived truncated (${body.byteLength} of ${declared} bytes) — a request-size limit between the browser and this server cut it. Check next.config.ts middlewareClientMaxBodySize / any proxy limit.` },
+        { error: `The upload arrived truncated (${body.byteLength} of ${declared} bytes) — a request-size limit between the browser and this server cut it. Check next.config.ts proxyClientMaxBodySize / any proxy limit.` },
         { status: 400, headers: noStore },
       );
     }

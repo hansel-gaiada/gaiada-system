@@ -9,7 +9,7 @@ import { sanitizeReturnTo } from "@/lib/returnTo";
 // `auth/callback` has always sealed `refreshToken` and `expiresAt` into the session cookie, and
 // NOTHING in this app ever read either one. `platformFetch` sent the access token verbatim forever.
 // The realm's `accessTokenLifespan` is 3600s, so one hour after signing in every backend call began
-// returning 401 - while `middleware.ts` checked only that the cookie EXISTED, so the user was never
+// returning 401 - while `middleware.ts` (now `proxy.ts`) checked only that the cookie EXISTED, so the user was never
 // redirected and never logged out. They just got an ERP where every page threw, with no way back
 // except finding `/auth/login` by hand. Every user, every hour, every day.
 //
@@ -20,19 +20,19 @@ import { sanitizeReturnTo } from "@/lib/returnTo";
 // ── WHY A ROUTE HANDLER AND NOT `platformFetch` ──────────────────────────────────────────────────
 // The obvious fix - refresh inside `platformFetch` when the token is stale - CANNOT WORK. That
 // helper is called from ~131 files, overwhelmingly from Server Components during a page render, and
-// Next only permits `cookies().set()` in Server Actions, Route Handlers and Middleware. A refresh
+// Next only permits `cookies().set()` in Server Actions, Route Handlers and Middleware (Proxy since Next 16). A refresh
 // there would obtain a new token and have nowhere to persist it, so the next request would refresh
 // again. Route handlers can set cookies; hence this file.
 //
-// ── WHY MIDDLEWARE REDIRECTS HERE RATHER THAN DOING IT ITSELF ────────────────────────────────────
-// Middleware runs on Edge, which cannot load `node:crypto`, so it cannot verify or re-sign the
-// session HMAC. It CAN cheaply read the expiry (`lib/session-expiry.ts`) and hand off. That split
-// also serialises the refresh: navigations arrive one at a time, so a page's parallel data fetches
+// ── WHY THE PROXY REDIRECTS HERE RATHER THAN DOING IT ITSELF ─────────────────────────────────────
+// When this was written the proxy (then `middleware.ts`) ran on Edge, which cannot load `node:crypto`, so it could
+// not verify or re-sign the session HMAC. Next 16 runs it on Node, but the split stays: it cheaply reads the expiry
+// (`lib/session-expiry.ts`) and hands off. That split also serialises the refresh: navigations arrive one at a time, so a page's parallel data fetches
 // never race to refresh the same token.
 //
 // ── FAIL-OPEN, NEVER FAIL-LOOP ───────────────────────────────────────────────────────────────────
 // Every failure path lands on `/auth/login`, NOT back on the page. If it returned to the page with
-// the cookie still stale, middleware would redirect here again - forever. `/auth/login` re-runs the
+// the cookie still stale, the proxy would redirect here again - forever. `/auth/login` re-runs the
 // full authorization-code flow, which against a live Keycloak SSO session (10h, vs the 1h access
 // token) completes without a password prompt and is invisible to the user. So the worst outcome of
 // a broken refresh is the behaviour we would have had anyway, plus one redirect.
@@ -53,7 +53,7 @@ function backToLogin(req: NextRequest, returnTo: string, reason: string): NextRe
 export async function GET(req: NextRequest) {
   const returnTo = sanitizeReturnTo(req.nextUrl.searchParams.get("return"));
 
-  // Verifies the HMAC properly (node:crypto) - this is the check middleware could not do. A forged
+  // Verifies the HMAC properly (node:crypto) - this is the check the proxy does not do. A forged
   // or tampered cookie resolves to null here and gets sent to a real sign-in.
   const session = await getSession();
   if (!session || session.mode !== "oidc") return backToLogin(req, returnTo, "no-oidc-session");
