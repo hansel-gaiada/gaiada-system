@@ -343,8 +343,12 @@ jobs:
           # `docker buildx imagetools create`, which (a) re-wrapped a single manifest into a new index unless
           # --prefer-index=false (346), and (b) walks the image's referrers while copying, so one pruned
           # attestation in report-renderer's `sha256-<digest>` referrers index failed 349's retag. crane is the
-          # official go-containerregistry image, pinned by digest; it reads the login above from ~/.docker.
-          crane() { docker run --rm -v "$HOME/.docker:/root/.docker:ro" \
+          # official go-containerregistry image, pinned by digest. It is DISTROLESS and runs as `nonroot`, so it never
+          # reads /root/.docker: 351's retag failed `UNAUTHORIZED` with that mount. It runs as THIS user (the login file
+          # is 0600 and the runner's) with DOCKER_CONFIG pointing at the mounted dir; reproduced and fixed on Linux
+          # against GHCR with a file-based login (2026-10-11).
+          crane() { docker run --rm --user "$(id -u):$(id -g)" -e DOCKER_CONFIG=/docker-config \
+            -v "$HOME/.docker:/docker-config:ro" \
             gcr.io/go-containerregistry/crane@sha256:9162effd4c674ad2fa4e7170a894503ffff9114f15a57e75a0a32e111ad32d85 "$@"; }
           mapfile -t rows < <(printf '%s' "$RETAG" | jq -c '.[]')
           for row in "${rows[@]}"; do

@@ -1,6 +1,6 @@
 // Shared same-origin, path-only "?return=" validator (UI-01).
 //
-// Every login-adjacent surface (middleware, /login, /step-up, /auth/login, /auth/callback) needs
+// Every login-adjacent surface (the proxy, /login, /step-up, /auth/login, /auth/callback) needs
 // to remember where the user was headed and land them back there after auth completes. A return
 // target is user-controlled and sits ON THE LOGIN PATH, which is the worst place to get an open
 // redirect wrong — so there is exactly ONE validator, used at every consumption point, not one
@@ -10,7 +10,7 @@
 // target was simply dropped on the SSO path.)
 //
 // Kept free of `node:crypto`/`next/headers`/`server-only` on purpose: this runs in the Edge
-// middleware, in server components, in `"use server"` actions, and in Node route handlers, and it
+// the proxy, in server components, in `"use server"` actions, and in Node route handlers, and it
 // needs to stay importable from plain vitest the way `lib/session.ts` does.
 //
 // This must be called again at the point a redirect is actually issued, not only when the value is

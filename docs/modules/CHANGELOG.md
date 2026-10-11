@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.63.0` - a scheduled WebDesk publish rebuilds staging by itself; a scheduled takedown marks it stale (2026-10-11) - PROTOTYPED
+
+- **WSK-61 ERP half:** `settleScheduledFirings` finds approved, executed `content.schedule` approvals with no build yet, reads every item over the control channel, and dispatches ONE staging rebuild as the approval's decider once they are live (the ledger's UNIQUE(approval) makes it exactly once). A scheduled takedown marks staging stale once. A `schedule.fired` Zone B event is only a wake-up; a sweep on the WSK-60 poller is the primary path (live has no event bridge).
+- **Migration `202610110441`:** `webdev_zoneb_event_log.kind` admits `schedule.fired` (the live value set is read, asserted and extended, never re-typed); new `webdev_schedule_firings` with forced RLS.
+- `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS` (empty = 15 min; out of range refuses boot).
+
+### platform-ui `0.84.0` - Next 16.3: a click right after saving is no longer lost (2026-10-11) - PROTOTYPED
+
+- **Next 15.5 → 16.3.8** (owner ruling WSK-D57). 15.5.1+ discards a navigation issued while a server action is in flight (vercel/next.js#88343, fixed by #95391 in 16.3.0, not backported): the WebDesk editor's navigation failures went 7 → 0 on the same box, and the key-mint link click 3/3 → 0/3.
+- `middleware.ts` → `proxy.ts` (the rename Next 16 requires; it now runs on Node, still a cookie-presence check); `proxyClientMaxBodySize` replaces `middlewareClientMaxBodySize`. Builds with Turbopack. A container smoke of 18 auth/redirect requests is identical on both versions.
+
+### infra `0.9.3` - the public WebDesk host never logs a token; the proof site's deploy key is locked to its site (2026-10-11) - PROTOTYPED
+
+- `infra/nginx/api.gaiada.com.conf` (staged; enabled after the A record): preview and media-upload tokens are logged as `[redacted]`, the Referer loses its query, and `/admin`, `/api/graphql`, `/control` are 404 on the public host.
+- `docker-compose.vps.yml` forwards `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS`.
+- Runbooks: `webdesk-live-swap.md` (new), `webdesk-staging-rebuild.md` (WSK-61 section).
+
 ### platform-nest `0.62.0` - `projects.status` is a closed set: a CHECK, and a 400 from both project PATCH routes (2026-10-11) - PROTOTYPED
 
 PV2-09. `projects.status` had been free text since `0001_core.sql`, so a hand-typed value nobody listed would count as an active project in every "finished" reader.

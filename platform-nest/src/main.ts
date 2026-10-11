@@ -51,6 +51,7 @@ import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
 import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
 import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
 import { rebuildTargets, startSiteBuildsLoop } from "./modules/webdev/site-builds.service";
+import { sweepScheduledRebuilds } from "./modules/webdev/scheduled-rebuilds.service";
 import { invoiceModule } from "./modules/invoice";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -736,9 +737,10 @@ async function bootstrap(): Promise<void> {
   }
   // WSK-60: the staging-rebuild stamp poller. It reads only rows that exist and GETs only the staging URL
   // an operator put in WEBDESK_REBUILD_TARGETS, so "a target is configured" is its whole gate: with none,
-  // no build can have been dispatched and there is nothing to poll.
+  // no build can have been dispatched and there is nothing to poll. WSK-61 rides the same tick: a
+  // scheduled publish that went live is settled into a build first (scheduled-rebuilds.service.ts).
   if (rebuildTargets().length > 0) {
-    startSiteBuildsLoop(config.webdeskRebuild.pollIntervalMs);
+    startSiteBuildsLoop(config.webdeskRebuild.pollIntervalMs, { beforeSweep: () => sweepScheduledRebuilds() });
     // eslint-disable-next-line no-console
     console.log(`webdesk staging-rebuild poller on: every ${config.webdeskRebuild.pollIntervalMs}ms, ${rebuildTargets().length} target(s)`);
   }

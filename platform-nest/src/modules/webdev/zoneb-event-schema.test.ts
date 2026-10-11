@@ -98,4 +98,54 @@ describe("WSK-12 · validateZoneBEvent", () => {
     );
     expect(result.ok).toBe(true);
   });
+
+  // WSK-61: the content tick's fact. A hint only, but its shape is closed, so a malformed one never
+  // occupies an idempotency slot.
+  describe("schedule.fired data — strict, unknown keys refused", () => {
+    const ITEM = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+    const SITE = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+    const data = (over: Record<string, unknown> = {}) => ({
+      tenantSlug: "gaiada",
+      siteId: SITE,
+      transition: "publish",
+      approvalId: null,
+      items: [{ itemId: ITEM, version: 3, effectiveAt: "2026-10-11T08:00:00.000Z" }],
+      ...over,
+    });
+    const check = (d: unknown) => validateZoneBEvent(TENANT, validFormReceivedBody({ kind: "schedule.fired", data: d }));
+
+    it("ACCEPTS a plain publish (approvalId null), a swap (approvalId set) and a takedown (version null)", () => {
+      expect(check(data()).ok).toBe(true);
+      expect(check(data({ approvalId: "11111111-2222-4333-8444-555555555555" })).ok).toBe(true);
+      expect(check(data({ transition: "unpublish", items: [{ itemId: ITEM, version: null, effectiveAt: "2026-10-11T08:00:00Z" }] })).ok).toBe(true);
+    });
+
+    it("REFUSES unknown keys, at the top and on an item", () => {
+      expect(check(data({ note: "x" }))).toEqual({ ok: false, reason: "data has unknown keys: note" });
+      const r = check(data({ items: [{ itemId: ITEM, version: 3, effectiveAt: "2026-10-11T08:00:00Z", slug: "a" }] }));
+      expect(r).toEqual({ ok: false, reason: "data.items[0] has unknown keys: slug" });
+    });
+
+    it("REFUSES a bad transition, slug, siteId, approvalId, item id, version or instant", () => {
+      const bad: Array<[Record<string, unknown>, string]> = [
+        [{ transition: "swap" }, "data.transition must be publish|unpublish"],
+        [{ tenantSlug: "Not A Slug" }, "data.tenantSlug must be a WebDesk tenant slug"],
+        [{ siteId: "site-1" }, "data.siteId must be a uuid"],
+        [{ approvalId: "apr-1" }, "data.approvalId must be a uuid or null"],
+        [{ approvalId: undefined }, "data.approvalId must be a uuid or null"],
+        [{ items: [{ itemId: "x", version: 1, effectiveAt: "2026-10-11T08:00:00Z" }] }, "data.items[0].itemId must be a uuid"],
+        [{ items: [{ itemId: ITEM, version: 0, effectiveAt: "2026-10-11T08:00:00Z" }] }, "data.items[0].version must be a positive integer or null"],
+        [{ items: [{ itemId: ITEM, version: 1.5, effectiveAt: "2026-10-11T08:00:00Z" }] }, "data.items[0].version must be a positive integer or null"],
+        [{ items: [{ itemId: ITEM, version: 1, effectiveAt: "soon" }] }, "data.items[0].effectiveAt must be an ISO-8601 instant"],
+      ];
+      for (const [over, reason] of bad) expect(check(data(over))).toEqual({ ok: false, reason });
+    });
+
+    it("REFUSES an empty item list and more than 100 items (the producer chunks)", () => {
+      const item = { itemId: ITEM, version: 1, effectiveAt: "2026-10-11T08:00:00Z" };
+      expect(check(data({ items: [] })).ok).toBe(false);
+      expect(check(data({ items: Array.from({ length: 101 }, () => item) })).ok).toBe(false);
+      expect(check(data({ items: Array.from({ length: 100 }, () => item) })).ok).toBe(true);
+    });
+  });
 });

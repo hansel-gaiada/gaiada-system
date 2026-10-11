@@ -109,7 +109,8 @@ server-only readers with a `*Actions.ts` sibling. Every actions file follows one
 - HMAC-signed cookie `gaiada_session`. **Pure crypto lives in `lib/session.ts`, cookie I/O in
   `lib/session-server.ts`** — load-bearing: `session.ts` must stay importable from plain vitest
   without pulling in `next/headers`.
-- `middleware.ts` runs on the edge and does a **presence check only** (no `node:crypto`); every
+- `src/proxy.ts` (Next 16's name for `middleware.ts`; it runs on the Node runtime now, not Edge) still does a
+  **presence check only** (no `node:crypto`), on purpose; every
   page re-verifies via `getSessionUserId()`. Public: `/login`, `/step-up`, `/auth`, **`/print`**
   (the renderer sidecar arrives with no cookies — see below).
 - Active company = `gaiada_tenant` cookie validated against `me.companies`, falling back to the
@@ -151,7 +152,7 @@ Work check-in card. **`lib/reports.ts` is the canonical `ReportDocument` contrac
 nest's `src/modules/reports/report-document.ts` mirrors *it*, not the reverse, so field names
 change here first. One typed document feeds viewer, chart kit, table view and exporters.
 
-Print/PDF goes through a sidecar: `/print/reports/[jobToken]` is a **public** route (middleware
+Print/PDF goes through a sidecar: `/print/reports/[jobToken]` is a **public** route (the proxy's
 allowlist) rendered by the `report-renderer` Playwright sidecar with **no cookies at all** — the
 one-shot `jobToken` is what authorizes, in `lib/reports-print-data.ts::getPrintPayload`. Set
 `PRINT_STUB=1` (dev/test only) to resolve from `lib/reports-print-stub.ts` fixtures while the
@@ -242,8 +243,9 @@ to; a genuinely new surface gets a new prefix, never a bare class name.
 - vitest aliases `@` → `src` and `server-only` → an empty module (vitest has no `react-server`
   export condition). That's why a bad `server-only` import passes tests and fails the build.
 - **Two request-body caps, both 1–10 MB by default, both silent.** Server Actions cap at 1 MB
-  (`serverActions.bodySizeLimit`), and because `src/middleware.ts` exists Next buffers EVERY request
-  body for middleware and truncates it at `experimental.middlewareClientMaxBodySize` (10 MB) — a route
+  (`serverActions.bodySizeLimit`), and because `src/proxy.ts` exists Next buffers EVERY request
+  body for the proxy and truncates it at `experimental.proxyClientMaxBodySize` (10 MB; `middlewareClientMaxBodySize`
+  before Next 16) — a route
   handler then sees a short body and the platform reports a multipart error that looks like a size
   cap. Both are set to 520 MB in `next.config.ts` (the platform's 500 MB video cap + overhead); if an
   upload "exceeds cap" at a size that plainly doesn't, check these first.
