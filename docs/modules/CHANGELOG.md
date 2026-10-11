@@ -64,6 +64,7 @@ WebDesk M4, built by the M4 session; it rides this release through the automatic
 - A fail-soft OpenTelemetry TRACES bootstrap for the api, off unless configured.
 - At most 10 ENABLED webhooks per tenant (M4 cost doc §3).
 - webdesk: CPU ceilings sum to 1.0 vCPU on the 2-vCPU box (WSK-D72): api 0.40, postgres 0.30, proxy/redis/rustfs 0.10 each (`webdesk/docker-compose.aicenter.yml`).
+- WS4 approval assertion v2 (EdDSA) supported on both sides; inert until keys are installed (M4 F1). WebDesk migration **0018** (a nullable audit column); the ERP compose gains `WEBDESK_CONTROL_WS4_SIGNING_KID` / `WEBDESK_CONTROL_WS4_SIGNING_KEY_FILE` and a key directory mount. While the kid is unset the platform keeps minting v1 (HMAC).
 
 ### infra `0.11.0` - a WebDesk-only, write-only OTLP receiver on the ERP collector, off until a token is set (2026-10-12) - PROTOTYPED
 
