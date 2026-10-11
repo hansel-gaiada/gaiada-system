@@ -24,7 +24,7 @@ measures the live side.
 | `webdev_sites` registry | `modules/webdev/site-registry.service.ts`, `portfolio-reads.service.ts`; console at `departments/[deptId]/sites/portfolio` | No `webdev_site` Cerbos kind: the registry routes borrow `webdev_provisioned_site`'s `provision`/`operate` actions |
 | WSK-D35 domain key | `202609040149_search_properties_domain_key.sql` | — |
 | WSK-D36 sentinel internal client | — | Not in code. M5 already owns it as **M5-G0**; M6 depends on it and does not duplicate it |
-| MON-01 probes | `infra/observability/scripts/gen-client-property-targets.mjs` (verified rows only, private ranges refused), `infra/scripts/sync-client-property-targets.sh`, the `client-properties` job in `prometheus.remote.yml` | The record disagrees about whether it is live: `CHANGELOG.md` says "proposed, not applied", `prometheus.remote.yml` says applied |
+| MON-01 probes | `infra/observability/scripts/gen-client-property-targets.mjs` (verified rows only, private ranges refused), `infra/scripts/sync-client-property-targets.sh`, the `client-properties` job in `prometheus.remote.yml` | **Measured 2026-10-11: probes nothing.** The `client-properties` job is configured on `sumopod`, but its target file has been `[]` since 2026-09-01 and there are zero series. `gda-aicenter` has no sync cron or timer |
 | MON-04 dashboard | — | No "Client Properties" dashboard in `infra/observability/grafana/dashboards/` |
 | Credential vault (D33) | VLT-1 hosting providers, VLT-6 lifecycle, reveal approvals | — |
 
@@ -131,7 +131,7 @@ Seats follow the agent-army standard: one agent in flight at a time, and at most
 | M6-P3a | **Measure the live side (read-only).** Registry and property counts by adoption, origin and verified; whether SM-74 carries data; MON-01's cron, target file and `client-properties` series on the boxes. Live DB reads are handed to the owner as a ready command; API and `sumopod` reads by the orchestrator | orchestrator | — | PLANNED |
 | M6-P3b | **Sentinel internal client** (= M5-G0, owned by M5), then backfill the internal `webdev_sites` rows' `client_id` to it. One-off script; the owner runs the live write | junior (Haiku) writes, owner runs | M5-G0 | PLANNED |
 | M6-P3c | **A `webdev_site` Cerbos kind**, so the registry routes stop borrowing provisioned-site actions. Six artifacts, not one policy file; the four pinned count tests move | senior-be (Sonnet) | — | PLANNED |
-| M6-P3d | **MON-01 made live**, if M6-P3a finds it is not. The cron on `gda-aicenter` sits outside the `webdesk` project, so it needs the owner's OK under D43 | orchestrator | M6-P3a, owner OK | PLANNED |
+| M6-P3d | **MON-01 made live** (M6-P3a found it probes nothing). The sync script as written cannot run: it calls `node` on a host that has none, and it needs a database login that can read `search_properties` across tenants (FORCE RLS). Shape: the generator in a pinned `node` container; a read-only role granted `SELECT` on the generator's columns only; an SSH key from `gda-aicenter` to `sumopod` whose forced command can only write that one file. Everything lands outside the `webdesk` project, so it needs the owner's OK (D43) | devops (Sonnet) + orchestrator on the boxes | owner OK | PLANNED |
 | M6-P3e | **MON-04 "Client Properties" dashboard**: uptime, certificate days left, a per-property drill-down. Internal properties are excluded once the sentinel exists | devops (Sonnet) | M6-P3a | PLANNED |
 | M6-P3f | **Stale text fixed**: §07's ticket table, §10's counts, the WordPress README, the three WSK-27 → WSK-70 comments | junior (Haiku) | — | PLANNED |
 | M6-P3 gate | **About 63 properties tracked**, the probe target file a subset of verified rows (checked against the DB), no request to an unverified client host, and the console shows the registry with its staleness | qa (Sonnet) + orchestrator | P3a–e | PLANNED |
@@ -174,3 +174,8 @@ Seats follow the agent-army standard: one agent in flight at a time, and at most
 - **2026-10-11:** plan written from a read of `origin/main`. Three read-only surveys, one per phase; the claims this
   plan rests on were then rechecked by hand. The shared checkout was 465 commits behind main, so nothing was read
   from it.
+- **2026-10-11, M6-P3f:** stale text fixed (`26573f95`).
+- **2026-10-11, M6-P3a (part):** MON-01 measured on the boxes: the `client-properties` job exists on `sumopod`, its
+  target file has been an empty list since 2026-09-01 and Prometheus holds zero series for it, and `gda-aicenter` has
+  no cron or timer for the sync. The registry and property counts wait on a read-only query the owner runs.
+- **2026-10-11, M6-P4a:** dispatched to a Sonnet senior-integrator on branch `webdesk/m6-p4a-snapshot-by-id`.
