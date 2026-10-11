@@ -120,6 +120,46 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
     expect(r.statusCode).toBe(404);
   });
 
+  it("PV3-03: deliverables?clientId= is a strict facet (uuid / internal / garbage)", async () => {
+    const other = (await app.inject({
+      method: "POST", url: `/api/${co}/clients`, headers: asUser(member), payload: { name: "Facet Other Retail" },
+    })).json().id as string;
+    const mk = async (name: string, cid?: string) => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/deliverables`, headers: asUser(member),
+        payload: { projectId, name, ...(cid ? { clientId: cid } : {}) },
+      });
+      expect(r.statusCode).toBe(201);
+      return r.json().id as string;
+    };
+    const theirs = await mk("facet-theirs", other);
+    const clientless = await mk("facet-clientless");
+    const get = (qs: string) => app.inject({ method: "GET", url: `/api/${co}/deliverables${qs}`, headers: asUser(member) });
+
+    const byClient = await get(`?clientId=${clientId}`);
+    expect(byClient.statusCode).toBe(200);
+    const clientRows = byClient.json() as Array<{ id: string; client_id: string | null }>;
+    expect(clientRows.map((d) => d.id)).toContain(deliverableId);
+    expect(clientRows.map((d) => d.id)).not.toContain(theirs);
+    expect(clientRows.map((d) => d.id)).not.toContain(clientless);
+    expect(clientRows.every((d) => d.client_id === clientId)).toBe(true);
+
+    const internal = await get(`?clientId=internal`);
+    expect(internal.statusCode).toBe(200);
+    const internalRows = internal.json() as Array<{ id: string; client_id: string | null }>;
+    expect(internalRows.map((d) => d.id)).toContain(clientless);
+    expect(internalRows.map((d) => d.id)).not.toContain(deliverableId);
+    expect(internalRows.every((d) => d.client_id === null)).toBe(true);
+
+    // Garbage used to 500 on the `$2::uuid` cast.
+    expect((await get(`?clientId=not-a-uuid`)).statusCode).toBe(400);
+    // Authorization runs before validation: a user with no grant in this tenant gets 403 for a garbage
+    // clientId, not 400, so a denial test cannot silently become a validation test.
+    const outsider = await createUser("outsider@cw.test");
+    const denied = await app.inject({ method: "GET", url: `/api/${co}/deliverables?clientId=not-a-uuid`, headers: asUser(outsider) });
+    expect(denied.statusCode).toBe(403);
+  });
+
   it("member logs billable time; minutes must be positive", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/time-entries`,

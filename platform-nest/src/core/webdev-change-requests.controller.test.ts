@@ -856,12 +856,32 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     expect((byProject.json() as CrListRow[]).every((r) => r.projectId === projX)).toBe(true);
   });
 
-  it("a malformed uuid in a filter matches nothing instead of 500ing the request", async () => {
+  it("PV3-03: a malformed clientId is a 400 (strict facet), not a silent empty list or a 500", async () => {
     const r = await app.inject({
       method: "GET", url: `/api/${co}/webdev/change-requests?clientId=not-a-uuid`, headers: asUser(admin),
     });
-    expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual([]);
+    expect(r.statusCode).toBe(400);
+  });
+
+  it("PV3-03: clientId=<uuid> excludes other clients' rows; clientId=internal returns only clientless rows", async () => {
+    const mineA = await internalCr({ kind: "bug", clientId: clientA });
+    const clientless = await internalCr({ kind: "bug", clientId: undefined, projectId: undefined });
+    expect(mineA.res.statusCode).toBe(201);
+    expect(clientless.res.statusCode).toBe(201);
+
+    const byClient = await app.inject({ method: "GET", url: `/api/${co}/webdev/change-requests?clientId=${clientA}`, headers: asUser(admin) });
+    expect(byClient.statusCode).toBe(200);
+    const clientRows = byClient.json() as CrListRow[];
+    expect(clientRows.map((r) => r.id)).toContain(mineA.id);
+    expect(clientRows.map((r) => r.id)).not.toContain(clientless.id);
+    expect(clientRows.every((r) => r.clientId === clientA)).toBe(true);
+
+    const internal = await app.inject({ method: "GET", url: `/api/${co}/webdev/change-requests?clientId=internal`, headers: asUser(admin) });
+    expect(internal.statusCode).toBe(200);
+    const internalRows = internal.json() as CrListRow[];
+    expect(internalRows.map((r) => r.id)).toContain(clientless.id);
+    expect(internalRows.map((r) => r.id)).not.toContain(mineA.id);
+    expect(internalRows.every((r) => r.clientId === null)).toBe(true);
   });
 
   it("detail joins the linked run live, so the CR reflects run status without copying it", async () => {
