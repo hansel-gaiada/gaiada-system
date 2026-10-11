@@ -58,7 +58,7 @@ uptime                                   # record load1; if > 14 on 4 cores, wai
 free -m                                  # need >= 1.5 GiB "available" for ~1.1 GiB of limits
 df -h / /var/lib/docker                  # need >= 20 GB free (81% used / 40 GB free measured 2026-10-11)
 ss -ltnH | awk '{print $4}' | grep -E ':(18742|18743|13000)$' || echo "ports free"
-docker network ls -q | xargs docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | tr ' ' '\n' | grep -E '^172\.28\.91\.' || echo "172.28.91.0/28 free"
+docker network ls -q | xargs docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | tr ' ' '\n' | grep . | python3 -c 'import ipaddress,sys; n=ipaddress.ip_network("10.211.91.0/28"); o=[s for s in sys.stdin.read().split() if ipaddress.ip_network(s).overlaps(n)]; print("OVERLAPS: "+" ".join(o) if o else "10.211.91.0/28 free")'   # a /16 that COVERS it counts too (2026-10-12: gaiada-obs_default owns 172.28.0.0/16)
 ip -4 addr show docker0 | grep 172.17.0.1       # docker0 is the publish address
 ip -4 addr show wg0 | grep 10.88.0.2            # only if the erp-read profile will be used
 # erp-edge's own preflight (mimi's subnet, ports, versions) is in infra/runbooks/erp-edge-sumopod.md
@@ -129,18 +129,18 @@ sudo ~/umami/egress-guard.sh status        # shows umami-edge-no-egress (and uma
 
 ## 5. ufw: let erp-edge reach docker0 (needs root; after erp-edge exists, see erp-edge-sumopod.md)
 
-The caller of 172.17.0.1:18742 is now erp-edge's bridge (`172.28.92.0/28`), not mimi's. Allow exactly that:
+The caller of 172.17.0.1:18742 is now erp-edge's bridge (`10.211.92.0/28`), not mimi's. Allow exactly that:
 
 ```bash
-ERP_EDGE_SUBNET=172.28.92.0/28
+ERP_EDGE_SUBNET=10.211.92.0/28
 sudo ufw allow from "$ERP_EDGE_SUBNET" to 172.17.0.1 port 18742 proto tcp comment 'umami edge from erp-edge'
 docker exec erp-edge-traefik-1 wget -q -T 3 -O /dev/null http://172.17.0.1:18742/lib/kestrel.js && echo reachable
 ```
 
 If that is refused although ufw allows it, Docker's inter-bridge isolation is dropping the DNAT'd packet
 (erp-edge bridge -> umami `edge` bridge). Fix without opening anything wider:
-`sudo iptables -I DOCKER-USER -s "$ERP_EDGE_SUBNET" -d 172.28.91.0/28 -p tcp --dport 8080 -j ACCEPT` placed ABOVE the
-egress-guard drop (that drop only matches `-s 172.28.91.0/28`, so order does not matter), then add it to
+`sudo iptables -I DOCKER-USER -s "$ERP_EDGE_SUBNET" -d 10.211.91.0/28 -p tcp --dport 8080 -j ACCEPT` placed ABOVE the
+egress-guard drop (that drop only matches `-s 10.211.91.0/28`, so order does not matter), then add it to
 `egress-guard.sh`. Record which was needed.
 
 ## 6. DNS, the erp-edge route and the trusted source (after erp-edge is running)
@@ -152,7 +152,7 @@ egress-guard drop (that drop only matches `-s 172.28.91.0/28`, so order does not
    nothing is copied into mimi's directory for Umami.
 3. **Which source does the edge see (sets `ERP_EDGE_SOURCE`).** erp-edge reaches `172.17.0.1:18742` through the
    host, so the packet is DNAT'd and normally masqueraded; nginx may see erp-edge's own address or the gateway of
-   the umami `edge` bridge (`172.28.91.1`). Do not guess; measure with a held connection:
+   the umami `edge` bridge (`10.211.91.1`). Do not guess; measure with a held connection:
    ```bash
    docker exec -d erp-edge-traefik-1 sh -c '(printf "GET /__x HTTP/1.0\r\nHost: x\r\n\r\n"; sleep 12) | nc 172.17.0.1 18742'
    sleep 2; docker exec umami-edge-1 netstat -tn | grep ':8080'      # Foreign Address column = the source to trust
