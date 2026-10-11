@@ -1,0 +1,176 @@
+# WebDesk M6 · platform phases after the proof — plan, tickets and open decisions
+
+**Started:** 2026-10-11 · **Board:** `TASKS.md` (outer folder), section *M6 · WebDesk platform phases after the
+proof* · **Design:** `docs/blueprints/webdesk-design-v2.md` §04, §06–§09, §12 (P3–P6), §13 · **Rulings:** WSK-D28–D36,
+WSK-D50 · **Branch:** `webdesk/m6-start`
+
+Status words are the estate's: PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED (driven on a Linux server, result
+observed). Ticket ids (`M6-P3a` and so on) are local to this plan.
+
+**This repository is public.** Client domains, host addresses and registry rows go in gitignored `*.local.md` files on
+the operator laptop. This file carries counts and results only.
+
+## 1 · Where each phase stands
+
+Read from `origin/main` at `f53a5fa7` on 2026-10-11. Nothing in this section was driven live; §3's first ticket
+measures the live side.
+
+### P3 · Portfolio — mostly in code; the live side is unmeasured
+
+| Item | In code | Gap |
+|---|---|---|
+| SM-70 Nexus importer | `platform-nest/src/seed/nexus-import.ts`, run by hand (`npm run import:nexus`) | Never sets `verified_at`, so imported rows are never probed (by design: an import is a lead, not consent) |
+| SM-74 hosting topology | `202608300818_sm74_property_hosting_topology.sql` (provider, control panel, stack, plugin surface) | Unknown whether any row carries data |
+| `webdev_sites` registry | `modules/webdev/site-registry.service.ts`, `portfolio-reads.service.ts`; console at `departments/[deptId]/sites/portfolio` | No `webdev_site` Cerbos kind: the registry routes borrow `webdev_provisioned_site`'s `provision`/`operate` actions |
+| WSK-D35 domain key | `202609040149_search_properties_domain_key.sql` | — |
+| WSK-D36 sentinel internal client | — | Not in code. M5 already owns it as **M5-G0**; M6 depends on it and does not duplicate it |
+| MON-01 probes | `infra/observability/scripts/gen-client-property-targets.mjs` (verified rows only, private ranges refused), `infra/scripts/sync-client-property-targets.sh`, the `client-properties` job in `prometheus.remote.yml` | The record disagrees about whether it is live: `CHANGELOG.md` says "proposed, not applied", `prometheus.remote.yml` says applied |
+| MON-04 dashboard | — | No "Client Properties" dashboard in `infra/observability/grafana/dashboards/` |
+| Credential vault (D33) | VLT-1 hosting providers, VLT-6 lifecycle, reveal approvals | — |
+
+Two monitoring paths run side by side and nothing links them: the in-app `monitoring` module (its own `monitors`
+rows; 18 sites we host, live since 2026-09-01) and MON-01's blackbox job (generated from `search_properties`). M6
+keeps both: blackbox for the client estate, the in-app module for sites we host. MON-04 shows MON-01.
+
+### P4 · Repo control — the repo shell works; everything inside and after it does not
+
+In code:
+- **The four refusals are lifted (WSK-D28):**
+  - the CHECK (`202609011230_webdev_provisioned_sites_framework_widen.sql`);
+  - the tool's `framework` enum;
+  - `STACK_TO_FRAMEWORK`, which makes the stack hint a selector;
+  - `code.scaffold`, which accepts `astro`, `node` and `wp`.
+- **The repo shell.** `ErpRepoControlProvider` files a GH-12 D14 approval. The `generate` call runs once, on approval
+  (`core/github/repo-creation.ts`).
+- **Carried from `provision`:** idempotency and crash-resume, and the `prd_sign` asymmetry
+  (`evaluateProvisionPrecondition`).
+- **`github.createRepo` stays fail-closed for good.**
+- **`code.scaffold` v2** exists as a library (`ai-agents/src/code-scaffold/`) and emits `CONTRACT.lock`.
+- **Artifact bytes** for pipeline stages come from `pipeline.artifacts.get`.
+
+Not in code:
+1. **No snapshot by id (§06's blocker, half open).** `HubContractSnapshotProvider` calls `webdev.contracts.get` and
+   `webdev.artifacts.download`, and neither is registered. platform-nest has only `GET contracts` and
+   `POST contracts/refresh`.
+2. **`code.scaffold` v2 has no caller.** The hub's `code.scaffold` tool is still the old stub, and
+   `blockLibraryTarball` has no source.
+3. **Provisioning stops at the repo shell.** It creates no `webdev_sites` row, no WebDesk tenant and no pinned
+   contract. §08 says it yields all three.
+4. **No template repos.** The three repos in `site-provisioning-templates.md` do not exist, and `ERP_REPO_TEMPLATE_*`
+   has no defaults, so a missing kind returns 422.
+5. **The automation path cannot choose a kind.** `automation/workflows/wd-provision.json` hardcodes
+   `framework: "vite"`.
+6. **The console form is stale.**
+   - `platform-ui/src/lib/webdevProvisionedSites.ts:57` disables `wp` with outdated text.
+   - It offers frameworks, not the D28 kinds.
+   - Its `pending` does not say "awaiting approval".
+7. **No org-level secret grants (WSK-D29).** Granting a new repo access to org Actions secrets is not coded.
+8. **No deploy gate.**
+
+### P5 · Headless WordPress — a prototype
+
+- **In code:**
+  - the PHP block renderer and vendored vocabulary (`webdesk/wordpress/theme/gaiada-webdesk/inc/`);
+  - the PHP SDK generator (`webdesk/api/src/codegen/generator/sdk-php.mts`, in the double-run gate);
+  - a render-invariant probe, run by hand;
+  - the scaffold's `wp` branch.
+- **Not in code:**
+  - the theme's entry files (`functions.php`, `page.php`, `style.css`, the vendored `sdk.php`) are not committed;
+  - the rewrite rules and the settings page are not built;
+  - the theme has never run in a WordPress install;
+  - CI runs no PHP.
+
+### CDN · WSK-70 — deferred by WSK-D50
+
+Cache tags (`webdesk/api/src/delivery/vocabulary/cache-tags.ts`) and the `content.cache_invalidate` log line
+(`content-transitions.ts`) are in place, so a purge adapter has its input the day a CDN arrives. Three code comments
+still call the ticket WSK-27.
+
+### P6 · Client delivery — no current target
+
+§12 still names `delphi`/`helios`. The 2026-09-04 plan `2026-09-04-hostinger-shared-replatform.md` moves client
+delivery to shared hosting, but it was never ratified (its OQ-3.1–3.8 are open). Until the owner rules, P6 cannot be
+planned.
+
+### Stale text found on the way
+
+- §07's ticket table still shows SM-74 and MON-01 as "designed".
+- §10's counts are out of date: there are now 5 workflows with 19 jobs, none of them self-hosted.
+- `infra/runbooks/self-hosted-ci-runner.md` is cited in two documents but is not on main.
+- `webdesk/wordpress/README.md` says the scaffold's `wp` branch is "not wired".
+
+## 2 · Owner decisions
+
+Each carries the default this plan works to if it stays unanswered.
+
+| # | Decision | Default | Blocks |
+|---|---|---|---|
+| O-1 | **P6's target.** Ratify the Hostinger shared replatform, or keep `delphi`/`helios`. If ratified, it takes the next free WSK-D id and amends D32 and §12 P6. | None. That plan asks for OQ-3.1 (decommission deadline) and OQ-3.6 (staging retention) before anything else | P6, and the deploy secrets in M6-P4g |
+| O-2 | **Who creates the three template repos** in `gaiadabali` (`template-static-astro`, `template-fullstack-next-nest`, `template-wp`)? The ERP App can only create repos with org Administration write. | The owner creates three empty private repos marked as templates; sessions fill them by pull request | M6-P4d |
+| O-3 | **The App's `organization_secrets: write` permission**, so the ERP can grant a new repo access to deploy secrets it never holds (D29). | Not granted, so the P4 gate stops short of deploy | M6-P4g |
+| O-4 | **Where the P4 gate creates repos.** The gate is 3 kinds × 2 paths = 6 real repos. | A separate test org, so the gate can be rerun without clutter in `gaiadabali` | M6-P4 gate |
+| O-5 | **OQ-2.1 ratified.** Repo creation stays manual except through the scoped, template-only, WS4-gated ERP path. | Adopt as written | Nothing; it only needs recording |
+
+Restated, not new: **no second live tenant until M4's CPU decision** (OQ-2.7). Until then, P4's tenant creation and
+P5's proof run against the WebDesk test stack on `sumopod`.
+
+**Design call put to the owner with O-3: the deploy gate is the secret grant.** The ERP grants a repo access to the
+org deploy secrets only when the repo has a `webdev_sites` row and a `CONTRACT.lock` on its default branch, read
+through the App. A repo without both cannot deploy, because it holds nothing to deploy with. The template's deploy
+workflow also refuses without `CONTRACT.lock`, so the refusal is visible in the run. A bypass means working around the
+tooling on purpose, and the ERP records it as an exception with a reason. This meets §08's second gate with no new
+runtime dependency between a site's CI and the ERP.
+
+## 3 · Tickets
+
+Seats follow the agent-army standard: one agent in flight at a time, and at most one Opus dispatch in a usage window.
+
+| # | Ticket | Seat | Needs | State |
+|---|---|---|---|---|
+| **P3** | | | | |
+| M6-P3a | **Measure the live side (read-only).** Registry and property counts by adoption, origin and verified; whether SM-74 carries data; MON-01's cron, target file and `client-properties` series on the boxes. Live DB reads are handed to the owner as a ready command; API and `sumopod` reads by the orchestrator | orchestrator | — | PLANNED |
+| M6-P3b | **Sentinel internal client** (= M5-G0, owned by M5), then backfill the internal `webdev_sites` rows' `client_id` to it. One-off script; the owner runs the live write | junior (Haiku) writes, owner runs | M5-G0 | PLANNED |
+| M6-P3c | **A `webdev_site` Cerbos kind**, so the registry routes stop borrowing provisioned-site actions. Six artifacts, not one policy file; the four pinned count tests move | senior-be (Sonnet) | — | PLANNED |
+| M6-P3d | **MON-01 made live**, if M6-P3a finds it is not. The cron on `gda-aicenter` sits outside the `webdesk` project, so it needs the owner's OK under D43 | orchestrator | M6-P3a, owner OK | PLANNED |
+| M6-P3e | **MON-04 "Client Properties" dashboard**: uptime, certificate days left, a per-property drill-down. Internal properties are excluded once the sentinel exists | devops (Sonnet) | M6-P3a | PLANNED |
+| M6-P3f | **Stale text fixed**: §07's ticket table, §10's counts, the WordPress README, the three WSK-27 → WSK-70 comments | junior (Haiku) | — | PLANNED |
+| M6-P3 gate | **About 63 properties tracked**, the probe target file a subset of verified rows (checked against the DB), no request to an unverified client host, and the console shows the registry with its staleness | qa (Sonnet) + orchestrator | P3a–e | PLANNED |
+| **P4** | | | | |
+| M6-P4a | **Snapshot by id (closes §06).** platform-nest `GET contracts/:id` and the snapshot's file bytes. Hub tools `webdev.contracts.get` and `webdev.artifacts.download`: read-only, tenant-scoped, authorised by `webdev_contract_snapshot` `read` | senior-integrator (Sonnet) | — | PLANNED |
+| M6-P4b | **Wire `code.scaffold` v2.** Runner dispatch in ai-agents, the hub stub replaced, a source for the block-library tarball. `dry_run` proven for all three kinds | senior-integrator (Sonnet; opus·medium if the runner seam resists) | M6-P4a | PLANNED |
+| M6-P4c | **Provisioning finishes §08.** When the repo is created: the `webdev_sites` row (`origin = provisioned`, `adoption = mandated`, its kind) and the WebDesk tenant with a pinned contract snapshot, idempotent and crash-resumable like the repo step | senior-be (opus·high: crash-resume across two services) | M6-P4a | PLANNED |
+| M6-P4d | **Template repos filled** per `site-provisioning-templates.md`. `template-wp` carries the M6-P5a theme. Each template's deploy workflow refuses without `CONTRACT.lock`. `ERP_REPO_TEMPLATE_*` set on the box and listed in compose | medior (Sonnet) + orchestrator on the box | O-2 | PLANNED |
+| M6-P4e | **PRD → kind on the automation path.** `wd-provision.json` passes the signed PRD's stack hint instead of `vite`, re-imported with the n8n CLI | medior (Sonnet) | — | PLANNED |
+| M6-P4f | **Console kind picker**: `static`/`wp`/`fullstack`, `wp` enabled, an "awaiting approval" state that links to the approval, the failure reason shown | medior (Sonnet), senior-fe review | — | PLANNED |
+| M6-P4g | **Deploy gate and org secret grant**, in the shape in §2 | senior-be (opus·high: a security boundary) | O-1, O-3 | PLANNED |
+| M6-P4 gate | **A staff click and a signed PRD each produce a correct repo for each kind** (6 runs), each with its registry row, tenant and `CONTRACT.lock`; a repo without them is refused deploy | qa (Sonnet) + orchestrator | P4a–g, O-4 | PLANNED |
+| **P5** | | | | |
+| M6-P5a | **Theme finished**: entry files, the vendored `sdk.php` from codegen, rewrite rules, a settings page. The read key comes from the environment, never a WordPress option | medior (Sonnet) | — | PLANNED |
+| M6-P5b | **PHP in CI**: `php -l`, the render-invariant probe, a drift check of the vendored vocabulary | devops (Sonnet) | M6-P5a | PLANNED |
+| M6-P5 gate | **A WordPress site renders entirely from `/v1`.** On `sumopod`: a throwaway WordPress and MySQL, the theme active, a test tenant on the WebDesk test stack, every page of a fixture site from `/v1`, unknown blocks reported and never thrown | qa (Sonnet) + orchestrator | M6-P5a, M6-P5b | PLANNED |
+| **CDN** | | | | |
+| WSK-70 | **CDN purge on publish.** Stays deferred (D50); its comment ids are fixed in M6-P3f | — | a CDN in front of `/v1` or a site | deferred |
+| **P6** | | | | |
+| M6-P6a | **P6 plan**, re-cut from the replatform's R0–R6 or from `delphi`/`helios`, per O-1 | orchestrator | O-1 | PLANNED |
+
+## 4 · Order
+
+1. **First, with no owner input:**
+   - M6-P3a measures the live side;
+   - M6-P4a closes §06, the first build item §12 names;
+   - M6-P3f fixes the stale text, small enough to run inline.
+2. **Then, one agent at a time:**
+   - P3: M6-P3c, then M6-P3e;
+   - P4: M6-P4b, then M6-P4c, then M6-P4e and M6-P4f;
+   - P5: M6-P5a, then M6-P5b, then the P5 gate. P5 runs independently of P4, apart from M6-P4d using its theme.
+3. **Once the owner answers:**
+   - M6-P4d after O-2;
+   - M6-P4g after O-1 and O-3;
+   - the P4 gate after O-4;
+   - P6 after O-1.
+
+## 5 · Log
+
+- **2026-10-11:** plan written from a read of `origin/main`. Three read-only surveys, one per phase; the claims this
+  plan rests on were then rechecked by hand. The shared checkout was 465 commits behind main, so nothing was read
+  from it.
