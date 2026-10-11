@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { parseOidcIssuers } from "./auth/oidc-issuers";
 
 // SM-36 — parse an optional comma-separated env override for a per-capability provider preference
 // list (config.search.capabilityPreference); an unset or empty-after-trim value keeps `fallback` so
@@ -326,7 +327,13 @@ const configBase = {
   // Auth mode (5b): "oidc" requires a verified IdP JWT; "dev" keeps the x-user-id header
   // (local + tests). OBO-envelope resolution works in both modes.
   authMode: process.env.AUTH_MODE ?? "dev",
-  oidcIssuer: process.env.OIDC_ISSUER ?? "http://localhost:8080/realms/gaiada",
+  // OIDC_ISSUER is comma-separated; during an issuer move list "new,old" (the first one is used to
+  // build URLs). A token is accepted when its `iss` equals ANY entry (see auth/oidc-issuers.ts).
+  // `oidcIssuer` is the FIRST entry, for code that needs a single URL.
+  oidcIssuers: parseOidcIssuers(process.env.OIDC_ISSUER),
+  get oidcIssuer(): string {
+    return this.oidcIssuers[0]!;
+  },
   oidcJwksUri:
     process.env.OIDC_JWKS_URI ?? "http://localhost:8080/realms/gaiada/protocol/openid-connect/certs",
   oidcAudience: process.env.OIDC_AUDIENCE ?? "gaiada-platform",
