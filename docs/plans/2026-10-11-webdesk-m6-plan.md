@@ -112,6 +112,8 @@ Each carries the default this plan works to if it stays unanswered.
 | O-4 | **Where the P4 gate creates repos.** The gate is 3 kinds × 2 paths = 6 real repos. | A separate test org, so the gate can be rerun without clutter in `gaiadabali` | M6-P4 gate |
 | O-5 | **OQ-2.1 ratified.** Repo creation stays manual except through the scoped, template-only, WS4-gated ERP path. | Adopt as written | Nothing; it only needs recording |
 
+**Owner answers, 2026-10-12:** O-2, O-4 and O-5 accepted as their defaults and recorded as **WSK-D74** in `webdesk-design-v2.md` §14 (OQ-2.1 marked resolved in §13). O-1 is deferred (P6 waits). O-3 stays open. The owner also approved merging M6's verified work to main (after a full gate on the then-current main) and two agents at a time.
+
 Restated, not new: **no second live tenant until M4's CPU decision** (OQ-2.7). Until then, P4's tenant creation and
 P5's proof run against the WebDesk test stack on `sumopod`.
 
