@@ -230,15 +230,45 @@ real bot token available in this ticket) — authored against the same call shap
 
 ---
 
+## 6a. The restore drill — run it, timed (M4 T3, first run 2026-10-11)
+
+`webdesk/ops/scripts/webdesk-restore-drill.sh` is the box side. It reads a plain dump on stdin and restores it into a
+throwaway `postgres:16-alpine` (`--network none`, removed on exit). It then checks that every table's row count
+equals the dump's COPY count, that RLS came back on every table (and, optionally, the live counts), and that
+`webdesk_app` with no tenant set reads zero rows.
+
+The age key lives only on the operator laptop. So the laptop decrypts, verifies the puller's checksum, and streams;
+plaintext never lands on sumopod:
+
+```sh
+S=$(date +%s)
+F=$(ssh sumopod 'ls -1 ~/erp-offsite/data/webdesk-*.sql.gz.age | tail -1'); B=$(basename "$F" .age)
+scp sumopod:"$F" sumopod:"$F.sha256" .
+age -d -i ~/.ssh/gaiada-backup-age "$B.age" > "$B"
+sha256sum -c "$B.age.sha256"                 # the line already names $B
+ssh gda-aicenter 'EXPECT_FORCED_TABLES=<live> EXPECT_ITEMS=<live> bash ~/gaiada-webdesk/webdesk/ops/scripts/webdesk-restore-drill.sh' < "$B"
+echo "end to end $(( $(date +%s) - S ))s"
+shred -u "$B"; rm -f "$B.age" "$B.age.sha256"
+```
+
+**2026-10-11 run.** Offsite file `webdesk-20261011-125911.sql.gz`, the first dump written by `webdesk_backup`.
+- Fetched in 5 s; decrypted and checksum OK at 6 s.
+- On the box, the throwaway was ready at 9.3 s, restored at 13.3 s and verified at 17.7 s.
+- **26 s end to end.**
+- 25 tables, every count equal to the dump; tenants 1; content_items 326 (= live); 24 tables RLS enabled + forced
+  (= live); `webdesk_app` without a tenant reads 0 of 326.
+
+Run it quarterly, and after any change to the backup role or the dump script.
+
 ## 5. Stated RTO/RPO and what they assume
 
 | Tier | RPO (target) | RTO (target) | Assumes |
 |---|---|---|---|
-| Zone B Postgres (tenants/sites/api_keys/releases/audit/forms) | **≤ 24h** (one nightly dump cycle) | **≤ 2h** to a working restored database on a fresh instance | Restore follows the same throwaway-container pattern as `infra/scripts/restore-drill.sh` (start `postgres:16-alpine`, `psql` the newest dump, integrity-check ≥1 table) — not yet built for Zone B specifically, so the 2h figure is an estimate from that precedent, not a measured number |
+| Zone B Postgres (tenants/sites/api_keys/releases/audit/forms) | **≤ 24h** (one nightly dump, 03:05 UTC; pulled offsite 04:15 UTC) | **OBSERVED 26 s** offsite copy → verified restore (2026-10-11 drill, 3.9 MB dump, 1 tenant / 326 items; 43 s on a busier run); the target stays ≤ 2h for a fresh instance, where box provisioning dominates | `ops/scripts/webdesk-restore-drill.sh` (§6a): decrypt on the operator laptop, stream into a throwaway `postgres:16-alpine` with `--network none` on the box, every table's rows equal to the dump, RLS enabled+forced on all 24 tables, `webdesk_app` without a tenant reads 0 rows |
 | Zone B RustFS (media/video/uploads/artifacts) | **≤ 24h** for content that changed since the last mirror; **0** for anything still in local versioned storage (object-lock keeps prior versions live on-box even before the offsite copy is consulted) | **Depends on volume** — a full-bucket restore from the offsite pull target is bandwidth-bound, not measured | No number exists yet because no offsite target exists yet to restore from and time |
 | Whole-box loss (box itself destroyed/unreachable) | Same as the Postgres/RustFS rows — the offsite copy is what survives | **Unknown — box provisioning time dominates.** A fresh box + hardening runbook (this ticket, §3-6 of the hardening runbook) + restore from offsite is realistically **measured in hours to low-single-digit days** once A-12 lands, not minutes; this platform does not yet have a hot-standby box, which would be the only way to get whole-box RTO into minutes | No hot standby exists or is funded (WSK-D23: "no new recurring cost is accepted at this stage") |
 
-**These are targets, not measurements.** Per the estate's `restore-drill.md` precedent ("Copy the
+**Only the Postgres row is measured (§6a). The other rows are targets, not measurements.** Per the estate's `restore-drill.md` precedent ("Copy the
 observed RTO/RPO from the log into the table... After a few runs"), the honest move is to publish
 the intended numbers now and replace every row with an *observed* number once a Zone B restore
 drill has actually run — which needs the box (or, for the Postgres/RustFS restore mechanics
