@@ -79,7 +79,7 @@ export class InvoiceController {
     const currency = (b?.currency || "USD").slice(0, 8);
     const id = newId();
     const invoice = await withTenants([tenantId], async (c) => {
-      const client = await c.query<{ id: string }>(`SELECT id FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]);
+      const client = await c.query<{ id: string }>(`SELECT id FROM clients WHERE id = $1 AND deleted_at IS NULL AND NOT is_internal`, [clientId]);
       if (!client.rows[0]) throw new NotFoundException("client not found");
       // Billable minutes per project for this client's projects within the period.
       const agg = await c.query<{ project: string; minutes: string }>(

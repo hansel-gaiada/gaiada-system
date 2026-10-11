@@ -59,7 +59,7 @@ export class PortalCentreController {
     return withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       const clients = await c.query<{ id: string; name: string }>(
-        `SELECT id, name FROM clients WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY name`,
+        `SELECT id, name FROM clients WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL AND NOT is_internal ORDER BY name`,
         [scope.clientIds],
       );
       const out = [];
@@ -84,7 +84,7 @@ export class PortalCentreController {
       // clientId it guessed belongs to SOMEONE ELSE'S tenant relationship, even as a bare "forbidden".
       if (!scope.clientIds.includes(clientId)) throw new NotFoundException("client not found");
       const client = await c.query<{ id: string; name: string; status: string | null }>(
-        `SELECT id, name, status FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId],
+        `SELECT id, name, status FROM clients WHERE id = $1 AND deleted_at IS NULL AND NOT is_internal`, [clientId],
       );
       if (!client.rows[0]) throw new NotFoundException("client not found");
       const row = await loadProfileRow(c, tenantId, clientId);
@@ -114,7 +114,7 @@ export class PortalCentreController {
         throw new ForbiddenException("your access is view-only — ask your account manager for company-wide signing access");
       }
       const client = await c.query<{ id: string; name: string; status: string | null }>(
-        `SELECT id, name, status FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId],
+        `SELECT id, name, status FROM clients WHERE id = $1 AND deleted_at IS NULL AND NOT is_internal`, [clientId],
       );
       if (!client.rows[0]) throw new NotFoundException("client not found");
       const existing = await loadProfileRow(c, tenantId, clientId);

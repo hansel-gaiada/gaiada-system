@@ -25,7 +25,7 @@ export function ClientsTable({
     <DataTable
       columns={columns}
       rows={rows}
-      link={{ base: "/clients", idKey: "id", labelKey: "name" }}
+      link={{ base: "/clients", idKey: "id", labelKey: "name", badgeKey: "badge" }}
       csvName="clients"
       pageSize={20}
       viewKey={viewKey}

@@ -20,7 +20,8 @@ import {
 
 // CC-D10: every read of a client row carries its owner (account manager) and the owner's name. The
 // users join is LEFT so an ownerless client, or one whose owner was hard-deleted, still reads.
-const CLIENT_COLUMNS = `cl.id, cl.name, cl.contact, cl.status, cl.custom_fields, cl.owner_user_id, ou.name AS owner_name`;
+const CLIENT_COLUMNS = `cl.id, cl.name, cl.contact, cl.status, cl.custom_fields, cl.owner_user_id, ou.name AS owner_name,
+  cl.is_internal AS "isInternal"`;
 const CLIENT_FROM = `FROM clients cl LEFT JOIN users ou ON ou.id = cl.owner_user_id`;
 
 // Notes are rows in the core `comments` table with this target type. That table is staff-only by
