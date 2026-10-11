@@ -111,7 +111,9 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // every basic-access contact an editor). 390 -> 391.
     // WSK-47 (2026-10-10): 391 -> 401 (+10 across the NEW webdesk_content_item/webdesk_collection kinds;
     // +2 authoring groups, publish/schedule advancedOnly). Relationship set untouched.
-    expect(grantable.length).toBe(401);
+    // WSK-49f (2026-10-11): 401 -> 403 (+2 on the EXISTING client_contact kind, both advancedOnly:
+    // manage_website_editor, manage_admin). No new authoring group. Relationship set untouched.
+    expect(grantable.length).toBe(403);
     expect(relationshipKeys.size).toBe(15);
   });
 

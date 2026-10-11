@@ -15,11 +15,11 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1818,
+      "totalPairs": 1825,
       "perRole": {
-        "platform_admin": 401,
-        "company_admin": 367,
-        "manager": 177,
+        "platform_admin": 403,
+        "company_admin": 369,
+        "manager": 178,
         "member": 88,
         "viewer": 31,
         "org_unit_lead": 16,
@@ -44,7 +44,7 @@
         "finance_manager": 43,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 367
+        "owner": 369
       },
       "selfScopedPairs": 28
     }
@@ -89,6 +89,8 @@
       "core.client.read",
       "core.client.update",
       "core.client_contact.create",
+      "core.client_contact.manage_admin",
+      "core.client_contact.manage_website_editor",
       "core.client_contact.read",
       "core.client_contact.revoke",
       "core.client_contact.update",
@@ -492,6 +494,8 @@
       "core.client.read",
       "core.client.update",
       "core.client_contact.create",
+      "core.client_contact.manage_admin",
+      "core.client_contact.manage_website_editor",
       "core.client_contact.read",
       "core.client_contact.revoke",
       "core.client_contact.update",
@@ -852,6 +856,7 @@
       "core.client.read",
       "core.client.update",
       "core.client_contact.create",
+      "core.client_contact.manage_website_editor",
       "core.client_contact.read",
       "core.client_contact.revoke",
       "core.client_contact.update",
@@ -1594,6 +1599,8 @@
       "core.client.read",
       "core.client.update",
       "core.client_contact.create",
+      "core.client_contact.manage_admin",
+      "core.client_contact.manage_website_editor",
       "core.client_contact.read",
       "core.client_contact.revoke",
       "core.client_contact.update",

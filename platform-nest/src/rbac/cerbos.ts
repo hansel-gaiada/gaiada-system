@@ -95,6 +95,13 @@ export interface Resource {
    *  from the client. `publish` lets a maker approve their own request only when this is exactly 1;
    *  batches keep maker ≠ checker. Omitted -> 0 -> the strict two-person rule applies (fail closed). */
   itemCount?: number;
+  /** WSK-49f / WSK-D60 -- the CLIENT RECORD (`clients.id`) this resource is about. Two readers, both in
+   *  derived_roles.yaml: `client_website_editor` (a grant with scopeType client whose scopeId equals it, in
+   *  the grant's tenant) and `client_contact_admin` (the principal's `clientAdminOf` contains this client in
+   *  this tenant). It must come from a row the handler loaded in the request's tenant (or from a route
+   *  param the handler then verifies against that row) -- NEVER from a request body. Omitted -> "" -> neither
+   *  derived role can match, so an unfed resource confers nothing (fail closed). */
+  clientId?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -122,7 +129,20 @@ export function principalPayload(p: Principal) {
       // principal assembled before this field existed (or by a test fixture that omits it) denies
       // cross-root access rather than permitting it, which is the direction an omission must fail.
       rootCompanies: p.rootCompanies ?? [],
-      grants: p.roles.map((g) => ({ role: g.role, scopeType: g.scopeType, scopeId: g.scopeId ?? "" })),
+      // WSK-49f: `scopeTenantId` is sent only on a client-scoped grant (see RoleGrant). The derived role
+      // guards it with has(), so a client-scoped grant that somehow arrives without its tenant matches nothing.
+      grants: p.roles.map((g) => ({
+        role: g.role,
+        scopeType: g.scopeType,
+        scopeId: g.scopeId ?? "",
+        // Conditional spread: every non-client grant keeps its exact historical shape (the HIER-1 round-trip
+        // tests pin it); only a client-scoped grant carries a tenant.
+        ...(g.scopeTenantId ? { scopeTenantId: g.scopeTenantId } : {}),
+      })),
+      // WSK-49f. An explicit allow-list entry, like every attribute here: an attribute not named in this
+      // function never reaches Cerbos. `?? []` is the fail-closed default (the derived role's `exists` is
+      // false on an empty list).
+      clientAdminOf: (p.clientAdminOf ?? []).map((a) => ({ tenantId: a.tenantId, clientId: a.clientId })),
       // IAM-04a: additive alongside `grants` — the resolved (permission key, scope) pairs IAM-03a's
       // `assemblePrincipal()` expands through `role_permissions` (0094). `p.perms` is optional on
       // `Principal` (see principal.ts's own comment on why: ~20 pre-existing test files construct
@@ -179,6 +199,8 @@ function resourcePayload(r: Resource) {
       collectionKey: r.collectionKey ?? "",
       locale: r.locale ?? "",
       itemCount: r.itemCount ?? 0,
+      // WSK-49f. Listed here or it never reaches derived_roles.yaml (this is an allow-list).
+      clientId: r.clientId ?? "",
     },
   };
 }

@@ -96,7 +96,7 @@ export async function grantRole(
   roleId: string,
   // HIER-1 added `org_unit` (widening); HIER-3 (2026-08-11) retired `team`/`record` — this union
   // now matches migration 0100+0103's DB CHECK exactly: global | company | org_unit | project.
-  scopeType: "global" | "company" | "org_unit" | "project",
+  scopeType: "global" | "company" | "org_unit" | "project" | "client",
   scopeId: string | null,
 ): Promise<void> {
   await withGlobal((c) =>

@@ -125,6 +125,43 @@ derivedRoles:
             request.principal.attr.grants.exists(g, g.role == "client" && (
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
 
+    # ═══════ WSK-49f / WSK-D60 (amended 2026-10-11) -- the client-website grant path ═══════════════════
+    # TWO attribute-gated derived roles. Neither has a perm_* mirror and neither may ever get one: a flat
+    # permission catalog cannot express "this ONE client", so a mirror would over-grant to every client
+    # (the Phase-2 role-write trap, UI-editable roles unlocking the perms arm). Neither reads
+    # `variables.local`: a factored local variable hides the self-scope and mis-routes IAM overrides.
+    #
+    # client_website_editor -- the ROLE `client_website_editor`, a grant stored as data with scopeType
+    #   `client` and scopeId = a `clients.id`. It matches only when that client IS the one the resource is
+    #   about (`resource.attr.clientId`) AND the grant's tenant is the resource's tenant. `scopeTenantId` is
+    #   not on the grant row: assemblePrincipal() reads it from the grantee's own ACTIVE client-wide
+    #   contact row, so a grant whose holder is no longer a contact of that client never reaches Cerbos.
+    #   `clientId != ""` is explicit: an unfed resource (a handler that forgot the attribute) matches
+    #   nothing, even against a hand-built grant with an empty scopeId.
+    - name: client_website_editor
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.resource.attr.clientId != "" &&
+            request.principal.attr.grants.exists(g, g.role == "client_website_editor" &&
+              g.scopeType == "client" && g.scopeId == request.resource.attr.clientId &&
+              has(g.scopeTenantId) && g.scopeTenantId == request.resource.attr.tenantId)
+
+    # client_contact_admin -- a client CONTACT holding capability `admin` on this client. Capability is not a
+    #   role, so it arrives as a server-derived principal attribute (`clientAdminOf`: [{tenantId, clientId}],
+    #   the principal's own ACTIVE client-wide admin contact rows) rather than a grant. It matches only the
+    #   client the resource names, in that client's own tenant.
+    - name: client_contact_admin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.resource.attr.clientId != "" &&
+            has(request.principal.attr.clientAdminOf) &&
+            request.principal.attr.clientAdminOf.exists(a,
+              a.clientId == request.resource.attr.clientId && a.tenantId == request.resource.attr.tenantId)
+
     # Module-elevated approver (e.g. agency_approver) covering its module's resources.
     - name: module_approver
       parentRoles: ["user"]

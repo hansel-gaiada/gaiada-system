@@ -38,7 +38,17 @@
 // Conclusion: the allowlist is empty. That is a STRONGER guarantee than a populated one (every
 // seeded global role must resolve to at least one grantable permission, no exceptions), not a
 // missing feature — stated plainly per the ticket's own framing.
-const EXEMPT_EMPTY_BUNDLE_ROLES: ReadonlySet<string> = new Set([]);
+//
+// WSK-49f (2026-10-11) -- THE FIRST EXEMPTION, AND WHY IT IS NOT THE DEFECT THIS GUARD EXISTS FOR:
+// `client_website_editor` (WSK-D60) is a role stored as data whose authority is an ATTRIBUTE condition in
+// Cerbos (derived_roles.yaml: a grant with scopeType `client` whose scopeId is the resource's client, in
+// that grant's tenant), never a bundle of `perm_*` keys. The owner ruled "no perm_* mirror": a flat
+// permission catalog cannot express "this ONE client" and would over-grant to every client. So a
+// permission bundle for it would be a defect, and migration 202610110520 asserts it stays EMPTY. The
+// variant-#4 failure this guard catches (a grantable name that authorises nobody) cannot happen here: the
+// role's reach is carried by its derived role, which `role-catalog-drift.db.test.ts` section (A) requires
+// a `roles` row for, and the role can be minted only at client scope (the DB trigger and the choke point).
+const EXEMPT_EMPTY_BUNDLE_ROLES: ReadonlySet<string> = new Set(["client_website_editor"]);
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";

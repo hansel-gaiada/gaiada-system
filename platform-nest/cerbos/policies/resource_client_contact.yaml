@@ -32,6 +32,34 @@ resourcePolicy:
       derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
+    # ══════════ WSK-49f / WSK-D60 (amended 2026-10-11) — the client-website grant path ═══════════════
+    # Two actions, ROLE-ARM ONLY (no perm_* mirror, deliberately: the client-admin arm below is attribute-
+    # gated, and a flat permission key cannot express "this client").
+    #
+    #   manage_website_editor — grant / revoke the `client_website_editor` role to a contact of a client,
+    #                           and list who holds it. The callers differ by WHAT THE HANDLER FEEDS:
+    #       * STAFF route (/clients/:clientId/contacts/:contactId/website-editor): resource carries NO
+    #         clientId, so the client-admin arm below cannot match and only the staff rules can.
+    #       * PORTAL route (/portal/clients/:clientId/...): resource carries the route's clientId, which
+    #         the handler then verifies against the caller's own portal scope and the target contact's row.
+    #   manage_admin          — grant / revoke the `admin` client-contact capability. STAFF ONLY: there is
+    #                           deliberately no client-admin rule for it, so a client admin can never mint
+    #                           another admin (WSK-D60 amendment: "assigned only by Gaiada staff").
+    - actions: ["manage_website_editor"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["manage_admin"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # The client-admin arm: THIS action only, THIS client only (the derived role pins clientId + tenant).
+    # `inRoot` mirrors the portal rules' second wall; `inTenant` is pinned to the caller's own contact rows.
+    - actions: ["manage_website_editor"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["client_contact_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+
     # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
     # is byte-for-byte unchanged. group_executive's own notLow-only rule above is DELIBERATELY not
     # mirrored (IAM-04c/TRAP-4: the exec tier never enters the permission catalog via this file's

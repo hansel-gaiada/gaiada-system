@@ -128,7 +128,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // WSK-47 (2026-10-10): +10 pairs / +2 kinds (webdesk_content_item: read/create/update/
     // request_publish/publish/schedule/unpublish/delete; webdesk_collection: read/apply_schema),
     // 406/99 -> 416/101.
-    expect(catalog.length).toBe(416);
+    // WSK-49f (2026-10-11, WSK-D60): +2 pairs, NO new kind -- client_contact.manage_website_editor and
+    // client_contact.manage_admin on the EXISTING `client_contact` kind. 416/101 -> 418/101.
+    expect(catalog.length).toBe(418);
     expect(catalogKindSet.size).toBe(101);
   });
 

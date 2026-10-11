@@ -153,6 +153,14 @@ const DIRECT: Record<string, RealRole[]> = {
   // IAM Phase 2 (P2-02) — it_account's own narrower IT tier (it_admin/it_manager, NOT plain "it").
   // Mirrors generate-role-bundles.mjs's own DIRECT entry so this file's independent re-derivation agrees.
   it_managers: ["it_admin", "it_manager"],
+  // WSK-49f (WSK-D60): the two ATTRIBUTE-gated client-website derived roles map to NO real role on purpose.
+  // `client_contact_admin` is a client CONTACT capability (a principal attribute, not a grant) and
+  // `client_website_editor` is a client-scoped grant that carries no permission bundle at all, so neither can
+  // contribute a (role, key) pair to any bundle. Listing them as empty keeps the "unknown derived role" guard
+  // armed for every OTHER new derived role. Kept byte-aligned across generate-role-bundles.mjs and
+  // role-permission-parity.db.test.ts.
+  client_contact_admin: [],
+  client_website_editor: [],
 };
 
 // MON-10b — the five module-tiered monitoring kinds (0117 + the completion migration). BARE names,
