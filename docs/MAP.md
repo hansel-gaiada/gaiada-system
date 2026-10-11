@@ -108,7 +108,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `knowledge` | — | — | — | — |
 | `mcp-hub` | — | — | — | — |
 | `node-exporter` | prom/node-exporter:v1.8.2 | — | — | — |
-| `otel-collector` | otel/opentelemetry-collector-contrib:0.116.1 | — | — | — |
+| `otel-collector` | otel/opentelemetry-collector-contrib:0.116.1 | — | `172.17.0.1:4319:4319` | — |
 | `platform` | — | — | — | — |
 | `postgres-exporter` | quay.io/prometheuscommunity/postgres-exporter:v0.16.0 | — | — | — |
 | `postgres-exporter-bot` | quay.io/prometheuscommunity/postgres-exporter:v0.16.0 | — | — | — |
