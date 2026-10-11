@@ -4,6 +4,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
 import { toolkitFor, deptTabs } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ImageStudio } from "@/components/creative/ImageStudio";
@@ -25,7 +26,7 @@ export default async function ImageStudioPage({ params }: { params: Params }) {
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
 
-  const hasStudio = deptTabs(toolkitFor(dept.name)).some((t) => t.path === "studio");
+  const hasStudio = deptTabs(toolkitFor(activeCompany(me, tenant)?.vertical, dept.name)).some((t) => t.path === "studio");
   if (!hasStudio) {
     return (
       <Card title="Image Studio">

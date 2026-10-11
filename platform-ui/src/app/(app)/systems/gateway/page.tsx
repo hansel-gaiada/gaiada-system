@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
-import { isElevated } from "@/lib/rbac";
+import { isPlatformOperator } from "@/lib/companyContext";
 import { getSystemStatus, getSystemConfig, getEgressAudit, getGatewayDetail } from "@/lib/admin";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -56,7 +56,8 @@ export default async function GatewaySystemPage({
     getEgressAudit(userId, { limit: 200, decision: decision || undefined, capability: capability || undefined }),
   ]);
 
-  const elevated = isElevated(me);
+  // PV-D18: the owner of the root gets the full controls too; the server gate decides for real.
+  const elevated = isPlatformOperator(me);
   const budget = detail?.budget;
   const security = detail?.security;
   const tenantSpend = Object.entries(budget?.tenants ?? {}).sort((a, b) => b[1] - a[1]);

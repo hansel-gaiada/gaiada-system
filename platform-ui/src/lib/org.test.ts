@@ -3,7 +3,7 @@ import { defaultStructure, sanitizeStructure } from "./org";
 
 describe("defaultStructure", () => {
   it("seeds the five departments for the agency", () => {
-    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency" });
+    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency", vertical: "agency" });
     expect(s.root.kind).toBe("company");
     // GM is LAST here on purpose: these ids are positional (`dept-${i + 1}`), so inserting it at the
     // front would renumber Web Dev off `dept-1` and SEO off `dept-3` — the latter is hard-wired into
@@ -15,14 +15,14 @@ describe("defaultStructure", () => {
   it("gives GM its own department node with no divisions", () => {
     // Mirrors platform-nest `seed/roster.ts`: `{ id: "d-gm", name: "GM", divisions: [] }` — people
     // sit directly under the department, same as Social Media.
-    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency" });
+    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency", vertical: "agency" });
     const gm = s.root.children.find((c) => c.name === "GM")!;
     expect(gm.id).toBe("dept-5");
     expect(gm.children.every((c) => c.kind === "person")).toBe(true);
   });
 
   it("seeds the canonical depth department → division → role → person for the agency", () => {
-    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency" });
+    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency", vertical: "agency" });
     const webDev = s.root.children[0];
     expect(webDev.children[0].kind).toBe("division");
     const division = webDev.children[0];
@@ -33,8 +33,16 @@ describe("defaultStructure", () => {
   });
 
   it("gives non-agency companies an empty, editable root", () => {
-    const s = defaultStructure({ id: "co-holding", name: "Holding", type: "holding" });
+    const s = defaultStructure({ id: "co-holding", name: "Holding", type: "holding", vertical: "holding" });
     expect(s.root.children).toEqual([]);
+  });
+
+  // PV-D13: the seed follows the VERTICAL. Neither the legacy `type` nor a company id (the old
+  // hard-coded "co-agency") may select the agency tree.
+  it("keys the agency tree on the vertical alone, not on type or id", () => {
+    expect(defaultStructure({ id: "co-agency", name: "X", type: "agency", vertical: "hospitality" }).root.children).toEqual([]);
+    expect(defaultStructure({ id: "co-agency", name: "X", type: "agency" }).root.children).toEqual([]);
+    expect(defaultStructure({ id: "anything", name: "X", type: null, vertical: "agency" }).root.children).toHaveLength(5);
   });
 });
 

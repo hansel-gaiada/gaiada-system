@@ -4,6 +4,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
 import { toolkitFor, deptTabs } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AssetLibrary } from "@/components/creative/AssetLibrary";
@@ -27,7 +28,7 @@ export default async function AssetLibraryPage({ params }: { params: Params }) {
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
 
-  const hasAssets = deptTabs(toolkitFor(dept.name)).some((t) => t.path === "assets");
+  const hasAssets = deptTabs(toolkitFor(activeCompany(me, tenant)?.vertical, dept.name)).some((t) => t.path === "assets");
   if (!hasAssets) {
     return (
       <Card title="Asset Library">

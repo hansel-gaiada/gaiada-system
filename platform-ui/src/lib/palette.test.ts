@@ -21,7 +21,7 @@ describe("palette entry builders", () => {
   });
 
   it("buildDeptEntries lists every non-Home tab, skipping the department's own root", () => {
-    const entries = buildDeptEntries([{ id: "dept-1", name: "Web Dev" }]);
+    const entries = buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], "agency");
     expect(entries.every((e) => e.href !== "/departments/dept-1")).toBe(true);
     expect(entries.some((e) => e.label === "Web Dev · Activity")).toBe(true);
     expect(entries.every((e) => e.section === "Departments")).toBe(true);
@@ -30,6 +30,11 @@ describe("palette entry builders", () => {
   it("buildDeptEntries falls back to the generic Home-only toolkit for an unregistered department name", () => {
     // The generic toolkit has only the Home tab, which is deliberately skipped — so this
     // department contributes zero tier-2 entries, not a crash.
-    expect(buildDeptEntries([{ id: "dept-9", name: "Legal" }])).toEqual([]);
+    expect(buildDeptEntries([{ id: "dept-9", name: "Legal" }], "agency")).toEqual([]);
+  });
+
+  it("buildDeptEntries gives a bespoke department name no tier-2 tabs outside the agency vertical", () => {
+    expect(buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], "hospitality")).toEqual([]);
+    expect(buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], undefined)).toEqual([]);
   });
 });

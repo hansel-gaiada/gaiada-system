@@ -13,7 +13,7 @@ import "server-only";
 //   Reads: any member of :t. Writes: elevated only (platform_admin/group_executive)
 //   — the UI also gates writes, but the backend is the real boundary.
 import { cookies } from "next/headers";
-import { platformFetch, PlatformError } from "./platform";
+import { platformFetch, PlatformError, getMe } from "./platform";
 
 // Canonical org depth: holding → company → department → division → role → person.
 // ("team" was renamed to "division"; legacy "team" nodes are migrated on read —
@@ -78,8 +78,12 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
   { name: "GM", divisions: [], people: [person("d5-p1", "Edward", "u-gm")] },
 ];
 
-export function defaultStructure(company: { id: string; name: string; type: string | null }): OrgStructure {
-  const isAgency = company.type === "agency" || company.id === "co-agency";
+/** What the default tree needs of a company. `vertical` selects the seed (PV-D13: never a name or an
+ *  id); when it is absent the tree is the empty, editable root. */
+export type OrgCompany = { id: string; name: string; type: string | null; vertical?: string | null };
+
+export function defaultStructure(company: OrgCompany): OrgStructure {
+  const isAgency = company.vertical === "agency";
   const children: OrgNode[] = isAgency
     ? AGENCY_DEPARTMENTS.map((dept, i) => ({
         id: `dept-${i + 1}`,
@@ -197,7 +201,7 @@ export function flattenOrgUnits(structure: OrgStructure): OrgUnitOption[] {
 export async function getOrgStructure(
   u: string,
   t: string,
-  company: { id: string; name: string; type: string | null },
+  company: OrgCompany,
 ): Promise<{ structure: OrgStructure; source: OrgSource }> {
   // 1) Backend is the source of truth when it exists.
   try {
@@ -215,8 +219,17 @@ export async function getOrgStructure(
       /* fall through to default */
     }
   }
-  // 3) Seeded default.
-  return { structure: defaultStructure(company), source: "default" };
+  // 3) Seeded default, chosen by the company's vertical. Several callers pass a bare `{ id, name }`
+  // with no vertical (they hold a tenant id, not a company record), so resolve it from /api/me.
+  let vertical = company.vertical;
+  if (vertical === undefined) {
+    try {
+      vertical = (await getMe(u)).companies.find((c) => c.id === t)?.vertical;
+    } catch {
+      /* no vertical known: the empty root is the safe default */
+    }
+  }
+  return { structure: defaultStructure({ ...company, vertical }), source: "default" };
 }
 
 // Writes the real API when present, else the cookie. MUST be called from a
