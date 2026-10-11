@@ -14,7 +14,7 @@ local stack). None of these mean "production-done".
 ### platform-nest `0.63.0` - a scheduled WebDesk publish rebuilds staging by itself; a scheduled takedown marks it stale (2026-10-11) - PROTOTYPED
 
 - **WSK-61 ERP half:** `settleScheduledFirings` finds approved, executed `content.schedule` approvals with no build yet, reads every item over the control channel, and dispatches ONE staging rebuild as the approval's decider once they are live (the ledger's UNIQUE(approval) makes it exactly once). A scheduled takedown marks staging stale once. A `schedule.fired` Zone B event is only a wake-up; a sweep on the WSK-60 poller is the primary path (live has no event bridge).
-- **Migration `202610110119`:** `webdev_zoneb_event_log.kind` admits `schedule.fired` (the live value set is read, asserted and extended, never re-typed); new `webdev_schedule_firings` with forced RLS.
+- **Migration `202610110441`:** `webdev_zoneb_event_log.kind` admits `schedule.fired` (the live value set is read, asserted and extended, never re-typed); new `webdev_schedule_firings` with forced RLS.
 - `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS` (empty = 15 min; out of range refuses boot).
 
 ### platform-ui `0.84.0` - Next 16.3: a click right after saving is no longer lost (2026-10-11) - PROTOTYPED
