@@ -31,6 +31,7 @@ import {
 import { AuditService } from "../src/audit/audit.service";
 import { TenantWebhooksService } from "../src/tenant-webhooks/tenant-webhooks.service";
 import { ContentTickService } from "../src/scheduler/content-tick.service";
+import type { ScheduleFiredData } from "../src/events/zoneb-event.types";
 import { ZoneBEventEmitterService } from "../src/events/zoneb-event-emitter.service";
 import { verifySignature } from "../src/events/zoneb-event-signature";
 import { MAX_ITEMS_PER_EVENT, groupFired, scheduleFiredEventId, type FiredTransition } from "../src/scheduler/schedule-fired";
@@ -46,7 +47,7 @@ interface Envelope {
   tenantId: string;
   originSite: string;
   occurredAt: string;
-  data: { tenantSlug: string; siteId: string; transition: string; approvalId: string | null; items: { itemId: string; version: number | null; effectiveAt: string }[] };
+  data: ScheduleFiredData;
 }
 
 describe("WSK-61 schedule.fired producer (pure)", () => {
