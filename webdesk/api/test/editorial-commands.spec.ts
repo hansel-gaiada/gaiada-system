@@ -479,8 +479,9 @@ describe("M5-W2b editorial review commands", () => {
     const itemId = await newItem(f, "Delivery");
     await toState(f, itemId, "approved");
     // the delivery tables never see it: the editorial rows exist, the content projection has no such column
+    // (word-anchored, so WSK-46's existing `preview_token` column is not mistaken for a review column)
     const cols = await asTenant(f.tenantId, async (db) =>
-      (await db.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'content_items' AND column_name ~ '(review|editorial|approved)'`)).rows,
+      (await db.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'content_items' AND column_name ~ '(^|_)(review|editorial|approved)(_|$)'`)).rows,
     );
     expect(cols).toEqual([]);
   });
