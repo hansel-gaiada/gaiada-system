@@ -1,0 +1,17 @@
+# WebDesk status page: static files only. TLS terminates at the owner's mimi Traefik (WSK-D70).
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	root * /srv
+	file_server
+	header {
+		Cache-Control "public, max-age=30"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		-Server
+	}
+}
