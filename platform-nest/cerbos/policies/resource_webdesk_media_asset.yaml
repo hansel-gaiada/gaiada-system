@@ -78,7 +78,6 @@ resourcePolicy:
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "webdev"
 
-    # ══════════ publisher tier — delete (MEDIUM, immediate; refused while content uses the asset) ══
     # ══════════ CLIENT EDITORS — WSK-49c (rulings WSK-D59, D60) ══════════════════════════════════
     # `client_website_editor` (derived_roles.yaml) may read the library, mint an upload token and update an
     # asset's metadata for the client the resource is about (`resource.attr.clientId`, fed only by the portal BFF
@@ -94,6 +93,7 @@ resourcePolicy:
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "webdev"
 
+    # ══════════ publisher tier — delete (MEDIUM, immediate; refused while content uses the asset) ══
     - actions: ["delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
