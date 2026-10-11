@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 
 // WSK-44 — the Website workspace, against the STUBBED WSK-59 BFF (e2e/webdesk-stub/, run by
@@ -198,6 +199,106 @@ test("markdown fields have a visual editor, a source tab and a structural previe
   await expect(page.getByTestId("markdown-preview").locator("li")).toHaveCount(3);
   await page.getByRole("tab", { name: "Source" }).click();
   await expect(page.locator(P("body"))).toBeVisible();
+});
+
+// WSK-45 — the visual editor in a real browser. The obligation (owner ruling WSK-D49): a body nobody changed is saved
+// byte-identical; a body that was changed differs from the original by exactly that change.
+const SEO_ID = "itm-service-seo-en";
+const headBody = async () => {
+  const it = await stub.item(SEO_ID);
+  const v = it.versions.at(-1)!;
+  return { n: it.headVersion, props: (v.props ?? {}) as Record<string, any> };
+};
+
+test("WSK-45 visual editor: bold on one word through the toolbar saves exactly that markdown change and nothing else", async ({ page }) => {
+  const before = await headBody();
+  expect(typeof before.props.body).toBe("string");
+  await open(page, SERVICE_SEO);
+  await expect(page.getByRole("tab", { name: "Visual" })).toHaveAttribute("aria-selected", "true");
+  const surface = page.locator(P("body"));
+  await expect(surface).toHaveAttribute("contenteditable", "true");
+  await hydrated(page.getByTestId("item-editor"));
+  // select the word "villas" with a real DOM selection, then press the Bold toolbar button
+  await surface.evaluate((root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const at = (n.textContent ?? "").indexOf("villas");
+      if (at >= 0) {
+        const r = document.createRange();
+        r.setStart(n, at);
+        r.setEnd(n, at + "villas".length);
+        const s = window.getSelection()!;
+        s.removeAllRanges();
+        s.addRange(r);
+        return;
+      }
+    }
+    throw new Error("word not found");
+  });
+  const bold = page.getByRole("button", { name: "Bold" });
+  await expect(bold).toBeEnabled();
+  await bold.click();
+  await expect(bold).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes");
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("save-status")).toHaveText(`Saved v${before.n + 1}`);
+  const after = await headBody();
+  expect(after.n).toBe(before.n + 1);
+  // the stored body is the original with exactly one change: villas -> **villas**
+  expect(after.props.body).toBe((before.props.body as string).replace("villas", "**villas**"));
+  expect(after.props.body).toContain("[CLIENT: confirm results claim]"); // the placeholder is untouched
+  // and no other field moved
+  const { body: _a, ...restAfter } = after.props;
+  const { body: _b, ...restBefore } = before.props;
+  expect(restAfter).toEqual(restBefore);
+});
+
+test("WSK-45 visual editor: an unchanged markdown body is saved byte-identical when another field is edited", async ({ page }) => {
+  const before = await headBody();
+  await open(page, SERVICE_SEO);
+  await expect(page.getByRole("tab", { name: "Visual" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(P("body"))).toHaveAttribute("contenteditable", "true");
+  // touch the editor without changing the document (focus, caret keys), move through the tabs and back
+  await page.locator(P("body")).click();
+  await page.keyboard.press("ArrowRight");
+  await page.getByRole("tab", { name: "Source" }).click();
+  await page.getByRole("tab", { name: "Visual" }).click();
+  await expect(page.locator(P("body"))).toHaveAttribute("contenteditable", "true");
+  await expect(page.getByTestId("save")).toBeDisabled(); // nothing is dirty yet: the editor has not changed the value
+  await page.locator(P("h1")).fill("SEO Agency in Bali — second edit");
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("save-status")).toHaveText(`Saved v${before.n + 1}`);
+  const after = await headBody();
+  expect(after.props.h1).toBe("SEO Agency in Bali — second edit");
+  expect(after.props.body).toBe(before.props.body); // the very same bytes
+});
+
+test("WSK-45 visual editor: typing then deleting a character leaves the field clean (the original bytes come back)", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  const surface = page.locator(P("body"));
+  await expect(surface).toHaveAttribute("contenteditable", "true");
+  await surface.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("End");
+  await page.keyboard.type("x");
+  await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes");
+  await page.keyboard.press("Backspace");
+  await expect(page.getByTestId("save-status")).toHaveText("No changes");
+  await expect(page.getByTestId("save")).toBeDisabled();
+});
+
+test("WSK-45 visual editor: no axe violation (WCAG 2 A/AA) inside the markdown field, toolbar and link bar open", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await expect(page.locator(P("body"))).toHaveAttribute("contenteditable", "true");
+  await page.getByRole("button", { name: "Link" }).click();
+  await expect(page.getByLabel("Link address")).toBeVisible();
+  const r = await new AxeBuilder({ page }).include(".wc-md").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(r.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+  // a keyboard user can reach and operate the toolbar
+  await page.getByRole("button", { name: "Bold" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("button", { name: "Italic" })).toBeFocused();
 });
 
 test("STATE invalid (422): errors are located inline by JSON pointer and the edits are kept", async ({ page }) => {
