@@ -107,18 +107,18 @@ $evil = '<p>hi</p><script>alert(1)</script><img src=x onerror=alert(1)>';
 $escaped = gaiada_sanitize_html($evil);
 check(!str_contains($escaped, '<') && !str_contains($escaped, '>'), 'outside WordPress, gaiada_sanitize_html() leaves no raw angle bracket');
 check($escaped === htmlspecialchars($evil, ENT_QUOTES, 'UTF-8'), 'outside WordPress, gaiada_sanitize_html() is exactly htmlspecialchars()');
-$rt = gaiada_render_blocks([['type' => 'richText', 'props' => ['value' => $evil]]]);
+$rt = gaiada_render_blocks([['type' => 'richText', 'props' => ['content' => $evil]]]);
 check(!str_contains($rt, '<script') && !str_contains($rt, '<img'), 'a rendered richText block outside WordPress contains no live <script> or <img>');
 check(str_contains($rt, '&lt;script&gt;'), 'the richText script payload is visible only as escaped text');
 
 // --- 5. blocks use the helpers at every href/src -------------------------------------------------
-$cta = gaiada_render_blocks([['type' => 'cta', 'props' => ['label' => 'Go', 'href' => 'javascript:alert(1)']]]);
+$cta = gaiada_render_blocks([['type' => 'cta', 'props' => ['buttonLabel' => 'Go', 'buttonHref' => 'javascript:alert(1)']]]);
 check(str_contains($cta, 'href="#"') && !str_contains(strtolower($cta), 'javascript'), 'cta with a javascript: href renders href="#"');
-$cta2 = gaiada_render_blocks([['type' => 'cta', 'props' => ['label' => 'Go', 'href' => "java\tscript:alert(1)"]]]);
+$cta2 = gaiada_render_blocks([['type' => 'cta', 'props' => ['buttonLabel' => 'Go', 'buttonHref' => "java\tscript:alert(1)"]]]);
 check(str_contains($cta2, 'href="#"') && !str_contains(strtolower($cta2), 'script:'), 'cta with a tab-split javascript: href renders href="#"');
-$cta3 = gaiada_render_blocks([['type' => 'cta', 'props' => ['label' => 'Go', 'href' => 'https://example.com/a?x=1&y=2']]]);
+$cta3 = gaiada_render_blocks([['type' => 'cta', 'props' => ['buttonLabel' => 'Go', 'buttonHref' => 'https://example.com/a?x=1&y=2']]]);
 check(str_contains($cta3, 'href="https://example.com/a?x=1&amp;y=2"'), 'cta with an https href keeps it (attribute-escaped)');
-$cta4 = gaiada_render_blocks([['type' => 'cta', 'props' => ['label' => 'Go']]]);
+$cta4 = gaiada_render_blocks([['type' => 'cta', 'props' => ['buttonLabel' => 'Go']]]);
 check(str_contains($cta4, 'href="#"'), 'cta with no href renders href="#"');
 
 $gallery = gaiada_render_blocks([['type' => 'gallery', 'props' => ['items' => [
@@ -138,7 +138,9 @@ $logos = gaiada_render_blocks([['type' => 'logoCloud', 'props' => ['logos' => [
 check(!str_contains(strtolower($logos), 'javascript') && str_contains($logos, 'src="https://cdn.example.com/logo.svg"'), 'logoCloud drops javascript: and keeps https sources');
 
 $testimonial = gaiada_render_blocks([['type' => 'testimonial', 'props' => ['quote' => ['root' => ['text' => '</script><script>alert(1)</script>']], 'author' => 'x']]]);
-check(!str_contains($testimonial, '</script>') && !str_contains($testimonial, '<script'), 'a richtext-object testimonial quote cannot emit a script tag');
+// The Lexical quote is emitted as an inert JSON payload (as Testimonial.astro does): exactly ONE script
+// element (the payload's own), and the editor's `</script><script>` can neither close nor open another.
+check(substr_count($testimonial, '<script') === 1 && substr_count($testimonial, '</script>') === 1 && str_contains($testimonial, '\u003c/script\u003e'), 'a richtext-object testimonial quote cannot emit a script tag of its own (one payload script, editor tags escaped)');
 
 // --- 6. INSIDE WordPress, wp_kses_post() is the route -------------------------------------------
 $GLOBALS['kses_calls'] = [];
@@ -154,7 +156,7 @@ $in = '<p onclick="x()">hello</p>';
 check(gaiada_sanitize_html($in) === 'KSES(' . strlen($in) . ')', 'inside WordPress, gaiada_sanitize_html() returns wp_kses_post() output');
 check(($GLOBALS['kses_calls'][0] ?? null) === $in, 'wp_kses_post() received the raw editor HTML');
 $GLOBALS['kses_calls'] = [];
-$rt2 = gaiada_render_blocks([['type' => 'richText', 'props' => ['value' => $in]]]);
+$rt2 = gaiada_render_blocks([['type' => 'richText', 'props' => ['content' => $in]]]);
 check(str_contains($rt2, 'KSES(') && count($GLOBALS['kses_calls']) === 1, 'a rendered richText block goes through wp_kses_post() exactly once');
 check(!str_contains($rt2, 'onclick'), 'the unsanitised editor HTML never reaches the output');
 

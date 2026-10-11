@@ -140,7 +140,7 @@ check($calls === [['pages', 'home', null]], '200: exactly one transport call, de
 $draft = (new Router($c, stub($calls, ['pages/home/' => item('H', ['meta' => ['draft' => true]])])))->handle('GET', '/');
 check(str_contains($draft['body'], 'gaiada-draft-banner'), '200: a draft item shows the draft banner');
 
-$withUnknown = item('Known', ['blocks' => [['type' => 'hero', 'props' => ['heading' => 'A']], ['type' => 'pricingTable', 'props' => []], ['type' => 'cta', 'props' => ['label' => 'Go', 'href' => '/x']]]]);
+$withUnknown = item('Known', ['blocks' => [['type' => 'hero', 'props' => ['heading' => 'A']], ['type' => 'pricingTable', 'props' => []], ['type' => 'cta', 'props' => ['heading' => 'H', 'buttonLabel' => 'Go', 'buttonHref' => '/x']]]]);
 gaiada_drain_unknown_block_reports();
 $u = (new Router($c, stub($calls, ['pages/home/' => $withUnknown]), static function (string $m): void {}))->handle('GET', '/');
 check($u['status'] === 200 && str_contains($u['body'], 'gaiada-block-cta') && !str_contains($u['body'], 'pricingTable'), '200: an unknown block is skipped, later known blocks still render');
