@@ -483,7 +483,7 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       const t = await mintOk(app, f, { bucket: "media", mime: ["image/png"] });
       const res = await uploadFile(app, f.slug, t.token, buildJpeg(), { contentType: "image/png" });
       expect(res.statusCode).toBe(400);
-      expect(String(res.json().message)).toMatch(/does not match the file's actual signature/);
+      expect(String(res.json().detail)).toMatch(/does not match the file's actual signature/);
       expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
       expect((await dumpTokens(f))[0].used_at).not.toBeNull(); // body-level refusal: the token was claimed before the body was read
       expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(404);
@@ -504,8 +504,8 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       const t = await mintOk(app, f, { bucket: "media", mime: ["application/pdf", "image/png"] });
       const res = await uploadFile(app, f.slug, t.token, buildEicarPdf(), { contentType: "application/pdf", filename: "eicar.pdf" });
       expect(res.statusCode).toBe(403);
-      expect(String(res.json().message)).toMatch(/malware scan matched/i);
-      expect(String(res.json().message)).toMatch(/eicar/i);
+      expect(String(res.json().detail)).toMatch(/malware scan matched/i);
+      expect(String(res.json().detail)).toMatch(/eicar/i);
       expect((await dumpAssets(f)).length).toBe(0);
       expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
       const refused = await auditRows(f, "webdesk.media.uploadRefused");
@@ -524,7 +524,7 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       try {
         const res = await uploadFile(app, f.slug, t.token, buildPng(1, 1, 2048));
         expect(res.statusCode).toBe(403);
-        expect(String(res.json().message)).toMatch(/quota/i);
+        expect(String(res.json().detail)).toMatch(/quota/i);
         expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
         expect((await dumpTokens(f))[0].used_at).not.toBeNull();
         const fits = await uploadFile(app, f.slug, (await mintOk(app, f)).token, buildPng(1, 1, 900)); // positive control: a new token, a file that fits
