@@ -16,7 +16,9 @@ async function signIn(page: Page, email: string): Promise<void> {
 }
 
 const groupLabels = (page: Page) => page.locator(".erp-side__grouplabel").allTextContents();
-const sideLink = (page: Page, name: string) => page.locator(".erp-side").getByRole("link", { name, exact: true });
+// By href, not by role: collapsed sidebar groups keep their links in the DOM but hidden, and a role
+// locator skips hidden elements, so it would report a present row as missing.
+const sideLink = (page: Page, href: string) => page.locator(`.erp-side a[href="${href}"]`);
 
 async function switchTo(page: Page, company: string): Promise<void> {
   await page.locator(".erp-company__form select").selectOption({ label: company });
@@ -39,28 +41,29 @@ test.describe("company context in the staff menu", () => {
     expect(labels).not.toContain("Group");
     expect(labels).toContain("Platform");
     // The agency pack: the agency rows are there.
-    await expect(sideLink(page, "Clients")).toHaveCount(1);
-    await expect(sideLink(page, "Delivery Pipeline")).toHaveCount(1);
+    await expect(sideLink(page, "/clients")).toHaveCount(1);
+    await expect(sideLink(page, "/pipeline")).toHaveCount(1);
 
     await switchTo(page, "Viceroy");
     labels = await groupLabels(page);
     expect(labels).not.toContain("Group");
     expect(labels).toContain("Platform");
     // A hospitality company gets the generic menu: no agency rows (PV-D15).
-    await expect(sideLink(page, "Clients")).toHaveCount(0);
-    await expect(sideLink(page, "Delivery Pipeline")).toHaveCount(0);
-    await expect(sideLink(page, "Agency")).toHaveCount(0);
+    await expect(sideLink(page, "/clients")).toHaveCount(0);
+    await expect(sideLink(page, "/pipeline")).toHaveCount(0);
+    await expect(sideLink(page, "/agency")).toHaveCount(0);
   });
 
-  test("a member sees neither Group nor Platform, in any company", async ({ page }) => {
+  test("a member sees neither Group nor Platform", async ({ page }) => {
+    // A member gets no company switcher, so this checks the company they land on.
     await signIn(page, "gede@gaiada.com");
-    for (const company of ["D & A Syrowatka", "Gaia Digital Agency", "Viceroy"]) {
-      await switchTo(page, company);
-      const labels = await groupLabels(page);
-      expect(labels, company).not.toContain("Group");
-      expect(labels, company).not.toContain("Platform");
-      expect(labels, company).not.toContain("Systems");
-    }
+    const labels = await groupLabels(page);
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels).not.toContain("Group");
+    expect(labels).not.toContain("Platform");
+    expect(labels).not.toContain("Systems");
+    await expect(sideLink(page, "/systems/gateway")).toHaveCount(0);
+    await expect(sideLink(page, "/group")).toHaveCount(0);
   });
 
   test("the group report renders for the owner, with Sum of companies and the F9 note", async ({ page }) => {
