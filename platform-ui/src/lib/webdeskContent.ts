@@ -780,7 +780,9 @@ export function stagingBaseUrl(site: SiteRef): string | null {
  *  about content. */
 export async function resolveAuthorNames(userId: string, company: string): Promise<Record<string, string>> {
   try {
-    const members = await listMembers(userId, company);
+    // Authors include automation principals (the importer wrote every gaiada.com v1), which `/members` leaves out
+    // unless asked: without them those versions read "user 01a12709" instead of the account's name.
+    const members = await listMembers(userId, company, { includeService: true });
     const out: Record<string, string> = {};
     if (Array.isArray(members)) for (const m of members) if (m && typeof m.user_id === "string" && typeof m.name === "string") out[m.user_id] = m.name;
     return out;
