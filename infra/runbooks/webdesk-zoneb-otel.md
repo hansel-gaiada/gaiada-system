@@ -139,3 +139,56 @@ write-only checker: **PROTOTYPED** (selftest driven and observed on this machine
 listener: **BLOCKED** — proposal authored, application owned by whoever holds
 `infra/observability/`, verification (an actual OTLP span landing in Zone A Grafana through the
 listener) cannot happen before that application and before A-12.
+
+---
+
+## 7. The api's OTel SDK: traces only, fail-soft (M4)
+
+> **MERGE NOTE.** This section is appended to the pre-T6a version of this file. Branch `webdesk/m4-t6a-otlp`
+> rewrites the runbook; when that lands, fold this section into it, replacing its "WebDesk's api has no OTel SDK
+> today" paragraph (the "still open" list) and the "(See ... inert until that ticket lands)" note under rollout step (d).
+> Status: **BUILT, NOT DEPLOYED**; nothing here is DEV-VERIFIED until a real span lands in Tempo.
+
+**Where.** `webdesk/api/src/telemetry/` (entry `index.ts`, called first by `src/main.ts`). Tests: `webdesk/api/test/telemetry-*.spec.ts`.
+
+**Gate: off unless all three hold.** `OTEL_ENABLED` is `true`/`1`, `WEBDESK_OTEL_ZONEA_PUSH_ENABLED` is `true`/`1`, and
+`OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is a valid http(s) URL. Parsing is strict: empty,
+unset, `false`, `0`, `yes`, `on`, anything else is OFF (an empty env var never becomes a value). A protocol other than
+`http/protobuf` in `OTEL_EXPORTER_OTLP_PROTOCOL` also keeps it off. Off means the SDK module is not imported, nothing is
+patched, no timer runs. A fault while starting is one warning line and the api boots normally.
+
+**What it sends.** Traces only, OTLP/HTTP protobuf to `<endpoint>/v1/traces`, `Authorization` from
+`OTEL_EXPORTER_OTLP_HEADERS` verbatim. No logs exporter, no metrics reader. Resource: `service.name=webdesk-api`,
+`service.version` (from `package.json`), `service.namespace=webdesk` (the collector upserts it anyway). Spans: inbound HTTP
+(`GET /v1/*`, method, status, route, scheme, host) and the Fastify route span; `pg` queries and `ioredis` commands made
+INSIDE a request (query text with `$n` placeholders, redis command NAME only); outbound `fetch` (webhooks, events bridge,
+Turnstile) made inside a request, with the URL reduced to scheme, host and `/[redacted]`. Queue/timer work with no request
+parent produces no spans. Bounded: queue 512 spans, batch 128, export every 5 s, 2.5 s request timeout, 3 s batch timeout.
+
+**What it never sends.** Applied to every span in one place, the exporter wrapper (`sanitizing-exporter.ts`, rules in
+`redact.ts`), so it covers whatever any instrumentation records:
+- bearer tokens in URL paths: `/v1/t/<slug>/preview/<token>` and `/v1/t/<slug>/media/upload/<token>` become `.../[redacted]`
+  in `url.path`, `url.full`, `http.target`, `http.url`, `http.route`, the span name, and any other string on a span or event
+  (the same rule `redactPreviewToken` uses for logs, plus a backstop for any 43-character base64url path segment);
+- query strings (`url.query` is dropped, and the query is cut from every URL/target attribute), URL userinfo, fragments;
+- request/response bodies and ALL header attributes (Authorization, Cookie, x-api-key, the control gate header);
+- caller identity: client address/port, user agent, and the peer address of inbound connections;
+- SQL parameter values (`enhancedDatabaseReporting: false`), redis arguments, exception messages and stack traces, span
+  status messages (database errors quote values), the handler source text `@fastify/otel` would record, connection strings.
+Trace context is not propagated in either direction (an inbound `traceparent` is ignored; none is injected outbound).
+
+**Failure behaviour.** A refused, hung, erroring or slow collector drops spans; requests are unaffected. The exporter wrapper
+turns every failure into a result code and logs one rate-limited line (`[webdesk:otel] trace export failed ...`, no URL or
+token) per minute. SIGTERM flushes through the Nest shutdown hooks (`TelemetryModule`), bounded to 5 s.
+
+**Enable (after rollout steps (a)-(c) above).** In `/etc/webdesk/.env`:
+```
+OTEL_ENABLED=true
+WEBDESK_OTEL_ZONEA_PUSH_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4319
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <the token from step (b)>
+```
+Recreate the api (step (d)). Expect `[webdesk:otel] tracing on (OTLP/HTTP protobuf, traces only)` in `docker logs`, then Tempo
+`{ resource.service.name = "webdesk-api" }` within ~20 s of a request. Every request is sampled (the collector's 500 spans/s tail limit is the cap; no head sampler is configured). Roll back with
+`OTEL_ENABLED=false` and a recreate. Cost: about 24 MB of node_modules (38 packages) in the image, roughly 30 MB RSS when on, nothing when off.
