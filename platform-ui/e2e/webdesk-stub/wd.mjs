@@ -389,7 +389,7 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
       requests: [...S.approvals.values()]
         .filter((a) => a.origin === "webdesk" && a.requestedBy === userId && (a.workflowId === "content.publish" || a.workflowId === "content.schedule") && (want === "all" || a.status === want))
         .reverse()
-        .map((a) => ({ approvalId: a.id, status: a.status, createdAt: a.createdAt, itemIds: a.toolArgs.items.map((i) => i.itemId), executionStatus: a.executionStatus ?? null })),
+        .map((a) => ({ approvalId: a.id, status: a.status, createdAt: a.createdAt, itemIds: a.toolArgs.items.map((i) => i.itemId), items: a.toolArgs.items.map((i) => ({ itemId: i.itemId, version: i.version })), executionStatus: a.executionStatus ?? null })),
     });
   }
   if ((mm = rest.match(/^\/publish-requests\/([^/]+)\/withdraw$/)) && method === "POST") {
