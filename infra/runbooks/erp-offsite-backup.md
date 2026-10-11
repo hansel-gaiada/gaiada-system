@@ -24,7 +24,7 @@ pipe, and keeps them under its own retention policy.
 | Encryption | `age`, recipient = `~/.ssh/gaiada-backup-age.pub` (owner's laptop) |
 | Retention | 90 days rolling; anything stamped on the 1st of a month kept 12 months |
 | Scripts | `infra/scripts/erp-offsite-pull.sh` (sumopod) · `infra/scripts/erp-backup-read.sh` (aicenter) |
-| Alerts | `infra/observability/prometheus/rules/backup-offsite.yml` — 6 rules |
+| Alerts | `infra/observability/prometheus/rules/backup-offsite.yml` — 7 rules |
 
 ---
 
@@ -130,6 +130,7 @@ they send you to different hosts:
 |---|---|---|
 | `OffsiteBackupPullStale` | sumopod stopped **copying** | sumopod: `pull.log`, `wg0`, the pull key |
 | `OffsiteBackupSourceStale` | aicenter stopped **producing** | aicenter: `~/gaiada-backups/backup.log`, disk |
+| `OffsiteBackupOneSourceStale` | ONE source (label `source`, e.g. `webdesk`, `gaiada_platform`) stopped while others still arrive — the aggregate rule above cannot see this (added 2026-10-11, M4) | for `webdesk`: aicenter `~/gaiada-backups/webdesk-backup.log` (03:05 cron); otherwise `backup.log` |
 | `OffsiteBackupCorrupt` | Hash mismatch; file was **discarded**, so it is NOT held offsite | tunnel, disk on either end |
 | `OffsiteBackupPullFailing` | Transfer errors, next run retries | the forced-command wrapper, the key |
 | `OffsiteBackupShrinkingFast` | Set shrank >20% in 1h — **not** retention | treat as deletion/tamper; look before re-running |

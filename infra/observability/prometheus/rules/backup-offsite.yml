@@ -47,6 +47,24 @@ groups:
             (infra/scripts/backup-cron.sh) has stopped producing dumps. Check
             ~/gaiada-backups/backup.log on aicenter — and its disk.
 
+      # --- ONE source stopped while the others keep arriving (M4, 2026-10-11). The aggregate rule
+      # above cannot see it: any fresh dump keeps it quiet. Every source (gaiada_platform, webdesk,
+      # postiz, the globals-*, ...) dumps nightly; 30h = one missed night plus margin, same as above.
+      - alert: OffsiteBackupOneSourceStale
+        expr: time() - gaiada_backup_source_newest_timestamp_seconds > 30 * 3600
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Offsite backups of {{ $labels.source }} stopped arriving (newest is over 30h old)"
+          description: >-
+            The newest offsite copy of {{ $labels.source }} is {{ $value | humanizeDuration }} old
+            while other sources are still arriving, so the pull works and this one dump stopped.
+            For webdesk: gda-aicenter's 03:05 cron (webdesk/ops/scripts/webdesk-backup-nightly.sh,
+            log ~/gaiada-backups/webdesk-backup.log). For the rest: infra/scripts/backup-cron.sh at 03:15.
+            A source retired on purpose leaves this firing until its last files age out of
+            retention; silence it with that reason.
+
       # --- A file arrived with the wrong hash. Never treat this as noise.
       # The pull discards the file rather than keeping it, so this fires on a backup that
       # does NOT exist offsite — silence here after a corrupt run would mean a gap.

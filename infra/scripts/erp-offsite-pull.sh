@@ -150,6 +150,13 @@ free_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
 # component of an AND-list is a live foot-gun in exactly the run where something failed.
 ok=1
 if [ "$failed" -gt 0 ] || [ "$corrupt" -gt 0 ]; then ok=0; fi
+# Per SOURCE (the file name before -YYYYMMDD-HHMMSS): the aggregate "newest file" above stays
+# fresh as long as ANY dump arrives, so one source that stops (e.g. WebDesk's own 03:05 dump)
+# would never show. awk only (reads to EOF; see the SIGPIPE note above).
+per_source=$(find "$DATA" -maxdepth 1 -name '*.age' -printf '%f %T@\n' 2>/dev/null | awk '
+  { n = $1; if (match(n, /-[0-9]{8}-[0-9]{6}\./)) s = substr(n, 1, RSTART - 1); else next
+    t = int($2); if (t > m[s]) m[s] = t }
+  END { for (s in m) printf "gaiada_backup_source_newest_timestamp_seconds{source=\"%s\"} %d\n", s, m[s] }' | sort)
 
 cat >"$METRICS.tmp" <<EOF
 # HELP gaiada_backup_pull_ok Last offsite pull completed with no failed or corrupt files.
@@ -179,6 +186,9 @@ gaiada_backup_failed_total $failed
 # HELP gaiada_backup_disk_free_gb Free space on the offsite host's root filesystem.
 # TYPE gaiada_backup_disk_free_gb gauge
 gaiada_backup_disk_free_gb $free_gb
+# HELP gaiada_backup_source_newest_timestamp_seconds Mtime of the newest offsite artifact per source.
+# TYPE gaiada_backup_source_newest_timestamp_seconds gauge
+$per_source
 EOF
 mv -f "$METRICS.tmp" "$METRICS"
 chmod 644 "$METRICS"
