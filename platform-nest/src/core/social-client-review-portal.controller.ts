@@ -43,6 +43,8 @@ import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { resolvePortalScope } from "./portal-scope";
+// PV3-02: the row-visibility predicate below comes from portal-visibility.ts.
+import { postReviewInPortalScope } from "./portal-visibility";
 import { declareSocialModuleScope } from "../modules/social/publish-precondition";
 
 const DECISIONS = new Set(["approved", "changes_requested"]);
@@ -82,7 +84,7 @@ export class SocialClientReviewPortalController {
            JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
            JOIN social_posts p         ON p.id = v.post_id    AND p.tenant_id = v.tenant_id
            JOIN social_accounts a      ON a.id = v.account_id AND a.tenant_id = v.tenant_id
-          WHERE r.client_id = ANY($1::uuid[]) ${statusClause}
+          WHERE ${postReviewInPortalScope("r", { clients: 1 })} ${statusClause}
           ORDER BY r.requested_at DESC LIMIT 200`,
         params,
       );
@@ -117,7 +119,7 @@ export class SocialClientReviewPortalController {
            FROM social_post_client_reviews r
            JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
            JOIN social_posts p         ON p.id = v.post_id    AND p.tenant_id = v.tenant_id
-          WHERE r.id = $1 AND r.client_id = ANY($2::uuid[])`,
+          WHERE r.id = $1 AND ${postReviewInPortalScope("r", { clients: 2 })}`,
         [id, scope.clientIds],
       );
       if (!owner.rows[0]) return { kind: "not_found" };
@@ -130,7 +132,7 @@ export class SocialClientReviewPortalController {
         `UPDATE social_post_client_reviews
             SET status = $2, comment = COALESCE($3, comment), reviewed_args_sha256 = $4,
                 decided_by = $5, decided_at = now(), updated_at = now()
-          WHERE id = $1 AND client_id = ANY($6::uuid[]) AND status = 'pending'
+          WHERE id = $1 AND ${postReviewInPortalScope("", { clients: 6 })} AND status = 'pending'
           RETURNING status`,
         [id, decision, comment ?? null, liveHash, req.principal.userId, scope.clientIds],
       );

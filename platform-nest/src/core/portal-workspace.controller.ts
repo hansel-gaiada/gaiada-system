@@ -30,11 +30,16 @@ import { AuthGuard } from "../auth/guards";
 import { resolvePortalScope, type PortalScope } from "./portal-scope";
 import type { PoolClient } from "pg";
 import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "./project-status";
+// PV3-02: every row-visibility predicate below comes from portal-visibility.ts. PROJECT_SCOPE (binds
+// $1 = clientIds uuid[], $2 = projectIds uuid[] | null) now lives and is exported there.
+import {
+  PROJECT_SCOPE, contractInPortalScope, deliverableClientVisible, gateClientVisible, inCallerClients,
+  invoiceInPortalScope, invoicePaymentClientVisible, invoicePaymentInPortalScope, milestoneClientVisible,
+  runClientVisible, runInPortalScope,
+} from "./portal-visibility";
 
-/** SQL predicate restricting `projects p` to the caller's scope. Kept as one exported constant rather
- *  than retyped per query: the second copy of an isolation predicate is where the typo lives. Binds
- *  $1 = clientIds uuid[], $2 = projectIds uuid[] | null. */
-const PROJECT_SCOPE = `p.client_id = ANY($1::uuid[]) AND ($2::uuid[] IS NULL OR p.id = ANY($2::uuid[])) AND p.deleted_at IS NULL`;
+/** Scope params for queries that bind the caller's scope as $1 (clients) / $2 (projects). */
+const S12 = { clients: 1, projects: 2 } as const;
 
 /** Progress for one project, 0-100.
  *
@@ -101,7 +106,7 @@ export class PortalWorkspaceController {
           `SELECT m.id, m.name, to_char(m.due_date, 'YYYY-MM-DD') AS "dueDate", m.status,
                   p.id AS "projectId", p.name AS "projectName"
              FROM pm_milestones m JOIN projects p ON p.id = m.project_id
-            WHERE ${PROJECT_SCOPE} AND m.deleted_at IS NULL AND m.status <> 'done' AND m.due_date IS NOT NULL
+            WHERE ${PROJECT_SCOPE} AND ${milestoneClientVisible("m")} AND m.status <> 'done' AND m.due_date IS NOT NULL
             ORDER BY m.due_date ASC LIMIT 1`,
           args,
         ),
@@ -112,7 +117,7 @@ export class PortalWorkspaceController {
                   count(*) FILTER (WHERE d.status IN ('delivered', 'approved', 'done')) AS delivered,
                   count(*) FILTER (WHERE d.due_date < current_date AND d.status NOT IN ('delivered', 'approved', 'done')) AS overdue
              FROM deliverables d JOIN projects p ON p.id = d.project_id
-            WHERE ${PROJECT_SCOPE} AND d.deleted_at IS NULL`,
+            WHERE ${PROJECT_SCOPE} AND ${deliverableClientVisible("d")}`,
           args,
         ),
       ]);
@@ -161,9 +166,8 @@ export class PortalWorkspaceController {
            -- an INNER join would silently drop every gate on such a run — the client would simply
            -- never be asked to sign. Client-wide contacts (projectIds IS NULL) therefore see them.
            LEFT JOIN projects p ON p.id = r.project_id
-          WHERE r.client_id = ANY($1::uuid[]) AND r.deleted_at IS NULL
-            AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
-            AND ($2::uuid[] IS NULL OR r.project_id = ANY($2::uuid[]))
+          WHERE ${runInPortalScope("r", S12)}
+            AND ${gateClientVisible("g")} AND g.status = 'pending'
           ORDER BY g.created_at ASC`,
         args,
       ),
@@ -171,8 +175,7 @@ export class PortalWorkspaceController {
         `SELECT k.id, k.title, k.reference, k.created_at AS "since", k.sent_at AS "sentAt",
                 k.value::float8 AS value, k.currency
            FROM contracts k
-          WHERE k.client_id = ANY($1::uuid[]) AND k.deleted_at IS NULL AND k.status = 'sent'
-            AND ($2::uuid[] IS NULL OR k.project_id = ANY($2::uuid[]) OR k.project_id IS NULL)
+          WHERE ${contractInPortalScope("k", S12)} AND k.status = 'sent'
             -- A contract already countersigned by this side is not outstanding even if the row still
             -- says 'sent' (status flips only when BOTH parties are in).
             AND NOT EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client')
@@ -226,7 +229,7 @@ export class PortalWorkspaceController {
       `WITH inv AS (
          SELECT i.id, i.currency, i.total, i.status, i.period_end
            FROM invoices i
-          WHERE i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'
+          WHERE ${invoiceInPortalScope("i", { clients: 1 })}
        )
        SELECT inv.currency,
               COALESCE(sum(inv.total) FILTER (WHERE inv.status <> 'void'), 0)::float8 AS invoiced,
@@ -238,7 +241,7 @@ export class PortalWorkspaceController {
          LEFT JOIN LATERAL (
            SELECT COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'confirmed'), 0) AS confirmed,
                   COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'pending'), 0) AS pending
-             FROM invoice_payments pp WHERE pp.invoice_id = inv.id AND pp.deleted_at IS NULL
+             FROM invoice_payments pp WHERE pp.invoice_id = inv.id AND ${invoicePaymentClientVisible("pp", "detail")}
          ) pay ON true
         GROUP BY inv.currency ORDER BY invoiced DESC`,
       [scope.clientIds],
@@ -272,11 +275,11 @@ export class PortalWorkspaceController {
                 to_char(p.due_date, 'YYYY-MM-DD') AS "dueDate",
                 p.client_id AS "clientId", cl.name AS "clientName",
                 ${PROJECT_PROGRESS_SQL},
-                (SELECT count(*) FROM pm_milestones m WHERE m.project_id = p.id AND m.deleted_at IS NULL) AS "milestoneCount",
-                (SELECT count(*) FROM pm_milestones m WHERE m.project_id = p.id AND m.deleted_at IS NULL AND m.status = 'done') AS "milestonesDone",
-                (SELECT count(*) FROM deliverables d WHERE d.project_id = p.id AND d.deleted_at IS NULL) AS "deliverableCount",
+                (SELECT count(*) FROM pm_milestones m WHERE m.project_id = p.id AND ${milestoneClientVisible("m")}) AS "milestoneCount",
+                (SELECT count(*) FROM pm_milestones m WHERE m.project_id = p.id AND ${milestoneClientVisible("m")} AND m.status = 'done') AS "milestonesDone",
+                (SELECT count(*) FROM deliverables d WHERE d.project_id = p.id AND ${deliverableClientVisible("d")}) AS "deliverableCount",
                 (SELECT to_char(min(m.due_date), 'YYYY-MM-DD') FROM pm_milestones m
-                  WHERE m.project_id = p.id AND m.deleted_at IS NULL AND m.status <> 'done' AND m.due_date IS NOT NULL) AS "nextMilestoneDue"
+                  WHERE m.project_id = p.id AND ${milestoneClientVisible("m")} AND m.status <> 'done' AND m.due_date IS NOT NULL) AS "nextMilestoneDue"
            FROM projects p LEFT JOIN clients cl ON cl.id = p.client_id
           WHERE ${PROJECT_SCOPE}
           ORDER BY (p.status = ANY($3::text[])), p.due_date NULLS LAST, p.created_at DESC
@@ -328,7 +331,7 @@ export class PortalWorkspaceController {
                   (SELECT count(*) FROM pm_tasks t WHERE t.milestone_id = m.id AND t.deleted_at IS NULL) AS "itemCount",
                   (SELECT count(*) FROM pm_tasks t WHERE t.milestone_id = m.id AND t.deleted_at IS NULL AND t.status = 'done') AS "itemsDone"
              FROM pm_milestones m
-            WHERE m.project_id = $1 AND m.deleted_at IS NULL
+            WHERE m.project_id = $1 AND ${milestoneClientVisible("m")}
             ORDER BY m.due_date NULLS LAST, m.created_at ASC`,
           [projectId],
         ),
@@ -337,16 +340,16 @@ export class PortalWorkspaceController {
                   (SELECT count(*) FROM files f
                     WHERE f.target_entity_type = 'deliverable' AND f.target_entity_id = d.id AND f.deleted_at IS NULL) AS "fileCount"
              FROM deliverables d
-            WHERE d.project_id = $1 AND d.deleted_at IS NULL
+            WHERE d.project_id = $1 AND ${deliverableClientVisible("d")}
             ORDER BY d.due_date NULLS LAST, d.created_at DESC`,
           [projectId],
         ),
         c.query(
           `SELECT r.id, r.title, r.status,
                   (SELECT count(*) FROM pipeline_gates g
-                    WHERE g.run_id = r.id AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL) AS "pendingActions"
+                    WHERE g.run_id = r.id AND ${gateClientVisible("g")} AND g.status = 'pending') AS "pendingActions"
              FROM pipeline_runs r
-            WHERE r.project_id = $1 AND r.client_id = ANY($2::uuid[]) AND r.deleted_at IS NULL
+            WHERE r.project_id = $1 AND ${inCallerClients("r", 2)} AND ${runClientVisible("r")}
             ORDER BY r.created_at DESC`,
           [projectId, scope.clientIds],
         ),
@@ -382,7 +385,7 @@ export class PortalWorkspaceController {
         `SELECT m.id, m.name, m.status, to_char(m.due_date, 'YYYY-MM-DD') AS "dueDate",
                 p.id AS "projectId", p.name AS "projectName"
            FROM pm_milestones m JOIN projects p ON p.id = m.project_id
-          WHERE ${PROJECT_SCOPE} AND m.deleted_at IS NULL
+          WHERE ${PROJECT_SCOPE} AND ${milestoneClientVisible("m")}
           ORDER BY m.due_date NULLS LAST, m.created_at ASC LIMIT 300`,
         args,
       );
@@ -421,7 +424,7 @@ export class PortalWorkspaceController {
          SELECT 'milestone' AS kind, m.id::text AS id, m.name AS label, m.status,
                 m.due_date::timestamptz AS at, 'due' AS tense, sp.name AS context, sp.id::text AS "projectId"
            FROM pm_milestones m JOIN scoped_projects sp ON sp.id = m.project_id
-          WHERE m.deleted_at IS NULL AND m.due_date IS NOT NULL
+          WHERE ${milestoneClientVisible("m")} AND m.due_date IS NOT NULL
          UNION ALL
          -- Deliverables: due when open, and their last change when settled (there is no per-status
          -- history table, so updated_at is the honest best answer and is labelled as such).
@@ -432,7 +435,7 @@ export class PortalWorkspaceController {
                 CASE WHEN d.status IN ('delivered', 'approved', 'done') THEN 'happened' ELSE 'due' END,
                 sp.name, sp.id::text
            FROM deliverables d JOIN scoped_projects sp ON sp.id = d.project_id
-          WHERE d.deleted_at IS NULL AND COALESCE(d.due_date::timestamptz, d.updated_at) IS NOT NULL
+          WHERE ${deliverableClientVisible("d")} AND COALESCE(d.due_date::timestamptz, d.updated_at) IS NOT NULL
          UNION ALL
          -- Decisions the client themselves made: the audit trail they are entitled to.
          SELECT 'decision', g.id::text,
@@ -443,9 +446,8 @@ export class PortalWorkspaceController {
                 COALESCE(g.decision, 'decided'), g.decided_at, 'happened',
                 COALESCE(r.title, 'Your project'), r.project_id::text
            FROM pipeline_gates g JOIN pipeline_runs r ON r.id = g.run_id
-          WHERE r.client_id = ANY($1::uuid[]) AND r.deleted_at IS NULL AND g.deleted_at IS NULL
-            AND g.actor_side = 'client' AND g.status = 'decided' AND g.decided_at IS NOT NULL
-            AND ($2::uuid[] IS NULL OR r.project_id = ANY($2::uuid[]))
+          WHERE ${runInPortalScope("r", S12)}
+            AND ${gateClientVisible("g")} AND g.status = 'decided' AND g.decided_at IS NOT NULL
          UNION ALL
          -- Contract lifecycle. A NULL project_id is admitted for a project-scoped contact because a
          -- master agreement covers the whole relationship, including their project.
@@ -453,21 +455,20 @@ export class PortalWorkspaceController {
                 COALESCE(k.signed_at, k.sent_at, k.created_at), 'happened',
                 COALESCE(k.reference, 'Agreement'), k.project_id::text
            FROM contracts k
-          WHERE k.client_id = ANY($1::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft'
-            AND ($2::uuid[] IS NULL OR k.project_id = ANY($2::uuid[]) OR k.project_id IS NULL)
+          WHERE ${contractInPortalScope("k", S12)}
          UNION ALL
          -- Invoices + confirmed payments. Drafts excluded (see finance()).
          SELECT 'invoice', i.id::text,
                 'Invoice ' || COALESCE(to_char(i.period_start, 'Mon YYYY'), '') , i.status,
                 i.created_at, 'happened', i.currency || ' ' || i.total::text, NULL
            FROM invoices i
-          WHERE i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'
+          WHERE ${invoiceInPortalScope("i", { clients: 1 })}
          UNION ALL
          SELECT 'payment', pp.id::text, 'Payment received', pp.status,
                 COALESCE(pp.confirmed_at, pp.created_at), 'happened',
                 pp.currency || ' ' || pp.amount::text, NULL
            FROM invoice_payments pp
-          WHERE pp.client_id = ANY($1::uuid[]) AND pp.deleted_at IS NULL AND pp.status = 'confirmed'
+          WHERE ${invoicePaymentInPortalScope("pp", "timeline", { clients: 1 })}
          ORDER BY at DESC
          LIMIT ${cap}`,
         [scope.clientIds, scope.projectIds],
@@ -491,7 +492,7 @@ export class PortalWorkspaceController {
         `SELECT d.id, d.name, d.status, to_char(d.due_date, 'YYYY-MM-DD') AS "dueDate",
                 d.updated_at AS "updatedAt", p.id AS "projectId", p.name AS "projectName"
            FROM deliverables d JOIN projects p ON p.id = d.project_id
-          WHERE ${PROJECT_SCOPE} AND d.deleted_at IS NULL
+          WHERE ${PROJECT_SCOPE} AND ${deliverableClientVisible("d")}
             AND ($3::uuid IS NULL OR d.project_id = $3)
           ORDER BY d.due_date NULLS LAST, d.created_at DESC LIMIT 300`,
         [scope.clientIds, scope.projectIds, projectId ?? null],

@@ -26,6 +26,8 @@ import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
 import { resolvePortalScope } from "./portal-scope";
+// PV3-02: the People list's row-visibility predicate comes from portal-visibility.ts.
+import { clientContactInPortalScope } from "./portal-visibility";
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -61,7 +63,7 @@ export class PortalProfileController {
                   cc.project_id AS "projectId",
                   CASE WHEN u.kind = 'client' THEN 'client' ELSE 'provider' END AS "side"
              FROM client_contacts cc JOIN users u ON u.id = cc.user_id
-            WHERE cc.client_id = ANY($1::uuid[]) AND cc.deleted_at IS NULL AND cc.status <> 'revoked'
+            WHERE ${clientContactInPortalScope("cc", { clients: 1 })}
             ORDER BY u.name`,
           [scope.clientIds],
         ),

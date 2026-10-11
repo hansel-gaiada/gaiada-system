@@ -23,6 +23,8 @@ import { AuthGuard } from "../auth/guards";
 import { lockPipelineRun } from "./pipeline-lock";
 import { notifyBestEffort, notifyScopeSignedBothSides, resolveClientRecipients } from "./client-notify";
 import { requireSigner, resolvePortalScope } from "./portal-scope";
+// PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
+import { gateClientVisible, inCallerClients, runInPortalScope, runStageClientVisible } from "./portal-visibility";
 
 const CLIENT_DECISIONS = new Set(["signed", "approved", "changes_requested"]);
 const REQUIRED_SCOPE_PARTIES = ["provider", "client"] as const;
@@ -76,8 +78,7 @@ export class PortalController {
       const { clientIds, projectIds } = await resolvePortalScope(c, req.principal);
       const runs = await c.query<{ id: string; title: string; status: string }>(
         `SELECT id, title, status, created_at FROM pipeline_runs
-         WHERE client_id = ANY($1::uuid[]) AND deleted_at IS NULL
-           AND ($2::uuid[] IS NULL OR project_id = ANY($2::uuid[]))
+         WHERE ${runInPortalScope("", { clients: 1, projects: 2 })}
          ORDER BY created_at DESC LIMIT 100`,
         [clientIds, projectIds],
       );
@@ -90,12 +91,12 @@ export class PortalController {
       const runIds = runs.rows.map((r) => r.id);
       const [allStages, allGates] = await Promise.all([
         c.query<{ run_id: string; status: string }>(
-          `SELECT run_id, status FROM pipeline_stages WHERE run_id = ANY($1::uuid[]) AND track <> 'report'`,
+          `SELECT run_id, status FROM pipeline_stages WHERE run_id = ANY($1::uuid[]) AND ${runStageClientVisible("")}`,
           [runIds],
         ),
         c.query<{ run_id: string; kind: string; status: string }>(
           `SELECT run_id, kind, status FROM pipeline_gates
-            WHERE run_id = ANY($1::uuid[]) AND actor_side = 'client' AND deleted_at IS NULL`,
+            WHERE run_id = ANY($1::uuid[]) AND ${gateClientVisible("")}`,
           [runIds],
         ),
       ]);
@@ -137,20 +138,19 @@ export class PortalController {
       const { clientIds, projectIds } = await resolvePortalScope(c, req.principal);
       const run = await c.query<{ id: string; title: string; status: string }>(
         `SELECT id, title, status, created_at FROM pipeline_runs
-          WHERE id = $1 AND client_id = ANY($2::uuid[]) AND deleted_at IS NULL
-            AND ($3::uuid[] IS NULL OR project_id = ANY($3::uuid[]))`,
+          WHERE id = $1 AND ${runInPortalScope("", { clients: 2, projects: 3 })}`,
         [runId, clientIds, projectIds],
       );
       if (!run.rows[0]) throw new NotFoundException("run not found"); // also the isolation boundary
       // Client-safe stages: hide the internal report track.
       const stages = await c.query(
-        `SELECT track, name, status, artifact_ref FROM pipeline_stages WHERE run_id = $1 AND track <> 'report' ORDER BY created_at ASC`,
+        `SELECT track, name, status, artifact_ref FROM pipeline_stages WHERE run_id = $1 AND ${runStageClientVisible("")} ORDER BY created_at ASC`,
         [runId],
       );
       // Only client-side gates are surfaced (internal review is abstracted into the blockage line).
       const gates = await c.query(
         `SELECT id, kind, status, decision, created_at FROM pipeline_gates
-         WHERE run_id = $1 AND actor_side = 'client' AND deleted_at IS NULL ORDER BY created_at ASC`,
+         WHERE run_id = $1 AND ${gateClientVisible("")} ORDER BY created_at ASC`,
         [runId],
       );
       const signoffs = await c.query(
@@ -204,9 +204,8 @@ export class PortalController {
       // project-less run stays invisible to a project-scoped contact on all three routes alike.
       const owner = await c.query<{ run_id: string }>(
         `SELECT g.run_id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
-         WHERE g.id = $1 AND r.client_id = ANY($2::uuid[]) AND g.actor_side = 'client' AND g.deleted_at IS NULL
-           AND r.deleted_at IS NULL
-           AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+         WHERE g.id = $1 AND ${runInPortalScope("r", { clients: 2, projects: 3 })}
+           AND ${gateClientVisible("g")}`,
         [id, clientIds, scope.projectIds],
       );
       if (!owner.rows[0]) return null;
@@ -219,8 +218,8 @@ export class PortalController {
         `UPDATE pipeline_gates g SET status = 'decided', decision = $2, note = COALESCE($3, note),
            decided_by = $4, decided_at = now(), updated_at = now()
          FROM pipeline_runs r
-         WHERE g.id = $1 AND g.run_id = r.id AND r.client_id = ANY($5::uuid[])
-           AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
+         WHERE g.id = $1 AND g.run_id = r.id AND ${inCallerClients("r", 5)}
+           AND ${gateClientVisible("g")} AND g.status = 'pending'
          RETURNING g.run_id, g.kind, r.owner_id, r.created_by`,
         [id, decision, note ?? null, req.principal.userId, clientIds],
       );
@@ -270,8 +269,7 @@ export class PortalController {
       // (a project-scoped contact could sign the scope of a run on another of their client's projects).
       const run = await c.query<{ project_id: string | null; owner_id: string | null; created_by: string | null; client_id: string | null }>(
         `SELECT project_id, owner_id, created_by, client_id FROM pipeline_runs
-          WHERE id = $1 AND client_id = ANY($2::uuid[]) AND deleted_at IS NULL
-            AND ($3::uuid[] IS NULL OR project_id = ANY($3::uuid[]))`,
+          WHERE id = $1 AND ${runInPortalScope("", { clients: 2, projects: 3 })}`,
         [runId, clientIds, scope.projectIds],
       );
       if (!run.rows[0]) throw new NotFoundException("run not found");

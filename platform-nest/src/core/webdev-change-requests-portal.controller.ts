@@ -26,6 +26,8 @@ import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
 import { resolvePortalScope, type PortalScope } from "./portal-scope";
+// PV3-02: the row-visibility predicate below comes from portal-visibility.ts.
+import { changeRequestInPortalScope } from "./portal-visibility";
 import type { PoolClient } from "pg";
 
 const KINDS = new Set(["content", "design", "feature", "bug"]);
@@ -74,9 +76,7 @@ export class WebdevChangeRequestsPortalController {
         `SELECT ${SELECT_COLUMNS}
            FROM webdev_change_requests wcr
            LEFT JOIN projects p ON p.id = wcr.project_id
-          WHERE wcr.client_id = ANY($1::uuid[])
-            AND ($2::uuid[] IS NULL OR wcr.project_id = ANY($2::uuid[]) OR wcr.project_id IS NULL)
-            AND wcr.deleted_at IS NULL
+          WHERE ${changeRequestInPortalScope("wcr", { clients: 1, projects: 2 })}
           ORDER BY wcr.created_at DESC LIMIT 200`,
         [scope.clientIds, scope.projectIds],
       );
@@ -228,9 +228,7 @@ export class WebdevChangeRequestsPortalController {
       `SELECT ${SELECT_COLUMNS}
          FROM webdev_change_requests wcr
          LEFT JOIN projects p ON p.id = wcr.project_id
-        WHERE wcr.id = $1 AND wcr.client_id = ANY($2::uuid[])
-          AND ($3::uuid[] IS NULL OR wcr.project_id = ANY($3::uuid[]) OR wcr.project_id IS NULL)
-          AND wcr.deleted_at IS NULL`,
+        WHERE wcr.id = $1 AND ${changeRequestInPortalScope("wcr", { clients: 2, projects: 3 })}`,
       [id, scope.clientIds, scope.projectIds],
     );
     if (!r.rows[0]) throw new NotFoundException("request not found");
