@@ -75,6 +75,12 @@ interface ItemRead {
   version: { blocks: unknown; seo: unknown; contentHash: string | null };
 }
 
+/** The rebuild as a client may see it (WSK-D65): the state and the typed failure token. Never the build id, a repo, a ref or a URL. */
+export function clientBuild(b: { state: string; failureReason: string | null }): { state: string; failureReason: string | null } {
+  const reason = typeof b.failureReason === "string" && b.failureReason !== "" ? b.failureReason : null;
+  return { state: b.state, failureReason: reason === null ? null : /^[a-z0-9_]{1,64}$/.test(reason) ? reason : "rebuild_failed" };
+}
+
 function itemNotFound(): WebdeskProblem {
   return new WebdeskProblem(404, {
     type: "https://webdesk.gaiada.online/errors/item-not-found",
@@ -154,7 +160,7 @@ export class WebdeskClientWebsiteService {
     await gate.resolveSite(this.zoneB, site);
     const q = strictQuery(rawQuery, ["locale", "state", "q", "cursor", "limit", "slug"]);
     if (q.state === "deleted") throw invalidRequest("a client editor cannot list deleted items");
-    return this.content.listItems(gate, site, collectionKey, q);
+    return this.withAuthors(gate, await this.content.listItems(gate, site, collectionKey, q));
   }
 
   /** `GET …/items/:itemId[?version=]` → Zone B's item + `composition` + the per-field `clientEditable` map (the UI's read-only switch). */
@@ -166,19 +172,19 @@ export class WebdeskClientWebsiteService {
     if (!item || typeof item.collectionKey !== "string") throw new BadGatewayException({ message: "webdesk_error", reason: "item_shape" });
     if (typeof item.deletedAt === "string") throw itemNotFound();
     const composition = await new CompositionReader(this.zoneB, site).get(item.collectionKey);
-    return { status: r.status, body: { ...body, composition, clientEditable: clientEditableMap(item.collectionKey, composition) } };
+    return this.withAuthors(gate, { status: r.status, body: { ...body, composition, clientEditable: clientEditableMap(item.collectionKey, composition) } });
   }
 
   async listVersions(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
     await this.assertReadable(gate, site, itemId);
-    return this.content.listVersions(gate, site, itemId, rawQuery);
+    return this.withAuthors(gate, await this.content.listVersions(gate, site, itemId, rawQuery));
   }
 
   async getVersion(gate: ContentGate, site: SiteRef, itemId: string, n: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
     await this.assertReadable(gate, site, itemId);
-    return this.content.getVersion(gate, site, itemId, n, rawQuery);
+    return this.withAuthors(gate, await this.content.getVersion(gate, site, itemId, n, rawQuery));
   }
 
   // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -361,6 +367,15 @@ export class WebdeskClientWebsiteService {
     const requests = found.rows.map((r) => {
       const items = Array.isArray(r.tool_args?.items) ? (r.tool_args?.items as unknown[]) : [];
       const itemIds = items.flatMap((i) => (isPlainObject(i) && typeof i.itemId === "string" ? [i.itemId] : []));
+      // The versions the request NAMED (WSK-359), exactly as the staff list reads them from `tool_args.items`: the portal shows
+      // "v<N> of <title>", not the item's current draft. Titles and slugs are NOT here: this list makes no WebDesk call (WebDesk's
+      // `item.get` carries a slug but no title, and a title is computed from the version's fields), so the page resolves them by
+      // reading each item AT the requested version (`items[].version`).
+      const versions = items.flatMap((i) =>
+        isPlainObject(i) && typeof i.itemId === "string" && typeof i.version === "number" && Number.isInteger(i.version) && i.version > 0
+          ? [{ itemId: i.itemId, version: i.version }]
+          : [],
+      );
       const mine = r.requested_by === me;
       return {
         approvalId: r.id,
@@ -370,6 +385,7 @@ export class WebdeskClientWebsiteService {
         siteId: r.tool_args?.siteId ?? null,
         itemCount: itemIds.length,
         itemIds,
+        items: versions,
         requestedBy: { userId: r.requested_by, name: r.requester_name },
         requestedByMe: mine,
         // A HINT for the UI; Cerbos (publish, with the row's creator and itemCount) is the authority at approval.
@@ -403,7 +419,7 @@ export class WebdeskClientWebsiteService {
       },
     });
     const w = result.webdesk;
-    // The client sees the outcome, not WebDesk's internals (the staging rebuild is the agency's business).
+    // The client sees the outcome, not WebDesk's internals: the rebuild is reduced to `{state, failureReason}` (`clientBuild`).
     return {
       status: 200,
       body: {
@@ -413,6 +429,8 @@ export class WebdeskClientWebsiteService {
         ...(w.executionStatus === "executed" && (w.command === "content.publish" || w.command === "content.schedule")
           ? { selfPublish: w.selfPublish, reconciled: w.reconciled, items: w.items }
           : {}),
+        // WSK-D65: the staging rebuild's state, client-safe: the state and the typed reason, never the build id, repo, ref or URL.
+        ...(w.executionStatus === "executed" && w.command === "content.publish" && w.build ? { build: clientBuild(w.build) } : {}),
         ...(w.executionStatus === "failed" ? { error: w.error } : {}),
       },
     };
@@ -440,6 +458,24 @@ export class WebdeskClientWebsiteService {
   }
 
   // ── helpers ───────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Adds `authors: {<users.id>: <label>}` to an item, version or item-list answer (WSK-359): a client has no directory read, so the
+   * ids WebDesk records as version authors would otherwise show as short ids. ONE query, in the request's tenant, for every distinct
+   * id in the body:
+   *   * a contact of THIS client (any contact row, or the legacy portal user)  -> their name;
+   *   * an automation / bot account that is a member of this company            -> its name (as the staff side shows it);
+   *   * a staff user (an employee member of this company)                       -> "Gaiada" (no personal name or email: a deliberate privacy choice);
+   *   * anyone else (another client's contact, an unknown or removed account)  -> "Someone else".
+   * An id that is not a uuid is "Someone else" without touching the database. A body with no author ids is returned untouched.
+   */
+  private async withAuthors(gate: ContentGate, r: ZoneBResult): Promise<ZoneBResult> {
+    if (!isPlainObject(r.body)) return r;
+    const ids = authorIdsOf(r.body);
+    if (ids.length === 0) return r;
+    const authors = await authorLabels(gate.tenantId, this.clientOf(gate).clientId, ids);
+    return { status: r.status, body: { ...r.body, authors } };
+  }
 
   private clientOf(gate: ContentGate): NonNullable<ContentGate["client"]> {
     if (!gate.client) throw new NotFoundException("not a client route");
@@ -505,6 +541,51 @@ export class WebdeskClientWebsiteService {
       version: { blocks: v.blocks, seo: v.seo, contentHash: typeof v.contentHash === "string" ? v.contentHash : null },
     };
   }
+}
+
+/** Every distinct author id an answer names: `version.createdBy` (item.get), `createdBy` (a single version read, whose body IS the version), `versions[].createdBy` and `items[].headCreatedBy`. */
+export function authorIdsOf(body: Record<string, unknown>): string[] {
+  const out = new Set<string>();
+  const add = (v: unknown): void => {
+    if (typeof v === "string" && v !== "") out.add(v);
+  };
+  if (isPlainObject(body.version)) add(body.version.createdBy);
+  add(body.createdBy);
+  if (Array.isArray(body.versions)) for (const v of body.versions) if (isPlainObject(v)) add(v.createdBy);
+  if (Array.isArray(body.items)) for (const i of body.items) if (isPlainObject(i)) add(i.headCreatedBy);
+  return [...out];
+}
+
+export const AUTHOR_STAFF = "Gaiada";
+export const AUTHOR_OTHER = "Someone else";
+
+/** The label a client is shown for each author id, resolved in ONE query in the request's tenant (see `withAuthors`). */
+export async function authorLabels(tenantId: string, clientId: string, ids: readonly string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const valid = ids.filter((i) => UUID_RE.test(i));
+  for (const i of ids) out[i] = AUTHOR_OTHER;
+  if (valid.length === 0) return out;
+  const { rows } = await withTenants([tenantId], (c) =>
+    c.query<{ id: string; name: string | null; kind: string; same_client: boolean; member: boolean }>(
+      `SELECT u.id, u.name, u.kind,
+              (EXISTS (SELECT 1 FROM client_contacts cc
+                        WHERE cc.user_id = u.id AND cc.client_id = $3::uuid AND cc.tenant_id = $2::uuid AND cc.deleted_at IS NULL)
+               OR EXISTS (SELECT 1 FROM clients cl
+                           WHERE cl.id = $3::uuid AND cl.tenant_id = $2::uuid AND cl.portal_user_id = u.id AND cl.deleted_at IS NULL)) AS same_client,
+              EXISTS (SELECT 1 FROM company_memberships m
+                       WHERE m.user_id = u.id AND m.tenant_id = $2::uuid AND m.deleted_at IS NULL) AS member
+         FROM users u
+        WHERE u.id = ANY($1::uuid[]) AND u.deleted_at IS NULL`,
+      [valid, tenantId, clientId],
+    ),
+  );
+  for (const r of rows) {
+    const name = typeof r.name === "string" && r.name.trim() !== "" ? r.name.trim() : null;
+    if (r.same_client) out[r.id] = name ?? AUTHOR_OTHER;
+    else if ((r.kind === "automation" || r.kind === "bot") && r.member) out[r.id] = name ?? AUTHOR_OTHER;
+    else if (r.kind === "employee" && r.member) out[r.id] = AUTHOR_STAFF;
+  }
+  return out;
 }
 
 /** The process-wide client-mode service (shares the wall cache and the egress seam with the staff BFF). */

@@ -4,7 +4,7 @@ import type { CollectionComposition } from "./webdeskContentModel";
 import type { ClientEditable } from "./webdeskEditorDriver";
 import {
   canOfferPublishNow, collectionEditability, createBlockedCopy, hasUnpublishedChanges, itemListState, itemTitle, portalWebsiteHref, PORTAL_COPY,
-  PUBLISHED_COPY, requesterLabel, requestState, showApprove, showWithdraw, splitRequests, type PortalPublishRequest,
+  PUBLISHED_COPY, publishOutcomeCopy, requesterLabel, requestState, showApprove, showWithdraw, splitRequests, type PortalPublishRequest,
 } from "./portalWebsiteModel";
 
 const ce = (over: Partial<ClientEditable> = {}): ClientEditable => ({ fields: { h1: true, url: false }, blocks: false, seo: false, create: { allowed: true, reason: null, blockedBy: [] }, ...over });
@@ -71,7 +71,7 @@ describe("Publish now is for a change the VIEWER made (WSK-D58)", () => {
 });
 
 const req = (over: Partial<PortalPublishRequest> = {}): PortalPublishRequest => ({
-  approvalId: "a1", status: "pending", createdAt: "2026-10-11T08:00:00Z", tenantSlug: "gaiada", siteId: "s1", itemCount: 2, itemIds: ["i1", "i2"],
+  approvalId: "a1", status: "pending", createdAt: "2026-10-11T08:00:00Z", tenantSlug: "gaiada", siteId: "s1", itemCount: 2, itemIds: ["i1", "i2"], items: [{ itemId: "i1", version: 4 }, { itemId: "i2", version: 2 }],
   requestedBy: { userId: "u2", name: "Dewi" }, requestedByMe: false, canApprove: true, executionStatus: null, ...over,
 });
 
@@ -138,5 +138,18 @@ describe("words and links", () => {
     expect(itemTitle({ h1: "  Home  " }, {}, "h1", "s")).toBe("Home");
     expect(itemTitle({}, { title: "SEO T" }, "h1", "s")).toBe("SEO T");
     expect(itemTitle({ h1: "" }, {}, "h1", "the-slug")).toBe("the-slug");
+  });
+});
+
+describe("WSK-359 · publishOutcomeCopy: the words for a client publish's rebuild state", () => {
+  it("is the owner's sentence for each state, and 'live' only for a live state", () => {
+    expect(publishOutcomeCopy({ state: "rebuilding", failureReason: null })).toEqual({ tone: "info", text: "Your site is rebuilding. This usually takes a few minutes." });
+    expect(publishOutcomeCopy({ state: "live", failureReason: null })).toEqual({ tone: "ok", text: "Live on your site." });
+    expect(publishOutcomeCopy({ state: "failed", failureReason: "rebuild_not_configured" })).toEqual({ tone: "warn", text: "Published. Your site's automatic update isn't set up yet, so Gaiada will update it." });
+    expect(publishOutcomeCopy({ state: "failed", failureReason: "anything_else" })).toEqual({ tone: "warn", text: "Published, but the site update didn't start. Gaiada has been told." });
+    expect(publishOutcomeCopy({ state: "failed", failureReason: null }).text).toBe("Published, but the site update didn't start. Gaiada has been told.");
+    expect(publishOutcomeCopy({ state: "unverified", failureReason: null }).tone).toBe("warn");
+    expect(publishOutcomeCopy(null)).toEqual({ tone: "ok", text: PUBLISHED_COPY });
+    for (const state of ["rebuilding", "unverified", "failed"] as const) expect(publishOutcomeCopy({ state, failureReason: null }).text).not.toMatch(/^live/i);
   });
 });

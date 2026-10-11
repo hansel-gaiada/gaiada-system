@@ -14,7 +14,14 @@
 //     GET     /v1/t/:slug/media/:id                            the bytes (for thumbnails)
 //
 // Scenario switches (`/__stub/config`): uploadCors (default true), publicUrlNotConfigured, mediaMaxBytes, mediaDeny
-// {upload,update,delete}, scanUnavailable, ambiguousMediaWrite. Content that contains the text EICAR is "infected".
+// {upload,update,delete}, scanUnavailable, ambiguousMediaWrite, mediaCaps ({upload,update,delete} booleans: overrides what the list's
+// `capabilities` says), mediaCapsUnknown (true: the list carries NO `capabilities`, as when the BFF could not ask Cerbos).
+// Content that contains the text EICAR is "infected".
+//
+// WSK-359: the list answer carries `capabilities: {read, upload, update, delete}` (BFF contract §27): by default from the caller's role
+// (a viewer can do nothing but read; an editor uploads and updates; only a publisher in STAFF mode deletes, a client never does).
+// `mediaDeny` is deliberately NOT folded in: it models a refusal the advisory answer did not predict (a policy changed after the list was
+// read), so the 403 handling stays testable with controls that were enabled up front.
 
 import crypto from "node:crypto";
 
@@ -33,7 +40,15 @@ const LOCALES = ["en", "id"];
 export function seedMedia() {
   return { media: new Map(), uploadTokens: new Map(), uploadLog: [], mediaLog: [] };
 }
-export const mediaCfg = () => ({ uploadCors: true, publicUrlNotConfigured: false, mediaMaxBytes: DEFAULT_MAX_BYTES, mediaDeny: {}, scanUnavailable: false, ambiguousMediaWrite: null });
+export const mediaCfg = () => ({ uploadCors: true, publicUrlNotConfigured: false, mediaMaxBytes: DEFAULT_MAX_BYTES, mediaDeny: {}, mediaCaps: {}, mediaCapsUnknown: false, scanUnavailable: false, ambiguousMediaWrite: null });
+
+/** The list's `capabilities` for this caller (see the header). `client` = the portal's client mode: delete is never offered. */
+export function mediaCapabilities(S, { role, client }) {
+  const base = role === "viewer" ? { upload: false, update: false, delete: false } : { upload: true, update: true, delete: role === "publisher" && !client };
+  const over = S.cfg.mediaCaps ?? {};
+  const pick = (k) => (typeof over[k] === "boolean" ? over[k] : base[k]);
+  return { read: true, upload: pick("upload"), update: pick("update"), delete: client ? false : pick("delete") };
+}
 
 /** What `/__stub/state` returns for the media library (never the bytes). */
 export function mediaState(S) {
@@ -86,7 +101,7 @@ function usageOf(S, assetId) {
 
 // ── BFF routes ────────────────────────────────────────────────────────────────────────────────────
 /** `rest` is what follows `/sites/:t/:s` (starts with `/media`). Returns a `{status, json}` or null when it is not a media route. */
-export function handleMediaBff(S, { method, rest, query, body, userId, role }) {
+export function handleMediaBff(S, { method, rest, query, body, userId, role, client = false }) {
   let mm;
   const deny = (cap) => S.cfg.mediaDeny?.[cap] === true;
 
@@ -103,7 +118,10 @@ export function handleMediaBff(S, { method, rest, query, body, userId, role }) {
     const offset = Number(query.get("cursor") ?? 0);
     const slice = rows.slice(offset, offset + limit);
     const hasMore = offset + limit < rows.length;
-    return R(200, { assets: slice.map((a) => wireAsset(S, a, true)), page: { cursor: hasMore ? String(offset + limit) : null, hasMore, limit } });
+    return R(200, {
+      assets: slice.map((a) => wireAsset(S, a, true)), page: { cursor: hasMore ? String(offset + limit) : null, hasMore, limit },
+      ...(S.cfg.mediaCapsUnknown ? {} : { capabilities: mediaCapabilities(S, { role, client }) }),
+    });
   }
 
   if ((mm = rest.match(/^\/media\/([^/]+)\/usage$/)) && method === "GET") {
