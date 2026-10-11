@@ -822,6 +822,14 @@ jobs:
             echo "##### $t"
             node --import tsx ../delivery/test/$t.test.mjs
           done
+      # M4 T5: WSK-18 condition c1, cross-machine determinism. The script starts two independent
+      # node:22-bookworm-slim containers per tenant (each with its own npm ci) and byte-compares their
+      # contract artifacts, so it needs a docker daemon. GitHub's runner has one; the sumopod Linux
+      # gate does not (the host socket stays vetoed there, and its `legacy` suite SKIPs this by name).
+      - name: WSK-18 c1 — cross-machine determinism (two independent containers per tenant)
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: node webdesk/scripts/check-determinism-crossmachine.mjs --docker --tenants acme,globex
 
   # P3-12: platform-ui build gate. `tsc` + vitest alone once passed while `next build` broke
   # (a `server-only` import reached a client component) and routes 500'd — `npm run build` here
