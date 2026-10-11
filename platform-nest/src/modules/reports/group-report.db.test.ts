@@ -212,10 +212,12 @@ describe.skipIf(!TEST_URL)("PV1-06a · group reads for the owner of a root (live
       expect((await rollups(admin)).status).toBe(200);
     });
 
-    it("gets 404 for a child id and for an id that is not a company at all", async () => {
+    it("gets 404 for a child id and for an id that is not a company at all; 400 for a malformed id", async () => {
       expect((await groupReport(childB, admin)).status).toBe(404);
-      expect((await groupReport("not-a-uuid", admin)).status).toBe(404);
       expect((await groupReport(newId(), admin)).status).toBe(404);
+      // A malformed tenant id never reaches the route: the app's tenant-id validation answers 400
+      // first (found by the PV-1 integration gate). Bad request is the right answer for it.
+      expect((await groupReport("not-a-uuid", admin)).status).toBe(400);
     });
   });
 
