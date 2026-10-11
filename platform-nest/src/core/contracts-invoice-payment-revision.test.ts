@@ -67,7 +67,7 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     await addMembership(tenant, recorder);
     await grantRole(admin, await createRole("company_admin"), "company", tenant);
     app = await buildApp();
-    clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme" } })).json().id;
+    clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme", businessType: "other" } })).json().id;
   });
   afterAll(async () => {
     await app.close();

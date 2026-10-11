@@ -7,6 +7,7 @@ import { can } from "@/lib/rbac";
 import { listClients } from "@/lib/entities";
 import { listClientCentres } from "@/lib/clientCentre-data";
 import { registry, businessTypeLabel } from "@/lib/clientCentre";
+import { REVIEW_BUSINESS_TYPE, clientsHref, inBusinessTypeReview, readCentres } from "@/lib/clientBusinessType";
 import { PageHeader } from "@/components/PageHeader";
 import { humanizeStatus } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -20,11 +21,12 @@ const COLUMNS: Column[] = [
   { key: "email", header: "Contact" },
   { key: "owner", header: "Owner", sortable: true },
   { key: "businessType", header: "Business type", sortable: true },
+  { key: "groupCompany", header: "Group company", sortable: true },
   { key: "profile", header: "Profile", align: "right" },
   { key: "status", header: "Status", format: "status", sortable: true, align: "right" },
 ];
 
-type Search = Promise<{ status?: string; archived?: string }>;
+type Search = Promise<{ status?: string; archived?: string; review?: string }>;
 
 export default async function ClientsPage({ searchParams }: { searchParams: Search }) {
   const userId = await getSessionUserId();
@@ -34,16 +36,22 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
   if (!tenant) {
     return (<><PageHeader eyebrow="Business" title="Clients" /><EmptyNote>Select a company from the top bar.</EmptyNote></>);
   }
-  const { status, archived } = await searchParams;
+  const { status, archived, review } = await searchParams;
 
   // CC-D8 — the former `/client-centre` list folded in as two columns, so there is one client list.
-  // The profile read is a second endpoint; if it fails the columns show "—" rather than taking the
-  // client list down with it ("—" says "unknown", never "0%", which would claim an empty profile).
-  const [clients, centres] = await Promise.all([
+  // The profile read is a second endpoint. PV3-04: when it fails the columns still show "—" ("unknown",
+  // never "0%"), but the page now SAYS so and withholds the business-type review filter: the old
+  // `.catch(() => [])` let a refused read pass for "no client has a type set".
+  const [clients, centreOutcome] = await Promise.all([
     listClients(userId, tenant),
-    listClientCentres(userId, tenant).catch(() => []),
+    listClientCentres(userId, tenant).then(
+      (items) => ({ items, thrown: undefined as unknown }),
+      (e: unknown) => ({ items: null, thrown: e ?? new Error("read failed") }),
+    ),
   ]);
-  const centreById = new Map(centres.map((c) => [c.clientId, c]));
+  const centreRead = readCentres(clients.length, centreOutcome.items, centreOutcome.thrown);
+  // Empty on a failed read, so every profile cell reads "—" (unknown) rather than a guess.
+  const centreById = new Map((centreRead.ok ? centreOutcome.items ?? [] : []).map((c) => [c.clientId, c]));
   const allRows = clients.map((c) => {
     const centre = centreById.get(c.id);
     return {
@@ -52,6 +60,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
       email: (c.contact as { email?: string })?.email ?? "—",
       owner: c.owner_name ?? "—",
       businessType: centre ? businessTypeLabel(registry, centre.businessType) : "—",
+      groupCompany: c.groupCompany?.name ?? "—",
       profile: centre && centre.fieldsFilled.total > 0
         ? `${Math.round((centre.fieldsFilled.filled / centre.fieldsFilled.total) * 100)}%`
         : "—",
@@ -69,10 +78,16 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
   // list (they are still one click away, and picking the "archived" status facet shows them too).
   const showArchived = archived === "1" || activeStatus === "archived";
   const archivedCount = counts.get("archived") ?? 0;
-  const rows = activeStatus
+  const inView = activeStatus
     ? allRows.filter((r) => r.status === activeStatus)
     : showArchived ? allRows : allRows.filter((r) => r.status !== "archived");
-  const buildStatusHref = (next: string | undefined) => (next ? `/clients?status=${encodeURIComponent(next)}` : "/clients");
+  // PV3-04 (PV-D1): the review list, "Business type: Other or not set", over the profile list read above.
+  // Withheld when that read failed (the banner below says so); never filtered through an empty stand-in.
+  const reviewCount = inView.filter((r) => inBusinessTypeReview(centreRead, r.id)).length;
+  const reviewActive = review === REVIEW_BUSINESS_TYPE && centreRead.ok;
+  const rows = reviewActive ? inView.filter((r) => inBusinessTypeReview(centreRead, r.id)) : inView;
+  const buildStatusHref = (next: string | undefined) => clientsHref({ status: next, review: reviewActive });
+  const buildReviewHref = (next: string | undefined) => clientsHref({ status: activeStatus, archived: archived === "1", review: next === REVIEW_BUSINESS_TYPE });
 
   return (
     <>
@@ -100,6 +115,21 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
               />
             </div>
           )}
+          {!centreRead.ok && (
+            <p role="alert" style={{ margin: "0 0 12px", font: "400 13px var(--font-body)", color: "var(--erp-accent)" }}>
+              {centreRead.message} The &ldquo;Other or not set&rdquo; filter is unavailable until it can, and the Business type and Profile columns show &ldquo;—&rdquo; rather than a guess.
+            </p>
+          )}
+          {centreRead.ok && (reviewCount > 0 || reviewActive) && (
+            <div style={{ marginBottom: 14 }}>
+              <FilterBar
+                label="Review business types"
+                active={reviewActive ? REVIEW_BUSINESS_TYPE : undefined}
+                options={[{ key: REVIEW_BUSINESS_TYPE, label: "Business type: Other or not set", count: reviewCount }]}
+                buildHref={buildReviewHref}
+              />
+            </div>
+          )}
           {!activeStatus && archivedCount > 0 && (
             <p style={{ margin: "0 0 10px", font: "400 12px var(--font-body)", color: "var(--ink-muted)" }}>
               {showArchived
@@ -108,7 +138,11 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
             </p>
           )}
           {/* Bulk delete is a delete: `client.delete` (manager+), not `client.write`. */}
-          <ClientsTable columns={COLUMNS} rows={rows} canManage={can(me, "client.delete", tenant)} viewKey="clients" />
+          {reviewActive && rows.length === 0 ? (
+            <EmptyNote>Every client in this view has a business type.</EmptyNote>
+          ) : (
+            <ClientsTable columns={COLUMNS} rows={rows} canManage={can(me, "client.delete", tenant)} viewKey="clients" />
+          )}
         </>
       )}
     </>

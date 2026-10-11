@@ -74,7 +74,7 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
   it("member creates a client; it lists back", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/clients`,
-      headers: asUser(member), payload: { name: "Acme Retail", contact: { email: "ops@acme.test" } },
+      headers: asUser(member), payload: { name: "Acme Retail", businessType: "retail", contact: { email: "ops@acme.test" } },
     });
     expect(r.statusCode).toBe(201);
     clientId = r.json().id;
