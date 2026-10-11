@@ -231,8 +231,13 @@ lines) in `PN/src/core/portal-workspace.controller.ts`, `portal-commerce.control
 - Every existing portal suite stays green unchanged: `portal-payloads.db.test.ts`, `portal.test.ts`,
   `portal-dashboard.test.ts`, `portal-client-contacts.test.ts`, `portal-centre.db.test.ts`,
   `social-client-review-portal.controller.test.ts` and `webdev-change-requests-portal.controller.test.ts`.
-- New guard test: the portal controllers contain none of the old inline literals (`status <> 'draft'`,
-  `actor_side = 'client'`, the `PROJECT_SCOPE` body) outside `portal-visibility.ts`.
+- New guard test. It scans every `PN/src` file that imports from `portal-scope` (`resolvePortalScope`,
+  `callerClientIds`, `requireSigner`), not a hand-kept list, so new portal routes are covered
+  automatically. Today that includes `client-website-access.controller.ts`; WebDesk's
+  `webdesk-client-website.*` files join in 356. None of these files may contain the old inline
+  literals (`status <> 'draft'`, `actor_side = 'client'`, the `PROJECT_SCOPE` body) outside
+  `portal-visibility.ts`. The test also asserts that the scan found the five refactored controllers,
+  so a broken scan can't pass vacuously.
 - Teeth: re-inline one predicate and the guard fails.
 
 ### PV3-03: client facets for Contracts & billing (client-centric slice 2, backend)
