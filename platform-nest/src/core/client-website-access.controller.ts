@@ -203,14 +203,15 @@ export class ClientWebsiteAccessController {
 
   /** Assign the `admin` client-contact capability. STAFF ONLY (`manage_admin` has no client arm).
    *
-   *  `admin` REPLACES `signer`/`viewer` in the single capability column and does not itself carry signing, so
-   *  promoting a SIGNER would silently strip their ability to sign contracts. That is refused with 409 unless
-   *  the caller states `{ "confirmReplaceSigner": true }`. */
+   *  `admin` REPLACES `signer`/`viewer` in the single capability column and IMPLIES signer (owner ruling
+   *  2026-10-11): every place that tests for a signer also accepts an admin (portal-scope `canSign`,
+   *  client-notify's signature recipients, canEditCentre). Promoting a signer therefore keeps their signing
+   *  and needs no confirmation; the previous capability is recorded in the audit row. */
   @Put(":tenantId/clients/:clientId/contacts/:contactId/admin")
   @HttpCode(200)
   async staffGrantAdmin(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string,
-    @Param("contactId") contactId: string, @Body() body?: { confirmReplaceSigner?: boolean },
+    @Param("contactId") contactId: string,
   ) {
     await authorize(req.principal, { kind: "client_contact", id: contactId, tenantId }, "manage_admin");
     uuidParam("clientId", clientId); uuidParam("contactId", contactId);
@@ -221,12 +222,6 @@ export class ClientWebsiteAccessController {
       }
       if (contact.status === "revoked") throw new BadRequestException("contact_revoked: a revoked contact cannot be made admin");
       if (contact.capability === "admin") return { contact, changed: false };
-      if (contact.capability === "signer" && body?.confirmReplaceSigner !== true) {
-        throw new ConflictException(
-          "would_remove_signer: this contact is a signer; the admin capability replaces signer in this release and does " +
-            "not carry signing. Resend with { confirmReplaceSigner: true } to proceed.",
-        );
-      }
       const upd = await c.query(
         `UPDATE client_contacts SET capability = 'admin', updated_at = now()
           WHERE id = $1 AND tenant_id = $2 AND client_id = $3 AND capability = $4 AND deleted_at IS NULL`,
@@ -241,32 +236,35 @@ export class ClientWebsiteAccessController {
     return { clientId, contactId, userId: result.contact.user_id, capability: "admin", changed: result.changed };
   }
 
-  /** Remove the `admin` capability. The contact is restored to `viewer` -- never to `signer`: a revoke must not
-   *  mint signing authority, and the prior capability is not stored. Staff can re-grant signing separately. */
+  /** Remove the `admin` capability. The target capability is explicit: `{ "to": "signer" | "viewer" }`, default
+   *  `viewer` (least privilege). The prior capability is not stored, so a FORMER SIGNER must be re-made a signer
+   *  deliberately (`to: "signer"`); omitting `to` never mints signing authority. */
   @Delete(":tenantId/clients/:clientId/contacts/:contactId/admin")
   @HttpCode(200)
   async staffRevokeAdmin(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string,
-    @Param("contactId") contactId: string,
+    @Param("contactId") contactId: string, @Body() body?: { to?: string },
   ) {
     await authorize(req.principal, { kind: "client_contact", id: contactId, tenantId }, "manage_admin");
     uuidParam("clientId", clientId); uuidParam("contactId", contactId);
+    const to = body?.to ?? "viewer";
+    if (to !== "signer" && to !== "viewer") throw new BadRequestException("to must be 'signer' or 'viewer'");
     const result = await withTenants([tenantId], async (c) => {
       const contact = await loadContact(c, tenantId, clientId, contactId);
       if (contact.capability !== "admin") return { contact, changed: false };
       const upd = await c.query(
-        `UPDATE client_contacts SET capability = 'viewer', updated_at = now()
+        `UPDATE client_contacts SET capability = $4, updated_at = now()
           WHERE id = $1 AND tenant_id = $2 AND client_id = $3 AND capability = 'admin' AND deleted_at IS NULL`,
-        [contactId, tenantId, clientId],
+        [contactId, tenantId, clientId, to],
       );
       if (!upd.rowCount) return { contact, changed: false };
       await writeClientAccessAuditTx(c, tenantId, req.principal.userId, "client_contact.admin_revoked", contactId, {
-        clientId, contactId, targetUserId: contact.user_id, restoredCapability: "viewer", surface: "staff",
+        clientId, contactId, targetUserId: contact.user_id, restoredCapability: to, surface: "staff",
       });
       return { contact, changed: true };
     });
     if (result.changed) await bumpSession(result.contact.user_id);
-    return { clientId, contactId, userId: result.contact.user_id, capability: "viewer", changed: result.changed };
+    return { clientId, contactId, userId: result.contact.user_id, capability: result.changed ? to : result.contact.capability, changed: result.changed };
   }
 
   // ═══════════════════════════ PORTAL (client admin) ═══════════════════════════

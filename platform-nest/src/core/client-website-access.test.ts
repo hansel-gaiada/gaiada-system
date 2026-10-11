@@ -264,13 +264,11 @@ describe.skipIf(!TEST_URL)("WSK-49f: client_website_editor grant path (staff + c
       expect((await auditRows(k, "client_contact.admin_%")).map((a) => a.verb)).toEqual(["client_contact.admin_granted", "client_contact.admin_revoked"]);
     });
 
-    it("promoting a SIGNER is refused (409) unless explicitly confirmed, because admin replaces signer", async () => {
+    it("promoting a SIGNER needs no confirmation (admin implies signer; see admin-implies-signer.test.ts)", async () => {
       const k = cid["signer-a@w49f.test"];
       const a = await app.inject({ method: "PUT", url: url.staffAdmin(clientA, k), headers: asUser(companyAdmin) });
-      expect(a.statusCode).toBe(409);
-      expect((await adminPool().query(`SELECT capability FROM client_contacts WHERE id = $1`, [k])).rows[0].capability).toBe("signer");
-      const b = await app.inject({ method: "PUT", url: url.staffAdmin(clientA, k), payload: { confirmReplaceSigner: true }, headers: asUser(companyAdmin) });
-      expect(b.statusCode).toBe(200);
+      expect(a.statusCode).toBe(200);
+      expect(a.json()).toMatchObject({ capability: "admin", changed: true });
       await setCapability(k, "signer"); // restore for the other tests
     });
 

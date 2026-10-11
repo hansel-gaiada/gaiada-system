@@ -34,8 +34,9 @@ export function clientNotifyKindForGate(gateKind: string): ClientNotifyKind {
  *    nobody to notify), and a 'revoked' one must never hear about this tenant's work again.
  *  - `project_id IS NULL` (client-wide) OR `project_id` = the run's own project — never a contact
  *    scoped to a DIFFERENT project than the one this run belongs to.
- *  - kind 'signature' -> only `capability = 'signer'` contacts, because a viewer cannot act on a sign
- *    request; kind 'general' -> every active contact in scope (signer AND viewer).
+ *  - kind 'signature' -> only `capability IN ('signer','admin')` contacts, because a viewer cannot act on
+ *    a sign request (WSK-49f, owner ruling 2026-10-11: `admin` IMPLIES signer, so an admin is asked too);
+ *    kind 'general' -> every active contact in scope (signer, admin AND viewer).
  *
  * Caller must already hold a PoolClient from `withTenants([tenantId], ...)` scoped to the run's
  * tenant — this issues one read-only SELECT on that connection and nothing else.
@@ -53,7 +54,7 @@ export async function resolveClientRecipients(
     `SELECT DISTINCT user_id FROM client_contacts
       WHERE client_id = $1 AND status = 'active' AND deleted_at IS NULL
         AND (project_id IS NULL OR project_id = $2)
-        ${kind === "signature" ? "AND capability = 'signer'" : ""}`,
+        ${kind === "signature" ? "AND capability IN ('signer', 'admin')" : ""}`,
     [clientId, projectId],
   );
   return rows.rows.map((r) => r.user_id);
