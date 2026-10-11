@@ -57,7 +57,7 @@ export const WORKFLOW_DISPATCH_FAILURES = [
   "workflow_not_dispatchable",
   /** Cerbos refused `github_repo · deploy` for the decider. Nothing was sent. */
   "deploy_denied",
-  /** WSK-D63: a client's publish could not be re-verified at dispatch time (the approval is not an executed client publish
+  /** WSK-D65: a client's publish could not be re-verified at dispatch time (the approval is not an executed client publish
    *  decided by this client, or its client is no longer linked to the site). Nothing was sent. */
   "client_publish_unverified",
   /** The GitHub org's tenant could not be resolved for this company (misconfigured or a foreign root). */
@@ -79,7 +79,7 @@ export class WorkflowDispatchError extends Error {
 }
 
 /**
- * WSK-D63 — the ONE narrow authority, other than `github_repo . deploy`, that may start a staging rebuild: the executed
+ * WSK-D65 — the ONE narrow authority, other than `github_repo . deploy`, that may start a staging rebuild: the executed
  * publish of a CLIENT editor ("a client publish rebuilds staging automatically").
  *
  * A client is never granted `deploy` and no policy changes. Instead the executor, after a publish that a client editor decided
@@ -104,7 +104,7 @@ export class ClientPublishAuthority {
   }
 }
 
-export const CLIENT_PUBLISH_BASIS = { kind: "client-publish", ruling: "WSK-D63" } as const;
+export const CLIENT_PUBLISH_BASIS = { kind: "client-publish", ruling: "WSK-D65" } as const;
 
 export interface WorkflowDispatchInput {
   /** The human who decided the approval; authorised against `github_repo · deploy`. */
@@ -120,7 +120,7 @@ export interface WorkflowDispatchInput {
   ref: string;
   /** Workflow inputs. GitHub requires strings. */
   inputs: Record<string, string>;
-  /** WSK-D63: set ONLY by the executor for a client-decided publish. Absent (the staff path) means `authorizeDeploy`, unchanged. */
+  /** WSK-D65: set ONLY by the executor for a client-decided publish. Absent (the staff path) means `authorizeDeploy`, unchanged. */
   authority?: ClientPublishAuthority;
 }
 
@@ -162,7 +162,7 @@ export async function authorizeDeploy(
 }
 
 /**
- * WSK-D63: re-verify a client-publish authority on the server, in this tenant, before any GitHub call. ALL must hold:
+ * WSK-D65: re-verify a client-publish authority on the server, in this tenant, before any GitHub call. ALL must hold:
  *   (a) the approval row exists here, is a WebDesk `content.publish`, `status = approved` and `execution_status = executed`,
  *       for the very site the authority names;
  *   (b) it was DECIDED by this principal, the principal is a client editor of the client the row was filed for
@@ -277,7 +277,7 @@ export async function dispatchApprovedWorkflow(input: WorkflowDispatchInput): Pr
   const actorId = input.decider.userId;
   if (!actorId) throw new WorkflowDispatchError("deploy_denied", "an authenticated decider is required");
 
-  // WSK-D63: a client publish is authorised by its own executed approval (re-verified), never by `deploy`. The staff path (no
+  // WSK-D65: a client publish is authorised by its own executed approval (re-verified), never by `deploy`. The staff path (no
   // `authority`) is exactly what it was: `authorizeDeploy`. Anything that is not a real `ClientPublishAuthority` is refused outright.
   if (input.authority !== undefined && !(input.authority instanceof ClientPublishAuthority)) {
     throw new WorkflowDispatchError("client_publish_unverified", "a client publish could not be verified: not an issued authority");

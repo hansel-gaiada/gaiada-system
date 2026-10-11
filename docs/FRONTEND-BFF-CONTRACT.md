@@ -1956,14 +1956,14 @@ requester is NOT notified when another client approves their batch (the staff in
 Staff deciders are still notified that a batch awaits (`/approvals/<id>`). The same holds when STAFF decide a client-filed
 request in the inbox: the row carries the client, so the client requester is not sent the staff href either.
 
-**A client publish rebuilds staging automatically (WSK-D63).** When a client editor's publish executes (a self-published item, or a
+**A client publish rebuilds staging automatically (WSK-D65).** When a client editor's publish executes (a self-published item, or a
 batch another client editor approved), the executor starts the same staging rebuild a staff publish starts (§27, WSK-60). The client
 never holds `github_repo · deploy` and no Cerbos policy changed: the rebuild is authorised by the executed publish itself, which the
 dispatch re-verifies on the server before any GitHub call (the approval is an executed `content.publish` in this tenant, decided by
 this client editor, filed for a client that is STILL linked to this exact site; otherwise the build row is
 `failed: client_publish_unverified` and nothing is sent). The target (repo, workflow, ref) comes only from the ERP's rebuild
 configuration; it is once per approval, staging only, and the `github.deploy` ledger rows carry `basis: 'client-publish'` and
-`ruling: 'WSK-D63'` with the client as actor. The build status the editor reads is unchanged (`rebuilding` -> `live`/`unverified`).
+`ruling: 'WSK-D65'` with the client as actor. The build status the editor reads is unchanged (`rebuilding` -> `live`/`unverified`).
 A staff decider's dispatch is untouched (`authorizeDeploy`).
 
 **A stale `baseVersion` is `409 version-conflict` (WebDesk's body: `currentHeadVersion`, `currentContentHash`, `updatedAt`), decided

@@ -1116,7 +1116,7 @@ async function startRebuildAfterPublish(
   clientDecider?: ClientDecider,
 ): Promise<{ buildId: string | null; state: "rebuilding" | "live" | "unverified" | "failed"; failureReason: string | null }> {
   const r = await startSiteRebuild({
-    // WSK-D63: the ONLY place a client-publish authority is issued: this executor, after the publish a CLIENT editor decided has
+    // WSK-D65: the ONLY place a client-publish authority is issued: this executor, after the publish a CLIENT editor decided has
     // executed. The dispatch re-verifies it against the approval row and the site link before any GitHub call.
     ...(clientDecider && decider.userId
       ? { authority: ClientPublishAuthority.issue({ tenantId, approvalId, tenantSlug: a.tenantSlug, siteId: a.siteId, deciderId: decider.userId }) }

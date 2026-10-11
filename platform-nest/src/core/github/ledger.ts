@@ -85,7 +85,7 @@ interface GithubLedgerBase {
    *  without a join. Absent for callers that have no approval; the key is then omitted, not null, so
    *  every pre-existing row shape is byte-identical. */
   approvalId?: string;
-  /** WSK-D63: a dispatch authorised by something other than `github_repo . deploy` says so, on all three rows of the attempt
+  /** WSK-D65: a dispatch authorised by something other than `github_repo . deploy` says so, on all three rows of the attempt
    *  (`metadata.basis`, `metadata.ruling`). Absent for every other caller: the keys are then omitted, so existing rows are byte-identical. */
   basis?: { kind: string; ruling: string };
 }

@@ -1,4 +1,4 @@
-// WSK-49c / WSK-D63 — a client editor's publish rebuilds staging automatically, WITHOUT the client ever holding
+// WSK-49c / WSK-D65 — a client editor's publish rebuilds staging automatically, WITHOUT the client ever holding
 // `github_repo · deploy` and with no Cerbos change.
 //
 // Real: Postgres (RLS, the build ledger, the activities ledger, the site -> client link), Cerbos (all policies unmodified),
@@ -7,7 +7,7 @@
 // real ledger. Stub: GitHub's API and Zone B (the in-process FakeZoneB).
 //
 // What is proven: the build row is `rebuilding` with the client as `decided_by` and the dispatch is ONE call to the target
-// that comes only from config; the dispatch ledger rows say `basis: client-publish` / `ruling: WSK-D63`; a link re-pointed
+// that comes only from config; the dispatch ledger rows say `basis: client-publish` / `ruling: WSK-D65`; a link re-pointed
 // between the execute and the dispatch sends NOTHING (typed `client_publish_unverified`); the staff path is still
 // `authorizeDeploy` (a staff decider without deploy is still `deploy_denied`); and the authority cannot be forged, borrowed by
 // a staff decider, or used for a rebuild. Denials send valid bodies, each beside a positive control.
@@ -82,7 +82,7 @@ async function startGithub() {
 }
 const dispatches = (g: { calls: GhCall[] }) => g.calls.filter((c) => c.method === "POST" && c.path.endsWith("/dispatches"));
 
-describe.skipIf(!live)("WSK-49c / WSK-D63 · a client publish rebuilds staging, authorised by the executed publish itself", () => {
+describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, authorised by the executed publish itself", () => {
   let app: NestFastifyApplication;
   let gh: Awaited<ReturnType<typeof startGithub>>;
   let A: string;
@@ -130,7 +130,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D63 · a client publish rebuilds staging, 
     config.serviceToken = "svc-token";
     resetModules();
     resetCoreRollupProviders();
-    A = await createCompany("WSK-D63 Co", ["webdev"]);
+    A = await createCompany("WSK-D65 Co", ["webdev"]);
     cA1 = await createClient(A, "Bali Beach Resort");
     cA2 = await createClient(A, "Nusa Coffee");
     const clientRole = await createRole("client");
@@ -231,7 +231,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D63 · a client publish rebuilds staging, 
     expect(rows[0].github_correlation_id).toBeTruthy();
   });
 
-  it("the dispatch is audited with the client as actor, `basis: client-publish` and the ruling WSK-D63 on every row of the attempt", async () => {
+  it("the dispatch is audited with the client as actor, `basis: client-publish` and the ruling WSK-D65 on every row of the attempt", async () => {
     const it = draft("svc.d63-audit");
     await call("POST", `${S()}/items/${it.itemId}/publish`, edA1, {});
     const approvalId = (await adminPool().query<{ id: string }>(`SELECT id FROM automation_approvals WHERE origin = 'webdesk' AND tenant_id = $1`, [A])).rows[0].id;
@@ -239,7 +239,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D63 · a client publish rebuilds staging, 
     expect(rows.map((x) => x.metadata.outcome)).toEqual(["attempted", "succeeded"]);
     for (const row of rows) {
       expect(row.actor_id).toBe(edA1);
-      expect(row.metadata).toMatchObject({ approvalId, basis: "client-publish", ruling: "WSK-D63", repo: REPO, ref: REF });
+      expect(row.metadata).toMatchObject({ approvalId, basis: "client-publish", ruling: "WSK-D65", repo: REPO, ref: REF });
     }
   });
 
@@ -253,7 +253,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D63 · a client publish rebuilds staging, 
     expect(ok.statusCode, ok.body).toBe(200);
     expect(dispatches(gh)).toHaveLength(1);
     expect((await builds(id))[0]).toMatchObject({ state: "rebuilding", decided_by: ed2A1, repo: REPO, ref: REF });
-    expect((await githubRows(id))[0].metadata).toMatchObject({ basis: "client-publish", ruling: "WSK-D63" });
+    expect((await githubRows(id))[0].metadata).toMatchObject({ basis: "client-publish", ruling: "WSK-D65" });
   });
 
   it("once per approval: starting the rebuild again for the same approval finds the first row and dispatches nothing", async () => {

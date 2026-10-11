@@ -254,7 +254,7 @@ export interface StartRebuildInput {
   decider: Principal | null;
   /** Recorded as `decided_by` when `decider` is null. */
   decidedBy?: string | null;
-  /** WSK-D63: set ONLY by the approved-command executor when the decider of an executed publish is a CLIENT editor. The dispatch
+  /** WSK-D65: set ONLY by the approved-command executor when the decider of an executed publish is a CLIENT editor. The dispatch
    *  then re-verifies it server-side instead of running `authorizeDeploy` (see `ClientPublishAuthority`). Never passed for a staff
    *  decider, for a `rebuild`, or for a scheduled publish. */
   authority?: ClientPublishAuthority;
