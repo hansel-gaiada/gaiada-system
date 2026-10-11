@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████████░░░░░░░░░░░` **64%** · 144/225<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████████░░░░░░░░░░░` **63%** · 144/226<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████████████░░░` **87%** · 81/93<!-- /bar -->
+<!-- bar -->🟡 `█████████████████░░░` **86%** · 81/94<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -64,7 +64,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Design doc: contract, draft/live, authoring + read commands, editorial assertion, Cerbos, loader principal, rebuild path, control channel
 - [x] Reviewed (claims checked against `breaking-change.ts` and the contract test); rulings landed as D44–D48
 
-### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **83%** · 10/12<!-- /bar -->
+### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **76%** · 10/13<!-- /bar -->
 - [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
 - [x] Verification tenants removed (250 `wsk<n>-*` fixtures; none other existed)
 - [x] RustFS up from the pinned digest and bootstrapped (16 changes, then 0); MinIO container removed
@@ -72,8 +72,9 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Defect fixed: compose gave the api `DATABASE_URL` but it reads `APP_DATABASE_URL` — the live api had never had a database
 - [x] Defect fixed: every table was owned by `postgres` and `webdesk_app` had 0 grants — DB rebuilt as the repo intends (migrator-owned, 74 app grants, revokes intact, RLS integrity 19/19)
 - [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
-- [ ] `api.gaiada.com` vhost enabled with TLS (staged as `api.gaiada.com.conf` with token redaction and public 404s for /admin and /control; enable + certbot after the A record)
-- [ ] DNS + TLS for the proof site `cms-proof.gaiada.com` → 72.61.142.88 (CloudPanel site created; certificate after the A record)
+- [ ] `api.erp.gaiada.com` vhost enabled with TLS (WSK-D61: the name moved under `erp.`; staged as `api.erp.gaiada.com.conf` with token redaction and public 404s; enable + certbot after DNS)
+- [ ] DNS at Hostinger (plan `docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §1): `aicenter.erp.gaiada.com` A 35.240.135.48, `sumopod.erp.gaiada.com` A 150.109.15.108, `api.erp.gaiada.com` CNAME aicenter, `erp.gaiada.com` CNAME aicenter, `cms-proof.gaiada.com` A 72.61.142.88; then TLS (CloudPanel site already created)
+- [ ] ERP cut-over to `erp.gaiada.com` (plan Phase B), after `__Host-` cookies + Origin checks
 - [x] The api image on the box built off the live box (sumopod `webdesk-api:1cbee520`, transferred in 30 s)
 - [x] The api image signed via a release (`v1.0.0-alpha.344`, cosign-verified digest `sha256:69abc934…`, live on gda-aicenter 2026-10-11)
 - [x] ERP egress client's own live probe from `gaiada-platform-1` (344: all four layers reach WebDesk, `404 tenant not found` before provisioning; without the client cert, refused at Layer 1)
