@@ -265,3 +265,18 @@ capacity statement is the interim ceiling (OQ-2.7).
   - The read quota now in effect is the configured 3000/min (`.env`; was the accidental code default 300).
 - CI on PR #15: c1 cross-machine determinism PASSED (acme and globex byte-identical across two independent
   containers).
+- 14:45Z: `https://status.erp.gaiada.com` live on sumopod (T6b). Main `f2b965c0`: probe job `blackbox-webdesk-api`,
+  alert `WebDeskApiDown`, and the blackbox-estate drift fix. WSK-D70 (mimi file per name) is amended by WSK-D71 (M5):
+  the page moves behind the shared `erp-edge` Traefik at M5's cut-over.
+- T6a built and tested (guard harness 32/32 on sumopod, after fixing its control), branch `webdesk/m4-t6a-otlp`.
+  Held: the WebDesk api has no OpenTelemetry SDK yet, so nothing would send.
+- 15:06Z: rehearsal of the deploy's tools step on the live box: rc=0 in 22 s, changes=0.
+- 15:41Z: release 356 (ERP-only) deployed; probes 39/39 afterwards.
+- 15:57–15:59Z: **release 357 deployed to WebDesk by `deploy-webdesk`**, its first live apply (owner-approved).
+  - plan run 38153324995 OK; apply run 38153398370 OK.
+  - The api now runs `ghcr.io/hansel-gaiada/gaiada-webdesk-api@sha256:5560bb9d…` on the release overlay (three
+    compose files).
+  - Backup taken as `webdesk_backup`; migrations 0 applied twice; RLS gate OK; health all PASS.
+  - Probes 39/39. The nightly backup script survived the tree swap. The upload refusal is 404 problem+json
+    `upload-not-found`.
+  - From now on every manual compose call on the box needs all three files plus `--no-build`.
