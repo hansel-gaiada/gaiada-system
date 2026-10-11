@@ -204,7 +204,7 @@ networks:
     # Fixed subnet so the egress guard can name it. Check it is free first (runbook preflight).
     ipam:
       config:
-        - subnet: 172.28.91.0/28
+        - subnet: 10.211.91.0/28
 
 volumes:
   umami-db-data:

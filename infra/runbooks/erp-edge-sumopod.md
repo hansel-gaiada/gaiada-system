@@ -25,7 +25,7 @@ visitor -> mimi-tls-le :443 --(TCP passthrough: SNI = <one label>.erp.gaiada.com
   query string. Do not turn those fields back on: a visitor log is personal data.
 * Hardening: `cap_drop: ALL`, `no-new-privileges`, read-only root fs + tmpfs `/tmp`, 0.5 cpu / 256 MiB / 128 pids.
   Verified locally that Traefik 3.3.7 starts under exactly these flags with the config as shipped.
-* Subnets: erp-edge `172.28.92.0/28` (pinned), Umami `172.28.91.0/28`.
+* Subnets: erp-edge `10.211.92.0/28` (pinned), Umami `10.211.91.0/28`.
 
 ## 0. Preflight (measure first; sumopod runs every session's test gates)
 
@@ -34,7 +34,7 @@ ssh sumopod
 uptime                                   # record load1; if > 14 on 4 cores, wait or pick another hour
 free -m; df -h / /var/lib/docker         # >= 400 MiB available, >= 5 GB free
 ss -ltnH | awk '{print $4}' | grep -E ':(18443|18480|18742)$'      # 18480 and 18742 must be the ONLY hits (status page; Umami edge once up). 18443 must be free.
-docker network ls -q | xargs docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | tr ' ' '\n' | grep -E '^172\.28\.92\.' || echo "172.28.92.0/28 free"
+docker network ls -q | xargs docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | tr ' ' '\n' | grep . | python3 -c 'import ipaddress,sys; n=ipaddress.ip_network("10.211.92.0/28"); o=[s for s in sys.stdin.read().split() if ipaddress.ip_network(s).overlaps(n)]; print("OVERLAPS: "+" ".join(o) if o else "10.211.92.0/28 free")'   # a /16 that COVERS it counts too (2026-10-12: gaiada-obs_default owns 172.28.0.0/16)
 ip -4 addr show docker0 | grep 172.17.0.1
 docker inspect mimi-tls-le --format '{{.Config.Image}}  {{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}} gw={{$v.Gateway}}{{end}}'
 docker exec mimi-tls-le traefik version | head -3                    # expect 3.3.x (passthrough + proxyProtocol syntax below is v3)
@@ -71,11 +71,11 @@ Set the staging origins in `dynamic/erp-insights.yml` first if the site's stagin
 
 ## 2. Reachability prerequisites (root; after the first start in step 3 if you prefer to see a failure first)
 
-The status page and Umami edge are reached from erp-edge's bridge (`172.28.92.0/28`) and erp-edge from mimi's. Allow
+The status page and Umami edge are reached from erp-edge's bridge (`10.211.92.0/28`) and erp-edge from mimi's. Allow
 exactly those, nothing wider (these mirror `umami-sumopod.md` step 5):
 
 ```bash
-ERP_EDGE_SUBNET=172.28.92.0/28
+ERP_EDGE_SUBNET=10.211.92.0/28
 MIMI_SUBNET=<mimi network subnet from preflight>
 sudo ufw allow from "$MIMI_SUBNET" to 172.17.0.1 port 18443 proto tcp comment 'erp-edge from mimi passthrough'
 sudo ufw allow from "$ERP_EDGE_SUBNET" to 172.17.0.1 port 18480 proto tcp comment 'status page from erp-edge'
@@ -95,10 +95,10 @@ The trusted PROXY source is unknown until mimi connects, so start with the most 
 
 ```bash
 cd ~/erp-edge
-./render-config.sh 172.28.92.1/32 "$(. ./.env; echo $ACME_EMAIL)"      # provisional: erp-edge's own bridge gateway
+./render-config.sh 10.211.92.1/32 "$(. ./.env; echo $ACME_EMAIL)"      # provisional: erp-edge's own bridge gateway
 docker compose config -q && docker compose pull && docker compose up -d
 docker compose ps                                                      # traefik Up
-docker logs --tail 30 erp-edge-traefik-1                               # expect "Enabling ProxyProtocol for trusted IPs [172.28.92.1/32]"; no other ERR than ACME validation failures (expected until the cut-over)
+docker logs --tail 30 erp-edge-traefik-1                               # expect "Enabling ProxyProtocol for trusted IPs [10.211.92.1/32]"; no other ERR than ACME validation failures (expected until the cut-over)
 
 # Measure: hold ONE connection from mimi's Traefik to the published port and read the source address erp-edge sees.
 docker exec -d mimi-tls-le sh -c 'sleep 12 | nc 172.17.0.1 18443'      # if mimi's image has no nc, see the fallback below
@@ -108,7 +108,7 @@ sleep 2; docker exec erp-edge-traefik-1 netstat -tn | grep ':8443'     # Foreign
 Fallback if `nc` is missing in `mimi-tls-le`: `docker run -d --rm --name erp-edge-probe --network mimi_mimi-network alpine sh -c 'sleep 12 | nc 172.17.0.1 18443'`
 (a throwaway probe container that exits by itself; it is not part of erp-edge) and read the same `netstat` line.
 
-The foreign address is usually erp-edge's bridge gateway (`172.28.92.1`), because the hop is masqueraded. Use
+The foreign address is usually erp-edge's bridge gateway (`10.211.92.1`), because the hop is masqueraded. Use
 exactly what you measured, as a single address:
 
 ```bash
