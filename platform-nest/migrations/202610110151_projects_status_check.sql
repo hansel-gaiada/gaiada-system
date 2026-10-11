@@ -1,0 +1,32 @@
+-- 202610110151_projects_status_check.sql — PV2-09: `projects.status` gets a CHECK.
+-- Ticket: docs/plans/2026-10-10-pv2-portal-recut-tickets.md, PV2-09.
+--
+-- ── NUMBERING (migrations/README.md — timestamp scheme) ─────────────────────────────────────────
+-- `ls migrations | sort | tail` immediately before writing this file showed the head as
+-- `202610101730_webdev_site_builds.sql`. This takes a later minute.
+--
+-- ── WHY ─────────────────────────────────────────────────────────────────────────────────────────
+-- `projects.status` has been free text since 0001_core.sql. A hand-typed value nobody listed (say
+-- `finished`) would silently count as an ACTIVE project in every "finished" reader (PV2-01). The set
+-- below is `PROJECT_STATUSES` in src/core/project-status.ts; project-status.test.ts pins this CHECK,
+-- that constant and the staff form's options together.
+--
+-- ── THE LIVE SURVEY (owner-approved production read, 2026-10-11) ───────────────────────────────
+-- `SELECT status, deleted_at IS NOT NULL, count(*) FROM projects GROUP BY 1, 2` as the postgres
+-- superuser on gda-aicenter returned exactly: active / live 30, active / deleted 11. Nothing else.
+-- So there is NO data mapping in this migration, deliberately: no UPDATE means no exposure to the
+-- RLS zero-row trap (migrations run as platform_owner, which has no BYPASSRLS, so an UPDATE here
+-- would silently touch zero rows on a real deploy while passing every test).
+--
+-- ── THE ASSERTION ───────────────────────────────────────────────────────────────────────────────
+-- ADD CONSTRAINT ... CHECK without NOT VALID makes Postgres validate EVERY existing row, deleted ones
+-- included. That scan is DDL, not a query, so row security does not hide rows from it. If a stray
+-- value reached the table between the survey and this deploy (the PATCH routes took any string until
+-- this same release), the migration FAILS loudly instead of passing silently. That is the intended
+-- outcome: map the value by hand, then redeploy.
+--
+-- ── SCOPE ───────────────────────────────────────────────────────────────────────────────────────
+-- A new, named constraint on one column. It does not DROP or re-declare any other CHECK.
+ALTER TABLE projects
+  ADD CONSTRAINT projects_status_check
+  CHECK (status IN ('planned', 'active', 'on_hold', 'completed', 'cancelled', 'archived'));

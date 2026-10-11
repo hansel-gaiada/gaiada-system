@@ -14,6 +14,7 @@ import { recomputeRollups } from "../rollups/engine";
 import { AuthGuard } from "../auth/guards";
 import { getServiceScopes } from "./service-scopes";
 import { deriveUniqueShortCode } from "./project-short-codes";
+import { isProjectStatus, unknownProjectStatusError } from "./project-status";
 
 // Lineage spec 4/4: the client a project is filed under must exist in the caller's tenant. Runs on the
 // tenant-scoped connection so RLS answers "not yours" and "does not exist" the same way — 400 on the
@@ -334,6 +335,10 @@ export class CoreController {
     if (b.clientId === null) {
       throw new BadRequestException({ message: "a project cannot be detached from its client", field: "clientId" });
     }
+    // PV2-09: `projects.status` has a CHECK. An unknown value is the caller's mistake, so it is a 400
+    // naming the allowed set, not a constraint-violation 500. After authorize(), so a denied caller
+    // still gets the 403 its tests assert.
+    if (b.status != null && !isProjectStatus(b.status)) throw new BadRequestException(unknownProjectStatusError());
     await withTenants([tenantId], async (c) => {
       if (b.customFields) {
         const cfError = await validateCustomFields(c, tenantId, "project", b.customFields);
