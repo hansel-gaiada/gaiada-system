@@ -50,6 +50,7 @@ import {
 } from "./webdesk-content.service";
 import { webdeskMedia, type WebdeskMediaService } from "./webdesk-media.service";
 import {
+  versionConflict,
   CompositionReader,
   assembleClientContent,
   assertClientMayChange,
@@ -70,8 +71,8 @@ const ITEM_PATH = "/control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:
 
 /** `item.get`'s answer, narrowed to what the client BFF reads. */
 interface ItemRead {
-  item: { itemId: string; collectionKey: string; deletedAt: string | null; headVersion: number };
-  version: { blocks: unknown; seo: unknown };
+  item: { itemId: string; collectionKey: string; deletedAt: string | null; headVersion: number; updatedAt: string | null };
+  version: { blocks: unknown; seo: unknown; contentHash: string | null };
 }
 
 function itemNotFound(): WebdeskProblem {
@@ -170,11 +171,13 @@ export class WebdeskClientWebsiteService {
 
   async listVersions(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
+    await this.assertReadable(gate, site, itemId);
     return this.content.listVersions(gate, site, itemId, rawQuery);
   }
 
   async getVersion(gate: ContentGate, site: SiteRef, itemId: string, n: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
+    await this.assertReadable(gate, site, itemId);
     return this.content.getVersion(gate, site, itemId, n, rawQuery);
   }
 
@@ -207,7 +210,9 @@ export class WebdeskClientWebsiteService {
    *   * fills what the client omitted FROM THE HEAD (fields, generic blocks, and ALWAYS the existing seo), so an update
    *     that leaves something out never removes it (the 49b note: omitting `seo` from an item that has one IS a change);
    *   * refuses a deleted item (409) and any change to a non-editable path (422, the pointers) BEFORE anything is sent.
-   * A stale `baseVersion` is WebDesk's 409 (it is decided first there too), not an ERP guess.
+   * A stale `baseVersion` is 409 version-conflict, decided FIRST (before the D59 diff and before anything is refilled from the
+   * head), exactly as WebDesk decides it: a head that moved (staff edited a protected field after the client loaded the item)
+   * must never be answered as a 422 about a field the client did not touch.
    */
   async updateItem(gate: ContentGate, site: SiteRef, itemId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "update");
@@ -217,6 +222,7 @@ export class WebdeskClientWebsiteService {
     if (typeof b.baseVersion !== "number" || !Number.isInteger(b.baseVersion) || b.baseVersion < 0) throw invalidRequest("baseVersion must be a non-negative integer");
     const head = await this.readItem(site, itemId);
     this.assertWritable(head, itemId);
+    this.assertFreshBase(head, b.baseVersion);
     const composition = await new CompositionReader(this.zoneB, site).get(head.item.collectionKey);
     this.refuseRedirect(head.item.collectionKey);
     const stored = splitStoredContent(composition, head.version);
@@ -239,6 +245,7 @@ export class WebdeskClientWebsiteService {
     if (typeof b.baseVersion !== "number" || !Number.isInteger(b.baseVersion) || b.baseVersion < 0) throw invalidRequest("baseVersion must be a non-negative integer");
     const head = await this.readItem(site, itemId);
     this.assertWritable(head, itemId);
+    this.assertFreshBase(head, b.baseVersion);
     this.refuseRedirect(head.item.collectionKey);
     const source = await this.readItem(site, itemId, b.version); // a missing version is WebDesk's typed 404/409, passed through
     const composition = await new CompositionReader(this.zoneB, site).get(head.item.collectionKey);
@@ -460,6 +467,20 @@ export class WebdeskClientWebsiteService {
     if (read.item.deletedAt !== null) throw itemDeleted(itemId);
   }
 
+  /** A deleted item's history is as invisible to a client as the item (404 item-not-found), like `getItem`. Wall first, then the head. */
+  private async assertReadable(gate: ContentGate, site: SiteRef, itemId: string): Promise<void> {
+    await gate.resolveSite(this.zoneB, site);
+    const head = await this.readItem(site, itemId);
+    if (head.item.deletedAt !== null) throw itemNotFound();
+  }
+
+  /** 409 version-conflict (WebDesk's body) unless the client's `baseVersion` is the head the BFF just read. */
+  private assertFreshBase(head: ItemRead, baseVersion: number): void {
+    if (baseVersion !== head.item.headVersion) {
+      throw versionConflict({ headVersion: head.item.headVersion, contentHash: head.version.contentHash, updatedAt: head.item.updatedAt });
+    }
+  }
+
   /** One `item.get` (head, or version `n`) narrowed to what the writes need. WebDesk's typed 404s pass through. */
   private async readItem(site: SiteRef, itemId: string, version?: number): Promise<ItemRead> {
     if (!UUID_RE.test(itemId)) throw itemNotFound();
@@ -479,8 +500,9 @@ export class WebdeskClientWebsiteService {
         collectionKey: item.collectionKey,
         deletedAt: typeof item.deletedAt === "string" ? item.deletedAt : null,
         headVersion: typeof item.headVersion === "number" ? item.headVersion : 0,
+        updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : null,
       },
-      version: { blocks: v.blocks, seo: v.seo },
+      version: { blocks: v.blocks, seo: v.seo, contentHash: typeof v.contentHash === "string" ? v.contentHash : null },
     };
   }
 }

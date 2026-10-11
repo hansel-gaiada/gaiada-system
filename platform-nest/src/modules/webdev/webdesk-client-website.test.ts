@@ -475,6 +475,50 @@ describe.skipIf(!live)("WSK-49c · the client-mode website BFF", () => {
       expect(slugOf(stale)).toBe("version-conflict");
     });
 
+    it("update/restore: a STALE baseVersion is 409 version-conflict, never a 422 about a field the client did not touch; nothing is sent (control: the same edit on a fresh base)", async () => {
+      // the client loaded v1; staff then changed a PROTECTED field (head v2)
+      const it = seed("svc.stale");
+      addVersion(it, { slugLabel: "staff changed it" });
+      zb.calls.length = 0;
+      // the client's save is relative to v1 and changes only an editable field (slugLabel is still the v1 value)
+      const stale = await call("PUT", `${S()}/items/${it.itemId}`, edA1, { baseVersion: 1, fields: goodFields });
+      expect(stale.statusCode, stale.body).toBe(409);
+      expect(stale.headers["content-type"]).toContain("application/problem+json");
+      expect(stale.json()).toMatchObject({
+        type: "https://webdesk.gaiada.online/errors/version-conflict", title: "Version conflict", status: 409, currentHeadVersion: 2,
+        currentContentHash: expect.any(String), updatedAt: expect.any(String),
+        detail: expect.stringContaining("baseVersion does not match the item's head version (2)"),
+      });
+      noWrites();
+      expect(it.headVersion).toBe(2);
+      // control: the same edit re-based on the head (carrying staff's value) goes through
+      const fresh = await call("PUT", `${S()}/items/${it.itemId}`, edA1, { baseVersion: 2, fields: { ...goodFields, slugLabel: "staff changed it" } });
+      expect(fresh.statusCode, fresh.body).toBe(200);
+
+      // restore: same rule
+      const r2 = seed("svc.stale-restore");
+      addVersion(r2, { h1: "v2 headline" });
+      zb.calls.length = 0;
+      const staleRestore = await call("POST", `${S()}/items/${r2.itemId}/restore`, edA1, { version: 1, baseVersion: 1 });
+      expect(staleRestore.statusCode).toBe(409);
+      expect(slugOf(staleRestore)).toBe("version-conflict");
+      noWrites();
+      expect((await call("POST", `${S()}/items/${r2.itemId}/restore`, edA1, { version: 1, baseVersion: 2 })).statusCode).toBe(200);
+    });
+
+    it("a deleted item's HISTORY is 404 to a client, like the item (control: live history reads; staff still read it)", async () => {
+      const it = seed("svc.hist");
+      expect((await call("GET", `${S()}/items/${it.itemId}/versions`, edA1)).statusCode).toBe(200);
+      expect((await call("GET", `${S()}/items/${it.itemId}/versions/1`, edA1)).statusCode).toBe(200);
+      it.deletedAt = new Date().toISOString();
+      for (const url of [`${S()}/items/${it.itemId}/versions`, `${S()}/items/${it.itemId}/versions/1`]) {
+        const r = await call("GET", url, edA1);
+        expect(r.statusCode, url).toBe(404);
+        expect(slugOf(r)).toBe("item-not-found");
+      }
+      expect((await call("GET", `${STAFF()}/items/${it.itemId}/versions`, staffAdmin)).statusCode).toBe(200);
+    });
+
     it("update: strict body (an unknown key is a 400, never forwarded)", async () => {
       const it = seed("svc.upd-strict");
       const r = await call("PUT", `${S()}/items/${it.itemId}`, edA1, { ...updateBody(it, goodFields), tenantSlug: "othertenant" });

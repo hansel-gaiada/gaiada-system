@@ -80,6 +80,23 @@ export function clientCommandNotAllowed(command: string): WebdeskProblem {
   });
 }
 
+/**
+ * 409 version-conflict, WebDesk's exact problem (slug, title, detail, `currentHeadVersion`, `currentContentHash`, `updatedAt`).
+ * WebDesk decides a stale `baseVersion` FIRST (before its D59 check), because a diff against a head that moved would blame the
+ * client for somebody else's change; the ERP's earlier D59 layer must answer the same, so it checks the base before it diffs.
+ */
+export function versionConflict(head: { headVersion: number; contentHash: string | null; updatedAt: string | null }): WebdeskProblem {
+  return new WebdeskProblem(409, {
+    type: `${PROBLEM_BASE}/version-conflict`,
+    title: "Version conflict",
+    status: 409,
+    detail: `baseVersion does not match the item's head version (${head.headVersion}). Reload and re-apply your change.`,
+    currentHeadVersion: head.headVersion,
+    currentContentHash: head.contentHash,
+    updatedAt: head.updatedAt,
+  });
+}
+
 export function itemDeleted(itemId: string): WebdeskProblem {
   return new WebdeskProblem(409, {
     type: `${PROBLEM_BASE}/item-deleted`,
