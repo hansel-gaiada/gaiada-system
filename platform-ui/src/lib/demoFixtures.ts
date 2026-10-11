@@ -48,18 +48,28 @@ const DEMO_USER_MANAGER_ID = "dept-manager";  // manager tier — drives the GM 
 // adding any second role here would silently turn this identity back into staff and stop exercising
 // the portal-only nav + landing redirect this identity exists to cover.
 const DEMO_USER_VICEROY_MARKETING_ID = "demo-viceroy-marketing";  // PV2-02: staff of co-resort + client of co-agency
-const DEMO_USER_TWO_COMPANY_CLIENT_ID = "demo-two-company-client";  // PV2-05: client of co-agency AND co-resort
+const DEMO_USER_TWO_COMPANY_CLIENT_ID = "demo-two-company-client";
+const DEMO_USER_OWNER_ID = "demo-owner";  // PV1-01: owner of the group (owner role on the root and its companies)  // PV2-05: client of co-agency AND co-resort
 const DEMO_USER_CLIENT_ID = "demo-client";
 
 let demoSeq = 1000;
 const demoId = (p: string) => `${p}-${++demoSeq}`;
 
+// PV1-01: the demo module set, ONE list for the `/modules-enabled` gate and for `/api/me`
+// `companies[].enabledModules`, so the menu and the page gate can never disagree in demo mode.
+// `monitoring` is on because the live agency runs it.
+const DEMO_ENABLED_MODULES = ["agency", "pm", "it", "invoice", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms", "monitoring"];
+
+// PV1-01: `vertical` and `root_company_id` mirror the companies table after migration
+// 202610110530 (holding → holding, agency → agency, resort → hospitality); `co-holding` is the root.
 const COMPANIES: Record<string, unknown>[] = [
-  { id: "co-holding", name: "D & A Syrowatka", type: "holding", enabled_modules: [], status: "active" },
+  { id: "co-holding", name: "D & A Syrowatka", type: "holding", vertical: "holding", root_company_id: "co-holding", enabled_modules: [], status: "active" },
   {
     id: "co-agency",
     name: "Gaia Digital Agency",
     type: "agency",
+    vertical: "agency",
+    root_company_id: "co-holding",
     enabled_modules: ["agency"],
     status: "active",
     parent_company_id: "co-holding",
@@ -68,6 +78,8 @@ const COMPANIES: Record<string, unknown>[] = [
     id: "co-resort",
     name: "Viceroy",
     type: "resort",
+    vertical: "hospitality",
+    root_company_id: "co-holding",
     enabled_modules: [],
     status: "active",
     parent_company_id: "co-holding",
@@ -187,6 +199,28 @@ const ME_TWO_COMPANY_CLIENT = {
   roles: [
     { role: "client", scopeType: "company", scopeId: "co-agency" },
     { role: "client", scopeType: "company", scopeId: "co-resort" },
+  ],
+};
+
+// PV1-01: an OWNER of the group, the way the seed grants it (owner-grant.ts): the `owner` role on each
+// owned company, the root included, and NOT platform_admin. With the root's owner role this identity
+// is a "root owner" (PV-D20), so it sees the Group area on co-holding and the Platform area everywhere.
+// Sign in with group-owner@gaiada.com (see lib/demoIdentity.ts).
+const ME_OWNER = {
+  userId: DEMO_USER_OWNER_ID,
+  name: "Group Owner",
+  email: "group-owner@gaiada.com",
+  title: "Owner",
+  assurance: "high",
+  companies: [
+    { id: "co-holding", name: "D & A Syrowatka", type: "holding" },
+    { id: "co-agency", name: "Gaia Digital Agency", type: "agency" },
+    { id: "co-resort", name: "Viceroy", type: "resort" },
+  ],
+  roles: [
+    { role: "owner", scopeType: "company", scopeId: "co-holding" },
+    { role: "owner", scopeType: "company", scopeId: "co-agency" },
+    { role: "owner", scopeType: "company", scopeId: "co-resort" },
   ],
 };
 
@@ -2046,6 +2080,7 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
   if (userId === DEMO_USER_VICEROY_MARKETING_ID) return ME_VICEROY_MARKETING;
   if (userId === DEMO_USER_TWO_COMPANY_CLIENT_ID) return ME_TWO_COMPANY_CLIENT;
+  if (userId === DEMO_USER_OWNER_ID) return ME_OWNER;
   return ME;
 }
 
@@ -2311,7 +2346,16 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const currentIdentity = getCurrentDemoIdentity(userId);
 
   // /api/me reflects the (mutable) company set so newly-created companies appear.
-  if (p === "/api/me") return ok({ ...currentIdentity, companies: COMPANIES.map((c) => ({ id: c.id, name: c.name, type: c.type })), clientOf: DEMO_CLIENT_OF[currentIdentity.userId] ?? [] });
+  if (p === "/api/me") {
+    return ok({
+      ...currentIdentity,
+      companies: COMPANIES.map((c) => ({
+        id: c.id, name: c.name, type: c.type,
+        vertical: c.vertical, enabledModules: DEMO_ENABLED_MODULES, rootCompanyId: c.root_company_id,
+      })),
+      clientOf: DEMO_CLIENT_OF[currentIdentity.userId] ?? [],
+    });
+  }
   if (p === "/api/companies") {
     if (m === "POST") {
       const b = JSON.parse(body || "{}");
@@ -2434,9 +2478,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // dark HR/Clients/Invoices/Reports and make the tour look broken. Real gating is a live-backend
   // concern (see lib/modules.ts).
   if (p.match(/^\/api\/[^/]+\/modules-enabled$/)) {
-    return ok({
-      enabled: ["agency", "pm", "it", "invoice", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms"],
-    });
+    return ok({ enabled: DEMO_ENABLED_MODULES });
   }
   if (p === "/api/module-catalog") {
     return ok(

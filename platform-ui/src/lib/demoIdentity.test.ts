@@ -40,6 +40,11 @@ describe("demoIdentityFor — dev-login identity tiers", () => {
     expect(demoIdentityFor("Two-Companies@Deity-Labs.example")).toBe("demo-two-company-client");
   });
 
+  it("group-owner resolves to the demo owner, while plain owner@ stays an ordinary staff address", () => {
+    expect(demoIdentityFor("group-owner@gaiada.com")).toBe("demo-owner");
+    expect(demoIdentityFor("Group-Owner@Gaiada.com")).toBe("demo-owner");
+  });
+
   it("an ordinary staff address is never mistaken for a client", () => {
     for (const e of ["pm@gaiada.com", "owner@gaiada.com", "dewi@gaiada.com"]) {
       expect(demoIdentityFor(e)).toBe("demo-hansel");

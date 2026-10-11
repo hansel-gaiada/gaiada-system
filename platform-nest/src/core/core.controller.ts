@@ -15,6 +15,7 @@ import { AuthGuard } from "../auth/guards";
 import { getServiceScopes } from "./service-scopes";
 import { deriveUniqueShortCode } from "./project-short-codes";
 import { isProjectStatus, unknownProjectStatusError } from "./project-status";
+import { enabledModuleKeys } from "../modules/registry";
 
 // Lineage spec 4/4: the client a project is filed under must exist in the caller's tenant. Runs on the
 // tenant-scoped connection so RLS answers "not yours" and "does not exist" the same way — 400 on the
@@ -50,13 +51,24 @@ export class CoreController {
         [req.principal.userId],
       ),
     );
-    const companies = req.principal.companies.length
+    const companyRows = req.principal.companies.length
       ? await withGlobal((c) =>
-          c.query(`SELECT id, name, type FROM companies WHERE deleted_at IS NULL AND id = ANY($1::uuid[])`, [
-            req.principal.companies,
-          ]),
+          c.query<{ id: string; name: string; type: string; vertical: string; rootCompanyId: string | null }>(
+            `SELECT id, name, type, vertical, root_company_id AS "rootCompanyId"
+               FROM companies WHERE deleted_at IS NULL AND id = ANY($1::uuid[])`,
+            [req.principal.companies],
+          ),
         )
       : { rows: [] };
+    // PV1-01: ADDITIVE fields the staff menu needs (packs by vertical, rows for disabled modules
+    // hidden, the root for the Group and Platform areas). `enabledModules` is the EFFECTIVE set the
+    // module gate uses (`enabledModuleKeys`: the company's own modules plus active service
+    // assignments), so the menu and the page gate can never disagree about a module.
+    const companies = {
+      rows: await Promise.all(
+        companyRows.rows.map(async (co) => ({ ...co, enabledModules: await enabledModuleKeys(co.id) })),
+      ),
+    };
     // ORG-7b: serviceScopes is ADDITIVE to the Me shape — existing consumers that don't read it
     // are unaffected; [] whenever the release-train flag is off (default) or there is none.
     const serviceScopes = await getServiceScopes(req.principal.userId, req.principal.companies);

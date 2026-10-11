@@ -158,7 +158,14 @@ export interface ServiceScope {
 
 export interface Me {
   userId: string; name: string; email: string; title: string | null; assurance: string;
-  companies: { id: string; name: string; type: string | null }[];
+  /** PV1-01 added `vertical` (the company's business line, which selects its pack), `enabledModules`
+   *  (the effective set the module gate uses) and `rootCompanyId`. Optional for an older backend:
+   *  treat a missing vertical as "general", missing modules as unknown (hide nothing), and a missing
+   *  root as "not a root". */
+  companies: {
+    id: string; name: string; type: string | null;
+    vertical?: string; enabledModules?: string[]; rootCompanyId?: string | null;
+  }[];
   roles: { role: string; scopeType: string; scopeId: string | null }[];
   serviceScopes?: ServiceScope[];
   /** PV2-02: companies where the caller is an active client contact. Optional: treat missing as []. */
