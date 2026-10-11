@@ -11,6 +11,33 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.67.0` - clients edit their own website: Cerbos rules, a client-mode portal BFF that checks every change, and a client publish that rebuilds staging (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3, WSK-49c. Rulings WSK-D58, D59, D60 (amended twice), D62, D65 in `docs/blueprints/webdesk-design-v2.md` §14.
+
+- **Which client a site serves.** Migration `202610111200_webdesk_site_clients.sql`: one row per (serving company, WebDesk tenant slug, site) → `clients.id`, tenant RLS with FORCE, a composite FK so a site can only point at a client of its own company. Staff manage it: `GET /site-clients`, `GET|PUT|DELETE /sites/:slug/:siteId/client` (audited).
+- **Cerbos.** The derived role `client_website_editor` may read, create, update and request publish on `webdesk_content_item`, and publish under D58 (one item they requested themselves, or a batch another editor of the same client requested); and read, upload and update on `webdesk_media_asset`. Never delete, unpublish, schedule or anything on schema. Staff rules unchanged. **Cerbos restart on deploy.**
+- **The portal BFF** (`/api/:t/portal/clients/:clientId/website/…`, contract §16j): sites, collections with a per-field `clientEditable` map, items, versions, update, restore, create, preview, publish requests (file, self-publish one item, approve another editor's batch, withdraw), and media list, upload token and update. Every route authorises first, then checks the portal scope and the site link, then pre-checks, then calls WebDesk.
+- **The ERP-side D59/D62 check** refuses a change to a field a client may not edit, a publish carrying Gaiada-only changes, and a stale base (409 first), with WebDesk's own slugs, before any WebDesk call. The editability rule is vendored from `webdesk/delivery/vocabulary` with a drift check (`npm run vendor:check`). WebDesk stays the authority: every client call carries the `ce: true` editorial-assertion claim, byte-pinned to WebDesk's vector v4.
+- **A client publish rebuilds staging (WSK-D65).** No client ever holds deploy: the rebuild is authorised by the executed publish itself, re-verified on the server (executed webdesk publish, decided by this client editor, their grant, the site still linked to their client), bound to the site it rebuilds, once per approval, and audited (`basis: client-publish`, `ruling: WSK-D65`). The staff path is unchanged.
+- **Zone B:** the n8n intake now accepts `schedule.fired`, pinned to the ERP's kinds by `zoneb-intake-workflow-parity.test.ts` (automation 0.4.2).
+- Reviewed twice by an Opus reviewer (round 1: 1 major fixed; round 2: 3 minor fixed). Verified on the Linux gate (sumopod `m3c356`): nest 8180/8181 (the one red is the known flaky `agency-lead-convert-race`, red on main), ui 5494/5495 (`MediaPicker.test.tsx` timed out under load ~30; 3/3 green on re-run), `next build` OK, repo checks PASS.
+
+### platform-ui `0.88.0` - the client portal's Website area, and who may edit a client's website (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3, WSK-49d and the WSK-49f UI.
+
+- **Portal → Business → Website**, shown only to a client's website editors: their linked sites, which collections they can edit, the editor in client mode (Gaiada-only fields read-only, "Managed by Gaiada"; SEO read-only), history with restore, Publish now for one page, Request publish for several, approve a colleague's request, withdraw your own, preview, and images without delete. Every refusal is said in plain words (a stale page asks for a reload and keeps your text).
+- **Website access.** Staff, on a client's Contacts page: a Website editor switch per contact, and Make admin / Remove admin (keep Signer or Viewer). A client's own admin, on People: a Website access switch per colleague. `owner` is not offered these controls yet (the server refuses it; tracked).
+- The shared staff editor gains optional client-mode props; staff behaviour is unchanged (staff WebDesk e2e 68/68 on the merged tree).
+- A client contact granted website editing stays in the portal (`CLIENT_SIDE_ROLES`, from 354).
+- Reviewed by an Opus reviewer (49d: 1 major, 5 minor fixed; 49f: 3 minor fixed) and by the PV program for the shared portal files. Verified on the Linux gate (sumopod `m3c356`): nest 8180/8181 (the one red is the known flaky `agency-lead-convert-race`, red on main), ui 5494/5495 (`MediaPicker.test.tsx` timed out under load ~30; 3/3 green on re-run), `next build` OK, repo checks PASS. Playwright on the merged tree: portal Website + staff WebDesk 88/88, website access 11/11.
+
+### automation (n8n) `0.4.2` - the Zone B intake accepts `schedule.fired` (2026-10-11) - PROTOTYPED
+
+- `automation/workflows/wd-zoneb-intake.json`'s schema check lists `schedule.fired` (WSK-61's wake-up hint) with a cheap first-wall shape check; the ERP's validator stays strict. Before, the hint would have been refused 400 at n8n once the live bridge URL was set.
+- Live steps after deploy: re-import the workflow (CLI only), check `WEBDEV_ZONEB_INTAKE_ENABLED` and the shared `WEBDESK_EVENT_SECRET`, then set `WEBDESK_ZONEB_BRIDGE_URL` on WebDesk to the PUBLIC https webhook (the egress guard drops private paths).
+
 ### platform-ui `0.87.0` - before the move to erp.gaiada.com: host-only `__Host-` cookies, an Origin check on every write, no framing; a signed agreement says so (2026-10-11) - PROTOTYPED
 
 ERP names Phase B0 (`docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §3). On `erp.gaiada.com` the ERP is same-site with every
