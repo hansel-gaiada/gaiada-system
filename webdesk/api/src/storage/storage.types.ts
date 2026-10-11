@@ -48,6 +48,15 @@ export interface StorageAdapter {
   getObject(bucket: string, key: string): Promise<GetObjectResult>;
   headObject(bucket: string, key: string): Promise<HeadObjectResult>;
   deleteObject(bucket: string, key: string): Promise<void>;
+  /**
+   * PURGE: deletes EVERY stored version of `key`, delete markers included, by version id, and returns how
+   * many versions it removed (0 when nothing is stored: the key is already gone). On a versioned bucket a
+   * plain `deleteObject` only adds a delete marker and leaves every version in place, so this is the only
+   * way storage is actually freed. A version still under its retention lock is refused by the provider:
+   * this throws and leaves the rest for the caller's next run (versions deleted before it are gone for
+   * good; calling again is safe). Never bypasses a lock. Used by WSK-43a's `media-purge` job.
+   */
+  deleteAllVersions(bucket: string, key: string): Promise<number>;
 
   /** A short-lived, time-limited GET URL — the only access mode `uploads` (PRIVATE) ever gets. */
   presignGetObject(bucket: string, key: string, expiresInSeconds: number): Promise<string>;

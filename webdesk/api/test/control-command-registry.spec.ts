@@ -59,6 +59,13 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "item.versions": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "item.versionGet": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "media.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // WSK-43a — the media library: an upload token lets its holder put one file into the public library, so
+  // minting is a MEDIUM write; update and delete are MEDIUM/operate (a delete is soft and refused while content
+  // uses the asset); the usage list is a read.
+  "media.uploadToken": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "media.update": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "media.delete": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "media.usage": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
 };
 
 describe("control command registry — the impact-class map (design §07)", () => {
@@ -91,7 +98,7 @@ describe("control command registry — the impact-class map (design §07)", () =
     );
   });
 
-  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1) plus the two WSK-46 preview-token commands", () => {
+  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1), the two WSK-46 preview-token commands and the three WSK-43a media writes", () => {
     expect([...EDITORIAL_COMMANDS].sort()).toEqual(
       [
         "content.create",
@@ -103,6 +110,9 @@ describe("control command registry — the impact-class map (design §07)", () =
         "content.delete",
         "content.previewToken",
         "content.previewTokenRevoke",
+        "media.uploadToken",
+        "media.update",
+        "media.delete",
       ].sort(),
     );
   });

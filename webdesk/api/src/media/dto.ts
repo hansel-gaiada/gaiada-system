@@ -28,4 +28,13 @@ export type MediaAssetRow = {
   size_bytes: string; // bigint comes back as string from pg
   scan_status: string;
   created_at: string;
+  // The library columns (migration 0014). Present on rows read with MEDIA_ASSET_COLUMNS.
+  title?: string | null;
+  alt?: Record<string, string>;
+  tags?: string[];
+  original_filename?: string | null;
+  width?: number | null;
+  height?: number | null;
+  updated_at?: string;
+  created_by?: string | null;
 };

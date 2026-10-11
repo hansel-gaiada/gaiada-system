@@ -50,11 +50,11 @@ unfalsifiable after.
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
-| pm | `pm` | 9 |
+| pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |
 | social | `social` | 12 |
-| webdev | `webdev` | 13 |
+| webdev | `webdev` | 14 |
 
 ## Capabilities
 

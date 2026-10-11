@@ -18,7 +18,8 @@ export const CI_GROUPS = {
   // platform-nest jobs: nest-static-gates, platform-nest shards, nest-corpus-perf.
   // Reads outside platform-nest/: docs/modules/CAPABILITY-INVENTORY.md, automation/workflows/
   // pipeline-delivery.json, root scripts/replay-inbound.mjs, platform-ui/src/lib/rbac*.
-  nest: ["platform-nest/", "docs/modules/", "automation/workflows/", "platform-ui/src/lib/rbac", "scripts/"],
+  // contracts/ holds cross-package wire fixtures (contracts/zoneb/*: WebDesk -> ERP Zone B envelopes), read by tests on BOTH sides.
+  nest: ["platform-nest/", "docs/modules/", "automation/workflows/", "platform-ui/src/lib/rbac", "scripts/", "contracts/"],
   // platform-ui reads platform-nest's Cerbos derived_roles, rbac catalogs and the clients registry.
   ui: ["platform-ui/", "platform-nest/cerbos/", "platform-nest/src/rbac/", "platform-nest/src/modules/clients/centre/"],
   gateway: ["ai-gateway-go/"],
@@ -33,7 +34,7 @@ export const CI_GROUPS = {
   // webdesk/api: migrations runner, storage-bootstrap, role bootstrap, and webdesk/delivery/ (the
   // vocabulary the api vendors, plus the vocabulary tests this job runs; WSK-48b renamed it from
   // webdesk/payload/ when Payload was deleted).
-  webdesk_api: ["webdesk/api/", "webdesk/migrations/", "webdesk/scripts/", "webdesk/postgres/", "webdesk/package", "webdesk/delivery/"],
+  webdesk_api: ["webdesk/api/", "webdesk/migrations/", "webdesk/scripts/", "webdesk/postgres/", "webdesk/package", "webdesk/delivery/", "contracts/"],
   // blocks vendors delivery/vocabulary and fails on drift.
   webdesk_blocks: ["webdesk/blocks/", "webdesk/delivery/vocabulary/"],
   webdesk_deploy: ["webdesk/deploy/"],

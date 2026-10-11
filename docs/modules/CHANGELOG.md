@@ -11,6 +11,43 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.63.0` - a scheduled WebDesk publish rebuilds staging by itself; a scheduled takedown marks it stale (2026-10-11) - PROTOTYPED
+
+- **WSK-61 ERP half:** `settleScheduledFirings` finds approved, executed `content.schedule` approvals with no build yet, reads every item over the control channel, and dispatches ONE staging rebuild as the approval's decider once they are live (the ledger's UNIQUE(approval) makes it exactly once). A scheduled takedown marks staging stale once. A `schedule.fired` Zone B event is only a wake-up; a sweep on the WSK-60 poller is the primary path (live has no event bridge).
+- **Migration `202610110441`:** `webdev_zoneb_event_log.kind` admits `schedule.fired` (the live value set is read, asserted and extended, never re-typed); new `webdev_schedule_firings` with forced RLS.
+- `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS` (empty = 15 min; out of range refuses boot).
+
+### platform-ui `0.84.0` - Next 16.3: a click right after saving is no longer lost (2026-10-11) - PROTOTYPED
+
+- **Next 15.5 → 16.3.8** (owner ruling WSK-D57). 15.5.1+ discards a navigation issued while a server action is in flight (vercel/next.js#88343, fixed by #95391 in 16.3.0, not backported): the WebDesk editor's navigation failures went 7 → 0 on the same box, and the key-mint link click 3/3 → 0/3.
+- `middleware.ts` → `proxy.ts` (the rename Next 16 requires; it now runs on Node, still a cookie-presence check); `proxyClientMaxBodySize` replaces `middlewareClientMaxBodySize`. Builds with Turbopack. A container smoke of 18 auth/redirect requests is identical on both versions.
+
+### infra `0.9.3` - the public WebDesk host never logs a token; the proof site's deploy key is locked to its site (2026-10-11) - PROTOTYPED
+
+- `infra/nginx/api.gaiada.com.conf` (staged; enabled after the A record): preview and media-upload tokens are logged as `[redacted]`, the Referer loses its query, and `/admin`, `/api/graphql`, `/control` are 404 on the public host.
+- `docker-compose.vps.yml` forwards `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS`.
+- Runbooks: `webdesk-live-swap.md` (new), `webdesk-staging-rebuild.md` (WSK-61 section).
+
+### platform-nest `0.62.0` - `projects.status` is a closed set: a CHECK, and a 400 from both project PATCH routes (2026-10-11) - PROTOTYPED
+
+PV2-09. `projects.status` had been free text since `0001_core.sql`, so a hand-typed value nobody listed would count as an active project in every "finished" reader.
+
+- **Live survey (owner-approved production read, run by the owner as the `postgres` superuser):** active / live 30, active / deleted 11, nothing else.
+- **Migration `202610110151_projects_status_check.sql`:** adds `projects_status_check` for planned, active, on_hold, completed, cancelled, archived.
+  - There is no data mapping and no UPDATE, so the RLS zero-row trap does not apply.
+  - Adding the CHECK validates every existing row, deleted ones included. If a stray value arrived after the survey, the migration fails loudly instead of passing silently.
+- **One set:** `PROJECT_STATUSES` in `core/project-status.ts`. "Finished" narrows to completed / archived / cancelled and "done" to completed. `done` / `complete` were kept only for older rows, which the survey shows do not exist.
+- **Both project PATCH routes** (`/:t/projects/:id` and `/:t/pm/projects/:id`) refuse any other value with a 400 naming the set. Before, they wrote any string, and after the CHECK that would be a 500. The check runs after `authorize()`, so a denied caller still gets 403.
+- **Tests:**
+  - `project-status.test.ts` pins the constant, the migration's CHECK and the staff form's `STATUS_OPTIONS` together.
+  - `project-status-check.db.test.ts` covers the CHECK, both 400s, accepted values, a body without a status, and 403 before 400.
+  - Teeth on Linux: each route without its guard answers 500, so its test fails. An empty migration fails the CHECK test, and a drifting form fails the parity test.
+- **Verified on Linux** (350 + patch): nest 540 passed, 3 skipped. `capability-inventory` (`pm` 9 → 10, the new suite) and MAP (new migration head) were regenerated on Linux.
+
+### platform-ui `0.83.0` - the project form offers the full status set (2026-10-11) - PROTOTYPED
+
+PV2-09's UI half. The staff project form's `STATUS_OPTIONS` is exactly `projects.status`'s CHECK set: planned, active, on_hold, completed, cancelled, archived (planned and cancelled are new). platform-nest's parity test reads the form's options line. `planned` and `cancelled` get the inactive status colour in `ui.tsx`, not the in-flight fallback. Verified on Linux: ui 237/237 files (4,679 tests); `next build` ok.
+
 ### platform-nest `0.61.0` - automation never publishes WebDesk content; a requester reads their own approval; a repeated key request says so (2026-10-11) - PROTOTYPED
 
 - **WebDesk M3 T7 (a):** Cerbos DENIES `publish`/`schedule` on `webdesk_content_item` to any principal with `users.kind` automation or bot (carried as `principal.attr.kind`). `request_publish` stays allowed, so the importer still files its batch for a human to approve.
@@ -99,7 +136,7 @@ Ticket PV2-07 in `docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. It renders
 - Pure helpers: `src/lib/portalPeople.ts` (`splitProjects`, `groupPeople`, `describeAccess`), 9 tests.
 - **Verified on Linux:** ui 228/228 files (4,516 tests); `next build` ok; portal e2e 12/12 in DEMO_MODE.
 
-### webdesk `0.4.0` - M3 waves 1-3: Payload removed, the scheduler, the public `/v1` read path hardened, deleted items release their slug, promotion fits the write plane, approvals claimed before the effect, codegen and AI drafting on vocabulary 1.1.0 (2026-10-11) - DEV-VERIFIED
+### webdesk `0.4.0` - M3 waves 1-4: Payload removed, the scheduler, the media library, the public `/v1` read path hardened, deleted items release their slug, promotion fits the write plane, approvals claimed before the effect, codegen and AI drafting on vocabulary 1.1.0 (2026-10-11) - DEV-VERIFIED
 
 Plan `docs/plans/2026-10-11-webdesk-m3-plan.md`; rulings WSK-D49…D51 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md` (M3).
 
@@ -112,6 +149,8 @@ Plan `docs/plans/2026-10-11-webdesk-m3-plan.md`; rulings WSK-D49…D51 in `docs/
 - **The read quota holds across replicas** (T6). The per-tenant `/v1` read quota counts in Redis with one atomic script per request, on aligned windows; if Redis is down it falls back to the per-process window, never failing a read.
 - **Draft preview, WebDesk half** (WSK-46, WSK-D52, migration 0013). An editor's preview mints a short-lived token (stored as a hash, scoped to one item version, revocable) and the site's preview page reads the draft from a public `/v1/t/:tenant/preview/:token`: the frozen item envelope, `no-store`, `noindex`, CORS only for the site's own domains, and one identical 404 for every invalid token. `preview` is a reserved collection key. The ERP button and the site page are separate tickets.
 - **Shutdown hygiene** (T8). The intermittent "Connection is closed" unhandled rejections came from BullMQ closing a still-connecting Redis client in the mail and webhook workers; every BullMQ client now closes after it is ready (bounded), so the api suite no longer exits 1 with 0 failures. Graceful shutdown drains a running scheduler tick before the pool ends. A lost-response retry of `tenant.archive` or `environment.archive` now replays instead of 404. The content commands run on the shared command envelope.
+- **The media library, WebDesk half** (WSK-43a, WSK-D53/D54, migration 0014). Assets gain title, per-locale alt text, tags, dimensions and uploader. Editors upload straight to WebDesk with a short-lived single-use token, so image bytes never pass through the ERP, and no database connection is held while a file streams. Deleting an asset still used by live or draft content is refused with 409 `media-in-use`, listing where; a deleted asset is purged by an hourly job once its object-lock retention has passed, which finally frees locked object versions, and the media quota counts the bytes storage actually holds. The ERP and UI halves are separate tickets.
+- **Form submissions reach the ERP again.** `form.received` carried WebDesk's internal tenant id instead of the ERP company id (`tenants.company_ref`) that the Zone B envelope documents, so the ERP's intake refused every form event and no submission ever became a lead. It now carries `company_ref`; the only other producer, the scheduler's `schedule.fired`, already does.
 - **Rulings** WSK-D49 (rich text is Markdown, edited WYSIWYG; resolves OQ-3.1), D50 (CDN purge deferred as WSK-70), D51 (a soft-deleted item releases its slug).
 - **Deleted items release their slug** (M3 T4, WSK-D51, migration 0010). The slug is unique among live rows only (`ux_content_items_slug_live`), so a page can be deleted and its URL reused. The runtime role loses every right on the migration ledger. The 0009 and 0010 migration tests now run in the Linux gate and in CI; before this, nothing ran them.
 - **Promotion fits the write plane** (T4). Items are matched by localization group and locale, not slug. A restore soft-deletes what the bundle does not describe instead of hard-deleting it (which failed on the version FK). Every changed item gets a version attributed to the promotion's approval. Soft-deleted items are no longer exported, and so no longer resurrected. A slug held by another live item is a 409, with nothing changed.

@@ -85,7 +85,7 @@ export interface PortalProject {
   id: string;
   name: string;
   status: string;
-  /** PV2-03: server-derived "finished" (done/complete/completed/archived/cancelled). Optional for an
+  /** PV2-03: server-derived "finished" (completed/archived/cancelled since PV2-09). Optional for an
    *  older backend; never re-derive it from `status` in the UI. */
   finished?: boolean;
   startDate: string | null;

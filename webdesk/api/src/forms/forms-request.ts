@@ -6,6 +6,8 @@ import type { FastifyRequest } from "fastify";
 export type ResolvedForm = {
   formId: string;
   tenantId: string;
+  /** The tenant's Zone A companies.id (`tenants.company_ref`): the envelope `tenantId` of every Zone B fact. */
+  companyRef: string;
   tenantSlug: string;
   siteId: string;
   key: string;

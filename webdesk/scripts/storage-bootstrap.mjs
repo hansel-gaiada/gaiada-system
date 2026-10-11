@@ -16,7 +16,13 @@
 //      none; any bucket not listed has its bucket policy removed if one exists.
 //   3. The api service user: policy `webdesk-api` (object get/put/delete + list on the four buckets
 //      ONLY — no PutBucketPolicy, no bucket create/delete, no versioning/lock/retention changes, no
-//      DeleteObjectVersion, no BypassGovernanceRetention) bound to STORAGE_ACCESS_KEY_ID.
+//      BypassGovernanceRetention) bound to STORAGE_ACCESS_KEY_ID. WSK-43a adds s3:ListBucketVersions and
+//      s3:DeleteObjectVersion on the PUBLIC buckets (media, video) ONLY, for the `media-purge` job that
+//      frees a soft-deleted library asset's stored versions once their GOVERNANCE retention has passed.
+//      That is NOT a way round the lock: the provider still refuses to delete a version that is under
+//      retention (without the bypass permission, which the key never holds), so the permission only
+//      ever works on versions whose lock has already lapsed. uploads (private form attachments) and
+//      artifacts keep no version-delete permission.
 //   4. Optional backup writer user (policy `webdesk-backup`, put/get/list on `backups` only) when
 //      WEBDESK_BACKUP_ACCESS_KEY_ID / WEBDESK_BACKUP_SECRET_ACCESS_KEY are set.
 //
@@ -282,6 +288,7 @@ function policyEquivalent(a, b) {
 // --- 3/4. Least-privilege users (RustFS admin API; it does not implement the AWS IAM API) ---------
 function apiPolicy() {
   const bucketArns = apiBuckets.map((b) => `arn:aws:s3:::${b}`);
+  const publicArns = apiBuckets.slice(0, 2).map((b) => `arn:aws:s3:::${b}`); // media, video (the first two, see apiBuckets)
   return {
     Version: "2012-10-17",
     Statement: [
@@ -295,6 +302,9 @@ function apiPolicy() {
         Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListMultipartUploadParts"],
         Resource: bucketArns.map((a) => `${a}/*`),
       },
+      // WSK-43a: the media-purge job (see the header). media + video only; never the lock bypass.
+      { Effect: "Allow", Action: ["s3:ListBucketVersions"], Resource: publicArns },
+      { Effect: "Allow", Action: ["s3:DeleteObjectVersion"], Resource: publicArns.map((a) => `${a}/*`) },
     ],
   };
 }

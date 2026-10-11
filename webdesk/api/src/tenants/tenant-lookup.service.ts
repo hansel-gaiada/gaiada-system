@@ -5,7 +5,9 @@
 import { Injectable } from "@nestjs/common";
 import { DbService } from "../db/db.service";
 
-export type ResolvedTenant = { id: string; slug: string; status: string };
+/** `companyRef` is the tenant's Zone A companies.id (0001: `tenants.company_ref uuid NOT NULL`, opaque here). It is
+ *  what a Zone B -> Zone A signed fact must carry as its envelope `tenantId`; the internal `id` means nothing to the ERP. */
+export type ResolvedTenant = { id: string; slug: string; status: string; companyRef: string };
 
 @Injectable()
 export class TenantLookupService {
@@ -14,7 +16,7 @@ export class TenantLookupService {
   async bySlug(slug: string): Promise<ResolvedTenant | null> {
     return this.db.withPlatformCtx(async (client) => {
       const { rows } = await client.query<ResolvedTenant>(
-        `SELECT id, slug, status FROM tenants WHERE slug = $1`,
+        `SELECT id, slug, status, company_ref AS "companyRef" FROM tenants WHERE slug = $1`,
         [slug],
       );
       return rows[0] ?? null;

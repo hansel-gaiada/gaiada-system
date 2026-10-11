@@ -49,8 +49,8 @@ export function allowedPreviewOrigin(origin: string | null | undefined, domains:
 }
 
 /**
- * The path with a preview token replaced by `:token`. For log lines and problem `instance` members:
- * a capability must not be copied into logs or error bodies that outlive the request.
+ * The path with a preview token (or, WSK-43a, a media upload token) replaced by `:token`. For log lines and
+ * problem `instance` members: a capability must not be copied into logs or error bodies that outlive the request.
  */
 export function redactPreviewToken(path: string): string {
   // ["", "v1", "t", <slug>, "preview", <token>, ...]. The fourth segment is compared DECODED, as the router
@@ -63,7 +63,24 @@ export function redactPreviewToken(path: string): string {
   } catch {
     return path;
   }
-  if (segment.toLowerCase() !== "preview") return path;
-  parts[5] = ":token";
-  return parts.join("/");
+  const lower = segment.toLowerCase();
+  if (lower === "preview") {
+    parts[5] = ":token";
+    return parts.join("/");
+  }
+  // WSK-43a: `/v1/t/<slug>/media/upload/<token>` is a bearer credential too (the media upload token).
+  // ["", "v1", "t", <slug>, "media", "upload", <token>, ...]
+  if (lower === "media" && parts.length >= 7) {
+    let sub: string;
+    try {
+      sub = decodeURIComponent(parts[5]);
+    } catch {
+      return path;
+    }
+    if (sub.toLowerCase() === "upload") {
+      parts[6] = ":token";
+      return parts.join("/");
+    }
+  }
+  return path;
 }

@@ -2,8 +2,8 @@ import { AcceptInviteForm } from "@/components/invite/AcceptInviteForm";
 
 // W0-5 — the magic link's landing page. PUBLIC by design and deliberately a sibling of `(app)` rather
 // than inside it: the person arriving has no account yet (creating one is the point), so the
-// authenticated shell would have nothing to render and the middleware would bounce them to /login.
-// `/invite` is on the middleware allowlist for that reason.
+// authenticated shell would have nothing to render and the proxy (`src/proxy.ts`) would bounce them to /login.
+// `/invite` is on the proxy's allowlist for that reason.
 //
 // This page does exactly two things: take the token out of its own URL, and hand it to a form that
 // posts it in a request BODY. That is the whole reason the token is a path segment HERE and nowhere

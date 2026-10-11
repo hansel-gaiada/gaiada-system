@@ -16,6 +16,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { allocateTaskSeq, deriveUniqueShortCode, displayCode } from "../../core/project-short-codes";
+import { isProjectStatus, unknownProjectStatusError } from "../../core/project-status";
 import { todayIso, addDaysIso } from "../../core/dept-resolution";
 import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
 // P4-E2 — the person-axis boundary this endpoint reuses verbatim rather than re-deriving (see the
@@ -1553,6 +1554,8 @@ export class PmController {
     @Body() b: { owner?: unknown; status?: string; startDate?: string | null; dueDate?: string | null; dependencyEnforcement?: boolean },
   ) {
     await authorize(req.principal, { kind: "pm_project", tenantId, id: projectId }, "manage");
+    // PV2-09: the same 400 as the core project PATCH; `projects.status` has a CHECK now.
+    if (b?.status != null && !isProjectStatus(b.status)) throw new BadRequestException(unknownProjectStatusError());
     await withTenants([tenantId], async (c) => {
       if (!(await projectExists(c, projectId))) throw new NotFoundException("project not found");
       // P4-H1 — startDate/dueDate together are the AUTHORED range (decision 12); both are plain

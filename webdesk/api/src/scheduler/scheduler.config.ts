@@ -6,7 +6,7 @@
 //                                     where every spec builds the real app and none may start a worker
 //                                     implicitly (a spec that wants the scheduler sets it to true).
 //   WEBDESK_SCHEDULER_TICK_SECONDS    how often the content tick runs. Default 60, allowed 15-300.
-//   WEBDESK_SCHEDULER_HOURLY_SECONDS  how often the forms purge and the idempotency sweep run.
+//   WEBDESK_SCHEDULER_HOURLY_SECONDS  how often the forms purge, the idempotency sweep and the media purge run.
 //                                     Default 3600, allowed 300-86400.
 //   WEBDESK_SCHEDULER_QUEUE_NAME      the BullMQ queue. Default `webdesk-scheduler`; an override exists
 //                                     so a spec can have a queue (and its job schedulers) to itself.
@@ -27,11 +27,13 @@ export const TICK_SECONDS = { default: 60, min: 15, max: 300 } as const;
 export const HOURLY_SECONDS = { default: 3600, min: 300, max: 86_400 } as const;
 export const DEFAULT_QUEUE_NAME = "webdesk-scheduler";
 
-/** The three job-scheduler ids (and BullMQ job names). */
+/** The four job-scheduler ids (and BullMQ job names). */
 export const JOB_CONTENT_TICK = "content-tick";
 export const JOB_FORMS_PURGE = "forms-retention-purge";
 export const JOB_IDEMPOTENCY_SWEEP = "idempotency-sweep";
-export const SCHEDULER_JOB_IDS = [JOB_CONTENT_TICK, JOB_FORMS_PURGE, JOB_IDEMPOTENCY_SWEEP] as const;
+/** WSK-43a: frees the stored versions of soft-deleted media assets once their retention has passed. */
+export const JOB_MEDIA_PURGE = "media-purge";
+export const SCHEDULER_JOB_IDS = [JOB_CONTENT_TICK, JOB_FORMS_PURGE, JOB_IDEMPOTENCY_SWEEP, JOB_MEDIA_PURGE] as const;
 
 export class SchedulerConfigError extends Error {
   constructor(message: string) {

@@ -171,7 +171,7 @@ export class ContentBundleService {
       );
 
       const { rows: mediaRows } = await db.query<{ bucket_key: string; mime: string; size_bytes: string; scan_status: string }>(
-        `SELECT bucket_key, mime, size_bytes, scan_status FROM media_assets WHERE site_id = $1 ORDER BY bucket_key`,
+        `SELECT bucket_key, mime, size_bytes, scan_status FROM media_assets WHERE site_id = $1 AND deleted_at IS NULL ORDER BY bucket_key`,
         [siteId],
       );
 

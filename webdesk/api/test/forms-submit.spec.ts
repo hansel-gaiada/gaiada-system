@@ -2,13 +2,15 @@
 // (WSK-D22c). Needs a REAL Mailpit (not just a mail_log row) so the assertion is "mail was
 // actually delivered", the same evidence-surface discipline WSK-11's own mail-delivery-mailpit.spec.ts
 // uses — see README.md's forms runbook for the exact container this file needs up.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { Client } from "pg";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { buildFormsTestApp, stopFormsTestApp } from "./forms-test-app";
 import { createFixtureTenant, type FixtureTenant } from "./helpers/fixtures";
 import { createFormDef, createMailTemplateForForm, setEnvironmentDomain, readSubmission } from "./helpers/forms-fixtures";
 import { waitForMailpitMessage } from "./helpers/mailpit-client";
 import { turnstileConfig } from "../src/forms/forms.config";
+import { ZoneBEventEmitterService } from "../src/events/zoneb-event-emitter.service";
 
 const SCHEMA = {
   fields: [
@@ -111,5 +113,43 @@ describe("WSK-10 — a valid submission persists, records consent, and enqueues 
       },
     });
     expect(res.statusCode).toBe(201);
+  });
+
+  it("emits form.received with the tenant's Zone A company id (tenants.company_ref), never the internal tenants.id", async () => {
+    // The ERP intake refuses an envelope whose tenantId is not its route's companies.id, so the internal
+    // id made every form.received a dropped event (found 2026-10-11, M3).
+    const migrator = new Client({ connectionString: process.env.MIGRATE_DATABASE_URL || "postgres://webdesk_migrator:throwaway_migrator@localhost:55450/webdesk" });
+    await migrator.connect();
+    let companyRef: string;
+    try {
+      await migrator.query("BEGIN");
+      await migrator.query("SET LOCAL webdesk.platform_ctx = 'true'");
+      companyRef = (await migrator.query<{ company_ref: string }>("SELECT company_ref FROM tenants WHERE id = $1", [tenant.tenantId])).rows[0].company_ref;
+      await migrator.query("COMMIT");
+    } finally {
+      await migrator.end();
+    }
+    expect(companyRef).not.toBe(tenant.tenantId);
+
+    const spy = vi.spyOn(app.get(ZoneBEventEmitterService), "emitFormReceived");
+    try {
+      const res = await app.inject({
+        method: "POST",
+        url: `/v1/t/${tenant.slug}/forms/${formId}/submit`,
+        headers: { origin: `https://${ALLOWED_DOMAIN}`, "content-type": "application/json" },
+        remoteAddress: "10.0.5.3",
+        payload: {
+          fields: { name: "Zone B Check", email: "zoneb-check@example.test", message: "company ref please" },
+          consent: true,
+          turnstileToken: turnstileConfig.stubPassToken,
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0][0]).toBe(companyRef);
+      expect(spy.mock.calls[0][0]).not.toBe(tenant.tenantId);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

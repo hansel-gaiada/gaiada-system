@@ -6,7 +6,7 @@ import "./login.css";
 type SP = Promise<Record<string, string | string[] | undefined>>;
 
 // Static holding-group roster for the identity panel. This route is public and
-// pre-session (see middleware allowlist) — there is no authenticated
+// pre-session (see the proxy's allowlist, `src/proxy.ts`) — there is no authenticated
 // `platformFetch` here, so it cannot be backend-driven the way an in-app company
 // list is.
 //
