@@ -559,9 +559,20 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       expect(s.item.unpublishAt).not.toBeNull();
     });
 
-    it("lint is computed live and reads back exactly what the save returned", async () => {
+    it("lint is computed live and reads back what the save returned", async () => {
       const r = (await get(itemUrl(fxA, id.seo, "?version=1"))).json();
-      expect(r.lint).toEqual(seoCreate.lint);
+      type Lint = { placeholders: unknown; content: { findings: { code: string }[] } };
+      const saved = seoCreate.lint as Lint;
+      // Placeholder lint depends only on the version itself: it reads back exactly what the save returned.
+      expect(r.lint.placeholders).toEqual(saved.placeholders);
+      // Content lint (M5-W3) is computed live as well. Its per-item findings read back exactly as saved; the
+      // ID-twin rule is cross-item (it reads the localization group as it is NOW), so once a twin exists in
+      // the group the save's `twin.missing.*` finding legitimately no longer appears on a later read.
+      const perItem = (l: Lint) => ({
+        ...l.content,
+        findings: l.content.findings.filter((f) => !f.code.startsWith("twin.")),
+      });
+      expect(perItem(r.lint)).toEqual(perItem(saved));
       expect(r.lint.placeholders.unresolvedTokens).toEqual(["{{RESULT_1_METRIC}}"]);
       expect(r.lint.placeholders.markers).toEqual({ CONFIRM: 1, CLIENT: 1 });
       // the head (v2) has none of them
