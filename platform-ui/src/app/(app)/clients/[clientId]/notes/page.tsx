@@ -8,12 +8,21 @@ import {
   type ClientHistoryEntry, type ClientContactKey,
 } from "@/lib/entities";
 import { addClientNoteAction, deleteClientNoteForm } from "@/lib/clientWorkActions";
+import { readResult } from "@/lib/readResult";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ClientNoteForm } from "@/components/forms/ClientWorkForms";
 import { formatDateTime } from "@/lib/format";
 
-// CC-D10 — the client hub's Notes & history tab.
+// CC-D10 — the client hub's Notes & history tab; PV3-05 — now the hub's INTERNAL area.
+//
+// STAFF ONLY, and the page says so in a banner (and the tab in a distinct style): no client-visible
+// area may look like this one. Nothing here is a portal read, so none of it is ever shown to the client.
+//
+// EVERY READ REFUSES EXPLICITLY (PV3-05): notes, history and the staff directory each render
+// `<ReadRefusal>` when refused. An empty list means the read succeeded and found nothing — "No notes
+// yet" used to be what a 403 looked like.
 //
 // NOTES are internal: stored in the core `comments` table, which no client/portal role can read, so
 // nothing written here reaches the client. Anyone with `client.write` can add one; you can delete your
@@ -29,28 +38,35 @@ export default async function ClientNotesPage({ params }: { params: Promise<{ cl
   const { clientId } = await params;
   if (!tenant) notFound();
 
-  const [notes, history, members] = await Promise.all([
+  const [notesRes, historyRes, membersRes] = await Promise.all([
     listClientNotes(userId, tenant, clientId),
     listClientHistory(userId, tenant, clientId),
-    listMembers(userId, tenant).catch(() => []),
+    // Only used to turn owner ids in the history into names; its refusal is shown beside the history.
+    readResult(listMembers(userId, tenant)),
   ]);
   const canWrite = can(me, "client.write", tenant);
   const canDeleteAny = can(me, "client.delete", tenant);
-  const names = new Map(members.map((m) => [m.user_id, m.name || m.email]));
+  const names = membersRes.kind === "ok" ? new Map(membersRes.data.map((m) => [m.user_id, m.name || m.email])) : null;
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <Card title={`Notes${notes.length ? ` · ${notes.length}` : ""}`} hint="Internal to our team. Clients never see these.">
+      <div role="note" className="ch-internal-banner">
+        <strong>Internal: never shown to the client.</strong> The notes and the change history on this tab are
+        for our team only.
+      </div>
+      <Card title={`Notes${notesRes.kind === "ok" && notesRes.data.length ? ` · ${notesRes.data.length}` : ""}`} hint="Internal to our team. Clients never see these.">
         {canWrite && (
           <div style={{ marginBottom: 16 }}>
             <ClientNoteForm action={addClientNoteAction.bind(null, clientId)} />
           </div>
         )}
-        {notes.length === 0 ? (
+        {notesRes.kind !== "ok" ? (
+          <ReadRefusal subject="this client's notes" kind={notesRes.kind} reason={notesRes.kind === "unavailable" ? notesRes.reason : undefined} inline />
+        ) : notesRes.data.length === 0 ? (
           <EmptyNote>No notes yet.</EmptyNote>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 12 }}>
-            {notes.map((n) => {
+            {notesRes.data.map((n) => {
               const mayDelete = (n.authorId === userId && canWrite) || canDeleteAny;
               return (
                 <li key={n.id} style={{ borderTop: "1px solid var(--hairline)", paddingTop: 10 }}>
@@ -71,11 +87,22 @@ export default async function ClientNotesPage({ params }: { params: Promise<{ cl
       </Card>
 
       <Card title="History" hint="Every change to this client and its profile, newest first.">
-        {history.length === 0 ? (
+        {membersRes.kind !== "ok" && (
+          <ReadRefusal
+            subject="the staff directory"
+            kind={membersRes.kind}
+            reason={membersRes.kind === "unavailable" ? membersRes.reason : undefined}
+            detail="Owner changes below show the person's id instead of a name."
+            inline
+          />
+        )}
+        {historyRes.kind !== "ok" ? (
+          <ReadRefusal subject="this client's history" kind={historyRes.kind} reason={historyRes.kind === "unavailable" ? historyRes.reason : undefined} inline />
+        ) : historyRes.data.length === 0 ? (
           <EmptyNote>No recorded changes yet. Changes made from now on are listed here.</EmptyNote>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 10 }}>
-            {history.map((h) => (
+            {historyRes.data.map((h) => (
               <li key={h.id} style={{ borderTop: "1px solid var(--hairline)", paddingTop: 8, font: "400 13px/1.5 var(--font-body)" }}>
                 <div>
                   <strong style={{ fontWeight: 600 }}>{h.actorName ?? "System"}</strong> {describe(h)}
@@ -138,8 +165,10 @@ function fieldLabel(field: string): string {
   return field;
 }
 
-function show(field: string, v: string | null, names: Map<string, string>): string {
+function show(field: string, v: string | null, names: Map<string, string> | null): string {
   if (v === null || v === "") return "(empty)";
-  if (field === "owner") return names.get(v) ?? "a former staff member";
+  // `names === null` means the directory read was refused (shown above the list): the id is the honest
+  // value then, NOT "a former staff member", which would be a confident wrong answer.
+  if (field === "owner") return names ? (names.get(v) ?? "a former staff member") : v;
   return v;
 }

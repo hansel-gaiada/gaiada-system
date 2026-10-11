@@ -2707,11 +2707,17 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const needsUs = cid === "cl-1"
       ? [
           { kind: "payment", id: "dpay-1", label: "Confirm a client-recorded payment", context: "USD 2,400", href: "/invoices/inv-1", since: daysAgoIso(11) },
-          { kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/requests` },
+          { kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work` },
         ]
       : [];
+    // PV3-05: no contracts page exists yet (PV3-08 adds `/clients/:id/billing`), so the contract item
+    // points at the hub Overview rather than at the nonexistent `/commercial`. The review item gives the
+    // Projects area's post-review list a reachable state in demo mode.
     const needsClient = cid === "cl-1"
-      ? [{ kind: "contract", id: "dk-1", label: "Awaiting client signature", context: "Statement of Work — redesign", href: `/clients/${cid}/commercial`, since: daysAgoIso(4) }]
+      ? [
+          { kind: "contract", id: "dk-1", label: "Awaiting client signature", context: "Statement of Work — redesign", href: `/clients/${cid}`, since: daysAgoIso(4) },
+          { kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3) },
+        ]
       : [];
     const money = invoices.length
       ? {
@@ -2823,7 +2829,9 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (delivMatch) {
     if (m === "POST") { const b = JSON.parse(body || "{}"); const d = { id: demoId("dl"), project_id: (b.projectId as string) ?? null, client_id: (b.clientId as string) ?? null, name: String(b.name ?? "New deliverable"), status: (b.status as string) ?? "todo", due_date: (b.dueDate as string) ?? null }; DELIVERABLES.push(d); return { status: 201, json: { id: d.id } }; }
     const pid = url.searchParams.get("projectId");
-    return ok(pid ? DELIVERABLES.filter((d) => d.project_id === pid) : DELIVERABLES);
+    // PV3-05: `?clientId=` is filtered here too, as the real controller does (a fixture that ignored it
+    // would show every client's deliverables on the hub and hide a broken facet).
+    return ok(applyDemoClientFilter(pid ? DELIVERABLES.filter((d) => d.project_id === pid) : DELIVERABLES, url.searchParams.get("clientId"), "client_id"));
   }
 
   const fieldsMatch = p.match(/^\/api\/[^/]+\/custom-fields$/);
