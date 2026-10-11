@@ -89,7 +89,7 @@ export function siteStatusLabel(
 /** The stored `failureReason` as text when it is free-form (not one of the typed tokens that already
  *  have their own wording), so the real reason is never swallowed by the generic copy. */
 export function failureDetail(reason: string | null): string | null {
-  if (!reason || reason in FAILURE_COPY) return null;
+  if (!reason || isKnownFailure(reason)) return null;
   return reason;
 }
 
@@ -175,6 +175,11 @@ const FAILURE_COPY: Record<KnownFailureReason, FailureCopy> = {
   },
 };
 
+/** Own keys only: `reason in FAILURE_COPY` would also match inherited names such as "toString". */
+function isKnownFailure(reason: string): reason is KnownFailureReason {
+  return Object.prototype.hasOwnProperty.call(FAILURE_COPY, reason);
+}
+
 const GENERIC_FAILURE: FailureCopy = {
   title: "Provisioning failed",
   body: "The provisioning service reported a failure this UI doesn't have specific wording for yet.",
@@ -182,7 +187,7 @@ const GENERIC_FAILURE: FailureCopy = {
 };
 
 export function failureCopy(reason: string | null): FailureCopy {
-  if (reason && reason in FAILURE_COPY) return FAILURE_COPY[reason as KnownFailureReason];
+  if (reason && isKnownFailure(reason)) return FAILURE_COPY[reason];
   return GENERIC_FAILURE;
 }
 

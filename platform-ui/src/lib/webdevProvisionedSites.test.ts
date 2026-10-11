@@ -169,3 +169,11 @@ describe("offered kinds and awaiting-approval state (M6-P4f)", () => {
     expect(failureDetail(null)).toBeNull();
   });
 });
+
+describe("known failure tokens are own keys only", () => {
+  it("an inherited name like toString is free-form text, not a typed token", () => {
+    expect(failureDetail("toString")).toBe("toString");
+    expect(failureDetail("constructor")).toBe("constructor");
+    expect(failureCopy("toString").title).toBe("Provisioning failed");
+  });
+});
