@@ -4,14 +4,14 @@
 #   egress-guard.sh remove   delete them
 #   egress-guard.sh status   print them
 #
-# Rule 1 (egress): the `edge` network is the only non-internal one (172.28.91.0/28, docker-compose.yml).
+# Rule 1 (egress): the `edge` network is the only non-internal one (10.211.91.0/28, docker-compose.yml).
 #   Nothing in it may OPEN a connection outward. Replies to published-port traffic are ESTABLISHED and pass;
 #   the app and db are on an `internal: true` network and need no rule at all.
 # Rule 2 (read-gate, only matters if the `erp-read` profile runs): published port 18743 on wg0 may be reached
 #   from gda-aicenter (10.88.0.1) only. Docker DNAT runs before ufw, so ufw cannot do this; DOCKER-USER sees
 #   the packet after DNAT, hence conntrack's ORIGINAL destination port.
 set -eu
-EDGE_SUBNET="${EDGE_SUBNET:-172.28.91.0/28}"
+EDGE_SUBNET="${EDGE_SUBNET:-10.211.91.0/28}"
 READ_PORT="${UMAMI_READ_PORT:-18743}"
 ERP_PEER="${ERP_PEER:-10.88.0.1}"
 

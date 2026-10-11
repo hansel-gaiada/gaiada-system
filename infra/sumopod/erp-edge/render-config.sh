@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Render traefik.yml from traefik.yml.template. Usage:  ./render-config.sh <mimi-source-cidr> <acme-email>
-# e.g.  ./render-config.sh 172.28.92.1/32 ops@example.com
+# e.g.  ./render-config.sh 10.211.92.1/32 ops@example.com
 set -euo pipefail
 cd "$(dirname "$0")"
 src="${1:?usage: render-config.sh <mimi source address as a /32 CIDR> <acme email>}"
