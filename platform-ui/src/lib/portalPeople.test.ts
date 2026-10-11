@@ -52,5 +52,7 @@ describe("describeAccess", () => {
   it("reads capability and scope", () => {
     expect(describeAccess({ capability: "signer", projectId: null })).toEqual({ capability: "Can sign", scope: "Whole account" });
     expect(describeAccess({ capability: "viewer", projectId: "p" })).toEqual({ capability: "View only", scope: "One project" });
+    // WSK-49f: an admin implies signer (owner ruling 2026-10-11), so the People page says they can sign.
+    expect(describeAccess({ capability: "admin", projectId: null })).toEqual({ capability: "Admin, can sign", scope: "Whole account" });
   });
 });
