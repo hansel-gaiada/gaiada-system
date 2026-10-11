@@ -47,6 +47,61 @@
   color: var(--surface-card-solid);
 }
 
+/* ── Internal tab (PV3-05) ─────────────────────────────────────────────────────────────────────── */
+/* The hub's one STAFF-ONLY area (notes and history; the portal never reads them). It must be
+   impossible to mistake for a client-visible area, so it breaks the strip's grammar three ways: it sits
+   apart at the far end, it carries the warning family instead of the gold accent, and its underline is
+   dashed. It also says "Staff only" in words, so the signal is not colour alone. Warning tokens flip in
+   dark with the rest of the status family, so there is no theme-specific rule here. */
+.ch-tab--internal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--status-warning-fg);
+  background: var(--status-warning-bg);
+  border-bottom: 2px dashed var(--status-warning);
+}
+.ch-tab--internal:hover { color: var(--status-warning-fg); opacity: 0.8; }
+.ch-tab--internal[aria-current="page"] {
+  color: var(--status-warning-fg);
+  border-bottom-style: solid;
+  border-bottom-color: var(--status-warning);
+}
+.ch-tab__staff {
+  font: 700 10px/1 var(--font-body);
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
+  border: 1px dashed currentColor;
+}
+
+/* The banner at the top of the Internal area. Same family and the same dashed edge as the tab. */
+.ch-internal-banner {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border: 1px dashed var(--status-warning);
+  background: var(--status-warning-bg);
+  color: var(--ink-strong);
+  font: 400 13px/1.55 var(--font-body);
+}
+.ch-internal-banner strong { color: var(--status-warning-fg); font-weight: 700; }
+
+/* ── Projects area sections (PV3-05) ───────────────────────────────────────────────────────────── */
+.ch-sections { display: grid; gap: 32px; }
+.ch-section__title {
+  margin: 0 0 12px;
+  font: 600 15px/1.3 var(--font-body);
+  color: var(--ink-strong);
+  letter-spacing: 0.01em;
+}
+.ch-section__body { display: grid; gap: 20px; }
+.ch-group__title {
+  margin: 0 0 6px;
+  font: 600 12px/1.4 var(--font-body);
+  color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
+
 /* ── Ball columns ──────────────────────────────────────────────────────────────────────────────── */
 /* The two lists sit SIDE BY SIDE on purpose. "Who is holding the ball" is a comparison, and stacking
    them turns it into two separate lists a reader has to hold in their head. */

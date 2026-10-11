@@ -4,6 +4,7 @@ import "server-only";
 // Missing detail endpoints are DERIVED from list endpoints or DEGRADE gracefully
 // (never throw to the page) so pages can ship ahead of the backend.
 import { platformFetch, PlatformError } from "./platform";
+import { readResult, type ReadResult } from "./readResult";
 
 export interface Project {
   id: string;
@@ -239,12 +240,13 @@ export const createClient = (u: string, t: string, body: { name: string; busines
  *  be cleared, only changed). `groupCompanyId`: omitted = unchanged, `null` = clear (operator-only). */
 export const updateClient = (u: string, t: string, id: string, body: { name?: string; status?: string; contact?: Record<string, string | null>; ownerUserId?: string | null; businessType?: string; groupCompanyId?: string | null }) =>
   platformFetch<{ id: string }>(`/api/${t}/clients/${id}`, u, { method: "PATCH", body: JSON.stringify(body) });
-// CC-D10 — notes + history. Both degrade to [] on 404/403 (an older backend, or a module-off tenant)
-// via skipUnavailable, the same rule as listClients; anything else throws to the error boundary.
-export const listClientNotes = (u: string, t: string, id: string) =>
-  skipUnavailable(platformFetch<ClientNote[]>(`/api/${t}/clients/${id}/notes`, u), [] as ClientNote[]);
-export const listClientHistory = (u: string, t: string, id: string) =>
-  skipUnavailable(platformFetch<ClientHistoryEntry[]>(`/api/${t}/clients/${id}/history`, u), [] as ClientHistoryEntry[]);
+// CC-D10 — notes + history. PV3-05: both answer a `ReadResult`. They used to degrade 403 AND 404 to []
+// (skipUnavailable), which showed a denied read as "No notes yet". `absentAsEmpty` keeps the one honest
+// absence (a backend that does not serve the route); a 403 is `forbidden`, anything else `unavailable`.
+export const listClientNotes = (u: string, t: string, id: string): Promise<ReadResult<ClientNote[]>> =>
+  readResult(platformFetch<ClientNote[]>(`/api/${t}/clients/${id}/notes`, u), { absentAsEmpty: [] });
+export const listClientHistory = (u: string, t: string, id: string): Promise<ReadResult<ClientHistoryEntry[]>> =>
+  readResult(platformFetch<ClientHistoryEntry[]>(`/api/${t}/clients/${id}/history`, u), { absentAsEmpty: [] });
 export const createClientNote = (u: string, t: string, id: string, body: string) =>
   platformFetch<{ id: string }>(`/api/${t}/clients/${id}/notes`, u, { method: "POST", body: JSON.stringify({ body }) });
 export const deleteClientNote = (u: string, t: string, id: string, noteId: string) =>
@@ -252,8 +254,21 @@ export const deleteClientNote = (u: string, t: string, id: string, noteId: strin
 export const deleteClient = (u: string, t: string, id: string) =>
   platformFetch<{ ok: true }>(`/api/${t}/clients/${id}`, u, { method: "DELETE" });
 
-export const listDeliverables = (u: string, t: string, projectId?: string) =>
-  skipUnavailable(platformFetch<Deliverable[]>(`/api/${t}/deliverables${projectId ? `?projectId=${projectId}` : ""}`, u), [] as Deliverable[]);
+function deliverablesPath(t: string, projectId?: string, clientId?: string): string {
+  const q = new URLSearchParams();
+  if (projectId) q.set("projectId", projectId);
+  // PV3-05: the backend has filtered on `clientId` all along (client-work.controller.ts); this reader
+  // never sent it, so the client hub fetched the whole tenant and narrowed in the browser.
+  if (clientId) q.set("clientId", clientId);
+  const qs = q.toString();
+  return `/api/${t}/deliverables${qs ? `?${qs}` : ""}`;
+}
+export const listDeliverables = (u: string, t: string, projectId?: string, clientId?: string) =>
+  skipUnavailable(platformFetch<Deliverable[]>(deliverablesPath(t, projectId, clientId), u), [] as Deliverable[]);
+/** One client's deliverables, server-filtered, with a refusal kept distinct from "none" (the client
+ *  hub's Projects area). `listDeliverables` above folds 403/404 into [] and stays for its old callers. */
+export const listClientDeliverables = (u: string, t: string, clientId: string): Promise<ReadResult<Deliverable[]>> =>
+  readResult(platformFetch<Deliverable[]>(deliverablesPath(t, undefined, clientId), u), { absentAsEmpty: [] });
 export const createDeliverable = (u: string, t: string, body: { name: string; projectId?: string; clientId?: string; dueDate?: string; status?: string }) =>
   platformFetch<{ id: string }>(`/api/${t}/deliverables`, u, { method: "POST", body: JSON.stringify(body) });
 export const createTimeEntry = (u: string, t: string, body: { minutes: number; projectId?: string; taskId?: string; billable: boolean; entryDate: string; notes?: string }) =>
