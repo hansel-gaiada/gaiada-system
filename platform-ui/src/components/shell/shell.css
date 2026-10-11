@@ -46,6 +46,14 @@
 }
 /* Every grid child sits above the wash. */
 .erp-side, .erp-top, .erp-main, .erp-special { position: relative; z-index: 1; }
+/* Each z-index above makes a stacking context, and a popover's own z-index only counts INSIDE its
+   panel's context. At an equal 1, main (last in the DOM) painted over everything that opens out of
+   the chrome: the top bar's account and New menus dropped UNDER the page, so "Account settings",
+   "Client view" and "Sign out" were covered where they overlapped it (found by the PV2-06 e2e,
+   2026-10-11). The top bar sits above main; the sidebar above both, because its flyouts cross both.
+   The mobile drawer's own rule below still takes it to 100. */
+.erp-top { z-index: 2; }
+.erp-side { z-index: 3; }
 
 /* The two glass panels. `border: none` replaces the old hairline edges:
    the material carries the separation now, through --glass-inner's inset

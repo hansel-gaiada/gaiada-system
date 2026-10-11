@@ -212,4 +212,59 @@ test.describe("client portal", () => {
     // One client company only, so no switch.
     await expect(page.getByLabel("Company")).toHaveCount(0);
   });
+
+  test("a client of two of our companies switches between them, and the choice sticks @portal", async ({ page }) => {
+    // PV2-05: demo-two-company-client is a contact of co-agency AND co-resort (PV-D10), the only identity
+    // that sees the switch. The demo fixtures answer both companies alike, so this proves the switch, its
+    // cookie and the resolver; per-company data isolation is proven by the BFF's database suite.
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("two-companies@deity-labs.example");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL("**/portal");
+
+    const brand = page.locator(".cp-brand__mark");
+    const sw = page.getByLabel("Company");
+    await expect(sw).toBeVisible();
+    await expect(sw.locator("option")).toHaveText(["Gaia Digital Agency", "Viceroy"]);
+    // No cookie yet: the first company by name.
+    await expect(brand).toHaveText("Gaia Digital Agency");
+
+    await sw.selectOption({ label: "Viceroy" });
+    await page.getByRole("button", { name: "Switch" }).click();
+    await expect(brand).toHaveText("Viceroy");
+
+    // The cookie carries the choice to every page, not only the one the form posted from.
+    await page.goto("/portal/projects");
+    await expect(brand).toHaveText("Viceroy");
+    await expect(page.getByLabel("Company")).toHaveValue("co-resort");
+  });
+
+  test("someone who is both staff and client moves between the workspace and the portal @portal", async ({ page }) => {
+    // PV2-06 at the identity level; UserMenu.test.tsx and PortalUserMenu.test.tsx pin the two halves.
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("viceroy-marketing@gaiada.com");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL("**/");
+
+    await page.locator(".erp-usermenu__trigger").click();
+    await page.getByRole("menuitem", { name: "Client view" }).click();
+    await page.waitForURL("**/portal");
+    await expect(page.locator(".cp-brand__mark")).toHaveText("Gaia Digital Agency");
+
+    await page.getByRole("button", { name: "Account menu" }).click();
+    const back = page.getByRole("menuitem", { name: "Back to workspace" });
+    await expect(back).toHaveAttribute("href", "/");
+    await back.click();
+    await page.waitForURL((url) => url.pathname === "/");
+    await expect(page.locator(".cp-brand__mark")).toHaveCount(0);
+  });
+
+  test("a client who is not staff has no way into the workspace from the portal menu @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.getByRole("button", { name: "Account menu" }).click();
+    // In the viewport, not merely "visible": the menu once opened upward, off the top of the screen.
+    await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeInViewport();
+    await expect(page.getByRole("menuitem", { name: "Your profile" })).toBeInViewport();
+    await expect(page.getByRole("menuitem", { name: "Back to workspace" })).toHaveCount(0);
+  });
 });

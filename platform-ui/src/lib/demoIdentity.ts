@@ -8,12 +8,17 @@
 // ORDER IS THE MECHANISM, not a style choice, which is why it is asserted rather than described:
 // the tests below the obvious ones are the ones that matter (a client address containing "ic", a
 // staff address containing "client").
-export type DemoIdentityId = "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel" | "demo-viceroy-marketing";
+export type DemoIdentityId =
+  | "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel" | "demo-viceroy-marketing"
+  | "demo-two-company-client";
 
 export function demoIdentityFor(email: string): DemoIdentityId {
   const lower = email.toLowerCase();
   // Most specific first. `search_staff` drives negative-permission rendering in the SEO console.
   if (lower === "seo-staff@gaiada.com" || lower.includes("seo-staff")) return "seo-staff";
+  // PV2-05: a client contact of TWO of our companies, the only identity that sees the company switch.
+  // BEFORE the generic client test, which would otherwise take any address containing "client".
+  if (lower === "two-companies@deity-labs.example" || lower.includes("two-companies")) return "demo-two-company-client";
   // External client BEFORE the "ic" test: "client" itself contains no "ic", but a real client
   // address easily can ("erica@…", "nicole@…"), and being an external client is the more specific
   // claim than the IC tier. Getting this order wrong hands a client the staff dashboard.

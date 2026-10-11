@@ -198,7 +198,8 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
         )}
 
         <div>
-          <Eyebrow style={{ display: "block", marginBottom: 6, opacity: 0.6 }}>Back</Eyebrow>
+          {/* `--ink-subtle`, not opacity: at 0.6 the label failed axe colour-contrast in the light theme. */}
+          <Eyebrow style={{ display: "block", marginBottom: 6, color: "var(--ink-subtle)" }}>Back</Eyebrow>
           <PortalLink href="/portal/projects">All your projects</PortalLink>
         </div>
       </div>
