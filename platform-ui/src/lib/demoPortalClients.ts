@@ -3,6 +3,8 @@
 // and refuse everyone else with the real 403 ("not a portal client").
 //
 //   demo-client             a client of co-agency (Northwind Traders), and nothing else.
+//   demo-client-admin       Northwind's client ADMIN (WSK-49f), a contact of co-agency and nothing else.
+//   demo-client-viewer      Northwind's view-only contact (WSK-49f), likewise.
 //   demo-viceroy-marketing  staff of co-resort (Viceroy) AND a client contact of co-agency (PV2-05):
 //                           the case where the portal must resolve through `clientOf`, not the employer.
 //   demo-two-company-client a client of co-agency AND co-resort (PV2-05), the only identity that sees the
@@ -13,7 +15,7 @@
 // list, read by every demo portal fixture, so a second client identity cannot be honoured by one
 // fixture and refused by another.
 export const DEMO_PORTAL_CLIENT_USERS: ReadonlySet<string> = new Set([
-  "demo-client", "demo-viceroy-marketing", "demo-two-company-client",
+  "demo-client", "demo-client-admin", "demo-client-viewer", "demo-viceroy-marketing", "demo-two-company-client",
 ]);
 
 export function isDemoPortalClient(userId: string): boolean {

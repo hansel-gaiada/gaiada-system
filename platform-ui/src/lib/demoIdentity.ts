@@ -10,7 +10,7 @@
 // staff address containing "client").
 export type DemoIdentityId =
   | "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel" | "demo-viceroy-marketing"
-  | "demo-two-company-client" | "demo-owner";
+  | "demo-two-company-client" | "demo-owner" | "demo-client-admin" | "demo-client-viewer";
 
 export function demoIdentityFor(email: string): DemoIdentityId {
   const lower = email.toLowerCase();
@@ -23,6 +23,10 @@ export function demoIdentityFor(email: string): DemoIdentityId {
   // PV2-05: a client contact of TWO of our companies, the only identity that sees the company switch.
   // BEFORE the generic client test, which would otherwise take any address containing "client".
   if (lower === "two-companies@deity-labs.example" || lower.includes("two-companies")) return "demo-two-company-client";
+  // WSK-49f: two more Northwind client contacts, one ADMIN and one VIEWER, so the website-access grant
+  // screens can be driven as each. BEFORE the generic client test, which takes any @northwind.example.
+  if (lower === "admin@northwind.example") return "demo-client-admin";
+  if (lower === "viewer@northwind.example") return "demo-client-viewer";
   // External client BEFORE the "ic" test: "client" itself contains no "ic", but a real client
   // address easily can ("erica@…", "nicole@…"), and being an external client is the more specific
   // claim than the IC tier. Getting this order wrong hands a client the staff dashboard.
