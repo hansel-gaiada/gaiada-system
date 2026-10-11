@@ -155,14 +155,34 @@ export type ContentKind = "webdesk_content_item" | "webdesk_collection" | "webde
 /** `upload` is `webdesk_media_asset`'s (WSK-43b: minting an upload token). */
 export type ContentAction = "read" | "create" | "update" | "request_publish" | "unpublish" | "delete" | "apply_schema" | "upload";
 
+/**
+ * WSK-49c — the CLIENT context a gate carries when it was opened for a client editor (the portal BFF). Absent on every
+ * staff gate, and absent means exactly what it meant before WSK-49: nothing below changes for a staff call.
+ *
+ * `clientId` is the client record the editor acts for. It is fed to Cerbos as `resource.attr.clientId`, where the
+ * `client_website_editor` derived role matches it against the principal's OWN grants (server-derived), so a URL id the
+ * caller made up matches nothing. `assertOwnsSite` is the second half and is supplied by the portal service
+ * (`webdesk-client-website.service.ts`): in the request's tenant it resolves the caller's portal scope
+ * (`resolvePortalScope`: the URL's client must be one of the caller's own) and loads the site -> client link
+ * (`webdesk_site_clients`); anything but "this site is linked to this client" is a uniform 404 site-not-found. It runs
+ * BEFORE the cross-company wall, so a client never probes another client's site, nor another company's.
+ */
+export interface ClientGateContext {
+  readonly clientId: string;
+  assertOwnsSite(site: SiteRef): Promise<void>;
+  /** A request filed under this gate notifies staff deciders ("approval requested") unless this is false (a single-item self-publish). */
+  readonly notifyDeciders?: boolean;
+}
+
 /** Proof that Cerbos allowed `principal` to run `action` on `kind` in company `tenantId`. Its constructor
- *  is private: `authorizeContent()` is the only way to get one. */
+ *  is private: `authorizeContent()` (staff) or `ContentGate.openClient()` (client editors) are the only ways to get one. */
 export class ContentGate {
   private constructor(
     readonly principal: Principal,
     readonly tenantId: string,
     readonly kind: ContentKind,
     readonly action: ContentAction,
+    readonly client?: ClientGateContext,
   ) {}
 
   /** @internal use `authorizeContent`. */
@@ -171,12 +191,44 @@ export class ContentGate {
     return new ContentGate(principal, tenantId, kind, action);
   }
 
+  /**
+   * WSK-49c: the client editor's gate. Cerbos FIRST (the client-editor rules: the `client_website_editor` derived role
+   * against `clientId`), exactly like `open`. The gate then carries the client so every later authorisation names the
+   * same client, every egress write is signed with the client marker (`ce`), and the site wall asks the link first.
+   */
+  static async openClient(
+    principal: Principal,
+    tenantId: string,
+    kind: ContentKind,
+    action: ContentAction,
+    client: ClientGateContext,
+  ): Promise<ContentGate> {
+    await authorize(principal, { kind, tenantId, module: "webdev", clientId: client.clientId }, action);
+    return new ContentGate(principal, tenantId, kind, action, client);
+  }
+
   /** A method that needs `webdesk_content_item:update` cannot be driven with a `read` gate. */
   require(kind: ContentKind, action: ContentAction): this {
     if (this.kind !== kind || this.action !== action) {
       throw new InternalServerErrorException(`webdesk content gate mismatch: opened ${this.kind}:${this.action}, needed ${kind}:${action}`);
     }
     return this;
+  }
+
+  /** The Cerbos resource attribute for any later authorisation made under this gate (`{}` for staff). */
+  clientAttr(): { clientId?: string } {
+    return this.client ? { clientId: this.client.clientId } : {};
+  }
+
+  /** The egress marker for a write made under this gate (`{}` for staff): the signed assertion gets `ce: true`. */
+  egressClient(): { clientEditor?: { clientId: string } } {
+    return this.client ? { clientEditor: { clientId: this.client.clientId } } : {};
+  }
+
+  /** The cross-company wall, preceded in client mode by the client -> site link (uniform 404 for a site that is not theirs). */
+  async resolveSite(zoneB: WebdeskZoneB, site: SiteRef): Promise<EditableSite> {
+    if (this.client) await this.client.assertOwnsSite(site);
+    return zoneB.resolveEditableSite(this.tenantId, site.tenantSlug, site.siteId);
   }
 }
 
@@ -268,6 +320,9 @@ export interface EgressWrite {
   idempotencyKey: string;
   /** Present for the editorial commands only (schema.apply and site.provision carry none: design §3.1). */
   editorial?: { tenantSlug: string; siteId: string };
+  /** WSK-49c: set only by a client-mode call. The editorial assertion then carries `ce: true` (WebDesk's client-editor
+   *  marker, WSK-D59/D62), and both ledger rows say so. It only ever RESTRICTS what WebDesk accepts; a staff call omits it. */
+  clientEditor?: { clientId: string };
   entity: { type: string; id: string | null };
   /** Non-secret identifiers copied onto both ledger rows. */
   ledger: Record<string, unknown>;
@@ -377,6 +432,7 @@ export class WebdeskZoneB {
           site: w.editorial.siteId,
           cmd: editorialCmd,
           cmh: computeCommandHash(w.command, commandArgsAsZoneBSeesThem(w.params, w.body)),
+          ...(w.clientEditor ? { ce: true } : {}),
         });
       } catch (err) {
         if (err instanceof EditorialSignerNotConfiguredError) throw notConfigured("editorial_signer_not_configured");
@@ -385,7 +441,12 @@ export class WebdeskZoneB {
       }
     }
 
-    const base = { command: w.command, idempotencyKey: w.idempotencyKey, ...w.ledger };
+    const base = {
+      command: w.command,
+      idempotencyKey: w.idempotencyKey,
+      ...w.ledger,
+      ...(w.clientEditor ? { clientEditor: true, clientId: w.clientEditor.clientId } : {}),
+    };
     // GH-04's two-row pattern: the ATTEMPT is on the ledger before the call.
     await writeActivity(tenantId, userId, w.verb, w.entity.type, w.entity.id, { ...base, outcome: "attempted" });
 
@@ -574,7 +635,7 @@ export class WebdeskContentService {
 
   async listCollections(gate: ContentGate, site: SiteRef): Promise<ZoneBResult> {
     gate.require("webdesk_collection", "read");
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     return this.zoneB.read({
       command: "collection.list",
       path: "/control/v1/tenants/:tenantSlug/sites/:siteId/collections",
@@ -585,7 +646,7 @@ export class WebdeskContentService {
   async listItems(gate: ContentGate, site: SiteRef, collectionKey: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
     const { slug, ...query } = strictQuery(rawQuery, ["locale", "state", "q", "includeDeleted", "cursor", "limit", "slug"]);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     const read = (q: Query) =>
       this.zoneB.read({
         command: "item.list",
@@ -618,7 +679,7 @@ export class WebdeskContentService {
   async getItem(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
     const query = strictQuery(rawQuery, ["version"]);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     return this.zoneB.read({
       command: "item.get",
       path: ITEM_PATH,
@@ -630,7 +691,7 @@ export class WebdeskContentService {
   async listVersions(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
     const query = strictQuery(rawQuery, ["cursor", "limit"]);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     return this.zoneB.read({
       command: "item.versions",
       path: `${ITEM_PATH}/versions`,
@@ -642,7 +703,7 @@ export class WebdeskContentService {
   async getVersion(gate: ContentGate, site: SiteRef, itemId: string, n: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
     strictQuery(rawQuery, []);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     return this.zoneB.read({
       command: "item.versionGet",
       path: `${ITEM_PATH}/versions/:n`,
@@ -663,7 +724,7 @@ export class WebdeskContentService {
     idempotencyKey: string,
   ): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "create");
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     const b = strictBody(rawBody, ["collectionKey", "locale", "slug", "twinOf", "fields", "blocks", "seo", "note"]);
     // The route's collection is the authority. A body that names a different one is a mistake, not a redirect.
     if (b.collectionKey !== undefined && b.collectionKey !== collectionKey) {
@@ -676,7 +737,7 @@ export class WebdeskContentService {
       params: { tenantSlug: site.tenantSlug, siteId: site.siteId, key: collectionKey },
     });
     const locale = typeof b.locale === "string" ? b.locale : "";
-    await authorize(gate.principal, { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", collectionKey, locale }, "create");
+    await authorize(gate.principal, { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", collectionKey, locale, ...gate.clientAttr() }, "create");
 
     const { collectionKey: _drop, ...rest } = b;
     void _drop;
@@ -689,6 +750,7 @@ export class WebdeskContentService {
       body: { collectionKey, ...rest },
       idempotencyKey,
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      ...gate.egressClient(),
       entity: { type: "webdesk_content_item", id: null },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, collectionKey, locale: locale || null, slug: typeof b.slug === "string" ? b.slug : null },
       reconcile: this.reconcileCreate(site, collectionKey, gate.principal.userId as string, b.locale, b.slug),
@@ -708,7 +770,7 @@ export class WebdeskContentService {
     const attrs = await this.readItemAttrs(site, itemId, version);
     await authorize(
       gate.principal,
-      { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", id: itemId, collectionKey: attrs.collectionKey, locale: attrs.locale },
+      { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", id: itemId, collectionKey: attrs.collectionKey, locale: attrs.locale, ...gate.clientAttr() },
       action,
     );
     return attrs;
@@ -829,7 +891,7 @@ export class WebdeskContentService {
     },
   ): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", action);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     const body = strictBody(spec.rawBody, spec.allowed);
     const attrs = await this.authorizeOnItem(gate, site, itemId, action);
     const result = await this.zoneB.write(gate.principal, gate.tenantId, {
@@ -841,6 +903,7 @@ export class WebdeskContentService {
       body,
       idempotencyKey: spec.idempotencyKey,
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      ...gate.egressClient(),
       entity: { type: "webdesk_content_item", id: UUID_RE.test(itemId) ? itemId : null },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId, collectionKey: attrs.collectionKey, locale: attrs.locale },
       reconcile: spec.reconcile(gate.principal.userId as string, body, attrs),
@@ -941,7 +1004,7 @@ export class WebdeskContentService {
   // token), so a caller that needs another link mints again under a NEW key.
   async previewItem(gate: ContentGate, site: SiteRef, itemId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "update");
-    const editable = await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    const editable = await gate.resolveSite(this.zoneB, site);
     const b = strictBody(rawBody === undefined || rawBody === null ? {} : rawBody, ["version"]);
     let version: number | undefined;
     if (b.version !== undefined && b.version !== null) {
@@ -982,6 +1045,7 @@ export class WebdeskContentService {
       body: version === undefined ? {} : { version },
       idempotencyKey,
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      ...gate.egressClient(),
       entity: { type: "webdesk_content_item", id: UUID_RE.test(itemId) ? itemId : null },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId, collectionKey: attrs.collectionKey, locale: attrs.locale, requestedVersion: version ?? null },
       // No `reconcile`: a mint that may have landed leaves nothing to read back (the token is shown once and never
@@ -1005,7 +1069,7 @@ export class WebdeskContentService {
    */
   async requestPublish(gate: ContentGate, site: SiteRef, rawBody: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "request_publish");
-    const editable = await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    const editable = await gate.resolveSite(this.zoneB, site);
     const b = strictBody(rawBody, ["items", "publishAt", "unpublishAt", "note"]);
     const items = parsePublishItems(b.items);
     const publishAt = optInstant(b.publishAt, "publishAt");
@@ -1015,6 +1079,16 @@ export class WebdeskContentService {
     }
     const scheduled = publishAt !== null || unpublishAt !== null;
     if (scheduled && b.note !== undefined) throw invalidRequest("a scheduled request takes no note");
+    if (scheduled && gate.client) {
+      // WSK-49c, defence in depth: the portal service already refuses a scheduled request, and WebDesk would too
+      // (`content.schedule` is not on a client's allow-list), but this method must not file one under a client gate.
+      throw new WebdeskProblem(403, {
+        type: "https://webdesk.gaiada.online/errors/client-command-not-allowed",
+        title: "Command not allowed for a client editor",
+        status: 403,
+        detail: "A client editor may not run content.schedule. Nothing was filed.",
+      });
+    }
 
     // Read every item at the requested version (bounded concurrency): proves it exists on THIS site and
     // is not deleted, and yields what Cerbos and the approver need. A typed 404/409 passes through.
@@ -1034,7 +1108,7 @@ export class WebdeskContentService {
       counts[attrs.collectionKey] = (counts[attrs.collectionKey] ?? 0) + 1;
     });
     for (const p of pairs.values()) {
-      await authorize(gate.principal, { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", collectionKey: p.collectionKey, locale: p.locale }, "request_publish");
+      await authorize(gate.principal, { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", collectionKey: p.collectionKey, locale: p.locale, ...gate.clientAttr() }, "request_publish");
     }
 
     const wireItems = items.map((it, i) => ({ itemId: it.itemId, version: it.version, ...(reads[i].contentHash ? { contentHash: reads[i].contentHash as string } : {}) }));
@@ -1053,6 +1127,7 @@ export class WebdeskContentService {
         ? { items: wireItems, publishAt, unpublishAt }
         : { items: wireItems, ...(b.note !== undefined ? { note: b.note as string } : {}) },
       summary: { title: title.length > 300 ? `${title.slice(0, 297)}...` : title, counts },
+      ...(gate.client ? { client: { clientId: gate.client.clientId, notifyDeciders: gate.client.notifyDeciders } } : {}),
     });
     return { status: 202, body: { approvalId, command, itemCount: n } };
   }
@@ -1074,7 +1149,7 @@ export class WebdeskContentService {
     if (!REQUEST_STATUSES.includes(status)) {
       throw invalidRequest(`status must be one of ${REQUEST_STATUSES.join(", ")}`);
     }
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     const params: unknown[] = [gate.principal.userId, site.tenantSlug, site.siteId];
     if (status !== "all") params.push(status);
     const found = await withTenants([gate.tenantId], (c) =>
@@ -1110,7 +1185,7 @@ export class WebdeskContentService {
    */
   async withdrawPublishRequest(gate: ContentGate, site: SiteRef, approvalId: string): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "request_publish");
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     const userId = gate.principal.userId as string;
     const notFound = (): HttpException => new NotFoundException({ message: "approval_not_found", reason: "approval_not_found" });
     if (!UUID_RE.test(approvalId)) throw notFound();
@@ -1160,7 +1235,7 @@ export class WebdeskContentService {
 
 // ── small parsers ──────────────────────────────────────────────────────────────────────────────────
 
-function parsePublishItems(raw: unknown): Array<{ itemId: string; version: number }> {
+export function parsePublishItems(raw: unknown): Array<{ itemId: string; version: number }> {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 1000) throw invalidRequest("items must be an array of 1..1000 { itemId, version }");
   const seen = new Set<string>();
   return raw.map((e, i) => {

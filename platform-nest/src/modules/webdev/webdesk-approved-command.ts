@@ -81,11 +81,13 @@ import {
   ForbiddenException,
   HttpException,
   Logger,
+  NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { newId, withTenants } from "../../db";
 import { authorize, writeActivity } from "../../core/http";
 import { insertAutomationApprovalRow } from "../../core/approval-filing";
+import { emitEvent } from "../../events/outbox.service";
 import { notifyBestEffort } from "../../core/client-notify";
 import { resolveWebdeskApprovalDeciders } from "../../core/approval-deciders";
 import { EXECUTION_RESULT_MAX_CHARS } from "../../core/approval-execute";
@@ -348,7 +350,7 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
 const MAX_ITEMS = 1000;
 
 /** Keys `fileWebdeskCommandApproval` writes itself; a caller's `args` may not carry them. */
-const RESERVED_ARG_KEYS = ["command", "tenantSlug", "siteId", "itemId", "commandHash", "summary", "rebuild"];
+const RESERVED_ARG_KEYS = ["command", "tenantSlug", "siteId", "itemId", "commandHash", "summary", "rebuild", "clientId"];
 const ARG_KEYS: Record<WebdeskApprovedCommand, ReadonlyArray<string>> = {
   "content.publish": ["items", "note"],
   "content.schedule": ["items", "publishAt", "unpublishAt"],
@@ -510,13 +512,23 @@ function filingGate(command: WebdeskApprovedCommand, tenantId: string): { resour
     : { resource: { kind: "webdesk_content_item", tenantId, module: "webdev" }, action: "request_publish" };
 }
 
+/** WSK-49c: the client a CLIENT editor decides for (the approval row's own `clientId`, verified by the caller). Absent for staff. */
+export interface ClientDecider {
+  clientId: string;
+}
+
 async function authorizeDecider(
   a: ParsedArgs,
   tenantId: string,
   approvalId: string,
   requestedBy: string,
   decider: Principal,
+  client?: ClientDecider,
 ): Promise<void> {
+  if (client && a.command !== "content.publish") {
+    // D58 gives a client editor ONE decision: a content.publish. A schedule, a key mint and a rebuild are never theirs.
+    throw new ForbiddenException(`not authorized: a client editor may decide only a publish, not ${a.command}`);
+  }
   if (a.command === "content.rebuild") {
     // The dispatch's own D14 rule (`github_repo · deploy`, approvalId set, resolved against the ORG
     // tenant). Run here so a refusal at preflight leaves the row pending; workflow-dispatch.ts runs it
@@ -551,6 +563,8 @@ async function authorizeDecider(
       creatorId: requestedBy,
       // From the STORED row's items (the caller passes the row's tool_args), never from a request.
       itemCount: itemCountOf(a),
+      // WSK-49c: the client editor's rule matches this against the principal's own grants (server-derived).
+      ...(client ? { clientId: client.clientId } : {}),
     },
     a.command === "content.publish" ? "publish" : "schedule",
   );
@@ -597,6 +611,7 @@ export async function preflightWebdeskApprovedCommand(
   toolArgs: unknown,
   requestedBy: string,
   decider: Principal,
+  clientDecider?: ClientDecider,
 ): Promise<{ args: ParsedArgs; client: WebdeskControlClient | null }> {
   if (!decider.userId) throw new BadRequestException("an authenticated decider is required");
   let a: ParsedArgs;
@@ -606,7 +621,7 @@ export async function preflightWebdeskApprovedCommand(
     if (err instanceof ArgsError) throw badRequest(WEBDESK_EXEC_ERROR.argsInvalid, err.message);
     throw err;
   }
-  await authorizeDecider(a, tenantId, approvalId, requestedBy, decider);
+  await authorizeDecider(a, tenantId, approvalId, requestedBy, decider, clientDecider);
   const client = ensureConfigured(a);
   return { args: a, client };
 }
@@ -629,13 +644,25 @@ export async function fileWebdeskCommandApproval(
     siteId: string;
     args: Record<string, unknown>;
     summary: WebdeskApprovalSummary;
+    /**
+     * WSK-49c: set ONLY by the client-mode portal BFF. The approval is filed by a CLIENT editor for `clientId` (the
+     * client the site -> client link names, loaded server-side). The filing is authorised under the client-editor
+     * rules (`resource.attr.clientId`), and the row stores `clientId` in its `tool_args`, which is what lets another
+     * client editor of the same client find and approve it (D58) and what a staff-filed request never carries. Only a
+     * `content.publish` may be filed this way (a client never schedules or mints a key).
+     * `notifyDeciders: false` skips the "approval requested" notification to staff (a self-publish needs no second person).
+     */
+    client?: { clientId: string; notifyDeciders?: boolean };
   },
 ): Promise<{ approvalId: string }> {
   if (!isApprovedCommand(input?.command)) {
     throw badRequest(WEBDESK_EXEC_ERROR.argsInvalid, "command is not in the WebDesk approved-command allow-list");
   }
+  if (input.client && input.command !== "content.publish") {
+    throw badRequest(WEBDESK_EXEC_ERROR.argsInvalid, "a client editor may file only a content.publish");
+  }
   const gate = filingGate(input.command, tenantId);
-  await authorize(principal, gate.resource, gate.action);
+  await authorize(principal, input.client ? { ...gate.resource, clientId: input.client.clientId } : gate.resource, gate.action);
   if (!principal.userId) throw new BadRequestException("an authenticated user is required");
 
   const args = isPlainObject(input.args) ? input.args : null;
@@ -661,6 +688,8 @@ export async function fileWebdeskCommandApproval(
   const id = newId();
   const toolArgs: Record<string, unknown> = {
     ...parsed,
+    // WSK-49c: server-set, never from a caller (RESERVED_ARG_KEYS): which client's editor filed this.
+    ...(input.client ? { clientId: input.client.clientId } : {}),
     // WSK-D46 R3: one human decision covers the publish AND the staging rebuild. WSK-60 reads this.
     ...(parsed.command === "key.mint" ? {} : { rebuild: { target: "staging", approvalId: id } }),
     summary: {
@@ -692,21 +721,24 @@ export async function fileWebdeskCommandApproval(
     tenantSlug: parsed.tenantSlug,
     siteId: parsed.siteId,
     itemCount: itemCountOf(parsed),
+    ...(input.client ? { clientEditor: true, clientId: input.client.clientId } : {}),
   });
-  const deciders = await resolveWebdeskApprovalDeciders(tenantId, {
-    requestedBy: principal.userId,
-    selfApprovalAllowed: isSelfApprovable(parsed),
-  });
-  await notifyBestEffort(tenantId, principal.userId, deciders, "approval.requested", {
-    title: summary.title,
-    href: `/approvals/${id}`,
-    entityType: "automation_approval",
-    entityId: id,
-    origin: WEBDESK_APPROVAL_ORIGIN,
-    impact: "high",
-    tool: filing.toolName,
-    severity: "warning",
-  });
+  if (input.client?.notifyDeciders !== false) {
+    const deciders = await resolveWebdeskApprovalDeciders(tenantId, {
+      requestedBy: principal.userId,
+      selfApprovalAllowed: isSelfApprovable(parsed),
+    });
+    await notifyBestEffort(tenantId, principal.userId, deciders, "approval.requested", {
+      title: summary.title,
+      href: `/approvals/${id}`,
+      entityType: "automation_approval",
+      entityId: id,
+      origin: WEBDESK_APPROVAL_ORIGIN,
+      impact: "high",
+      tool: filing.toolName,
+      severity: "warning",
+    });
+  }
   return { approvalId: id };
 }
 
@@ -837,11 +869,12 @@ export async function executeApprovedWebdeskCommand(
   toolArgs: unknown,
   requestedBy: string,
   decider: Principal,
+  clientDecider?: ClientDecider,
 ): Promise<WebdeskApprovedCommandResult> {
   // ── Phase 0: parse, authorize as the decider, check configuration. Nothing claimed, nothing sent.
   let pre: { args: ParsedArgs; client: WebdeskControlClient | null };
   try {
-    pre = await preflightWebdeskApprovedCommand(tenantId, approvalId, toolArgs, requestedBy, decider);
+    pre = await preflightWebdeskApprovedCommand(tenantId, approvalId, toolArgs, requestedBy, decider, clientDecider);
   } catch (err) {
     await markFailedUnclaimed(tenantId, approvalId, tokenFor(err));
     throw err;
@@ -913,6 +946,8 @@ export async function executeApprovedWebdeskCommand(
         cmh: filedHash,
         ...(requestedBy ? { req: requestedBy } : {}),
         apr: approvalId,
+        // WSK-49c: a CLIENT decider's assertion carries the client marker, so WebDesk applies D59/D62 to what goes live.
+        ...(clientDecider ? { ce: true as const } : {}),
       });
     } catch (err) {
       const error = err instanceof EditorialSignerNotConfiguredError
@@ -931,6 +966,7 @@ export async function executeApprovedWebdeskCommand(
     itemCount: itemCountOf(a),
     requestedBy: requestedBy || null,
     ...(a.command === "content.publish" ? { selfPublish } : {}),
+    ...(clientDecider ? { clientEditor: true, clientId: clientDecider.clientId } : {}),
   };
   const verb = `webdesk.${a.command}`;
   // GH-04's two-row pattern: the ATTEMPT is on the ledger before the call, so a crash still leaves evidence.
@@ -1031,7 +1067,10 @@ export async function executeApprovedWebdeskCommand(
   }
 
   // The requester is the one waiting (design §6: "requester notified").
-  if (requestedBy && requestedBy !== deciderId) {
+  // WSK-49c: NOT for a client decision. The notification's href is the staff inbox (`/approvals/<id>`), which a client
+  // contact cannot open, and the portal page that would carry it (`/portal/website`) is WSK-49d's: a link to it now would
+  // dangle (portal-links.guard.test.ts). The client's own request list is the read for "did it go live" until then.
+  if (requestedBy && requestedBy !== deciderId && !clientDecider) {
     const ok = outcome.executionStatus === "executed";
     await notifyBestEffort(tenantId, deciderId, [requestedBy], ok ? "automation_approval.executed" : "automation_approval.execution_failed", {
       title: ok ? `WebDesk ${a.command} executed` : `WebDesk ${a.command} FAILED to execute`,
@@ -1169,4 +1208,90 @@ function successOf(
     items: a.items.map((it) => ({ itemId: it.itemId, version: it.version, publishedAt: publishedAtOf(it.itemId) })),
     rebuild: { target: "staging", approvalId },
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// WSK-49c — a CLIENT editor decides a client's publish (WSK-D58)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The staff path is `decide()` in automation-approvals.controller.ts, behind the generic `decide` gate (company_admin).
+// A client editor is not, and must not become, an approval decider in general: D58 gives them ONE decision, a
+// `content.publish` that a client editor of their own client filed through the portal BFF, and only on these terms:
+//   * single item they requested -> they may approve it themselves (R4's client analogue);
+//   * a batch -> a DIFFERENT person (maker != checker), who also holds the grant for the SAME client.
+// Both are decided by Cerbos (`webdesk_content_item` . `publish`, the client-editor rule + the roles:[user] DENYs, with
+// `clientId` from the row) inside the SAME preflight the staff path uses, so there is no second copy of the rule here.
+//
+// ORDER (a refusal at any step before the UPDATE leaves the row `pending` and sends nothing to WebDesk):
+//   1. load the row in the request's tenant (RLS). Not a WebDesk content.publish row, not filed for THIS client, or not
+//      found -> the SAME 404 (no existence oracle across clients or companies);
+//   2. `beforeDecide` (the portal service): the site is still linked to this client, and the D62 pre-check passes;
+//   3. preflight: Cerbos as the decider with the row's creator and itemCount, channel and signer configured (403/503);
+//   4. the decide UPDATE (status pending -> approved, execution pending) + the `automation_approval.decided` event: the
+//      single-use guard, exactly as decide() does it;
+//   5. the in-band executor, as the decider, signing with `ce: true`.
+export async function approveClientWebdeskPublish(input: {
+  tenantId: string;
+  approvalId: string;
+  decider: Principal;
+  clientId: string;
+  beforeDecide: (row: { tenantSlug: string; siteId: string; items: WebdeskPublishItem[]; requestedBy: string }) => Promise<void>;
+}): Promise<{ id: string; status: "approved"; webdesk: WebdeskApprovedCommandResult }> {
+  const { tenantId, approvalId, decider, clientId } = input;
+  const notFound = (): HttpException => new NotFoundException("approval not found");
+  if (!UUID_RE.test(approvalId)) throw notFound();
+  if (!decider.userId) throw new BadRequestException("an authenticated decider is required");
+
+  const found = await withTenants([tenantId], (c) =>
+    c.query<{ origin: string; workflow_id: string; status: string; requested_by: string | null; tool_args: unknown }>(
+      `SELECT origin, workflow_id, status, requested_by, tool_args FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
+      [approvalId],
+    ),
+  );
+  const row = found.rows[0];
+  const stored = row && isPlainObject(row.tool_args) ? row.tool_args : null;
+  if (!row || !stored || row.origin !== WEBDESK_APPROVAL_ORIGIN || row.workflow_id !== "content.publish" || stored.clientId !== clientId) {
+    throw notFound();
+  }
+  let parsed: ParsedArgs;
+  try {
+    parsed = parseCommandArgs(stored);
+  } catch (err) {
+    if (err instanceof ArgsError) throw badRequest(WEBDESK_EXEC_ERROR.argsInvalid, err.message);
+    throw err;
+  }
+  if (parsed.command !== "content.publish") throw notFound();
+  if (row.status !== "pending") {
+    throw new ConflictException({ message: "approval_not_pending: this request has already been decided or withdrawn", reason: "approval_not_pending" });
+  }
+  const requestedBy = row.requested_by ?? "";
+
+  await input.beforeDecide({ tenantSlug: parsed.tenantSlug, siteId: parsed.siteId, items: parsed.items, requestedBy });
+  await preflightWebdeskApprovedCommand(tenantId, approvalId, row.tool_args, requestedBy, decider, { clientId });
+
+  const decided = await withTenants([tenantId], async (c) => {
+    const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
+      `UPDATE automation_approvals
+          SET status = 'approved', decided_by = $2, decided_at = now(), updated_at = now(), execution_status = 'pending'
+        WHERE id = $1 AND status = 'pending' AND deleted_at IS NULL
+        RETURNING origin, tool_args, workflow_id, tool_name`,
+      [approvalId, decider.userId],
+    );
+    if (upd.rowCount === 0) return null;
+    await emitEvent(c, tenantId, "automation_approval", approvalId, "automation_approval.decided", {
+      decision: "approved",
+      origin: upd.rows[0].origin,
+      toolArgs: upd.rows[0].tool_args,
+      workflowId: upd.rows[0].workflow_id,
+      toolName: upd.rows[0].tool_name,
+      decidedBy: decider.userId,
+    });
+    return upd.rows[0];
+  });
+  if (!decided) {
+    throw new ConflictException({ message: "approval_not_pending: this request has already been decided or withdrawn", reason: "approval_not_pending" });
+  }
+  const webdesk = await executeApprovedWebdeskCommand(tenantId, approvalId, decided.tool_args, requestedBy, decider, { clientId });
+  await writeActivity(tenantId, decider.userId, "approved", "automation_approval", approvalId, { origin: WEBDESK_APPROVAL_ORIGIN, clientEditor: true, clientId });
+  return { id: approvalId, status: "approved", webdesk };
 }
