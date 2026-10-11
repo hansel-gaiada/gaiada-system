@@ -4,7 +4,7 @@
 // One SDK, one app, one port whose far end changes: nothing listening at all (connection refused) -> a
 // listener that accepts and never answers -> 503 -> 401 -> healthy. Requests are driven through every phase
 // and must be answered the same way each time, promptly.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ExportResultCode } from "@opentelemetry/core";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { SanitizingSpanExporter } from "../src/telemetry/sanitizing-exporter";
@@ -65,8 +65,10 @@ describe("fail-soft: the collector is unreachable or hostile", () => {
 
   it("the failure is reported once, without the endpoint or the token", async () => {
     await handle.forceFlush();
-    await new Promise((r) => setTimeout(r, 300));
-    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    // Polled, not a fixed sleep: on a loaded runner the exporter's failure callback can land well after 300 ms
+    // (it went red once on GitHub Actions, run 38164969216). The rate-limit claim is checked after it settles.
+    await vi.waitFor(() => expect(warnings.length).toBeGreaterThanOrEqual(1), { timeout: 5_000, interval: 50 });
+    await new Promise((r) => setTimeout(r, 300)); // a second notice, if the limiter were broken, would land here
     expect(warnings.length).toBeLessThanOrEqual(1); // rate limited: one notice a minute, however many batches failed
     expect(warnings[0]).toContain("[webdesk:otel]");
     expect(warnings[0]).not.toContain(String(port));
