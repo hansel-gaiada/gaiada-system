@@ -460,6 +460,61 @@ export async function setLeadDeal(tenantId: string, leadId: string, body: unknow
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────── P1-c reads
+export interface StageHistoryRow {
+  id: string;
+  fromStage: string;
+  toStage: string;
+  dealValue: string | null;
+  dealCurrency: string | null;
+  actorId: string | null;
+  actorName: string | null;
+  viaAgent: string | null;
+  occurredAt: string;
+}
+
+/** The lead's stage history, newest first (design §6). `null` (not `[]`) when the lead is not visible, so the
+ *  route can 404 instead of presenting "no such lead" as "no moves yet". The history holds no personal data;
+ *  `actorName` is the staff member's display name, joined here for the UI. */
+export async function listStageHistory(tenantId: string, leadId: string): Promise<StageHistoryRow[] | null> {
+  return withTenants([tenantId], async (c) => {
+    const ex = await c.query(`SELECT 1 FROM agency_leads WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`, [leadId, tenantId]);
+    if (!ex.rows[0]) return null;
+    const { rows } = await c.query<StageHistoryRow>(
+      `SELECT e.id, e.from_stage AS "fromStage", e.to_stage AS "toStage",
+              e.deal_value::text AS "dealValue", e.deal_currency AS "dealCurrency",
+              e.actor_id AS "actorId", u.name AS "actorName", e.via_agent AS "viaAgent",
+              e.occurred_at AS "occurredAt"
+         FROM agency_lead_stage_events e
+         LEFT JOIN users u ON u.id = e.actor_id
+        WHERE e.lead_id = $1 AND e.tenant_id = $2
+        ORDER BY e.occurred_at DESC, e.id DESC`,
+      [leadId, tenantId],
+    );
+    return rows;
+  });
+}
+
+export interface PipelineReference {
+  stages: { key: string; position: number; kind: string; label: string }[];
+  currencies: { code: string; symbol: string | null; minorUnit: number }[];
+}
+
+/** The two global lists the UI and agents need to render and validate a move or a value (design §6):
+ *  every stage in order, and the ACTIVE currencies with their minor units. Both tables are global
+ *  reference data (no RLS), so this carries no tenant data. */
+export async function readPipelineReference(tenantId: string): Promise<PipelineReference> {
+  return withTenants([tenantId], async (c) => {
+    const st = await c.query<{ key: string; position: number; kind: string; label: string }>(
+      `SELECT key, position::int AS position, kind, label FROM agency_lead_stages ORDER BY position`,
+    );
+    const cur = await c.query<{ code: string; symbol: string | null; minorUnit: number }>(
+      `SELECT code, symbol, minor_unit::int AS "minorUnit" FROM finance_currencies WHERE status = 'active' ORDER BY code`,
+    );
+    return { stages: st.rows, currencies: cur.rows };
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────── P2 read
 /** What P2-P4 read after a `stage_changed` (design §7). Contact fields are here ONLY so an uploader can
  *  normalise and hash them in memory at execution time; they are never logged, persisted or put into an

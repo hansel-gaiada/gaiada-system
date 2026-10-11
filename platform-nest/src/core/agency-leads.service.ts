@@ -32,6 +32,14 @@ const CONTACT_EMAIL_CAP = 320; // RFC 5321 practical max
 const CONTACT_PHONE_CAP = 40;
 const REASON_CAP = 1000;
 
+/** M5-P1 (design §6): when the lead entered its current stage. The latest history row's `occurred_at`; else
+ *  `triaged_at` for a won/lost lead (a backfilled terminal one has no history); else `created_at` (still at
+ *  `enquiry`). Correlated on the (tenant_id, lead_id, occurred_at DESC) index. */
+const STAGE_ENTERED_AT = `COALESCE(
+  (SELECT max(e.occurred_at) FROM agency_lead_stage_events e WHERE e.lead_id = l.id AND e.tenant_id = l.tenant_id),
+  CASE WHEN l.stage IN ('won','lost') THEN l.triaged_at END,
+  l.created_at)`;
+
 // ─────────────────────────────────────────────────────────────── queue ordering (design §9.2)
 /** The queue sorts by WHOSE MOVE IT IS, not by recency or by lifecycle order.
  *
@@ -134,6 +142,8 @@ export async function listLeadsQueue(tenantId: string): Promise<unknown[]> {
       `SELECT l.id, l.org_name AS "orgName", l.contact_name AS "contactName",
               l.contact_email AS "contactEmail", l.contact_phone AS "contactPhone",
               l.source, l.status, l.owner_id AS "ownerId", ou.name AS "ownerName",
+              l.stage, l.deal_value::text AS "dealValue", l.deal_currency AS "dealCurrency",
+              ${STAGE_ENTERED_AT} AS "stageEnteredAt",
               l.created_at AS "createdAt", l.updated_at AS "updatedAt",
               EXTRACT(EPOCH FROM (now() - l.created_at))::bigint AS "ageSeconds",
               EXISTS (SELECT 1 FROM agency_discovery_submissions s WHERE s.lead_id = l.id) AS "hasSubmission"
@@ -163,6 +173,8 @@ export async function getLeadDetail(tenantId: string, leadId: string): Promise<R
       `SELECT l.id, l.org_name AS "orgName", l.contact_name AS "contactName",
               l.contact_email AS "contactEmail", l.contact_phone AS "contactPhone",
               l.source, l.status, l.owner_id AS "ownerId", ou.name AS "ownerName",
+              l.stage, l.deal_value::text AS "dealValue", l.deal_currency AS "dealCurrency",
+              ${STAGE_ENTERED_AT} AS "stageEnteredAt",
               l.converted_client_id AS "convertedClientId", l.converted_project_id AS "convertedProjectId",
               l.pipeline_run_id AS "pipelineRunId", l.declined_reason AS "declinedReason",
               l.triaged_by AS "triagedBy", tu.name AS "triagedByName", l.triaged_at AS "triagedAt",

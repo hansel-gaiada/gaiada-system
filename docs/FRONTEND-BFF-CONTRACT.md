@@ -4601,16 +4601,20 @@ no Cerbos policy at all, which is deliberate and preserves the `0072:32-36` inva
 
 | Method | Path | Returns | Cerbos |
 |---|---|---|---|
-| GET | `/api/:tenantId/agency/leads` | queue rows + `ageSeconds`, `hasSubmission` | `agency_lead:read` |
-| GET | `/api/:tenantId/agency/leads/:leadId` | lead + latest submission | `agency_lead:read` |
+| GET | `/api/:tenantId/agency/leads` | queue rows + `ageSeconds`, `hasSubmission`, and (M5-P1) `stage`, `dealValue`, `dealCurrency`, `stageEnteredAt` | `agency_lead:read` |
+| GET | `/api/:tenantId/agency/leads/:leadId` | lead + latest submission + (M5-P1) `stage`, `dealValue`, `dealCurrency`, `stageEnteredAt` | `agency_lead:read` |
 | GET | `/api/:tenantId/agency/leads/:leadId/submissions` | full history (`supersedes_id` chains) | `agency_discovery_submission:read` |
 | POST | `/api/:tenantId/agency/leads` | `{ id, status: "new" }` (staff-entered, `source='staff'`) | `agency_lead:create` |
 | POST | `/api/:tenantId/agency/leads/:leadId/invite` | `{ tokenId, token, expiresAt }` — **the token is returned ONCE** | `agency_lead:update` |
 | POST | `/api/:tenantId/agency/leads/:leadId/invite/:tokenId/revoke` | `{ revoked }` (idempotent) | `agency_lead:update` |
 | POST | `/api/:tenantId/agency/leads/:leadId/open` | `{ ok }` — `submitted → in_review` | `agency_lead:triage` |
-| POST | `/api/:tenantId/agency/leads/:leadId/decline` | `{ ok }` — `reason` REQUIRED | `agency_lead:triage` |
+| POST | `/api/:tenantId/agency/leads/:leadId/decline` | `{ id, status: "declined" }` — `reason` REQUIRED. **From any open status** (new, invited, submitted, in_review, nurturing); sets stage `lost` | `agency_lead:triage` |
 | POST | `/api/:tenantId/agency/leads/:leadId/nurture` | `{ ok }` | `agency_lead:triage` |
-| POST | `/api/:tenantId/agency/leads/:leadId/convert` | `{ id, status, clientId, projectId, runId }` | **`agency_lead:convert`** |
+| POST | `/api/:tenantId/agency/leads/:leadId/convert` | `{ id, status, clientId, projectId, runId, delegations, dealValue, dealCurrency }`. Body gains an optional `deal: {value, currency}` (M5-P1); sets stage `won` | **`agency_lead:convert`**, plus `agency_lead:update` when `deal` is sent |
+| GET | `/api/:tenantId/agency/leads/:leadId/stage-history` | M5-P1. `[{ id, fromStage, toStage, dealValue, dealCurrency, actorId, actorName, viaAgent, occurredAt }]`, newest first; 404 when the lead is invisible | `agency_lead:read` (with the lead id) |
+| GET | `/api/:tenantId/agency/pipeline/reference` | M5-P1. `{ stages: [{ key, position, kind: open\|won\|lost, label }], currencies: [{ code, symbol, minorUnit }] }` — the six stages in order and the ACTIVE currencies | `agency_lead:read` |
+| POST | `/api/:tenantId/agency/leads/:leadId/stage` | M5-P1. Body `{ stage, deal? }` → `{ id, stage, changed, stageEventId? }`. Open stages only; same-stage move is `200 changed:false` and writes nothing | `agency_lead:triage`, plus `agency_lead:update` when `deal` is sent |
+| POST | `/api/:tenantId/agency/leads/:leadId/deal` | M5-P1. Body `{ value, currency }` or `{ value: null, currency: null }` (clear) → `{ id, changed, dealValue, dealCurrency }`. Any status; emits no stage event | `agency_lead:update` |
 
 ### The invite token is shown once and never again
 
@@ -4659,6 +4663,40 @@ the lead; it will not drag a lead that has already **submitted** backwards out o
    said, and it is the basis of scope. Corrections arrive as a NEW submission with `supersedes_id`
    set; both are kept and the compare view is the intended surface for the difference.
 
+### The lead pipeline (M5-P1, WSK-D69) — **STATUS: PROTOTYPED**
+
+Design: `docs/plans/2026-10-11-m5-lead-pipeline-design.md`. A lead has two state machines that meet only at the
+ends: `status` (the intake lifecycle above) and `stage` (the sales position, from the global reference table
+`agency_lead_stages`): `enquiry` → `contacted` → `qualified` → `proposal` (open), then `won` or `lost`. **Won
+⇔ converted and lost ⇔ declined, enforced by CHECKs.**
+
+- **Won only through Convert, lost only through Decline.** `POST …/stage` with `won` or `lost` is
+  `400 {reason:"stage_terminal"}`. Moves go in any direction between open stages (deals regress). A converted
+  or declined lead is `409 {reason:"lead_closed"}`. An unknown key is `400 {reason:"stage_unknown"}`.
+- **Authorization needs no new Cerbos action.** A move is `triage`, a value is `update`, won is `convert`. When
+  a `deal` rides on a move or a convert, the route ALSO authorizes `update`, after the first check and before
+  any validation, so a caller with `triage` or `convert` but not `update` gets a `403` for the deal part. Every
+  route authorizes before it validates, so a denial is never a validation 400.
+- **Deal value.** `dealValue` is a decimal **string** (Postgres `numeric(20,4)`, for example `"15000000.0000"`),
+  never a JSON number: do no float arithmetic on it. The request may send a decimal string (preferred) or a
+  finite number, matched by `^\d{1,16}(\.\d{1,4})?$`. The value must be exact at the currency's `minorUnit`
+  (from `…/pipeline/reference`): IDR (0) refuses `1500.5`, USD (2) accepts `10.25` and refuses `10.255`. Value and
+  currency are set together or not at all; the clear is the explicit pair of nulls (a body that omits both is
+  incomplete, so `{}` can never wipe a value). There is no default currency: pre-select the one most recently
+  used and always send the code.
+- **Typed `reason` codes** (branch on `reason`, rule 5 above): `stage_unknown`, `stage_terminal`, `lead_closed`,
+  `deal_incomplete`, `deal_value_invalid`, `deal_currency_unknown`, `deal_value_precision`.
+- **`stageEnteredAt`** is the latest history `occurredAt`; else `triagedAt` for a won or lost lead; else
+  `createdAt`. The queue **keeps its whose-move-it-is order**: `stage` and `dealValue` are for filter chips and
+  columns, and a consumer must not re-sort by them (rule 1 above).
+- **History** holds no personal data and is append-only. A lead's entry into `enquiry` is its `createdAt`; the
+  history starts at the first move.
+- **Event.** Every stage change emits `agency.lead.stage_changed` v1 (ids, stages, value; no names, emails,
+  phones, reasons, attribution or consent). It is not a notification topic and not on the n8n allow-list.
+- **MCP.** `agency_pipeline.reference` and `agency_pipeline.stageHistory` (reads); `agency_pipeline.moveStage`
+  and `agency_pipeline.setDealValue` (impact `low`). `agency_intake.convert` gains the optional `deal`.
+  `agency_intake.decline` now works from every open status.
+
 ### Convert — what it spawns, and the one thing it must never do
 
 One transaction: `clients` → `client_contacts` (`capability='signer'`, because a viewer-only contact
@@ -4672,12 +4710,20 @@ pipeline.run.created`, which is what the shipped `pipeline-fanout` n8n workflow 
 and a converted run satisfies that the same way every run does — by real client signatures.
 Pre-seeding would forge what a client signed.
 
-### Known limitation a consumer should not design around
+### The agent path to Convert (corrected 2026-10-11)
 
-`convert` is medium-impact and therefore D14-gated, and the D14 **resume path is broken estate-wide**
-("approving a suspended write currently executes nothing" — the agentic-native plan's highest-leverage
-open item). So an agent-initiated convert suspends and never executes. **Convert is a human-driven
-capability until that lands.** This feature neither introduces nor can fix it.
+`convert` is medium-impact, so an unattended agent call **suspends** at the hub and files an approval. An older
+version of this section said the D14 resume path was broken estate-wide and that convert was therefore
+human-driven only. That predates convert's executor entry: `core/approval-executables.ts` registers
+`agency_intake.convert` (a lock key per lead and a precondition that the lead is still open), so when a human
+approves the filed request the executor re-drives the call. D14's execution half is built estate-wide (see
+`automation-approvals` above), and registered tools execute on approval.
+
+What is NOT verified: an approve-then-executed round trip for this tool has not been driven against a running
+hub, Cerbos and platform (**PROTOTYPED**; the suspension itself is proven in `mcp-hub/src/agency-intake-tools.test.ts`).
+Until it is, treat an agent-initiated convert as "files an approval", and expect a human to be able to run the
+same convert directly. A `deal` in the tool arguments rides along to the re-driven call, which is authorized
+for `update` as well as `convert`.
 
 ## 25. Client Centre — CMC's layout/categorisation as native ERP pages (CC-D1…D7, 2026-09-29) — `src/modules/clients/centre/`, `src/core/portal-centre.controller.ts` — **STATUS: PROTOTYPED (backend only — typechecked + unit-tested; DB-backed proofs written, not yet run on the Linux gate)**
 

@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **158** capabilities across **16** owners
-- **85** writes · 73 reads
-- Writes by impact: **high 18** · medium 28 · low 39
+- **162** capabilities across **16** owners
+- **87** writes · 75 reads
+- Writes by impact: **high 18** · medium 28 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -39,11 +39,11 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 9 |
+| agency | `agency` | 11 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 9 |
-| core | `agency` · `positions` · `role-grants` | 13 |
+| core | `agency` · `positions` · `role-grants` | 15 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 3 |
@@ -74,6 +74,10 @@ unfalsifiable after.
 | core | `agency_intake.listSubmissions` | `GET` | `/api/:tenantId/agency/leads/:leadId/submissions` | read | — |
 | core | `agency_intake.nurture` | `POST` | `/api/:tenantId/agency/leads/:leadId/nurture` | write | `low` |
 | core | `agency_intake.open` | `POST` | `/api/:tenantId/agency/leads/:leadId/open` | write | `low` |
+| core | `agency_pipeline.moveStage` | `POST` | `/api/:tenantId/agency/leads/:leadId/stage` | write | `low` |
+| core | `agency_pipeline.reference` | `GET` | `/api/:tenantId/agency/pipeline/reference` | read | — |
+| core | `agency_pipeline.setDealValue` | `POST` | `/api/:tenantId/agency/leads/:leadId/deal` | write | `low` |
+| core | `agency_pipeline.stageHistory` | `GET` | `/api/:tenantId/agency/leads/:leadId/stage-history` | read | — |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
 | core | `iam.listAttachableRoles` | `GET` | `/api/:tenantId/positions/attachable-roles` | read | — |
