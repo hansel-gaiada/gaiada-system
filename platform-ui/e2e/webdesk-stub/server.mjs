@@ -19,6 +19,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { addAsset, COMPANY, concurrentSave, decideApproval, handleKeyRequest, handlePublicMedia, handleWebdesk, listApprovals, mediaState, seed, setBuild } from "./wd.mjs";
+import { handlePortalWebsite, isPortalWebsitePath, PORTAL_USERS, portalMe, portalOverview, portalUserIdFor, seedPortal } from "./portal.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = Number(process.env.WD_STUB_PORT ?? 3991);
@@ -35,7 +36,7 @@ await build({
 const { getDemoResponse } = await import(pathToFileURL(path.join(out, "demoFixtures.mjs")).href);
 const { demoIdentityFor } = await import(pathToFileURL(path.join(out, "demoIdentity.mjs")).href);
 
-let S = seed();
+let S = seedPortal(seed());
 
 function send(res, status, json) {
   const body = JSON.stringify(json);
@@ -78,7 +79,7 @@ const server = http.createServer(async (req, res) => {
     // ── scenario controls ───────────────────────────────────────────────────────────────────────
     if (pathname.startsWith("/__stub/")) {
       const cmd = pathname.slice("/__stub/".length);
-      if (cmd === "reset") { S = seed(); return send(res, 200, { ok: true }); }
+      if (cmd === "reset") { S = seedPortal(seed()); return send(res, 200, { ok: true }); }
       if (cmd === "config") { Object.assign(S.cfg, body ?? {}); return send(res, 200, S.cfg); }
       // Put an asset straight into the library (no upload): { title?, alt?, tags?, mime?, originalFilename?, width?, height?, createdBy?, createdAt? }
       if (cmd === "seed-media") return send(res, 200, { assetId: addAsset(S, body ?? {}) });
@@ -99,7 +100,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ── login: the dev path's email -> user id lookup ───────────────────────────────────────────
-    if (pathname === "/dev/user-by-email") return send(res, 200, { id: demoIdentityFor(url.searchParams.get("email") ?? "") });
+    // WSK-49d: the portal's client editors (e2e/portal-website.spec.ts) have their own ids; every other address keeps the app's demo mapping.
+    if (pathname === "/dev/user-by-email") return send(res, 200, { id: portalUserIdFor(url.searchParams.get("email") ?? "") ?? demoIdentityFor(url.searchParams.get("email") ?? "") });
+
+    // ── the client portal: who the viewer is, and the client website BFF (§16j) ─────────────────
+    if (PORTAL_USERS[userId] && pathname === "/api/me") return send(res, 200, portalMe(userId));
+    if (PORTAL_USERS[userId] && /^\/api\/[^/]+\/portal\/overview$/.test(pathname)) return send(res, 200, portalOverview());
+    if (isPortalWebsitePath(pathname)) {
+      if (S.cfg.delayMs) await sleep(S.cfg.delayMs);
+      const pm = pathname.match(/^\/api\/([^/]+)\//);
+      const r = handlePortalWebsite(S, { method, pathname, query: url.searchParams, body, userId, company: decodeURIComponent(pm[1]) });
+      return send(res, r.status, r.json);
+    }
 
     // ── WebDesk content BFF ─────────────────────────────────────────────────────────────────────
     const wd = pathname.match(/^\/api\/([^/]+)\/modules\/webdev\/content(\/.*)?$/);
