@@ -1875,6 +1875,25 @@ an approval). The args hash covers `{kind: 'publish'|'swap'|'takedown', itemId, 
 original approval id goes there. After the commit, fail-soft, the tenant webhook goes out through the same path the
 commands use (`content.published` for a publish or a swap, `content.unpublished` for a takedown, item refs only).
 
+### The `schedule.fired` Zone B event (rebuild hint)
+
+After a tenant's three steps finish, the tick tells the ERP what went live or came down, through
+`ZoneBEventEmitterService` (kind `schedule.fired`, HMAC-signed like every Zone B event; `WEBDESK_ZONEB_EVENTS_ENABLED`
+and an empty `WEBDESK_ZONEB_BRIDGE_URL` are honoured by the emitter). Only transitions whose transaction
+**committed** are reported (a rolled-back item, a failed or cancelled swap reports nothing). Fail-soft: an emit
+failure is logged and changes nothing about the tick, its counts or the tenant webhook.
+
+- `tenantId` (envelope) = the tenant's `company_ref`; `originSite` = `WEBDESK_ZONEB_ORIGIN_SITE`.
+- `data` is exactly `{tenantSlug, siteId, transition: 'publish'|'unpublish', approvalId: uuid|null, items: [{itemId, version, effectiveAt}]}`,
+  1 to 100 items. Mapping: a due publish is `publish`/`null` with `effectiveAt = publish_at`; a swap is `publish` with the
+  swap row's `ws4_approval_id` and its `publish_at`; a takedown is `unpublish`/`null` with `unpublish_at`. `effectiveAt` is
+  `toISOString()` (UTC). `ws4_approval_id` is free text in this database: a value that is not a uuid is sent as `null`.
+- One event per `(siteId, transition, approvalId-or-null)` group per tenant per tick; a larger group is chunked
+  into 100s in `itemId` order.
+- `eventId` = lowercase hex `sha256("schedule.fired|" + tenantSlug + "|" + siteId + "|" + transition + "|" + (approvalId ?? "-") + "|" + sorted(itemId:version:effectiveAt).join(","))`:
+  deterministic, so a redelivery dedups at the ERP (`UNIQUE (tenant_id, event_id)`, `event_id` is text) and a later firing differs.
+- Code: `src/scheduler/schedule-fired.ts` (pure grouping + id), `test/scheduler-schedule-fired.spec.ts`.
+
 ### `content.schedule` on a live item
 
 A future `publishAt` on a **live** item no longer returns 409 `schedule-live-item-requires-worker` (the slug is

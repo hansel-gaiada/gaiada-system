@@ -15,7 +15,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { eventsConfig } from "./events.config";
 import { computeSignatureHex, formatSignatureHeader } from "./zoneb-event-signature";
-import type { FormReceivedData, ZoneBEventEnvelope, ZoneBEventKind } from "./zoneb-event.types";
+import type { FormReceivedData, ScheduleFiredData, ZoneBEventEnvelope, ZoneBEventKind } from "./zoneb-event.types";
 
 @Injectable()
 export class ZoneBEventEmitterService {
@@ -29,6 +29,8 @@ export class ZoneBEventEmitterService {
     kind: ZoneBEventKind,
     tenantId: string,
     data: TData,
+    /** A caller-supplied deterministic eventId (so a redelivery dedups). Default: a fresh random uuid. */
+    eventId?: string,
   ): Promise<void> {
     if (!eventsConfig.enabled) {
       this.logger.debug(`zoneb event ${kind} not emitted — WEBDESK_ZONEB_EVENTS_ENABLED=false`);
@@ -47,7 +49,7 @@ export class ZoneBEventEmitterService {
     }
 
     const envelope: ZoneBEventEnvelope<TData> = {
-      eventId: randomUUID(),
+      eventId: eventId ?? randomUUID(),
       kind,
       tenantId,
       originSite: eventsConfig.originSite,
@@ -67,6 +69,11 @@ export class ZoneBEventEmitterService {
 
   async emitFormReceived(tenantId: string, data: FormReceivedData): Promise<void> {
     return this.emit("form.received", tenantId, data);
+  }
+
+  /** WSK-61: `tenantId` is the tenant's company_ref; `eventId` is the content hash from scheduleFiredEventId. */
+  async emitScheduleFired(tenantId: string, data: ScheduleFiredData, eventId: string): Promise<void> {
+    return this.emit("schedule.fired", tenantId, data, eventId);
   }
 
   private async deliver(envelope: ZoneBEventEnvelope): Promise<void> {
