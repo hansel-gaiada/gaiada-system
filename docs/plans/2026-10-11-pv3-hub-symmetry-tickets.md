@@ -135,7 +135,7 @@
 | Wave | Tickets | Why this order |
 |---|---|---|
 | 1 | PV3-01 (countersign rule), PV3-02 (predicate module), PV3-03 (client facets), PV3-04 (client data), PV3-05 (hub areas and Projects) | disjoint files; nothing here needs another ticket |
-| 2 | PV3-06 (billing tools), PV3-07 (`clientVisible` + parity), PV3-08 (Contracts & billing page) | 06 needs 01 and 03; 07 needs 02 and 03 (same controllers as 03); 08 needs 01 and 03, and edits the layout after 05 |
+| 2 | PV3-02b (mail thread scope), PV3-06 (billing tools), PV3-07 (`clientVisible` + parity), PV3-08 (Contracts & billing page) | 02b needs 02; 06 needs 01 and 03; 07 needs 02 and 03 (same controllers as 03); 08 needs 01 and 03, and edits the layout after 05 |
 | 3 | PV3-09 (markers on every area, hub axe) | needs 05, 07 and 08 merged |
 | 4 | PV3-10 (QA, release, live) | after the merged tree is green |
 
@@ -239,6 +239,27 @@ lines) in `PN/src/core/portal-workspace.controller.ts`, `portal-commerce.control
   `portal-visibility.ts`. The test also asserts that the scan found the five refactored controllers,
   so a broken scan can't pass vacuously.
 - Teeth: re-inline one predicate and the guard fails.
+
+### PV3-02b: portal mail threads follow the portal's run scope (found by PV3-02's guard)
+
+**Owner:** senior-be. **Wave 2** (needs PV3-02 merged).
+
+**Finding (2026-10-11).** `GET /:t/portal/mail/threads?runId=` (`PN/src/mail/thread.controller.ts:288-294`)
+admits a run with no project to a **project-scoped** contact (`OR r.project_id IS NULL`). The portal's
+own run list and run page do not (`runInPortalScope` admits no project-less run for such a contact),
+so the run's thread panel is unreachable in the UI, yet the thread is readable through the API by run
+id. Same client only: no cross-client or cross-company exposure. The `gateId` branch of the same route
+already matches the portal.
+
+**Owned paths:** `PN/src/mail/thread.controller.ts` (the `runId` branch only) and its test; the
+`NOT_YET_SWITCHED` entry in `PN/src/core/portal-visibility.test.ts`.
+
+**Change:** build both branches from `runInPortalScope` and `gateClientVisible`, then remove the file
+from the ratchet list. This narrows a read to what the portal already shows, so it needs no new ruling;
+the owner may overrule it.
+
+**Tests:** a project-scoped contact gets 404 for a project-less run's thread, and a client-wide contact
+gets 200. Teeth: put back `OR r.project_id IS NULL` and the 404 case fails.
 
 ### PV3-03: client facets for Contracts & billing (client-centric slice 2, backend)
 
