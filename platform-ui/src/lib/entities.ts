@@ -173,7 +173,9 @@ export async function getTask(u: string, t: string, id: string): Promise<TaskDet
 }
 
 // ---- Members (endpoint exists) ----
-export const listMembers = (u: string, t: string) => platformFetch<Member[]>(`/api/${t}/members`, u);
+// `includeService` adds the non-human accounts (automation, service rows) that the directory hides by default (PK-02).
+export const listMembers = (u: string, t: string, opts?: { includeService?: boolean }) =>
+  platformFetch<Member[]>(`/api/${t}/members${opts?.includeService ? "?includeService=1" : ""}`, u);
 
 // ---- Custom field definitions (endpoint may not exist yet) ----
 export const getFieldDefs = (u: string, t: string, entityType: string) =>

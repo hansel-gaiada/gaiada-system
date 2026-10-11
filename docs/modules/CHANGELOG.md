@@ -18,11 +18,17 @@ WebDesk M3 (`docs/plans/2026-10-11-webdesk-m3-plan.md`), rulings WSK-D52, D53, D
 - **Media library, ERP half (WSK-43b).** A new Cerbos kind `webdesk_media_asset` (read, upload, update, delete) with its six artifacts: catalog 422 pairs / 102 kinds / 407 grantable, bundles 1847. BFF routes for list, usage, upload token, update and delete, and five MCP tools (`webdesk.media.*`). The upload token goes to the browser as a public WebDesk URL (`WEBDESK_PUBLIC_BASE_URL`), so image bytes never pass through the ERP; it is never stored, and the upload-token tool is deliberately not an approval-replayable action. `resource_mcp_tool.yaml` gains the media update/delete executables.
 - **Draft preview action (WSK-46, D52).** `POST …/items/:itemId/preview` and the MCP tool `webdesk.content.preview` mint a preview token and answer `https://<site staging domain>/preview/#t=<token>`: the token rides in the URL fragment, never a query string or a log. Honest refusals when preview isn't set up or the site has no preview page yet.
 - **Client website editors, grant path (WSK-49f, D60).** A role-as-data `client_website_editor`, scoped to one client record; derived roles `client_website_editor` and `client_contact_admin`; a new client-contact capability `admin`, assigned by staff, which lets a client grant website editing to their own contacts (bounded, audited). Three CHECKs widened by self-verifying migrations that read the live definition. **A client admin also signs** (owner ruling): signing, signature notifications and Client Centre editing accept `admin`.
-- Verified on the Linux gate (sumopod `m3r354c`, nest + ui + next build, with the M2 editor fixes merged).
+- Verified on the Linux gate (sumopod `m3r354c`, nest + ui + next build, with the M2 editor fixes merged; `m3r354d` re-ran ui + next build + the nest webdev suite after the M2 author-name fix).
 
 ### infra `0.9.4` - the WebDesk public origin reaches the ERP and its UI (2026-10-11) - PROTOTYPED
 
 - `docker-compose.vps.yml` forwards `WEBDESK_PUBLIC_BASE_URL` to `platform` (media upload URLs, WSK-43b) and `platform-ui` (library thumbnails, WSK-43c). Empty default: uploads answer "not enabled" and the grid shows type tiles. Set it to `https://api.erp.gaiada.com` (WSK-D61).
+
+### platform-ui `0.85.2` - version authors that are automation accounts show their name (2026-10-11) - PROTOTYPED
+
+WebDesk M2, the last open WSK-44 box. Seen on erp.gaiada.online: every gaiada.com v1 was written by the importer, an automation account, and History, the editor's "saved by" and the item list's last-edited column read "user 01a12709".
+
+- `resolveAuthorNames` asked `GET /api/:t/members`, which leaves out non-human accounts unless asked (PK-02). It now passes `includeService=1`, through an optional flag on the shared `listMembers` (existing callers unchanged), so the importer reads "Automation — WebDesk importer", its users row name. On live the flag returns 64 rows instead of 30, the importer among them. `authorLabel` is unchanged. Unit test: a service-account author resolves to its name, and the lookup asks for service accounts (it fails with the old call).
 
 ### platform-ui `0.85.1` - the Website editor's controls are styled, and a pending publish keeps its version after a reload (2026-10-11) - PROTOTYPED
 
