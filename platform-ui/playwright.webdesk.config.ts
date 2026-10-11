@@ -20,7 +20,8 @@ const DIST = process.env.NEXT_DIST_DIR || ".next-e2e-wd";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /webdesk-content\.spec\.ts/,
+  // WSK-49d: the portal's Website area (e2e/portal-website.spec.ts) runs on the same stub, so the staff and client editors share one fixture.
+  testMatch: /(webdesk-content|portal-website)\.spec\.ts/,
   // One worker, no file parallelism: the stub is ONE in-memory store and every test resets it first.
   fullyParallel: false,
   workers: 1,

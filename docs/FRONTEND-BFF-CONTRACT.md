@@ -1892,7 +1892,7 @@ grants only) and `attr.clientAdminOf: [{tenantId, clientId}]`; `resourcePayload`
 nothing). A handler feeding `clientId` must take it from a row it loaded in the request's tenant, never from a request body. The UI
 gets the same facts from the two list endpoints above (`isAdmin`, `websiteEditor`); no `Me` shape changed.
 
-### 16j. Client website editing (WSK-49c, WSK-D58 / D59 / D60 / D62, 2026-10-11) — `src/modules/webdev/webdesk-client-website.{controller,service}.ts`, `webdesk-client-guard.ts`, `webdesk-site-clients.{controller,service}.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (tested on local Linux containers: Postgres + Redis + Cerbos 0.54.0; no server gate yet; platform-nest only; the portal UI is WSK-49d)**
+### 16j. Client website editing (WSK-49c, WSK-D58 / D59 / D60 / D62, 2026-10-11) — `src/modules/webdev/webdesk-client-website.{controller,service}.ts`, `webdesk-client-guard.ts`, `webdesk-site-clients.{controller,service}.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (tested on local Linux containers: Postgres + Redis + Cerbos 0.54.0; no server gate yet); the portal UI (WSK-49d: `/portal/website`, `platform-ui/src/lib/portalWebsite*.ts`) is BUILT, PROTOTYPED against a stub of these routes (vitest + Playwright on `next dev`; not run against a live platform-nest)**
 
 A client editor edits THEIR client's WebDesk site through the portal. It is the staff content BFF (§27) **in client mode**, not a second
 implementation: every immediate write, the preview, the publish filing and the media calls are the staff service's, handed a gate opened

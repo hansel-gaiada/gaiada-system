@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { listMediaAction } from "@/lib/webdeskMediaActions";
 import type { SiteScope } from "@/lib/webdeskContentActions";
 import type { WdResult } from "@/lib/webdeskContentModel";
+import type { MediaDriver } from "@/lib/webdeskEditorDriver";
 import { formatDateTime } from "@/lib/format";
 import {
   assetLabel, dimensionsLabel, formatBytes, mediaValueFor, MEDIA_TYPE_FILTERS, mimeLabel, previewUrl,
@@ -41,6 +42,13 @@ const REASONS: Record<Cap, string> = {
   delete: "Deleting needs a Web Dev publisher or a company admin.",
 };
 
+// WSK-49d CLIENT MODE: whom a client asks, and no Delete (a client has none).
+const CLIENT_REASONS: Record<Cap, string> = {
+  upload: "You can browse the library but not add to it. Ask your company's admin.",
+  update: "You can browse the library but not edit files. Ask your company's admin.",
+  delete: "Deleting files isn't available to you.",
+};
+
 type Filters = { q: string; tag: string; type: string };
 const NO_FILTERS: Filters = { q: "", tag: "", type: "" };
 type Problem = Exclude<WdResult<unknown>, { kind: "ok" }>;
@@ -74,9 +82,12 @@ export interface MediaLibraryProps {
   /** Pick mode: the dialog's own Close. */
   onClose?: () => void;
   headingId?: string;
+  /** WSK-49d CLIENT MODE: the portal's media calls. Absent = the staff actions, as before. A driver without `usage` shows no
+   *  "Where it's used" and one without `remove` shows no Delete (the client BFF has neither). */
+  driver?: MediaDriver;
 }
 
-export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, initial, authors, publicBase, denied, onPick, onClose, headingId }: MediaLibraryProps) {
+export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, initial, authors, publicBase, denied, onPick, onClose, headingId, driver }: MediaLibraryProps) {
   const uid = useId();
   const [assets, setAssets] = useState<MediaAsset[]>(initial?.list.assets ?? []);
   const [page, setPage] = useState(initial?.list.page ?? null);
@@ -96,6 +107,8 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
   const detailDirty = useRef(false);
   const hasDataRef = useRef(initial !== null);
   const reqId = useRef(0);
+  const driverRef = useRef(driver);
+  driverRef.current = driver;
   const started = useRef(false);
   const retryRef = useRef<() => void>(() => {});
   const gridRef = useRef<HTMLDivElement>(null);
@@ -104,13 +117,14 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-  const deny = useCallback((cap: Cap) => setOff((o) => (o[cap] ? o : { ...o, [cap]: REASONS[cap] })), []);
+  const clientMode = driver !== undefined;
+  const deny = useCallback((cap: Cap) => setOff((o) => (o[cap] ? o : { ...o, [cap]: (clientMode ? CLIENT_REASONS : REASONS)[cap] })), [clientMode]);
 
   // ── reading the list ───────────────────────────────────────────────────────────────────────────
   const fetchPage = useCallback(async (filters: Filters, cursor: string | null) => {
     const my = ++reqId.current;
     setLoading(cursor ? "more" : "loading");
-    const r = await listMediaAction(scope, { mime: filters.type || undefined, q: filters.q || undefined, tag: filters.tag || undefined, cursor: cursor ?? undefined, limit: PAGE_SIZE });
+    const r = await (driverRef.current?.list ?? listMediaAction)(scope, { mime: filters.type || undefined, q: filters.q || undefined, tag: filters.tag || undefined, cursor: cursor ?? undefined, limit: PAGE_SIZE });
     if (!mounted.current || my !== reqId.current) return;
     setLoading("idle");
     if (r.kind !== "ok") {
@@ -149,6 +163,7 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
   // ── uploads ────────────────────────────────────────────────────────────────────────────────────
   const uploads = useMediaUploads({
     scope,
+    mint: driver?.mintToken,
     onUploaded: (asset) => {
       setAssets((prev) => (prev.some((a) => a.assetId === asset.assetId) ? prev : [asset, ...prev]));
       setHasData(true); hasDataRef.current = true; setProblem(null);
@@ -237,7 +252,7 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
   if (!hasData && problem) {
     return <section aria-labelledby={heading} data-testid="media-library" data-mode={mode}>
       <h2 id={heading} tabIndex={-1} className="wm-heading">Media library</h2>
-      <LibraryProblem result={problem} onRetry={() => retryRef.current()} />
+      <LibraryProblem result={problem} onRetry={() => retryRef.current()} client={clientMode} />
       {mode === "pick" && onClose && <div className="wc-dialog__actions"><button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={onClose} data-testid="media-pick-close">Close</button></div>}
     </section>;
   }
@@ -372,7 +387,7 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
           {selected ? (
             <MediaDetail
               key={selected.assetId}
-              asset={selected} scope={scope} routeBase={routeBase} locales={locales} authors={authors} previewBase={base} mode={mode}
+              asset={selected} scope={scope} routeBase={routeBase} locales={locales} authors={authors} previewBase={base} mode={mode} driver={driver}
               caps={{ update: off.update ?? null, delete: off.delete ?? null }}
               onSaved={onSaved} onDeleted={onDeleted} onDenied={deny} onDirty={onDirty} onNotice={setNotice}
               pickLocale={pickLocale}
@@ -388,13 +403,14 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
 }
 
 /** A read that produced no data: says what happened instead of drawing an empty library. */
-function LibraryProblem({ result, onRetry }: { result: Problem; onRetry: () => void }) {
+function LibraryProblem({ result, onRetry, client = false }: { result: Problem; onRetry: () => void; client?: boolean }) {
+  const live = client ? "status" : "alert"; // client mode: polite, never assertive
   const retry = <div className="wc-notice__actions"><button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={onRetry}>Try again</button></div>;
   switch (result.kind) {
     case "unavailable":
       if (result.code === "contract_drift") {
         return (
-          <div className="wc-notice wc-notice--bad" role="alert" data-testid="media-drift">
+          <div className="wc-notice wc-notice--bad" role={live} data-testid="media-drift">
             <h3>The media API answered with something unexpected</h3>
             <p>WebDesk replied, but not in the shape the ERP expects, so nothing is shown rather than a wrong answer. This does <strong>not</strong> mean the library is empty.</p>
             <p className="wc-notice__reason">{result.reason}</p>
@@ -403,7 +419,7 @@ function LibraryProblem({ result, onRetry }: { result: Problem; onRetry: () => v
         );
       }
       return (
-        <div className="wc-notice" role="alert" data-testid="media-unavailable">
+        <div className="wc-notice" role={live} data-testid="media-unavailable">
           <h3>The media library is unavailable</h3>
           <p>WebDesk can&apos;t be reached. Nothing has been lost.</p>
           <p className="wc-notice__reason">{result.reason}</p>
@@ -412,22 +428,22 @@ function LibraryProblem({ result, onRetry }: { result: Problem; onRetry: () => v
       );
     case "forbidden":
       return (
-        <div className="wc-notice" role="alert" data-testid="media-forbidden">
+        <div className="wc-notice" role={live} data-testid="media-forbidden">
           <h3>You don&apos;t have access to the media library</h3>
           <p>{ASK}</p>
         </div>
       );
     case "not_enabled":
       return (
-        <div className="wc-notice" role="alert" data-testid="media-not-enabled">
+        <div className="wc-notice" role={live} data-testid="media-not-enabled">
           <h3>{result.reason === "module_disabled" ? "The Web Dev module is switched off" : "The media library isn't served here yet"}</h3>
           <p>{result.reason === "module_disabled" ? "Nothing has been deleted." : "This deployment doesn't serve the media routes yet."}</p>
         </div>
       );
     case "not_found":
-      return <div className="wc-notice" role="alert" data-testid="media-not-found"><h3>That site isn&apos;t one of your company&apos;s</h3></div>;
+      return <div className="wc-notice" role={live} data-testid="media-not-found"><h3>That site isn&apos;t one of your company&apos;s</h3></div>;
     case "conflict":
     case "invalid":
-      return <div className="wc-notice wc-notice--bad" role="alert"><h3>The library couldn&apos;t be read</h3><p className="wc-notice__reason">{result.message}</p>{retry}</div>;
+      return <div className="wc-notice wc-notice--bad" role={live}><h3>The library couldn&apos;t be read</h3><p className="wc-notice__reason">{result.message}</p>{retry}</div>;
   }
 }
