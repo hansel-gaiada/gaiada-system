@@ -34,6 +34,7 @@ import {
   type PositionHolderResolution,
   type PositionResolvableRole,
 } from "./agency-delegation-resolver";
+import { assertDealAllowed, SQL_NOW, transitionStage, WON_STAGE, type DealInput } from "./agency-lead-pipeline.service";
 
 /** Advisory-lock namespace (int4) for agency-lead convert serialization. Deliberately distinct from
  *  PIPELINE_RUN_LOCK_NS (0x50520001), WEBDEV_CR_LOCK_NS (0x57430001), APPROVAL_EXEC_LOCK_NS
@@ -388,6 +389,10 @@ export interface ConvertLeadInput {
   leadId: string;
   actorUserId: string;
   delegations: DelegationInput[];
+  /** M5-P1 (additive): the deal value set in the same UPDATE that moves the stage to `won`. Validate the
+   *  shape with `normalizeOptionalDeal()` first; `undefined` leaves the lead's value as it is. The caller
+   *  authorizes `update` on top of `convert` when it sends one (design §3). */
+  deal?: DealInput | null;
 }
 
 /** One line of the convert response's delegation report — "what was delegated and to whom" (this
@@ -420,6 +425,10 @@ export type ConvertLeadOutcome =
       contactUserId: string | null;
       orgName: string;
       delegations: DelegationReportEntry[];
+      /** M5-P1: the `agency_lead_stage_events` row the move to `won` wrote, and the lead's value after it. */
+      stageEventId: string;
+      dealValue: string | null;
+      dealCurrency: string | null;
     };
 
 /** Task description suffix that makes a fallback VISIBLE on the task itself, not only in the API
@@ -473,7 +482,7 @@ interface LeadRow {
  *  -> update the lead -> emit events. All inside one `withTenants` callback, so BEGIN/COMMIT is what
  *  makes the advisory lock (`pg_advisory_xact_lock`) real. */
 export async function convertAgencyLead(input: ConvertLeadInput): Promise<ConvertLeadOutcome> {
-  const { tenantId, leadId, actorUserId, delegations } = input;
+  const { tenantId, leadId, actorUserId, delegations, deal } = input;
 
   const preRead = await withTenants([tenantId], (c) =>
     c.query<LeadRow>(
@@ -522,11 +531,17 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
     await lockAgencyLead(c, leadId);
 
     // 2 · RE-READ under the lock. This, not the lock, is the fix (§6.2 / DEF-2).
+    //     M5-P1: the re-read also takes the lead's ROW lock (FOR UPDATE) and holds it to COMMIT. The
+    //     advisory lock serializes converts only; decline and stage moves take the row lock and not the
+    //     advisory one, so without this a decline could commit between this re-check and the stage write
+    //     below and the convert would spawn a client for a declined lead. Lock order is advisory -> row,
+    //     the order the pipeline design (§5 step 1) fixes, so no cycle with moves/decline (row only).
     const cur = await c.query<LeadRow>(
       `SELECT id, org_name, contact_name, contact_email, contact_phone, owner_id, status,
               converted_client_id, converted_project_id, pipeline_run_id
-         FROM agency_leads WHERE id = $1 AND deleted_at IS NULL`,
-      [leadId],
+         FROM agency_leads WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+         FOR UPDATE`,
+      [leadId, tenantId],
     );
     const row = cur.rows[0];
     if (!row) return { outcome: "not_found" as const };
@@ -554,6 +569,9 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
     //     silent skip, design §4.3) but a server-resolved candidate's failure falls through to its
     //     next fallback instead of aborting the whole convert.
     await assertActiveStaff(c, actorUserId, "the converting user");
+    // M5-P1: a deal that rides on the convert is checked against finance_currencies HERE, before anything
+    // is spawned, so a bad currency or precision is a clean 400 rather than a rollback of a whole spawn.
+    if (deal) await assertDealAllowed(c, deal);
 
     const leadForRender = { id: row.id, orgName: row.org_name, contactName: row.contact_name };
 
@@ -713,14 +731,31 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
       });
     }
 
-    // §4.2 step 6 — UPDATE the lead.
-    await c.query(
-      `UPDATE agency_leads
-          SET status = 'converted', converted_client_id = $2, converted_project_id = $3,
-              pipeline_run_id = $4, triaged_by = $5, triaged_at = now(), updated_at = now()
-        WHERE id = $1 AND status = ANY($6::text[])`,
-      [leadId, clientId, projectId, runId, actorUserId, [...OPEN_STATUSES]],
-    );
+    // §4.2 step 6 — UPDATE the lead, through the ONE stage writer (M5-P1, design §5): status
+    // 'converted', the converted_* links, triaged_* AND stage 'won' (plus the deal, when given) in a
+    // single UPDATE, so lead_won_iff_converted sees both columns at once; then the history row and
+    // `agency.lead.stage_changed`, all in THIS transaction. The status precondition is re-checked under
+    // the row lock (already held since step 2), so this cannot land on a lead that stopped being open.
+    const moved = await transitionStage(c, {
+      tenantId,
+      leadId,
+      to: WON_STAGE,
+      actorId: actorUserId,
+      deal,
+      requireStatusIn: [...OPEN_STATUSES],
+      extraSet: {
+        status: "converted",
+        converted_client_id: clientId,
+        converted_project_id: projectId,
+        pipeline_run_id: runId,
+        triaged_by: actorUserId,
+        triaged_at: SQL_NOW,
+      },
+    });
+    if (moved.outcome !== "changed") {
+      // Unreachable while the row lock from step 2 is held; throwing rolls the whole spawn back.
+      throw new Error(`convertAgencyLead: lead ${leadId} could not move to won (${moved.outcome})`);
+    }
 
     // §4.2 step 7 — THE LOAD-BEARING LINE. The shipped `pipeline-fanout` n8n workflow triggers on
     // exactly this event (automation/workflows/pipeline-fanout.json's webhook path
@@ -741,6 +776,9 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
       contactUserId,
       orgName: row.org_name,
       delegations: delegationReport,
+      stageEventId: moved.stageEventId,
+      dealValue: moved.dealValue,
+      dealCurrency: moved.dealCurrency,
     };
   });
 
