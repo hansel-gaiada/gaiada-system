@@ -50,7 +50,7 @@ decomposed).
 | P3 SEM + reports | SM-18…24, SM-30 | **SM-18 LANDED** (⚡ §6r + §6x.1) | 7 |
 | P4 Live-ads | SM-25a/b/c, SM-26 | 0 | **construction UNBLOCKED** (§6x.3 + §A12: SM-51 sandbox + local Keycloak); the Google OAuth client gates only SM-41G staging acceptance |
 | Money-path P0 | **SM-50** (§6x.2, §A11) | 0 | **highest priority; before OQ-11 funding** — ∥ SM-52 |
-| Decision-gated | SM-27 (Umami), SM-28 (Semrush) | — | **do not mobilize** |
+| Decision-gated | SM-28 (Semrush) | — | **do not mobilize** (SM-27 mobilised 2026-10-11 by WSK-D66; tracked as WebDesk M5) |
 
 **Critical path right now (§6x.4 authoritative):** **SM-50 ∥ SM-52** → owed-gates QA batch
 (SM-17 · SM-47 · SM-48 · SM-49-QA-half) → **SM-14 remainder ⚡** → SM-15 ∥ SM-16 →
@@ -193,7 +193,7 @@ the SM-23 doc-reconcile debt showing up in the one place it is most costly.*
 
 | # | Gate | Default |
 |---|---|---|
-| SM-27 Umami deploy | OQ-5 | Defer |
+| SM-27 Umami deploy | OQ-5 | **Ruled 2026-10-11: deploy (WSK-D66)** |
 | SM-28 Semrush premium driver | **SUPERSEDED 2026-07-29** by the SM-34 HTTP driver (addendum §A5) — a connector path would be a second, unmetered cost meter, fail-open by construction, in the wrong trust zone. **OQ-3 no longer gates anything.** | Deferred permanently; connector stays a human research aid whose output is never ingested |
 
 ---
@@ -785,7 +785,7 @@ other — a demo-only artifact that read exactly like "saving silently reverts".
 | Google OAuth client (GSC/GA4/Ads) + real property + Ads test account | **SM-41G staging acceptance + SM-26's real push ONLY** — construction unblocked 2026-07-30 (§6x.3, §A12: SM-51 sandbox + local Keycloak) | create in Google Cloud console | open |
 | pgvector extension | SM-09 native-vector mode (fallback works) | enable on PG | open (OQ-8) |
 | Semrush MCP OAuth | SM-28 only (deferred anyway) | authorize in claude.ai connector settings | open |
-| OQ-5 Umami | SM-27 only (deferred) | decide deploy vs defer | open |
+| OQ-5 Umami | SM-27 | decide deploy vs defer | **ruled 2026-10-11: unparked on `gda-aicenter` (WSK-D66)** |
 
 None of these block M1 or M2.
 

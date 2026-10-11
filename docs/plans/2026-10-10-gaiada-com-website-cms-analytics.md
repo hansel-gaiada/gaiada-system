@@ -5,6 +5,12 @@ session, handed here so the ERP side can continue. Nothing below is a ruling.
 Rulings go in the WebDesk decision log (`webdesk-design-v2.md` §14) once the
 owner makes them.
 
+> **Rulings since (2026-10-11):** decisions 1 and 2 → WSK-D41 and WSK-D37; 3 → WSK-D66; 4 → WSK-D67;
+> 5 → WSK-D68; 6 → WSK-D69 (all in [`webdesk-design-v2.md`](../blueprints/webdesk-design-v2.md) §14). 7 is drafted for counsel
+> (`legal/website-visitor-addendum.md`); 8 stays open. The phases are worked as M5 in
+> [`2026-10-11-webdesk-m5-plan.md`](./2026-10-11-webdesk-m5-plan.md). Since this was written, WebDesk's
+> scheduled-publish worker (WSK-61) and preview tokens (WSK-46) have shipped.
+
 - **Full plan:** `C:/Users/Hansel/Documents/Hansel/Projects/gaiada-web-revamp/docs/CMS_PLAN.md`
   (copied in summary below).
 - **The site:** gaiada-web-revamp, an Astro 5 static site on branch `astro-site`,
@@ -193,11 +199,11 @@ accept later.
    v2 "internal proof site" wording disagree today.
 2. Ratify D37 (WebDesk owns the editor, Payload is removed, editors use ERP
    identity).
-3. Unpark Umami (OQ-5 / SM-27).
+3. Unpark Umami (OQ-5 / SM-27). **Ruled: unparked, on `gda-aicenter` (WSK-D66).**
 4. How far tracking goes: company identification, session replay, retention
-   periods.
-5. The `/onboard/` vs AD-1 split.
-6. Who builds lead stage + deal value in platform-nest.
+   periods. **Ruled: the whole plan, consent-first (WSK-D67); retention stays in the addendum's drafts.**
+5. The `/onboard/` vs AD-1 split. **Ruled: `/onboard` first, AD-1 after the call (WSK-D68).**
+6. Who builds lead stage + deal value in platform-nest. **Ruled: a small pipeline adopts `agency_leads`, built in M5 (WSK-D69).**
 7. Counsel review of the visitor addendum.
 8. Production hosting for gaiada.com (D17 vs D26 vs OQ-3.6), and the date the
    Hostinger WordPress site is retired.

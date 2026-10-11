@@ -71,7 +71,7 @@ committed P4, /army-ready, in §12.
 - **No direct vendor AI calls** — everything through ai-gateway-go (locked).
 - **No client-facing portal changes** — reports deliver as files (Shared Drive + `deliverables`); a
   portal view can come later.
-- **No Matomo** — Umami chosen (MIT, lighter); and even Umami is decision-gated (OQ-5).
+- **No Matomo** — Umami chosen (MIT, lighter). OQ-5 was **ruled 2026-10-11: Umami is unparked** (WSK-D66 in [webdesk-design-v2.md](./webdesk-design-v2.md) §14).
 - **No payroll/billing changes** — provider costs are metered in the ledger; invoicing them is the
   existing billing module's concern (a rollup metric feeds it).
 
@@ -115,7 +115,7 @@ flowchart LR
     ADS[Google Ads<br/>Scripts bridge P3 / OAuth P4]
   end
   subgraph ZB["Zone B — internet-facing (WebDesk boxes)"]
-    UMAMI[Umami analytics<br/>decision-gated]
+    UMAMI[Umami analytics<br/>gda-aicenter, WSK-D66]
   end
   CRAWL -->|GET, allowlisted domains only| SITES
   PN -->|task_post / poll, server-side key| DFS
@@ -145,7 +145,7 @@ one-way control), adapted to this subsystem's actual exposure:
 | `search` module + provider layer + ledger | **A** | Paid API keys (DataForSEO, Semrush) are **server-side env → OpenBao target-state**, held only by platform-nest (mirrors "bot never holds provider keys"). Never in the browser, never per-request from the UI, never in n8n credentials. |
 | Crawl workers (SEONaut / open-seo-crawler / Unlighthouse) | **A, egress-only** | No inbound ports. **Egress guard:** may fetch only domains registered + verified on a `search_properties` row (allowlist resolved at job dispatch), deny RFC-1918/link-local/metadata IPs after DNS resolution (SSRF), respect robots.txt, identified UA, per-host rate cap. Same DialContext-enforcement idea as the gateway's egress allowlist. |
 | DataForSEO postback / Ads-Scripts webhook | **edge → n8n** | Inbound webhooks land on n8n (the existing signed-webhook bridge pattern): HMAC-signed or secret-path, schema-validated, and **treated as triggers only** — n8n calls an MCP tool; the module fetches authoritative data itself. A forged webhook can cause at most a redundant authenticated fetch. |
-| Umami (if approved) | **B** | Deployed with the WebDesk boxes (or own VPS); client sites embed its tracker. ERP holds a read-only API token and pulls; Umami has zero credentials into Zone A. One Umami "website" per `search_properties` row; the mapping lives on our side. |
+| Umami (unparked 2026-10-11, WSK-D66) | **B** | Deployed on `gda-aicenter` beside WebDesk, in its own compose project (WSK-D66; the 2026-08-31 re-zoning moved Zone B there); client sites embed its tracker. ERP holds a read-only API token and pulls; Umami has zero credentials into Zone A. One Umami "website" per `search_properties` row; the mapping lives on our side. |
 | Client Google accounts (GSC/GA4/Ads — P4) | **A vault** | Per-client OAuth tokens ride the existing **`integration_connections` vault** (0033: AES-256-GCM at rest, `hasToken` reads only) with `owner_kind` widened to `'client'` and new providers — see §04. |
 
 ---
@@ -457,7 +457,7 @@ is made here, per tool**. "Data-only" = we take its data/engine/reference, never
 | **open-seo-crawler** | **Adapt, job-mode.** Deep-crawl worker (Screaming-Frog-alt). | Concurrent crawler, sitemap hygiene, exports | Any UI | Job container; XLSX/JSON export → ingest adapter; crawled page content also feeds WS8 knowledge ingest (briefs/GEO RAG) |
 | **Unlighthouse** | **Data-only CLI, job-mode.** No adaptation beyond a wrapper. | Site-wide Lighthouse/CWV JSON | Its report UI | n8n-scheduled CLI job → JSON → `search_audits(kind='cwv')`; also wire into WS10 CI for WebDesk-hosted sites later |
 | **SerpBear** | **Data-only (reference; don't run).** Running it would create a second rank store outside RLS and a duplicate scheduler (n8n owns schedules). | Its pluggable SERP-scraper adapter list | The app | Adapter list informs the `scraper` fallback driver; rank UX informs the Rankings tab |
-| **Umami** | **Run stock as shared infra (like Keycloak/n8n) — no fork.** Internet-facing ⇒ **Zone B** placement (OQ-5). | Everything (stock container, own Postgres DB per db-topology pattern) | Nothing (its multi-site model is used as-is) | One Umami website per `search_properties`; ERP stores `umami_site_id` + read-only API token; console pulls summaries. **Decision-gated** |
+| **Umami** | **Run stock as shared infra (like Keycloak/n8n) — no fork.** Internet-facing ⇒ **Zone B** placement, on `gda-aicenter` (OQ-5 ruled, WSK-D66). | Everything (stock container, own Postgres DB per db-topology pattern) | Nothing (its multi-site model is used as-is) | One Umami website per `search_properties`; ERP stores `umami_site_id` + read-only API token; console pulls summaries. **Unparked 2026-10-11 (WSK-D66)** |
 | **Claude Ads** | **Integrate as MCP tooling, phased.** P3: its Google-Ads-Scripts patterns → the read bridge **plus the manual-apply twin** (approved change proposals export Ads-Editor-ready — no OAuth). P4 (committed): its MCP/API surface executes api-mode proposals, registered behind mcp-hub with `write:true, impact:'high'` ⇒ every mutation suspends into WS4. | Audit/budget-check/draft-first patterns, scripts | Direct-to-platform key custody (keys live in our vault, calls via our envelope) | SEM console buttons → change proposals → manual export **or** `search.applyNegatives` / `search.setBudget` / `search.launchCampaign` tools → approval queue |
 | *(minor)* keyword-research-tool (py) / Ansvisor | Reference-only | Autocomplete/PAA technique; GEO metric ideas | — | Folded into the `scraper` driver + `ai_visibility` design |
 
@@ -731,8 +731,8 @@ gate + architect design-review on the diff.
 | SM-25 ⚡ | Google OAuth (GSC/GA4/Ads) on the 0033 vault: consent flows, token refresh, `owner_kind='client'` links, `setConnectionTokens` path | senior-be | **opus·medium** — client-credential custody + consent-flow edge cases; a token leak is unacceptable | SM-01 | OAuth round-trip stores encrypted tokens (`hasToken` reads only); refresh + revoke verified; property bindings resolve |
 | SM-26 | Automated live-write executor: approved **api-mode** change proposals → Google Ads API push (via the Claude Ads MCP surface), one-shot consumption (SM-21 path), per-change result + rollback notes | senior-integrator | default | SM-21,25 | Sandbox/test-account push applies exactly the proposal payload; failure surfaces on the proposal; ledger/audit rows complete |
 
-**Decision-gated (do not mobilize):** SM-27 Umami deploy + property binding [senior-integrator]
-(OQ-5) · SM-28 Semrush premium driver [medior] (OQ-3).
+**Decision-gated (do not mobilize):** SM-28 Semrush premium driver [medior] (OQ-3). SM-27 (Umami deploy + property binding)
+was mobilised by OQ-5's ruling (WSK-D66) and is tracked as M5 in the WebDesk M5 plan.
 
 **Count by tier (P0–P3, 26 tickets):** senior-db 1 · senior-be 7 (SM-02,04,05,10,18,21,30) ·
 senior-fe 2 (SM-11,19) · senior-integrator 2 (SM-07,20) · medior 11 (SM-03,08,09,12,14,15,16,17,22,24,29) ·
@@ -752,7 +752,7 @@ ratified → D-4). Remaining items keep their original IDs:
 |---|---|---|---|
 | OQ-2 | **Fund the $50 DataForSEO deposit** now? (P0/P1 proceed regardless; P2 is gated) | P2 | Build P0/P1, hold P2 |
 | OQ-3 | **Semrush MCP OAuth** — authorize now or at first premium client? (Connector is currently unauthorized; needs claude.ai connector settings) | SM-28 | Defer to premium demand |
-| OQ-5 | **Umami pillar:** deploy (Zone B WebDesk boxes vs own VPS) or defer — GSC+GA4 may suffice for most clients? | SM-27 | Defer |
+| ~~OQ-5~~ | **RULED 2026-10-11 — Umami is unparked, on `gda-aicenter` (WSK-D66 in [webdesk-design-v2.md](./webdesk-design-v2.md) §14).** Was: deploy (Zone B WebDesk boxes vs own VPS) or defer | SM-27 | — |
 | OQ-8 | **pgvector extension in the platform DB** images (dual-mode fallback keeps plain-PG tests green) | SM-01/09 | Add to dev/VPS images |
 
 ---
@@ -776,7 +776,7 @@ for $0 audit/crawl/speed; Postgres SERP/volume caching; per-client metering on a
 | D-6 | Api-mode executions require one-shot approved `approvalId` (humans included) | Closes the WS4 no-Temporal-resume gap without new infra |
 | D-7 | Keyword embeddings as a dual-mode operational column; retrieval-shaped RAG stays in WS8 | D9 ownership preserved; clustering can't round-trip MCP |
 | D-8 | **Dual-mode SEM execution (owner, 2026-07-23, ex-OQ-4):** every live-account action is a `search_change_proposals` row; **manual twin** (approved proposal → Ads-Editor export → human applies, P3, zero OAuth) *and* **automated twin** (API push behind WS4 + one-shot approvalId, P4 committed); the human picks the mode per action | Best of both: early value with no OAuth on the critical path, full automation when OAuth lands |
-| D-9 | Umami in Zone B if approved; ERP pulls read-only | Internet-facing = WebDesk zone doctrine |
+| D-9 | Umami in Zone B (now `gda-aicenter`, its own compose project; approved 2026-10-11, WSK-D66); ERP pulls read-only | Internet-facing = WebDesk zone doctrine |
 | D-10 | **Console ratified (owner, 2026-07-23, ex-OQ-1):** dept name stays **SEO**; console = dept-interface-template exactly as Web Dev, with the 3 craft groups (Accounts / Optimize / Campaigns) as primary-strip divisions; supersedes the IA plan's single-"Optimize" sketch (SM-23 updates that doc) | One console, WebDev-proven pattern |
 | D-11 | **Per-engagement tool-scope config (owner, 2026-07-23, ex-OQ-6 generalized):** every tool/paid pull (GEO, backlinks, rank, audits, volume, SEM sync, …) is enabled per client by a human via `tool_scope` + per-engagement budget caps; fixed tiers survive only as presets that seed the config; scheduled flows and the dispatch choke-point both consult it | Fully custom per-client invocation; cost = Σ enabled tools per engagement |
 
