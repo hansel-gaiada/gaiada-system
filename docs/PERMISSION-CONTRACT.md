@@ -40,6 +40,17 @@ build against.
 > need the two-person appointment (`owner` is in `ELEVATED_TIER`), so system power still has no
 > single-step path. Ruling: decision log of `docs/plans/2026-10-10-three-perspectives.md`.
 
+> **⚠ PV3-01 (2026-10-11): a company `owner` may countersign that company's contracts.** Cerbos
+> `contract` / `countersign` gains one rule (`resource_contract.yaml`): `roles: ["user"]`, allowed when
+> the principal holds `owner` at company scope ON the contract's tenant (plus `inTenant && notLow`),
+> the shape of PV1-06a's `report_document` / `read_company` rule. This implements the recorded intent
+> ("owner-only, deliberately narrower than company_admin"); it is not a new ruling. Until now only the
+> `platform_admin` wildcard reached the action. **Unchanged:** there is still no
+> `core.contract.countersign` key, no bundle holds it, and no `perm_*` rule names it, so
+> `company_admin`, `manager` and every custom role stay refused, whatever `core.contract.*` keys they
+> hold. An owner of another company is refused too. The staff contract reads expose the outcome as a
+> `canCountersign` row flag (BFF §16e).
+
 > **⚠ NEW AXIS (2026-08-13, P2-03): `ui_grantable`.** Every catalog entry now carries a REQUIRED
 > `uiGrantable: boolean` (and a DB-side `permissions.ui_grantable`, migration 0110). It answers a
 > DIFFERENT question than `sensitive` or `class`: **may this permission ever appear in a role bundle

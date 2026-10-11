@@ -8,10 +8,8 @@
 // `signerName` before it authorizes; an empty body would 400 for everyone and the denial cases would
 // silently stop testing authorization.
 //
-// ── WHAT IS NOT HERE ────────────────────────────────────────────────────────────────────────────
-// The company-OWNER rule (an owner of the contract's company countersigns; the owner of another
-// company does not). Its Cerbos rule is blocked on the catalog decision recorded in BFF §16e. The
-// other-company-owner denial below already holds today and is the case the rule must not widen.
+// The rule's own edges (global grant, low assurance, non-member) are pinned without a DB in
+// src/rbac/contract-countersign-cerbos.test.ts.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -34,6 +32,7 @@ describe.skipIf(!TEST_URL)("PV3-01 · contract reads: canCountersign + strict cl
   let platformAdmin: string; // platform_admin @ global: the wildcard, may countersign
   let manager: string; // manager @ tenant: reads only
   let allKeys: string; // a custom role holding EVERY core.contract.* key @ tenant
+  let owner: string; // `owner` @ tenant: the contract's company owner, may countersign
   let otherOwner: string; // member of tenant, but `owner` only of ANOTHER company
   let outsider: string; // member of tenant with no role: may not even read
   let clientA: string;
@@ -76,6 +75,10 @@ describe.skipIf(!TEST_URL)("PV3-01 · contract reads: canCountersign + strict cl
     await addMembership(tenant, manager);
     await grantRole(manager, await createRole("manager"), "company", tenant);
 
+    owner = await createUser("owner@pv301.test");
+    await addMembership(tenant, owner);
+    await grantRole(owner, await createRole("owner"), "company", tenant);
+
     otherOwner = await createUser("other-owner@pv301.test");
     await addMembership(tenant, otherOwner);
     await addMembership(otherCo, otherOwner);
@@ -105,7 +108,7 @@ describe.skipIf(!TEST_URL)("PV3-01 · contract reads: canCountersign + strict cl
     // MON-00a: the permission arm is root-bounded (`variables.inRoot`), and rootCompanies comes from
     // home_company_id first. Anchor every tenant user on the tenant, the realistic shape.
     const pool = adminPool();
-    for (const u of [admin, platformAdmin, manager, otherOwner, outsider, allKeys]) {
+    for (const u of [admin, platformAdmin, manager, owner, otherOwner, outsider, allKeys]) {
       await pool.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [tenant, u]);
     }
 
@@ -134,6 +137,16 @@ describe.skipIf(!TEST_URL)("PV3-01 · contract reads: canCountersign + strict cl
       expect(d.signatures).toEqual([]);
     });
 
+    it("the owner of the contract's company countersigns (200), and the signature is theirs", async () => {
+      const id = await sent(clientA, "Owner signs");
+      const r = await countersign(id, owner);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toMatchObject({ ok: true, alreadySigned: false, complete: false });
+      const d = (await get(`/api/${tenant}/contracts/${id}`, owner)).json();
+      expect(d.providerSigned).toBe(true);
+      expect(d.signatures).toEqual([expect.objectContaining({ party: "provider", signer: owner, signerName: SIGN.signerName })]);
+    });
+
     it("platform_admin countersigns (200) and the provider signature is recorded", async () => {
       const id = await sent(clientA, "Platform signs");
       const r = await countersign(id, platformAdmin);
@@ -152,6 +165,13 @@ describe.skipIf(!TEST_URL)("PV3-01 · contract reads: canCountersign + strict cl
       const d = await get(`/api/${tenant}/contracts/${id}`, platformAdmin);
       expect(d.statusCode).toBe(200);
       expect(d.json().canCountersign).toBe(true);
+    });
+
+    it("is true for the company's owner, on the list AND the detail", async () => {
+      const id = await sent(clientA, "Flag true for owner");
+      const list = (await get(`/api/${tenant}/contracts?clientId=${clientA}`, owner)).json() as Row[];
+      expect(list.find((r) => r.id === id)?.canCountersign).toBe(true);
+      expect((await get(`/api/${tenant}/contracts/${id}`, owner)).json().canCountersign).toBe(true);
     });
 
     it("🔴 is false for company_admin on the same contract (list and detail): the flag follows Cerbos, not the read", async () => {
