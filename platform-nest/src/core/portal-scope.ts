@@ -97,7 +97,9 @@ export async function resolvePortalScope(c: PoolClient, principal: PortalPrincip
   return {
     clientIds,
     projectIds,
-    canSign: r.rows.some((row) => row.capability === "signer"),
+    // WSK-49f (owner ruling 2026-10-11): `admin` IMPLIES signer. The capability column is single-valued, so
+    // promoting a signer to admin must not silently take signing away from them.
+    canSign: r.rows.some((row) => row.capability === "signer" || row.capability === "admin"),
   };
 }
 

@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **151** capabilities across **16** owners
-- **80** writes · 71 reads
-- Writes by impact: **high 18** · medium 23 · low 39
+- **157** capabilities across **16** owners
+- **84** writes · 73 reads
+- Writes by impact: **high 18** · medium 27 · low 39
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -42,8 +42,8 @@ unfalsifiable after.
 | agency | `agency` | 9 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 7 |
-| core | `agency` · `positions` · `role-grants` | 12 |
+| clients | `clients` | 9 |
+| core | `agency` · `positions` · `role-grants` | 13 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 3 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 16 |
 | search | `search` | 16 |
 | social | `social` | 12 |
-| webdev | `webdev` | 14 |
+| webdev | `webdev` | 16 |
 
 ## Capabilities
 
@@ -190,6 +190,7 @@ unfalsifiable after.
 | webdev | `webdesk.content.listMedia` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media` | read | — |
 | webdev | `webdesk.content.listSites` | `GET` | `/api/:tenantId/modules/webdev/content/sites` | read | — |
 | webdev | `webdesk.content.listVersions` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions` | read | — |
+| webdev | `webdesk.content.preview` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/preview` | write | `medium` |
 | webdev | `webdesk.content.requestPublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/publish-requests` | write | `low` |
 | webdev | `webdesk.content.restoreVersion` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/restore` | write | `low` |
 | webdev | `webdesk.content.unpublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/unpublish` | write | `medium` |
@@ -200,6 +201,11 @@ unfalsifiable after.
 | webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |
 | webdev | `webdesk.listSites` | `GET` | `/api/:tenantId/modules/webdev/control/sites` | read | — |
 | webdev | `webdesk.listSubmissions` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/submissions` | read | — |
+| webdev | `webdesk.media.delete` | `DELETE` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId` | write | `medium` |
+| webdev | `webdesk.media.list` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media` | read | — |
+| webdev | `webdesk.media.update` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId` | write | `medium` |
+| webdev | `webdesk.media.uploadToken` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/upload-token` | write | `medium` |
+| webdev | `webdesk.media.usage` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId/usage` | read | — |
 | webdev | `webdesk.schema.apply` | `POST` | `/api/:tenantId/modules/webdev/control/schema/apply` | write | `medium` |
 | webdev | `webdesk.schema.propose` | `POST` | `/api/:tenantId/modules/webdev/control/schema/propose` | write | `low` |
 | webdev | `webdesk.site.archive` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/archive` | write | `high` |

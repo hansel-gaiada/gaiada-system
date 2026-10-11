@@ -7,6 +7,7 @@
 //   POST …/sites/:tenantSlug/:siteId/publish-requests                       -> 202 { approvalId }
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/unpublish
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/delete
+//   POST …/sites/:tenantSlug/:siteId/items/:itemId/preview                  -> {previewUrl, expiresAt, version}  (WSK-46, built; mints a one-time draft link)
 //   POST …/sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw  -> { approvalId, status:"cancelled" }  (WSK-59, built)
 //   POST /api/:t/modules/webdev/control/sites/:siteId/keys  {tenantSlug, envId, scope}   -> 202 {approvalId[, alreadyPending]}  (files a key.mint approval; mints NOTHING)
 //   STILL PROPOSED (WSK-60; a 404 comes back as `not_enabled` and the UI says so):
@@ -42,13 +43,13 @@ import { getSessionUserId } from "./session-server";
 import { getMe } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
-  wdCall, siteBase, controlSiteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus, parseKeyRequest,
+  wdCall, siteBase, controlSiteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus, parseKeyRequest, parsePreviewLink,
   loadEditorBundle, getItem, pollApproval,
   type EditorBundle,
 } from "./webdeskContent";
 import { KEY_SCOPES } from "./webdeskContentModel";
 import type {
-  Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, KeyRequestFiled, KeyScope, WdResult, WebdeskApprovalRow,
+  Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, KeyRequestFiled, KeyScope, PreviewLink, WdResult, WebdeskApprovalRow,
 } from "./webdeskContentModel";
 
 export interface SiteScope { tenantSlug: string; siteId: string }
@@ -191,6 +192,22 @@ export async function deleteItemAction(scope: SiteScope, itemId: string, baseVer
   return wdCall(
     `${siteBase(c.company, scope.tenantSlug, scope.siteId)}/items/${encodeURIComponent(itemId)}/delete`,
     c.userId, parseItemOnly, json({ baseVersion }),
+  );
+}
+
+// ── Draft preview (WSK-46) ───────────────────────────────────────────────────────────────────────
+
+/** "Preview": mints a ONE-TIME link to the item's DRAFT (`version` omitted = the head) and returns it for the browser to open in a new
+ *  tab. The BFF authorises this as the item's `update`, checks the site has a staging address and a `/preview/` page BEFORE minting
+ *  anything (409 `preview_not_configured` / `preview_page_missing`), and builds `previewUrl` with the token in the URL FRAGMENT.
+ *  The link is a bearer secret: it is returned to the caller and not stored, logged or echoed in an error here. */
+export async function previewItemAction(scope: SiteScope, itemId: string, version?: number): Promise<WdResult<PreviewLink>> {
+  const c = await ctx(); if (!isCtx(c)) return c;
+  if (!scopeOk(scope) || !clean(itemId)) return badScope;
+  if (version !== undefined && (!Number.isInteger(version) || version < 1)) return { kind: "invalid", issues: [], message: "Missing version." };
+  return wdCall(
+    `${siteBase(c.company, scope.tenantSlug, scope.siteId)}/items/${encodeURIComponent(itemId)}/preview`,
+    c.userId, parsePreviewLink, json(version === undefined ? {} : { version }),
   );
 }
 

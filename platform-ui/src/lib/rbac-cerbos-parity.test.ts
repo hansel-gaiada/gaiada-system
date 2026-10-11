@@ -19,7 +19,7 @@
 // `it_manager`/`it`, are mirrored instead, which is the thing that actually matters).
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { ROLE_CAPS } from "./rbac";
+import { ROLE_CAPS, CLIENT_SIDE_ROLES } from "./rbac";
 
 const DERIVED_ROLES_POLICY_PATH = "../../../platform-nest/cerbos/policies/derived_roles.yaml";
 
@@ -37,13 +37,14 @@ function rawRolesGrantedByCerbos(policyYaml: string): string[] {
 }
 
 // Raw grant-role strings that Cerbos genuinely issues but which this file deliberately models
-// OUTSIDE `Role`/`ROLE_CAPS` for a documented reason — NOT omissions. Currently exactly one:
-// `client` is handled entirely by `isClient`/`isStaff`/`isClientOnly` (portal-only routing), never
-// by `can()`, because the portal BFF — not this capability model — is the real boundary for a
-// client contact (see `isClient`'s own doc comment in rbac.ts). Anything else missing from
-// `Role`/`ROLE_CAPS` below is a real gap, not an intentional exclusion, and must be added there —
-// never silenced by adding it to this list.
-const DELIBERATELY_OUTSIDE_ROLE_CAPS = new Set(["client"]);
+// OUTSIDE `Role`/`ROLE_CAPS` for a documented reason — NOT omissions. They are exactly the
+// client-side roles, `CLIENT_SIDE_ROLES` in rbac.ts: `client` and (WSK-D60) `client_website_editor`.
+// They are handled by `isClient`/`isStaff`/`isClientOnly` (portal-only routing), never by `can()`,
+// because the portal BFF — not this capability model — is the real boundary for a client contact.
+// The set is not a silencer: adding a role to it also makes `isStaff` treat that role as NOT staff,
+// so a staff role put there would lose its workspace. Anything else missing from `Role`/`ROLE_CAPS`
+// below is a real gap and must be added there.
+const DELIBERATELY_OUTSIDE_ROLE_CAPS = CLIENT_SIDE_ROLES;
 
 describe("Role mirrors every raw role Cerbos actually grants (drift-proof, not a hand-list)", () => {
   it("every g.role == \"...\" literal in derived_roles.yaml is a member of Role (or the documented client exception)", () => {

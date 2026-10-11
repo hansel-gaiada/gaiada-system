@@ -83,6 +83,7 @@ import {
 } from "./webdesk-approved-command";
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
 import { noteStagingStale } from "./site-builds.service";
+import { previewPageState, previewUrlFor, stagingOriginOf } from "./webdesk-preview";
 
 const logger = new Logger("WebdeskContent");
 
@@ -128,10 +129,10 @@ export class AmbiguousWriteError extends HttpException {
 function editorialUnavailable(reason: string, extra?: string): ServiceUnavailableException {
   return new ServiceUnavailableException({ message: "editorial_unavailable", reason, ...(extra ? { detail: extra } : {}) });
 }
-function notConfigured(reason: string): ServiceUnavailableException {
+export function notConfigured(reason: string): ServiceUnavailableException {
   return new ServiceUnavailableException({ message: "webdesk_not_configured", reason });
 }
-function invalidRequest(detail: string): BadRequestException {
+export function invalidRequest(detail: string): BadRequestException {
   return new BadRequestException({ message: `invalid_request: ${detail}`, reason: "invalid_request" });
 }
 function siteNotFound(): WebdeskProblem {
@@ -150,8 +151,9 @@ function siteNotFound(): WebdeskProblem {
 // The gate: authorization as the CALLER, first, as a type
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
-export type ContentKind = "webdesk_content_item" | "webdesk_collection";
-export type ContentAction = "read" | "create" | "update" | "request_publish" | "unpublish" | "delete" | "apply_schema";
+export type ContentKind = "webdesk_content_item" | "webdesk_collection" | "webdesk_media_asset";
+/** `upload` is `webdesk_media_asset`'s (WSK-43b: minting an upload token). */
+export type ContentAction = "read" | "create" | "update" | "request_publish" | "unpublish" | "delete" | "apply_schema" | "upload";
 
 /** Proof that Cerbos allowed `principal` to run `action` on `kind` in company `tenantId`. Its constructor
  *  is private: `authorizeContent()` is the only way to get one. */
@@ -210,18 +212,18 @@ export interface EditableSite {
 
 type Query = Record<string, string>;
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEM_RE = /^[\x21-\x7e]{8,200}$/;
 const SITE_CACHE_TTL_MS = 60_000;
 const SITE_CACHE_REFETCH_ON_MISS_MS = 5_000;
 const ITEM_READ_CONCURRENCY = 8;
 const REQUEST_STATUSES: readonly string[] = ["pending", "approved", "rejected", "cancelled", "all"];
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
+export function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-function strictBody(raw: unknown, allowed: readonly string[]): Record<string, unknown> {
+export function strictBody(raw: unknown, allowed: readonly string[]): Record<string, unknown> {
   if (!isPlainObject(raw)) throw invalidRequest("the request body must be a JSON object");
   for (const k of Object.keys(raw)) {
     if (!allowed.includes(k)) throw invalidRequest(`unknown body key "${k}" (allowed: ${allowed.join(", ")})`);
@@ -258,12 +260,13 @@ export interface EgressWrite {
   command: WebdeskBffEditorialCommand | "schema.apply" | "site.provision";
   /** `webdesk.content.update` etc. */
   verb: string;
-  method: "POST" | "PUT";
+  method: "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   params: Record<string, string>;
-  body: Record<string, unknown>;
+  /** Omitted for a body-less write (WSK-43b's `media.delete`): no body is sent, and Zone B hashes the params alone. */
+  body?: Record<string, unknown>;
   idempotencyKey: string;
-  /** Present for the five editorial commands only (schema.apply and site.provision carry none: design §3.1). */
+  /** Present for the editorial commands only (schema.apply and site.provision carry none: design §3.1). */
   editorial?: { tenantSlug: string; siteId: string };
   entity: { type: string; id: string | null };
   /** Non-secret identifiers copied onto both ledger rows. */
@@ -647,17 +650,8 @@ export class WebdeskContentService {
     });
   }
 
-  async listMedia(gate: ContentGate, site: SiteRef, rawQuery: unknown): Promise<ZoneBResult> {
-    gate.require("webdesk_content_item", "read");
-    const query = strictQuery(rawQuery, ["mime", "cursor", "limit"]);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
-    return this.zoneB.read({
-      command: "media.list",
-      path: "/control/v1/tenants/:tenantSlug/sites/:siteId/media",
-      params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
-      query,
-    });
-  }
+  // The media library's reads and writes (`media.list` and the rest) moved to `webdesk-media.service.ts` in
+  // WSK-43b, authorised as `webdesk_media_asset` rather than `webdesk_content_item:read`.
 
   // ── writes: create ───────────────────────────────────────────────────────────────────────────
 
@@ -923,6 +917,82 @@ export class WebdeskContentService {
       reconcile: (_sub, _body, before) =>
         before.deletedAt === null ? this.reconcileState(site, itemId, (i) => typeof i.deletedAt === "string") : async () => null,
     });
+  }
+
+  // ── preview: mint a one-time capability link to a DRAFT ─────────────────────────────────────
+  //
+  // `POST …/items/:itemId/preview` body `{ version? }` -> 200 `{ previewUrl, expiresAt, version }`.
+  //
+  // A preview link DISCLOSES AN UNPUBLISHED DRAFT to whoever holds it, so it is authorised as the item's existing
+  // `update` action (never `read`): the same people who may change the draft may share it. No new Cerbos action.
+  // Zone B's `content.previewToken` is MEDIUM and editorial, so it signs and ledgers like the other writes.
+  //
+  // ORDER (each step is a refusal that mints NOTHING):
+  //   gate (the controller's first statement) -> the cross-company wall (404) -> body -> the site's staging base
+  //   (409 `preview_not_configured`) -> the site's `/preview/` page exists (409 `preview_page_missing`; 502
+  //   `preview_site_unreachable` when that cannot be told) -> the item read from Zone B and authorised AGAIN with
+  //   its real collection/locale -> mint.
+  // The site checks come BEFORE the item read on purpose: a site that cannot show a preview costs no Zone B call.
+  //
+  // THE TOKEN IS A ONE-TIME SECRET. It is in Zone B's response and in the returned `previewUrl`'s FRAGMENT
+  // (`<staging>/preview/#t=<token>`; a fragment is never sent to a server or in a Referer), and nowhere else:
+  // not the ledger rows (they carry identifiers and the outcome), not a log line, not an error message.
+  // A replay of the same Idempotency-Key is Zone B's 409 `idempotency-response-withheld` (it never stores the
+  // token), so a caller that needs another link mints again under a NEW key.
+  async previewItem(gate: ContentGate, site: SiteRef, itemId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
+    gate.require("webdesk_content_item", "update");
+    const editable = await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    const b = strictBody(rawBody === undefined || rawBody === null ? {} : rawBody, ["version"]);
+    let version: number | undefined;
+    if (b.version !== undefined && b.version !== null) {
+      if (typeof b.version !== "number" || !Number.isInteger(b.version) || b.version < 1 || b.version > 2_147_483_647) {
+        throw invalidRequest("version must be an integer >= 1 (omit it to preview the item's head version)");
+      }
+      version = b.version;
+    }
+
+    const origin = stagingOriginOf(editable.site);
+    if (origin === null) {
+      throw new ConflictException({ message: "Preview isn't set up for this site yet", reason: "preview_not_configured" });
+    }
+    const page = await previewPageState(origin);
+    if (page === "missing") {
+      throw new ConflictException({ message: "This site doesn't have a preview page yet", reason: "preview_page_missing" });
+    }
+    if (page === "unknown") {
+      throw new BadGatewayException({ message: "The site didn't answer, so a preview link can't be made right now", reason: "preview_site_unreachable" });
+    }
+
+    const attrs = await this.authorizeOnItem(gate, site, itemId, "update", version === undefined ? undefined : String(version));
+    if (attrs.deletedAt !== null) {
+      throw new WebdeskProblem(409, {
+        type: "https://webdesk.gaiada.online/errors/item-deleted",
+        title: "Item deleted",
+        status: 409,
+        detail: "This item has been deleted, so there is nothing to preview.",
+      });
+    }
+
+    const minted = await this.zoneB.write(gate.principal, gate.tenantId, {
+      command: "content.previewToken",
+      verb: "webdesk.content.previewToken",
+      method: "POST",
+      path: `${ITEM_PATH}/preview-token`,
+      params: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId },
+      body: version === undefined ? {} : { version },
+      idempotencyKey,
+      editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      entity: { type: "webdesk_content_item", id: UUID_RE.test(itemId) ? itemId : null },
+      ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId, collectionKey: attrs.collectionKey, locale: attrs.locale, requestedVersion: version ?? null },
+      // No `reconcile`: a mint that may have landed leaves nothing to read back (the token is shown once and never
+      // stored), so an ambiguous answer is the typed 502 `webdesk_ambiguous` and the caller simply mints again.
+    });
+    const r = minted.body as Record<string, unknown>;
+    if (typeof r.token !== "string" || r.token === "" || typeof r.expiresAt !== "string" || typeof r.version !== "number") {
+      // Name the shape, never the value: the body may hold the token.
+      throw new BadGatewayException({ message: "webdesk_error", reason: "preview_shape" });
+    }
+    return { status: 200, body: { previewUrl: previewUrlFor(origin, r.token), expiresAt: r.expiresAt, version: r.version } };
   }
 
   // ── publish requests: file ONE approval, never publish ───────────────────────────────────────

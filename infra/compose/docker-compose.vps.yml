@@ -646,6 +646,10 @@ services:
       # WSK-61 — how long past a schedule's effective time to wait for Zone B to show it (default 15 min when
       # empty). A value outside [60000, 86400000] REFUSES BOOT (config.ts readScheduleSupersedeGraceMs).
       WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS: ${WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS:-}
+      # WSK-43b — the PUBLIC origin of the WebDesk api (the host serving /v1, e.g. https://api.erp.gaiada.com).
+      # Media upload URLs are built on it, so image bytes go from the browser straight to WebDesk, never through
+      # the ERP. Empty means uploads answer "not enabled" (fail closed; the ERP still boots).
+      WEBDESK_PUBLIC_BASE_URL: ${WEBDESK_PUBLIC_BASE_URL:-}
       # The SAME omission again, and this one had been silently disabling THREE shipped features on
       # this box: a 43-char value sat in .env while the container saw an empty string, because no row
       # forwarded it. It signs W0 client-invite tokens (`core/client-invites.ts`), signs SEO's Google
@@ -1203,6 +1207,9 @@ services:
       # Empty falls back to PUBLIC_ORIGIN. During the name move both are listed:
       # https://erp.gaiada.com,https://erp.gaiada.online
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      # WSK-43c — the same WebDesk public origin the platform builds upload URLs on; the media library reads it
+      # server-side for thumbnails. Empty means the grid shows type tiles instead of images. Not a secret.
+      WEBDESK_PUBLIC_BASE_URL: ${WEBDESK_PUBLIC_BASE_URL:-}
     ports:
       # Loopback only (Phase B0, like platform's 127.0.0.1:3004): nginx is the one public way in, so
       # its headers, rate limits and Host handling cannot be bypassed. Everything else reaches this

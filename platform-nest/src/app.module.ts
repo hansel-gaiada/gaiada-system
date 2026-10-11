@@ -20,6 +20,7 @@ import { ApprovalsDecideController } from "./core/approvals-decide.controller";
 import { TasksMineController } from "./core/tasks-mine.controller";
 import { MeetingRecordingsController } from "./core/meetings.controller";
 import { ClientContactsController, ClientInviteAcceptController } from "./core/client-contacts.controller";
+import { ClientWebsiteAccessController } from "./core/client-website-access.controller";
 import { PortalController } from "./core/portal.controller";
 // CP-2..CP-5: the client portal split across four further controller classes, all on the same `api`
 // prefix as PortalController. Nest permits that as long as no individual route path collides, and none
@@ -177,7 +178,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, HrController, LoansController,

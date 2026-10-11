@@ -14,7 +14,9 @@ import {
 } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
 import { ConflictDialog } from "./ConflictDialog";
+import { placeholderSyntaxes } from "@/lib/markdownCodec";
 import { FieldEditor, type FormCtx } from "./FieldEditor";
+import { PreviewCard } from "./PreviewCard";
 import { PublishBar } from "./PublishBar";
 import "./content.css";
 
@@ -82,7 +84,7 @@ const CONFLICT_COPY: Record<string, string> = {
 };
 
 export function ItemEditor({
-  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason,
+  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason, mediaPublicBase = null,
 }: {
   mode: "edit" | "create";
   scope: SiteScope;
@@ -98,6 +100,8 @@ export function ItemEditor({
   authors: Record<string, string>;
   /** Server-known reason the form is read-only (e.g. a deleted item). */
   readOnlyReason: string | null;
+  /** WSK-43c: where WebDesk serves media from (thumbnails in the picker); null = type tiles. */
+  mediaPublicBase?: string | null;
 }) {
   const router = useRouter();
   const defs = useMemo(() => collection.composition.fields ?? [], [collection.composition.fields]);
@@ -155,8 +159,12 @@ export function ItemEditor({
   const readOnly = readOnlyWhy !== null;
   const canWrite = !readOnly && stale === null && unconfirmed === null;
 
+  const placeholders = useMemo(() => placeholderSyntaxes(collection.composition.lint?.placeholders), [collection.composition.lint]);
+  // The "Choose from library" button of a media field: it needs the site, the language being edited (the asset's alt for it
+  // becomes the value's alt) and who the uploaders are. Picking only fills the field; saving the item is still this editor's.
   const ctx: FormCtx = {
-    issues, readOnly, neutralLock: nonDefaultLocale, neutralLocale: tenant.defaultLocale,
+    issues, readOnly, neutralLock: nonDefaultLocale, neutralLocale: tenant.defaultLocale, placeholders,
+    media: { scope, routeBase, locale, locales: tenant.locales, authors, publicBase: mediaPublicBase },
   };
 
   // ── adopting a freshly read record (initial refresh, Load theirs, restore) ─────────────────────
@@ -568,6 +576,17 @@ export function ItemEditor({
                 </>
               )}
             </section>
+
+            {/* WSK-46: preview the DRAFT on the site's own /preview/ page. Off exactly when Save is off (`canWrite`). */}
+            {!item.deletedAt && (
+              <PreviewCard
+                scope={scope}
+                itemId={item.itemId}
+                version={baseVersion}
+                dirty={dirty}
+                blocked={readOnly ? "Read-only." : stale !== null ? "Disabled until WebDesk answers again." : unconfirmed !== null ? "Disabled until you reload." : null}
+              />
+            )}
 
             {stagingItemUrl && (
               <section className="wc-side-card"><h3>Staging</h3><a href={stagingItemUrl} target="_blank" rel="noopener noreferrer" data-testid="view-staging">View on staging</a></section>

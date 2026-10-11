@@ -51,6 +51,8 @@ export default defineConfig({
         DEMO_MODE: "0",
         PLATFORM_URL: `http://127.0.0.1:${STUB_PORT}`,
         PLATFORM_SERVICE_TOKEN: "wd-e2e-service-token",
+        // WSK-43c: where the stub serves WebDesk's PUBLIC media routes (thumbnails). The real value is the public WebDesk origin.
+        WEBDESK_PUBLIC_BASE_URL: `http://127.0.0.1:${STUB_PORT}`,
         SESSION_SECRET: "wd-e2e-session-secret",
         NEXT_DIST_DIR: DIST,
       },

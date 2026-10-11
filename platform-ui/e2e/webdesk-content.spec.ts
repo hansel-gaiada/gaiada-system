@@ -1,5 +1,7 @@
+import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { tenantCookie } from "./appCookies";
+import zlib from "node:zlib";
 
 // WSK-44 — the Website workspace, against the STUBBED WSK-59 BFF (e2e/webdesk-stub/, run by
 // playwright.webdesk.config.ts). Every row of write-plane design §10's states table is reached here;
@@ -32,6 +34,10 @@ const stub = {
     approvals: { id: string; status: string; workflowId: string; toolArgs: { items: { itemId: string; version: number }[]; envId?: string; scope?: string; siteId?: string; tenantSlug?: string } }[];
     build: { state: string } | null;
     stagingStale: boolean;
+    // WSK-43c: the media library, and what the fake WebDesk upload endpoint received
+    media: { assetId: string; mime: string; sizeBytes: number; title: string | null; alt: Record<string, string>; tags: string[]; originalFilename: string | null; width: number | null; height: number | null; createdBy: string | null; deletedAt: string | null; bucket: string }[];
+    uploadLog: { token: string; contentType: string; filename: string | null; size: number; origin: string | null }[];
+    mediaLog: { op: string; bucket?: string; assetId?: string; keys?: string[]; by: string }[];
   },
   item: async (id: string) => (await stub.state()).items.find((i) => i.itemId === id)!,
 };
@@ -193,13 +199,114 @@ test("STATE dirty -> saving -> saved vN: the real composition renders and a save
   expect(it.publishedVersion).toBe(2); // saving never changes what is live
 });
 
-test("markdown fields have a source tab and a structural preview", async ({ page }) => {
+test("markdown fields have a visual editor, a source tab and a structural preview", async ({ page }) => {
   await open(page, SERVICE_SEO);
+  await expect(page.getByRole("tab", { name: "Visual" })).toHaveAttribute("aria-selected", "true"); // WSK-45: a text that round-trips opens visually
   await page.getByRole("tab", { name: "Preview" }).click();
   await expect(page.getByTestId("markdown-preview").getByRole("heading", { name: "SEO Agency in Bali" })).toBeVisible();
   await expect(page.getByTestId("markdown-preview").locator("li")).toHaveCount(3);
-  await page.getByRole("tab", { name: "Write" }).click();
+  await page.getByRole("tab", { name: "Source" }).click();
   await expect(page.locator(P("body"))).toBeVisible();
+});
+
+// WSK-45 — the visual editor in a real browser. The obligation (owner ruling WSK-D49): a body nobody changed is saved
+// byte-identical; a body that was changed differs from the original by exactly that change.
+const SEO_ID = "itm-service-seo-en";
+const headBody = async () => {
+  const it = await stub.item(SEO_ID);
+  const v = it.versions.at(-1)!;
+  return { n: it.headVersion, props: (v.props ?? {}) as Record<string, any> };
+};
+
+test("WSK-45 visual editor: bold on one word through the toolbar saves exactly that markdown change and nothing else", async ({ page }) => {
+  const before = await headBody();
+  expect(typeof before.props.body).toBe("string");
+  await open(page, SERVICE_SEO);
+  await expect(page.getByRole("tab", { name: "Visual" })).toHaveAttribute("aria-selected", "true");
+  const surface = page.locator(P("body"));
+  await expect(surface).toHaveAttribute("contenteditable", "true");
+  await hydrated(page.getByTestId("item-editor"));
+  // select the word "villas" with a real DOM selection, then press the Bold toolbar button
+  await surface.evaluate((root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const at = (n.textContent ?? "").indexOf("villas");
+      if (at >= 0) {
+        const r = document.createRange();
+        r.setStart(n, at);
+        r.setEnd(n, at + "villas".length);
+        const s = window.getSelection()!;
+        s.removeAllRanges();
+        s.addRange(r);
+        return;
+      }
+    }
+    throw new Error("word not found");
+  });
+  const bold = page.getByRole("button", { name: "Bold" });
+  await expect(bold).toBeEnabled();
+  await bold.click();
+  await expect(bold).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes");
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("save-status")).toHaveText(`Saved v${before.n + 1}`);
+  const after = await headBody();
+  expect(after.n).toBe(before.n + 1);
+  // the stored body is the original with exactly one change: villas -> **villas**
+  expect(after.props.body).toBe((before.props.body as string).replace("villas", "**villas**"));
+  expect(after.props.body).toContain("[CLIENT: confirm results claim]"); // the placeholder is untouched
+  // and no other field moved
+  const { body: _a, ...restAfter } = after.props;
+  const { body: _b, ...restBefore } = before.props;
+  expect(restAfter).toEqual(restBefore);
+});
+
+test("WSK-45 visual editor: an unchanged markdown body is saved byte-identical when another field is edited", async ({ page }) => {
+  const before = await headBody();
+  await open(page, SERVICE_SEO);
+  await expect(page.getByRole("tab", { name: "Visual" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(P("body"))).toHaveAttribute("contenteditable", "true");
+  // touch the editor without changing the document (focus, caret keys), move through the tabs and back
+  await page.locator(P("body")).click();
+  await page.keyboard.press("ArrowRight");
+  await page.getByRole("tab", { name: "Source" }).click();
+  await page.getByRole("tab", { name: "Visual" }).click();
+  await expect(page.locator(P("body"))).toHaveAttribute("contenteditable", "true");
+  await expect(page.getByTestId("save")).toBeDisabled(); // nothing is dirty yet: the editor has not changed the value
+  await page.locator(P("h1")).fill("SEO Agency in Bali — second edit");
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("save-status")).toHaveText(`Saved v${before.n + 1}`);
+  const after = await headBody();
+  expect(after.props.h1).toBe("SEO Agency in Bali — second edit");
+  expect(after.props.body).toBe(before.props.body); // the very same bytes
+});
+
+test("WSK-45 visual editor: typing then deleting a character leaves the field clean (the original bytes come back)", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  const surface = page.locator(P("body"));
+  await expect(surface).toHaveAttribute("contenteditable", "true");
+  await surface.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Control+Home");
+  await page.keyboard.press("End");
+  await page.keyboard.type("x");
+  await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes");
+  await page.keyboard.press("Backspace");
+  await expect(page.getByTestId("save-status")).toHaveText("No changes");
+  await expect(page.getByTestId("save")).toBeDisabled();
+});
+
+test("WSK-45 visual editor: no axe violation (WCAG 2 A/AA) inside the markdown field, toolbar and link bar open", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await expect(page.locator(P("body"))).toHaveAttribute("contenteditable", "true");
+  await page.getByRole("button", { name: "Link" }).click();
+  await expect(page.getByLabel("Link address")).toBeVisible();
+  const r = await new AxeBuilder({ page }).include(".wc-md").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(r.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
+  // a keyboard user can reach and operate the toolbar
+  await page.getByRole("button", { name: "Bold" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("button", { name: "Italic" })).toBeFocused();
 });
 
 test("STATE invalid (422): errors are located inline by JSON pointer and the edits are kept", async ({ page }) => {
@@ -651,6 +758,7 @@ test("create: a new item is filled in on the same form, then created as a draft"
   await page.locator(P("phase")).selectOption("L");
   await page.locator(P("visibility")).selectOption("shown");
   await page.locator(P("plan/action")).selectOption("SHOW");
+  await page.getByRole("tab", { name: "Source" }).click(); // the plain textarea: fill() sets the Markdown itself
   await page.locator(P("body")).fill("# New thing\n");
   await page.getByTestId("save").click();
   await expect(page).toHaveURL(/service\/service\.new-thing\?locale=en$/);
@@ -861,4 +969,401 @@ test("STATE key.mint approved but the mint FAILED: the typed error in plain word
   await expect(page.getByTestId("key-failed")).toContainText("The key wasn't created. WebDesk couldn't be reached. Nothing was sent.");
   await expect(page.getByTestId("key-once")).toHaveCount(0);
   await expect(page.getByLabel("API key")).toHaveCount(0);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// WSK-43c — the media library: the Media tab and the picker for media fields
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+const MEDIA = `${DEPT}/website/media/gaiada/site-gaiada-com`;
+const BANNER = `${SITE}/banner/banner.home?locale=en`;
+const SITE_ORIGIN = `http://localhost:${process.env.WD_E2E_APP_PORT || 3006}`;
+
+/** A real, decodable PNG of w x h (so the thumbnail genuinely renders, and the fake WebDesk reads w/h from its header). */
+function makePng(w: number, h: number, extra = ""): Buffer {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b: Buffer) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; // 8-bit RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0x7a)]);
+  const idat = zlib.deflateSync(Buffer.concat(Array.from({ length: h }, () => row)));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0)), Buffer.from(extra, "latin1")]);
+}
+const pngFile = (name = "hero.png", w = 16, h = 9, extra = "") => ({ name, mimeType: "image/png", buffer: makePng(w, h, extra) });
+
+async function openMedia(page: Page, url = MEDIA) {
+  await page.goto(url);
+  await hydrated(page.getByTestId("media-library"));
+}
+const upload = (page: Page, ...files: { name: string; mimeType: string; buffer: Buffer }[]) => page.getByTestId("media-file-input").setInputFiles(files);
+const axe = async (page: Page, include: string) =>
+  (await new AxeBuilder({ page }).include(include).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze()).violations;
+const seedMedia = async (o: Record<string, unknown>) => ((await stub.post("seed-media", o)) as { assetId: string }).assetId;
+
+test("the Website group has a Media tab next to Content; a library with nothing in it says it is empty", async ({ page }) => {
+  await page.goto(DEPT);
+  await page.getByRole("navigation", { name: "Department sections" }).getByRole("link", { name: "Website" }).click();
+  // the group's own tab strip ("Website tools"): Content and Media
+  const tabs = page.getByRole("navigation", { name: "Website tools" });
+  await expect(tabs.getByRole("link", { name: "Content" })).toBeVisible();
+  await tabs.getByRole("link", { name: "Media" }).click();
+  await expect(page).toHaveURL(/\/website\/media\/gaiada\/site-gaiada-com$/); // one site: straight in, as Content does
+  await expect(page.getByTestId("media-empty")).toContainText("library is empty");
+  await expect(page.getByTestId("media-upload")).toBeEnabled();
+});
+
+test("STATE media unavailable / forbidden: a notice with no grid and no 'empty' claim, on the Media tab", async ({ page }) => {
+  await stub.config({ unavailable: true });
+  await page.goto(MEDIA);
+  await expect(page.getByTestId("wd-editorial-unavailable")).toContainText("Editing is unavailable");
+  await expect(page.getByTestId("media-library")).toHaveCount(0);
+  await expect(page.getByTestId("media-empty")).toHaveCount(0);
+  await stub.config({ unavailable: false, forbidden: true });
+  await page.goto(MEDIA);
+  await expect(main(page)).toContainText("You don't have access");
+  await expect(page.getByTestId("media-grid")).toHaveCount(0);
+});
+
+test("upload one image, see it in the grid, set its alt text, pick it into an item's media field, save: the stub receives exactly the expected media value", async ({ page }) => {
+  await openMedia(page);
+  const file = pngFile("hero.png", 16, 9);
+  await upload(page, file);
+
+  // the grid shows it, its row says it uploaded, and the new asset is selected with its detail open
+  const tile = page.getByTestId("media-tile").first();
+  await expect(tile).toBeVisible();
+  await expect(page.getByTestId("media-uploads")).toContainText("Uploaded");
+  await expect(tile).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("media-detail-title")).toHaveText("hero.png");
+  // a thumbnail genuinely rendered (the fake WebDesk served the bytes)
+  await expect.poll(() => tile.locator("img").evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBe(16);
+
+  // what the FAKE WEBDESK received: the raw file, its own Content-Type and filename, from the ERP's origin, on a token minted for it
+  const s1 = await stub.state();
+  expect(s1.uploadLog).toEqual([{ token: "redacted", contentType: "image/png", filename: "hero.png", size: file.buffer.length, origin: SITE_ORIGIN }]);
+  expect(s1.mediaLog.filter((m) => m.op === "uploadToken")).toEqual([{ op: "uploadToken", bucket: "media", by: "demo-hansel" }]);
+  expect(s1.media).toHaveLength(1);
+  expect(s1.media[0]).toMatchObject({ mime: "image/png", width: 16, height: 9, originalFilename: "hero.png", createdBy: "demo-hansel" });
+  const assetId = s1.media[0].assetId;
+  await expect(page.getByTestId("media-uploader")).toHaveText(/\S/);
+
+  // alt text, per locale (the tenant's locales: en and id), a title and tags
+  await page.getByTestId("media-alt-en").fill("A tiny test image");
+  await page.getByTestId("media-alt-id").fill("Gambar uji kecil");
+  await page.getByLabel("Title").fill("Hero banner");
+  await page.getByLabel("Tags").fill("Hero, Test");
+  await page.getByTestId("media-save").click();
+  await expect(page.getByTestId("media-notice")).toHaveText("Saved Hero banner.");
+  await expect(page.getByTestId("media-save")).toBeDisabled();
+  const s2 = await stub.state();
+  expect(s2.media[0]).toMatchObject({ title: "Hero banner", alt: { en: "A tiny test image", id: "Gambar uji kecil" }, tags: ["hero", "test"] });
+  expect(s2.mediaLog.filter((m) => m.op === "update")).toEqual([{ op: "update", assetId, keys: ["title", "alt", "tags"], by: "demo-hansel" }]);
+  await expect(page.getByTestId("media-url")).toHaveValue(`/v1/t/gaiada/media/${assetId}`);
+
+  // pick it into the banner's media fields (the editor is in English)
+  await open(page, BANNER);
+  await page.getByRole("button", { name: /Choose from library: Hero image/ }).click();
+  const dlg = page.getByTestId("media-picker");
+  await expect(dlg).toBeVisible();
+  await dlg.getByTestId("media-tile").first().click();
+  await expect(dlg.getByTestId("media-detail-title")).toHaveText("Hero banner");
+  await dlg.getByTestId("media-use").click();
+  await expect(dlg).toHaveCount(0);
+  await expect(page.locator(P("hero/url"))).toHaveValue(`/v1/t/gaiada/media/${assetId}`);
+  await expect(page.locator(P("hero/alt"))).toHaveValue("A tiny test image");
+
+  // and APPEND to the multiple field, then save the item
+  await page.getByRole("button", { name: /Add from library: Gallery/ }).click();
+  await page.getByTestId("media-picker").getByTestId("media-tile").first().click();
+  await page.getByTestId("media-use").click();
+  await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes");
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("save-status")).toHaveText("Saved v2");
+
+  const banner = await stub.item("itm-banner-en");
+  const picked = { url: `/v1/t/gaiada/media/${assetId}`, alt: "A tiny test image", width: 16, height: 9, mime: "image/png" };
+  expect(banner.versions.at(-1)!.props).toEqual({ title: "Home banner", hero: picked, gallery: [picked] });
+
+  // the Media tab now says where it is used
+  await openMedia(page);
+  await page.getByTestId("media-tile").first().click();
+  await expect(page.getByTestId("media-usage-list")).toContainText("banner / banner.home (en)");
+  await expect(page.getByTestId("media-usage-list").getByRole("link")).toHaveAttribute("href", `${SITE}/banner/banner.home?locale=en`);
+});
+
+test("picking in the Indonesian editor writes the Indonesian alt", async ({ page }) => {
+  const id = await seedMedia({ title: "Villa", alt: { en: "A villa", id: "Sebuah vila" }, width: 800, height: 600, mime: "image/png", originalFilename: "villa.png" });
+  await open(page, BANNER);
+  await page.getByTestId("create-locale-id").click();
+  await expect(page).toHaveURL(/locale=id/);
+  await hydrated(page.getByTestId("item-editor"));
+  await page.getByRole("button", { name: /Choose from library: Hero image/ }).click();
+  await page.getByTestId("media-picker").getByTestId("media-tile").first().click();
+  await page.getByTestId("media-use").click();
+  await expect(page.locator(P("hero/alt"))).toHaveValue("Sebuah vila");
+  await expect(page.locator(P("hero/url"))).toHaveValue(`/v1/t/gaiada/media/${id}`);
+});
+
+test("uploading from inside the picker selects the new asset, ready to use", async ({ page }) => {
+  await open(page, BANNER);
+  await page.getByRole("button", { name: /Choose from library: Hero image/ }).click();
+  const dlg = page.getByTestId("media-picker");
+  await expect(dlg.getByTestId("media-empty")).toBeVisible();
+  await dlg.getByTestId("media-file-input").setInputFiles(pngFile("inline.png", 8, 8));
+  await expect(dlg.getByTestId("media-tile").first()).toHaveAttribute("aria-selected", "true");
+  await dlg.getByTestId("media-use").click();
+  const id = (await stub.state()).media[0].assetId;
+  await expect(page.locator(P("hero/url"))).toHaveValue(`/v1/t/gaiada/media/${id}`);
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("save-status")).toHaveText("Saved v2");
+  expect((await stub.item("itm-banner-en")).versions.at(-1)!.props!.hero).toEqual({ url: `/v1/t/gaiada/media/${id}`, width: 8, height: 8, mime: "image/png" });
+});
+
+test("manual URL entry still works beside the picker", async ({ page }) => {
+  await open(page, BANNER);
+  await page.locator(P("hero/url")).fill("https://cdn.example/manual.png");
+  await page.locator(P("hero/alt")).fill("typed by hand");
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("save-status")).toHaveText("Saved v2");
+  expect((await stub.item("itm-banner-en")).versions.at(-1)!.props!.hero).toEqual({ url: "https://cdn.example/manual.png", alt: "typed by hand" });
+});
+
+// ── the upload refusals, in plain words ─────────────────────────────────────────────────────────────
+
+test("STATE uploads not enabled (the ERP's origin is not on WebDesk's upload allow-list): the specific copy, nothing added, and a retry mints a fresh token", async ({ page }) => {
+  await stub.config({ uploadCors: false });
+  await openMedia(page);
+  await upload(page, pngFile("blocked.png"));
+  const row = page.getByTestId("media-upload-failed");
+  await expect(row).toContainText("Uploads aren't enabled for this site yet.");
+  await expect(row).toContainText("WEBDESK_UPLOAD_CORS_ORIGINS");
+  await expect(page.getByTestId("media-tile")).toHaveCount(0);
+  expect((await stub.state()).media).toHaveLength(0);
+  await stub.config({ uploadCors: true });
+  await page.getByRole("button", { name: "Retry blocked.png" }).click();
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  const s = await stub.state();
+  expect(s.mediaLog.filter((m) => m.op === "uploadToken")).toHaveLength(2); // a FRESH token for the retry
+  expect(s.media).toHaveLength(1);
+});
+
+test("STATE uploads not enabled (WebDesk's public URL is not configured on the platform): the same words, with the operator's fix", async ({ page }) => {
+  await stub.config({ publicUrlNotConfigured: true });
+  await openMedia(page);
+  await upload(page, pngFile());
+  await expect(page.getByTestId("media-upload-failed")).toContainText("Uploads aren't enabled for this site yet.");
+  await expect(page.getByTestId("media-upload-failed")).toContainText("WEBDESK_PUBLIC_BASE_URL");
+  expect((await stub.state()).uploadLog).toHaveLength(0); // nothing was sent
+});
+
+test("STATE refusals: too large and type not allowed are caught before any bytes leave; an infected file is refused by WebDesk's scan; a retry mints a fresh token", async ({ page }) => {
+  await stub.config({ mediaMaxBytes: 100 }); // a flat 64x64 PNG deflates to ~150 bytes
+  await openMedia(page);
+  await upload(page, pngFile("big.png", 64, 64), { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+  const rows = page.getByTestId("media-upload-failed");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("too large");
+  await expect(rows.nth(0)).toContainText("The limit is 100 B.");
+  await expect(rows.nth(1)).toContainText("That file type isn't allowed.");
+  expect((await stub.state()).uploadLog).toHaveLength(0);
+
+  await stub.config({ mediaMaxBytes: 1024 * 1024 });
+  await upload(page, pngFile("virus.png", 8, 8, "EICAR-STANDARD-ANTIVIRUS-TEST-FILE"));
+  const infected = page.locator('[data-testid="media-upload-failed"][data-kind="infected"]');
+  await expect(infected).toContainText("virus scan refused this file");
+  await expect(infected).toContainText("not added to the library");
+  expect((await stub.state()).media).toHaveLength(0);
+  await page.getByRole("button", { name: "Retry virus.png" }).click();
+  await expect.poll(async () => (await stub.state()).uploadLog.length).toBe(2); // the retry reached WebDesk with a new token
+  await expect(infected).toHaveCount(1);
+  const tokens = (await stub.state()).mediaLog.filter((m) => m.op === "uploadToken");
+  expect(tokens.length).toBe(4); // big.png, notes.txt, virus.png, and the retry: one token per attempt
+});
+
+test("STATE refusal: WebDesk's scanner being down is not the file's fault, and says to try again", async ({ page }) => {
+  await stub.config({ scanUnavailable: true });
+  await openMedia(page);
+  await upload(page, pngFile());
+  await expect(page.getByTestId("media-upload-failed")).toContainText("couldn't scan this file right now");
+});
+
+test("STATE read-only: a viewer browses the library, Upload is refused with a reason once tried, and Save and Delete say why they don't work", async ({ page, context }) => {
+  const id = await seedMedia({ title: "Villa", mime: "image/png", originalFilename: "villa.png" });
+  await loginAs(page, context, "gede@gaiada.com");
+  await openMedia(page);
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  await upload(page, pngFile());
+  await expect(page.getByTestId("media-upload-failed")).toContainText("You can't upload to this library.");
+  await expect(page.getByTestId("media-upload")).toBeDisabled();
+  await expect(page.getByTestId("media-upload-why")).toContainText("You can browse the library but not add to it");
+  await page.getByTestId("media-tile").first().click();
+  await page.getByLabel("Title").fill("A viewer's edit");
+  await page.getByTestId("media-save").click();
+  await expect(page.getByTestId("media-readonly")).toContainText("You can browse the library but not edit assets");
+  await expect(page.getByLabel("Title")).not.toBeEditable();
+  await expect(page.getByLabel("Title")).toHaveValue("A viewer's edit"); // kept
+  await page.getByTestId("media-delete").click();
+  await page.getByTestId("media-delete-confirm").click();
+  await expect(page.getByTestId("media-delete-failed")).toContainText("needs a Web Dev publisher");
+  expect((await stub.state()).media.find((m) => m.assetId === id)).toMatchObject({ title: "Villa", deletedAt: null });
+});
+
+test("STATE stale: a failed refresh keeps the grid and says so; Try again recovers", async ({ page }) => {
+  await seedMedia({ title: "Villa", mime: "image/png", originalFilename: "villa.png" });
+  await openMedia(page);
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  await stub.config({ unavailable: true });
+  await page.getByTestId("media-q").fill("vil");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("media-stale")).toContainText("Couldn't update the list");
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  await stub.config({ unavailable: false });
+  await page.getByTestId("media-stale-retry").click();
+  await expect(page.getByTestId("media-stale")).toHaveCount(0);
+});
+
+test("filters (search, tag, type) and cursor paging", async ({ page }) => {
+  for (let i = 1; i <= 50; i++) {
+    await seedMedia({ title: `Photo ${String(i).padStart(2, "0")}`, tags: i % 2 ? ["odd"] : ["even"], mime: "image/png", originalFilename: `p${i}.png`, createdAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString() });
+  }
+  await seedMedia({ title: "Brochure", mime: "application/pdf", originalFilename: "brochure.pdf", tags: ["print"] });
+  await openMedia(page);
+  await expect(page.getByTestId("media-tile")).toHaveCount(48);
+  await page.getByTestId("media-more").click();
+  await expect(page.getByTestId("media-tile")).toHaveCount(51);
+  await expect(page.getByTestId("media-more")).toHaveCount(0);
+  await page.getByTestId("media-type").selectOption("application/pdf");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  await page.getByRole("button", { name: "Clear" }).click();
+  await page.getByTestId("media-tag").fill("even");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("media-tile")).toHaveCount(25);
+  await page.getByTestId("media-q").fill("no such thing");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("media-empty")).toContainText("No media matches these filters.");
+});
+
+// ── delete ────────────────────────────────────────────────────────────────────────────────────────
+
+test("delete: an unused asset is deleted after a confirm; one that content uses is refused with the items that use it (never just 'failed')", async ({ page }) => {
+  const used = await seedMedia({ title: "Used", mime: "image/png", originalFilename: "used.png" });
+  const spare = await seedMedia({ title: "Spare", mime: "image/png", originalFilename: "spare.png", createdAt: new Date(Date.now() - 60_000).toISOString() });
+  await stub.post("concurrent-save", { itemId: "itm-banner-en", fields: { hero: { url: `/v1/t/gaiada/media/${used}` } } });
+  await openMedia(page);
+
+  await page.locator(`[data-asset-id="${used}"]`).click();
+  await page.getByTestId("media-delete").click();
+  await expect(page.getByTestId("media-delete-dialog")).toContainText("Delete this file?");
+  await page.getByTestId("media-delete-confirm").click();
+  await expect(page.getByTestId("media-in-use")).toContainText("is used by 1 item");
+  await expect(page.getByTestId("media-in-use-list")).toContainText("banner / banner.home (en)");
+  await expect(page.getByTestId("media-in-use-list").getByRole("link")).toHaveAttribute("href", `${SITE}/banner/banner.home?locale=en`);
+  await expect(page.getByTestId("media-delete-failed")).toHaveCount(0);
+  await page.getByTestId("media-delete-close").click();
+  await expect(page.getByTestId("media-tile")).toHaveCount(2); // still there
+
+  await page.locator(`[data-asset-id="${spare}"]`).click();
+  await page.getByTestId("media-delete").click();
+  await page.getByTestId("media-delete-confirm").click();
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  await expect(page.getByTestId("media-notice")).toContainText("Deleted. WebDesk keeps the stored file until");
+  const s = await stub.state();
+  expect(s.media.find((m) => m.assetId === spare)!.deletedAt).not.toBeNull();
+  expect(s.media.find((m) => m.assetId === used)!.deletedAt).toBeNull();
+});
+
+test("an unconfirmed save (502 webdesk_ambiguous) is not 'saved' and not 'failed': Retry re-sends the same change", async ({ page }) => {
+  await seedMedia({ title: "Villa", mime: "image/png", originalFilename: "villa.png" });
+  await openMedia(page);
+  await page.getByTestId("media-tile").first().click();
+  await page.getByLabel("Title").fill("Renamed");
+  await stub.config({ ambiguousMediaWrite: "land" });
+  await page.getByTestId("media-save").click();
+  await expect(page.getByTestId("media-save-problem")).toContainText("couldn't confirm the save");
+  await stub.config({ ambiguousMediaWrite: null });
+  await page.getByTestId("media-save-retry").click();
+  await expect(page.getByTestId("media-notice")).toHaveText("Saved Renamed.");
+});
+
+// ── keyboard and accessibility ─────────────────────────────────────────────────────────────────────
+
+test("keyboard: the grid is one tab stop with arrow-key movement, Enter selects, and the picker dialog traps focus and gives it back", async ({ page }) => {
+  for (let i = 1; i <= 4; i++) await seedMedia({ title: `Photo ${i}`, mime: "image/png", originalFilename: `p${i}.png`, createdAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString() });
+  await openMedia(page);
+  const tiles = page.getByTestId("media-tile");
+  await expect(tiles).toHaveCount(4);
+  await tiles.first().focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(tiles.nth(1)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(tiles.nth(3)).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(tiles.first()).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(tiles.first()).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("media-detail")).toBeVisible();
+
+  // the picker: focus stays inside, Escape closes, focus returns to the button that opened it
+  await open(page, BANNER);
+  const opener = page.getByRole("button", { name: /Choose from library: Hero image/ });
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  const dlg = page.getByTestId("media-picker");
+  await expect(dlg.getByTestId("media-tile")).toHaveCount(4);
+  // modal: Tab cycles through the dialog (and the browser's own chrome, where activeElement reads as <body>), and never lands on
+  // anything of the page behind it
+  for (let i = 0; i < 25; i++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => { const el = document.activeElement; return el === document.body || !!el?.closest("dialog"); })).toBe(true);
+  }
+  await expect(dlg).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dlg).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
+test("the upload control works without drag and drop, and progress is announced politely (never assertive, never role=log)", async ({ page }) => {
+  await openMedia(page);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Upload files" }).click();
+  await (await chooser).setFiles([pngFile("kbd.png")]);
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  const status = page.getByTestId("media-upload-status");
+  await expect(status).toHaveAttribute("aria-live", "polite");
+  await expect(status).toHaveAttribute("role", "status");
+  await expect(status).toHaveText("kbd.png uploaded.");
+  // scoped to the library: the shell's own assistant drawer is a role=log of its own
+  await expect(page.getByTestId("media-library").locator('[aria-live="assertive"], [role="log"]')).toHaveCount(0);
+});
+
+test("axe: the Media tab (with an asset selected and an upload row) has no violations", async ({ page }) => {
+  await seedMedia({ title: "Villa", alt: { en: "A villa" }, tags: ["hero"], mime: "image/png", originalFilename: "villa.png", width: 800, height: 600 });
+  await openMedia(page);
+  await upload(page, pngFile("axe.png"));
+  await expect(page.getByTestId("media-tile")).toHaveCount(2);
+  await expect(page.getByTestId("media-usage")).toContainText("Not used by any item");
+  expect(await axe(page, '[data-testid="media-library"]')).toEqual([]);
+  // and with a refusal on screen
+  await stub.config({ uploadCors: false });
+  await upload(page, pngFile("axe2.png"));
+  await expect(page.getByTestId("media-upload-failed")).toBeVisible();
+  expect(await axe(page, '[data-testid="media-library"]')).toEqual([]);
+});
+
+test("axe: the picker dialog has no violations (empty, then with an asset selected)", async ({ page }) => {
+  await open(page, BANNER);
+  await page.getByRole("button", { name: /Choose from library: Hero image/ }).click();
+  const dlg = page.getByTestId("media-picker");
+  await expect(dlg.getByTestId("media-empty")).toBeVisible();
+  expect(await axe(page, '[data-testid="media-picker"]')).toEqual([]);
+  await dlg.getByTestId("media-file-input").setInputFiles(pngFile("axe.png"));
+  await expect(dlg.getByTestId("media-tile")).toHaveCount(1);
+  await expect(dlg.getByTestId("media-use")).toBeVisible();
+  expect(await axe(page, '[data-testid="media-picker"]')).toEqual([]);
 });

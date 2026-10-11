@@ -85,8 +85,13 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // the EXISTING `portal` kind. 405 -> 406 / 390 -> 391.
     // WSK-47 (2026-10-10): +10 grantable / +10 total on 2 NEW kinds (webdesk_content_item x8,
     // webdesk_collection x2), all uiGrantable:true. 406 -> 416 / 391 -> 401.
-    expect(permissions.length).toBe(416);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(401);
+    // WSK-43b (2026-10-11): +4 grantable / +4 total on 1 NEW kind (webdesk_media_asset x4), all
+    // uiGrantable:true. 416 -> 420 / 401 -> 405.
+    // WSK-49f (2026-10-11): +2 grantable / +2 total on the EXISTING client_contact kind
+    // (manage_website_editor, manage_admin), both uiGrantable:true.
+    // Merged: 416 base + 4 + 2 = 422 total; 401 base + 4 + 2 = 407 grantable.
+    expect(permissions.length).toBe(422);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(407);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

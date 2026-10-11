@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import service from "../../../../e2e/webdesk-stub/compositions/service.json";
 import navigation from "../../../../e2e/webdesk-stub/compositions/navigation.json";
 import type { CollectionSummary, ItemDetail, ItemWriteResult, ItemRef, TenantRef, SiteRef, WdResult } from "@/lib/webdeskContentModel";
@@ -9,7 +9,10 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace: vi.fn() }) }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/webdeskContentActions", () => ({
-  createItemAndOpenAction: vi.fn(), deleteItemAction: vi.fn(), getItemHeadAction: vi.fn(), refreshEditorAction: vi.fn(), saveItemAction: vi.fn(),
+  createItemAndOpenAction: vi.fn(), deleteItemAction: vi.fn(), getItemHeadAction: vi.fn(), previewItemAction: vi.fn(), refreshEditorAction: vi.fn(), saveItemAction: vi.fn(),
+}));
+vi.mock("@/lib/webdeskMediaActions", () => ({
+  listMediaAction: vi.fn(), mediaUsageAction: vi.fn(), mintUploadTokenAction: vi.fn(), updateMediaAction: vi.fn(), deleteMediaAction: vi.fn(),
 }));
 // The publish bar has its own suite; here it only needs to show what the editor tells it.
 vi.mock("./PublishBar", () => ({
@@ -17,6 +20,7 @@ vi.mock("./PublishBar", () => ({
 }));
 
 import * as A from "@/lib/webdeskContentActions";
+import * as M from "@/lib/webdeskMediaActions";
 import { ItemEditor } from "./ItemEditor";
 
 const a = vi.mocked(A);
@@ -416,5 +420,127 @@ describe("create mode", () => {
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.seo" } });
     await click(saveBtn());
     expect(document.querySelector("#wc-slug")?.closest(".wc-field")?.textContent).toContain("already used");
+  });
+});
+
+// WSK-46: the Preview control in the side panel. The card's own states are PreviewCard.test.tsx; this is the editor's wiring.
+describe("preview (WSK-46): the editor hands the card the same gates Save has", () => {
+  const previewBtn = () => screen.getByTestId("preview") as HTMLButtonElement;
+  const LINK = { previewUrl: "https://stg.example/preview/#t=tok", expiresAt: "2026-10-11T09:00:00Z", version: 3 };
+  let open: MockInstance<typeof window.open>;
+  beforeEach(() => { open = vi.spyOn(window, "open").mockReturnValue(null); });
+  afterEach(() => { open.mockRestore(); });
+
+  it("an edit-mode item has a Preview button beside the staging link; it previews the version the editor is on and opens a new tab", async () => {
+    a.previewItemAction.mockResolvedValue(ok(LINK));
+    mount(bundle(detail(SERVICE_FIELDS, {}, 3)));
+    expect(screen.getByTestId("view-staging")).toBeTruthy();
+    expect(previewBtn().disabled).toBe(false);
+    await click(previewBtn());
+    expect(a.previewItemAction).toHaveBeenCalledWith(SCOPE, "i1", 3);
+    expect(open).toHaveBeenCalledWith(LINK.previewUrl, "_blank", "noopener,noreferrer");
+  });
+
+  it("is disabled exactly when Save is: read-only from the server, a 403 on save, a stale page, an unconfirmed write", async () => {
+    mount(bundle(detail(SERVICE_FIELDS)), { readOnlyReason: "This item is locked." });
+    expect(previewBtn().disabled).toBe(true);
+    expect(screen.getByTestId("preview-why").textContent).toContain("Read-only.");
+    cleanup();
+
+    a.saveItemAction.mockResolvedValue({ kind: "forbidden", reason: "forbidden" });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    expect(previewBtn().disabled).toBe(true);
+    cleanup();
+
+    a.refreshEditorAction.mockResolvedValueOnce({ kind: "unavailable", code: "editorial_unavailable", reason: "editorial_unavailable" });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    await click(screen.getByTestId("refresh-now"));
+    expect(previewBtn().disabled).toBe(true);
+    expect(screen.getByTestId("preview-why").textContent).toContain("Disabled until WebDesk answers again.");
+    await click(previewBtn());
+    cleanup();
+
+    a.saveItemAction.mockResolvedValue({ kind: "unavailable", code: "upstream_error", reason: "not_observed" });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    expect(previewBtn().disabled).toBe(true);
+    expect(screen.getByTestId("preview-why").textContent).toContain("Disabled until you reload.");
+    expect(a.previewItemAction).not.toHaveBeenCalled();
+  });
+
+  it("unsaved edits do not disable it; it says the link shows the last saved version", () => {
+    mount(bundle(detail(SERVICE_FIELDS, {}, 3)));
+    type("h1", "Mine");
+    expect(previewBtn().disabled).toBe(false);
+    expect(screen.getByTestId("preview-why").textContent).toBe("Shows the last saved version (v3), not your unsaved changes.");
+  });
+
+  it("a refusal is a notice in the side panel; the editor's edits and Save are untouched (a preview is not a write)", async () => {
+    a.previewItemAction.mockResolvedValue({ kind: "conflict", slug: "preview_page_missing", message: "m", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Mine");
+    await click(previewBtn());
+    expect(screen.getByTestId("preview-notice").textContent).toContain("doesn't have a preview page yet");
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("stale-banner")).toBeNull();
+    expect(field("h1").value).toBe("Mine");
+    expect(saveBtn().disabled).toBe(false);
+  });
+
+  it("create mode has no Preview (there is no saved draft yet), and a deleted item has none either", () => {
+    render(<ItemEditor mode="create" scope={SCOPE} routeBase={ROUTE} collection={coll("service", service)} tenant={tenant} site={site} seed={{ locale: "en", twinOf: null, slug: "", fields: {}, seo: {}, extraBlocks: [] }} authors={{}} readOnlyReason={null} />);
+    expect(screen.queryByTestId("preview-card")).toBeNull();
+    cleanup();
+    mount(bundle(detail(SERVICE_FIELDS, { item: ref({ deletedAt: "2026-10-10" }) })), { readOnlyReason: "This item has been deleted." });
+    expect(screen.queryByTestId("preview-card")).toBeNull();
+  });
+});
+
+// The picker reads the library asynchronously inside the full editor (TipTap and all). On a loaded gate host the first
+// tile took longer than Testing Library's 1s default (sumopod m3r354b, load ~17; 3/3 green at load 4), so the tile
+// waits get a longer ceiling. It only bounds how long a correct render may take; it asserts nothing weaker.
+const TILE_WAIT = { timeout: 5000 };
+
+describe("WSK-43c: a media field filled from the library is saved as the exact media value", () => {
+  const banner = { fields: [{ name: "title", primitive: "text" }, { name: "hero", primitive: "media", ui: { label: "Hero image" } }, { name: "gallery", primitive: "media", multiple: true, ui: { label: "Gallery" } }], blocks: [], ui: { label: "Banner" } };
+  beforeEach(() => { Object.values(M).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset()); });
+  const asset = { assetId: "a1", url: "/v1/t/gaiada/media/a1", mime: "image/webp", sizeBytes: 100, scanStatus: "clean", title: "Hero", alt: { en: "A villa", id: "Sebuah vila" }, tags: [], originalFilename: "hero.webp", width: 1600, height: 900, createdBy: "u1", createdAt: "t", updatedAt: "t", deletedAt: null };
+
+  it.each([["en", "A villa"], ["id", "Sebuah vila"]])("picking in the %s editor writes that locale's alt; Save sends it; the gallery appends", async (locale, alt) => {
+    vi.mocked(M.listMediaAction).mockResolvedValue({ kind: "ok", data: { assets: [asset], page: { cursor: null, hasMore: false, limit: 48 } } });
+    vi.mocked(M.mediaUsageAction).mockResolvedValue({ kind: "ok", data: { assetId: "a1", url: asset.url, total: 0, items: [] } });
+    a.saveItemAction.mockResolvedValue(ok(written(4)));
+    const d = detail({ title: "T", gallery: [{ url: "/old.png" }] }, { item: ref({ locale, collectionKey: "banner" }) });
+    const b = bundle(d, {}, coll("banner", banner));
+    mount(b, { mediaPublicBase: "https://webdesk.example" });
+
+    const heroBtn = screen.getAllByRole("button", { name: /Choose from library: Hero image/ })[0];
+    heroBtn.focus(); fireEvent.click(heroBtn);
+    fireEvent.click((await screen.findAllByTestId("media-tile", undefined, TILE_WAIT))[0]);
+    fireEvent.click(await screen.findByTestId("media-use"));
+    await waitFor(() => expect(screen.queryByTestId("media-picker")).toBeNull());
+
+    const addBtn = screen.getByRole("button", { name: /Add from library: Gallery/ });
+    addBtn.focus(); fireEvent.click(addBtn);
+    fireEvent.click((await screen.findAllByTestId("media-tile", undefined, TILE_WAIT))[0]);
+    fireEvent.click(await screen.findByTestId("media-use"));
+    await waitFor(() => expect(screen.queryByTestId("media-picker")).toBeNull());
+
+    expect(status()).toBe("Unsaved changes");
+    await click(saveBtn());
+    const [, , body] = a.saveItemAction.mock.calls[0];
+    const picked = { url: "/v1/t/gaiada/media/a1", alt, width: 1600, height: 900, mime: "image/webp" };
+    expect(body.fields.hero).toEqual(picked);
+    expect(body.fields.gallery).toEqual([{ url: "/old.png" }, picked]);
+  });
+
+  it("a read-only item has a disabled picker and the library is never read", () => {
+    const b = bundle(detail({ title: "T" }, { item: ref({ collectionKey: "banner" }) }), {}, coll("banner", banner));
+    mount(b, { readOnlyReason: "This item has been deleted." });
+    for (const btn of screen.getAllByTestId("media-choose")) expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(M.listMediaAction).not.toHaveBeenCalled();
   });
 });

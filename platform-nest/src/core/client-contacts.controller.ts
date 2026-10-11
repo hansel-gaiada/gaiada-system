@@ -34,7 +34,8 @@ import { config } from "../config";
 import { newId, withGlobal, withTenants } from "../db";
 import { authorize, notify, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
-import { insertGrantRow } from "../admin/grant-write.service";
+import { insertGrantRow, revokeClientWebsiteEditor, CLIENT_WEBSITE_EDITOR_ROLE } from "../admin/grant-write.service";
+import { writeClientAccessAuditTx } from "./client-website-access.controller";
 import { createInvite, consumeInvite, generatePassword } from "./client-invites";
 import {
   createUser as kcCreateUser,
@@ -231,6 +232,22 @@ export class ClientContactsController {
         [id],
       );
       await emitEvent(c, tenantId, "client_contact", id, "client_contact.revoked", { actorId: req.principal.userId });
+      // WSK-49f: a revoked contact keeps no website-editor grant. It would already be inert (assemblePrincipal
+      // drops a client-scoped grant whose holder is not an ACTIVE client-wide contact), but a dormant grant
+      // would silently come back to life if the contact were ever re-invited, so it is deleted here and the
+      // deletion is audited in the same transaction. Only a client-wide row can hold one.
+      if (contact.project_id === null) {
+        const grantId = await revokeClientWebsiteEditor(c, {
+          tenantId, clientId: contact.client_id, targetUserId: contact.user_id,
+          actorUserId: req.principal.userId, actorVia: "staff",
+        });
+        if (grantId) {
+          await writeClientAccessAuditTx(c, tenantId, req.principal.userId, "client_website_editor.revoked", id, {
+            clientId: contact.client_id, contactId: id, targetUserId: contact.user_id, role: CLIENT_WEBSITE_EDITOR_ROLE,
+            grantId, surface: "staff", reason: "contact_revoked",
+          });
+        }
+      }
     });
 
     // Disable at the IdP too — the platform side alone would still let them hold a live session until

@@ -11,12 +11,15 @@
     "companionDoc": "docs/superpowers/plans/2026-08-13-iam-sec-06-report.md",
     "keyOrder": "roles sorted alphabetically by name; each role's scope-type list sorted lexically",
     "counts": {
-      "roles": 12
+      "roles": 13
     }
   },
   "roles": {
     "client": [
       "company"
+    ],
+    "client_website_editor": [
+      "client"
     ],
     "company_admin": [
       "company",

@@ -171,7 +171,7 @@ const WEB_DEV: DeptToolkit = {
     },
     // WSK-44 — Website: the ERP screen where staff edit the content of the sites WebDesk serves
     // (gaiada.com first). Write-plane design §10 / Decision H: Home · Work · Build · **Website** ·
-    // Connections. One tab today, **Content** (site -> collection -> item editor -> history). Writers'
+    // Connections. Two tabs: **Content** (site -> collection -> item editor -> history) and **Media** (WSK-43c: the site's library). Writers'
     // room, SEO & AI search, Analytics, Leads and Governance are later tabs of THIS group, so the group
     // key is "website" and the tab key "content" — neither will change when they arrive. The tab's
     // `path` carries the whole sub-tree (`website/content/[tenant]/[site]/…`); DeptTabs lights it by
@@ -182,6 +182,8 @@ const WEB_DEV: DeptToolkit = {
       icon: "sitemap",
       tabs: [
         { key: "content", label: "Content", path: "website/content", icon: "box", blurb: "Edit the content of the websites WebDesk serves: pages, globals and settings. Saved as drafts; publishing is requested and approved separately." },
+        // WSK-43c — the site's media library: upload, describe (alt text per language, tags), find where an image is used, delete.
+        { key: "media", label: "Media", path: "website/media", icon: "image", blurb: "The images and files WebDesk serves for a site: upload them, write their alt text, see where each is used. A media field in the content editor picks from here." },
       ],
     },
     CONNECTIONS_GROUP,

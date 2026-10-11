@@ -153,6 +153,14 @@ const DIRECT: Record<string, RealRole[]> = {
   // IAM Phase 2 (P2-02) — it_account's own narrower IT tier (it_admin/it_manager, NOT plain "it").
   // Mirrors generate-role-bundles.mjs's own DIRECT entry so this file's independent re-derivation agrees.
   it_managers: ["it_admin", "it_manager"],
+  // WSK-49f (WSK-D60): the two ATTRIBUTE-gated client-website derived roles map to NO real role on purpose.
+  // `client_contact_admin` is a client CONTACT capability (a principal attribute, not a grant) and
+  // `client_website_editor` is a client-scoped grant that carries no permission bundle at all, so neither can
+  // contribute a (role, key) pair to any bundle. Listing them as empty keeps the "unknown derived role" guard
+  // armed for every OTHER new derived role. Kept byte-aligned across generate-role-bundles.mjs and
+  // role-permission-parity.db.test.ts.
+  client_contact_admin: [],
+  client_website_editor: [],
 };
 
 // MON-10b — the five module-tiered monitoring kinds (0117 + the completion migration). BARE names,
@@ -190,9 +198,10 @@ function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] 
   // generate-role-bundles.mjs's own GH-03 addition (see that file's comment for the full reasoning).
   // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
   // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
+  // WSK-43b (2026-10-11): `webdesk_media_asset` (the media library) joins them, same reasoning.
   // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
-      kind === "webdesk_content_item" || kind === "webdesk_collection") {
+      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset") {
     return ["webdev_staff"];
   }
   if (kind === "service_assignment" || kind === "member") {
@@ -220,9 +229,10 @@ function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[
   // GH-03 (2026-08-31) — see moduleStaffTargets' own GH-03 note above.
   // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
   // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
+  // WSK-43b (2026-10-11): `webdesk_media_asset` (the media library) joins them, same reasoning.
   // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
-      kind === "webdesk_content_item" || kind === "webdesk_collection") {
+      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset") {
     return ["webdev_manager"];
   }
   if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager", "monitoring_manager"];

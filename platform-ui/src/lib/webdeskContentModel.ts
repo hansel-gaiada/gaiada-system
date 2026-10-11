@@ -870,3 +870,48 @@ export function describeKeyMintError(token: string | null | undefined): string {
     default: return `Reason: ${t}`;
   }
 }
+
+// ── Draft preview (WSK-46, owner ruling WSK-D52) ─────────────────────────────────────────────────
+// `POST …/sites/:t/:s/items/:itemId/preview` {version?} -> 200 {previewUrl, expiresAt, version}.
+// `previewUrl` is `https://<staging domain>/preview/#t=<token>`: the token is in the FRAGMENT (never sent to a server or
+// a Referer) and is a one-time bearer secret to ONE draft, so it is opened in a new tab (`noopener,noreferrer`), never
+// logged, and never put in an error message (the parser names a path and a type, not a value). Two 409s are plain-words
+// states, not failures, and mint nothing: `preview_not_configured` (the site has no staging address) and
+// `preview_page_missing` (the site has no /preview/ page yet). 502 `preview_site_unreachable`: the site did not answer.
+
+export interface PreviewLink {
+  previewUrl: string;
+  /** ISO instant after which the link stops working. */
+  expiresAt: string;
+  /** The draft version the link shows. */
+  version: number;
+}
+
+export const PREVIEW_NOT_CONFIGURED = "preview_not_configured";
+export const PREVIEW_PAGE_MISSING = "preview_page_missing";
+export const PREVIEW_SITE_UNREACHABLE = "preview_site_unreachable";
+
+/** What the Preview control says about a refusal, in plain words: the tone is `info` for the two states that are a
+ *  site setup matter (nothing is wrong with the editor), `bad` for anything the user may want to retry. */
+export function previewRefusalCopy(r: Exclude<WdResult<PreviewLink>, { kind: "ok" }>): { tone: "info" | "bad"; text: string } {
+  switch (r.kind) {
+    case "conflict":
+      if (r.slug === PREVIEW_NOT_CONFIGURED) return { tone: "info", text: "Preview isn't set up for this site yet. The site needs a staging address before a preview link can be made." };
+      if (r.slug === PREVIEW_PAGE_MISSING) return { tone: "info", text: "This site doesn't have a preview page yet. Ask the site's developer to add one. No link was made." };
+      if (r.slug === "item-deleted") return { tone: "bad", text: "This item has been deleted, so there is nothing to preview." };
+      return { tone: "bad", text: `A preview link couldn't be made: ${r.message}` };
+    case "forbidden":
+      return { tone: "bad", text: "You don't have permission to make a preview link for this item." };
+    case "not_found":
+      return { tone: "bad", text: "This item, or the version you are on, no longer exists in WebDesk." };
+    case "not_enabled":
+      return { tone: "info", text: "Preview isn't available on this deployment." };
+    case "invalid":
+      return { tone: "bad", text: `A preview link couldn't be made: ${r.message}` };
+    case "unavailable":
+      if (isOutcomeUnknown(r)) return { tone: "bad", text: "We couldn't confirm a preview link was made. Try again." };
+      if (r.code === "contract_drift") return { tone: "bad", text: `WebDesk answered unexpectedly (${r.reason}). No link was opened.` };
+      if (r.reason === PREVIEW_SITE_UNREACHABLE) return { tone: "bad", text: "The site didn't answer, so a preview link couldn't be made. Try again in a moment." };
+      return { tone: "bad", text: "Couldn't reach WebDesk, so no preview link was made. Try again shortly." };
+  }
+}

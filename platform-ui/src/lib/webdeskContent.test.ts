@@ -432,6 +432,11 @@ describe("resolveAuthorNames is COSMETIC, and the only read here that swallows a
     members.mockResolvedValue([{ user_id: "u1", name: "Dewi" }] as never);
     expect(await resolveAuthorNames("u", "c")).toEqual({ u1: "Dewi" });
   });
+  it("asks for service accounts too, so an automation author (the importer) gets its name, not a short id", async () => {
+    members.mockResolvedValue([{ user_id: "u1", name: "Dewi" }, { user_id: "01a12709-4db9", name: "Automation — WebDesk importer", kind: "service" }] as never);
+    expect(await resolveAuthorNames("u", "c")).toEqual({ u1: "Dewi", "01a12709-4db9": "Automation — WebDesk importer" });
+    expect(members).toHaveBeenLastCalledWith("u", "c", { includeService: true });
+  });
   it("returns an empty map on failure so authors fall back to short ids (it never states anything about content)", async () => {
     members.mockRejectedValue(new Error("403"));
     expect(await resolveAuthorNames("u", "c")).toEqual({});

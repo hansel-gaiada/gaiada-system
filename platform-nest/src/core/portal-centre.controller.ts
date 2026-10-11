@@ -32,7 +32,8 @@ import {
   DEFAULT_BUSINESS_TYPE,
 } from "../modules/clients/centre/store";
 
-/** CC-D4's editor test — see the file header. Returns false for a viewer, a project-scoped signer,
+/** CC-D4's editor test — see the file header. `admin` implies signer (WSK-49f, owner ruling 2026-10-11), so
+ *  an active client-wide admin edits too. Returns false for a viewer, a project-scoped signer,
  *  or anyone not an active contact of this exact client at all (a caller outside scope should never
  *  reach this function — the route checks `clientId ∈ scope.clientIds` first). */
 export async function canEditCentre(c: PoolClient, userId: string, clientId: string): Promise<boolean> {
@@ -40,7 +41,7 @@ export async function canEditCentre(c: PoolClient, userId: string, clientId: str
     `SELECT EXISTS (
        SELECT 1 FROM client_contacts cc
         WHERE cc.user_id = $1 AND cc.client_id = $2 AND cc.project_id IS NULL
-          AND cc.capability = 'signer' AND cc.status = 'active' AND cc.deleted_at IS NULL
+          AND cc.capability IN ('signer', 'admin') AND cc.status = 'active' AND cc.deleted_at IS NULL
        UNION
        SELECT 1 FROM clients cl WHERE cl.id = $2 AND cl.portal_user_id = $1 AND cl.deleted_at IS NULL
      ) AS can_edit`,

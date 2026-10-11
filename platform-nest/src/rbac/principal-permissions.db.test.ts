@@ -224,17 +224,18 @@ describe.skipIf(!TEST_URL)("IAM-03a · assemblePrincipal() perms resolution", ()
 
   it("two roles at the SAME scope dedupe to the union, not the sum, with no duplicate (key,scope) pairs", async () => {
     const p = await assemblePrincipal(multiRoleId, "high");
-    // member (79) and manager (116) overlap substantially; the union must be strictly less than
-    // the naive sum (195) and every (key, scopeId) pair must be unique.
+    // member and manager overlap substantially; the union must be strictly less than the naive sum
+    // and every (key, scopeId) pair must be unique.
     //
-    // AD-7b (2026-09-05) grew both bundles: member 74->79 and manager 109->116, from the
-    // agency discovery-intake kinds (migration 202609051010). member's 5 new keys are a strict
-    // SUBSET of manager's 7, so the union grew by 7, not 12 — which is precisely the property this
-    // assertion exists to check, and why the literals must move together with the bundles rather
-    // than the bound simply being loosened. Same pinned-literal maintenance every kind-adding
-    // ticket in this file's history performs.
-    expect(p!.perms!.length).toBeGreaterThan(0);
-    expect(p!.perms!.length).toBeLessThan(79 + 116);
+    // The sum is DERIVED from the bundle artifact, like every other size in this file. It used to be
+    // the literal `79 + 116`, which went stale as the bundles grew (member 88, manager 181 by
+    // 1.0.0-alpha.354) while the union crept up underneath it: 192 on main, then 195 once WSK-43b
+    // gave manager three webdesk_media_asset keys member lacks, and a correct union failed against
+    // an out-of-date sum. A derived sum keeps the property honest without per-kind maintenance; the
+    // lower bound adds the other half of "union, not sum": never fewer than the larger bundle.
+    const sum = bundleSize("member") + bundleSize("manager");
+    expect(p!.perms!.length).toBeGreaterThanOrEqual(Math.max(bundleSize("member"), bundleSize("manager")));
+    expect(p!.perms!.length).toBeLessThan(sum);
     const pairs = p!.perms!.map((g) => `${g.key}::${g.scopeType}::${g.scopeId}`);
     expect(new Set(pairs).size).toBe(pairs.length);
     // member's self-scoped hr.case.create AND manager's core.pipeline_stage.update must both survive

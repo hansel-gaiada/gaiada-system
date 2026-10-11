@@ -46,6 +46,8 @@ export const webdevModule: ModuleContract = {
     "202609011230_webdev_provisioned_sites_framework_widen.sql",
     // WSK-47 (additive): IAM seed for the two WebDesk editorial kinds (no DDL).
     "202610101420_iam_webdesk_content_permissions.sql",
+    // WSK-43b (additive): IAM seed for the WebDesk media library kind (no DDL).
+    "202610111030_iam_webdesk_media_permissions.sql",
     // WSK-60 (additive): the staging rebuild ledger + the stale-staging marker (third wall).
     "202610101730_webdev_site_builds.sql",
   ],
@@ -70,6 +72,11 @@ export const webdevModule: ModuleContract = {
     { key: "webdev.webdesk_content_item.delete", description: "Delete a WebDesk editorial item" },
     { key: "webdev.webdesk_collection.read", description: "View a WebDesk site's collections and compositions" },
     { key: "webdev.webdesk_collection.apply_schema", description: "Apply a composition change to a WebDesk collection" },
+    // WSK-43b (additive): the WebDesk media library (m3 plan "WSK-43 · The media library"). No approval gate: all MEDIUM or lower.
+    { key: "webdev.webdesk_media_asset.read", description: "View a WebDesk site's media library and where each asset is used" },
+    { key: "webdev.webdesk_media_asset.upload", description: "Start a WebDesk media upload (mints a single-use upload token)" },
+    { key: "webdev.webdesk_media_asset.update", description: "Edit a WebDesk media asset's title, alt text and tags" },
+    { key: "webdev.webdesk_media_asset.delete", description: "Delete a WebDesk media asset that no content uses" },
   ],
   customFieldTargets: [],
   mcpTools: [
@@ -441,6 +448,12 @@ export const webdevModule: ModuleContract = {
     // D14 PAIRING (the standing lesson): unpublish and delete are registered in BOTH
     // `core/approval-executables.ts` AND `resource_mcp_tool.yaml`'s executable list, in this same change.
     //
+    // WSK-46 `webdesk.content.preview` is `medium` (it mints a capability link that exposes a DRAFT) and is NOT on that
+    // list, on purpose and pending the owner's call: an attended human runs it (the editor's Preview button is the
+    // same BFF route); an unattended caller SUSPENDS, and approving that suspension re-drives nothing (`not_applicable`)
+    // because the link is a one-time secret that must not be parked in an approval row. So an agent cannot hold a
+    // preview link unattended. Registering it would need `core/approval-executables.ts` + the Cerbos list (not WSK-46's paths).
+    //
     // ASSURANCE. `low`, like every other WebDesk tool: the hub mints only `low` for an n8n workflow or a chat-surface
     // agent (principal.ts), and `verified` would lock exactly the unattended callers this program exists for out of
     // the capability. The real authority is the platform's Cerbos decision on the resolved human, not this floor.
@@ -525,7 +538,7 @@ export const webdevModule: ModuleContract = {
     },
     {
       name: "webdesk.content.listMedia",
-      description: "List a site's media library assets (id, key, mime, size, scan status).",
+      description: "List a site's media library assets (id, key, mime, size, scan status). Same route as `webdesk.media.list`, which supersedes it; now authorised as `webdesk_media_asset:read`.",
       minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media",
@@ -653,6 +666,141 @@ export const webdevModule: ModuleContract = {
           baseVersion: { type: "integer", minimum: 0 },
         },
         required: ["tenantId", "tenantSlug", "siteId", "itemId", "baseVersion"],
+      },
+    },
+    {
+      name: "webdesk.content.preview",
+      description:
+        "Make a one-time PREVIEW link to an item's DRAFT (its head version, or `version`), opening on the site's own /preview/ page. "
+        + "MEDIUM write: the link shows unpublished content to whoever holds it, so an unattended caller (agent / n8n) is suspended for "
+        + "human approval, and the link is a secret: share it only with the person who asked. Returns {previewUrl, expiresAt, version}; "
+        + "the link expires (about an hour) and is shown once. Typed 409 `preview_not_configured` (the site has no staging address) / "
+        + "`preview_page_missing` (the site has no /preview/ page yet) mint nothing.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/preview",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          version: { type: "integer", minimum: 1, description: "The version to preview; omit for the head (latest draft)." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId"],
+      },
+    },
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // WSK-43b — the media library's MCP tools (m3 plan "WSK-43 · The media library"; owner rulings WSK-D53/D54).
+    // One tool per action, routed through the SAME BFF handlers as the HTTP routes
+    // (`webdesk-content.controller.ts` → `webdesk-media.service.ts`), authorised as the Cerbos kind
+    // `webdesk_media_asset`. Names follow the `webdesk.content.*` convention above (dotted, camelCase action).
+    //
+    // IMPACT CLASSES. `list` and `usage` are reads. `uploadToken`, `update` and `delete` are `medium`, like WebDesk's
+    // own impact class for the three commands: an unattended caller (n8n or an agent) SUSPENDS into a WS4 approval
+    // (D14), an attended human is not suspended.
+    //
+    // D14 PAIRING, AND WHY `uploadToken` IS THE ONE MEDIUM TOOL THAT IS NOT PAIRED. `update` and `delete` are
+    // registered in BOTH `core/approval-executables.ts` (registerWebdeskMediaExecutableApprovals) AND
+    // `resource_mcp_tool.yaml`'s executable list, in this same change, so an approved suspension re-drives as the
+    // ORIGINAL principal. `uploadToken` is deliberately in neither: its result is a ONE-TIME SECRET (a bearer upload
+    // URL), and a D14 re-drive stores the tool's result text in `automation_approvals.execution_result`, i.e. it
+    // would write the plaintext token into a durable table. So an unattended agent/n8n `uploadToken` call suspends
+    // and, on approval, does nothing (`not_applicable`): an unattended caller can never obtain a token. The tool
+    // exists for an ATTENDED human (whose call is not suspended): returning the upload URL is its whole purpose, the
+    // token is single-use, ten minutes, bound to one site, bucket, size cap and set of types, and this tool's
+    // result is never ledgered or stored by the ERP (see webdesk-media.service.ts).
+    //
+    // HUB LIMITATION (same as the content tools): `mcp-hub/src/module-tools.ts` sends only PATH args for a GET, so
+    // `list` returns Zone B's default first page with no filters or cursor, and a Zone B problem reaches the agent as
+    // the hub's generic "platform … <status>" error: the structured `media-in-use` item list is visible over HTTP
+    // (and through `webdesk.media.usage`, which an agent should call before a delete), not in a hub error.
+    {
+      name: "webdesk.media.list",
+      description:
+        "List a site's media library assets (id, title, alt, tags, mime, size, dimensions, scan status, URL), newest first. "
+        + "Returns the first page only (hub limitation: no filters or cursor over MCP yet). Deleted assets are hidden.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId"],
+      },
+    },
+    {
+      name: "webdesk.media.usage",
+      description:
+        "Where one media asset is used: the items (live or draft, at most 50) whose content references it, with collection, "
+        + "locale, slug and where in the item. An asset with items cannot be deleted (409 media-in-use): call this first.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId/usage",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, assetId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId", "assetId"],
+      },
+    },
+    {
+      name: "webdesk.media.uploadToken",
+      description:
+        "Start a media upload: mints a SINGLE-USE upload URL (valid about ten minutes, bound to this site, bucket, size cap and "
+        + "allowed types) and returns {uploadUrl, expiresAt, maxBytes, allowedMimes}. POST the raw file bytes to uploadUrl with "
+        + "its Content-Type; the bytes go straight to WebDesk, never through the ERP. The URL is a secret: do not log or share it. "
+        + "MEDIUM write: an unattended caller (agent / n8n) is suspended and never receives a token.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/upload-token",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" },
+          bucket: { type: "string", enum: ["media", "video"], description: "The library's public bucket the file goes into." },
+          maxBytes: { type: "integer", minimum: 1, description: "Size cap; defaults to and cannot exceed the platform maximum." },
+          mime: { description: "Allowed media type(s), a subset of the bucket's allowlist; defaults to the whole list.", oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "bucket"],
+      },
+    },
+    {
+      name: "webdesk.media.update",
+      description:
+        "Edit a media asset's metadata. Provide at least one of: `title` (string, or null to clear), `alt` (the COMPLETE locale -> text map; {} clears it), "
+        + "`tags` (the COMPLETE list; [] clears it). MEDIUM write: an unattended caller is suspended for human approval and re-driven as the original requester.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, assetId: { type: "string" },
+          title: { type: ["string", "null"], maxLength: 200 },
+          alt: { type: "object", additionalProperties: { type: "string", maxLength: 500 } },
+          tags: { type: "array", maxItems: 20, items: { type: "string", maxLength: 40 } },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "assetId"],
+      },
+    },
+    {
+      name: "webdesk.media.delete",
+      description:
+        "Soft-delete a media asset (it leaves the library; the stored file is purged after its retention). REFUSED with 409 media-in-use while any live or "
+        + "draft item still uses the asset: call webdesk.media.usage first. MEDIUM write: an unattended caller is suspended for human approval and re-driven as the original requester.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "DELETE",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, assetId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId", "assetId"],
       },
     },
   ],

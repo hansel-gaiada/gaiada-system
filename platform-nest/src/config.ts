@@ -745,6 +745,20 @@ const configBase = {
     /** Assertion lifetime. §5: 60 s; WebDesk refuses anything over 120 s, so the signer refuses to configure above it. */
     ttlSec: positiveIntFromEnv("WEBDESK_EDITORIAL_TTL_SEC", 60),
   },
+  // WSK-43b — the PUBLIC origin of the WebDesk api: the host that serves `/v1/...` to browsers (the same
+  // origin the site build's `WEBDESK_API_URL` names), NOT the internal mTLS control vhost above. The media
+  // library hands the editor's browser an upload URL on it (`<base>/v1/t/<slug>/media/upload/<token>`): the
+  // browser uploads the bytes straight to WebDesk and they never pass through the ERP. Nothing else in the
+  // ERP knew this origin, so it is one explicit value. NO DEFAULT, same doctrine as the control channel: a
+  // guessed host would point an editor's upload (and its one-time token) at the wrong place, so unset ⇒ the
+  // upload-token route answers 503 `webdesk_not_configured` before it mints anything. Must be https
+  // (http only for a loopback dev host), no credentials, query or fragment; a trailing slash is stripped.
+  // WebDesk's own `WEBDESK_UPLOAD_CORS_ORIGINS` must list the ERP origin or the browser's upload is blocked.
+  // Compose: pass it through the api's `environment:` block (`${WEBDESK_PUBLIC_BASE_URL:-}`); a value only
+  // in `.env` never reaches the container.
+  webdeskPublic: {
+    baseUrl: process.env.WEBDESK_PUBLIC_BASE_URL ?? "",
+  },
   // WSK-60 — publish → rebuild → staging (write-plane design §9). A publish approval's id authorises ONE
   // `workflow_dispatch` of the site repo's `webdesk-rebuild.yml` through the GitHub chokepoint; the ERP
   // then polls the staging site's `webdesk-build.json` stamp. NO DEFAULT TARGET, EVER (the PRV-02 rule):

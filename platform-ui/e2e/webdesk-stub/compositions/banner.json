@@ -1,0 +1,15 @@
+{
+  "fields": [
+    { "name": "title", "primitive": "text", "required": true },
+    { "name": "hero", "primitive": "media", "ui": { "label": "Hero image" } },
+    { "name": "gallery", "primitive": "media", "multiple": true, "ui": { "label": "Gallery" } }
+  ],
+  "blocks": [],
+  "ui": {
+    "label": "Banners",
+    "description": "STUB ONLY (WSK-43c): the one composition with media fields, so the picker has something to fill. Not part of the gaiada.com bundle.",
+    "group": "Pages",
+    "order": 9,
+    "titleField": "title"
+  }
+}

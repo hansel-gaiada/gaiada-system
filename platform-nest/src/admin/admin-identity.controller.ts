@@ -66,6 +66,8 @@ const ROLE_SCOPE_CONSTRAINTS: Record<string, readonly string[]> = {
   platform_admin: ["global"],
   client: ["company"],
   org_unit_lead: ["org_unit"],
+  // WSK-49f: derived_roles.yaml's `client_website_editor` can only match a `client` scope (a clients.id).
+  client_website_editor: ["client"],
 };
 
 /** THE single scope-guard check — every write path that mints a `user_roles` row from a
