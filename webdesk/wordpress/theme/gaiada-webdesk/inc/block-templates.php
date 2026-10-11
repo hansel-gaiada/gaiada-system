@@ -11,6 +11,14 @@ declare(strict_types=1);
 
 namespace GaiadaWebDesk\Theme;
 
+/** An <img> whose src has already passed gaiada_safe_img_src(); an empty (refused) src omits the
+ *  attribute. $url is NOT yet escaped here, $alt IS already escaped. */
+function gaiada_img_tag(string $url, string $alt): string
+{
+    $src = $url === '' ? '' : ' src="' . gaiada_h($url) . '"';
+    return "<img{$src} alt=\"{$alt}\" loading=\"lazy\">";
+}
+
 /** @param array<string,mixed> $props */
 function gaiada_render_block_hero(array $props): string
 {
@@ -22,9 +30,11 @@ function gaiada_render_block_hero(array $props): string
 /** @param array<string,mixed> $props */
 function gaiada_render_block_richText(array $props): string
 {
-    // richText's `value` is trusted, pre-sanitized editorial HTML (matching RichText.astro's own
-    // `set:html` — the vocabulary's job to sanitize at write time, not this renderer's).
-    $value = is_string($props['value'] ?? null) ? $props['value'] : '';
+    // richText's `value` is EDITOR-CONTROLLED HTML and is NOT sanitised at write time: the WebDesk API
+    // validates shape only (a string or a `{ root }` object), so this renderer sanitises it here, via
+    // the one route gaiada_sanitize_html() (wp_kses_post() inside WordPress, htmlspecialchars() outside).
+    // RichText.astro does the same with an allow-list sanitiser (M6-P5c).
+    $value = gaiada_sanitize_html(is_string($props['value'] ?? null) ? $props['value'] : '');
     return "<div class=\"gaiada-block gaiada-block-richtext\">{$value}</div>";
 }
 
@@ -34,9 +44,9 @@ function gaiada_render_block_gallery(array $props): string
     $items = is_array($props['items'] ?? null) ? $props['items'] : [];
     $html = '<div class="gaiada-block gaiada-block-gallery">';
     foreach ($items as $item) {
-        $url = gaiada_h(is_array($item) ? ($item['url'] ?? '') : '');
+        $url = gaiada_safe_img_src(is_array($item) ? ($item['url'] ?? '') : '');
         $alt = gaiada_h(is_array($item) ? ($item['alt'] ?? '') : '');
-        $html .= "<img src=\"{$url}\" alt=\"{$alt}\" loading=\"lazy\">";
+        $html .= gaiada_img_tag($url, $alt);
     }
     return $html . '</div>';
 }
@@ -45,7 +55,7 @@ function gaiada_render_block_gallery(array $props): string
 function gaiada_render_block_cta(array $props): string
 {
     $label = gaiada_h($props['label'] ?? '');
-    $href = gaiada_h($props['href'] ?? '#');
+    $href = gaiada_h(gaiada_safe_href($props['href'] ?? '#'));
     return "<div class=\"gaiada-block gaiada-block-cta\"><a href=\"{$href}\">{$label}</a></div>";
 }
 
@@ -96,8 +106,8 @@ function gaiada_render_block_logoCloud(array $props): string
     $logos = is_array($props['logos'] ?? null) ? $props['logos'] : [];
     $html = '<div class="gaiada-block gaiada-block-logocloud">';
     foreach ($logos as $logo) {
-        $url = gaiada_h(is_array($logo) ? ($logo['url'] ?? '') : '');
-        $html .= "<img src=\"{$url}\" alt=\"\" loading=\"lazy\">";
+        $url = gaiada_safe_img_src(is_array($logo) ? ($logo['url'] ?? '') : '');
+        $html .= gaiada_img_tag($url, '');
     }
     return $html . '</div>';
 }

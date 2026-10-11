@@ -18,6 +18,7 @@ declare(strict_types=1);
 namespace GaiadaWebDesk\Theme;
 
 require_once __DIR__ . '/block-vocabulary.php';
+require_once __DIR__ . '/safety.php';
 
 /**
  * Splits a raw `blocks` array (an ItemEnvelope's own `blocks`, per webdesk/delivery/vocabulary/
