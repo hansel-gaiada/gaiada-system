@@ -18,6 +18,7 @@ import {
   JOB_CONTENT_TICK,
   JOB_FORMS_PURGE,
   JOB_IDEMPOTENCY_SWEEP,
+  JOB_MEDIA_PURGE,
   SCHEDULER_JOB_IDS,
   SchedulerConfigError,
   TICK_SECONDS,
@@ -150,7 +151,7 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
     }
   });
 
-  it("enabled: queue.getJobSchedulers() lists exactly the three ids with the configured intervals; a second app instance leaves it at three; shutdown leaves no unhandled error", async () => {
+  it("enabled: queue.getJobSchedulers() lists exactly the four ids with the configured intervals; a second app instance leaves it at four; shutdown leaves no unhandled error", async () => {
     useEnv({ WEBDESK_SCHEDULER_ENABLED: "true", WEBDESK_SCHEDULER_TICK_SECONDS: "20", WEBDESK_SCHEDULER_HOURLY_SECONDS: "600" });
     const first = await boot();
     const svc1 = first.get(SchedulerService);
@@ -159,12 +160,13 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
       { id: JOB_CONTENT_TICK, everyMs: 20_000 },
       { id: JOB_FORMS_PURGE, everyMs: 600_000 },
       { id: JOB_IDEMPOTENCY_SWEEP, everyMs: 600_000 },
+      { id: JOB_MEDIA_PURGE, everyMs: 600_000 },
     ];
     const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
     expect([...(await svc1.listJobSchedulers())].sort(byId)).toEqual([...expected].sort(byId));
     expect([...SCHEDULER_JOB_IDS].sort()).toEqual(expected.map((e) => e.id).sort());
 
-    // A second replica boots against the same queue: upsert is idempotent, still exactly three.
+    // A second replica boots against the same queue: upsert is idempotent, still exactly four.
     const second = await boot();
     const svc2 = second.get(SchedulerService);
     await svc2.registered;
@@ -176,7 +178,7 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
     try {
       const list = await probe.getJobSchedulers();
       expect(list.map((j) => j.key).sort()).toEqual([...SCHEDULER_JOB_IDS].sort());
-      expect(await probe.getJobSchedulersCount()).toBe(3);
+      expect(await probe.getJobSchedulersCount()).toBe(4);
     } finally {
       await probe.close();
     }
@@ -193,7 +195,7 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
     expect(unhandled.slice(before)).toEqual([]);
   }, 60_000);
 
-  it("three replicas booting at the same instant still register exactly three job schedulers", async () => {
+  it("three replicas booting at the same instant still register exactly four job schedulers", async () => {
     useEnv({ WEBDESK_SCHEDULER_ENABLED: "true", WEBDESK_SCHEDULER_TICK_SECONDS: "30", WEBDESK_SCHEDULER_HOURLY_SECONDS: "900" });
     const replicas = await Promise.all([boot(), boot(), boot()]);
     await Promise.all(replicas.map((a) => a.get(SchedulerService).registered));
@@ -205,6 +207,7 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
         [JOB_CONTENT_TICK]: 30_000,
         [JOB_FORMS_PURGE]: 900_000,
         [JOB_IDEMPOTENCY_SWEEP]: 900_000,
+        [JOB_MEDIA_PURGE]: 900_000,
       });
     } finally {
       await probe.close();
@@ -218,7 +221,7 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
     await svc.registered;
     expect(svc.settings).toMatchObject({ enabled: true, tickSeconds: 60, hourlySeconds: 3600 });
     const got = Object.fromEntries((await svc.listJobSchedulers()).map((j) => [j.id, j.everyMs]));
-    expect(got).toEqual({ [JOB_CONTENT_TICK]: 60_000, [JOB_FORMS_PURGE]: 3_600_000, [JOB_IDEMPOTENCY_SWEEP]: 3_600_000 });
+    expect(got).toEqual({ [JOB_CONTENT_TICK]: 60_000, [JOB_FORMS_PURGE]: 3_600_000, [JOB_IDEMPOTENCY_SWEEP]: 3_600_000, [JOB_MEDIA_PURGE]: 3_600_000 });
   }, 30_000);
 
   it.each([
@@ -244,7 +247,7 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
     }
   }, 30_000);
 
-  it("the worker dispatches by job name: the maintenance jobs and the content tick complete, an unknown name fails (and nothing crashes)", async () => {
+  it("the worker dispatches by job name: the maintenance jobs, the media purge and the content tick complete, an unknown name fails (and nothing crashes)", async () => {
     // Long intervals: the schedulers themselves will not fire during this test; jobs are added by hand.
     useEnv({ WEBDESK_SCHEDULER_ENABLED: "true", WEBDESK_SCHEDULER_TICK_SECONDS: "300", WEBDESK_SCHEDULER_HOURLY_SECONDS: "86400" });
     const app = await boot();
@@ -265,6 +268,11 @@ describe("WSK-61 scheduler wiring (real Redis, the real AppModule)", () => {
       const content = await queue.add(JOB_CONTENT_TICK, {});
       const contentOut = (await content.waitUntilFinished(events, 60_000)) as { published: number; errors: number };
       expect(contentOut.errors).toBe(0);
+
+      // WSK-43a: the media purge is dispatched by name and answers its counts (nothing is due here).
+      const mediaPurge = await queue.add(JOB_MEDIA_PURGE, {});
+      const mediaOut = (await mediaPurge.waitUntilFinished(events, 60_000)) as { tenants: number; purged: number; versionsDeleted: number; failed: number };
+      expect(mediaOut).toEqual({ tenants: expect.any(Number), purged: expect.any(Number), versionsDeleted: expect.any(Number), failed: 0 });
 
       const bogus = await queue.add("not-a-job", {}, { attempts: 1 });
       await expect(bogus.waitUntilFinished(events, 20_000)).rejects.toThrow(/unknown scheduler job: not-a-job/);

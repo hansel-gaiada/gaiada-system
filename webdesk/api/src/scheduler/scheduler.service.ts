@@ -1,4 +1,5 @@
-// WSK-61 — the scheduler: three BullMQ job schedulers on one queue, one worker, in the api process.
+// WSK-61 — the scheduler: four BullMQ job schedulers on one queue, one worker, in the api process
+// (three from WSK-61, plus WSK-43a's media-purge).
 //
 // WHY BULLMQ JOB SCHEDULERS. Redis is already a hard dependency (tenant webhooks, mail), and a job
 // scheduler makes BullMQ create ONE job per tick per scheduler id however many replicas run. Rejected:
@@ -9,16 +10,17 @@
 //   content-tick            WEBDESK_SCHEDULER_TICK_SECONDS    ContentTickService.runContentTick()
 //   forms-retention-purge   WEBDESK_SCHEDULER_HOURLY_SECONDS  MaintenanceJobsService.runFormsPurge()
 //   idempotency-sweep       WEBDESK_SCHEDULER_HOURLY_SECONDS  MaintenanceJobsService.runIdempotencySweep()
+//   media-purge             WEBDESK_SCHEDULER_HOURLY_SECONDS  MediaPurgeService.runMediaPurge()  (WSK-43a)
 //
 // MULTI-REPLICA. upsertJobScheduler is idempotent (same id + same interval changes nothing), so every
 // replica registers on boot without coordination. Every replica also runs a worker (concurrency 1), so
 // whichever picks a tick job up runs it. Even if two ticks ever overlap (a slow tick, clock skew),
-// ContentTickService claims each item with FOR UPDATE SKIP LOCKED, and the two maintenance jobs are
-// idempotent, so overlap is safe, merely wasted work.
+// ContentTickService claims each item with FOR UPDATE SKIP LOCKED, MediaPurgeService claims each asset the
+// same way, and the two maintenance jobs are idempotent, so overlap is safe, merely wasted work.
 //
 // BOOT. Registration happens in the background and retries until Redis answers, so a Redis outage
 // delays the schedule rather than blocking or failing the api's boot (the webhook and mail queues are
-// built the same non-blocking way). `registered` resolves once all three are in; it never rejects.
+// built the same non-blocking way). `registered` resolves once all four are in; it never rejects.
 //
 // SHUTDOWN. The worker closes first (it finishes a running job, then stops taking more), then the queue,
 // both awaited, and a registration still retrying is told to stop. No promise is left to reject later.
@@ -34,10 +36,12 @@ import { redisConnectionOptions } from "../queue/redis-connection";
 import { closeBullmq } from "../queue/bullmq-shutdown";
 import { ContentTickService } from "./content-tick.service";
 import { MaintenanceJobsService } from "./maintenance-jobs.service";
+import { MediaPurgeService } from "./media-purge.service";
 import {
   JOB_CONTENT_TICK,
   JOB_FORMS_PURGE,
   JOB_IDEMPOTENCY_SWEEP,
+  JOB_MEDIA_PURGE,
   resolveSchedulerSettings,
   type SchedulerSettings,
 } from "./scheduler.config";
@@ -56,12 +60,13 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
 
   /** The resolved settings (set by onModuleInit; undefined before). */
   settings?: SchedulerSettings;
-  /** Resolves when the three job schedulers are registered (or the service is closing). Never rejects. */
+  /** Resolves when the four job schedulers are registered (or the service is closing). Never rejects. */
   registered: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly content: ContentTickService,
     private readonly jobs: MaintenanceJobsService,
+    private readonly mediaPurge: MediaPurgeService,
     private readonly db: DbService,
   ) {}
 
@@ -92,6 +97,7 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
       [JOB_CONTENT_TICK, s.tickSeconds],
       [JOB_FORMS_PURGE, s.hourlySeconds],
       [JOB_IDEMPOTENCY_SWEEP, s.hourlySeconds],
+      [JOB_MEDIA_PURGE, s.hourlySeconds],
     ];
     for (let attempt = 0; !this.closing; attempt++) {
       try {
@@ -130,6 +136,9 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
         return this.jobs.runFormsPurge();
       case JOB_IDEMPOTENCY_SWEEP:
         return this.jobs.runIdempotencySweep();
+      case JOB_MEDIA_PURGE:
+        // Per-asset failures are counted and logged inside, never thrown: a storage outage must not fail the job loop.
+        return this.mediaPurge.runMediaPurge();
       default:
         throw new Error(`unknown scheduler job: ${job.name}`);
     }
