@@ -29,7 +29,7 @@ import {
   type TransitionOutcome,
 } from "./agency-leads.service";
 import { mintInviteToken, revokeIntakeToken } from "./agency-intake-tokens.service";
-import { createLeadFromWebSubmission } from "./agency-web-leads.service";
+import { createLeadFromWebSubmission, listWebLeads } from "./agency-web-leads.service";
 import { listStageHistory, moveLeadStage, readPipelineReference, setLeadDeal } from "./agency-lead-pipeline.service";
 
 /** Turns a `TransitionOutcome` into the HTTP response for a triage endpoint, or throws the typed
@@ -63,6 +63,18 @@ export class AgencyLeadsController {
   async list(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "agency_lead", tenantId, module: "agency" }, "read");
     return listLeadsQueue(tenantId);
+  }
+
+  /** M5-L6 — the web leads of one WebDesk site (tenant) slug, newest first, for the Website → Leads tab. A path
+   *  segment, not a query filter, so the same route is reachable by the MCP tool (the hub fills path parameters
+   *  only on a GET). `agency_lead:read`, tenant-wide, like the queue: no new kind. `authorize()` runs BEFORE the slug
+   *  is looked at, so a denied caller never learns anything from a validation answer. Click-id VALUES and the
+   *  raw attribution never leave the service (see `summarizeAttribution`). */
+  @Get(":tenantId/agency/web-leads/:siteSlug")
+  async webLeads(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("siteSlug") siteSlug: string) {
+    await authorize(req.principal, { kind: "agency_lead", tenantId, module: "agency" }, "read");
+    if (!siteSlug || siteSlug.length > 200) throw new BadRequestException("siteSlug is required (at most 200 characters)");
+    return listWebLeads(tenantId, siteSlug);
   }
 
   /** Detail, joined to the latest submission. `authorize()` runs WITH the lead's `id` and BEFORE

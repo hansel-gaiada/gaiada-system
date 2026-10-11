@@ -239,3 +239,99 @@ export async function createLeadFromWebSubmission(
   });
   return result.created ? { outcome: "created", leadId: result.leadId } : { outcome: "existing", leadId: result.leadId };
 }
+
+// ───────────────────────────────────────────────────────────────────────── M5-L6: the Website → Leads read
+const CLICK_ID_KEYS = ["gclid", "gbraid", "wbraid", "fbclid", "msclkid", "li_fat_id"] as const;
+const SUMMARY_TEXT_CAP = 512;
+export const WEB_LEADS_LIST_LIMIT = 200;
+
+/** What staff see of a web lead's attribution. An ALLOW-LIST projection of the stored jsonb: the landing and form
+ *  page paths, the referrer host, the three UTM columns the screen shows, and click-id PRESENCE (the names of the
+ *  click ids that are set, never their values). fbp/fbc, utm_term/content, the ids and everything unknown stay in
+ *  the table and never reach the browser or an agent. Wrong-typed values read as absent. */
+export interface WebLeadAttributionSummary {
+  landing: string | null;
+  formPage: string | null;
+  referrer: string | null;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  clickIds: string[];
+}
+
+export interface WebLeadRow {
+  id: string;
+  orgName: string;
+  contactName: string | null;
+  originForm: string | null;
+  createdAt: string;
+  status: string;
+  stage: string;
+  attribution: WebLeadAttributionSummary;
+  /** The banner choice for marketing at submit time: `true` / `false`, or `null` = unknown (no record = no consent). */
+  marketingConsent: boolean | null;
+}
+
+export interface WebLeadsList {
+  /** `AGENCY_WEB_LEADS_ENABLED === "1"` — the flag's state only, never its raw value. */
+  leadIntakeEnabled: boolean;
+  /** More than WEB_LEADS_LIST_LIMIT leads exist for this site; the newest are shown. */
+  truncated: boolean;
+  leads: WebLeadRow[];
+}
+
+function summaryText(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim().slice(0, SUMMARY_TEXT_CAP) : null;
+}
+
+export function summarizeAttribution(raw: unknown): WebLeadAttributionSummary {
+  const a = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return {
+    landing: summaryText(a.landing),
+    formPage: summaryText(a.form_page),
+    referrer: summaryText(a.referrer),
+    utmSource: summaryText(a.utm_source),
+    utmMedium: summaryText(a.utm_medium),
+    utmCampaign: summaryText(a.utm_campaign),
+    clickIds: CLICK_ID_KEYS.filter((k) => typeof a[k] === "string" && (a[k] as string).trim() !== ""),
+  };
+}
+
+export function marketingConsentOf(raw: unknown): boolean | null {
+  const c = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return typeof c.marketing === "boolean" ? c.marketing : null;
+}
+
+/** The web leads for one WebDesk site (tenant) slug, newest first. The CALLER authorizes `read` on `agency_lead`
+ *  first; the tenant wall (`tenant_id = $1` under `withTenants`, no `{ modules }` option) is what keeps another
+ *  company's leads out, even for an identical slug. */
+export async function listWebLeads(tenantId: string, siteSlug: string): Promise<WebLeadsList> {
+  const { rows } = await withTenants([tenantId], (c) =>
+    c.query<{
+      id: string; org_name: string; contact_name: string | null; origin_form: string | null; created_at: Date | string;
+      status: string; stage: string; attribution: unknown; visitor_consent: unknown;
+    }>(
+      `SELECT id, org_name, contact_name, origin_form, created_at, status, stage, attribution, visitor_consent
+         FROM agency_leads
+        WHERE tenant_id = $1 AND deleted_at IS NULL AND source = 'web' AND web_site_slug = $2
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${WEB_LEADS_LIST_LIMIT + 1}`,
+      [tenantId, siteSlug],
+    ),
+  );
+  return {
+    leadIntakeEnabled: webLeadsEnabled(),
+    truncated: rows.length > WEB_LEADS_LIST_LIMIT,
+    leads: rows.slice(0, WEB_LEADS_LIST_LIMIT).map((r) => ({
+      id: r.id,
+      orgName: r.org_name,
+      contactName: r.contact_name,
+      originForm: r.origin_form,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      status: r.status,
+      stage: r.stage,
+      attribution: summarizeAttribution(r.attribution),
+      marketingConsent: marketingConsentOf(r.visitor_consent),
+    })),
+  };
+}

@@ -474,6 +474,29 @@ const AGENCY_INTAKE_CORE_TOOLS: McpToolDef[] = [
     },
   },
 
+  // ── M5-L6: the Website → Leads read ─────────────────────────────────────────────────────────────
+  {
+    name: "agency_intake.listWebLeads",
+    description:
+      "The web leads (source 'web') filed from one WebDesk site (tenant) slug, newest first, at most 200 " +
+      "(`truncated` says more exist). Per lead: org/contact name, form key, received-at, pipeline stage and status, " +
+      "an attribution summary (landing, form page, referrer, utm source/medium/campaign, and which click ids are " +
+      "PRESENT by name — never their values) and the visitor's marketing consent (true / false / null = unknown, " +
+      "which counts as no consent). `leadIntakeEnabled` is false while AGENCY_WEB_LEADS_ENABLED is off: an empty " +
+      "list then means intake is off, not that no one submitted. A 403 is a refusal, never an empty list.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/agency/web-leads/:siteSlug",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        siteSlug: { type: "string", description: "The WebDesk tenant slug of the site (e.g. the one in the Website workspace's URL)." },
+      },
+      required: ["tenantId", "siteSlug"],
+    },
+  },
+
   // ── the one medium-impact write ───────────────────────────────────────────────────────────────────
   {
     name: "agency_intake.convert",
