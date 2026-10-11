@@ -34,7 +34,7 @@ export function planCi({ files, forceAll = false, groups = cfg.CI_GROUPS, shared
     reasons[name] = hit ? `changed: ${hit}` : "no relevant change -> skipped";
   }
   outputs.any_test = ["wa_chat_bot", "mcp_hub", "ai_agents", "report_renderer"].some((k) => outputs[k]);
-  outputs.any_webdesk_light = ["webdesk_root", "webdesk_blocks", "webdesk_deploy"].some((k) => outputs[k]);
+  outputs.any_webdesk_light = ["webdesk_root", "webdesk_blocks", "webdesk_deploy", "webdesk_wordpress"].some((k) => outputs[k]);
   return { outputs, reasons };
 }
 

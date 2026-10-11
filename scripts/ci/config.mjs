@@ -40,6 +40,9 @@ export const CI_GROUPS = {
   // blocks vendors delivery/vocabulary and fails on drift.
   webdesk_blocks: ["webdesk/blocks/", "webdesk/delivery/vocabulary/"],
   webdesk_deploy: ["webdesk/deploy/"],
+  // M6-P5b: the WordPress theme + its php-cli probes. The vendored block list derives from
+  // delivery/vocabulary, and sdk-php.mts generates the PHP SDK fixture the probes load.
+  webdesk_wordpress: ["webdesk/wordpress/", "webdesk/delivery/vocabulary/", "webdesk/api/src/codegen/generator/sdk-php.mts"],
   obs: ["infra/observability/", "infra/scripts/"],
 };
 
