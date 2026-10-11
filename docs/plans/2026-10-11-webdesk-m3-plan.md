@@ -22,7 +22,11 @@ server, result observed). Every ticket's gate is `webdesk/qa/linux-gate.sh` on s
 | **WSK-48b** | Delete Payload; `webdesk/payload/` → `webdesk/delivery/` (vocabulary source); differential → golden suite | Sonnet, Opus review, **then the WebDesk orchestrator reviews before main** (it touches CI, release and compose) | **0011** | after T1, T2, T4 |
 | **WSK-61** | Scheduler: due publishes/takedowns, live-item version swaps, forms purge, idempotency sweep | Sonnet, Opus review | **0012** | after T4, T5a |
 | **WSK-46** | Draft preview as an instant page on the site (D52): hashed expiring tokens + public `/v1/t/:tenant/preview/:token`; an ERP Preview action; a `/preview/` page in gaiada-web-revamp | Sonnet, Opus review; the site part with the site owner | **0013** | WebDesk part after WSK-61; ERP part after the M2 editor follow-ups merge (347); site part needs `api.gaiada.com` public |
-| WSK-45 · WSK-43 · WSK-49 | WYSIWYG Markdown editor (D49), media library (+ the storage-lifecycle defect), client editors | later waves | | |
+| **WSK-43a** | Media library, WebDesk half: asset metadata, token uploads, soft delete refused while in use (D54), purge job (frees locked versions), quota in bytes held | Sonnet, Opus review | **0014** | after wave 3 |
+| **WSK-43b** | Media library, ERP half: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools | Sonnet, Opus review; the WebDesk orchestrator releases it (Cerbos restart) | — | after 43a |
+| **WSK-43c** | Media library UI: a Media tab in the Website workspace, and a picker for media fields in the editor | Sonnet, Opus review | — | after the M2 editor follow-ups (350) and 43b |
+| **WSK-43d** | gaiada-web-revamp's pull step downloads library images into the static build (D53) | with the site owner | — | after 43a |
+| WSK-45 · WSK-49 | WYSIWYG Markdown editor (D49), client editors | later waves | | |
 
 **Merging.** Each wave merges to main only after `webdesk/qa/linux-gate.sh` is green on the merged tree (main + the wave), under WSK-D47(b), and the WebDesk orchestrator is told each time.
 
@@ -61,6 +65,30 @@ approval, with `head_version`/`published_version` moved to it; an unchanged item
   tests. `webdesk/delivery/vocabulary/` is the one source; the api, blocks and WordPress copies are vendored from it.
 - **Migration 0011** drops exactly the tables and types Payload's own migration created, `IF EXISTS` (the live
   database was rebuilt on 2026-10-10 from WebDesk's migrations only, so this is expected to be a no-op there).
+
+## WSK-43 · The media library
+
+Rulings: WSK-D53 (library images reach a static site through its build) and WSK-D54 (an image in use cannot be deleted).
+What exists: uploads through the public api with an api key, presigned reads, imgproxy transforms, ClamAV scanning, and the control
+read `media.list`. The media primitive stores `{url, alt?, width?, height?, mime?}`, so content refers to an image by URL.
+
+- **Schema (0014).** `media_assets` gains `title`, `alt` (a per-locale map), `tags text[]`, `original_filename`, `width`, `height`,
+  `updated_at`, `deleted_at`, `purge_after` and `purged_at`. A library asset's canonical URL is WebDesk's media route
+  `/v1/t/<tenant>/media/<assetId>`, and that is what the editor writes into the media field.
+- **Uploads never pass through the ERP.** A control command `media.uploadToken` (MEDIUM, editorial assertion) mints a short-lived,
+  single-use upload token bound to the tenant, site, bucket, size cap and allowed types. The browser then uploads straight to
+  WebDesk on a public route with that token; the existing scan and store path runs. Only the token's hash is stored.
+- **Commands.** `media.update` (title, alt, tags), `media.delete` (soft; 409 `media-in-use` listing the items whose live or
+  head version references the asset's URL, D54) and a `media.usage` read. `media.list` gains search (title, tags, filename),
+  tag and type filters, and hides deleted assets.
+- **Lifecycle.** A deleted asset gets `purge_after = deleted_at + the bucket's GOVERNANCE retention`. A scheduler job
+  (`media-purge`, hourly, on WSK-61's scheduler) deletes the stored object versions once retention has passed and sets
+  `purged_at`. This closes the defect that locked object versions are never freed. The media quota counts the bytes of every
+  asset not yet purged, which is what storage actually holds.
+- **Static sites (D53).** The site's build step downloads each referenced image through the read key and rewrites its URL into
+  the static output. WebDesk serves no public image traffic for a static site.
+- **ERP and UI.** A Cerbos kind `webdesk_media_asset` (read, upload, update, delete) with its six artifacts, BFF routes and MCP
+  tools for every action, then a Media tab and a picker in the Website workspace.
 
 ## WSK-61 · The scheduler
 
