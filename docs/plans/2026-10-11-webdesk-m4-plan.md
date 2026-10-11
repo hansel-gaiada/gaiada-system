@@ -280,3 +280,9 @@ capacity statement is the interim ceiling (OQ-2.7).
   - Probes 39/39. The nightly backup script survived the tree swap. The upload refusal is 404 problem+json
     `upload-not-found`.
   - From now on every manual compose call on the box needs all three files plus `--no-build`.
+- 16:58Z: **358 deployed to WebDesk** (plan 38157565110, apply 38157632390). Migration 0015 applied once; health PASS;
+  probes 39/39; `ensure-backup-role` unchanged (the backup role reads 0015's objects).
+- The skip path proven live on the already-current 358 (run 38157846946, from the branch): "already current", the api's
+  StartedAt unchanged.
+- **release.yml wired** (owner-approved 2026-10-12; main `4d104aa1`): every release runs deploy-webdesk (apply,
+  skip_if_current) after a successful ERP deploy.
