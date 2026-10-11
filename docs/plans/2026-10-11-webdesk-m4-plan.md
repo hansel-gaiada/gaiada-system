@@ -158,15 +158,15 @@ The August tracker lists 36 green rows; the design's "34" is a stale roll-up. Of
 
 **Nothing runs these today** (inventory 2026-10-11):
 
-| Ticket | What | Command |
-|---|---|---|
-| WSK-14 | `wsk14-breaking-change`, `wsk14-composition-validator`, `wsk14-renderer-invariant` (`webdesk/delivery/test/`) | `node --import tsx ../delivery/test/<name>.test.mjs` from `webdesk/api` |
-| WSK-03/04 | the consolidated cross-path tenancy script (`migrations/tests/rls.spec.sql` runs only inside it) | `node webdesk/scripts/wsk04-cross-path-suite.mjs` (needs the three DB URLs) |
-| WSK-18 | P3 gate: cross-machine determinism, contract coherence, unknown-block rejection, artifact-URL expiry | `webdesk/scripts/check-determinism-crossmachine.mjs`, `check-contract-coherence.mjs`, `check-unknown-block-rejection.mjs`, `check-artifact-url-expiry.mjs --docker` |
-| WSK-15 | the codegen double-run gate | `cd webdesk/api && npm run codegen:gate` |
-| WSK-11 | `mail-retry-backoff.spec.ts` (self-skips on sumopod without the docker socket, owner veto) | CI runs it; record CI as its Linux evidence |
-| — | `webdesk/deploy` suite | CI only, not in the gate |
-| — | `ops/scripts/check-cdn-bypass.mjs --selftest`, `check-otlp-write-only.mjs` | neither |
+| Ticket | What | Command | In the gate (`legacy` suite) |
+|---|---|---|---|
+| WSK-14 | `wsk14-breaking-change`, `wsk14-composition-validator`, `wsk14-renderer-invariant` (`webdesk/delivery/test/`) | `node --import tsx ../delivery/test/<name>.test.mjs` from `webdesk/api` | `wsk14-breaking-change`, `wsk14-composition-validator`, `wsk14-renderer-invariant`, `wsk64-snapshot-probe` (a CLI; the step checks it emits a valid snapshot) |
+| WSK-03/04 | the consolidated cross-path tenancy script (`migrations/tests/rls.spec.sql` runs only inside it) | `node webdesk/scripts/wsk04-cross-path-suite.mjs` (needs the three DB URLs) | `wsk04-cross-path-suite`, against the migrated gate database |
+| WSK-18 | P3 gate: cross-machine determinism, contract coherence, unknown-block rejection, artifact-URL expiry | `webdesk/scripts/check-determinism-crossmachine.mjs`, `check-contract-coherence.mjs`, `check-unknown-block-rejection.mjs`, `check-artifact-url-expiry.mjs --docker` | `c2-contract-coherence` (selftest + both fixture tenants), `c3-unknown-block-rejection` (selftest + real), `c1-determinism-selftest` + `c1-determinism-crossmachine` (SKIP without `--with-docker-socket`: it starts two containers), `c4-artifact-url-expiry-selftest` + `c4-artifact-url-expiry` (against the gate's RustFS, no `--docker`) |
+| WSK-15 | the codegen double-run gate | `cd webdesk/api && npm run codegen:gate` | `wsk15-codegen-gate` (seeds two throwaway tenants in the gate database, runs the gate, removes them) |
+| WSK-11 | `mail-retry-backoff.spec.ts` (self-skips on sumopod without the docker socket, owner veto) | CI runs it; record CI as its Linux evidence | not in `legacy`: still the `webdesk-api` suite's skip, named in its summary |
+| — | `webdesk/deploy` suite | CI only, not in the gate | `deploy-typecheck-test` |
+| — | `ops/scripts/check-cdn-bypass.mjs --selftest`, `check-otlp-write-only.mjs` | neither | `ops-check-cdn-bypass-selftest`, `ops-check-otlp-write-only-selftest`, `ops-test-deploy-webdesk` (the T4 harness) |
 
 The manual drives are superseded by live evidence on the board:
 - WSK-17's rebuild by WSK-55's dist parity;
