@@ -397,6 +397,56 @@ END $$;
 RESET ROLE;
 
 -- ============================================================================================
+-- Probe 7 (WSK-68) — the read-only BYPASSRLS backup role. With NO GUC set it reads the fixtures'
+-- rows on FORCE-RLS tables (that is its whole purpose: a real pg_dump), it cannot write, and the
+-- read-only setting is on the role. (SET ROLE does not apply the role's own `ALTER ROLE ... SET`
+-- defaults — those load at LOGIN — so the "read-only transaction" half is proven over the real
+-- socket login by ops/scripts/webdesk-backup-nightly.sh and the CI/gate step; the grant wall is
+-- what is asserted here.) Requires a cluster built by init-roles.sh >= WSK-68, or one that has had
+-- ops/scripts/ensure-backup-role.sh run on it.
+-- ============================================================================================
+SET LOCAL ROLE webdesk_backup;
+SET LOCAL webdesk.tenant_ctx = '';
+SET LOCAL webdesk.platform_ctx = '';
+DO $$
+DECLARE cnt int;
+BEGIN
+  SELECT count(*) INTO cnt FROM tenants;
+  IF cnt < 2 THEN RAISE EXCEPTION 'PROBE 7 FAILED: webdesk_backup read % tenants rows with no GUC set; expected >= 2 (the fixtures) — it is not bypassing RLS', cnt; END IF;
+  SELECT count(*) INTO cnt FROM sites;
+  IF cnt < 2 THEN RAISE EXCEPTION 'PROBE 7 FAILED: webdesk_backup read % sites rows with no GUC set; expected >= 2 (the fixtures)', cnt; END IF;
+  SELECT count(*) INTO cnt FROM audit_entries WHERE tenant_id IS NULL;
+  IF cnt < 1 THEN RAISE EXCEPTION 'PROBE 7 FAILED: webdesk_backup cannot read the platform-level audit_entries row (% rows)', cnt; END IF;
+  RAISE NOTICE 'PASS (7a): webdesk_backup with no GUC set reads the fixtures'' rows on FORCE-RLS tables (tenants, sites, platform-level audit_entries)';
+END $$;
+DO $$
+BEGIN
+  BEGIN
+    EXECUTE 'INSERT INTO sites (id, tenant_id, kind, name) VALUES (''a1000000-0000-0000-0000-0000000000ff'', ''a0000000-0000-0000-0000-00000000000a'', ''astro'', ''backup must not write'')';
+    RAISE EXCEPTION 'PROBE 7 FAILED: webdesk_backup was able to INSERT into sites';
+  EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'PASS (7b): webdesk_backup cannot INSERT — %', SQLERRM;
+  END;
+  BEGIN
+    EXECUTE 'UPDATE tenants SET slug = slug';
+    RAISE EXCEPTION 'PROBE 7 FAILED: webdesk_backup was able to UPDATE tenants';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+END $$;
+RESET ROLE;
+DO $$
+DECLARE r pg_roles%ROWTYPE;
+BEGIN
+  SELECT * INTO r FROM pg_roles WHERE rolname = 'webdesk_backup';
+  IF NOT (r.rolbypassrls AND NOT r.rolsuper AND NOT r.rolcreaterole AND NOT r.rolcreatedb AND NOT r.rolreplication AND NOT r.rolinherit
+          AND 'default_transaction_read_only=on' = ANY (r.rolconfig)) THEN
+    RAISE EXCEPTION 'PROBE 7 FAILED: webdesk_backup attributes are wrong: %', row_to_json(r);
+  END IF;
+  RAISE NOTICE 'PASS (7c): webdesk_backup is BYPASSRLS NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION with default_transaction_read_only=on';
+END $$;
+
+-- ============================================================================================
 -- Done. Roll back every fixture and leave the database exactly as found.
 -- ============================================================================================
 ROLLBACK;

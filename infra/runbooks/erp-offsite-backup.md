@@ -109,7 +109,7 @@ scp sumopod:"$F" sumopod:"$F.sha256" .
 B=$(basename "$F" .age)
 
 age -d -i ~/.ssh/gaiada-backup-age "$B.age" > "$B"      # 1. decrypts?
-sha256sum -c <(sed "s|\$| $B|" "$B.age.sha256")          # 2. byte-identical to what aicenter dumped?
+sha256sum -c "$B.age.sha256"                            # 2. byte-identical to what aicenter dumped? (the line already names $B)
 gzip -t "$B"                                             # 3. valid gzip?
 zcat "$B" | grep -c 'CREATE TABLE'                       # 4. real dump? (expect ~282)
 

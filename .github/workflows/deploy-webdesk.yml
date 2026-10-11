@@ -1,0 +1,188 @@
+# WebDesk's own deploy job (M4 T4): swaps the SIGNED gaiada-webdesk-api image into the `webdesk` compose
+# project on gda-aicenter. It is NOT part of deploy.yml: that job's `up --remove-orphans` targets the `gaiada`
+# project, and WebDesk must stay outside it (docker-compose.aicenter-release.yml explains why).
+#
+# Entry points:
+#   - workflow_dispatch (today the only one): run mode `plan` first (changes nothing live), then `apply`.
+#   - workflow_call: shaped for release.yml to call LATER (after `deploy`); release.yml is not edited yet.
+#
+# Everything that touches the box lives in webdesk/ops/deploy/deploy-webdesk.sh, which runs ON the box.
+# Runbook: infra/runbooks/webdesk-live-swap.md ("Automated (M4 T4)").
+#
+# Required repo secrets (same as deploy.yml): VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_SSH_KNOWN_HOSTS.
+name: deploy-webdesk
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag whose signed gaiada-webdesk-api image to deploy"
+        required: true
+        type: string
+      mode:
+        description: "plan = change nothing live; apply = deploy"
+        required: false
+        type: string
+        default: plan
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose signed gaiada-webdesk-api image to deploy (the live tag = a no-op swap)"
+        required: true
+        type: string
+      mode:
+        description: "plan = change nothing live; apply = deploy"
+        required: true
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+# One box, one deploy at a time: never alongside an ERP deploy. Do NOT cancel in progress.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write # cosign verification
+
+jobs:
+  deploy-webdesk:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      TAG: ${{ inputs.tag }}
+      MODE: ${{ inputs.mode }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$ ]] || { echo "::error::tag '$TAG' is not a plain release tag"; exit 1; }
+          case "$MODE" in plan | apply) ;; *) echo "::error::mode must be plan or apply"; exit 1 ;; esac
+          echo "OWNER_LC=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      # `ctl` = the ref this workflow runs from: it supplies the deploy SCRIPT, so a rollback to an older
+      # tag still uses today's script. `rel` = the release tag: it supplies the TREE that is shipped.
+      - name: Checkout the deploy script (this workflow's ref)
+        uses: actions/checkout@v4
+        with:
+          path: ctl
+
+      - name: Checkout the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          path: rel
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # cosign reads the Docker keychain and GHCR packages are private (see deploy.yml).
+      - name: Authenticate the runner to GHCR (for cosign)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the image signature and read its digest
+        id: sign
+        run: |
+          set -euo pipefail
+          img="ghcr.io/${OWNER_LC}/gaiada-webdesk-api:${TAG}"
+          cosign verify "$img" \
+            --certificate-identity-regexp "https://github.com/${OWNER}/.+/.github/workflows/release.yml@.+" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            > cosign.json
+          digest="$(jq -r '.[0].critical.image."docker-manifest-digest"' cosign.json)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::cosign returned no usable digest"; exit 1; }
+          echo "OK $img"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Pinned host key, never StrictHostKeyChecking=no on a deploy path.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host vps
+            HostName ${VPS_HOST}
+            User ${VPS_USER}
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      # The release's WebDesk tree, LF-exact (autocrlf off). api/package*.json ride along because
+      # storage-bootstrap.mjs resolves the AWS SDK from webdesk/api/node_modules.
+      - name: Archive the release tree
+        working-directory: rel
+        run: |
+          set -euo pipefail
+          git -c core.autocrlf=false archive --format=tar -o "$RUNNER_TEMP/tree.tar" "HEAD:webdesk" \
+            migrations scripts ops proxy postgres \
+            docker-compose.yml docker-compose.aicenter.yml docker-compose.aicenter-release.yml \
+            package.json package-lock.json api/package.json api/package-lock.json
+          ls -l "$RUNNER_TEMP/tree.tar"
+
+      - name: Ship the tree and the script to the box
+        run: |
+          set -euo pipefail
+          D="$(ssh vps 'mktemp -d')"
+          echo "REMOTE_DIR=$D" >> "$GITHUB_ENV"
+          scp "$RUNNER_TEMP/tree.tar" ctl/webdesk/ops/deploy/deploy-webdesk.sh "vps:$D/"
+          ssh vps "chmod 700 '$D' && chmod +x '$D/deploy-webdesk.sh'"
+
+      # Apply only. The job token is short-lived; no long-lived registry PAT is stored on the box.
+      - name: Authenticate the box to GHCR
+        if: ${{ env.MODE == 'apply' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | ssh vps "docker login ghcr.io -u '$GH_ACTOR' --password-stdin"
+
+      - name: Run the deploy script on the box (${{ env.MODE }})
+        id: run
+        env:
+          DIGEST: ${{ steps.sign.outputs.digest }}
+        run: |
+          set -euo pipefail
+          set +e
+          ssh vps "GHCR_OWNER='$OWNER_LC' bash '$REMOTE_DIR/deploy-webdesk.sh' '$MODE' '$TAG' '$DIGEST' '$REMOTE_DIR/tree.tar'" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          rc=${PIPESTATUS[0]}
+          exit "$rc"
+
+      - name: Clean up the box
+        if: always()
+        run: |
+          [ -n "${REMOTE_DIR:-}" ] && ssh vps "rm -rf '$REMOTE_DIR'" || true
+
+      - name: Summary
+        if: always()
+        env:
+          DIGEST: ${{ steps.sign.outputs.digest }}
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "### deploy-webdesk \`${TAG}\` (${MODE})"
+            echo ""
+            echo "- Result: **${RESULT}**"
+            echo "- Signed digest: \`${DIGEST:-not verified}\`"
+            echo ""
+            echo '```'
+            tail -60 "$RUNNER_TEMP/deploy.log" 2>/dev/null || echo "(the script did not run)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
