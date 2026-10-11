@@ -42,21 +42,15 @@ export const FRAMEWORK_LABEL: Record<SiteFramework, string> = {
  *  are not offered: a new site should not be created against superseded vocabulary. */
 export const FRAMEWORKS: SiteFramework[] = ["astro", "node", "wp"];
 
-/** Offered but NOT yet provisionable, with the reason shown in the UI rather than discovered on
- *  submit.
+/** Kinds that are offered but cannot be provisioned right now, mapped to the reason shown in the UI
+ *  (the option renders disabled with that reason, rather than failing on submit).
  *
- *  `wp` is real end-to-end everywhere except the last mile: the DB CHECK admits it, the MCP tool's
- *  enum admits it, and the scaffolder composes the theme. What refuses it is the external
- *  "provision" HTTP tool, which is static-export-only and always was — it answers 422 with an
- *  honest reason and makes zero HTTP calls. §08's fix is the ERP's own repo control (GH-12's
- *  template-generate path) replacing that tool; until this flow is wired to it, offering WordPress
- *  as a live choice would be a button that always fails.
- *
- *  Shown-and-disabled rather than hidden on purpose: hiding it reads as "WordPress is not supported",
- *  which is now false and was the actual confusion this whole change came from. */
-export const FRAMEWORK_UNAVAILABLE: Partial<Record<SiteFramework, string>> = {
-  wp: "Needs the ERP repo-control path (§08) — the static-only provision service refuses it",
-};
+ *  Empty today: all three kinds (`astro`, `node`, `wp`) go through the same ERP repo-control provider
+ *  (platform-nest `erp-repo-control-provider.ts`), which files an approval and creates the repo from
+ *  the template configured for that kind. A kind whose template is not configured is refused by the
+ *  backend with its own reason. The export and the disabled-option mechanism in the forms are kept so
+ *  a future kind can be switched off here without touching the components. */
+export const FRAMEWORK_UNAVAILABLE: Partial<Record<SiteFramework, string>> = {};
 
 // OQ-P4 default. Was "vite"; now §08's static selector. provisioning.service.ts still defaults to
 // "vite" server-side when no framework is sent, so this only governs what the form pre-selects.
@@ -69,6 +63,35 @@ export const STATUS_LABEL: Record<SiteStatus, string> = {
   live: "Live",
   failed: "Failed",
 };
+
+/** The `provider` value the ERP's own repo control writes (`ErpRepoControlProvider.key` in
+ *  platform-nest `erp-repo-control-provider.ts`, stored as `webdev_provisioned_sites.provider`). */
+export const ERP_REPO_PROVIDER = "erp_repo";
+
+/** The approval page for a site that is waiting on a company admin, or null. Only a `pending` row
+ *  from the ERP repo-control provider qualifies; its `providerRef` is the `automation_approvals.id`. */
+export function awaitingApprovalHref(
+  site: Pick<ProvisionedSite, "status" | "provider" | "providerRef">,
+): string | null {
+  if (site.status !== "pending" || site.provider !== ERP_REPO_PROVIDER || !site.providerRef) return null;
+  return `/approvals/${encodeURIComponent(site.providerRef)}`;
+}
+
+/** Status text for a site row: "Awaiting approval" for a pending repo-control row, else `fallback`
+ *  (defaults to the run-workspace `STATUS_LABEL`). */
+export function siteStatusLabel(
+  site: Pick<ProvisionedSite, "status" | "provider" | "providerRef">,
+  fallback: string = STATUS_LABEL[site.status],
+): string {
+  return awaitingApprovalHref(site) ? "Awaiting approval" : fallback;
+}
+
+/** The stored `failureReason` as text when it is free-form (not one of the typed tokens that already
+ *  have their own wording), so the real reason is never swallowed by the generic copy. */
+export function failureDetail(reason: string | null): string | null {
+  if (!reason || reason in FAILURE_COPY) return null;
+  return reason;
+}
 
 /** The API/DTO shape of one mirror row — camelCase, matching `SiteDto` in
  *  `platform-nest/src/modules/webdev/provisioning.service.ts` field-for-field. */

@@ -14,7 +14,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { formatDateTime } from "@/lib/format";
 import {
   STATUS_LABEL, FRAMEWORKS, FRAMEWORK_LABEL, DEFAULT_FRAMEWORK,
-  canReconcile, canStartNewProvision, failureCopy,
+  canReconcile, canStartNewProvision, failureCopy, failureDetail, awaitingApprovalHref, siteStatusLabel,
   type ProvisionedSite, type SiteFramework, FRAMEWORK_UNAVAILABLE,
 } from "@/lib/webdevProvisionedSites";
 import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
@@ -90,6 +90,8 @@ function SiteRow({ site, runId, mayReconcile, onReconcile }: {
   const [result, setResult] = useState<SiteActionResult | null>(null);
   const reconcilable = mayReconcile && canReconcile(site);
   const failure = site.status === "failed" ? failureCopy(site.failureReason) : null;
+  const approvalHref = awaitingApprovalHref(site);
+  const detail = site.status === "failed" ? failureDetail(site.failureReason) : null;
   const frameworkLabel = FRAMEWORK_LABEL[site.framework] ?? site.framework;
 
   const reconcile = () => {
@@ -105,7 +107,7 @@ function SiteRow({ site, runId, mayReconcile, onReconcile }: {
   return (
     <div className="pl-site-row">
       <div className="pl-site-row__head">
-        <StatusBadge label={site.status} />
+        <StatusBadge label={siteStatusLabel(site, site.status)} />
         <span className="pl-site-row__slug">{site.slug}</span>
         <span className="pl-site-row__framework">{frameworkLabel}</span>
       </div>
@@ -132,9 +134,13 @@ function SiteRow({ site, runId, mayReconcile, onReconcile }: {
         {site.approvalId ? " · via an approved automation request" : ""}
         {site.lastReconciledAt ? ` · last checked ${formatDateTime(site.lastReconciledAt)}` : ""}
       </p>
+      {approvalHref && (
+        <p className="pl-site-row__meta"><a href={approvalHref}>Review the approval</a></p>
+      )}
       {failure && (
         <div className="pl-site-row__failure">
           <strong>{failure.title}.</strong> {failure.body}
+          {detail && <> Reason: {detail}</>}
         </div>
       )}
       {reconcilable && (
