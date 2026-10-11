@@ -245,8 +245,8 @@ export interface AnnounceContext {
 
 /**
  * The post-commit side effects every projection-changing transition shares: the
- * `content.cache_invalidate` log line with the Cache-Tag set (no CDN fronts /v1 yet; WSK-27 wires the
- * purge) and the tenant webhook (item refs only, never values). Returns a thunk the caller runs AFTER
+ * `content.cache_invalidate` log line with the Cache-Tag set (no CDN fronts /v1 yet; WSK-70 wires the
+ * purge, deferred by WSK-D50) and the tenant webhook (item refs only, never values). Returns a thunk the caller runs AFTER
  * its transaction committed; the dispatcher is fail-soft by contract, and callers catch the rest.
  */
 export function announceContentEvent(

@@ -487,9 +487,9 @@ and it reuses the estate's own stack rather than building a probe harness:
 | Ticket | What it is | State |
 |---|---|---|
 | **SM-70** | the Nexus importer — lands ~63 client properties into `search_properties` | ✅ **built** (inert, opt-in) |
-| **SM-74** | *"property hosting topology field set on `search_properties` — host, **control panel**, stack, plugin surface"* | ⬜ designed, `junior` |
-| **MON-01** | blackbox-exporter extended to client properties: `targets.yml` generated from `search_properties` (**verified rows only**), `http_2xx` + `ssl_expiry` | ⬜ designed |
-| **MON-04** | Grafana "Client Properties" dashboard — uptime, cert days remaining, per-property drill-down | ⬜ designed |
+| **SM-74** | *"property hosting topology field set on `search_properties` — host, **control panel**, stack, plugin surface"* | in code: `202608300818_sm74_property_hosting_topology.sql`; whether any row carries data is unmeasured (M6-P3a, 2026-10-11) |
+| **MON-01** | blackbox-exporter extended to client properties: `targets.yml` generated from `search_properties` (**verified rows only**), `http_2xx` + `ssl_expiry` | in code: `infra/observability/scripts/gen-client-property-targets.mjs` (verified rows only, private ranges refused) + `infra/scripts/sync-client-property-targets.sh` + the `client-properties` job in `prometheus.remote.yml`; whether it runs live is measured by M6-P3a (2026-10-11) |
+| **MON-04** | Grafana "Client Properties" dashboard — uptime, cert days remaining, per-property drill-down | ⬜ designed (M6-P3e) |
 
 **Consent is not optional and not implied.** `search_properties.verified_at` exists because
 scheduled requests to someone else's server is a permissions question. MON-01's "verified rows
@@ -618,7 +618,7 @@ largest lever is architectural, not operational.
 GitHub-hosted, metered. **Zero self-hosted runners.** The ERP repo is a **personal-account** repo
 (`hansel-gaiada/gaiada-system`); the operator token sees **no orgs**, so the client repos in
 `Gaia-Digital-Agency` bill against a different account entirely. **Two billing buckets.** The actual
-figures could not be read (billing endpoints need `admin:org`) — OQ-2.5.
+figures could not be read (billing endpoints need `admin:org`) — OQ-2.5. *Re-counted 2026-10-11 (M6 plan): **19 jobs across 5 workflows** (`deploy-webdesk.yml` added), all `ubuntu-latest`, still zero self-hosted.*
 
 Levers, in size order:
 

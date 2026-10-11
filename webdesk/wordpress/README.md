@@ -274,5 +274,8 @@ ticket's scope, and WSK-36's job to define precisely what "parity" means before 
   PHP SDK was generated against WSK-18's static fixtures and a fresh throwaway Postgres tenant —
   never a real, deployed `/v1` API a real HTTP client hit end-to-end. `WebDeskClient`'s `curl`
   calls were read, not exercised against a live server.
-- **`scaffold.ts`'s `wp` branch is not wired** — see the WSK-20 section above.
+- **`scaffold.ts`'s `wp` branch** — *superseded 2026-10-11:* the branch is now wired in
+  `ai-agents/src/code-scaffold/scaffold.ts` (it composes the theme from its own copy,
+  `templates/wp-site.ts`, and refuses when the pinned snapshot carries no `sdkPhpSource`). The WSK-20
+  section above describes the code as it was. `code.scaffold` itself still has no live caller (M6-P4b).
 - **Astro↔WP HTML parity is unmeasured** — see the section above; that is WSK-36's gate.
