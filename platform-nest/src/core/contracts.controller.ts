@@ -34,7 +34,6 @@ import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
 import { recordInvoiceRevision, snapshotInvoice } from "../modules/invoice/invoice-revisions";
 import { check, type Resource } from "../rbac/cerbos";
 import { assemblePrincipal, type Principal } from "../rbac/principal";
-import { clientFilterSql, parseClientFilter } from "./client-filter";
 
 const CONTRACT_SELECT = `
   SELECT k.id, k.client_id AS "clientId", cl.name AS "clientName", k.project_id AS "projectId",
