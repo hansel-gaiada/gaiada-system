@@ -47,10 +47,16 @@ describe("staff writes", () => {
     expect((staffEditor("DELETE", "demo-hansel", "cc-dana")!.json as { changed: boolean }).changed).toBe(false);
   });
 
-  it("an owner is refused on both staff writes (permission-native, no permission key), but may read", () => {
+  it("an owner may read and may do both staff writes, like a company admin (permission arm, WSK-D60)", () => {
     expect(staffList("demo-owner")!.status).toBe(200);
-    expect(staffEditor("PUT", "demo-owner", "cc-dana")!.status).toBe(403);
-    expect(staffAdmin("PUT", "demo-owner", "cc-dana")!.status).toBe(403);
+    expect(staffEditor("PUT", "demo-owner", "cc-dana")!.json).toMatchObject({ websiteEditor: true, changed: true });
+    expect(staffEditor("DELETE", "demo-owner", "cc-dana")!.json).toMatchObject({ websiteEditor: false, changed: true });
+    expect(staffAdmin("PUT", "demo-owner", "cc-dana")!.json).toMatchObject({ capability: "admin", changed: true });
+    expect(staffAdmin("DELETE", "demo-owner", "cc-dana")!.json).toMatchObject({ capability: "viewer", changed: true });
+  });
+
+  it("the owner is still not a PORTAL caller: a staff member is not a contact of the client (403)", () => {
+    expect(portalList("demo-owner")!.status).toBe(403);
   });
 
   it("a project-scoped contact cannot be granted", () => {
