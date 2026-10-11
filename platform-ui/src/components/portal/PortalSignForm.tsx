@@ -1,6 +1,7 @@
 "use client";
 import { useActionState } from "react";
 import { portalSignContract, type PortalActionResult } from "@/lib/portalActions";
+import { PortalSignedNote } from "./PortalSignedNote";
 
 // CP-14 — the client's countersignature on an agreement.
 //
@@ -22,14 +23,11 @@ export function PortalSignForm({ contractId, title }: { contractId: string; titl
     null,
   );
 
-  if (state?.ok) {
-    return (
-      <div className="cp-form__ok" role="status">
-        Signed — thank you. Your signature is recorded against {title}, and a copy of the agreement stays
-        available on this page.
-      </div>
-    );
-  }
+  // The success state here is only the bridge to the refreshed page, NOT the confirmation itself: the
+  // action revalidates this page, the refreshed read has `canSign: false`, and the page then unmounts
+  // this form and renders the same `PortalSignedNote` from the recorded signature (see
+  // `contractSigningState` in lib/portal.ts for why that has to be the durable source).
+  if (state?.ok) return <PortalSignedNote title={title} />;
 
   return (
     <form action={formAction} className="cp-form">
