@@ -92,8 +92,10 @@ describe("WSK-49f — derived_roles.yaml: the attribute conditions are pinned st
     expect(e).toContain("request.principal.attr.clientAdminOf.exists(a, a.clientId == request.resource.attr.clientId && a.tenantId == request.resource.attr.tenantId)");
     expect(e).toContain('request.resource.attr.clientId != ""');
   });
-  it("neither role has a perm_* mirror, and no policy uses variables.local", () => {
-    expect(defs.some((d) => /^perm_.*(website_editor|contact_admin)/.test(d.name))).toBe(false);
+  it("neither ROLE has a perm_* mirror (the two ACTIONS do, below), and no policy uses variables.local", () => {
+    // A mirror OF THE ROLES would be `perm_client_website_editor` / `perm_client_contact_admin`: a flat key cannot say
+    // "this one client". The action mirrors `perm_client_contact_manage_*` (WSK-D60 follow-up) are a different thing.
+    expect(defs.some((d) => /^perm_(client_website_editor|client_contact_admin)/.test(d.name))).toBe(false);
     for (const f of readdirSync(POLICIES)) {
       const code = readFileSync(join(POLICIES, f), "utf8").split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
       expect(code.includes("variables.local"), `${f} must not use variables.local (outside comments)`).toBe(false);
@@ -103,10 +105,37 @@ describe("WSK-49f — derived_roles.yaml: the attribute conditions are pinned st
     const doc = yaml.load(readFileSync(join(POLICIES, "resource_client_contact.yaml"), "utf8")) as any;
     const rules: any[] = doc.resourcePolicy.rules;
     // explicitly-named rules only (platform_admin reaches both through its separate `actions: ["*"]` rule)
-    const arms = (action: string) => rules.filter((r) => r.effect === "EFFECT_ALLOW" && (r.actions ?? []).includes(action)).flatMap((r) => r.derivedRoles ?? []);
+    // Role arms only: the permission arm (`perm_*`) is pinned in its own test below.
+    const arms = (action: string) => rules.filter((r) => r.effect === "EFFECT_ALLOW" && (r.actions ?? []).includes(action)).flatMap((r) => r.derivedRoles ?? []).filter((d) => !d.startsWith("perm_"));
     expect(arms("manage_website_editor").sort()).toEqual(["client_contact_admin", "company_admin", "manager"].sort());
     expect(arms("manage_admin")).toEqual(["company_admin"]);
     expect(arms("manage_admin")).not.toContain("client_contact_admin");
+  });
+  // WSK-D60 follow-up (2026-10-12): `owner` is permission-native, so it reaches these two actions only through a perm_*
+  // arm. The mirror must be the STAFF shape only (no clientId), so a key holder can never ride the portal arm.
+  it("the permission arm of the two actions: ONE perm_* role each, staff shape only (clientId empty), tenant + assurance gated", () => {
+    const doc = yaml.load(readFileSync(join(POLICIES, "resource_client_contact.yaml"), "utf8")) as any;
+    const rules: any[] = doc.resourcePolicy.rules;
+    const permRules = (action: string) => rules.filter((r) => r.effect === "EFFECT_ALLOW" && (r.actions ?? []).includes(action) && (r.derivedRoles ?? []).some((d: string) => d.startsWith("perm_")));
+    for (const [action, role] of [["manage_website_editor", "perm_client_contact_manage_website_editor"], ["manage_admin", "perm_client_contact_manage_admin"]] as const) {
+      const rs = permRules(action);
+      expect(rs.length, `${action}: exactly one perm rule`).toBe(1);
+      expect(rs[0].actions, "one rule per action, never a shared list").toEqual([action]);
+      expect(rs[0].derivedRoles).toEqual([role]);
+      const cond = String(rs[0].condition.match.expr).replace(/\s+/g, " ");
+      expect(cond).toContain("variables.inTenant");
+      expect(cond).toContain("variables.notLow");
+      expect(cond).toContain('request.resource.attr.clientId == ""');
+    }
+  });
+  it("the two perm_* derived roles are plain global-or-company mirrors of exactly their own key", () => {
+    for (const [role, key] of [["perm_client_contact_manage_website_editor", "core.client_contact.manage_website_editor"], ["perm_client_contact_manage_admin", "core.client_contact.manage_admin"]] as const) {
+      const e = expr(role);
+      expect(e).toContain(`g.key == "${key}"`);
+      expect(e).toContain('g.scopeType == "global"');
+      expect(e).toContain('g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId');
+      expect(e, "no attribute gate: the narrowing lives in the RULE").not.toContain("request.resource.attr.clientId");
+    }
   });
 });
 
@@ -217,5 +246,54 @@ describe.skipIf(!live)("WSK-49f — client_contact · manage_website_editor / ma
     const pa = editorPrincipal([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
     expect(await allow(pa, staffRes, "manage_website_editor")).toBe(true);
     expect(await allow(pa, staffRes, "manage_admin")).toBe(true);
+  });
+
+  // ── WSK-D60 follow-up: `owner` is permission-native (zero role rules); it reaches these actions through perm_* only ──
+  const KW = "core.client_contact.manage_website_editor";
+  const KA = "core.client_contact.manage_admin";
+  const permOnly = (keys: string[], scope: "company" | "global" = "company", extra: Partial<Principal> = {}): Principal =>
+    editorPrincipal([], { perms: keys.map((key) => ({ key, scopeType: scope, scopeId: scope === "company" ? T1 : null })), ...extra });
+
+  it("owner (perm keys only, no role grants): BOTH actions allowed on the staff shape in its own company", async () => {
+    const owner = permOnly([KW, KA]);
+    expect(await allow(owner, staffRes, "manage_website_editor")).toBe(true);
+    expect(await allow(owner, staffRes, "manage_admin")).toBe(true);
+    expect(await allow(owner, { ...staffRes, id: "contact-1" }, "manage_website_editor")).toBe(true);
+  });
+  it("owner: DENIED in another company (the own-company rows above are the positive controls)", async () => {
+    const owner = permOnly([KW, KA]);
+    expect(await allow(owner, { ...staffRes, tenantId: T2 }, "manage_website_editor")).toBe(false);
+    expect(await allow(owner, { ...staffRes, tenantId: T2 }, "manage_admin")).toBe(false);
+  });
+  it("owner: DENIED on the PORTAL shape (clientId set) - a key holder never rides the portal arm", async () => {
+    const owner = permOnly([KW, KA]);
+    expect(await allow(owner, staffRes, "manage_website_editor")).toBe(true); // positive control
+    expect(await allow(owner, own, "manage_website_editor")).toBe(false);
+    expect(await allow(owner, own, "manage_admin")).toBe(false);
+  });
+  it("a GLOBAL-scope perm grant still needs the tenant gate", async () => {
+    const owner = permOnly([KW, KA], "global");
+    expect(await allow(owner, staffRes, "manage_website_editor")).toBe(true);
+    expect(await allow(owner, { ...staffRes, tenantId: T2 }, "manage_website_editor")).toBe(false);
+  });
+  it("each key authorises its OWN action only, and no other client_contact key does either", async () => {
+    expect(await allow(permOnly([KW]), staffRes, "manage_website_editor")).toBe(true);
+    expect(await allow(permOnly([KW]), staffRes, "manage_admin")).toBe(false);
+    expect(await allow(permOnly([KA]), staffRes, "manage_admin")).toBe(true);
+    expect(await allow(permOnly([KA]), staffRes, "manage_website_editor")).toBe(false);
+    const others = permOnly(["core.client_contact.read", "core.client_contact.update", "core.client_contact.create", "core.client_contact.revoke"]);
+    expect(await allow(others, staffRes, "manage_website_editor")).toBe(false);
+    expect(await allow(others, staffRes, "manage_admin")).toBe(false);
+  });
+  it("a perm holder at LOW assurance, or whose company set lacks the tenant, is denied", async () => {
+    expect(await allow(permOnly([KW, KA], "company", { assurance: "low" }), staffRes, "manage_website_editor")).toBe(false);
+    expect(await allow(permOnly([KW, KA], "company", { companies: [T2], rootCompanies: [T2] }), staffRes, "manage_admin")).toBe(false);
+  });
+  it("manager keeps manage_admin DENIED even while it holds the website-editor key; member holds neither", async () => {
+    const manager = editorPrincipal([{ role: "manager", scopeType: "company", scopeId: T1 }], { perms: [{ key: KW, scopeType: "company", scopeId: T1 }] });
+    expect(await allow(manager, staffRes, "manage_website_editor")).toBe(true);
+    expect(await allow(manager, staffRes, "manage_admin")).toBe(false);
+    expect(await allow(manager, own, "manage_admin")).toBe(false);
+    expect(await allow(staff("member"), staffRes, "manage_admin")).toBe(false);
   });
 });
