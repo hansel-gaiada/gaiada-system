@@ -36,13 +36,13 @@ import { resolveRequestedLocale, localeFallbackFlag } from './vocabulary/locale'
  * ownership, not this ticket's `payload/` scope) — flagged in the final report as a follow-up,
  * not a defect in this read path.
  */
-const EFFECTIVE_PUBLISHED_SQL = `(
+export const EFFECTIVE_PUBLISHED_SQL = `(
   (ci.publish_state = 'published' AND (ci.unpublish_at IS NULL OR ci.unpublish_at > now()))
   OR (ci.publish_state = 'scheduled' AND ci.publish_at IS NOT NULL AND ci.publish_at <= now()
       AND (ci.unpublish_at IS NULL OR ci.unpublish_at > now()))
 )`
 
-type ContentRow = {
+export type ContentRow = {
   id: string
   slug: string
   locale: string
@@ -122,7 +122,7 @@ async function loadCollectionId(client: PoolClient, siteId: string, collectionKe
   return rows[0]?.id ?? null
 }
 
-async function loadLocalizations(
+export async function loadLocalizations(
   client: PoolClient,
   groupId: string,
   currentLocale: string,
@@ -138,7 +138,7 @@ async function loadLocalizations(
   return rows.map((r: { locale: string; slug: string }) => ({ locale: r.locale, slug: r.slug }))
 }
 
-function toEnvelope(
+export function toEnvelope(
   row: ContentRow,
   collectionKey: string,
   localizations: LocalizationLink[],

@@ -46,6 +46,10 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "content.schedule": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "content.unpublish": { impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
   "content.delete": { impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
+  // WSK-46 — a preview token exposes unpublished content to whoever holds the link, so it is a MEDIUM
+  // write (never a read), on the same scope as the other draft writes; the revoke shares it.
+  "content.previewToken": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.previewTokenRevoke": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // WSK-51 — design §4: every editor read is read/webdesk:read.
   "tenant.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "collection.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
@@ -87,7 +91,7 @@ describe("control command registry — the impact-class map (design §07)", () =
     );
   });
 
-  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1)", () => {
+  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1) plus the two WSK-46 preview-token commands", () => {
     expect([...EDITORIAL_COMMANDS].sort()).toEqual(
       [
         "content.create",
@@ -97,6 +101,8 @@ describe("control command registry — the impact-class map (design §07)", () =
         "content.schedule",
         "content.unpublish",
         "content.delete",
+        "content.previewToken",
+        "content.previewTokenRevoke",
       ].sort(),
     );
   });

@@ -45,6 +45,10 @@ export type CommandName =
   | "content.schedule"
   | "content.unpublish"
   | "content.delete"
+  // WSK-46 — draft preview (owner ruling WSK-D52): a short-lived bearer token for ONE version of one
+  // item, read at GET /v1/t/:tenantSlug/preview/:token. Both carry an editorial principal.
+  | "content.previewToken"
+  | "content.previewTokenRevoke"
   // WSK-51 — the editor read commands (design §4). Registered here by WSK-41 so the registry is
   // one change; WSK-51 builds their handlers.
   | "tenant.list"
@@ -135,6 +139,12 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "content.schedule": { command: "content.schedule", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "content.unpublish": { command: "content.unpublish", impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
   "content.delete": { command: "content.delete", impactClass: "medium", scope: "webdesk:promote", jobTracked: false },
+  // WSK-46: minting a preview token EXPOSES UNPUBLISHED CONTENT to whoever holds the link, so it is a
+  // write (never `read`), MEDIUM/operate like the other draft writes: nothing goes live, and the link
+  // is time-boxed (default 1h, max 24h) and revocable. The revoke is the matching takedown and sits on
+  // the same scope, so whoever may mint a link may withdraw it (it only ever reduces exposure).
+  "content.previewToken": { command: "content.previewToken", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "content.previewTokenRevoke": { command: "content.previewTokenRevoke", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // WSK-51 (design §4): live editor reads. read/webdesk:read, no editorial assertion, not audited.
   "tenant.list": { command: "tenant.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "collection.list": { command: "collection.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
@@ -162,6 +172,8 @@ export const EDITORIAL_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>
   "content.schedule",
   "content.unpublish",
   "content.delete",
+  "content.previewToken",
+  "content.previewTokenRevoke",
 ]);
 
 export function commandMeta(command: CommandName): CommandMeta {
