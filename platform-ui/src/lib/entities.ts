@@ -204,6 +204,8 @@ export const getRollups = (u: string, period?: string) =>
 export interface Client {
   id: string; name: string; contact: Record<string, unknown>; status: string; custom_fields: Record<string, unknown>;
   owner_user_id?: string | null; owner_name?: string | null;
+  /** PV3-04 (PV-D2): the group company this client IS, or null for an ordinary client. Optional: an older backend omits it. */
+  groupCompany?: { id: string; name: string } | null;
 }
 /** The contact keys the staff UI edits (platform-nest `client-input.ts` CONTACT_KEYS). */
 export const CLIENT_CONTACT_KEYS = ["email", "phone", "address", "billingName", "billingEmail"] as const;
@@ -226,12 +228,16 @@ export async function getClient(u: string, t: string, id: string): Promise<Clien
   return list.find((c) => c.id === id) ?? null;
 }
 // Client-work CRUD — BFF contract (backend TODO, see docs/FRONTEND-BFF-CONTRACT.md).
-export const createClient = (u: string, t: string, body: { name: string; status?: string; contact?: Record<string, string>; ownerUserId?: string | null }) =>
+/** PV3-04: `businessType` is REQUIRED (a registry business type id; "other" is a valid explicit choice) and
+ *  the backend writes it as the client's profile row in the same transaction. `groupCompanyId` is
+ *  operator-only: anyone else gets a 403, so only send it when the form offered the picker. */
+export const createClient = (u: string, t: string, body: { name: string; businessType: string; status?: string; contact?: Record<string, string>; ownerUserId?: string | null; groupCompanyId?: string | null }) =>
   platformFetch<{ id: string }>(`/api/${t}/clients`, u, { method: "POST", body: JSON.stringify(body) });
 /** `PATCH /api/:t/clients/:id`. `contact` is a KEY-LEVEL MERGE on the backend (CC-D10): a string sets
  *  that key, `null` deletes it, an omitted key is left alone — so send only what the form owns.
- *  `ownerUserId`: omitted = unchanged, `null` = no owner. */
-export const updateClient = (u: string, t: string, id: string, body: { name?: string; status?: string; contact?: Record<string, string | null>; ownerUserId?: string | null }) =>
+ *  `ownerUserId`: omitted = unchanged, `null` = no owner. `businessType`: omitted = unchanged (a type cannot
+ *  be cleared, only changed). `groupCompanyId`: omitted = unchanged, `null` = clear (operator-only). */
+export const updateClient = (u: string, t: string, id: string, body: { name?: string; status?: string; contact?: Record<string, string | null>; ownerUserId?: string | null; businessType?: string; groupCompanyId?: string | null }) =>
   platformFetch<{ id: string }>(`/api/${t}/clients/${id}`, u, { method: "PATCH", body: JSON.stringify(body) });
 // CC-D10 — notes + history. Both degrade to [] on 404/403 (an older backend, or a module-off tenant)
 // via skipUnavailable, the same rule as listClients; anything else throws to the error boundary.

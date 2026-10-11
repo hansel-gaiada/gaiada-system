@@ -131,7 +131,7 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ | GET/POST | `/api/:t/projects/:pid/tasks` | list + create. |
 | ✅ | PATCH | `/api/:t/tasks/:id` | BUILT (`core.controller.ts`). Base task update. |
 | ✅ | Agency | `/api/:t/modules/agency/campaigns[/:cid/briefs]`, `/approvals/pending`, `/approvals/:id/decide` | campaigns + approvals ✅; **briefs GET+POST ✅** (`agency.controller.ts`); assets GET+POST ✅, submit ✅. **Still no campaign detail/edit/delete endpoints** (not in route inventory). |
-| ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. |
+| ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. **PV3-04: POST now REQUIRES `businessType`; see §26.** |
 | ✅ (UI built) | GET/POST/PATCH | `/api/:t/deliverables[?projectId][/:id]` | BUILT (`client-work.controller.ts`). UI: `/deliverables` list + `/deliverables/new`. |
 | ✅ (UI built) | GET/POST | `/api/:t/time-entries` | BUILT (incl. PATCH). UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
 | ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`invoice.controller.ts`: GET, GET/:id, POST, PATCH). **Invoices** UI: `/invoices` list + `/invoices/new` (generate from billable time in a period × rate) + `/invoices/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/invoice.ts`. `company.manage` only. |
@@ -4892,9 +4892,9 @@ route below uses the existing `client` resource.
 
 | Method + path | Authz | Notes |
 |---|---|---|
-| `GET /api/:t/clients` · `GET /api/:t/clients/:id` | `client` read | **Additive:** each row now carries `owner_user_id` and `owner_name` (both null when unassigned). |
-| `POST /api/:t/clients` | `client` create | Body `{name, status?, contact?, ownerUserId?, customFields?}`. **Fix:** `status` is now stored (it was dropped, so every client was born `active`). |
-| `PATCH /api/:t/clients/:id` | `client` update | **Behaviour change:** `contact` is a key-level MERGE: a string sets that key, `null`/`""` deletes it, an omitted key is untouched. It used to replace the whole object. `ownerUserId`: omitted = unchanged, `null` = clear, a user id must be ACTIVE STAFF of this tenant (400 otherwise; checked through the tenant-scoped connection, so another tenant's user is refused). `name` must not be blank; `status` must be a lowercase token. The activity row carries `{changes: [{field, before, after}]}`. |
+| `GET /api/:t/clients` · `GET /api/:t/clients/:id` | `client` read | **Additive:** each row now carries `owner_user_id` and `owner_name` (both null when unassigned), and (PV3-04) `groupCompany: {id, name} \| null`. |
+| `POST /api/:t/clients` | `client` create | Body `{name, businessType, status?, contact?, ownerUserId?, groupCompanyId?, customFields?}`. **Fix:** `status` is now stored (it was dropped, so every client was born `active`). **PV3-04: `businessType` is REQUIRED** (see "PV3-04" below); `groupCompanyId` is platform-operator only. |
+| `PATCH /api/:t/clients/:id` | `client` update | **Behaviour change:** `contact` is a key-level MERGE: a string sets that key, `null`/`""` deletes it, an omitted key is untouched. It used to replace the whole object. `ownerUserId`: omitted = unchanged, `null` = clear, a user id must be ACTIVE STAFF of this tenant (400 otherwise; checked through the tenant-scoped connection, so another tenant's user is refused). `name` must not be blank; `status` must be a lowercase token. The activity row carries `{changes: [{field, before, after}]}`. **PV3-04:** also accepts `businessType` (omitted = unchanged; it can be changed, never cleared) and `groupCompanyId` (omitted = unchanged, `null` = clear; platform-operator only). |
 | `GET /api/:t/clients/:id/notes` | `client` read | Newest first, max 200: `[{id, body, authorId, authorName, createdAt}]`. |
 | `POST /api/:t/clients/:id/notes` | `client` update | Body `{body}` (1–5,000 chars, trimmed). Returns `{id}`. Writes activity `noted`. |
 | `DELETE /api/:t/clients/:id/notes/:noteId` | own note: `client` update · anyone else's: `client` delete | Soft delete. Writes activity `note_deleted`. |
@@ -4902,6 +4902,61 @@ route below uses the existing `client` resource.
 
 UI mirror: capabilities `client.write` (company_admin, manager, member, owner) and `client.delete`
 (company_admin, manager, owner) in `platform-ui/src/lib/rbac.ts`, matching `resource_client.yaml`.
+
+### PV3-04: a required business type and a group-company link (2026-10-11) — **STATUS: PROTOTYPED**
+
+Tickets: `docs/plans/2026-10-11-pv3-hub-symmetry-tickets.md` PV3-04. Rulings: PV-D1 (business type), PV-D2
+(a group company the agency serves is a client of the agency), PV-D13 (no company names or ids in code).
+Migration `202610111322_clients_group_company.sql` adds `clients.group_company_id uuid NULL REFERENCES
+companies(id)`, `CHECK (group_company_id IS DISTINCT FROM tenant_id)` and a partial index
+`(tenant_id, group_company_id) WHERE group_company_id IS NOT NULL`. No backfill; no RLS or grant change.
+
+**Business type** (`businessType`, one of `src/modules/clients/centre/registry.json` `businessTypes`: hotel,
+restaurant, hospital, spa, agency, services, retail, ecommerce, saas, other):
+
+| Call | Result |
+|---|---|
+| `POST` without `businessType` (or `""`/`null`) | `400 {error:"business_type_required", field:"businessType"}`; no client written |
+| `POST` / `PATCH` with a value not in the registry | `400 {error:"business_type_invalid", field:"businessType"}` |
+| `POST` with a valid type | `201 {id}`. The client AND its `client_centre_profiles` row (`business_type`, `revision 1`) are written in ONE transaction through the Client Centre store, so a new client is never "not set". The `client.created` event payload carries `businessType` |
+| `PATCH` with a type that differs | `200 {id}`. Upserts the profile row in the same transaction, bumps its `revision`, emits `client.centre_updated` (`{changes:["businessType"]}`, the same event the centre PATCH emits) and the History entry carries `{field:"businessType", before, after}`. A client with no profile row ("not set") records `before: null` |
+| `PATCH` with the same type | `200`; nothing written, no event, no History entry |
+
+Order of checks, both routes: Cerbos `client` create/update first (403), then the group-company authority
+(below), then shape validation, then the target company, then the transaction. Lead conversion
+(`agency-lead-convert.service.ts`) is unchanged: leads carry no type, so converted clients read `other` and
+land on the Clients list's review filter ("Business type: Other or not set"). The read side is unchanged
+too: `GET /clients/centre` and `GET /clients/:id/centre` report `other` for a client with no row; the
+centre read's `revision: 0` is how a caller tells "not set" from an explicit "other".
+
+**Group company** (`groupCompanyId`; reads return `groupCompany: {id, name} | null`, `null` also when the
+linked company has been deleted):
+
+| Caller | Result |
+|---|---|
+| `platform_admin` (global), or the owner of the ROOT company (`isPlatformOperator`) | may set, change or clear it (`null`) |
+| anyone else (member, manager, `company_admin`, the owner of a child company) sending the key at all, even `null` | `403 "linking a client to a group company needs a platform operator"`, checked BEFORE the target is validated, so the answer never reveals whether a company exists; the row is unchanged |
+| operator, value is not a uuid | `400 group_company_invalid` |
+| operator, the client's own company | `400 group_company_self` (the table CHECK is the backstop) |
+| operator, no such company or a soft-deleted one | `400 group_company_not_found` |
+| operator, a live company of ANOTHER root | `400 group_company_other_root` |
+| operator, a live company under the same root as the client's tenant | accepted; History records `{field:"groupCompany", before, after}` (company NAMES, not ids) |
+
+`companies` is global with no RLS, so the same-root rule is enforced in the application
+(`modules/clients/group-company.ts`, through `withGlobal`, the `resolveGithubOrgTenant` precedent), not by
+the FK. PV3-Q1 (who may link) is open for the owner; the default above is the lead's, and widening it is one
+condition in `assertMayTouchGroupCompany`.
+
+**MCP** (`mcp-hub/src/platform-write-tools.ts`): `clients.create` requires `businessType` (enum of the
+registry ids) and accepts `groupCompanyId`; `clients.update` accepts both (`groupCompanyId: null` clears).
+A platform 400 now surfaces its typed code in the tool error (`platform /api/.../clients 400: business_type_required`).
+
+**UI**: New client has a required Business type select (no default); Edit preselects the current type, or
+nothing for a client with no profile row (centre `revision` 0) and will not submit until one is chosen
+("Other" is a valid explicit choice). The Group company select is shown only to a platform operator. The
+hub header and the Clients list show the group company. The Clients list has a "Business type: Other or
+not set" filter (`?review=business-type`) over the centre list it already loads; if that read fails, or
+comes back empty for a company that has clients, the page says so and withholds the filter.
 
 ## 27. WebDesk content BFF — the "Website" editor's backend (WSK-59, 2026-10-10) — `src/modules/webdev/webdesk-content.{controller,service}.ts`, `platform-ui/src/lib/webdeskContent.ts` (WSK-44) — **STATUS: BACKEND DEV-VERIFIED (Linux, see the ticket report); UI: WSK-44 builds against this section; UI RE-VERIFIED against the real controller by WSK-44b (see "Re-verified" below)**
 

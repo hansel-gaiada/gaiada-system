@@ -81,6 +81,9 @@ export default async function ClientHubLayout({
         actions={
           <>
             {overview.client.status && <StatusBadge label={overview.client.status} />}
+            {overview.client.groupCompany && (
+              <span className="lux-badge" title="This client is one of our own group companies">Group company: {overview.client.groupCompany.name}</span>
+            )}
             <span style={{ font: "400 12px var(--font-body)", color: "var(--ink-muted)" }}>
               Owner: {overview.client.owner_name ?? "none"}
             </span>

@@ -59,7 +59,7 @@ const CUSTOM_CONNECTION_ID_RE = /^x[a-z0-9]{4,40}$/;
 
 const TOP_LEVEL_DEPARTMENT_IDS = new Set<string>((registry.departments as Array<{ id: string }>).map((d) => d.id));
 const VALID_DEPARTMENT_IDS = new Set<string>([...TOP_LEVEL_DEPARTMENT_IDS, "ix"]);
-const VALID_BUSINESS_TYPES = new Set<string>((registry.businessTypes as Array<{ id: string }>).map((b) => b.id));
+export const VALID_BUSINESS_TYPES = new Set<string>((registry.businessTypes as Array<{ id: string }>).map((b) => b.id));
 const VALID_FIELD_KEYS = new Set<string>(Object.keys(registry.fields as Record<string, unknown>));
 const VALID_REGISTRY_CONNECTION_KEYS = new Set<string>(Object.keys(registry.connections as Record<string, unknown>));
 const VALID_CONNECTION_METHODS = new Set<string>(registry.connectionMethods as string[]);
