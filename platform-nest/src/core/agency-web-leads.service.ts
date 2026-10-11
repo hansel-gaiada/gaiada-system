@@ -24,6 +24,12 @@
 // `AGENCY_WEB_LEADS_ENABLED=1` is required. Owner ruling: each phase waits for counsel. Read at call time
 // (not at import) so a test or an operator flips it without a rebuild.
 //
+// ── SUPPRESSION (M5-G5) ─────────────────────────────────────────────────────────────────────────────
+// A person who had their data erased is on `agency_contact_suppressions` (hashed). If the mapped email or
+// phone is suppressed for 'intake', NOTHING is stored: no lead, no event, and only the typed outcome
+// `suppressed` (with the submission id) is logged. Checked inside the insert transaction, so a concurrent
+// erase cannot slip a row in between the check and the insert unnoticed for longer than that transaction.
+//
 // ── PLAIN TENANT WALL ───────────────────────────────────────────────────────────────────────────────
 // Like every other `agency_leads` access (agency-leads.service.ts header, design §3.1): `withTenants` with NO
 // `{ modules }` option; passing one would read/write zero rows.
@@ -32,6 +38,7 @@ import { config } from "../config";
 import { newId, withTenants } from "../db";
 import { emitEvent } from "../events/outbox.service";
 import { scrubText } from "./scrub";
+import { isContactSuppressed } from "./agency-privacy.service";
 import { webdeskZoneB, WebdeskProblem } from "../modules/webdev/webdesk-content.service";
 
 const logger = new Logger("AgencyWebLeads");
@@ -124,6 +131,8 @@ export type WebLeadOutcome =
   | { outcome: "existing"; leadId: string }
   | { outcome: "gone" }
   | { outcome: "unmapped_form" }
+  /** M5-G5: the submitter's email or phone is on the suppression list (they were erased). Nothing stored. */
+  | { outcome: "suppressed" }
   | { outcome: "disabled" }
   | { outcome: "invalid" };
 
@@ -209,6 +218,9 @@ export async function createLeadFromWebSubmission(
   const visitorConsent = plainObjectOrNull(fetched.visitorConsent, ATTRIBUTION_MAX_BYTES);
   const id = newId();
   const result = await withTenants([tenantId], async (c) => {
+    if (await isContactSuppressed(c, tenantId, { email: mapped.contactEmail, phone: mapped.contactPhone }, "intake")) {
+      return { suppressed: true as const };
+    }
     const ins = await c.query<{ id: string }>(
       `INSERT INTO agency_leads
          (id, tenant_id, org_name, contact_name, contact_email, contact_phone, source, status,
@@ -229,13 +241,17 @@ export async function createLeadFromWebSubmission(
       await emitEvent(c, tenantId, "agency_lead", id, "agency.lead.created", {
         source: "web", originForm: formKey, submissionRef: submissionId,
       });
-      return { created: true as const, leadId: id };
+      return { suppressed: false as const, created: true as const, leadId: id };
     }
     const again = await c.query<{ id: string }>(
       `SELECT id FROM agency_leads WHERE tenant_id = $1 AND submission_ref = $2`,
       [tenantId, submissionId],
     );
-    return { created: false as const, leadId: again.rows[0].id };
+    return { suppressed: false as const, created: false as const, leadId: again.rows[0].id };
   });
+  if (result.suppressed) {
+    logger.log(`submission ${submissionId}: suppressed (the submitter was erased); nothing stored`);
+    return { outcome: "suppressed" };
+  }
   return result.created ? { outcome: "created", leadId: result.leadId } : { outcome: "existing", leadId: result.leadId };
 }

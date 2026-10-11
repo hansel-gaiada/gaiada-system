@@ -208,6 +208,9 @@ export class AgencyLeadsController {
         throw new GoneException({ message: "the submission was purged or erased", reason: "submission-gone" });
       case "unmapped_form":
         throw new UnprocessableEntityException({ message: "this form has no lead mapping", reason: "unmapped_form" });
+      case "suppressed":
+        // M5-G5: the submitter asked to be erased; their contact is on the suppression list. Nothing stored.
+        throw new UnprocessableEntityException({ message: "the submitter's data was erased on request; no lead is created", reason: "subject_suppressed" });
       case "existing":
         reply.status(200);
         return { id: r.leadId, status: "new", created: false };

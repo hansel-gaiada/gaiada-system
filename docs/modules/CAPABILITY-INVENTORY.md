@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **169** capabilities across **16** owners
-- **87** writes · 82 reads
-- Writes by impact: **high 18** · medium 28 · low 41
+- **172** capabilities across **16** owners
+- **90** writes · 82 reads
+- Writes by impact: **high 21** · medium 28 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -39,11 +39,11 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 11 |
+| agency | `agency` | 12 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 12 |
-| core | `agency` · `positions` · `role-grants` | 15 |
+| core | `agency` · `positions` · `role-grants` | 16 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 4 |
@@ -78,6 +78,9 @@ unfalsifiable after.
 | core | `agency_pipeline.reference` | `GET` | `/api/:tenantId/agency/pipeline/reference` | read | — |
 | core | `agency_pipeline.setDealValue` | `POST` | `/api/:tenantId/agency/leads/:leadId/deal` | write | `low` |
 | core | `agency_pipeline.stageHistory` | `GET` | `/api/:tenantId/agency/leads/:leadId/stage-history` | read | — |
+| core | `agency_privacy.erase` | `POST` | `/api/:tenantId/agency/privacy/erase` | write | `high` |
+| core | `agency_privacy.export` | `POST` | `/api/:tenantId/agency/privacy/export` | write | `high` |
+| core | `agency_privacy.find` | `POST` | `/api/:tenantId/agency/privacy/find` | write | `high` |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
 | core | `iam.listAttachableRoles` | `GET` | `/api/:tenantId/positions/attachable-roles` | read | — |

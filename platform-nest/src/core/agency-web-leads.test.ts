@@ -8,12 +8,18 @@ import { Logger, NotFoundException } from "@nestjs/common";
 interface Row { id: string; tenant_id: string; submission_ref: string | null; params: unknown[] }
 const store: Row[] = [];
 const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+/** M5-G5: hashed contacts on the suppression list (scope 'all'), answered by the mock below. */
+const suppressed = new Set<string>();
 let idSeq = 0;
 
 vi.mock("../db", async (orig) => {
   const actual = await orig<typeof import("../db")>();
   const client = {
     async query(sql: string, p: unknown[]) {
+      if (sql.includes("agency_contact_suppressions")) {
+        const hashes = (p[3] as string[]) ?? [];
+        return { rows: [{ hit: hashes.some((h) => suppressed.has(h)) }] };
+      }
       if (sql.includes("INSERT INTO agency_leads")) {
         const [id, tenant, , , , , , , ref] = p as string[];
         if (store.some((r) => r.tenant_id === tenant && r.submission_ref === ref)) return { rows: [] };
@@ -42,6 +48,7 @@ import {
 } from "./agency-web-leads.service";
 import { config } from "../config";
 import { maybeFileLeadFromFormReceived } from "../modules/webdev/form-received-lead";
+import { normalizePhone, subjectHash } from "./agency-privacy.subject";
 
 const TENANT_A = "11111111-1111-4111-8111-111111111111";
 const TENANT_B = "22222222-2222-4222-8222-222222222222";
@@ -86,6 +93,7 @@ let logged: string[];
 beforeEach(() => {
   store.length = 0;
   events.length = 0;
+  suppressed.clear();
   logged = [];
   process.env.AGENCY_WEB_LEADS_ENABLED = "1";
   for (const m of ["log", "warn", "error", "debug", "verbose", "fatal"] as const) {
@@ -210,6 +218,29 @@ describe("createLeadFromWebSubmission", () => {
     const big = { ...submission("contact", { name: NAME }), attribution: { landing: "x".repeat(5000) } };
     await createLeadFromWebSubmission({ tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB }, deps({ answer: big }));
     expect((store[0].params as unknown[])[9]).toBeNull();
+  });
+
+  it("M5-G5: a suppressed email OR phone stores nothing, emits nothing, and logs the outcome token only", async () => {
+    suppressed.add(subjectHash(EMAIL.toLowerCase()));
+    expect(await createLeadFromWebSubmission({ tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB }, deps()))
+      .toEqual({ outcome: "suppressed" });
+    expect(store).toHaveLength(0);
+    expect(events).toHaveLength(0);
+
+    suppressed.clear();
+    suppressed.add(subjectHash(normalizePhone(PHONE)!));
+    expect(await createLeadFromWebSubmission({ tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB2 }, deps()))
+      .toEqual({ outcome: "suppressed" });
+    expect(store).toHaveLength(0);
+    const all = logged.join("\n");
+    expect(all).toContain("suppressed");
+    for (const s of SECRETS) expect(all).not.toContain(s);
+  });
+
+  it("M5-G5: an unrelated suppression does not block a different person", async () => {
+    suppressed.add(subjectHash("someone.else@example.com"));
+    const r = await createLeadFromWebSubmission({ tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB }, deps());
+    expect(r.outcome).toBe("created");
   });
 });
 

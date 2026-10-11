@@ -1874,6 +1874,27 @@ export function registerAgencyIntakeExecutableApprovals(): void {
   });
 }
 
+// M5-G5 - `agency_privacy.find|export|erase`: BARRED, never auto-executed on approval.
+//
+// The route itself is the WS4 gate (core/agency-privacy.service.ts): its first call files the approval that
+// matters and its approved re-call, by the requester, runs the command once. A D14 re-drive of a hub-filed
+// row would reach that route WITHOUT an approvalId and only file a second approval, so registering an
+// executor would make an approved hub row look executed while nothing ran. The bar says so positively, and
+// keeps core-tools.test.ts's "no medium/high write without an executor or a bar" invariant honest.
+export const AGENCY_PRIVACY_BARRED_TOOLS = ["agency_privacy.find", "agency_privacy.export", "agency_privacy.erase"] as const;
+
+export function registerAgencyPrivacyBars(): void {
+  for (const toolName of AGENCY_PRIVACY_BARRED_TOOLS) {
+    registerBarredExecutable({
+      toolName,
+      reason: "route_ws4_gated",
+      note:
+        "M5-G5: the privacy route files and consumes its own WS4 approval per call (requester re-calls with the "
+        + "approvalId, maker != checker). A hub re-drive cannot carry that approval, so it never auto-executes.",
+    });
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // THE production bootstrap — one list, so it cannot go stale
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1909,6 +1930,7 @@ export function registerAllExecutableApprovals(): void {
   registerJmlExecutableApprovals();
   registerIamExecutableApprovals();
   registerAgencyIntakeExecutableApprovals();
+  registerAgencyPrivacyBars();
 }
 
 registerAllExecutableApprovals();
