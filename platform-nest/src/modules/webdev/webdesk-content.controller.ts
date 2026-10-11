@@ -155,6 +155,18 @@ export class WebdeskContentController {
     send(reply, await webdeskContent.restoreVersion(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
   }
 
+  /** WSK-46: mint a one-time preview link to a DRAFT. Authorised as the item's `update` (a link discloses the draft). */
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/preview")
+  async preview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "update");
+    send(reply, await webdeskContent.previewItem(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
+  }
+
   /** Files ONE approval. 202, never 200: nothing is published yet. */
   @Post("sites/:tenantSlug/:siteId/publish-requests")
   @HttpCode(202)

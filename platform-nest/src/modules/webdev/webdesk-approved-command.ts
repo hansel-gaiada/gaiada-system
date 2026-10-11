@@ -119,7 +119,9 @@ export type WebdeskBffEditorialCommand =
   | "content.update"
   | "content.restoreVersion"
   | "content.unpublish"
-  | "content.delete";
+  | "content.delete"
+  // WSK-46: minting a draft-preview token (MEDIUM, editorial; Zone B's `content.previewToken`).
+  | "content.previewToken";
 
 /** `automation_approvals.origin` for these rows (migration 202610101500). */
 export const WEBDESK_APPROVAL_ORIGIN = "webdesk";

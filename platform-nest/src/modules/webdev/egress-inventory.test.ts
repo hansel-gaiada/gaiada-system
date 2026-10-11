@@ -39,6 +39,13 @@ const APPROVED_EGRESS: Record<string, string> = {
   "site-build-stamp.ts":
     "the staging site's build stamp: GET <stagingUrl>/webdesk-build.json (config.webdeskRebuild target only, "
     + "no redirects, 8 KiB cap, no credential).",
+  // WSK-46 — the fourth far side, also a PUBLIC website: a HEAD of `https://<staging domain>/preview/`, asked before a
+  // preview token is minted so the editor is never handed a link to a page that is not there. The domain is the site's
+  // own staging environment as WebDesk reports it (validated as a bare public hostname), never a request value.
+  // HEAD only, no redirects, 5 s timeout, no credential, cached 5 minutes.
+  "webdesk-preview.ts":
+    "the staging site's preview page: HEAD https://<staging environment domain>/preview/ (a public hostname from WebDesk's "
+    + "own tenant.list, never from a request; no redirects, 5 s timeout, no credential, cached 5 min).",
 };
 
 /** Namespaces that would indicate cross-contamination if this module referenced them. */

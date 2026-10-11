@@ -441,6 +441,12 @@ export const webdevModule: ModuleContract = {
     // D14 PAIRING (the standing lesson): unpublish and delete are registered in BOTH
     // `core/approval-executables.ts` AND `resource_mcp_tool.yaml`'s executable list, in this same change.
     //
+    // WSK-46 `webdesk.content.preview` is `medium` (it mints a capability link that exposes a DRAFT) and is NOT on that
+    // list, on purpose and pending the owner's call: an attended human runs it (the editor's Preview button is the
+    // same BFF route); an unattended caller SUSPENDS, and approving that suspension re-drives nothing (`not_applicable`)
+    // because the link is a one-time secret that must not be parked in an approval row. So an agent cannot hold a
+    // preview link unattended. Registering it would need `core/approval-executables.ts` + the Cerbos list (not WSK-46's paths).
+    //
     // ASSURANCE. `low`, like every other WebDesk tool: the hub mints only `low` for an n8n workflow or a chat-surface
     // agent (principal.ts), and `verified` would lock exactly the unattended callers this program exists for out of
     // the capability. The real authority is the platform's Cerbos decision on the resolved human, not this floor.
@@ -653,6 +659,28 @@ export const webdevModule: ModuleContract = {
           baseVersion: { type: "integer", minimum: 0 },
         },
         required: ["tenantId", "tenantSlug", "siteId", "itemId", "baseVersion"],
+      },
+    },
+    {
+      name: "webdesk.content.preview",
+      description:
+        "Make a one-time PREVIEW link to an item's DRAFT (its head version, or `version`), opening on the site's own /preview/ page. "
+        + "MEDIUM write: the link shows unpublished content to whoever holds it, so an unattended caller (agent / n8n) is suspended for "
+        + "human approval, and the link is a secret: share it only with the person who asked. Returns {previewUrl, expiresAt, version}; "
+        + "the link expires (about an hour) and is shown once. Typed 409 `preview_not_configured` (the site has no staging address) / "
+        + "`preview_page_missing` (the site has no /preview/ page yet) mint nothing.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/preview",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          version: { type: "integer", minimum: 1, description: "The version to preview; omit for the head (latest draft)." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId"],
       },
     },
   ],

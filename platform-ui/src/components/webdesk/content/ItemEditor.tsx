@@ -16,6 +16,7 @@ import { formatDateTime } from "@/lib/format";
 import { ConflictDialog } from "./ConflictDialog";
 import { placeholderSyntaxes } from "@/lib/markdownCodec";
 import { FieldEditor, type FormCtx } from "./FieldEditor";
+import { PreviewCard } from "./PreviewCard";
 import { PublishBar } from "./PublishBar";
 import "./content.css";
 
@@ -570,6 +571,17 @@ export function ItemEditor({
                 </>
               )}
             </section>
+
+            {/* WSK-46: preview the DRAFT on the site's own /preview/ page. Off exactly when Save is off (`canWrite`). */}
+            {!item.deletedAt && (
+              <PreviewCard
+                scope={scope}
+                itemId={item.itemId}
+                version={baseVersion}
+                dirty={dirty}
+                blocked={readOnly ? "Read-only." : stale !== null ? "Disabled until WebDesk answers again." : unconfirmed !== null ? "Disabled until you reload." : null}
+              />
+            )}
 
             {stagingItemUrl && (
               <section className="wc-side-card"><h3>Staging</h3><a href={stagingItemUrl} target="_blank" rel="noopener noreferrer" data-testid="view-staging">View on staging</a></section>

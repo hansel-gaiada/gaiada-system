@@ -52,7 +52,7 @@ import {
   PRIMITIVE_NAMES,
   type ApprovalStatus, type BuildStatus, type CollectionComposition, type CollectionSummary,
   type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail,
-  type KeyMintOutcome, type KeyRequestFiled, type KeyScope,
+  type KeyMintOutcome, type KeyRequestFiled, type KeyScope, type PreviewLink,
   type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type Page,
   type PrimitiveName, type PublishRequestRow, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
   type VersionContent, type VersionFull, type VersionListBody, type WdResult,
@@ -350,6 +350,26 @@ export function parseKeyRequest(v: unknown): KeyRequestFiled {
   const approvalId = key(o, "approvalId", str, "key-request");
   if ("alreadyPending" in o && o.alreadyPending !== true) throw new WireDrift("key-request.alreadyPending", "true or absent", o.alreadyPending);
   return { approvalId, alreadyPending: o.alreadyPending === true };
+}
+
+/** `POST …/items/:itemId/preview` -> 200 `{previewUrl, expiresAt, version}`. STRICT, because the answer is OPENED IN A NEW TAB: the URL must be
+ *  https, point at the site's `/preview/` page, carry the token in the FRAGMENT (`#t=…`) and no query string. Anything else is drift and
+ *  nothing is opened. A `WireDrift` names the path and the TYPE it got, never the value, so the token cannot reach an error or a log. */
+export function parsePreviewLink(v: unknown): PreviewLink {
+  const o = obj(v, "preview");
+  for (const k of Object.keys(o)) {
+    if (k !== "previewUrl" && k !== "expiresAt" && k !== "version") throw new WireDrift(`preview.${k}`, "previewUrl|expiresAt|version", o[k]);
+  }
+  const previewUrl = key(o, "previewUrl", str, "preview");
+  const expiresAt = key(o, "expiresAt", str, "preview");
+  const version = key(o, "version", int, "preview");
+  if (Number.isNaN(Date.parse(expiresAt))) throw new WireDrift("preview.expiresAt", "an ISO timestamp", 0);
+  let u: URL | null = null;
+  try { u = new URL(previewUrl); } catch { u = null; }
+  if (!u || u.protocol !== "https:" || u.username !== "" || u.password !== "" || !u.pathname.endsWith("/preview/") || u.search !== "" || !u.hash.startsWith("#t=") || u.hash.length <= 3) {
+    throw new WireDrift("preview.previewUrl", "an https URL to the site's /preview/ page with the token in the #t= fragment", "malformed");
+  }
+  return { previewUrl, expiresAt, version };
 }
 
 /** The decide façade's body for a key.mint row: `{ ok: true, webdesk?: {command, executionStatus, apiKeyId, envId, scope, plaintextOnce, error?} }`.

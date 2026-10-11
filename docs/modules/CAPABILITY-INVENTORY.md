@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **151** capabilities across **16** owners
-- **80** writes · 71 reads
-- Writes by impact: **high 18** · medium 23 · low 39
+- **152** capabilities across **16** owners
+- **81** writes · 71 reads
+- Writes by impact: **high 18** · medium 24 · low 39
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |
 | social | `social` | 12 |
-| webdev | `webdev` | 13 |
+| webdev | `webdev` | 14 |
 
 ## Capabilities
 
@@ -190,6 +190,7 @@ unfalsifiable after.
 | webdev | `webdesk.content.listMedia` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media` | read | — |
 | webdev | `webdesk.content.listSites` | `GET` | `/api/:tenantId/modules/webdev/content/sites` | read | — |
 | webdev | `webdesk.content.listVersions` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/versions` | read | — |
+| webdev | `webdesk.content.preview` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/preview` | write | `medium` |
 | webdev | `webdesk.content.requestPublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/publish-requests` | write | `low` |
 | webdev | `webdesk.content.restoreVersion` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/restore` | write | `low` |
 | webdev | `webdesk.content.unpublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/unpublish` | write | `medium` |

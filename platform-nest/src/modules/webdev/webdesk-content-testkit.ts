@@ -70,8 +70,8 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "schema.apply", "site.provision", "key.mint"]);
-const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint"]);
+const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken"]);
 
 export function problem(status: number, slug: string, extra: Record<string, unknown> = {}): WebdeskControlResponse {
   const json = { type: `https://webdesk.gaiada.online/errors/${slug}`, title: slug, status, ...extra };
@@ -98,6 +98,12 @@ export class FakeZoneB {
   readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string; env?: { production: string; staging: string } }> = [];
   /** Every plaintext `key.mint` returned, in order (so a test can scan storage and logs for it). */
   readonly mintedKeys: string[] = [];
+  /** Every preview token `content.previewToken` returned, in order (WSK-46: a test scans logs and the ledger for them). */
+  readonly mintedPreviewTokens: string[] = [];
+  /** Idempotency keys a preview mint has answered: a replay is 409 `idempotency-response-withheld`, as in Zone B. */
+  private readonly previewKeys = new Set<string>();
+  /** The staging environment's `domain` in `tenant.list` (null = a site with no staging hostname yet). WSK-46's preview base. */
+  stagingDomain: string | null = "staging.gaiada.test";
   /** Throw this from the NEXT `send` (a breaker-open, a transport failure, ...). Persistent until cleared. */
   failWith: Error | null = null;
   /** Respond to the NEXT write with this instead of applying it. */
@@ -123,6 +129,9 @@ export class FakeZoneB {
   reset(): void {
     this.calls.length = 0;
     this.mintedKeys.length = 0;
+    this.mintedPreviewTokens.length = 0;
+    this.previewKeys.clear();
+    this.stagingDomain = "staging.gaiada.test";
     this.items.clear();
     this.failWith = null;
     this.nextWriteResponse = null;
@@ -227,7 +236,7 @@ export class FakeZoneB {
             // `environments.domain` is nullable in WebDesk (a site with no hostname yet): one of each.
             environments: [
               { envId: this.envOf(t).production, name: "production", domain: null, status: "pending" },
-              { envId: this.envOf(t).staging, name: "staging", domain: "staging.gaiada.test", status: "active" },
+              { envId: this.envOf(t).staging, name: "staging", domain: this.stagingDomain, status: "active" },
             ],
           }],
         })),
@@ -380,6 +389,21 @@ export class FakeZoneB {
         if (i.publishedVersion !== null) return problem(409, "item-is-live");
         i.deletedAt = now;
         return ok({ item: this.stateJson(i), replayed: false });
+      }
+      case "content.previewToken": {
+        // WebDesk preview-token-commands.service#mint: the item must exist and be live-or-draft (a deleted one is
+        // 409 item-deleted), the version must exist (409 version-not-found), the token is 43-char base64url and is
+        // returned ONCE; a replay of the same Idempotency-Key is 409 idempotency-response-withheld.
+        const i = this.items.get(p.itemId);
+        if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
+        if (i.deletedAt) return problem(409, "item-deleted");
+        if (this.previewKeys.has(req.idempotencyKey as string)) return problem(409, "idempotency-response-withheld");
+        const version = b.version ?? i.headVersion;
+        if (version < 1 || !i.versions[version - 1]) return problem(409, "version-not-found");
+        this.previewKeys.add(req.idempotencyKey as string);
+        const token = randomBytes(32).toString("base64url");
+        this.mintedPreviewTokens.push(token);
+        return ok({ tokenId: randomUUID(), token, expiresAt: new Date(Date.now() + 3600_000).toISOString(), version, previewPath: `/v1/t/${p.tenantSlug}/preview/${token}`, replayed: false }, 201);
       }
       case "key.mint": {
         // WebDesk keys-command.service#mint: the env must be one of THIS tenant's (else 404), and the plaintext

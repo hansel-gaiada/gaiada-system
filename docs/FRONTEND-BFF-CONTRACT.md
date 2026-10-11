@@ -4802,6 +4802,7 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | POST | `/sites/:ts/:site/publish-requests/:approvalId/withdraw` | `…:request_publish` (the right that filed it) | 200 `{approvalId, status:"cancelled"}` |
 | POST | `/sites/:ts/:site/items/:itemId/unpublish` | `…:unpublish` | 200 `{item,replayed}` |
 | POST | `/sites/:ts/:site/items/:itemId/delete` | `…:delete` | 200 `{item,replayed}` |
+| POST | `/sites/:ts/:site/items/:itemId/preview` (WSK-46, 2026-10-11) | **`…:update`** (a preview link discloses a draft, so it is gated as the right to change it; no new Cerbos action or kind) | 200 `{previewUrl, expiresAt, version}`. See "Draft preview" below |
 
 `ItemWriteResult` = `{item:ItemState, version:{version,contentHash,createdAt}, unchanged, lint, replayed}`
 (`ItemState` = `{itemId,collectionKey,locale,slug,localizationGroupId,headVersion,publishedVersion,publishState,publishAt,unpublishAt,deletedAt,updatedAt}`).
@@ -4817,10 +4818,43 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | publish-requests | `{items:[{itemId,version}] (1..1000), note?}` **or** `{items, publishAt?, unpublishAt?}` for a scheduled publish/takedown (no note) |
 | unpublish | `{expectedPublishedVersion}` |
 | delete | `{baseVersion}` (a non-live item only) |
+| preview | `{version?}` (an integer >= 1; omitted = the item's head). An absent body is `{}`. Nothing else is accepted (the token lifetime is WebDesk's default, one hour) |
 
 Writes accept an optional `Idempotency-Key` header (8..200 printable ASCII); without one the BFF generates a fresh
 uuid. **A retry of the same logical write must resend the SAME key**: WebDesk then answers `replayed:true` instead of
 writing twice. Route params `tenantSlug`/`siteId`/`itemId` never appear in a body.
+
+### Draft preview (WSK-46, owner ruling WSK-D52, 2026-10-11)
+
+`POST …/items/:itemId/preview` `{version?}` -> `200 {previewUrl, expiresAt, version}`. An **instant preview page on the site itself**: WebDesk mints a
+short-lived token for ONE version of ONE item (`POST /control/v1/tenants/:ts/sites/:site/content/items/:itemId/preview-token`, command
+`content.previewToken`, MEDIUM, editorial assertion + Idempotency-Key, like the other writes), and the site's own `/preview/` page reads it and fetches the draft from
+WebDesk's public `GET /v1/t/:tenant/preview/:token`. No preview build.
+
+* **`previewUrl` = `<the site's staging base>/preview/#t=<token>`. The token is in the URL FRAGMENT, never a query string**: a browser never sends a fragment to any
+  server and never puts it in a Referer. The staging base is `https://<domain>` of the site's `environments[]` entry named `staging` that has a domain (case-insensitive,
+  the first such), from `GET …/content/sites`: **the same source as the editor's "View on staging" link, not a second configuration.** The domain must be a bare public
+  hostname (no scheme, port, path, userinfo, IP literal or `localhost`), else it counts as not configured, because the server makes a request to it.
+* **The token is a one-time secret.** It is in WebDesk's response and in the returned `previewUrl`'s fragment, and nowhere else: not the `activities` rows, not a log line,
+  not an error body. WebDesk never stores it (it keeps a hash), so a replay of the same `Idempotency-Key` is WebDesk's typed `409 idempotency-response-withheld`; mint again
+  under a NEW key (the editor always does). `expiresAt` is ISO; the link works until then (default one hour) or until revoked.
+* **Honest states: never a dead link, and each of these mints NOTHING.** The checks run before the mint, and before the item read:
+  * the site has no usable staging address: **`409 {error:"Preview isn't set up for this site yet", reason:"preview_not_configured"}`**;
+  * the site has no `/preview/` page yet: the server asks `HEAD <staging>/preview/` (redirects not followed, 5 s timeout, no credential), cached **5 minutes** per origin
+    for a DEFINITE answer only; a **404 or 410** is **`409 {error:"This site doesn't have a preview page yet", reason:"preview_page_missing"}`**. Any other 4xx (401/403/405) is
+    not a 404, so the page is assumed present; 2xx and 3xx are present. **Today gaiada.com's staging site has no `/preview/` page, so this is the correct live answer until the
+    site owner builds it** (and it can take up to 5 minutes after they do for the cached "missing" to expire);
+  * the site did not answer (a 5xx, a timeout, no connection): **`502 {error:"The site didn't answer, so a preview link can't be made right now", reason:"preview_site_unreachable"}`**, not cached.
+* **WebDesk refusals map exactly as the other writes do:** 404 `item-not-found` / `version-not-found` and 409 `item-deleted` (also checked before the mint from the item read) pass through as
+  `application/problem+json`; 503 `editorial_unavailable` / `webdesk_not_configured`; 502 `webdesk_ambiguous` (a mint that may have landed is not reconciled: there is nothing to read back,
+  so the caller simply mints again); 502 `webdesk_refused` / `webdesk_error` (`preview_shape` when WebDesk's 2xx lacked a token); the cross-company 404 `site-not-found`.
+* **Ledger:** two `activities` rows, verb `webdesk.content.previewToken` (`attempted` then `succeeded`|`refused`|`failed`|`ambiguous`), identifiers only (`tenantSlug`, `siteId`, `itemId`,
+  `collectionKey`, `locale`, `requestedVersion`), never the token. Nothing is written when a site check above refuses (nothing was attempted).
+* **UI:** `platform-ui/src/components/webdesk/content/PreviewCard.tsx` (a "Preview" card in the item editor's side panel, beside "View on staging"), through the server action
+  `previewItemAction` in `lib/webdeskContentActions.ts` and the STRICT parser `parsePreviewLink` in `lib/webdeskContent.ts` (the answer is opened in a new tab, so anything but an https link to a
+  `/preview/` page with the token in `#t=` and no query string is `contract_drift` and nothing is opened). The button opens `previewUrl` with `window.open(…, "_blank", "noopener,noreferrer")`, shows
+  "Link valid until …", and keeps an "Open the preview again" anchor (a blocked pop-up cannot be detected with `noopener`). It is disabled exactly when Save is (read-only, stale, unconfirmed), and
+  says when it shows the last saved version rather than unsaved edits. The two 409s are plain-words notices; the rest say what to do. A preview is not a write: a failure never flips the editor to stale.
 
 ### Publish is a request, never an action (WSK-D46)
 
@@ -4907,7 +4941,7 @@ Anything else is the 502 above.
   read/create/update/restore/request_publish. Publisher tier (`webdev_manager`, company_admin): also unpublish/delete.
   Item-targeted writes authorize twice: generically first, then with the `collectionKey`/`locale` read from WebDesk.
 * **Ledger.** Every write that reaches WebDesk writes two `activities` rows around the call, verb `webdesk.content.<cmd>`
-  (`create`/`update`/`restoreVersion`/`unpublish`/`delete`, and `webdesk.schema.apply`/`webdesk.site.provision`), actor = the ERP user
+  (`create`/`update`/`restoreVersion`/`unpublish`/`delete`/`previewToken`, and `webdesk.schema.apply`/`webdesk.site.provision`), actor = the ERP user
   (the same id as the editorial `sub`), `target_entity_type` `webdesk_content_item` (or `webdesk_site`), metadata
   `{outcome: attempted → succeeded|reconciled|refused|failed|ambiguous, status, problem?, tenantSlug, siteId, itemId?, collectionKey?, locale?, idempotencyKey}`;
   never content values. Reads write nothing.
@@ -4919,7 +4953,10 @@ Declared in `modules/webdev/index.ts` and aggregated by the hub from `GET /mcp/t
 (free). Writes: `webdesk.content.create` · `update` (PATCH) · `restoreVersion` · `requestPublish`, `write:true, impact:"low"`
 (never suspend: a draft, or only files an approval); `webdesk.content.unpublish` · `delete`, `write:true, impact:"medium"`:
 an unattended caller (agent / n8n) **suspends** into an approval and is re-driven as the original requester on approval
-(D14: `core/approval-executables.ts` + `resource_mcp_tool.yaml`, both). **There is no publish tool.** Hub limitation: a GET tool
+(D14: `core/approval-executables.ts` + `resource_mcp_tool.yaml`, both). `webdesk.content.preview` (WSK-46, `POST …/items/:itemId/preview`, input `{version?}`) is also
+`write:true, impact:"medium"`: it creates a capability link that exposes a draft, so an unattended caller **suspends**; unlike unpublish/delete it is deliberately NOT on the D14 executable list (the link is a
+one-time secret that must not be parked in an approval row), so approving that suspension re-drives nothing and an unattended agent cannot hold a preview link. An attended human runs it directly: it is the same
+BFF route the editor's button calls. **There is no publish tool.** Hub limitation: a GET tool
 passes only path args, so the list tools return the default first page with no filter or cursor over MCP.
 
 ### Control routes re-pointed (WSK-31 stubs → real; same paths, same Cerbos `webdev_provisioned_site` gate)
