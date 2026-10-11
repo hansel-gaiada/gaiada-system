@@ -72,7 +72,7 @@ export function PublishBar({
   dirty: boolean;
   /** Why requests are disabled (stale / read-only) — null when allowed. */
   blocked: string | null;
-  initialPending: { approvalId: string }[] | null;
+  initialPending: { approvalId: string; version?: number | null }[] | null;
   pendingProblem: string | null;
   initialBuild: BuildStatus | null;
   buildProblem: string | null;
@@ -86,7 +86,7 @@ export function PublishBar({
 }) {
   const [flow, setFlow] = useState<Flow | null>(() => {
     const first = initialPending?.[0];
-    return first ? { kind: "publish", approvalId: first.approvalId, version: null, phase: { phase: "pending", approvalId: first.approvalId } } : null;
+    return first ? { kind: "publish", approvalId: first.approvalId, version: first.version ?? null, phase: { phase: "pending", approvalId: first.approvalId } } : null;
   });
   const [busy, setBusy] = useState<null | "request" | "unpublish" | "withdraw" | "rebuild">(null);
   const [message, setMessage] = useState<{ tone: "info" | "bad" | "ok"; text: string } | null>(null);

@@ -915,13 +915,13 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
       return r.json().approvalId;
     }
 
-    it("🔴 a webdev_staff editor reads the request they filed: {requests:[{approvalId,status,createdAt,itemIds,executionStatus}]}, exactly", async () => {
+    it("🔴 a webdev_staff editor reads the request they filed: {requests:[{approvalId,status,createdAt,itemIds,items,executionStatus}]}, exactly", async () => {
       const id = await fileAs(editorA);
       const r = await list(editorA, "?status=pending");
       expect(r.statusCode).toBe(200);
       expect(r.headers["content-type"]).toContain("application/json");
       expect(r.json()).toEqual({
-        requests: [{ approvalId: id, status: "pending", createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/), itemIds: [item.itemId], executionStatus: "not_applicable" }],
+        requests: [{ approvalId: id, status: "pending", createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/), itemIds: [item.itemId], items: [{ itemId: item.itemId, version: 1 }], executionStatus: "not_applicable" }],
       });
       // no ?status means pending
       expect((await list(editorA)).json().requests.map((q: { approvalId: string }) => q.approvalId)).toEqual([id]);

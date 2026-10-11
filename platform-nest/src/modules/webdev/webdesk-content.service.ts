@@ -989,7 +989,7 @@ export class WebdeskContentService {
 
   /**
    * `GET …/publish-requests[?status=pending|approved|rejected|cancelled|all]` (default `pending`) →
-   * `{requests:[{approvalId, status, createdAt, itemIds, executionStatus}]}`: the CALLER'S OWN publish/schedule
+   * `{requests:[{approvalId, status, createdAt, itemIds, items:[{itemId,version}], executionStatus}]}`: the CALLER'S OWN publish/schedule
    * approvals for THIS site, newest first, at most 100. WSK-44b: the editor's "pending request after reload" read.
    * `GET /api/:t/automation-approvals?origin=webdesk` needs `automation_approval:read` (company_admin/manager only),
    * so a `webdev_staff` editor got 403 on it and could not see the request they had filed. This is authorised as
@@ -1025,6 +1025,11 @@ export class WebdeskContentService {
         status: r.status,
         createdAt: new Date(r.created_at).toISOString(),
         itemIds: items.flatMap((i) => (isPlainObject(i) && typeof i.itemId === "string" ? [i.itemId] : [])),
+        items: items.flatMap((i) =>
+          isPlainObject(i) && typeof i.itemId === "string" && typeof i.version === "number" && Number.isInteger(i.version) && i.version > 0
+            ? [{ itemId: i.itemId, version: i.version }]
+            : [],
+        ),
         executionStatus: r.execution_status ?? null,
       };
     });

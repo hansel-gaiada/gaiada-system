@@ -1,8 +1,11 @@
 /* Website workspace (WSK-44) — the WebDesk content editor and its list/history/approval surfaces.
 
    Prefix `wc-` (webdesk content). `wd-` is the site-portfolio surface; a genuinely new surface gets a
-   new prefix (platform-ui/CLAUDE.md). Form controls reuse `.lux-field*` from forms/forms.css.
+   new prefix (platform-ui/CLAUDE.md). Form controls reuse `.lux-field*` from forms/forms.css, imported
+   here: no component of this workspace imports it, so a direct load of the editor drew bare browser
+   controls (found on erp.gaiada.online, 2026-10-11).
    Tokens only — `styles/tokens.test.ts` fails the build on any colour literal in a component stylesheet. */
+@import "../../forms/forms.css";
 
 .wc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 

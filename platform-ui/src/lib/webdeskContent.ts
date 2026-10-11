@@ -600,9 +600,16 @@ export function parsePublishRequests(v: unknown): PublishRequestRow[] {
     if (!APPROVAL_STATUSES.includes(status)) throw new WireDrift(`${path}.status`, APPROVAL_STATUSES.join("|"), status);
     const es = key(r, "executionStatus", strN, path);
     if (es !== null && !EXEC_STATES.includes(es)) throw new WireDrift(`${path}.executionStatus`, EXEC_STATES.join("|"), es);
+    // `items` is optional on the wire: a BFF one release behind omits it, so absent => [] (no version known).
+    const items = opt(r, "items", arr((x, p) => {
+      const it = obj(x, p);
+      const version = key(it, "version", int, p);
+      if (version < 1) throw new WireDrift(`${p}.version`, "positive integer", version);
+      return { itemId: key(it, "itemId", str, p), version };
+    }), path) ?? [];
     return {
       approvalId: key(r, "approvalId", str, path), status: status as ApprovalStatus, createdAt: key(r, "createdAt", str, path),
-      itemIds: key(r, "itemIds", arr(str), path), executionStatus: es as ExecState | null,
+      itemIds: key(r, "itemIds", arr(str), path), items, executionStatus: es as ExecState | null,
     };
   }), "publish-requests");
 }
@@ -616,10 +623,14 @@ export function listOwnPublishRequests(
 /** The caller's pending publish requests that name `itemId` (the editor's "pending request after reload"). */
 export async function findPendingPublishRequests(
   userId: string, company: string, tenantSlug: string, siteId: string, itemId: string,
-): Promise<WdResult<{ approvalId: string }[]>> {
+): Promise<WdResult<{ approvalId: string; version: number | null }[]>> {
   const r = await listOwnPublishRequests(userId, company, tenantSlug, siteId, "pending");
   if (r.kind !== "ok") return r;
-  return { kind: "ok", data: r.data.filter((q) => q.status === "pending" && q.itemIds.includes(itemId)).map((q) => ({ approvalId: q.approvalId })) };
+  return {
+    kind: "ok",
+    data: r.data.filter((q) => q.status === "pending" && q.itemIds.includes(itemId))
+      .map((q) => ({ approvalId: q.approvalId, version: q.items.find((i) => i.itemId === itemId)?.version ?? null })),
+  };
 }
 
 /** One approval for the editor's poll. The detail route needs `automation_approval:read`; a requester
@@ -687,7 +698,7 @@ export interface EditorBundle {
   authoritative: { locale: string; fields: Record<string, unknown> } | null;
   authoritativeProblem: string | null;
   /** Pending publish requests that name this item. `null` + problem when the lookup failed. */
-  pendingRequests: { approvalId: string }[] | null;
+  pendingRequests: { approvalId: string; version: number | null }[] | null;
   pendingProblem: string | null;
   /** `null` until/unless the proposed build-status route answers. */
   build: BuildStatus | null;
