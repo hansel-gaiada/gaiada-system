@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { previewItemAction, type SiteScope } from "@/lib/webdeskContentActions";
-import { previewRefusalCopy, type PreviewLink } from "@/lib/webdeskContentModel";
+import { previewRefusalCopy, type PreviewLink, type WdResult } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
 
 // WSK-46 (owner ruling WSK-D52) — the editor's "Preview" action: an instant preview of the DRAFT on the site's own
@@ -26,7 +26,7 @@ import { formatDateTime } from "@/lib/format";
 type Notice = { tone: "info" | "bad"; text: string };
 
 export function PreviewCard({
-  scope, itemId, version, dirty, blocked,
+  scope, itemId, version, dirty, blocked, preview,
 }: {
   scope: SiteScope;
   itemId: string;
@@ -35,6 +35,8 @@ export function PreviewCard({
   dirty: boolean;
   /** Why the editor's writes are off (read-only, stale, unconfirmed), or null. Preview is disabled exactly then. */
   blocked: string | null;
+  /** WSK-49d: the portal's own call (client mode). Absent = the staff action, as before. */
+  preview?: (scope: SiteScope, itemId: string, version: number) => Promise<WdResult<PreviewLink>>;
 }) {
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<PreviewLink | null>(null);
@@ -47,7 +49,7 @@ export function PreviewCard({
     setBusy(true); setNotice(null); setLink(null);
     let r: Awaited<ReturnType<typeof previewItemAction>>;
     try {
-      r = await previewItemAction(scope, itemId, version);
+      r = await (preview ?? previewItemAction)(scope, itemId, version);
     } catch {
       // A rejected server action (the network, a deploy in flight): the same plain words as an unreachable WebDesk.
       if (!mounted.current) return;

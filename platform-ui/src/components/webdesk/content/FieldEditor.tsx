@@ -35,13 +35,31 @@ export interface FormCtx {
   placeholders?: PlaceholderSyntax[];
   /** WSK-43c: what the "Choose from library" button of a `media` field needs. Absent = no button (the URL and alt inputs only). */
   media?: MediaPickerCtx | null;
+  /** WSK-49d CLIENT MODE: the BFF's `clientEditable.fields` map (dotted path -> bool, §16j), exactly as sent. Absent = staff
+   *  editor, and nothing below changes. Present: a field is editable ONLY when the map says `true`; a missing entry is NOT
+   *  editable (every doubt answers read-only), and the reason shown is "Managed by Gaiada". */
+  clientEditable?: Record<string, boolean>;
 }
 
-type Lock = null | "readonly" | "neutral";
+type Lock = null | "readonly" | "neutral" | "protected";
 
-function lockFor(def: FieldDef, ctx: FormCtx, inherited: Lock): Lock {
+/** The words beside a field only Gaiada can change (client mode). */
+export const PROTECTED_HINT = "Managed by Gaiada.";
+
+/** `faq.answer` for the segments `["faq", 3, "answer"]`: the BFF's key for a field at any depth (a list's rows share one path). */
+function dottedPath(segments: (string | number)[]): string {
+  return segments.filter((s): s is string => typeof s === "string").join(".");
+}
+
+function lockFor(def: FieldDef, ctx: FormCtx, inherited: Lock, segments: (string | number)[]): Lock {
   if (ctx.readOnly) return "readonly";
   if (def.ui?.readOnly) return "readonly";
+  if (ctx.clientEditable) {
+    // The BFF's verdict for THIS field wins over what a protected parent group implies: a member can be editable inside a
+    // group that is not (the rule is the member's own flag, else its group's). A missing entry is protected.
+    if (ctx.clientEditable[dottedPath(segments)] !== true) return "protected";
+    if (inherited === "protected") inherited = null;
+  }
   if (inherited) return inherited;
   if (ctx.neutralLock && isNeutral(def)) return "neutral";
   return null;
@@ -49,8 +67,17 @@ function lockFor(def: FieldDef, ctx: FormCtx, inherited: Lock): Lock {
 
 function lockHint(lock: Lock, ctx: FormCtx): string | null {
   if (lock === "neutral") return `Shared across locales — edit it in ${ctx.neutralLocale ?? "the default locale"}.`;
+  if (lock === "protected") return PROTECTED_HINT;
   if (lock === "readonly") return ctx.readOnly ? null : "Read-only.";
   return null;
+}
+
+/** Client mode: does any member beneath this dotted path belong to Gaiada? Then the rows of a list of groups are fixed
+ *  (adding, removing or reordering a row would change the members the client may not touch). */
+function hasProtectedBeneath(ctx: FormCtx, dotted: string): boolean {
+  if (!ctx.clientEditable) return false;
+  const prefix = `${dotted}.`;
+  return Object.entries(ctx.clientEditable).some(([k, v]) => v !== true && k.startsWith(prefix));
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
@@ -105,7 +132,7 @@ export function FieldEditor({
 function FieldRow({ def, value, onValue, ctx, segments, inheritedLock }: {
   def: FieldDef; value: unknown; onValue: (v: unknown) => void; ctx: FormCtx; segments: (string | number)[]; inheritedLock: Lock;
 }) {
-  const lock = lockFor(def, ctx, inheritedLock) ?? (isNeutral(def) && ctx.neutralLock ? "neutral" : null);
+  const lock = lockFor(def, ctx, inheritedLock, segments) ?? (isNeutral(def) && ctx.neutralLock ? "neutral" : null);
   if (def.multiple) return <ListField def={def} value={value} onValue={onValue} ctx={ctx} segments={segments} lock={lock} inheritedLock={inheritedLock} />;
   if (def.primitive === "group") {
     const pointer = fieldPointer(...segments);
@@ -134,7 +161,8 @@ function ScalarField({ def, value, onValue, ctx, segments, lock }: {
   const errs = issuesAt(ctx.issues, pointer);
   const errId = `${id}-err`;
   const hintId = `${id}-hint`;
-  const hint = def.ui?.help ?? lockHint(lock, ctx) ?? undefined;
+  // A field only Gaiada can change always says so, even when it has help text of its own (client mode).
+  const hint = lock === "protected" ? [def.ui?.help, PROTECTED_HINT].filter(Boolean).join(" ") : (def.ui?.help ?? lockHint(lock, ctx) ?? undefined);
   const describedBy = [errs.length ? errId : null, hint ? hintId : null].filter(Boolean).join(" ") || undefined;
   const label = fieldLabel(def);
   const isCheckbox = def.primitive === "boolean";
@@ -310,8 +338,10 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
   // removing a row would create one nobody can complete — structure is the default locale's call;
   // reordering is allowed (order is per locale, §2.5 rule 3).
   const fullyLocked = lock !== null;
-  const structureLocked = fullyLocked || (ctx.neutralLock && def.primitive === "group" && hasNeutralDescendant(def));
-  const reorderLocked = fullyLocked;
+  // Client mode: rows of a list that has members only Gaiada can change are fixed (add, remove and reorder all change them).
+  const clientFixedRows = def.primitive === "group" && hasProtectedBeneath(ctx, dottedPath(segments));
+  const structureLocked = fullyLocked || clientFixedRows || (ctx.neutralLock && def.primitive === "group" && hasNeutralDescendant(def));
+  const reorderLocked = fullyLocked || clientFixedRows;
 
   const [grabbed, setGrabbed] = useState<{ id: string; originValue: unknown[]; originIds: string[] } | null>(null);
   // The drag SOURCE is a ref, not state: re-rendering the dragged element inside `dragstart` makes
@@ -406,11 +436,12 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
         <span className="wc-group__count"> · {items.length} {items.length === 1 ? "item" : "items"}</span>
         {nested.length > 0 && <span className="wc-group__count"> · {nested.length} problem{nested.length === 1 ? "" : "s"}</span>}
       </legend>
-      {(def.ui?.help || lockHint(lock, ctx)) && <p className="lux-field__hint">{def.ui?.help ?? lockHint(lock, ctx)}</p>}
-      {!fullyLocked && items.length > 1 && (
+      {(def.ui?.help || lockHint(lock, ctx)) && <p className="lux-field__hint">{lock === "protected" ? [def.ui?.help, PROTECTED_HINT].filter(Boolean).join(" ") : (def.ui?.help ?? lockHint(lock, ctx))}</p>}
+      {clientFixedRows && !fullyLocked && <p className="lux-field__hint">Rows are added, removed and reordered by Gaiada. You can edit the fields that are not marked as managed.</p>}
+      {!reorderLocked && items.length > 1 && (
         <p id={helpId} className="lux-field__hint">
           Reorder: drag the handle, or focus it and press Space, then the arrow keys, then Space to drop (Escape cancels).
-          {structureLocked && !fullyLocked ? ` Rows are added and removed in ${ctx.neutralLocale ?? "the default locale"}.` : ""}
+          {structureLocked && !fullyLocked && !clientFixedRows ? ` Rows are added and removed in ${ctx.neutralLocale ?? "the default locale"}.` : ""}
         </p>
       )}
       <ol className="wc-list__rows">
