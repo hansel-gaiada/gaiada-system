@@ -52,6 +52,12 @@ import { DevModeEditorialPrincipalResolver } from "./auth/dev-mode-editorial-pri
 import { RealEditorialPrincipalResolver } from "./auth/real-editorial-principal-resolver";
 import { ContentCommandsService } from "./content/content-commands.service";
 import { ContentCommandsController } from "./content/content-commands.controller";
+// WSK-46 — draft-preview tokens (mint / revoke), on the shared command envelope.
+import { PreviewTokenCommandsService } from "./content/preview-token-commands.service";
+import { PreviewTokenCommandsController } from "./content/preview-token-commands.controller";
+// WSK-43a — the media library's writes (upload token / update / delete), on the shared command envelope.
+import { MediaCommandsService } from "./content/media-commands.service";
+import { MediaCommandsController } from "./content/media-commands.controller";
 // WSK-51 — the editor's live read commands (design §4): tenant.list + the content reads.
 import { ContentReadsService } from "./content/content-reads.service";
 import { ContentReadsController } from "./content/content-reads.controller";
@@ -115,6 +121,8 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     JobsController,
     ContractController,
     ContentCommandsController,
+    PreviewTokenCommandsController,
+    MediaCommandsController,
     ContentReadsController,
     TenantReadsController,
   ],
@@ -131,6 +139,8 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     PgIdempotencyStore,
     EditorialAssertionGuard,
     ContentCommandsService,
+    PreviewTokenCommandsService,
+    MediaCommandsService,
     ContentReadsService,
     TenantReadsService,
     { provide: CONTROL_CHANNEL_AUTHENTICATOR, useClass: controlChannelAuthenticatorClass },

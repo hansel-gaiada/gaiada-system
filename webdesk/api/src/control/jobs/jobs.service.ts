@@ -2,7 +2,9 @@
 // promote/rollback/triggerRebuild return a jobId immediately; this service is what that jobId
 // resolves against.
 //
-// IN-MEMORY, SINGLE-PROCESS — same flagged limitation as idempotency-store.ts. A persisted
+// IN-MEMORY, SINGLE-PROCESS: a job record lives in the process that started it, so another replica
+// cannot answer for it. (The idempotency records are NOT in this state any more: they are durable in
+// idempotency/pg-idempotency-store.ts, which replaced the old in-memory idempotency-store.ts.) A persisted
 // `control_jobs` table is the natural next step and needs a migration this ticket does not own.
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";

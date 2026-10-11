@@ -73,6 +73,7 @@ export class FormContextGuard implements CanActivate {
     request.webdeskForm = {
       formId: form.id,
       tenantId: tenant.id,
+      companyRef: tenant.companyRef,
       tenantSlug: tenant.slug,
       siteId: form.site_id,
       key: form.key,

@@ -10,6 +10,7 @@ import { buildApp, createFastifyAdapter } from "../../src/app";
 import {
   API_ROUTE_SEGMENTS,
   isReservedCollectionKey,
+  PREVIEW_SEGMENT,
   RESERVED_COLLECTION_KEYS,
   SEARCH_SEGMENT,
   SITEMAP_SEGMENT,
@@ -62,11 +63,26 @@ describe("M3 T1 D1 — reserved collection keys", () => {
   it("the router's own special segments are reserved, and the list has nothing else hidden in it", () => {
     expect(isReservedCollectionKey(SEARCH_SEGMENT)).toBe(true);
     expect(isReservedCollectionKey(SITEMAP_SEGMENT)).toBe(true);
-    expect([...RESERVED_COLLECTION_KEYS].sort()).toEqual([...API_ROUTE_SEGMENTS, SEARCH_SEGMENT, SITEMAP_SEGMENT].sort());
+    expect(isReservedCollectionKey(PREVIEW_SEGMENT)).toBe(true);
+    expect([...RESERVED_COLLECTION_KEYS].sort()).toEqual([...API_ROUTE_SEGMENTS, SEARCH_SEGMENT, SITEMAP_SEGMENT, PREVIEW_SEGMENT].sort());
+  });
+
+  // WSK-46: the preview route is answered by the delivery router, not a Nest controller, so the route-table
+  // test above cannot see it. This one drives the real app: the segment the router answers for a preview
+  // request must be a reserved collection key, or a collection of that name would be unreachable.
+  it("the draft-preview segment is spelled `preview`, is reserved, and is the one the router answers on", async () => {
+    expect(PREVIEW_SEGMENT).toBe("preview");
+    expect(isReservedCollectionKey("preview")).toBe(true);
+    expect(isReservedCollectionKey("Preview")).toBe(true);
+    // the router answers /v1/t/:tenant/preview/:token itself: an unknown token is ITS 404 (no api key asked for),
+    // not the 401 every other unauthenticated /v1 path gives.
+    const res = await app.inject({ method: "GET", url: `/v1/t/anything/${PREVIEW_SEGMENT}/${"A".repeat(43)}` });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().type).toBe("https://webdesk.gaiada.online/errors/not-found");
   });
 
   it("matching is case-insensitive and exact", () => {
-    for (const k of ["Media", "FORMS", "Search", "SiteMap.XML"]) expect(isReservedCollectionKey(k)).toBe(true);
-    for (const k of ["media-gallery", "form", "searches", "sitemap", "case-study", "redirect"]) expect(isReservedCollectionKey(k)).toBe(false);
+    for (const k of ["Media", "FORMS", "Search", "SiteMap.XML", "PREVIEW"]) expect(isReservedCollectionKey(k)).toBe(true);
+    for (const k of ["media-gallery", "form", "searches", "sitemap", "case-study", "redirect", "previews", "preview-page"]) expect(isReservedCollectionKey(k)).toBe(false);
   });
 });

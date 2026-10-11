@@ -25,12 +25,14 @@ import { DbService } from "../db/db.service";
 import { TenantQuotaService } from "../rate-limit/tenant-quota.service";
 import { DeliveryAuthService } from "./delivery-auth.service";
 import { deliveryDbFrom } from "./db";
+import { redactPreviewToken } from "./preview-token";
 import { createV1Handler, type AuthGate } from "./router";
 import { problemDetails, problemResponse } from "./vocabulary/problem-details";
 
 const logger = new Logger("DeliveryGateway");
 
-// Every method Fastify 4 can route. The router (not Fastify) decides that all but GET are 405.
+// Every method Fastify 4 can route. The router (not Fastify) decides that all but GET are 405, except OPTIONS on
+// the WSK-46 draft-preview route, which it answers as a CORS preflight.
 const ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
 
 // Only authorization and x-request-id can matter to the router — but copying every header is
@@ -59,6 +61,38 @@ export class DeliveryGateway implements OnModuleInit {
     private readonly quota: TenantQuotaService,
   ) {}
 
+  /**
+   * The api's per-tenant READ quota (WSK-05 amendment), the same TenantQuotaService counter the
+   * guarded routes use — keyed by tenant, shared across that tenant's keys. In-quota requests
+   * get the same X-RateLimit-* headers TenantQuotaGuard sets and an otherwise untouched
+   * response (status/body/content-type/Cache-Tag identical). Over quota: 429 in the frozen
+   * problem+json envelope (not TenantQuotaGuard's ad-hoc `{ error, resetAt }`), because /v1's
+   * contract is "one error shape for every failure".
+   */
+  private async readQuotaGate(tenantId: string, { instance, requestId }: { instance: string; requestId: string }): Promise<AuthGate> {
+    const d = await this.quota.consume(tenantId);
+    const headers: Record<string, string> = {
+      "x-ratelimit-limit": String(d.limit),
+      "x-ratelimit-remaining": String(d.remaining),
+      "x-ratelimit-reset": String(Math.ceil(d.resetAt / 1000)),
+    };
+    if (d.allowed) return { headers };
+    headers["retry-after"] = String(Math.max(1, Math.ceil((d.resetAt - Date.now()) / 1000)));
+    return {
+      headers,
+      reject: problemResponse(
+        problemDetails({
+          slug: "rate-limited",
+          title: "Too many requests",
+          status: 429,
+          detail: "Per-tenant read quota exceeded; retry after the window resets.",
+          instance,
+          requestId,
+        }),
+      ),
+    };
+  }
+
   onModuleInit(): void {
     const fastify = this.adapterHost.httpAdapter.getInstance() as FastifyInstance;
 
@@ -66,35 +100,11 @@ export class DeliveryGateway implements OnModuleInit {
       db: deliveryDbFrom(this.db),
       resolveTenantBySlug: (slug) => this.auth.resolveTenantBySlug(slug),
       resolveApiKey: (tenant, key) => this.auth.resolveApiKey(tenant, key),
-      // The api's per-tenant READ quota (WSK-05 amendment), the same TenantQuotaService counter the
-      // guarded routes use — keyed by tenant, shared across that tenant's keys. In-quota requests
-      // get the same X-RateLimit-* headers TenantQuotaGuard sets and an otherwise untouched
-      // response (status/body/content-type/Cache-Tag identical). Over quota: 429 in the frozen
-      // problem+json envelope (not TenantQuotaGuard's ad-hoc `{ error, resetAt }`), because /v1's
-      // contract is "one error shape for every failure".
-      onAuthenticated: (auth, { instance, requestId }): AuthGate => {
-        const d = this.quota.consume(auth.tenantId);
-        const headers: Record<string, string> = {
-          "x-ratelimit-limit": String(d.limit),
-          "x-ratelimit-remaining": String(d.remaining),
-          "x-ratelimit-reset": String(Math.ceil(d.resetAt / 1000)),
-        };
-        if (d.allowed) return { headers };
-        headers["retry-after"] = String(Math.max(1, Math.ceil((d.resetAt - Date.now()) / 1000)));
-        return {
-          headers,
-          reject: problemResponse(
-            problemDetails({
-              slug: "rate-limited",
-              title: "Too many requests",
-              status: 429,
-              detail: "Per-tenant read quota exceeded; retry after the window resets.",
-              instance,
-              requestId,
-            }),
-          ),
-        };
-      },
+      // The per-tenant read quota: see readQuotaGate.
+      onAuthenticated: (auth, ctx) => this.readQuotaGate(auth.tenantId, ctx),
+      // WSK-46: a draft-preview read spends the SAME per-tenant budget, but only once its token has proven
+      // valid (router.ts), so token guessing cannot exhaust a tenant's real reads.
+      onPreviewServed: (tenant, ctx) => this.readQuotaGate(tenant.id, ctx),
     });
 
     const handler = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
@@ -115,14 +125,14 @@ export class DeliveryGateway implements OnModuleInit {
         // The router answers its own failures as problem+json; this is only reachable if building
         // the Request itself threw. Same shape, same status the router uses for "internal error" —
         // and, like the router, never the thrown message (M3 T1): that goes to the server log.
-        logger.error(`delivery edge failure on ${String(req.raw.url ?? "/").split("?")[0]}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+        logger.error(`delivery edge failure on ${redactPreviewToken(String(req.raw.url ?? "/").split("?")[0])}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
         const response = problemResponse(
           problemDetails({
             slug: "internal-error",
             title: "Internal error",
             status: 500,
             detail: "The server could not complete this request.",
-            instance: String(req.raw.url ?? "/").split("?")[0],
+            instance: redactPreviewToken(String(req.raw.url ?? "/").split("?")[0]),
             requestId: String(req.headers["x-request-id"] ?? req.id),
           }),
         );
@@ -130,7 +140,8 @@ export class DeliveryGateway implements OnModuleInit {
         headers = { "content-type": "application/problem+json" };
         body = Buffer.from(await response.arrayBuffer());
       }
-      headers["content-length"] = String(body.length);
+      // A 204 (the WSK-46 preflight answer) has no body, and a content-length on it is not allowed.
+      if (status !== 204) headers["content-length"] = String(body.length);
       raw.writeHead(status, headers);
       raw.end(req.method === "HEAD" ? undefined : body);
     };

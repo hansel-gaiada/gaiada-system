@@ -4,14 +4,17 @@
 // for exactly this kind of sibling consumption — no edit to that file was needed (its exports
 // array already held `ControlAuthGuard` before this ticket started; see the final report).
 //
-// `IdempotencyStore` is registered as THIS module's own provider (a plain, dependency-free class —
-// see ../control/idempotency/idempotency-store.ts) rather than imported from ControlModule, so
-// this module gets its OWN in-memory idempotency scope, no ControlModule export needed for it.
+// M3 T5b: `PgIdempotencyStore` and `CommandEnvelope` are registered as THIS module's own providers
+// (plain classes over DbService and AuditService, both reachable here) rather than imported from
+// ControlModule, which does not export them. They hold no state of their own: the idempotency record
+// is the control_idempotency_keys table, so a second instance next to ControlModule's is the same
+// store.
 import { Module } from "@nestjs/common";
 import { TenantsModule } from "../tenants/tenants.module";
 import { AuditModule } from "../audit/audit.module";
 import { ControlModule } from "../control/control.module";
-import { IdempotencyStore } from "../control/idempotency/idempotency-store";
+import { CommandEnvelope } from "../control/command-envelope";
+import { PgIdempotencyStore } from "../control/idempotency/pg-idempotency-store";
 import { ContentBundleService } from "./content-bundle.service";
 import { PromotionSnapshotService } from "./promotion-snapshot.service";
 import { PromotionAuditService } from "./promotion-audit.service";
@@ -25,7 +28,8 @@ import { NotYetAvailableFrontendDeployDriver } from "./not-yet-available-fronten
   imports: [TenantsModule, AuditModule, ControlModule],
   controllers: [PromotionController],
   providers: [
-    IdempotencyStore,
+    PgIdempotencyStore,
+    CommandEnvelope,
     ContentBundleService,
     PromotionSnapshotService,
     PromotionAuditService,

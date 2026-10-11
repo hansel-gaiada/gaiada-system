@@ -13,13 +13,15 @@ import { randomUUID } from "node:crypto";
 import { Logger } from "@nestjs/common";
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { problemDetails } from "./vocabulary/problem-details";
+import { redactPreviewToken } from "./preview-token";
 
 const logger = new Logger("FrameworkErrors");
 
 export function frameworkErrorsHandler(error: FastifyError, req: FastifyRequest, reply: FastifyReply): void {
   const raw = req.raw;
   const rawUrl = String(raw.url ?? "/");
-  const instance = rawUrl.split("?")[0];
+  // A draft-preview token is a bearer capability (WSK-46): it never goes into a log line or an error body.
+  const instance = redactPreviewToken(rawUrl.split("?")[0]);
   const header = raw.headers["x-request-id"];
   const requestId = (Array.isArray(header) ? header[0] : header) || randomUUID();
 

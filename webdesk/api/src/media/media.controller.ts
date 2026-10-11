@@ -1,11 +1,16 @@
-// WSK-07 — the media route surface. Three concerns kept in three route shapes:
+// WSK-07 — the media route surface. Four concerns kept in four route shapes:
 //   - upload:    authenticated, write-scoped (reuses WSK-05's ApiKeyAuthGuard/ScopeGuard)
+//   - token upload (WSK-43a): PUBLIC, the single-use upload token in the path is the credential
+//                (POST|OPTIONS upload/:token; media-upload.service.ts is the whole security story)
 //   - serving:   PUBLIC, cookieless, media/video buckets ONLY, long Cache-Control + cache tags
 //   - presigned: authenticated, read-scoped, uploads (PRIVATE) bucket ONLY
 //   - transform: PUBLIC, imgproxy-signed redirect, media/video buckets ONLY
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Query, Req, Res, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, NotFoundException, Options, Param, Post, Query, Req, Res, ServiceUnavailableException, UnauthorizedException, UseGuards } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { MediaService } from "./media.service";
+import { MediaUploadService, cleanOriginalFilename } from "./media-upload.service";
+import { TenantLookupService } from "../tenants/tenant-lookup.service";
+import { allowedUploadOrigin } from "./upload-cors";
 import { ImgproxyService } from "./imgproxy.service";
 import { ApiKeyAuthGuard } from "../auth/api-key-auth.guard";
 import { ScopeGuard } from "../auth/scope.guard";
@@ -25,7 +30,110 @@ function assertBucketParam(bucket: string): BucketName {
 
 @Controller("v1/t/:tenantSlug/media")
 export class MediaController {
-  constructor(private readonly media: MediaService, private readonly imgproxy: ImgproxyService) {}
+  constructor(
+    private readonly media: MediaService,
+    private readonly imgproxy: ImgproxyService,
+    private readonly uploads: MediaUploadService,
+    private readonly tenants: TenantLookupService,
+  ) {}
+
+  /**
+   * Headers of EVERY answer of the token upload route, errors and the 404 included: never cached, `Vary: Origin`,
+   * and `Access-Control-Allow-Origin` only for an Origin that is exactly one configured origin
+   * (WEBDESK_UPLOAD_CORS_ORIGINS, upload-cors.ts: the ERP's origin). It depends on the Origin alone, never on the
+   * token, so it tells a caller nothing about one. Never `Allow-Credentials`.
+   */
+  private uploadHeaders(reply: FastifyReply, origin: string | undefined): string | null {
+    reply.header("cache-control", "no-store");
+    reply.header("vary", "Origin");
+    const allowed = allowedUploadOrigin(origin);
+    if (allowed) reply.header("access-control-allow-origin", allowed);
+    return allowed;
+  }
+
+  /**
+   * The one answer of the token upload route to every invalid-token cause (unknown, malformed, expired, spent,
+   * another tenant's token, an unknown or archived tenant slug): a bare 404, the same body as an unknown
+   * tenant on any public media route. `Connection: close` ends a sender still streaming a body nobody will read.
+   */
+  private tokenNotFound(reply: FastifyReply): NotFoundException {
+    reply.header("connection", "close");
+    return new NotFoundException();
+  }
+
+  private async activeTenantId(slug: string): Promise<string | null> {
+    const tenant = await this.tenants.bySlug(slug);
+    return tenant && tenant.status === "active" ? tenant.id : null;
+  }
+
+  /** CORS preflight of the token upload route: answers only for a token that could still be redeemed. */
+  @Options("upload/:token")
+  @HttpCode(204)
+  async uploadPreflight(
+    @Param("tenantSlug") tenantSlug: string,
+    @Param("token") token: string,
+    @Headers("origin") origin: string | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const allowed = this.uploadHeaders(reply, origin);
+    const tenantId = await this.activeTenantId(tenantSlug);
+    const ok = tenantId ? await this.uploads.redeemable(tenantId, token) : false;
+    if (!ok) throw this.tokenNotFound(reply);
+    if (allowed) {
+      reply.header("access-control-allow-methods", "POST, OPTIONS");
+      reply.header("access-control-allow-headers", "content-type, x-request-id");
+      reply.header("access-control-max-age", "600");
+    }
+    return undefined;
+  }
+
+  /**
+   * `POST /v1/t/:tenantSlug/media/upload/:token?filename=<name>`: the body is the file, its Content-Type the
+   * file's type. No api key: the token (minted by the `media.uploadToken` control command) is the credential
+   * and uploads exactly once. 201 with the asset; see media-upload.service.ts.
+   */
+  @Post("upload/:token")
+  async uploadWithToken(
+    @Req() req: WebdeskRequest,
+    @Param("tenantSlug") tenantSlug: string,
+    @Param("token") token: string,
+    @Query("filename") filename: unknown,
+    @Headers("origin") origin: string | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    this.uploadHeaders(reply, origin);
+    const tenantId = await this.activeTenantId(tenantSlug);
+    if (!tenantId) throw this.tokenNotFound(reply);
+    const declared = req.headers["content-length"];
+    const contentLength = typeof declared === "string" && /^\d{1,15}$/.test(declared) ? Number(declared) : null;
+    // A slot BEFORE anything about the token is looked at (media-upload.service.ts, 2b): this process runs only a few
+    // uploads at once (each holds a body in memory, a scan socket and a storage write). It says nothing about
+    // any token, so a full house is the same answer for every token.
+    const release = this.uploads.slots.tryAcquire(tenantId);
+    if (!release) {
+      reply.header("retry-after", "5");
+      reply.header("connection", "close");
+      throw new ServiceUnavailableException("too many uploads are in progress; retry shortly");
+    }
+    try {
+      return await this.uploads.redeem({
+        tenantId,
+        tenantSlug,
+        token,
+        contentType: req.headers["content-type"],
+        contentLength,
+        filename: cleanOriginalFilename(filename),
+        body: req.raw,
+      });
+    } catch (err) {
+      // Whatever went wrong, the body may be unread (or too big to be worth reading): end the connection after
+      // the answer instead of draining it.
+      reply.header("connection", "close");
+      throw err;
+    } finally {
+      release();
+    }
+  }
 
   @Post(":bucket")
   @RequireScope("write")

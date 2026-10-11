@@ -5,6 +5,7 @@
 // UNDER the resolved tenant's context, so a row belonging to a different tenant is invisible to
 // the query (RLS), not merely filtered after the fact.
 import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
 import { STORAGE_ADAPTER } from "../storage/storage.tokens";
@@ -18,6 +19,24 @@ import { decodeBucketKey, encodeBucketKey } from "./bucket-key-codec";
 import { isMimeAllowedForBucket, sniffMime } from "./mime-allowlist";
 import type { ResolvedApiKey } from "../api-keys/api-keys.service";
 import type { MediaAssetRow, UploadMediaResult } from "./dto";
+
+/** A scan hit. Not an HttpException on purpose: the token route's transaction must roll back on it, THEN the refusal is audited. */
+export class InfectedUploadError extends Error {
+  constructor(readonly signature: string) {
+    super(`malware scan matched '${signature}'`);
+    this.name = "InfectedUploadError";
+  }
+
+  toForbidden(): ForbiddenException {
+    return new ForbiddenException(`upload refused: malware scan matched '${this.signature}'`);
+  }
+}
+
+export type StoredObject = { objectKey: string; storedBucketKey: string };
+
+/** The columns of a media_assets row every read here returns (the library facts included). */
+export const MEDIA_ASSET_COLUMNS =
+  "id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, created_at, title, alt, tags, original_filename, width, height, updated_at, created_by";
 
 export type ResolvedAsset = {
   id: string;
@@ -39,6 +58,10 @@ export class MediaService {
     @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
   ) {}
 
+  /**
+   * The API-key upload (`POST /v1/t/:slug/media/:bucket`, base64 JSON): the original WSK-07 path. A thin
+   * wrapper: screen -> store -> record, in the transaction it opens itself.
+   */
   async upload(
     auth: ResolvedApiKey,
     bucket: BucketName,
@@ -48,19 +71,57 @@ export class MediaService {
     if (!CLIENT_UPLOADABLE_BUCKETS.has(bucket)) {
       throw new BadRequestException(`bucket '${bucket}' does not accept client uploads`);
     }
+    try {
+      await this.screen(auth.tenantId, bucket, input, {});
+    } catch (err) {
+      if (err instanceof InfectedUploadError) {
+        await this.refuseInfected(auth.tenantId, actor, bucket, input.filename, err.signature);
+        throw err.toForbidden();
+      }
+      throw err;
+    }
 
+    const stored = await this.storeObject(auth.tenantId, auth.siteId, bucket, input);
+    const row = await this.db.withTenant(auth.tenantId, (db) =>
+      db.transaction((client) => this.recordAsset(client, { tenantId: auth.tenantId, siteId: auth.siteId, bucket, input, stored, actor })),
+    );
+
+    return {
+      id: row.id,
+      bucket,
+      bucketKey: stored.objectKey,
+      mime: row.mime,
+      sizeBytes: Number(row.size_bytes),
+      scanStatus: row.scan_status,
+      createdAt: row.created_at,
+    };
+  }
+
+  /**
+   * The upload pipeline's checks, in order, up to and including the malware scan: every way an upload can
+   * be refused BEFORE a byte is stored. Shared by the API-key route and the token route (WSK-43a: one
+   * pipeline, never a second). It holds no database connection across the scan (the quota read is one
+   * short query). `policy.maxBytes` / `policy.allowedMimes` narrow what the service-wide cap and the bucket allowlist
+   * already allow (an upload token's own limits); they can never widen it.
+   * Throws InfectedUploadError for a scan hit; the caller records the refusal (refuseInfected) and answers 403.
+   */
+  async screen(
+    tenantId: string,
+    bucket: BucketName,
+    input: { filename: string; contentType: string; buffer: Buffer },
+    policy: { maxBytes?: number; allowedMimes?: readonly string[] },
+  ): Promise<{ sniffed: string }> {
     // 1. Size cap — cheapest check first, refuses before any I/O.
     if (input.buffer.length === 0) {
       throw new BadRequestException("empty upload");
     }
-    if (input.buffer.length > storageConfig.maxUploadSizeBytes) {
-      throw new BadRequestException(
-        `upload exceeds the ${storageConfig.maxUploadSizeBytes}-byte limit (${input.buffer.length} bytes)`,
-      );
+    const cap = Math.min(storageConfig.maxUploadSizeBytes, policy.maxBytes ?? Number.POSITIVE_INFINITY);
+    if (input.buffer.length > cap) {
+      throw new BadRequestException(`upload exceeds the ${cap}-byte limit (${input.buffer.length} bytes)`);
     }
 
-    // 2. Declared-type allowlist.
-    if (!isMimeAllowedForBucket(bucket, input.contentType)) {
+    // 2. Declared-type allowlist (the bucket's, narrowed by the token's set when there is one).
+    if (!isMimeAllowedForBucket(bucket, input.contentType) || (policy.allowedMimes && !policy.allowedMimes.includes(input.contentType))) {
       throw new BadRequestException(`content-type '${input.contentType}' is not allowed for bucket '${bucket}'`);
     }
 
@@ -72,8 +133,8 @@ export class MediaService {
       );
     }
 
-    // 4. Per-tenant storage quota (§11a).
-    if (await this.quota.wouldExceedQuota(auth.tenantId, input.buffer.length)) {
+    // 4. Per-tenant storage quota (§11a), counted in bytes storage still holds (quota.service.ts).
+    if (await this.quota.wouldExceedQuota(tenantId, input.buffer.length)) {
       throw new ForbiddenException("tenant storage quota exceeded");
     }
 
@@ -89,59 +150,111 @@ export class MediaService {
     } catch (err) {
       throw new ServiceUnavailableException(`malware scan unavailable — upload refused: ${String(err)}`);
     }
+    if (scanResult.infected) throw new InfectedUploadError(scanResult.signature);
+    return { sniffed };
+  }
 
-    if (scanResult.infected) {
-      // Refused AND logged — the ticket's own AC wording. Logged via the audit trail (design
-      // §11: "immutable audit_entries on every command"), args carry the signature but never the
-      // file bytes.
-      await this.db.withTenant(auth.tenantId, (db) =>
-        db.transaction((client) =>
-          this.audit.record(client, {
-            tenantId: auth.tenantId,
-            actor,
-            action: "webdesk.media.uploadRefused",
-            args: { bucket, filename: input.filename, reason: "clamav-hit", signature: scanResult.signature },
-          }),
-        ),
-      );
-      throw new ForbiddenException(`upload refused: malware scan matched '${scanResult.signature}'`);
-    }
-
-    // 6. Store, then record — object write happens BEFORE the DB row so a crash between the two
-    //    leaves an orphaned object (cheap to garbage-collect later) rather than a DB row pointing
-    //    at nothing.
-    const objectKey = buildObjectKey(auth.tenantId, auth.siteId, input.filename);
-    const bucketName = storageConfig.bucketName(bucket);
-    await this.storage.putObject(bucketName, objectKey, input.buffer, input.contentType);
-
-    const storedBucketKey = encodeBucketKey(bucket, objectKey);
-    const row = await this.db.withTenant(auth.tenantId, (db) =>
-      db.transaction(async (client) => {
-        const { rows } = await client.query<MediaAssetRow>(
-          `INSERT INTO media_assets (tenant_id, site_id, bucket_key, mime, size_bytes, scan_status)
-           VALUES ($1, $2, $3, $4, $5, 'clean')
-           RETURNING id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, created_at`,
-          [auth.tenantId, auth.siteId, storedBucketKey, input.contentType, input.buffer.length],
-        );
-        await this.audit.record(client, {
-          tenantId: auth.tenantId,
+  /**
+   * "Refused AND logged" (the ticket's own AC wording): a scan hit is written to the audit trail (design §11:
+   * "immutable audit_entries on every command"); args carry the signature but never the file bytes. Its own
+   * short transaction, so it commits whatever happens to the caller's.
+   */
+  async refuseInfected(tenantId: string, actor: string, bucket: BucketName, filename: string, signature: string): Promise<void> {
+    await this.db.withTenant(tenantId, (db) =>
+      db.transaction((client) =>
+        this.audit.record(client, {
+          tenantId,
           actor,
-          action: "webdesk.media.upload",
-          args: { bucket, mediaAssetId: rows[0].id, sizeBytes: input.buffer.length },
-        });
-        return rows[0];
-      }),
+          action: "webdesk.media.uploadRefused",
+          args: { bucket, filename, reason: "clamav-hit", signature },
+        }),
+      ),
     );
+  }
 
-    return {
-      id: row.id,
-      bucket,
-      bucketKey: objectKey,
-      mime: row.mime,
-      sizeBytes: Number(row.size_bytes),
-      scanStatus: row.scan_status,
-      createdAt: row.created_at,
-    };
+  /**
+   * Store the object. The object write happens BEFORE the DB row so a crash between the two leaves an
+   * orphaned object (cheap to garbage-collect later) rather than a DB row pointing at nothing.
+   */
+  async storeObject(
+    tenantId: string,
+    siteId: string,
+    bucket: BucketName,
+    input: { filename: string; contentType: string; buffer: Buffer },
+  ): Promise<StoredObject> {
+    const objectKey = buildObjectKey(tenantId, siteId, input.filename);
+    await this.storage.putObject(storageConfig.bucketName(bucket), objectKey, input.buffer, input.contentType);
+    return { objectKey, storedBucketKey: encodeBucketKey(bucket, objectKey) };
+  }
+
+  /** Best-effort cleanup of an object whose row never committed (a plain delete: on a locked bucket it adds a marker only). */
+  async discardObject(bucket: BucketName, objectKey: string): Promise<void> {
+    await this.storage.deleteObject(storageConfig.bucketName(bucket), objectKey).catch(() => undefined);
+  }
+
+  /**
+   * A soft-deleted row for an object that was stored but whose real row could not be written (the token route's
+   * insert failed). The object has been deleted, but on a locked bucket that only adds a marker: this row, with
+   * `purge_after` = now + the bucket retention, is what lets `media-purge` free the locked version later (and
+   * keeps the quota honest until then). Best effort: the caller logs if it fails too.
+   */
+  async recordTombstone(p: {
+    tenantId: string;
+    siteId: string;
+    bucket: BucketName;
+    input: { filename: string; contentType: string; buffer: Buffer };
+    stored: StoredObject;
+    actor: string;
+  }): Promise<void> {
+    const days = storageConfig.objectLockRetentionDays;
+    await this.db.withTenant(p.tenantId, (db) =>
+      db.query(
+        `INSERT INTO media_assets (tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, created_by, deleted_at, purge_after)
+         VALUES ($1, $2, $3, $4, $5, 'clean', $6, now(), now() + ($7::integer * interval '1 day'))`,
+        [p.tenantId, p.siteId, p.stored.storedBucketKey, p.input.contentType, p.input.buffer.length, p.actor, days],
+      ),
+    );
+  }
+
+  /** The asset row and its audit row, on the caller's transaction. */
+  async recordAsset(
+    client: PoolClient,
+    p: {
+      tenantId: string;
+      siteId: string;
+      bucket: BucketName;
+      input: { filename: string; contentType: string; buffer: Buffer };
+      stored: StoredObject;
+      actor: string;
+      /** Library facts (WSK-43a); omitted by the API-key route. */
+      facts?: { originalFilename: string | null; width: number | null; height: number | null };
+      /** Extra audit args (the token route names its token id). */
+      auditExtra?: Record<string, unknown>;
+    },
+  ): Promise<MediaAssetRow> {
+    const { rows } = await client.query<MediaAssetRow>(
+      `INSERT INTO media_assets (tenant_id, site_id, bucket_key, mime, size_bytes, scan_status, original_filename, width, height, created_by)
+       VALUES ($1, $2, $3, $4, $5, 'clean', $6, $7, $8, $9)
+       RETURNING ${MEDIA_ASSET_COLUMNS}`,
+      [
+        p.tenantId,
+        p.siteId,
+        p.stored.storedBucketKey,
+        p.input.contentType,
+        p.input.buffer.length,
+        p.facts?.originalFilename ?? null,
+        p.facts?.width ?? null,
+        p.facts?.height ?? null,
+        p.actor,
+      ],
+    );
+    await this.audit.record(client, {
+      tenantId: p.tenantId,
+      actor: p.actor,
+      action: "webdesk.media.upload",
+      args: { bucket: p.bucket, mediaAssetId: rows[0].id, sizeBytes: p.input.buffer.length, ...(p.auditExtra ?? {}) },
+    });
+    return rows[0];
   }
 
   /**
@@ -161,7 +274,7 @@ export class MediaService {
     const row = await this.db.withTenant(tenantId, async (db) => {
       const { rows } = await db.query<MediaAssetRow>(
         `SELECT id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status
-           FROM media_assets WHERE id = $1`,
+           FROM media_assets WHERE id = $1 AND deleted_at IS NULL`,
         [assetId],
       );
       return rows[0] ?? null;
@@ -188,7 +301,7 @@ export class MediaService {
     const row = await this.db.withTenant(auth.tenantId, async (db) => {
       const { rows } = await db.query<MediaAssetRow>(
         `SELECT id, tenant_id, site_id, bucket_key, mime, size_bytes, scan_status
-           FROM media_assets WHERE id = $1 AND site_id = $2`,
+           FROM media_assets WHERE id = $1 AND site_id = $2 AND deleted_at IS NULL`,
         [assetId, auth.siteId],
       );
       return rows[0] ?? null;

@@ -366,13 +366,35 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       expect(miss.json().type).toBe(`${PROBLEM}version-not-found`);
     });
 
-    it("media.list: {assetId, bucketKey, mime, sizeBytes, scanStatus, createdAt}, newest first; mime filter exact and wildcard", async () => {
+    it("media.list: the original keys plus the WSK-43a library fields, newest first; mime filter exact and wildcard", async () => {
       const r = await get(`${siteBase(fxA)}/media`);
       expect(r.statusCode).toBe(200);
       const { assets, page } = r.json();
       expect(page).toEqual({ cursor: null, hasMore: false, limit: 50 });
       expect(assets.map((a: { bucketKey: string }) => a.bucketKey)).toEqual(["a/three.jpg", "a/two.pdf", "a/one.png"]);
-      expect(keysOf(assets[0])).toEqual(["assetId", "bucketKey", "createdAt", "mime", "scanStatus", "sizeBytes"]);
+      // WSK-43a added the library fields to every asset; the six original keys are unchanged (the full filter and
+      // lifecycle battery is test/media-library-commands.spec.ts).
+      expect(keysOf(assets[0])).toEqual([
+        "alt",
+        "assetId",
+        "bucket",
+        "bucketKey",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "height",
+        "mime",
+        "originalFilename",
+        "purgeAfter",
+        "purgedAt",
+        "scanStatus",
+        "sizeBytes",
+        "tags",
+        "title",
+        "updatedAt",
+        "url",
+        "width",
+      ]);
       expect(assets[0]).toMatchObject({ mime: "image/jpeg", sizeBytes: 3000, scanStatus: "clean", createdAt: "2026-01-01T00:00:03.000Z" });
       const exact = (await get(`${siteBase(fxA)}/media?mime=application/pdf`)).json().assets;
       expect(exact.map((a: { bucketKey: string }) => a.bucketKey)).toEqual(["a/two.pdf"]);

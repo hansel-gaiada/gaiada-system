@@ -444,6 +444,61 @@ describe("M3 T5a — the WSK-21 commands on the command envelope", () => {
       expect(withoutReplayed(p2)).toEqual(withoutReplayed(p1));
       expect(rec.count(/INSERT INTO tenants/)).toBe(1);
     });
+
+    // M3 T8 — the archives used to resolve an ACTIVE tenant before the envelope, so once the tenant was
+    // archived, a retry of the same archive (same key, response lost) got 404 instead of the stored answer.
+    it("tenant.archive: a retry of the SAME key after the archive replays the stored body; a FRESH key on the archived tenant is still 404", async () => {
+      const fx = await fixture(app);
+      const approval = randomUUID();
+      const idem = randomUUID();
+      rec.reset();
+      const first = await post(app, `/control/v1/tenants/${fx.slug}/archive`, promote(approval, idem));
+      expect(first.statusCode).toBe(201);
+      expect(first.json()).toMatchObject({ tenant: { slug: fx.slug, status: "archived" }, replayed: false });
+
+      const replay = await post(app, `/control/v1/tenants/${fx.slug}/archive`, promote(approval, idem));
+      expect(replay.statusCode).toBe(201); // the status the command answers with on a replay too (key.revoke, release.promote)
+      expect(replay.json().replayed).toBe(true);
+      expect(withoutReplayed(replay)).toEqual(withoutReplayed(first));
+      expect(rec.count(/UPDATE tenants SET status = 'archived'/)).toBe(1); // no second effect
+      expect(await approvalActions(null, approval)).toEqual(["control.tenant.archive", "control.tenant.archive.replay"]);
+
+      // A new key (and a new approval) on the now-archived tenant is a fresh run: refused exactly as before.
+      const approval2 = randomUUID();
+      const idem2 = randomUUID();
+      rec.reset();
+      const fresh = await post(app, `/control/v1/tenants/${fx.slug}/archive`, promote(approval2, idem2));
+      expect(fresh.statusCode).toBe(404);
+      expect(fresh.json().message).toBe("tenant not found");
+      expect(await approvalActions(null, approval2)).toEqual([]); // rolled back: the approval is still free
+      const scopeKey = `platform:tenant.archive:${idem2}`;
+      expect(await inPlatform(async (c) => (await c.query(`SELECT 1 FROM control_idempotency_keys WHERE scope_key = $1`, [scopeKey])).rows)).toEqual([]); // the refused key is released
+    });
+
+    it("environment.archive: a retry of the same key replays even after the TENANT was archived; a fresh key on the archived tenant is 404", async () => {
+      const fx = await fixture(app);
+      const approval = randomUUID();
+      const idem = randomUUID();
+      const url = `/control/v1/tenants/${fx.slug}/environments/${fx.envId}/archive`;
+      const first = await post(app, url, promote(approval, idem));
+      expect(first.statusCode).toBe(201);
+      expect(first.json()).toMatchObject({ environment: { id: fx.envId, status: "archived" }, replayed: false });
+
+      const archived = await post(app, `/control/v1/tenants/${fx.slug}/archive`, promote(randomUUID(), randomUUID()));
+      expect(archived.statusCode).toBe(201);
+
+      rec.reset();
+      const replay = await post(app, url, promote(approval, idem));
+      expect(replay.statusCode).toBe(201);
+      expect(replay.json().replayed).toBe(true);
+      expect(withoutReplayed(replay)).toEqual(withoutReplayed(first));
+      expect(rec.count(/UPDATE environments SET status = 'archived'/)).toBe(0);
+
+      const approval2 = randomUUID();
+      const fresh = await post(app, url, promote(approval2, randomUUID()));
+      expect(fresh.statusCode).toBe(404);
+      expect(await approvalActions(fx.tenantId, approval2)).toEqual([]);
+    });
   });
 
   // ==============================================================================================

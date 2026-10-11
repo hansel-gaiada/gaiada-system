@@ -11,7 +11,8 @@
 // honest. A pre-0009 row (head_version = 0) is ADOPTED on its first write: version N is written from
 // its current projection, and published_version follows its publish_state.
 //
-// ONE TRANSACTION PER COMMAND, AND THE AUDIT ROW GOES FIRST. The audit row is the FIRST statement of
+// ONE TRANSACTION PER COMMAND, AND THE AUDIT ROW GOES FIRST (the shared CommandEnvelope, ../command-envelope.ts,
+// runs it; M3 T8 replaced this file's private copy of that logic). The audit row is the FIRST statement of
 // the command's transaction, so on a HIGH command the WS4 approval id is CLAIMED (0009's
 // ux_audit_entries_ws4_once) BEFORE any side effect. A concurrent second use of the same approval
 // blocks on that index until the first commits, then fails with 23505 and rolls back having changed
@@ -31,17 +32,16 @@ import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { DbService } from "../../db/db.service";
-import { AuditService, type AuditArgs } from "../../audit/audit.service";
-import { COMMAND_REGISTRY, type CommandName } from "../command-types";
+import type { AuditArgs } from "../../audit/audit.service";
+import type { CommandName } from "../command-types";
+import { CommandEnvelope, type EffectOutcome } from "../command-envelope";
 import type { EditorialPrincipal } from "../auth/editorial-principal";
 import { computeCommandHash } from "../auth/ws4-assertion";
-import { PgIdempotencyStore } from "../idempotency/pg-idempotency-store";
 import { TenantWebhookDispatcherService } from "../../tenant-webhooks/tenant-webhook-dispatcher.service";
 import type {
   TenantWebhookContentEventKind,
   TenantWebhookContentItemRef,
 } from "../../tenant-webhooks/tenant-webhook-event.types";
-import { buildCacheTags } from "../../delivery/vocabulary/cache-tags";
 import { validateCollectionComposition, type CollectionComposition } from "../../delivery/vocabulary/composition";
 import { fieldsBlockOf } from "../../delivery/vocabulary/item-fields";
 import {
@@ -54,7 +54,19 @@ import {
   type ContentInput,
 } from "./content-projection";
 import { extractSearchText } from "./search-text";
-import { attributionOf, insertContentVersion, nextVersionNumber } from "./content-versions";
+import { attributionOf, insertContentVersion } from "./content-versions";
+import {
+  ITEM_COLUMNS,
+  adoptLegacyItem,
+  announceContentEvent,
+  applyPublishEffect,
+  applyUnpublishEffect,
+  cancelPendingSwap,
+  effectivePublishedSql,
+  loadVersionRow,
+  type ItemColumnsRow,
+  type VersionRow,
+} from "./content-transitions";
 import { lintPlaceholders, type LintReport } from "./content-lint";
 import { ControlProblem, problems, type ProblemIssue } from "./content-problem";
 
@@ -146,45 +158,17 @@ export interface ItemStateResult {
 // ------------------------------------------------------------------------------------------------
 
 /**
- * The read path's visibility rule (delivery/content-read.ts EFFECTIVE_PUBLISHED_SQL, restated: that
- * file's SQL is frozen by WSK-48a's byte gate and does not export it). "Live" below means exactly
- * "a production key sees this row right now".
+ * "Live" below means exactly "a production key sees this row right now" (the read path's visibility
+ * rule; content-transitions.ts restates it, parameterised on the clock so the scheduler can share it).
  */
-const EFFECTIVE_PUBLISHED_SQL = `(
-  (ci.publish_state = 'published' AND (ci.unpublish_at IS NULL OR ci.unpublish_at > now()))
-  OR (ci.publish_state = 'scheduled' AND ci.publish_at IS NOT NULL AND ci.publish_at <= now()
-      AND (ci.unpublish_at IS NULL OR ci.unpublish_at > now()))
-)`;
+const EFFECTIVE_PUBLISHED_SQL = effectivePublishedSql("now()");
 
-const ITEM_COLUMNS = `ci.id, ci.collection_id, ci.locale, ci.slug, ci.localization_group_id, ci.head_version,
-  ci.published_version, ci.publish_state, ci.publish_at, ci.unpublish_at, ci.deleted_at, ci.updated_at`;
-
-interface ItemRow {
-  id: string;
-  collection_id: string;
+interface ItemRow extends ItemColumnsRow {
   collection_key: string;
   composition: unknown;
-  locale: string;
-  slug: string;
-  localization_group_id: string;
-  head_version: number;
-  published_version: number | null;
-  publish_state: string;
-  publish_at: Date | null;
-  unpublish_at: Date | null;
-  deleted_at: Date | null;
-  updated_at: Date;
   blocks: unknown;
   seo: Record<string, unknown> | null;
   is_live: boolean;
-}
-
-interface VersionRow {
-  version: number;
-  blocks: unknown;
-  seo: Record<string, unknown>;
-  content_hash: string | null;
-  created_at: Date;
 }
 
 const iso = (d: Date | string | null): string | null => (d === null ? null : new Date(d).toISOString());
@@ -247,20 +231,13 @@ export function mapDbError(err: unknown): unknown {
   }
 }
 
-interface EffectOutcome<R> {
-  result: R;
-  /** Post-commit, fail-soft side effects (webhooks, cache-tag log). */
-  after?: () => Promise<void>;
-}
-
 @Injectable()
 export class ContentCommandsService {
   private readonly logger = new Logger(ContentCommandsService.name);
 
   constructor(
     private readonly db: DbService,
-    private readonly audit: AuditService,
-    private readonly idempotency: PgIdempotencyStore,
+    private readonly envelope: CommandEnvelope,
     private readonly webhooks: TenantWebhookDispatcherService,
   ) {}
 
@@ -296,75 +273,27 @@ export class ContentCommandsService {
   }
 
   // ==============================================================================================
-  // The command envelope: idempotency -> one transaction (audit FIRST, effect, idempotency
-  // response) -> post-commit fail-soft side effects.
+  // The command envelope (../command-envelope.ts): idempotency -> one transaction (audit FIRST, effect,
+  // idempotency response) -> post-commit fail-soft side effects. This adapter only names the command's
+  // scope and keys; mapDbError turns the content constraint names into their problems.
   // ==============================================================================================
-  private async execute<R extends object>(
+  private execute<R extends object>(
     ctx: EditorialCommandContext,
     requestArgs: Record<string, unknown>,
     auditArgs: AuditArgs,
     effect: (client: PoolClient) => Promise<EffectOutcome<R>>,
   ): Promise<R & { replayed: boolean }> {
-    const meta = COMMAND_REGISTRY[ctx.command];
-    const ws4ApprovalId = meta.impactClass === "high" ? ctx.ws4ApprovalId : null;
-    if (meta.impactClass === "high" && !ws4ApprovalId) {
-      // Defence in depth: CommandAuthorizationGuard already refuses a HIGH command without a
-      // verified WS4 assertion; the service never runs one without an approval id to claim.
-      throw new ControlProblem(403, "ws4-approval-required", "WS4 approval required", `${ctx.command} is HIGH-impact and needs a WS4 approval.`);
-    }
-
-    const requestHash = computeCommandHash(ctx.command, requestArgs);
-    const scopeKey = `${ctx.tenant.slug}:${ctx.command}:${ctx.idempotencyKey}`;
-    const begin = await this.idempotency.begin<R>({ tenantId: ctx.tenant.id, scopeKey, command: ctx.command, requestHash });
-
-    if (begin.kind === "replay") {
-      // A replay changes nothing; it is recorded as such (`.replay` rows are outside the WS4
-      // single-use index).
-      await this.db
-        .withTenant(ctx.tenant.id, (db) =>
-          db.transaction((client) =>
-            this.audit.record(client, {
-              tenantId: ctx.tenant.id,
-              actor: ctx.principal.sub,
-              action: `control.${ctx.command}.replay`,
-              args: auditArgs,
-              ws4ApprovalId,
-            }),
-          ),
-        )
-        .catch((err) => this.logger.warn(`replay audit row failed for ${ctx.command}: ${String(err)}`));
-      return { ...(begin.response as R), replayed: true };
-    }
-
-    let after: (() => Promise<void>) | undefined;
-    let result: R;
-    try {
-      result = await this.db.withTenant(ctx.tenant.id, (db) =>
-        db.transaction(async (client) => {
-          // FIRST statement: claims the WS4 approval id (unique over non-replay rows) before any
-          // side effect. A concurrent reuse blocks here, then fails and rolls back untouched.
-          await this.audit.record(client, {
-            tenantId: ctx.tenant.id,
-            actor: ctx.principal.sub,
-            action: `control.${ctx.command}`,
-            args: auditArgs,
-            ws4ApprovalId,
-          });
-          const outcome = await effect(client);
-          after = outcome.after;
-          await this.idempotency.complete(client, begin.claim, outcome.result);
-          return outcome.result;
-        }),
-      );
-    } catch (err) {
-      await this.idempotency.release(begin.claim);
-      throw mapDbError(err);
-    }
-
-    if (after) {
-      await after().catch((err) => this.logger.warn(`post-commit side effect failed for ${ctx.command}: ${String(err)}`));
-    }
-    return { ...result, replayed: false };
+    return this.envelope.run<R>({
+      command: ctx.command,
+      scope: { kind: "tenant", tenantId: ctx.tenant.id },
+      scopeKey: `${ctx.tenant.slug}:${ctx.command}:${ctx.idempotencyKey}`,
+      requestHash: computeCommandHash(ctx.command, requestArgs),
+      actor: ctx.principal.sub,
+      auditArgs,
+      ws4ApprovalId: ctx.ws4ApprovalId,
+      effect,
+      mapError: mapDbError,
+    });
   }
 
   // ==============================================================================================
@@ -387,13 +316,8 @@ export class ContentCommandsService {
     return rows[0];
   }
 
-  private async loadVersion(client: PoolClient, itemId: string, version: number): Promise<VersionRow | null> {
-    const { rows } = await client.query<VersionRow>(
-      `SELECT version, blocks, seo, content_hash, created_at FROM content_versions
-        WHERE content_item_id = $1 AND version = $2`,
-      [itemId, version],
-    );
-    return rows[0] ?? null;
+  private loadVersion(client: PoolClient, itemId: string, version: number): Promise<VersionRow | null> {
+    return loadVersionRow(client, itemId, version);
   }
 
   /** The head's ref. A pre-0009 row (head 0) has no version: its projection is its head. */
@@ -411,27 +335,8 @@ export class ContentCommandsService {
    * head_version (and published_version, when the row is published/scheduled) at it. Returns the
    * row with the new pointers. A no-op for any row already on the write plane.
    */
-  private async adopt(client: PoolClient, ctx: EditorialCommandContext, item: ItemRow): Promise<ItemRow> {
-    if (item.head_version > 0) return item;
-    const seo = item.seo ?? {};
-    const v = await nextVersionNumber(client, item.id);
-    await insertContentVersion(client, {
-      tenantId: ctx.tenant.id,
-      itemId: item.id,
-      version: v,
-      blocks: item.blocks ?? [],
-      seo,
-      publishState: item.publish_state,
-      createdBy: ctx.principal.sub,
-      note: "adopted: the projection as it stood before the write plane",
-      attribution: attributionOf(ctx.principal),
-    });
-    const isPublishedState = item.publish_state === "published" || item.publish_state === "scheduled";
-    await client.query(
-      `UPDATE content_items SET head_version = $2, published_version = $3 WHERE id = $1`,
-      [item.id, v, isPublishedState ? v : null],
-    );
-    return { ...item, head_version: v, published_version: isPublishedState ? v : null };
+  private adopt(client: PoolClient, ctx: EditorialCommandContext, item: ItemRow): Promise<ItemRow> {
+    return adoptLegacyItem(client, { tenantId: ctx.tenant.id, createdBy: ctx.principal.sub, attribution: attributionOf(ctx.principal) }, item);
   }
 
   /**
@@ -535,14 +440,13 @@ export class ContentCommandsService {
     refs: TenantWebhookContentItemRef[],
     extra?: { publishAt?: string | null; unpublishAt?: string | null },
   ): () => Promise<void> {
-    return async () => {
-      const tags = new Set<string>();
-      for (const r of refs) {
-        for (const t of buildCacheTags({ tenantSlug: ctx.tenant.slug, collectionKey: r.collectionKey, itemId: r.itemId })) tags.add(t);
-      }
-      this.logger.log(JSON.stringify({ event: "content.cache_invalidate", command: ctx.command, tenant: ctx.tenant.slug, tags: [...tags] }));
-      await this.webhooks.dispatchContentEvent(ctx.tenant.id, kind, { siteId: ctx.siteId, items: refs, ...(extra ?? {}) });
-    };
+    return announceContentEvent(
+      { logger: this.logger, webhooks: this.webhooks },
+      { tenantId: ctx.tenant.id, tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, command: ctx.command },
+      kind,
+      refs,
+      extra,
+    );
   }
 
   // ==============================================================================================
@@ -754,18 +658,18 @@ export class ContentCommandsService {
             publishedAt = iso((await client.query<{ at: Date }>(`SELECT COALESCE(last_published_at, updated_at) AS at FROM content_items WHERE id = $1`, [item.id])).rows[0].at) as string;
           } else {
             item = await this.adopt(client, ctx, item);
-            const { rows: upd } = await client.query<{ last_published_at: Date }>(
-              `UPDATE content_items SET
-                  blocks = $2::jsonb, seo = $3::jsonb, search_text = $4,
-                  published_version = $5, publish_state = 'published', publish_at = NULL,
-                  unpublish_at = CASE WHEN unpublish_at > now() THEN unpublish_at ELSE NULL END,
-                  last_published_at = now(), last_published_by = $6, updated_at = now()
-                WHERE id = $1
-                RETURNING last_published_at`,
-              [item.id, JSON.stringify(source.blocks), JSON.stringify(source.seo), extractSearchText(source.blocks), req.version, ctx.principal.sub],
-            );
-            publishedAt = iso(upd[0].last_published_at) as string;
+            const lastPublishedAt = await applyPublishEffect(client, {
+              itemId: item.id,
+              source,
+              version: req.version,
+              publishedBy: ctx.principal.sub,
+              publishedAt: null,
+              unpublishAt: { mode: "keep" },
+            });
+            publishedAt = iso(lastPublishedAt) as string;
           }
+          // The newest human decision wins (WSK-61): a pending version swap on this item is moot now.
+          await cancelPendingSwap(client, item.id, "superseded-by-publish");
           published.push({ itemId: item.id, collectionKey: item.collection_key, locale: item.locale, slug: item.slug, version: req.version, publishedAt });
           refs.push({ itemId: item.id, collectionKey: item.collection_key, locale: item.locale, slug: item.slug, version: req.version });
         }
@@ -804,37 +708,36 @@ export class ContentCommandsService {
           let item = rows.get(req.itemId) as ItemRow;
           this.assertNotDeleted(item);
           if (input.publishAt !== null) {
-            // A deferred publish. Moving a LIVE item's content at a future time needs the worker
-            // that swaps the projection then (WSK-61); until it exists that is refused.
+            const source = await this.loadVersionToSchedule(client, item, req.version, index);
             if (item.is_live) {
-              throw problems.conflict(
-                "schedule-live-item-requires-worker",
-                "Scheduling a live item needs the scheduler",
-                "This item is live; scheduling a different version of a live item needs the publish worker (WSK-61). Publish it, or schedule a takedown.",
-                { itemIndex: index },
+              // A LIVE item: its projection is what production serves right now, so the new version
+              // cannot go in yet. It waits in content_schedules (migration 0012) and the scheduler
+              // swaps it in at publish_at (WSK-61). The projection is untouched. The newest approved
+              // decision wins: an earlier pending swap of this item is superseded in this same
+              // transaction (ux_content_schedules_one_pending is the backstop).
+              await cancelPendingSwap(client, item.id, "superseded");
+              await client.query(
+                `INSERT INTO content_schedules
+                   (tenant_id, site_id, content_item_id, version, publish_at, unpublish_at, requested_by, ws4_approval_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [ctx.tenant.id, ctx.siteId, item.id, req.version, input.publishAt, input.unpublishAt, ctx.principal.sub, ctx.ws4ApprovalId],
+              );
+            } else {
+              item = await this.adopt(client, ctx, item);
+              // An item that stopped being live by TIME (its unpublish_at passed) may still hold a
+              // pending swap; the schedule written now replaces it.
+              await cancelPendingSwap(client, item.id, "superseded");
+              // The projection takes the scheduled version now; the read path's time rule keeps it
+              // invisible to production until publish_at (and honours unpublish_at).
+              await client.query(
+                `UPDATE content_items SET
+                    blocks = $2::jsonb, seo = $3::jsonb, search_text = $4,
+                    published_version = $5, publish_state = 'scheduled', publish_at = $6, unpublish_at = $7,
+                    last_published_at = $6, last_published_by = $8, updated_at = now()
+                  WHERE id = $1`,
+                [item.id, JSON.stringify(source.blocks), JSON.stringify(source.seo), extractSearchText(source.blocks), req.version, input.publishAt, input.unpublishAt, ctx.principal.sub],
               );
             }
-            const source = await this.loadVersion(client, item.id, req.version);
-            if (!source) {
-              throw problems.conflict("version-not-found", "Version not found", `Item ${item.id} has no version ${req.version}.`, { itemIndex: index });
-            }
-            const composition = compositionOf(item.collection_key, item.composition);
-            const issues = validateStoredContent(item.collection_key, composition, source.blocks, source.seo).map((i) => ({
-              ...i,
-              path: `/items/${index}${i.path}`,
-            }));
-            if (issues.length > 0) throw problems.compositionViolation(issues, "A version to schedule no longer satisfies its collection's composition.");
-            item = await this.adopt(client, ctx, item);
-            // The projection takes the scheduled version now; the read path's time rule keeps it
-            // invisible to production until publish_at (and honours unpublish_at).
-            await client.query(
-              `UPDATE content_items SET
-                  blocks = $2::jsonb, seo = $3::jsonb, search_text = $4,
-                  published_version = $5, publish_state = 'scheduled', publish_at = $6, unpublish_at = $7,
-                  last_published_at = $6, last_published_by = $8, updated_at = now()
-                WHERE id = $1`,
-              [item.id, JSON.stringify(source.blocks), JSON.stringify(source.seo), extractSearchText(source.blocks), req.version, input.publishAt, input.unpublishAt, ctx.principal.sub],
-            );
           } else {
             // A scheduled takedown of the live version.
             if (!item.is_live) {
@@ -850,6 +753,7 @@ export class ContentCommandsService {
               );
             }
             await client.query(`UPDATE content_items SET unpublish_at = $2 WHERE id = $1`, [item.id, input.unpublishAt]);
+            await this.reconcileSwapWithTakedown(client, item.id, input.unpublishAt as string);
           }
           scheduled.push({
             itemId: item.id,
@@ -868,6 +772,46 @@ export class ContentCommandsService {
         };
       },
     );
+  }
+
+  /**
+   * Loads the version a schedule names and validates it against the collection's CURRENT composition,
+   * exactly as content.publish does (404-style version-not-found, 422 composition violation). Shared
+   * by both schedule paths (a non-live item's projection write, a live item's pending swap).
+   */
+  private async loadVersionToSchedule(client: PoolClient, item: ItemRow, version: number, index: number): Promise<VersionRow> {
+    const source = await this.loadVersion(client, item.id, version);
+    if (!source) {
+      throw problems.conflict("version-not-found", "Version not found", `Item ${item.id} has no version ${version}.`, { itemIndex: index });
+    }
+    const composition = compositionOf(item.collection_key, item.composition);
+    const issues = validateStoredContent(item.collection_key, composition, source.blocks, source.seo).map((i) => ({
+      ...i,
+      path: `/items/${index}${i.path}`,
+    }));
+    if (issues.length > 0) throw problems.compositionViolation(issues, "A version to schedule no longer satisfies its collection's composition.");
+    return source;
+  }
+
+  /**
+   * A scheduled takedown was just written on a live item that may have a pending version swap. The
+   * takedown is the newest decision, and the swap must not silently undo it: executing the swap
+   * rewrites the item's unpublish_at from the swap row. So a takedown AFTER the swap is due becomes
+   * the swap's own unpublish_at; a takedown BEFORE (or at) it makes the swap moot, and it is cancelled.
+   */
+  private async reconcileSwapWithTakedown(client: PoolClient, itemId: string, unpublishAt: string): Promise<void> {
+    const { rows } = await client.query<{ id: string; publish_at: Date }>(
+      `SELECT id, publish_at FROM content_schedules
+        WHERE content_item_id = $1 AND executed_at IS NULL AND cancelled_at IS NULL AND failed_at IS NULL`,
+      [itemId],
+    );
+    const pending = rows[0];
+    if (!pending) return;
+    if (Date.parse(unpublishAt) > pending.publish_at.getTime()) {
+      await client.query(`UPDATE content_schedules SET unpublish_at = $2 WHERE id = $1`, [pending.id, unpublishAt]);
+    } else {
+      await cancelPendingSwap(client, itemId, "superseded");
+    }
   }
 
   // ==============================================================================================
@@ -891,19 +835,12 @@ export class ContentCommandsService {
             { currentPublishedVersion: item.published_version },
           );
         }
-        const head = await this.loadVersion(client, item.id, item.head_version);
-        if (!head) throw new Error(`content item ${item.id} has head_version ${item.head_version} but no such version row`);
         // Back to the draft model: the projection serves the head again (staging sees it,
-        // production does not).
-        const { rows } = await client.query<ItemRow>(
-          `UPDATE content_items ci SET
-              publish_state = 'unpublished', published_version = NULL, publish_at = NULL, unpublish_at = NULL,
-              blocks = $2::jsonb, seo = $3::jsonb, search_text = $4, updated_at = now()
-            WHERE ci.id = $1
-            RETURNING ${ITEM_COLUMNS}`,
-          [item.id, JSON.stringify(head.blocks), JSON.stringify(head.seo), extractSearchText(head.blocks)],
-        );
-        const state = toState({ ...rows[0], collection_key: item.collection_key });
+        // production does not). The same effect the scheduler runs for a due takedown.
+        const row = await applyUnpublishEffect(client, item);
+        // The newest human decision wins (WSK-61): a pending version swap would republish the item.
+        await cancelPendingSwap(client, item.id, "unpublished");
+        const state = toState({ ...row, collection_key: item.collection_key });
         return {
           result: { item: state },
           after: this.announce(ctx, "content.unpublished", [this.refOf(state, input.expectedPublishedVersion)]),
@@ -934,6 +871,10 @@ export class ContentCommandsService {
           `UPDATE content_items ci SET deleted_at = now() WHERE ci.id = $1 RETURNING ${ITEM_COLUMNS}`,
           [item.id],
         );
+        // A deleted item must not be swapped into (WSK-61). A published or scheduled item cannot reach this
+        // point (409 item-is-live, above) and unpublish already cancels its swap, so through the API this
+        // finds nothing; it keeps the invariant "a deleted item has no pending swap" true by construction.
+        await cancelPendingSwap(client, item.id, "deleted");
         return { result: { item: toState({ ...rows[0], collection_key: item.collection_key }) } };
       },
     );

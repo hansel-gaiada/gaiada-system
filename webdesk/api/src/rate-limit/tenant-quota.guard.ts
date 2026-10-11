@@ -10,7 +10,7 @@ import type { WebdeskRequest } from "../auth/webdesk-request";
 export class TenantQuotaGuard implements CanActivate {
   constructor(private readonly quota: TenantQuotaService) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<WebdeskRequest>();
     const tenantId = request.webdesk?.tenantId;
     if (!tenantId) {
@@ -19,7 +19,7 @@ export class TenantQuotaGuard implements CanActivate {
       throw new HttpException("no resolved tenant for quota check", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    const decision = this.quota.consume(tenantId);
+    const decision = await this.quota.consume(tenantId);
     const reply = context.switchToHttp().getResponse();
     if (typeof reply?.header === "function") {
       reply.header("X-RateLimit-Limit", String(decision.limit));

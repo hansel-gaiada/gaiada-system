@@ -17,6 +17,7 @@ import { DbService } from "../db/db.service";
 import { TenantWebhooksRepository } from "./tenant-webhooks.repository";
 import { tenantWebhooksConfig } from "./tenant-webhooks.config";
 import { redisConnectionOptions } from "../queue/redis-connection";
+import { closeBullmq } from "../queue/bullmq-shutdown";
 import type {
   TenantWebhookContentData,
   TenantWebhookContentEventKind,
@@ -38,6 +39,8 @@ export class TenantWebhookDispatcherService {
     this.queue = new Queue<TenantWebhookJobData>(tenantWebhooksConfig.queueName, {
       connection: redisConnectionOptions() as never,
     });
+    // See mail.service.ts: a BullMQ 'error' with no listener throws inside an unawaited promise handler.
+    this.queue.on("error", (err) => this.logger.warn(`tenant webhook queue error: ${String(err)}`));
   }
 
   /**
@@ -157,6 +160,6 @@ export class TenantWebhookDispatcherService {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.queue.close();
+    await closeBullmq(this.queue, (err) => this.logger.warn(`tenant webhook queue close failed: ${String(err)}`));
   }
 }

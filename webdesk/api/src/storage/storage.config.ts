@@ -77,10 +77,28 @@ export const storageConfig = {
   },
 
   /**
+   * How many days a stored object version stays LOCKED after it is written: the GOVERNANCE default
+   * retention webdesk/scripts/storage-bootstrap.mjs puts on every bucket (WEBDESK_STORAGE_LOCK_DAYS,
+   * default 1). WSK-43a reads the SAME variable, so the two cannot disagree: a soft-deleted media asset
+   * is purged `purge_after = deleted_at + this many days`, the earliest instant the lock is guaranteed
+   * to have passed (the lock runs from the object's write, which is before its delete). An EMPTY
+   * variable means the default (compose passes `${VAR:-}` through as ""), never 0.
+   */
+  get objectLockRetentionDays(): number {
+    const raw = (process.env.WEBDESK_STORAGE_LOCK_DAYS ?? "").trim();
+    if (raw === "") return 1;
+    if (!/^\d{1,4}$/.test(raw) || Number(raw) < 1) {
+      throw new Error(`[webdesk:api] WEBDESK_STORAGE_LOCK_DAYS=${JSON.stringify(raw)} is not a whole number of days >= 1 (the bucket retention the storage bootstrap applies).`);
+    }
+    return Number(raw);
+  },
+
+  /**
    * §11a: "Per-tenant storage quotas (§15) are the enforcement." §15 does not exist yet in the
    * design doc at the time of this ticket (flagged in the report) — this is a pragmatic default,
-   * config-overridable, enforced in `media/quota.service.ts` against `sum(media_assets.size_bytes)`
-   * rather than a dedicated ledger column (no migration is in this ticket's scope).
+   * config-overridable, enforced in `media/quota.service.ts` against `sum(media_assets.size_bytes)` of
+   * every asset whose bytes storage still holds (`purged_at IS NULL`, WSK-43a), rather than a dedicated
+   * ledger column.
    */
   get tenantStorageQuotaBytes(): number {
     return Number(process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES ?? 5 * 1024 * 1024 * 1024); // 5 GiB default
