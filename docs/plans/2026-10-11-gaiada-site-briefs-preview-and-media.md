@@ -31,7 +31,7 @@ configuration in the site (one env value), never a literal, in case it moves aga
    Browsers never send a fragment to any server, nor in a Referer, so the token stays out of the site host's access
    logs. Do not copy it into the URL, `history`, analytics or error reports.
 2. **Set `<meta name="referrer" content="no-referrer">`** on the page.
-3. **Fetch the envelope client-side**, with the token in the path: `fetch(\`${WEBDESK_PUBLIC_BASE}/v1/t/gaiada/preview/${token}\`)` with `WEBDESK_PUBLIC_BASE = https://api.erp.gaiada.com``.
+3. **Fetch the envelope client-side**, with the token in the path: `fetch(\`${WEBDESK_PUBLIC_BASE}/v1/t/gaiada/preview/${token}\`)` with `WEBDESK_PUBLIC_BASE = https://api.erp.gaiada.com`.
 4. **Render it with the same component pipeline the build uses for that collection** (the site picks section
    components from `## ` headings via `lib/sections/split.ts` + `rules.ts`). That pipeline has to run in the
    browser for this page, as an island. Every other page stays static.
