@@ -2030,8 +2030,13 @@ uses the asset, so it cannot break a page.
   `Content-Length` over it is 413 before a byte is read; a body without one is counted as it arrives and refused when it
   crosses the cap, so nothing larger is ever held. `WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS` (60000) ends a stalled sender (408).
   The declared type must be in the token's set (415), then the **existing pipeline** runs unchanged (bucket allowlist,
-  magic-byte sniff, quota, ClamAV fail-closed with the usual 403 and audit row, store, row). One pooled connection is
-  held per in-flight upload for the length of that work.
+  magic-byte sniff, quota, ClamAV fail-closed with the usual 403 and audit row, store, row).
+- **Slots.** An in-flight upload holds one pooled connection (the pool is 10 and shared with the whole api) for the
+  length of that work, so a process runs at most `WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT` token uploads at once (default 4,
+  1 to 8) and `WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT` per tenant (default 2); the rest get **503 with `Retry-After: 5`**.
+  The check comes before the token is looked at, so it is the same answer for every token (no oracle). A second request
+  with a token that is mid-upload gets the same 404 at once (the claim is `FOR UPDATE SKIP LOCKED`): it does not queue.
+  Known limit: the slots are per process, so N replicas admit N times as many.
 - **Body parsing** is scoped: a Fastify parser for exactly the public buckets' media types, handing the route the
   unread stream. On any other path it answers the 415 Fastify would (`media/media-upload-parser.ts`).
 - **CORS** is the draft-preview rule (`allowedPreviewOrigin`): the request `Origin` is echoed only when it is

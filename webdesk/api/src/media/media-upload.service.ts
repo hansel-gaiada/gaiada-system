@@ -11,12 +11,18 @@
 //      is the same zero rows, hence ONE identical 404 (the same body as an unknown tenant slug): the route
 //      cannot be used to learn why a token failed.
 //   2. THE CLAIM IS THE LOCK. The UPDATE runs in the SAME transaction that later creates the asset row, and
-//      that transaction stays open while the body is read, scanned and stored. A second request with the
-//      same token blocks on the row lock until the first commits (then finds the token spent: 404) or rolls
-//      back (then it may proceed). So a token uploads exactly once even under concurrency, a loser has not
-//      read or stored a byte, and a refused upload (too big, wrong type, infected, storage down) rolls the
-//      claim back and leaves the token usable until it expires. The cost is one pooled connection per
-//      in-flight upload; each is bounded by the read deadline below and needs a valid token to exist.
+//      that transaction stays open while the body is read, scanned and stored. The claim selects its row
+//      `FOR UPDATE SKIP LOCKED`, so a second request with the token while the first is in flight finds
+//      nothing and gets the same 404 AT ONCE: it neither waits nor holds a pooled connection. Once the first
+//      commits the token is spent (404); if it rolls back, the token is free again. So a token uploads
+//      exactly once even under concurrency, a loser has not read or stored a byte, and a refused upload (too
+//      big, wrong type, infected, storage down) rolls the claim back and leaves the token usable until it
+//      expires.
+//   2b. SLOTS (UploadSlots, below). An in-flight upload holds one pooled connection for the whole transfer, and
+//      the pool is small and shared with the rest of the api, so a slow sender must not be able to drain it.
+//      Before the token is even looked at, a process admits at most WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT uploads
+//      (default 4) and WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT per tenant (default 2); the rest get 503 with
+//      Retry-After. The check comes first on purpose: it says nothing about any token, so it is no oracle.
 //   3. THE BODY IS BOUNDED WHILE IT STREAMS. The cap is min(the token's max_bytes, WEBDESK_MEDIA_MAX_UPLOAD_BYTES).
 //      A declared Content-Length over it is refused (413) before a byte is read; a body without one is
 //      counted as it arrives and refused the moment it crosses the cap, so nothing larger than the cap is ever
@@ -51,6 +57,44 @@ function uploadTimeoutMs(): number {
     throw new Error(`[webdesk:api] WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS=${JSON.stringify(raw)} must be a whole number of milliseconds from 1000 to 600000 (unset for 60000).`);
   }
   return n;
+}
+
+function boundedInt(name: string, fallback: number, min: number, max: number): number {
+  const raw = (process.env[name] ?? "").trim();
+  if (raw === "") return fallback;
+  const n = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(n) || n < min || n > max) {
+    throw new Error(`[webdesk:api] ${name}=${JSON.stringify(raw)} must be a whole number from ${min} to ${max} (unset for ${fallback}).`);
+  }
+  return n;
+}
+
+/**
+ * How many token uploads one api process runs at once, and how many for one tenant (see the header, 2b). A
+ * slot is taken before the token is looked at and given back when the request ends, however it ends.
+ */
+export class UploadSlots {
+  private active = 0;
+  private readonly perTenant = new Map<string, number>();
+
+  /** A release function, or null when this process (or this tenant) is at its limit. */
+  tryAcquire(tenantId: string): (() => void) | null {
+    const max = boundedInt("WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT", 4, 1, 8);
+    const maxTenant = Math.min(max, boundedInt("WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT", 2, 1, 8));
+    const mine = this.perTenant.get(tenantId) ?? 0;
+    if (this.active >= max || mine >= maxTenant) return null;
+    this.active++;
+    this.perTenant.set(tenantId, mine + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.active--;
+      const left = (this.perTenant.get(tenantId) ?? 1) - 1;
+      if (left <= 0) this.perTenant.delete(tenantId);
+      else this.perTenant.set(tenantId, left);
+    };
+  }
 }
 
 interface ClaimedToken {
@@ -125,6 +169,7 @@ export function readBounded(stream: Readable, maxBytes: number, timeoutMs: numbe
 @Injectable()
 export class MediaUploadService {
   private readonly logger = new Logger(MediaUploadService.name);
+  readonly slots = new UploadSlots();
 
   constructor(
     private readonly db: DbService,
@@ -185,7 +230,9 @@ export class MediaUploadService {
           // 1 + 2. Prove and claim the token in one statement, in the transaction that will create the asset.
           const { rows } = await client.query<ClaimedToken>(
             `UPDATE media_upload_tokens SET used_at = now()
-              WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()
+              WHERE id = (SELECT id FROM media_upload_tokens
+                           WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()
+                           FOR UPDATE SKIP LOCKED)
           RETURNING id, site_id, bucket, max_bytes, allowed_mimes, created_by`,
             [hash, p.tenantId],
           );

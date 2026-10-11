@@ -37,6 +37,7 @@ import {
   objectKeysUnderTenant,
   preflight,
   sha256Hex,
+  sleep,
   uploadFile,
   type MintedUpload,
 } from "./media-library-kit";
@@ -51,6 +52,15 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
   let fx: ContentFixture;
   let other: ContentFixture;
   const saved: Record<string, string | undefined> = {};
+  /** The app listens on a real socket the first time a test needs one (inject does not exercise streaming or concurrency faithfully). */
+  let listening: number | null = null;
+  const serverPort = async (): Promise<number> => {
+    if (listening === null) {
+      await app.listen(0, "127.0.0.1");
+      listening = (app.getHttpServer().address() as { port: number }).port;
+    }
+    return listening;
+  };
 
   beforeAll(async () => {
     saved.cap = process.env.WEBDESK_MEDIA_MAX_UPLOAD_BYTES;
@@ -327,17 +337,36 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       expect((await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).length).toBe(1);
     });
 
-    it("TWO CONCURRENT uploads with one token: exactly one succeeds, the other is 404, one asset, one object (repeated, so a lucky interleaving cannot pass)", async () => {
+    it("CONCURRENT uploads with one token: exactly one succeeds, the other is 404 AT ONCE (it does not wait on the winner), one asset, one object (repeated, so a lucky interleaving cannot pass)", async () => {
       const f = await createContentFixture("race");
-      for (let round = 0; round < 4; round++) {
+      for (let round = 0; round < 6; round++) {
         const t = await mintOk(app, f);
-        const results = await Promise.all([0, 1, 2].map((i) => uploadFile(app, f.slug, t.token, buildPng(100 + i, 100, 2048 + i), { filename: `race-${round}-${i}.png` })));
-        const codes = results.map((r) => r.statusCode).sort();
-        expect(codes, `round ${round}`).toEqual([201, 404, 404]);
+        const results = await Promise.all([0, 1].map((i) => uploadFile(app, f.slug, t.token, buildPng(100 + i, 100, 2048 + i), { filename: `race-${round}-${i}.png` })));
+        expect(results.map((r) => r.statusCode).sort(), `round ${round}`).toEqual([201, 404]);
       }
-      expect((await dumpAssets(f)).length).toBe(4); // one per round
-      expect((await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).length).toBe(4); // and only the winners' objects were stored
+      expect((await dumpAssets(f)).length).toBe(6); // one per round
+      expect((await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).length).toBe(6); // and only the winners' objects were stored
     }, 60_000);
+
+    it("a request that arrives while another holds the token does not queue behind it: while a slow upload is in flight (real socket), the same token answers 404 immediately; when the slow one is refused the token is free again", async () => {
+      const f = await createContentFixture("noqueue");
+      const t = await mintOk(app, f, { bucket: "media", mime: ["image/png"] });
+      const port = await serverPort();
+      // a slow sender: headers and a first piece, then nothing until we say so
+      const slow = http.request({ host: "127.0.0.1", port, method: "POST", path: `/v1/t/${f.slug}/media/upload/${t.token}`, headers: { "content-type": "image/png", "transfer-encoding": "chunked" } });
+      slow.on("error", () => undefined);
+      const slowDone = new Promise<number>((resolve) => slow.on("response", (res) => { res.resume(); resolve(res.statusCode ?? 0); }));
+      slow.write(buildPng(1, 1, 128));
+      await sleep(400); // the server has claimed the token and is waiting for the rest of the body
+      const t0 = Date.now();
+      const second = await fetch(`http://127.0.0.1:${port}/v1/t/${f.slug}/media/upload/${t.token}`, { method: "POST", headers: { "content-type": "image/png" }, body: buildPng(2, 2, 300) });
+      expect(second.status).toBe(404);
+      expect(Date.now() - t0, "no waiting on the row lock").toBeLessThan(2000);
+      // the slow sender completes a valid file: it is the one that wins
+      slow.end(Buffer.alloc(64, 0x61));
+      expect(await slowDone).toBe(201);
+      expect((await dumpAssets(f)).length).toBe(1);
+    }, 30_000);
 
     it("a REFUSED upload does not spend the token: the same token then uploads a good file", async () => {
       const f = await createContentFixture("unspent");
@@ -367,8 +396,7 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
     it("a STREAMED body with no Content-Length is cut off at the cap while it arrives (a REAL socket): 413 before the sender is read to the end, nothing stored", async () => {
       const f = await createContentFixture("stream");
       const t = await mintOk(app, f, { bucket: "media", maxBytes: 4096 });
-      await app.listen(0, "127.0.0.1");
-      const addr = app.getHttpServer().address() as { port: number };
+      const addr = { port: await serverPort() };
       const chunk = Buffer.alloc(64 * 1024, 0x61);
       const totalChunks = 3200; // 200 MB offered, generated lazily: nothing is held here
       let produced = 0;
@@ -490,6 +518,82 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       } finally {
         if (prev === undefined) delete process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES;
         else process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES = prev;
+      }
+    });
+  });
+
+  // ==============================================================================================
+  // Upload: slots (a slow sender cannot drain the shared connection pool)
+  // ==============================================================================================
+  describe("upload: at most a few uploads in flight per process and per tenant", () => {
+    it("with the per-tenant limit (2) taken by two slow senders, a THIRD upload of that tenant is 503 with Retry-After, whatever its token; another tenant is unaffected; when a slot frees, uploads work again", async () => {
+      const f = await createContentFixture("slots");
+      const g = await createContentFixture("slots-b");
+      const [t1, t2, t3] = [await mintOk(app, f), await mintOk(app, f), await mintOk(app, f)];
+      const tg = await mintOk(app, g);
+      const port = await serverPort();
+      const slowOne = (token: string) => {
+        const req = http.request({ host: "127.0.0.1", port, method: "POST", path: `/v1/t/${f.slug}/media/upload/${token}`, headers: { "content-type": "image/png", "transfer-encoding": "chunked" } });
+        req.on("error", () => undefined);
+        const done = new Promise<number>((resolve) => req.on("response", (res) => { res.resume(); resolve(res.statusCode ?? 0); }));
+        req.write(buildPng(1, 1, 128));
+        return { req, done };
+      };
+      const a = slowOne(t1.token);
+      const b = slowOne(t2.token);
+      await sleep(500); // both are inside the route, holding their slots
+      const post = (slug: string, token: string) => fetch(`http://127.0.0.1:${port}/v1/t/${slug}/media/upload/${token}`, { method: "POST", headers: { "content-type": "image/png" }, body: buildPng(3, 3, 200) });
+      const full = await post(f.slug, t3.token);
+      expect(full.status).toBe(503);
+      expect(full.headers.get("retry-after")).toBe("5");
+      // no oracle: a bogus token meets the same answer while the house is full (the slot is checked first)
+      expect((await post(f.slug, randomBytes(32).toString("base64url"))).status).toBe(503);
+      // another tenant has its own allowance
+      expect((await post(g.slug, tg.token)).status).toBe(201);
+      // the two slow senders finish and free their slots
+      a.req.end(Buffer.alloc(16, 0x61));
+      b.req.end(Buffer.alloc(16, 0x61));
+      expect(await a.done).toBe(201);
+      expect(await b.done).toBe(201);
+      expect((await post(f.slug, t3.token)).status).toBe(201); // the 503'd token was never touched: it is still good
+    }, 30_000);
+
+    it("a stalled sender is cut off at the read deadline (408), its token is NOT spent, and its slot is freed", async () => {
+      const f = await createContentFixture("deadline");
+      const t = await mintOk(app, f);
+      const prev = process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS;
+      process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS = "1000";
+      try {
+        const port = await serverPort();
+        const req = http.request({ host: "127.0.0.1", port, method: "POST", path: `/v1/t/${f.slug}/media/upload/${t.token}`, headers: { "content-type": "image/png", "transfer-encoding": "chunked" } });
+        req.on("error", () => undefined);
+        const status = new Promise<number>((resolve) => req.on("response", (res) => { res.resume(); resolve(res.statusCode ?? 0); }));
+        req.write(buildPng(1, 1, 128)); // ... and then silence
+        expect(await status).toBe(408);
+        expect((await dumpTokens(f))[0].used_at).toBeNull();
+        expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
+        process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS = prev ?? "";
+        expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(201);
+      } finally {
+        if (prev === undefined) delete process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS;
+        else process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS = prev;
+      }
+    }, 30_000);
+
+    it("the limits are configurable and validated: out of range is a 500 (refusing loudly), never silently the default", async () => {
+      const f = await createContentFixture("slots-cfg");
+      const t = await mintOk(app, f);
+      const prev = process.env.WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT;
+      try {
+        for (const bad of ["0", "9", "abc", "-1", "2.5"]) {
+          process.env.WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT = bad;
+          expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode, bad).toBe(500);
+        }
+        process.env.WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT = "";
+        expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(201); // empty = the default
+      } finally {
+        if (prev === undefined) delete process.env.WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT;
+        else process.env.WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT = prev;
       }
     });
   });

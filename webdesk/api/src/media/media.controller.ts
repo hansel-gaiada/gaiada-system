@@ -5,7 +5,7 @@
 //   - serving:   PUBLIC, cookieless, media/video buckets ONLY, long Cache-Control + cache tags
 //   - presigned: authenticated, read-scoped, uploads (PRIVATE) bucket ONLY
 //   - transform: PUBLIC, imgproxy-signed redirect, media/video buckets ONLY
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, NotFoundException, Options, Param, Post, Query, Req, Res, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, NotFoundException, Options, Param, Post, Query, Req, Res, ServiceUnavailableException, UnauthorizedException, UseGuards } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { MediaService } from "./media.service";
 import { MediaUploadService, cleanOriginalFilename } from "./media-upload.service";
@@ -92,6 +92,15 @@ export class MediaController {
     if (!tenantId) throw this.tokenNotFound(reply);
     const declared = req.headers["content-length"];
     const contentLength = typeof declared === "string" && /^\d{1,15}$/.test(declared) ? Number(declared) : null;
+    // A slot BEFORE anything about the token is looked at (media-upload.service.ts, 2b): this process runs only a few
+    // uploads at once, each holding a pooled connection, so a slow sender cannot drain the pool. It says nothing
+    // about any token, so a full house is the same answer for every token.
+    const release = this.uploads.slots.tryAcquire(tenantId);
+    if (!release) {
+      reply.header("retry-after", "5");
+      reply.header("connection", "close");
+      throw new ServiceUnavailableException("too many uploads are in progress; retry shortly");
+    }
     try {
       const asset = await this.uploads.redeem({
         tenantId,
@@ -115,6 +124,8 @@ export class MediaController {
       // the answer instead of draining it.
       reply.header("connection", "close");
       throw err;
+    } finally {
+      release();
     }
   }
 
