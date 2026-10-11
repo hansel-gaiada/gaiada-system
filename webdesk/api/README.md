@@ -872,7 +872,7 @@ value**:
 | `WEBDESK_APPROVAL_ASSERTION_KEY` | HMAC key for WS4 assertions (§03 Layer 4) — shared with platform-nest, Zone A/B custody only | `real-policy-decision-point.ts` |
 | `WEBDESK_CONTROL_MTLS_CA_PEM` | Pinned synccert CA public cert (PEM) — Zone B holds only the CA public, never a private key | `real-control-channel-authenticator.ts` |
 | `WEBDESK_CONTROL_MTLS_ALLOWED_CN` | Comma-separated allow-list of client-cert CNs (default `platform-nest-webdesk`) | `real-control-channel-authenticator.ts` |
-| `WEBDESK_CONTROL_OIDC_ISSUER` | Public Keycloak issuer URL (default `https://erp.gaiada.online/idp/realms/gaiada` — there is only one real issuer in this design, so the dev fallback IS the real one; harmless because it is read-only public key material) | `real-control-channel-authenticator.ts` |
+| `WEBDESK_CONTROL_OIDC_ISSUER` | Public Keycloak issuer URL(s) - comma-separated; during an issuer move list `old,new` (the JWKS URI derives from the first) (default `https://erp.gaiada.online/idp/realms/gaiada` — there is only one real issuer in this design, so the dev fallback IS the real one; harmless because it is read-only public key material) | `real-control-channel-authenticator.ts` |
 | `WEBDESK_CONTROL_OIDC_JWKS_URI` | Override for the JWKS endpoint, if it ever diverges from the OIDC-conventional path under the issuer | `real-control-channel-authenticator.ts` |
 | `WEBDESK_CONTROL_OIDC_AUDIENCE` | Expected `aud` claim (default `webdesk-control-plane`, per design §03) | `real-control-channel-authenticator.ts` |
 

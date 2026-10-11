@@ -21,7 +21,7 @@ import type { ControlChannelAuthenticator } from "./control-channel-authenticato
 import type { ControlRequest, ControlContext } from "./control-request";
 import type { ControlPrincipal } from "./control-principal";
 import { verifyClientCertificate } from "./mtls-verifier";
-import { OfflineJwksVerifier } from "./keycloak-token-verifier";
+import { OfflineJwksVerifier, parseIssuerList } from "./keycloak-token-verifier";
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -153,7 +153,8 @@ export class RealControlChannelAuthenticator implements ControlChannelAuthentica
     .filter(Boolean);
 
   private readonly jwks = new OfflineJwksVerifier({
-    issuer: requireEnv("WEBDESK_CONTROL_OIDC_ISSUER", "https://erp.gaiada.online/idp/realms/gaiada"),
+    // Comma-separated; during an issuer move list old,new. The JWKS URI (unless overridden) derives from the FIRST.
+    issuers: parseIssuerList(requireEnv("WEBDESK_CONTROL_OIDC_ISSUER", "https://erp.gaiada.online/idp/realms/gaiada")),
     jwksUri: process.env.WEBDESK_CONTROL_OIDC_JWKS_URI || undefined,
     audience: requireEnv("WEBDESK_CONTROL_OIDC_AUDIENCE", "webdesk-control-plane"),
   });
