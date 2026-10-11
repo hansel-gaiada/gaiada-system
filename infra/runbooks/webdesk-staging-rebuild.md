@@ -296,6 +296,19 @@ time, 86 s end to end, billed as 2 minutes** (the repo is private: **about $0.01
 (npm cache hit), pull from `api.erp.gaiada.com` + build 34 s (326 items, 82 pages), deploy 31 s (9.8 MB through sumopod to delphi,
 server-side validate and swap, stamp matched on the first read), the rest about 9 s. The estimate above was pessimistic by about 45 s.
 
+## P2 proof as executed on LIVE (2026-10-11)
+
+| Step | Evidence |
+|---|---|
+| 1. Edit saved as a draft (staging unchanged) | Anthony record (WSK-D55): `service.seo` en v2, published still v1 |
+| 2. Request publish; a second person approves | approval `01a129dc`, decided by the owner: `executed`, `selfPublish: false`, `build.state: rebuilding` |
+| 3. One run, then live on staging | run 38121492350 `webdesk rebuild (publish, approval 01a129dc-…)`, 88 s; ledger `live` at +1 min 42 s (4 polls); release diff = `services/seo/index.html` + stamp |
+| Re-presenting a decided approval | 404 `approval not found or already decided`; still one build, no new run |
+| Self-approving a batch | 403 `cerbos denied publish on webdesk_content_item` (2 items at their published versions; withdrawn after). A SINGLE-item self-approval is allowed by WSK-D46 R4 and would execute: never use one as a negative test |
+| Revert cycle | approval `01a129e0-8598…` (v3 hash = v1 hash), run 38121721999, ledger `live`; all 302 files byte-identical to the pre-edit release, only the stamp's `pulledAt`/`maxUpdatedAt` differ |
+
+Steps 4 (two quick publishes coalescing) and 5 (negative control with a broken key) were not run on live.
+
 ## As executed (sumopod gate, 2026-10-10; DEV-VERIFIED only where a real run is named in "Owner steps")
 
 Everything below ran on the sumopod gate: Linux, `postgres:17`, `redis:7`, `cerbos 0.54.0` on a private network with no host ports (Cerbos health proven 200 before any result was trusted).

@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████████████░░░░░░░░░░` **67%** · 155/229<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `█████████████████████░░░░░░░░░` **69%** · 160/229<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -173,7 +173,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `████████████░░░░░░░░` **59%** · 13/22<!-- /bar -->
+<!-- bar -->🟡 `████████████████░░░░` **81%** · 18/22<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **55%** · 5/9<!-- /bar -->
 - [x] Sites → collections → items for gaiada.com (driven LIVE on erp.gaiada.online, 1.0.0-alpha.351, as hansel@gaiada.com in a real browser, 2026-10-11: Web Dev → Website redirects straight into gaiada-com; 17 collections with the real counts (326 items, all live, 0 pending); Service pages lists 52 items; an item opens in the editor; its history shows v1 head+live; 0 console errors)
@@ -186,22 +186,22 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `████████░░` **80%** · 8/10<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->✅ `██████████` **100%** · 10/10<!-- /bar -->
 - [x] Restricted deploy user on delphi — for the separate proof site `cms-proof.gaiada.com` (WSK-D56): `gdeploy` (group `ucmsproof` only, no sudo: a gdeploy-only `!ALL` overrides CloudPanel's all-users rule), forced command `gaiada-deploy-forced cms-proof` (site chosen by root; harness 96/0 on Linux), key proven locked (command → 126, no shell) 2026-10-11
 - [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
-- [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
+- [x] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`) — PROVEN 2026-10-11: the ERP's dispatch for approval `01a129dc` was accepted (build `01a129dd` → `rebuilding`; site run 38121492350)
 - [x] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (2026-10-11, as `web-gaiada`; the read key minted through an approval, the host key pinned from the verified session; the deploy key's local copy shredded)
 - [x] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP — PR gaiadabali/gaiada-web-revamp#1 merged (`13470aa3`); the ERP dispatches ref `webdesk-rebuild-proof-site` (`9ebde12`, deploys to cms-proof; workflow test 12/12 on Linux); ERP target live since 352 (`webdesk staging-rebuild poller on: every 30000ms, 1 target(s)`); a manual dispatch (run 38120681566) pulled 326 items, built 82 pages, deployed, stamp matched on the first read
 - [x] Deploy path: delphi admits SSH only from 5 fixed IPs + the WireGuard mesh, so the first run timed out at deploy. Owner choice 2026-10-11: tunnel-only `wdjump` on sumopod (key only, `PermitOpen 10.88.0.4:22`, no shell, no `-R`; global sshd unchanged), repo vars `DELPHI_JUMP`/`DELPHI_HOST` + secret `DELPHI_JUMP_KEY`, both host keys pinned; delphi's firewall untouched. Proven: banner via `-W`, shell refused, other targets prohibited, `-R` fails; delphi logs the deploy `from=10.88.0.2` (runbook step D2)
-- [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
+- [x] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly — 2026-10-11: one approval → one `webdev_site_builds` row → one run (38121492350, 88 s job); stamp `maxUpdatedAt` = the publish's `publishedAt` (07:28:37.222Z); ledger `live` at 07:30:19 after 4 polls, 1 min 42 s after the decision
 - [x] Cost per run measured and recorded — run 38120681566: 82 s job, billed 2 min (private repo, about $0.016 a run); runbook `## Cost`
 - [x] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (only when the item had a live version; best-effort; Linux: webdev 29 files/484, negative control fails exactly 6)
 - [x] Scheduled takedowns (`content.schedule` with `unpublishAt`) also mark staging stale (they take effect inside Zone B later: needs a Zone B event or a check at build-status time) — DONE in WSK-61's ERP half: a `schedule.fired` unpublish (or the sweep) marks staging stale exactly once — 1.0.0-alpha.352 gate (sumopod 2026-10-11): nest 7768/0, ui 4679 + next build on Next 16.3.8
 
-### P2 proof gate <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change
-- [ ] Page-for-page parity holds after the edit cycle
-- [ ] The editor cannot approve a batch; the same approval re-presented is refused; `/control/*` is 404 publicly
+### P2 proof gate <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
+- [x] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change — 2026-10-11: the Anthony record (WSK-D55, request side) saved a one-word FAQ edit on `service.seo` (en) as v2 and filed approval `01a129dc`; the owner approved it (as hansel@gaiada.com; `selfPublish: false`, executed in-band); the ERP dispatched the rebuild and `https://cms-proof.gaiada.com/services/seo/` shows "Technical fixes can show results within weeks" (WSK-D56: the proof site, not 24-pyevq)
+- [x] Page-for-page parity holds after the edit cycle — 2026-10-11 on cms-proof (delphi releases, `diff -rq`): the edit changed exactly `services/seo/index.html` (+ the stamp); the owner-approved revert (`01a129e0-8598`, v3 content hash = v1's) rebuilt to a site byte-identical to the pre-edit release in all 302 files, 82 pages (only the stamp's `pulledAt`/`maxUpdatedAt` differ; `sourceSha256` equal). WebDesk build = git build was the WSK-55/parity gate (0 differ)
+- [x] The editor cannot approve a batch; the same approval re-presented is refused; `/control/*` is 404 publicly — 2026-10-11 on LIVE: the Anthony record's 2-item batch (both items at their already-published versions, so a wrong yes changes nothing; approval `01a129e0`) self-decided through the real decide handler → 403 `cerbos denied publish`, then withdrawn (`cancelled`); the owner re-presenting the executed `01a129dc` → 404 `approval not found or already decided`, still 1 build, no new run; `https://api.erp.gaiada.com/control/*` and `/admin` → 404
 
 ---
 
