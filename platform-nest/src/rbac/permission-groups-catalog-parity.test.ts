@@ -115,8 +115,10 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // +1 authoring group, `webdesk_media_library`, all four in it, none advancedOnly). Relationship set untouched.
     // WSK-49f (2026-10-11): +2 on the EXISTING client_contact kind, both advancedOnly
     // (manage_website_editor, manage_admin). No new authoring group.
-    // Merged: 401 base + 4 (webdesk_media_asset) + 2 (client_contact) = 407 grantable.
-    expect(grantable.length).toBe(407);
+    // M6-P3c (2026-10-12): +4 on the NEW webdev_site kind (read/create/update/request_probe_consent); +1
+    // authoring group, `webdev_site_registry`, all four in it, none advancedOnly. 407 -> 411.
+    // Merged: 401 base + 4 (webdesk_media_asset) + 2 (client_contact) + 4 (webdev_site) = 411 grantable.
+    expect(grantable.length).toBe(411);
     expect(relationshipKeys.size).toBe(15);
   });
 

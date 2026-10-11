@@ -34,6 +34,9 @@ describe.skipIf(!TEST_URL)("WSK-23 · ConsoleReadsController (HTTP, isolated app
   let noModule: string; // webdev NOT enabled
   let user: string; // plain employee — no elevated role
   let admin: string; // company_admin in `tenant` — the positive-authorization control
+  let member: string; // role `member` in `tenant` — denied on webdev_site (M6-P3c)
+  let staff: string; // role `webdev_staff` in `tenant` — module_staff: read + request_probe_consent
+  let clientOnly: string; // role `client` in `tenant` — the client grant appears nowhere in resource_webdev_site.yaml
 
   beforeAll(async () => {
     await initTestDb();
@@ -47,6 +50,13 @@ describe.skipIf(!TEST_URL)("WSK-23 · ConsoleReadsController (HTTP, isolated app
     await addMembership(tenant, admin);
     const adminRole = await createRole("company_admin");
     await grantRole(admin, adminRole, "company", tenant);
+    member = await createUser("wsk23-http-member@a.test", "HTTP Test Member");
+    staff = await createUser("wsk23-http-staff@a.test", "HTTP Test Staff");
+    clientOnly = await createUser("wsk23-http-client@a.test", "HTTP Test Client");
+    for (const [u, role] of [[member, "member"], [staff, "webdev_staff"], [clientOnly, "client"]] as const) {
+      await addMembership(tenant, u);
+      await grantRole(u, await createRole(role), "company", tenant);
+    }
     app = await buildIsolatedApp();
   });
   afterAll(async () => {
@@ -108,6 +118,31 @@ describe.skipIf(!TEST_URL)("WSK-23 · ConsoleReadsController (HTTP, isolated app
     });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ pins: [{ webdeskTenantSlug: "no-such-slug", pinned: null }] });
+  });
+
+  // ── M6-P3c: the portfolio registry's own Cerbos kind, `webdev_site` (behaviour-preserving) ─────────
+  // console/portfolio = webdev_site · read; probe-consent-requests = webdev_site · request_probe_consent.
+  // Before M6-P3c both were `webdev_provisioned_site · read`; the tiers below are exactly that action's.
+  it("portfolio: company_admin 200 (webdev_site · read), module_staff 200, plain member 403, client-only 403", async () => {
+    const url = `/api/${tenant}/modules/webdev/console/portfolio`;
+    expect((await app.inject({ method: "GET", url, headers: asUser(admin) })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url, headers: asUser(staff) })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url, headers: asUser(member) })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url, headers: asUser(clientOnly) })).statusCode).toBe(403);
+  });
+
+  it("probe-consent-requests: authorized on webdev_site · request_probe_consent BEFORE any validation — staff/admin reach the 400, member/client get 403", async () => {
+    const url = `/api/${tenant}/modules/webdev/console/probe-consent-requests`;
+    // An empty body passes authorization and then trips the propertyId validation: a 400 proves the
+    // caller was authorized (a 403 would mean the gate refused before any validation ran).
+    for (const who of [admin, staff]) {
+      const r = await app.inject({ method: "POST", url, headers: asUser(who), payload: {} });
+      expect(r.statusCode).toBe(400);
+    }
+    for (const who of [member, clientOnly]) {
+      const r = await app.inject({ method: "POST", url, headers: asUser(who), payload: {} });
+      expect(r.statusCode).toBe(403);
+    }
   });
 
   it("no route collides with the sibling controllers' own paths on this SAME prefix (contracts, contracts/refresh, provisioned-sites, zoneb-events)", async () => {

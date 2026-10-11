@@ -20,6 +20,9 @@ describe.skipIf(!TEST_URL)("webdev sites registry HTTP surface (VLT-2)", () => {
   let other: string;
   let member: string;
   let admin: string;
+  let webdevManager: string; // module_manager: create + update, like company_admin
+  let webdevStaff: string; // module_staff: read only
+  let clientOnly: string; // the client grant appears nowhere in resource_webdev_site.yaml
   let connectionId: string;
   let otherConnectionId: string;
 
@@ -36,6 +39,13 @@ describe.skipIf(!TEST_URL)("webdev sites registry HTTP surface (VLT-2)", () => {
     await addMembership(co, admin);
     await grantRole(member, await createRole("member"), "company", co);
     await grantRole(admin, await createRole("company_admin"), "company", co);
+    webdevManager = await createUser("webdevmanager@siteregistry.test");
+    webdevStaff = await createUser("webdevstaff@siteregistry.test");
+    clientOnly = await createUser("client@siteregistry.test");
+    for (const [u, role] of [[webdevManager, "webdev_manager"], [webdevStaff, "webdev_staff"], [clientOnly, "client"]] as const) {
+      await addMembership(co, u);
+      await grantRole(u, await createRole(role), "company", co);
+    }
     const conn = await withTenants([co], (c) =>
       c.query<{ id: string }>(
         `INSERT INTO integration_connections (id, tenant_id, owner_kind, owner_id, provider, status, origin_site)
@@ -146,6 +156,26 @@ describe.skipIf(!TEST_URL)("webdev sites registry HTTP surface (VLT-2)", () => {
     // Confirm the row itself is untouched under the legitimate tenant's own view.
     const check = await app.inject({ method: "GET", url: `${base()}/${siteId}`, headers: asUser(admin) });
     expect(check.json().vaultRef).toBe(connectionId);
+  });
+
+  // ── M6-P3c: `webdev_site` (create / read / update) — behaviour-preserving against the borrowed kind ──
+  it("module tiers on webdev_site: webdev_manager creates (201) and updates (200); webdev_staff reads (200) but cannot create or update (403); client-only is 403 everywhere", async () => {
+    const created = await app.inject({
+      method: "POST", url: base(), headers: asUser(webdevManager), payload: { domain: "manager-created.test" },
+    });
+    expect(created.statusCode).toBe(201);
+    const id = created.json().id as string;
+    expect((await app.inject({ method: "PATCH", url: `${base()}/${id}`, headers: asUser(webdevManager), payload: { vaultRef: connectionId } })).statusCode).toBe(200);
+
+    expect((await app.inject({ method: "GET", url: `${base()}/${id}`, headers: asUser(webdevStaff) })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: base(), headers: asUser(webdevStaff), payload: { domain: "staff-denied.test" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PATCH", url: `${base()}/${id}`, headers: asUser(webdevStaff), payload: { vaultRef: null } })).statusCode).toBe(403);
+
+    expect((await app.inject({ method: "GET", url: `${base()}/${id}`, headers: asUser(clientOnly) })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: base(), headers: asUser(clientOnly), payload: { domain: "client-denied.test" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PATCH", url: `${base()}/${id}`, headers: asUser(clientOnly), payload: { vaultRef: null } })).statusCode).toBe(403);
+    // and the member (no webdev tier at all) cannot read either
+    expect((await app.inject({ method: "GET", url: `${base()}/${id}`, headers: asUser(member) })).statusCode).toBe(403);
   });
 
   it("clears vaultRef with null", async () => {
