@@ -10,6 +10,9 @@ import { TenantsModule } from "../tenants/tenants.module";
 // final report for why editing control.module.ts (rather than only contract.controller.ts) was
 // necessary despite the ticket's ownership list naming only the controller file.
 import { CodegenModule } from "../codegen/codegen.module";
+// M6-P4r-b -- the live contract-codegen rail (queue, worker, trigger). tenant.provision and schema.apply
+// queue a run after their commit; contract.regenerate is the re-run / backfill command.
+import { ContractCodegenModule } from "../codegen/contract-codegen.module";
 // WSK-41 — the content commands fan their post-commit events out through the tenant-webhook
 // dispatcher (TenantWebhooksModule exports it). AppModule already imports TenantWebhooksModule;
 // Nest modules are singletons, so this adds no second queue or worker in the real app.
@@ -42,6 +45,8 @@ import { ReleasesCommandService } from "./releases/releases-command.service";
 import { ReleasesController } from "./releases/releases.controller";
 import { JobsController } from "./jobs/jobs.controller";
 import { ContractController } from "./contract/contract.controller";
+import { ContractRegenerateController } from "./contract/contract-regenerate.controller";
+import { ContractRegenerateService } from "./contract/contract-regenerate.service";
 
 // WSK-41 — content authoring commands + the editorial principal seam + the durable idempotency store.
 import { PgIdempotencyStore } from "./idempotency/pg-idempotency-store";
@@ -115,7 +120,7 @@ const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicy
 const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevModeEditorialPrincipalResolver : RealEditorialPrincipalResolver;
 
 @Module({
-  imports: [DbModule, AuditModule, ApiKeysModule, TenantsModule, CodegenModule, TenantWebhooksModule],
+  imports: [DbModule, AuditModule, ApiKeysModule, TenantsModule, CodegenModule, ContractCodegenModule, TenantWebhooksModule],
   controllers: [
     LifecycleController,
     SchemaController,
@@ -123,6 +128,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     ReleasesController,
     JobsController,
     ContractController,
+    ContractRegenerateController,
     ContentCommandsController,
     PreviewTokenCommandsController,
     MediaCommandsController,
@@ -140,6 +146,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     SchemaService,
     KeysCommandService,
     ReleasesCommandService,
+    ContractRegenerateService,
     PgIdempotencyStore,
     EditorialAssertionGuard,
     ContentCommandsService,

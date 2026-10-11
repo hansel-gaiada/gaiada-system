@@ -9,10 +9,9 @@
 //   STORAGE_ENDPOINT=http://localhost:PORT STORAGE_ACCESS_KEY_ID=... STORAGE_SECRET_ACCESS_KEY=... \
 //     node --import tsx src/codegen/generator/run-codegen.mts --tenant <slug> [--emit-event]
 //
-// A currently-unwired trigger, by design: nothing in this ticket's scope calls this from
-// `schema.apply` (WSK-21's `SchemaService` — out of this ticket's owned files) or from a
-// scheduler. Flagged as a follow-up in the ticket report, matching the pattern
-// WSK-10/11/12 each already used for their own "not wired into X" gaps.
+// This CLI is now the manual/dev path only. M6-P4r-b wired the live trigger: `tenant.provision` and
+// `schema.apply` queue a run after their commit (src/codegen/contract-codegen.*.ts), and the
+// `contract.regenerate` control command is the re-run/backfill path.
 import pg from "pg";
 import { createGeneratorStorageAdapter } from "./storage-io.mts";
 import { generateTenantContract } from "./generate-tenant.mts";
