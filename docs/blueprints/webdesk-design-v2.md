@@ -694,7 +694,7 @@ else and pays for itself immediately.
 | OQ-2.4 | Do client engagements permit scheduled auditing of their sites? | **Unverified per client** — `verified_at` stays false, nothing is probed |
 | OQ-2.5 | The monthly Actions figure, and which account owns the client repos | Assume the ERP monorepo dominates; act on lever 1 regardless |
 | ~~OQ-2.6~~ | **RESOLVED 2026-09-04 — see WSK-D33.** There was no vault to choose: `integration_connections` (`0033`) already is one. Widen it; keep the existing key. | — |
-| OQ-2.7 | Per-tenant cost and quotas (v1.1's A-10, still open) | Deferred; `gda-aicenter` capacity in §03 is the interim ceiling |
+| OQ-2.7 | Per-tenant cost and quotas (v1.1's A-10). **Written 2026-10-11:** [`webdesk-tenant-cost-and-quotas.md`](./webdesk-tenant-cost-and-quotas.md) — measured costs, the proposed per-tenant quotas, and one open capacity decision (WebDesk's CPU ceilings, 3.25 vCPU, exceed the 2-vCPU box) | `gda-aicenter` capacity in §03 is the interim ceiling; no second tenant until the capacity decision |
 | ~~OQ-2.8~~ | **DISSOLVED by WSK-D37** — Payload is removed, so there is no rebrand to check. A-11 goes with it. | — |
 | ~~OQ-2.9~~ | **RESOLVED 2026-09-04 — see WSK-D34.** Split: the test suite runs on `sumopod`; the containment probes run on `gda-aicenter` (§03), where alone a boundary probe means anything. A suite proves the code; a probe proves the boundary — conflating them is what made this look like one question for four days. | — |
 
