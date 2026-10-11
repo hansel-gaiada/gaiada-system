@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████████████░░░░░░░░░░` **66%** · 142/215<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████████░░░░░░░░░░░` **64%** · 144/224<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████████░░` **88%** · 81/92<!-- /bar -->
+<!-- bar -->🟡 `█████████████████░░░` **87%** · 81/93<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -64,7 +64,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Design doc: contract, draft/live, authoring + read commands, editorial assertion, Cerbos, loader principal, rebuild path, control channel
 - [x] Reviewed (claims checked against `breaking-change.ts` and the contract test); rulings landed as D44–D48
 
-### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `█████████░` **90%** · 10/11<!-- /bar -->
+### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **83%** · 10/12<!-- /bar -->
 - [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
 - [x] Verification tenants removed (250 `wsk<n>-*` fixtures; none other existed)
 - [x] RustFS up from the pinned digest and bootstrapped (16 changes, then 0); MinIO container removed
@@ -73,6 +73,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Defect fixed: every table was owned by `postgres` and `webdesk_app` had 0 grants — DB rebuilt as the repo intends (migrator-owned, 74 app grants, revokes intact, RLS integrity 19/19)
 - [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
 - [ ] `api.gaiada.com` vhost enabled with TLS (staged as `api.gaiada.com.conf` with token redaction and public 404s for /admin and /control; enable + certbot after the A record)
+- [ ] DNS + TLS for the proof site `cms-proof.gaiada.com` → 72.61.142.88 (CloudPanel site created; certificate after the A record)
 - [x] The api image on the box built off the live box (sumopod `webdesk-api:1cbee520`, transferred in 30 s)
 - [x] The api image signed via a release (`v1.0.0-alpha.344`, cosign-verified digest `sha256:69abc934…`, live on gda-aicenter 2026-10-11)
 - [x] ERP egress client's own live probe from `gaiada-platform-1` (344: all four layers reach WebDesk, `404 tenant not found` before provisioning; without the client cert, refused at Layer 1)
@@ -149,7 +150,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Editors can read their own pending publish request (new `GET …/publish-requests`, own rows only, behind the wall)
 ### Wave C · WSK-57 · Provision the gaiada tenant (over the channel) <!-- bar -->🟡 `███░░░░░░░` **33%** · 1/3<!-- /bar -->
 - [x] Tenant `gaiada`, site `gaiada-com`, staging + production environments (live 2026-10-11 over the control channel: tenant `b8ed45ee…` → ERP company Gaia Digital Agency; site `fc19fb0c-bc1d-4be0-af8b-b2ff9ce34c43`; staging `24-pyevq.gaiada.com`, production domain unset until the real-domain cutover)
-- [ ] Build key (production read) minted through an approval; preview key (staging read)
+- [ ] Build key (production read) minted through an approval; preview key (staging read) — production READ key minted 2026-10-11 (filed by the Anthony persona, approved by the owner; `/v1` 200 with it, 401 without); the staging preview key is still open
 - [ ] Read quota sized for a full site build
 
 ### Wave C · WSK-67 · Importer CLI <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
@@ -171,7 +172,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `██████░░░░░░░░░░░░░░` **31%** · 6/19<!-- /bar -->
+<!-- bar -->🟡 `████████░░░░░░░░░░░░` **42%** · 8/19<!-- /bar -->
 
 ### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **57%** · 4/7<!-- /bar -->
 - [ ] Sites → collections → items for gaiada.com
@@ -182,12 +183,12 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `██░░░░░░░░` **22%** · 2/9<!-- /bar -->
-- [ ] Restricted deploy user on delphi (forced command swaps the `24-pyevq` docroot only)
+### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `████░░░░░░` **44%** · 4/9<!-- /bar -->
+- [x] Restricted deploy user on delphi — for the separate proof site `cms-proof.gaiada.com` (WSK-D56): `gdeploy` (group `ucmsproof` only, no sudo: a gdeploy-only `!ALL` overrides CloudPanel's all-users rule), forced command `gaiada-deploy-forced cms-proof` (site chosen by root; harness 96/0 on Linux), key proven locked (command → 126, no shell) 2026-10-11
 - [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
 - [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
-- [ ] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (the `web-gaiada` gh account is admin there; none set as of 2026-10-11)
-- [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP
+- [x] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (2026-10-11, as `web-gaiada`; the read key minted through an approval, the host key pinned from the verified session; the deploy key's local copy shredded)
+- [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP — branch `webdesk-rebuild-proof-site` pushed (deploys to cms-proof); the default-branch registration is PR gaiadabali/gaiada-web-revamp#1 (workflow file only, `[skip ci]`), awaiting the owner's merge. ERP target set in the platform `.env` (live from the next deploy)
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
 - [ ] Cost per run measured and recorded
 - [x] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (only when the item had a live version; best-effort; Linux: webdev 29 files/484, negative control fails exactly 6)
@@ -201,7 +202,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `███████████████░░░░░` **73%** · 45/61<!-- /bar -->
+<!-- bar -->🟡 `█████████████░░░░░░░` **65%** · 45/69<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -211,7 +212,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 - [x] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 
-### CMS features <!-- bar -->🟡 `████░░░░░░` **40%** · 6/15<!-- /bar -->
+### CMS features <!-- bar -->🟡 `███░░░░░░░` **30%** · 6/20<!-- /bar -->
 - [x] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52, recorded in webdesk-design-v2.md §14 on main `26862851`)
 - [x] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
@@ -226,9 +227,14 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43b · ERP: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools
 - [ ] WSK-43c · Website workspace: Media tab + a picker for media fields (after the M2 editor follow-ups)
 - [ ] WSK-43d · site repo: the pull step downloads library images into the static build (with the site owner)
-- [ ] WSK-49 · client editors through the client portal
+- [ ] WSK-49 ruled by the owner 2026-10-11: build now; a client publisher self-publishes one item, batches need a second client person (WSK-D58); clients edit only client-editable fields (WSK-D59) (ticked when on main)
+- [ ] WSK-49a · vocabulary 1.2.0: `ui.clientEditable` on compositions and fields
+- [ ] WSK-49b · WebDesk write plane refuses a client's change to a non-editable path; publish obeys D58
+- [ ] WSK-49c · ERP: Cerbos rules for client editors (own company only) + a portal BFF that diff-checks client writes
+- [ ] WSK-49d · client portal: a Website area in the portal's own shell, editor in client mode
+- [ ] WSK-49e · a seeded test client company with its own WebDesk tenant and site, proven end to end
 
-### Defects found on the way <!-- bar -->🟡 `████████░░` **83%** · 35/42<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `████████░░` **77%** · 35/45<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
@@ -270,6 +276,9 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] `webdesk/api/src/main.ts` has no `enableShutdownHooks()`: a SIGTERM kills a running scheduler tick mid-item (safe: one transaction per item) instead of draining it (WSK-61 follow-up) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [x] Preview and upload tokens travel in the URL path: redact `/v1/t/*/preview/*` and `/v1/t/*/media/upload/*` in Caddy's (and any edge's) access log before those endpoints go live (the api already redacts its own logs; the WebDesk orchestrator owns this) — DONE 2026-10-11: Caddy writes no access log; the public nginx host logs via a redacting format (token → `[redacted]`, Referer query dropped). Proven in a throwaway nginx (0 secrets logged); `infra/nginx/api.gaiada.com.conf` (`634675ab`), staged on gda-aicenter, live when the vhost is enabled
 - [x] WebDesk emits `form.received` with the internal `tenants.id` where the Zone B envelope documents the ERP company id (`company_ref`); check the ERP intake's mapping and fix one side (found by the WSK-61 producer, 2026-10-11) (main `232b7665`; sumopod gate m3w4: api 1015/0/2, 0 unhandled, migrations 435; contract fixture `contracts/zoneb/form-received.envelope.json` binds the WebDesk emit to the ERP validator)
+- [ ] The public media upload route answers refusals with Nest's default body, not problem+json slugs; the UI maps them by status + message (found by WSK-43c)
+- [ ] platform-ui needs `WEBDESK_PUBLIC_BASE_URL` in its compose `environment:` for library thumbnails (WSK-43c; the ERP needs it too, WSK-43b)
+- [ ] Media controls disable only after a first 403: give the BFF a capabilities answer for `webdesk_media_asset` so the UI can disable up front (WSK-43c)
 - [ ] Not ours, flagged: `agency-lead-convert-race.db.test.ts` is flaky (failed 1 of 3 identical runs) and `monitoring.controller.test.ts` is a date time bomb (red since ~09-17) — both red on main, owners elsewhere
 
 ---
