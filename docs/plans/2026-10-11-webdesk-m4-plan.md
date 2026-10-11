@@ -20,7 +20,7 @@ Status words are the estate's: PLANNED · IN PROGRESS · DEV-VERIFIED (driven on
 | T3 | Restore drill from the offsite copy, timed | orchestrator | PLANNED (after T2) |
 | T4 | `deploy-webdesk.yml`: WebDesk's own deploy job in the release (signed image, never the `gaiada` project) | devops (Sonnet) + orchestrator | PLANNED |
 | T5 | The August provisional greens re-run on Linux (the ones nothing runs today) | qa (Sonnet) + orchestrator on sumopod | PLANNED |
-| T6 | OTel to sumopod + public status page | design first, then devops | PLANNED: needs two owner answers (below) |
+| T6 | OTel to sumopod + public status page | devops (Sonnet) + orchestrator | PLANNED; ruled WSK-D63/D64 |
 | T7 | Per-tenant cost and quotas written (A-10 / OQ-2.7) | orchestrator measures, Sonnet drafts | PLANNED |
 | T8 | Stale WebDesk copy on sumopod retired | orchestrator | **DONE** 2026-10-11; volumes deleted after 2026-10-25 |
 | T9 | Deploy procedure committed | — | already on main: `infra/runbooks/webdesk-live-swap.md` (LF-safe archive, refuse CR, image from the signed release, never built on the box) |
@@ -178,17 +178,17 @@ is not deployed anywhere, so it gets no Linux claim.
 Plan: add a `legacy` stage to `webdesk/qa/linux-gate.sh` that runs the rows above, run it on sumopod, and fix or
 record whatever is red.
 
-## T6 · OTel and the status page: two owner answers needed
+## T6 · OTel and the status page (ruled 2026-10-11: WSK-D63, WSK-D64)
 
-- **OTLP path.** Design §03 channel 2 is a write-only OTLP push to a dedicated ERP-side listener. The guard now
-  drops every private path from the webdesk network, WireGuard included, so the push needs either:
-  - (a) one explicit guard exception to a write-only listener on the host, which forwards to sumopod over WireGuard;
-    or
-  - (b) a public, TLS, bearer-authenticated OTLP ingest on sumopod reached over the internet.
-
-  (a) keeps telemetry off the internet; (b) needs no exception.
-- **Status page name.** `gen-status-page.mjs` needs a public home: a new name under `erp.gaiada.com` (DNS is the
-  owner's), or a path on `api.erp.gaiada.com`.
+- **OTLP path (WSK-D63 (2)).** The ERP's existing `gaiada-otel-collector` gets a second, write-only OTLP/HTTP receiver:
+  bearer-authenticated, rate-limited, published on the docker0 address only. `webdesk-egress-guard.sh` gains exactly
+  one RETURN for that address and port, and the collector forwards to sumopod's Tempo/Loki over WireGuard as it does
+  today. The api sets `OTEL_ENABLED` + `WEBDESK_OTEL_ZONEA_PUSH_ENABLED` and the endpoint/bearer. The ERP compose
+  change ships with a release; the guard change and the probe update ship with it, and probe 6 must then show exactly
+  that one host port open.
+- **Status page (WSK-D64).** `status.erp.gaiada.com`, a CNAME to `sumopod.erp.gaiada.com` (the owner creates it), is
+  served from sumopod and fed by its existing blackbox probes for `api.erp.gaiada.com` (`/healthz`, a `/v1` 401
+  problem+json). It replaces the in-project `status-page` sketch in `webdesk-zoneb-status-page.md`.
 
 ## T7 · Per-tenant cost and quotas
 
