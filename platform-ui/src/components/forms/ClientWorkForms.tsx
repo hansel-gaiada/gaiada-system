@@ -121,7 +121,7 @@ export function EditClientForm({ action, name, status, statusOptions, contact, o
       <BusinessTypeSelect defaultValue={businessType} />
       <Field name="status" label="Status" type="select" options={statusOptions} defaultValue={status} />
       <OwnerSelect owners={owners} defaultValue={ownerUserId} />
-      {groupCompanies && <GroupCompanySelect options={groupCompanies} defaultValue={groupCompanyId} />
+      {groupCompanies && <GroupCompanySelect options={groupCompanies} defaultValue={groupCompanyId} />}
       <ContactFields contact={contact} />
       <Err state={state} />
       <div style={{ gridColumn: "1 / -1" }}><Button type="submit" size="md" disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button></div>
