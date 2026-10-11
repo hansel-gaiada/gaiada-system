@@ -169,7 +169,10 @@ export function createV1Handler(deps: V1Deps): (request: Request) => Promise<Res
   return async function handleV1Request(request: Request): Promise<Response> {
     const requestId = request.headers.get('x-request-id') || randomUUID()
     const url = new URL(request.url)
-    const instance = url.pathname
+    // WSK-43a: a path that carries a bearer token (the media upload route also reaches this wildcard when it is
+    // called with a method or on a path the Nest route does not serve) never has it copied into a problem `instance`.
+    // Every other path is returned unchanged, so the frozen contract's bytes do not move.
+    const instance = redactPreviewToken(url.pathname)
 
     const segments = url.pathname.split('/').filter(Boolean)
     if (segments[0] !== ENVELOPE_VERSION || segments[1] !== 't' || !segments[2]) {
