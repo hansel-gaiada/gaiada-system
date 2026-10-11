@@ -176,6 +176,8 @@ test("STATE dirty -> saving -> saved vN: the real composition renders and a save
   await expect(page.locator(P("source_path"))).not.toBeEditable(); // ui.readOnly
   await expect(page.locator(P("schema")).locator("li")).toHaveCount(4);
   await expect(page.locator(P("schema_notes"))).toHaveCSS("font-family", /mono/i);
+  // forms.css reaches the editor on a direct load (it rendered bare browser inputs live; a UA input pads 1px 2px)
+  await expect(page.locator(P("h1"))).toHaveCSS("padding-left", "13px");
 
   const h1 = page.locator(P("h1"));
   await h1.fill("SEO Agency in Bali — Edited");
