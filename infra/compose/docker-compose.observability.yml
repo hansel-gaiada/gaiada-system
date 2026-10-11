@@ -63,6 +63,25 @@ services:
     image: otel/opentelemetry-collector-contrib:0.116.1
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
+    # WSK-D63 (2) / WebDesk M4 T6a: the WebDesk-only OTLP/HTTP receiver `otlp/webdesk` (config.yaml).
+    #  * The publish is on the docker0 address ONLY, with BOTH sides literal: never `0.0.0.0`, and never a
+    #    `${VAR}` that could resolve empty (an empty host in a ports mapping means every interface).
+    #    The webdesk egress guard (webdesk/ops/host/webdesk-egress-guard.sh) opens exactly this
+    #    address:port to the webdesk network and nothing else; the ERP's own receivers (4317/4318),
+    #    the self-metrics (8888) and the Prometheus exporter (8889) stay unpublished.
+    #  * WEBDESK_OTLP_BEARER_TOKEN: when EMPTY or UNSET (the state of every deploy before the token is
+    #    minted) the receiver REFUSES EVERY REQUEST and the collector still starts. The default is a
+    #    lone control character, U+0001 (the YAML escape in the double quotes below): a token no HTTP
+    #    client can send (the server answers 400 to a header carrying it). A printable placeholder would
+    #    be an open door: proven on 2026-10-11, a literal quote-backslash-n default let a request
+    #    carrying exactly that text straight in. An empty value would stop the bearertokenauth
+    #    extension (and so the ERP's collector) starting. Compose rejects a newline in a default. Do
+    #    not "simplify" this default or switch it to single quotes (that makes the escape literal):
+    #    check-otlp-write-only.mjs fails CI if it changes.
+    ports:
+      - "172.17.0.1:4319:4319"
+    environment:
+      WEBDESK_OTLP_BEARER_TOKEN: "${WEBDESK_OTLP_BEARER_TOKEN:-\x01}"
     volumes:
       - ../../infra/observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
       # Read-only tail of container stdout for the filelog receiver (logs → Loki).
