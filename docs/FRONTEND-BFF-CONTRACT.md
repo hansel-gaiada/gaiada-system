@@ -1852,6 +1852,44 @@ unconditional idle poll instead of inventing a topic string nothing emits.
 
 ---
 
+### 16i. Client website access (WSK-49f, WSK-D60 amended 2026-10-11) — `src/core/client-website-access.controller.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (tested on local Linux containers, no server gate yet; platform-nest only; no UI yet — the portal Website area and the Contacts/People grant controls come later)**
+
+Who may edit a client's website through WebDesk, and who may say so. `client_website_editor` is a **role stored as data** scoped to
+ONE client record (`user_roles.scope_type = 'client'`, `scope_id = clients.id`; the serving company is that client's tenant), the
+same for a plain client and for a CMC client company. It carries **no permission bundle and no `perm_*` mirror**: Cerbos checks it
+by an attribute condition (`derived_roles.yaml` `client_website_editor`: the grant's client == `resource.attr.clientId`, in the
+grant's tenant). A client-scoped grant only reaches the principal while its holder is still an ACTIVE, client-wide contact of that
+client (`assemblePrincipal()`), so revoking the contact switches the grant off. The client-contact capability gains **`admin`**
+(beside `signer | viewer`), assigned ONLY by Gaiada staff; an admin may grant this ONE role, to contacts of their OWN client only.
+
+**Order on every route: authorize (Cerbos) → load the target contact on the tenant-scoped connection and verify it belongs to the
+client in the URL → write, in the SAME transaction as the audit row.** The role is a literal in the path and the scope is the client
+in the path: there is no role/scope/permission parameter anywhere, and any such body field is ignored, never read. Idempotent:
+granting twice or revoking what is not held is a **200 with `changed:false` and NO second audit row** (the audit trail records
+state changes). Audit rows (`activities`, `target_entity_type = 'client_contact'`, `target_entity_id` = the contact id, actor =
+the caller): `client_website_editor.granted|revoked` (metadata `{clientId, contactId, targetUserId, role, grantId, surface:
+'staff'|'portal', actorKind}`; the contact-revoke cleanup adds `reason:'contact_revoked'`) and `client_contact.admin_granted|
+admin_revoked` (`previousCapability` / `restoredCapability`). A revoke also bumps the target's `session_version`.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/clients/:clientId/website-access` | STAFF. → `{clientId, role:'client_website_editor', contacts:[{contactId, userId, name, email, capability, status, isAdmin, websiteEditor}]}`. Only client-wide, non-revoked contact rows (a project-scoped or revoked row is not eligible and is not listed). Authz `client_contact · read`. |
+| ✅ | PUT / DELETE | `/api/:t/clients/:clientId/contacts/:contactId/website-editor` | STAFF. Grant / revoke → `{clientId, contactId, userId, role, websiteEditor, changed}`. Authz `client_contact · manage_website_editor` (company_admin, manager, owner, platform_admin of THIS company). `404` if the contact is not a contact of that client (RLS hides other companies'); `400 website_editor_is_client_wide` for a project-scoped row, `400 target_not_a_contact_of_client` for a revoked one; `400 self_grant_forbidden` when the caller is the target. A client admin gets `403` here (they use the portal route). |
+| ✅ | PUT / DELETE | `/api/:t/clients/:clientId/contacts/:contactId/admin` | STAFF ONLY. Assign / remove the `admin` capability → `{clientId, contactId, userId, capability:'admin'\|'viewer', changed}`. Authz `client_contact · manage_admin` (company_admin, owner, platform_admin; **not manager, and no client arm at all** — a client admin can never mint another admin). `admin` REPLACES `signer`/`viewer` in the one column and does **not** carry signing, so promoting a `signer` is `409 would_remove_signer` unless the body is `{confirmReplaceSigner:true}`. `DELETE` restores `viewer` (never `signer`; the prior value is not stored). Client-wide rows only (`400 admin_is_client_wide`). |
+| ✅ | GET | `/api/:t/portal/clients/:clientId/website-access` | PORTAL (client admin). Same body as the staff list, for the caller's own client. Authz `client_contact · manage_website_editor` with `clientId`, then the portal scope predicate (`resolvePortalScope`): `403` for any client that is not the caller's. |
+| ✅ | PUT / DELETE | `/api/:t/portal/clients/:clientId/contacts/:contactId/website-editor` | PORTAL (client admin). Grant / revoke the website editor to a contact of the SAME client. `403` for a signer, a viewer, a plain website editor, an admin of another client, a revoked or project-scoped admin, any staff member (not a contact of the client) and any other company's user; `404` for a contact id of another client/company; `400 self_grant_forbidden` for a grant to themselves (a self-REVOKE is allowed). There is deliberately **no** portal route for `admin` or any other role. |
+
+Existing endpoint touched: `POST /api/:t/client-contacts/:id/revoke` now also deletes that contact's `client_website_editor` grant (when
+the row is client-wide) and writes its audit row (`reason:'contact_revoked'`) in the same transaction, so a dormant grant cannot come
+back to life if the contact is ever re-invited. `POST /api/:t/clients/:clientId/contacts` still accepts only `signer|viewer`.
+Generic grant surfaces (`POST /api/:t/users/:id/roles`, `POST /api/:t/role-grants`) refuse `scope_type='client'` and the role itself
+(`400 client_scope_dedicated_path`); a DB trigger (`user_roles_client_scope_guard`) welds the role to the client scope for any writer.
+
+**Principal / Cerbos contract (for WSK-49c and the portal):** `principalPayload` now sends `grants[].scopeTenantId` (client-scoped
+grants only) and `attr.clientAdminOf: [{tenantId, clientId}]`; `resourcePayload` sends `attr.clientId` ("" when unfed, which matches
+nothing). A handler feeding `clientId` must take it from a row it loaded in the request's tenant, never from a request body. The UI
+gets the same facts from the two list endpoints above (`isAdmin`, `websiteEditor`); no `Me` shape changed.
+
 ## 17. Mail subsystem (MAIL-* program, 2026-08-04) — `src/mail/` — **STATUS: IN PROGRESS**
 
 Design: [`../superpowers/specs/2026-08-04-zone-a-mail-design.md`](../superpowers/specs/2026-08-04-zone-a-mail-design.md)
