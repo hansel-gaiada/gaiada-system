@@ -10,6 +10,7 @@ import { BadRequestException, Body, ConflictException, Controller, ForbiddenExce
 import type { FastifyRequest } from "fastify";
 import { withGlobal, withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
+import { check } from "../rbac/cerbos";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { getExecutable } from "./approval-executables";
@@ -211,10 +212,19 @@ export class AutomationApprovalsController {
         [id],
       ),
     );
-    const row = rows[0] as { origin: string } | undefined;
+    const row = rows[0] as { origin: string; requestedBy: string | null } | undefined;
     if (!row) throw new NotFoundException("approval not found");
     const module = row.origin === "hr" ? "hr" : undefined;
-    await authorize(req.principal, { kind: "automation_approval", id, tenantId, module }, "read");
+    // T7 (WebDesk M3): the REQUESTER may read their own row. `creatorId` is `requested_by` — the
+    // users.id that filed it, the same id as `principal.id` (approval-filing.ts stores
+    // `requestedBy: principal.userId`; principalPayload() sends `id: p.userId`). It is the fetched
+    // row's value, never anything the client sent. Cerbos's own-row ALLOW is `read` only: it grants
+    // no decide/retry, and managers/company admins pass through their existing rules unchanged.
+    await authorize(
+      req.principal,
+      { kind: "automation_approval", id, tenantId, module, creatorId: row.requestedBy ?? undefined },
+      "read",
+    );
     return row;
   }
 
@@ -230,10 +240,29 @@ export class AutomationApprovalsController {
     // never widens visibility for any other origin.
     @Query("origin") origin?: string,
   ) {
-    await authorize(req.principal, { kind: "automation_approval", tenantId, module: origin === "hr" ? "hr" : undefined }, "read");
+    const inbox = { kind: "automation_approval", tenantId, module: origin === "hr" ? "hr" : undefined };
+    // T7 (WebDesk M3) — TWO READ TIERS. A caller who passes the existing (elevated) read sees the
+    // whole inbox exactly as before; probed WITHOUT auditing so a requester's ordinary list does not
+    // file an authz.deny row on every call. A caller who does NOT is offered the own-row rule instead:
+    // `creatorId` is the caller's OWN id, which makes Cerbos's requester-reads-own ALLOW match for
+    // any in-tenant caller — so that ALLOW proves tenancy and nothing more, and it is the SQL filter
+    // below (`requested_by = caller`) that bounds what comes back. `ownOnly` is set ONLY on that
+    // branch and ONLY ever narrows; a failure of either authorize() is the same 403 as before.
+    const elevated = (await check(req.principal, inbox, "read")).allow;
+    if (elevated) {
+      await authorize(req.principal, inbox, "read");
+    } else {
+      await authorize(req.principal, { ...inbox, creatorId: req.principal.userId ?? undefined }, "read");
+    }
+    const ownOnly = !elevated;
     const filterPending = status === undefined || status === "pending";
     const params: unknown[] = [];
     const clauses = ["deleted_at IS NULL"];
+    if (ownOnly) {
+      // `userId` is non-null here: an anonymous principal sends creatorId "" and was refused above.
+      params.push(req.principal.userId);
+      clauses.push(`requested_by = $${params.length}`);
+    }
     if (filterPending) clauses.push("status = 'pending'");
     else if (status) { params.push(status); clauses.push(`status = $${params.length}`); }
     if (origin) { params.push(origin); clauses.push(`origin = $${params.length}`); }

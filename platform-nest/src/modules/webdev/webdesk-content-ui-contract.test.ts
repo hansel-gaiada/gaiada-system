@@ -390,10 +390,10 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       const bundle = okData(await step("refreshEditorAction (after reload)", () => actions.refreshEditorAction(SCOPE, "service", "service.seo", "en")));
       expect(bundle.pendingRequests).toEqual([{ approvalId: filed.approvalId }]);
 
-      // FIX 3, the poll: the requester CANNOT read /automation-approvals/:id (403), so the UI falls back to their own requests
-      const detail = await refusal(`/api/${A}/automation-approvals/${filed.approvalId}`, editorA);
-      expect(detail.status).toBe(403);
-      expect(ui.resultFromError(detail)).toMatchObject({ kind: "forbidden" });
+      // FIX 3, the poll: since WebDesk M3 T7 the requester CAN read their own /automation-approvals/:id
+      // (Cerbos own-row read), so the poll reads it directly; the own-list fallback stays for anyone else.
+      const detail = await platform.platformFetch(`/api/${A}/automation-approvals/${filed.approvalId}`, editorA);
+      expect(detail).toMatchObject({ id: filed.approvalId, status: "pending" });
       const polled = okData(await step("pollApprovalAction (editor: 403 → own list)", () => actions.pollApprovalAction(SCOPE, filed.approvalId)));
       expect(polled).toMatchObject({ id: filed.approvalId, status: "pending", executionStatus: "not_applicable" });
       expect(model.phaseOf(polled).phase).toBe("pending");

@@ -315,7 +315,12 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("HR module (WSD-4)", () => {
     // C has hr enabled but neither u2 (as company_admin/manager) nor any relevant grant at all
     // there — filing at B and reading at C must 404/empty, never leak the leave row cross-tenant.
     const crossTenant = await app.inject({ method: "GET", url: `/api/${C}/automation-approvals?origin=hr`, headers: asUser(u2) });
-    expect(crossTenant.statusCode).toBe(403); // u2 holds no company_admin/manager grant at C at all
+    // T7 (WebDesk M3): u2 holds no elevated grant at C, so they are off the elevated tier. A caller in
+    // the tenant who is NOT elevated now gets the requester's own-rows-only view (200) instead of a
+    // 403; u2 filed nothing at C, so the body is empty. The wall this test exists for is unchanged:
+    // not one hr row from B (or anyone else's at C) is revealed.
+    expect(crossTenant.statusCode).toBe(200);
+    expect(crossTenant.json()).toEqual([]);
   });
 
   it("user.invited auto-instantiates a default onboarding hr_case through the real pipeline", async () => {

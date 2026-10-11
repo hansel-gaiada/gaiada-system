@@ -232,6 +232,29 @@ describe.skipIf(!TEST_URL)("GET /api/approvals — unified cross-origin + cross-
     expect((await app.inject({ method: "GET", url: `/api/approvals?scope=${coA}&sort=bogus`, headers: asUser(manager) })).statusCode).toBe(400);
   });
 
+  // T7 (WebDesk M3) — a requester may now read their OWN approval through `/automation-approvals[/:id]`,
+  // but the UNIFIED inbox is deliberately unchanged: its legs probe `read` WITHOUT a creatorId, so a
+  // plain member who filed an approval still does not see it (or anyone's) in `/api/approvals`.
+  it("T7: a plain member who FILED an automation approval still sees no automation rows in the unified inbox (own-row read is the detail/list endpoint only)", async () => {
+    const filed = await app.inject({
+      method: "POST", url: `/api/${coA}/automation-approvals`, headers: asUser(member),
+      payload: { workflowId: "wf:t7-unified", toolName: "money.transfer", toolArgs: {}, impact: "medium", reason: "t7 member-filed" },
+    });
+    expect(filed.statusCode).toBe(201);
+    const filedId = (filed.json() as { id: string }).id;
+
+    const mine = await app.inject({ method: "GET", url: `/api/approvals?scope=${coA}&origin=automation,agent`, headers: asUser(member) });
+    expect(mine.statusCode).toBe(200);
+    const mineBody = mine.json() as EnvelopeBody;
+    expect(mineBody.items.find((i) => i.id === filedId)).toBeUndefined();
+    expect(mineBody.items.filter((i) => i.origin === "automation" || i.origin === "agent")).toEqual([]);
+    expect(mineBody.companies).toEqual([{ id: coA, included: false, reason: "no_access" }]);
+
+    // The company admin's inbox still lists it (the elevated path is untouched).
+    const admin = await app.inject({ method: "GET", url: `/api/approvals?scope=${coA}&origin=automation`, headers: asUser(manager) });
+    expect((admin.json() as EnvelopeBody).items.find((i) => i.id === filedId)).toBeDefined();
+  });
+
   it("hr-origin: a served company's hr_manager (module_manager) sees ONLY hr-origin rows, never automation/agent rows, in the same tenant", async () => {
     registerModule({
       key: "hr", migrations: [], permissions: [], customFieldTargets: [], mcpTools: [], rollupProviders: [], uiManifest: [],
