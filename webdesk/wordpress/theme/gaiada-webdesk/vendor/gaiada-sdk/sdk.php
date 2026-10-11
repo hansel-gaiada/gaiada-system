@@ -46,11 +46,16 @@ final class WebDeskClient
 {
     private string $baseUrl;
     private string $apiKey;
+    private float $timeoutSeconds;
 
-    public function __construct(string $baseUrl, string $apiKey)
+    public function __construct(string $baseUrl, string $apiKey, float $timeoutSeconds = 5.0)
     {
+        if ($timeoutSeconds <= 0) {
+            throw new \InvalidArgumentException('timeoutSeconds must be positive');
+        }
         $this->baseUrl = rtrim($baseUrl, '/');
         $this->apiKey = $apiKey;
+        $this->timeoutSeconds = $timeoutSeconds;
     }
 
     /**
@@ -100,7 +105,8 @@ final class WebDeskClient
                 'Authorization: Bearer ' . $this->apiKey,
                 'Accept: application/json',
             ],
-            CURLOPT_TIMEOUT => 10,
+            CURLOPT_CONNECTTIMEOUT_MS => (int) min(2000, $this->timeoutSeconds * 1000),
+            CURLOPT_TIMEOUT_MS => (int) ($this->timeoutSeconds * 1000),
         ]);
         $body = curl_exec($ch);
         if ($body === false) {
