@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { COMPANY, concurrentSave, decideApproval, handleWebdesk, listApprovals, seed, setBuild } from "./wd.mjs";
+import { COMPANY, concurrentSave, decideApproval, handleKeyRequest, handleWebdesk, listApprovals, seed, setBuild } from "./wd.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = Number(process.env.WD_STUB_PORT ?? 3991);
@@ -74,6 +74,8 @@ const server = http.createServer(async (req, res) => {
       }
       if (cmd === "decide") { const r = decideApproval(S, body.id, body.outcome, body.by); return send(res, r.status, r.json); }
       if (cmd === "corrupt-args") { const a = S.approvals.get(body.id); if (a) a.toolArgs = { unexpected: true }; return send(res, 200, { ok: !!a }); }
+      // File a key.mint request AS another user (so the logged-in user can approve it: maker != checker).
+      if (cmd === "request-key") { const r = handleKeyRequest(S, { method: "POST", siteId: body.siteId ?? "site-gaiada-com", body: { tenantSlug: "gaiada", envId: body.envId, scope: body.scope ?? "read" }, userId: body.by ?? "dept-manager", company: COMPANY }); return send(res, r.status, r.json); }
       if (cmd === "build") { setBuild(S, body.state, body.stagingStale); return send(res, 200, { build: S.build, stagingStale: S.stagingStale }); }
       if (cmd === "concurrent-save") { return send(res, 200, concurrentSave(S, body.itemId, body.fields ?? {}, body.by)); }
       return send(res, 404, { error: `unknown stub command ${cmd}` });
@@ -87,6 +89,14 @@ const server = http.createServer(async (req, res) => {
     if (wd) {
       if (S.cfg.delayMs) await sleep(S.cfg.delayMs);
       const r = handleWebdesk(S, { method, pathname, query: url.searchParams, body, userId, company: decodeURIComponent(wd[1]) });
+      return send(res, r.status, r.json);
+    }
+
+    // ── control plane: "Request an API key" files a key.mint approval ───────────────────────────
+    const ck = pathname.match(/^\/api\/([^/]+)\/modules\/webdev\/control\/sites\/([^/]+)\/keys$/);
+    if (ck) {
+      if (S.cfg.delayMs) await sleep(S.cfg.delayMs);
+      const r = handleKeyRequest(S, { method, siteId: decodeURIComponent(ck[2]), body, userId, company: decodeURIComponent(ck[1]) });
       return send(res, r.status, r.json);
     }
 

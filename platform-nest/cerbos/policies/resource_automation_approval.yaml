@@ -20,6 +20,35 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # T7 (WebDesk M3) — a REQUESTER reads their OWN approval. Before this, a plain requester could
+    # `create` (above) but never `read`, so the emailed link to the approval they had just filed
+    # ended on the "You don't have access" state of platform-ui's /approvals/[id]. This is the
+    # IAM-GAP-01 `creatorId` seam again (the DB user id that filed the row = automation_approvals
+    # .requested_by = principal.id; resourcePayload() allow-lists it), used here as an EQUALITY.
+    #   - `read` ONLY. `decide`/`retry`/`decide_*` are not listed, so a requester still cannot decide
+    #     their own request, and no resource attribute a handler passes can turn this into a decide.
+    #   - NO derived role on purpose: a requester is whoever FILED the row, and not every filer holds
+    #     company_admin/manager/member (a webdev_staff files a publish approval on a row whose module
+    #     is "", which module_staff cannot match). The caller proves the tenant via `inTenant` and
+    #     `notLow`, exactly as every neighbouring rule does.
+    #   - `creatorId` must be KNOWN: `has() && != ""`, because resourcePayload() sends "" when a
+    #     handler omits it and an empty creator must never equal anything (the anonymous principal's
+    #     id is "anonymous", never "").
+    #   - A `client` grant never reads through this: the client surface is separate (portal), and an
+    #     approval is staff-side data.
+    #   - Written inline, never as a `variables.local` (the cerbos-local-variables trap).
+    #   - NO perm_automation_approval_read mirror — IAM-04-REG1 below stays true. A mirror cannot
+    #     express an attribute-instance check, and it was removed for exactly that reason.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId == request.principal.id &&
+            !request.principal.attr.grants.exists(g, g.role == "client")
     - actions: ["decide", "retry"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]

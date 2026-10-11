@@ -207,6 +207,60 @@ describe("PublishBar: request -> approval -> published -> staging", () => {
   });
 });
 
+describe("PublishBar: unknown outcome (502 webdesk_ambiguous) and a site with no rebuild set up", () => {
+  const ambiguous: WdResult<never> = { kind: "unavailable", code: "upstream_error", reason: "not_observed" };
+
+  it("a publish request whose outcome is unknown is handed to the editor, not shown as filed or as failed", async () => {
+    a.requestPublishAction.mockResolvedValue(ambiguous);
+    const onUnconfirmed = vi.fn();
+    const { props } = setup({ onUnconfirmed });
+    await act(async () => { fireEvent.click(screen.getByTestId("request-publish")); });
+    expect(onUnconfirmed).toHaveBeenCalledWith("the publish request");
+    expect(props.onUnavailable).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("publish-message")).toBeNull();
+    expect(screen.queryByTestId("awaiting-approval")).toBeNull();
+  });
+
+  it("without an editor to tell, it says so itself in plain words (an alert), never 'Couldn't ...'", async () => {
+    a.unpublishItemAction.mockResolvedValue(ambiguous);
+    const { props } = setup();
+    fireEvent.click(screen.getByTestId("unpublish"));
+    await act(async () => { fireEvent.click(screen.getByTestId("confirm-unpublish")); });
+    const m = screen.getByTestId("publish-message");
+    expect(m.textContent).toBe("We couldn't confirm the unpublish. Reload to see what happened.");
+    expect(m.getAttribute("role")).toBe("alert");
+    expect(props.onItemChanged).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("staging-stale")).toBeNull(); // not assumed unpublished
+  });
+
+  it("a withdraw whose outcome is unknown leaves the request showing", async () => {
+    a.withdrawPublishRequestAction.mockResolvedValue(ambiguous);
+    setup({ initialPending: [{ approvalId: "ap-9" }] });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Withdraw" })); });
+    expect(screen.getByTestId("publish-message").textContent).toContain("We couldn't confirm the withdrawal. Reload to see what happened.");
+    expect(screen.getByTestId("awaiting-approval")).toBeTruthy();
+  });
+
+  it("503 webdesk_not_configured on a rebuild request: 'Staging rebuild isn't set up for this site.', not the raw slug", async () => {
+    a.requestRebuildAction.mockResolvedValue({ kind: "unavailable", code: "editorial_unavailable", reason: "webdesk_not_configured" });
+    const { props } = setup({ initialBuild: { build: null, stagingStale: true } });
+    await act(async () => { fireEvent.click(screen.getByTestId("request-rebuild")); });
+    const m = screen.getByTestId("publish-message");
+    expect(m.textContent).toBe("Staging rebuild isn't set up for this site.");
+    expect(m.textContent).not.toContain("webdesk_not_configured");
+    expect(m.getAttribute("role")).toBe("alert");
+    expect(screen.queryByTestId("awaiting-approval")).toBeNull();
+    expect(props.onUnavailable).not.toHaveBeenCalled(); // not an outage: the page is not flipped to stale
+  });
+
+  it("any other rebuild-request outage keeps the generic 'can't be reached' copy", async () => {
+    a.requestRebuildAction.mockResolvedValue({ kind: "unavailable", code: "editorial_unavailable", reason: "circuit_open" });
+    setup({ initialBuild: { build: null, stagingStale: true } });
+    await act(async () => { fireEvent.click(screen.getByTestId("request-rebuild")); });
+    expect(screen.getByTestId("publish-message").textContent).toBe("Couldn't request a rebuild. WebDesk can't be reached right now.");
+  });
+});
+
 describe("PublishBar: unpublish needs no approval, and staging is then stale", () => {
   it("two-step unpublish, then the staging-stale warning with Request rebuild", async () => {
     a.unpublishItemAction.mockResolvedValue(ok({ item: item({ publishedVersion: null, publishState: "unpublished" }) }));

@@ -1,8 +1,8 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████████░░░░░░░░░░░░░░` **53%** · 108/201<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **59%** · 125/211<!-- /bar -->
 
-Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
+Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
 **How this file works**
 - A box is ticked **only when the item is verified**: driven on a Linux server and the result observed (DEV-VERIFIED), or — for a decision or document — landed in the repo. Code that exists but is unverified stays unticked.
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `██████████████████░░` **88%** · 80/90<!-- /bar -->
+<!-- bar -->🟡 `█████████████████░░░` **86%** · 80/92<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -77,10 +77,12 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 - [x] The api image signed via a release (`v1.0.0-alpha.344`, cosign-verified digest `sha256:69abc934…`, live on gda-aicenter 2026-10-11)
 - [x] ERP egress client's own live probe from `gaiada-platform-1` (344: all four layers reach WebDesk, `404 tenant not found` before provisioning; without the client cert, refused at Layer 1)
 
-### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `██░░░░░░░░` **20%** · 1/5<!-- /bar -->
+### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `█░░░░░░░░░` **14%** · 1/7<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
-- [ ] CI runs only the jobs whose component changed; superseded runs are cancelled
-- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags
+- [ ] CI runs only the jobs whose component changed; superseded runs are cancelled — first half PROVEN on main 2026-10-11 (347 push, run 38082096371: only the platform-nest jobs ran, 9 jobs skipped); superseded-run cancellation not yet observed
+- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags; 349 (2026-10-11): the plan built ONLY platform-ui and re-tagged 10, and 7 re-tags kept their digests (the fix works, wa-chat-bot included); the 8th failed for a different reason (below), so not yet proven end to end
+- [ ] GHCR prune deleted an untagged ATTESTATION of report-renderer `249e5e4c` (`f627854c`); its `sha256-<digest>` referrers index still lists it, so a referrer-walking copy fails (349's retag). The image itself pulls fine (GET manifest 200; corrected 2026-10-11, it is not an index). Prune DISABLED on main (`5cda7ea5`); retag switched to `crane tag` for 350 (`cc05fce7`)
+- [ ] A reference-aware GHCR prune (never delete a digest that any tagged index lists) before re-enabling retention
 - [ ] Dependency and Docker layer caching
 - [ ] Billed minutes for a WebDesk-only change measured after, and recorded
 
@@ -199,18 +201,18 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `█████░░░░░░░░░░░░░░░` **24%** · 12/49<!-- /bar -->
+<!-- bar -->🟡 `██████████░░░░░░░░░░` **50%** · 29/57<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
-### WSK-48b · Delete Payload <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/4<!-- /bar -->
-- [ ] Payload app, dependencies and the `payload` service removed
-- [ ] Forward migration drops `pages`, `users`, `payload_*`
-- [ ] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source
-- [ ] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted
+### WSK-48b · Delete Payload <!-- bar -->✅ `██████████` **100%** · 4/4<!-- /bar -->
+- [x] Payload app, dependencies and the `payload` service removed (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
+- [x] Forward migration drops `pages`, `users`, `payload_*` (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
+- [x] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
+- [x] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 
-### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **10%** · 1/10<!-- /bar -->
-- [ ] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52; ticked when on main)
+### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **14%** · 2/14<!-- /bar -->
+- [x] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52, recorded in webdesk-design-v2.md §14 on main `26862851`)
 - [ ] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved
 - [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
 - [ ] WSK-46 · site repo (gaiada-web-revamp): `/preview/` page renders the draft with the site's own components (coordinate with the site owner; needs `api.gaiada.com` public)
@@ -218,41 +220,49 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live)
 - [x] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, recorded in webdesk-design-v2.md §14 on main)
 - [ ] WSK-45 · WYSIWYG editor (TipTap) on the `markdown` primitive; an unchanged body saves byte-identical
-- [ ] WSK-43 · media library
+- [ ] WSK-43 ruled by the owner 2026-10-11: library images reach a static site through its build (WSK-D53); an image in use cannot be deleted (WSK-D54) (ticked when on main)
+- [ ] WSK-43a · WebDesk: asset metadata, token uploads that never pass through the ERP, soft delete refused while in use, purge job, quota in bytes held
+- [ ] WSK-43b · ERP: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools
+- [ ] WSK-43c · Website workspace: Media tab + a picker for media fields (after the M2 editor follow-ups)
+- [ ] WSK-43d · site repo: the pull step downloads library images into the static build (with the site owner)
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `███░░░░░░░` **31%** · 11/35<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `██████░░░░` **58%** · 23/39<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Undecodable `%` in a path gets Fastify's 400, not a problem+json body (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A non-integer `limit` (`limit=2.5`) reached `LIMIT $n` and 500ed — now truncated (found and fixed in M3 T1) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
-- [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes)
+- [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes) — lands with WSK-43a's purge job and byte quota
 - [x] The privacy residency statement still names MinIO to customers (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] `check-artifact-url-expiry.mjs` still starts a MinIO container (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
-- [ ] In-memory read quota and idempotency under-enforce with more than one api replica
+- [ ] In-memory read quota and idempotency under-enforce with more than one api replica (idempotency: the WSK-21 commands moved to the durable store in T5a; promotion + privacy follow in T5b; the read quota moves to Redis in T6)
 - [ ] Defence in depth: a Cerbos rule denying `publish`/`schedule` to automation principals (today only the importer's code prevents it)
 - [ ] Approvals DETAIL page dead-ends for a requester (`automation_approval:read` 403) — needs a requester-own read rule in Cerbos
-- [ ] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim)
-- [ ] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale)
-- [ ] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state
+- [x] Editor: `lint.unavailable` is ignored, so an invalid composition shows "no unresolved tokens" (an empty list as a claim) (merged for 348: `webdesk/editor-followups` @ `560ca521`; Linux: platform-ui vitest 229 files/4538, tsc, next build; nest ui-contract 26/26; the new e2e state test passes every run)
+- [x] Editor: `502 webdesk_ambiguous` has no dedicated "couldn't confirm the save" state (safe: goes stale) (merged for 348: `webdesk/editor-followups` @ `560ca521`; Linux: platform-ui vitest 229 files/4538, tsc, next build; nest ui-contract 26/26; the new e2e state test passes every run)
+- [x] Editor: a rebuild request on a site with no staging target (`503 webdesk_not_configured`) shows the raw slug under `editorial_unavailable`; give it a plain-words "staging rebuild is not set up for this site" state (merged for 348: `webdesk/editor-followups` @ `560ca521`; Linux: platform-ui vitest 229 files/4538, tsc, next build; nest ui-contract 26/26; the new e2e state test passes every run)
 - [ ] Importer CLI never wired the editorial signer (own process): the live run refused every write with 503 `editorial_signer_not_configured` — fixed on the proof branch (`f52f9a27`), verify in the next release gate
 - [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
+- [x] Approving a `key.mint` on `/approvals/[id]` discards the once-only plaintext (the UI's decide action ignores the response body): until the fix lands (`webdesk/key-request-ui`), approve key mints through the API and read `webdesk.plaintextOnce` — FIXED for 349 (`webdesk/key-request-ui` @ `81040b05`: `KeyMintDecide` shows it once, component state only; Linux: ui vitest 234/4661, build; e2e custody STATE passes on a quiet box)
 - [ ] `editorial-assertion-matrix.spec.ts` can leak 2 unhandled `ioredis` "Connection is closed" rejections when an app instance closes mid-command: the api suite exits 1 with 0 failures (1 of 2 runs on sumopod, 2026-10-11)
-- [ ] WSK-44 stub Playwright suite flakes on a loaded box (lost click after navigation; the base flakes too)
-- [ ] Older HIGH commands (WSK-21/25/38) write the audit row after the side effect: a concurrent approval reuse now 500s but the effect already ran — claim the approval first
-- [ ] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug)
-- [ ] Promotion export includes soft-deleted items, so a promotion resurrects them as live (found 2026-10-11)
-- [ ] Promotion writes the live projection without appending a version, so `published_version` points at content that is no longer live (found 2026-10-11)
-- [ ] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever. Ruled 2026-10-11: a deleted item releases its slug; a restore onto a taken slug is 409 (WSK-D51)
+- [ ] PRODUCT BUG, mechanism found (a6 probe, 2026-10-11): after a server action the App Router (Next 15.5.20) refetches the page the action started on, unprompted (the action itself revalidates nothing: `x-action-revalidated=[[],0,0]`), and races a navigation issued right after; when the refetch wins, the navigation is DISCARDED (URL never changes). Hits the editor's create / twin / restore pushes and a link click after Approve. Waiting does not fix it. Next: (b) find a Next release that fixes it, (a) `redirect()` inside the editor's own actions. UPSTREAM: fixed in next@16.3.0 (vercel/next.js#95391, issue #88343; regressed in 15.5.1 via #82674; NOT backported to 15.5.x)
+- [ ] Editor create / twin / restore navigate via `redirect()` inside the server action — MITIGATION merged for 350 (`163fba56`): measured ×12 on a quiet box, failures 12/36 → 5/36 (twin create 4 → 0; create 2 → 1; restore 6 → 4). Not a fix: the queue can still undo a redirect on 15.5
+- [ ] OWNER DECISION: upgrade platform-ui Next 15.5 → 16.3+ to fix dropped navigations after ANY server action ERP-wide (a major upgrade; its own ticket and full UI gate) — EVIDENCE (a6, 2026-10-11, throwaway): next@16.3.8 needs only the package bump (React 19.2.7 unchanged, no code changes; 2 deprecation renames: `middleware`→`proxy`, `middlewareClientMaxBodySize`→`proxyClientMaxBodySize`); platform-ui vitest 4679/4679; webdesk e2e ×3: navigation failures 7 → 0, key.mint link click 3/3 fail → 3/3 pass. Recommended: yes
+- [x] WSK-21 HIGH commands (keys, lifecycle, releases) claim the WS4 approval in the same transaction as the effect, through a shared envelope; a reused approval is 403 before any effect (T5a; 10-racer tests) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [ ] WSK-25 promotion and WSK-38 privacy commands still write the audit row after the side effect — move them onto the envelope (T5b)
+- [x] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] Promotion export includes soft-deleted items, so a promotion resurrects them as live (found 2026-10-11) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] Promotion writes the live projection without appending a version, so `published_version` points at content that is no longer live (found 2026-10-11) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] `UNIQUE (collection_id, locale, slug)` ignores soft delete — a deleted item holds its slug forever. Ruled 2026-10-11: a deleted item releases its slug; a restore onto a taken slug is 409 (WSK-D51) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [ ] Idempotency expiry sweep must run per tenant + once at platform scope; reads treat expired rows as absent (both already true in `pg-idempotency-store.ts`; what is missing is a caller: lands with WSK-61)
-- [ ] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written
-- [ ] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration
+- [x] Hard deletes of `content_items` (bundle restore) will fail on the `content_versions` FK once versions are written (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
+- [x] `webdesk_app` can write `schema_migrations` via default privileges — revoke in a later migration (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [x] Codegen `versioning.mts` drops `singleton`/`localized`/`ui`/`lint` from the tenant-contract snapshot (flips go unrated) — already fixed by WSK-41 (`toContractSnapshot`); pinned by `codegen-versioning.spec.ts`, green in the 2026-10-11 Linux release gate (api 643/0/2)
 - [x] WordPress theme vocabulary drift (9 vs 10 block names); naive re-vendor breaks `block-renderer.php` on `fields` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Codegen generic `oneOf` is ambiguous (a known block also matches the unknown branch) — should be `anyOf` (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] `schema-draft/prompt.ts` does not teach the model `group`/`itemKey`/`fields` (fails closed today) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
-- [ ] WebDesk migration tests (0009, 0010) were never run by the gate or CI; T4 wired a `migrations` suite into `linux-gate.sh` and the `webdesk-api` CI job (found 2026-10-11)
+- [x] WebDesk migration tests (0009, 0010) were never run by the gate or CI; T4 wired a `migrations` suite into `linux-gate.sh` and the `webdesk-api` CI job (found 2026-10-11) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [ ] `tenant.archive` can never replay: the tenant lookup runs before the envelope and 404s once archived, so a lost-response retry gets 404 (found by T5a)
 - [ ] `site.archive` is HIGH but always 501 and consumes no approval; decide whether it claims one or leaves the registry (found by T5a)
 - [ ] `content-commands.service.ts` keeps a private copy of the command envelope; adopt `CommandEnvelope` (T5a follow-up)

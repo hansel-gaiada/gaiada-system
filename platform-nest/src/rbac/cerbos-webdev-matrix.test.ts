@@ -449,6 +449,25 @@ describe.skipIf(!live)("WSK-47 Cerbos matrix — webdesk_content_item / webdesk_
     expect(await allow(publisher(), item, "delete")).toBe(true);
   });
 
+  // T7 (WebDesk M3) — `kind` is a principal attribute (users.kind via assemblePrincipal). These rows use
+  // hand-built principals; webdesk-automation-deny.test.ts proves the same DENY end to end from real users rows.
+  it("T7: automation and bot principals are denied publish/schedule (platform_admin wildcard included) but keep request_publish", async () => {
+    for (const kind of ["automation", "bot"] as const) {
+      for (const base of [publisher(), principal("company_admin", "company", T1), platformAdmin]) {
+        const p: Principal = { ...base, kind };
+        expect(await allow(p, approved(OTHER_USER, 1), "publish"), `${kind} publish`).toBe(false);
+        expect(await allow(p, approved(OTHER_USER, 3), "schedule"), `${kind} schedule`).toBe(false);
+        expect(await allow(p, item, "request_publish"), `${kind} request_publish`).toBe(true);
+      }
+    }
+    // Controls: the same principals as employees (and with no kind at all) still publish.
+    for (const kind of ["employee", undefined] as const) {
+      const p: Principal = { ...publisher(), kind };
+      expect(await allow(p, approved(OTHER_USER, 1), "publish"), `${kind} publish`).toBe(true);
+      expect(await allow(p, approved(OTHER_USER, 3), "schedule"), `${kind} schedule`).toBe(true);
+    }
+  });
+
   it("member, client, group_executive and a T1 admin on T2: nothing on either kind", async () => {
     const ALL_ITEM = [...EDIT, ...TAKEDOWN, "publish", "schedule"];
     const exec: Principal = { userId: ME, assurance: "high", companies: [T1], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };

@@ -147,6 +147,10 @@ export interface Lint {
   unresolvedTokens: string[];
   /** `{ CONFIRM: 3, CLIENT: 1 }` — keyed by the composition's marker labels. */
   markers: Record<string, number>;
+  /** Present ONLY when WebDesk could not run the lint (`item.get` sends `lint.unavailable`, a reason string — e.g. the
+   *  collection's stored composition is invalid). The lists above are then EMPTY BY DEFAULT, not by finding: an empty
+   *  list is a claim, so a reader must check this first and never show "no unresolved placeholders" when it is set. */
+  unavailable?: string;
 }
 
 export interface ItemDetail {
@@ -257,6 +261,35 @@ export type WdResult<T> =
   | { kind: "invalid"; issues: Issue[]; message: string };
 
 export type WdOk<T> = Extract<WdResult<T>, { kind: "ok" }>;
+
+// ── Two failures that need their own words (rendering decisions — the result shapes are unchanged) ─
+// `resultFromError` folds both into `unavailable`, and the nest-side UI contract test pins those shapes, so the
+// components recognise them here instead of the lib re-coding them.
+
+/** Next's redirect error. A server action that calls `redirect()` (the `…AndOpenAction` writes) has ALREADY navigated
+ *  when its awaited promise rejects with this; the caller treats it as "done", never as a failure. Next 15 marks it with
+ *  a `digest` beginning `NEXT_REDIRECT;` (next/dist/client/components/redirect-error). */
+export function isNextRedirect(e: unknown): boolean {
+  const digest = typeof e === "object" && e !== null ? (e as { digest?: unknown }).digest : undefined;
+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+}
+
+/** `502 webdesk_ambiguous`: a write whose outcome is UNKNOWN (the BFF could not confirm whether Zone B applied it).
+ *  The BFF puts the machine cause (`not_observed` | `reconcile_failed`) in `reason`, which is what `resultFromError`
+ *  keeps (as `unavailable/upstream_error`); `webdesk_ambiguous` itself is accepted too for a problem document that
+ *  carries it as its type. Never "saved", never "failed": the caller re-reads. */
+export const AMBIGUOUS_REASONS: ReadonlySet<string> = new Set(["webdesk_ambiguous", "not_observed", "reconcile_failed"]);
+export function isOutcomeUnknown(r: { kind: string; code?: string; reason?: string }): boolean {
+  return r.kind === "unavailable" && r.code === "upstream_error" && typeof r.reason === "string" && AMBIGUOUS_REASONS.has(r.reason);
+}
+/** `what` is the thing the user tried to do, with its article: "the save", "the publish request". */
+export const unconfirmedCopy = (what: string): string => `We couldn't confirm ${what}. Reload to see what happened.`;
+
+/** `503 webdesk_not_configured` on `POST …/rebuild-requests`: the BFF's `reason` is exactly this token when the site
+ *  has no staging rebuild target. (Other not-configured causes — `control_channel_not_configured`,
+ *  `editorial_signer_not_configured` — carry their own reason and keep the generic notice.) */
+export const REBUILD_NOT_CONFIGURED_REASON = "webdesk_not_configured";
+export const REBUILD_NOT_CONFIGURED_COPY = "Staging rebuild isn't set up for this site.";
 
 // ── Pointers (§2.2: `/blocks/0/props/faq/2/answer`) ──────────────────────────────────────────────
 
@@ -744,4 +777,95 @@ export function parseMarkdown(src: string): MdBlock[] {
   }
   flush();
   return blocks;
+}
+
+// ── API keys: "Request an API key" (filing) and the approver's once-only reveal ──────────────────
+//
+//   file    POST /api/:t/modules/webdev/control/sites/:siteId/keys   {tenantSlug, envId, scope}
+//             -> 202 {approvalId} | 202 {approvalId, alreadyPending: true}     (FILES an approval; mints NOTHING)
+//   decide  POST /api/:t/approvals/:id/decide   (the unified façade)  ->  {ok:true, webdesk:{command:"key.mint", …}}
+//             and `webdesk.plaintextOnce` is the API key in plaintext: the ONLY time it exists anywhere
+//             (WebDesk stores a hash; the approval row, activities, outbox and logs never hold it).
+// Everything below is pure and client-safe. The wire parsers live in `webdeskContent.ts` (server-only).
+
+export type KeyScope = "read" | "write";
+export const KEY_SCOPES: readonly KeyScope[] = ["read", "write"];
+
+export interface KeyRequestFiled {
+  approvalId: string;
+  /** True when a pending request for the same (site, environment, scope) already existed and was returned instead of a new one. */
+  alreadyPending: boolean;
+}
+
+/** Every user-facing sentence of the request control, in one place so the component, the tests and the contract agree. */
+export const KEY_REQUEST_COPY = {
+  filed: "Request filed. Someone else must approve it before the key is created.",
+  alreadyPending: "Already requested: a request for this environment and scope is waiting for approval.",
+  viewRequest: "View the request",
+  writeHint: "Write keys can change content through the API. Most sites only need read.",
+  environmentNotFound: "That environment isn't part of this site.",
+  forbidden: "You can't request API keys for this site.",
+  unavailable: "Editing is unavailable. WebDesk can't be reached. Nothing has been lost.",
+} as const;
+
+/** The control's failure sentence for any non-ok result. Plain words; never a raw slug. */
+export function keyRequestFailureCopy(r: Exclude<WdResult<unknown>, { kind: "ok" }>): string {
+  switch (r.kind) {
+    case "forbidden": return KEY_REQUEST_COPY.forbidden;
+    case "not_found": return r.slug === "environment-not-found" ? KEY_REQUEST_COPY.environmentNotFound : "That site doesn't exist or isn't one of your company's.";
+    case "not_enabled": return r.reason === "module_disabled" ? "The Web Dev module is switched off for this company." : "Requesting keys isn't available on this deployment yet.";
+    case "invalid": return r.message;
+    case "conflict": return r.message;
+    case "unavailable": return r.code === "contract_drift" ? `WebDesk answered with something unexpected (${r.reason}).` : KEY_REQUEST_COPY.unavailable;
+  }
+}
+
+/** The approval's `tool_args` for a key.mint row (`{tenantSlug, siteId, envId, scope, summary, commandHash}`). Never trusted:
+ *  anything that does not match is `null` and the page says it is unrecognised instead of guessing. */
+export interface KeyMintArgs { tenantSlug: string; siteId: string; envId: string; scope: KeyScope }
+
+export function parseKeyMintArgs(raw: unknown): KeyMintArgs | null {
+  if (!isRecord(raw)) return null;
+  const { tenantSlug, siteId, envId, scope } = raw;
+  if (typeof tenantSlug !== "string" || typeof siteId !== "string" || typeof envId !== "string") return null;
+  if (scope !== "read" && scope !== "write") return null;
+  return { tenantSlug, siteId, envId, scope };
+}
+
+/** A key.mint approval, however the detail names it: the workflow (`key.mint`) or the tool (`webdesk.key.mint`). */
+export function isKeyMintApproval(row: { workflowId?: string | null; toolName?: string | null }): boolean {
+  return row.workflowId === "key.mint" || row.toolName === "webdesk.key.mint";
+}
+
+/** What WSK-66's in-band mint reported, as the approver's browser needs it. `plaintextOnce` exists ONLY here, in transit
+ *  from the server action to one component's state — see `KeyMintDecide` for the custody rules. */
+export type KeyMintOutcome =
+  | { status: "executed"; envId: string; scope: KeyScope; apiKeyId: string | null; plaintextOnce: string | null }
+  | { status: "failed"; envId: string | null; scope: KeyScope | null; error: string }
+  /** Approved, but the answer was not the shape the ERP expects: no key can be shown. */
+  | { status: "unreadable" };
+
+export type KeyMintDecideResult =
+  | { ok: true; decision: "approved"; mint: KeyMintOutcome }
+  | { ok: true; decision: "rejected" }
+  | { ok: false; error: string };
+
+/** Executor error tokens (`WEBDESK_EXEC_ERROR` in platform-nest) in plain words for the approver. */
+export function describeKeyMintError(token: string | null | undefined): string {
+  if (!token) return "No reason was recorded.";
+  const t = token.trim();
+  if (t.startsWith("webdesk_refused")) {
+    const rest = t.replace(/^webdesk_refused:?\s*/, "");
+    return rest ? `WebDesk refused the request (${rest}).` : "WebDesk refused the request.";
+  }
+  switch (t) {
+    case "webdesk_denied": return "You aren't allowed to approve key requests for this site.";
+    case "webdesk_args_invalid":
+    case "webdesk_args_tampered": return "The request no longer matches what was filed, so nothing was sent.";
+    case "webdesk_not_configured": return "Key creation isn't set up for WebDesk on this deployment.";
+    case "webdesk_unavailable": return "WebDesk is temporarily unavailable. Nothing was sent.";
+    case "webdesk_unreachable": return "WebDesk couldn't be reached. Nothing was sent.";
+    case "webdesk_ambiguous": return "We couldn't confirm whether WebDesk created the key. Check the site's keys in WebDesk before requesting another.";
+    default: return `Reason: ${t}`;
+  }
 }

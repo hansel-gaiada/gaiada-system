@@ -9,7 +9,7 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace: vi.fn() }) }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/webdeskContentActions", () => ({
-  createItemAction: vi.fn(), deleteItemAction: vi.fn(), getItemHeadAction: vi.fn(), refreshEditorAction: vi.fn(), saveItemAction: vi.fn(),
+  createItemAndOpenAction: vi.fn(), deleteItemAction: vi.fn(), getItemHeadAction: vi.fn(), refreshEditorAction: vi.fn(), saveItemAction: vi.fn(),
 }));
 // The publish bar has its own suite; here it only needs to show what the editor tells it.
 vi.mock("./PublishBar", () => ({
@@ -37,6 +37,7 @@ const SERVICE_FIELDS = { url: "/services/seo/", source_path: "content/en/seo.md"
 const bundle = (d: ItemDetail, over: Partial<EditorBundle> = {}, c = coll("service", service)): EditorBundle => ({
   tenant, site, collection: c, detail: d, authoritative: null, authoritativeProblem: null, pendingRequests: [], pendingProblem: null, build: null, buildProblem: null, loadedAt: "2026-10-10T08:30:00Z", ...over,
 });
+const redirected = (url: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${url};307;` });
 const written = (n: number): ItemWriteResult => ({ item: ref({ headVersion: n }), version: { version: n, contentHash: "h", createdAt: "t" }, unchanged: false, lint: noLint, replayed: false });
 
 function mount(b: EditorBundle, extra: Partial<React.ComponentProps<typeof ItemEditor>> = {}) {
@@ -214,6 +215,105 @@ describe("stale: a failed read after a good load", () => {
   });
 });
 
+describe("unconfirmed (502 webdesk_ambiguous): a write whose outcome is unknown", () => {
+  const ambiguous: WdResult<never> = { kind: "unavailable", code: "upstream_error", reason: "not_observed" };
+
+  it("says it couldn't confirm the save: not 'Saved', not a plain failure; keeps the edit; writes stay off until a re-read", async () => {
+    a.saveItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    const banner = screen.getByTestId("unconfirmed-banner");
+    expect(banner.getAttribute("role")).toBe("alert");
+    expect(banner.textContent).toContain("We couldn't confirm the save. Reload to see what happened.");
+    expect(status()).toBe("Unsaved changes");            // not "Saved vN"
+    expect(screen.queryByTestId("save-error")).toBeNull(); // not the generic failure
+    expect(screen.queryByTestId("stale-banner")).toBeNull();
+    expect(field("h1").value).toBe("Typed");
+    expect(saveBtn().disabled).toBe(true);
+    expect(screen.getByTestId("pb").getAttribute("data-blocked")).toMatch(/reload/i);
+    expect(a.saveItemAction).toHaveBeenCalledTimes(1);     // never retried blind
+  });
+
+  it("Reload re-reads the item: if the save landed the editor says the head moved; either way writes come back", async () => {
+    a.saveItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    a.refreshEditorAction.mockResolvedValue(ok(bundle(detail({ ...SERVICE_FIELDS, h1: "Typed" }, {}, 4))));
+    await click(screen.getByTestId("unconfirmed-reload"));
+    expect(a.refreshEditorAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("unconfirmed-banner")).toBeNull();
+    expect(screen.getByTestId("behind-head").textContent).toContain("v4 was saved since you opened this");
+    expect(field("h1").value).toBe("Typed");
+    expect(saveBtn().disabled).toBe(false);
+  });
+
+  it("a failed reload keeps the notice (nothing is claimed either way)", async () => {
+    a.saveItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    a.refreshEditorAction.mockResolvedValue({ kind: "unavailable", code: "editorial_unavailable", reason: "editorial_unavailable" });
+    await click(screen.getByTestId("unconfirmed-reload"));
+    expect(screen.getByTestId("unconfirmed-banner")).toBeTruthy();
+    expect(saveBtn().disabled).toBe(true);
+  });
+
+  it("a delete whose outcome is unknown says the same, not 'Couldn't delete'", async () => {
+    a.deleteItemAction.mockResolvedValue(ambiguous);
+    mount(bundle(detail(SERVICE_FIELDS, { item: ref({ publishedVersion: null, publishState: "draft" }) })));
+    await click(screen.getByRole("button", { name: "Delete draft…" }));
+    await click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByTestId("unconfirmed-banner").textContent).toContain("We couldn't confirm the delete. Reload to see what happened.");
+    expect(screen.queryByTestId("editor-banner")).toBeNull();
+  });
+
+  it("an unknown-outcome create has no Reload button (nothing to re-read yet) but still blocks Create", async () => {
+    a.createItemAndOpenAction.mockResolvedValue(ambiguous);
+    render(<ItemEditor mode="create" scope={SCOPE} routeBase={ROUTE} collection={coll("service", service)} tenant={tenant} site={site} seed={{ locale: "en", twinOf: null, slug: "", fields: {}, seo: {}, extraBlocks: [] }} authors={{}} readOnlyReason={null} />);
+    fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.new" } });
+    await click(saveBtn());
+    expect(screen.getByTestId("unconfirmed-banner").textContent).toContain("We couldn't confirm the new item. Reload to see what happened.");
+    expect(screen.queryByTestId("unconfirmed-reload")).toBeNull();
+    expect(saveBtn().disabled).toBe(true);
+  });
+
+  it("an ordinary unavailable save is still the stale flow, not the unconfirmed notice", async () => {
+    a.saveItemAction.mockResolvedValue({ kind: "unavailable", code: "upstream_error", reason: "http_500" });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    type("h1", "Typed");
+    await click(saveBtn());
+    expect(screen.queryByTestId("unconfirmed-banner")).toBeNull();
+    expect(screen.getByTestId("stale-banner")).toBeTruthy();
+  });
+});
+
+describe("placeholders card: an empty list is a claim only when the lint actually ran", () => {
+  it("lint ran and found nothing: the all-clear", () => {
+    mount(bundle(detail(SERVICE_FIELDS)));
+    expect(screen.getByTestId("lint-card").textContent).toContain("No unresolved placeholders.");
+    expect(screen.queryByTestId("lint-unavailable")).toBeNull();
+  });
+  it("lint.unavailable: 'couldn't check', never the all-clear", () => {
+    mount(bundle(detail(SERVICE_FIELDS, { lint: { unresolvedTokens: [], markers: {}, unavailable: "the collection's stored composition is invalid" } })));
+    const card = screen.getByTestId("lint-card");
+    expect(screen.getByTestId("lint-unavailable").textContent).toBe("Couldn't check for placeholders. This is not a statement that there are none.");
+    expect(screen.getByTestId("lint-unavailable").getAttribute("role")).toBe("note");
+    expect(card.textContent).not.toContain("No unresolved placeholders");
+  });
+  it("a refresh that comes back with lint.unavailable flips the card; a later good lint flips it back", async () => {
+    mount(bundle(detail(SERVICE_FIELDS)));
+    a.refreshEditorAction.mockResolvedValueOnce(ok(bundle(detail(SERVICE_FIELDS, { lint: { unresolvedTokens: [], markers: {}, unavailable: "x" } }))));
+    await click(screen.getByTestId("refresh-now"));
+    expect(screen.getByTestId("lint-unavailable")).toBeTruthy();
+    a.refreshEditorAction.mockResolvedValueOnce(ok(bundle(detail(SERVICE_FIELDS))));
+    await click(screen.getByTestId("refresh-now"));
+    expect(screen.queryByTestId("lint-unavailable")).toBeNull();
+    expect(screen.getByTestId("lint-card").textContent).toContain("No unresolved placeholders.");
+  });
+});
+
 describe("read-only", () => {
   it("a 403 on save turns the whole form read-only, says why, and keeps the typed edit", async () => {
     a.saveItemAction.mockResolvedValue({ kind: "forbidden", reason: "forbidden" });
@@ -267,13 +367,24 @@ describe("locale-neutral members (id locale)", () => {
 
 describe("locale tabs", () => {
   it("links an existing twin and offers to create a missing one from the saved version", async () => {
-    a.createItemAction.mockResolvedValue(ok({ ...written(1), item: ref({ locale: "id", itemId: "i2" }) }));
+    // Success navigates from the SERVER: the action redirects, so its awaited promise rejects with Next's redirect error
+    // and the editor pushes nothing itself (a client push after an action was sometimes dropped).
+    a.createItemAndOpenAction.mockRejectedValue(redirected(`${ROUTE}/service/service.seo?locale=id`));
     mount(bundle(detail(SERVICE_FIELDS)));
     const create = screen.getByTestId("create-locale-id");
     expect(create.textContent).toContain("not created");
     await click(create);
-    expect(a.createItemAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "id", slug: "service.seo", twinOf: "i1", fields: expect.objectContaining({ h1: "SEO Agency" }) }));
-    expect(push).toHaveBeenCalledWith(`${ROUTE}/service/service.seo?locale=id`);
+    expect(a.createItemAndOpenAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "id", slug: "service.seo", twinOf: "i1", fields: expect.objectContaining({ h1: "SEO Agency" }) }), ROUTE);
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("editor-banner")).toBeNull();
+  });
+
+  it("a twin that could not be created stays on the page and says why (the typed failure, unchanged)", async () => {
+    a.createItemAndOpenAction.mockResolvedValue({ kind: "conflict", slug: "twin-locale-taken", message: "taken", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
+    mount(bundle(detail(SERVICE_FIELDS)));
+    await click(screen.getByTestId("create-locale-id"));
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByTestId("editor-banner")).toBeTruthy();
   });
 });
 
@@ -285,22 +396,22 @@ describe("create mode", () => {
     mountCreate();
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "Bad Slug" } });
     await click(saveBtn());
-    expect(a.createItemAction).not.toHaveBeenCalled();
+    expect(a.createItemAndOpenAction).not.toHaveBeenCalled();
     expect(document.querySelector("#wc-slug")?.getAttribute("aria-invalid")).toBe("true");
   });
 
   it("creates with the typed fields and goes to the new item's editor", async () => {
-    a.createItemAction.mockResolvedValue(ok({ ...written(1), item: ref({ slug: "service.new", itemId: "i9" }) }));
+    a.createItemAndOpenAction.mockRejectedValue(redirected(`${ROUTE}/service/service.new?locale=en`));
     mountCreate();
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.new" } });
     type("h1", "New");
     await click(saveBtn());
-    expect(a.createItemAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "en", slug: "service.new", twinOf: null, fields: expect.objectContaining({ h1: "New" }) }));
-    expect(push).toHaveBeenCalledWith(`${ROUTE}/service/service.new?locale=en`);
+    expect(a.createItemAndOpenAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ collectionKey: "service", locale: "en", slug: "service.new", twinOf: null, fields: expect.objectContaining({ h1: "New" }) }), ROUTE);
+    expect(push).not.toHaveBeenCalled(); // the server's redirect navigates, not a client push
   });
 
   it("slug-taken (409) lands on the slug field", async () => {
-    a.createItemAction.mockResolvedValue({ kind: "conflict", slug: "slug-taken", message: "x", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
+    a.createItemAndOpenAction.mockResolvedValue({ kind: "conflict", slug: "slug-taken", message: "x", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
     mountCreate();
     fireEvent.change(document.querySelector("#wc-slug")!, { target: { value: "service.seo" } });
     await click(saveBtn());

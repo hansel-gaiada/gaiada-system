@@ -185,7 +185,7 @@ export class WebdeskControlController {
   @HttpCode(202)
   async mintKey(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("siteId") siteId: string, @Body() body: unknown,
-  ): Promise<{ approvalId: string }> {
+  ): Promise<{ approvalId: string; alreadyPending?: true }> {
     await authorize(req.principal, siteResource(tenantId), "promote");
     return controlRequestKeyMint(req.principal, tenantId, siteId, body);
   }

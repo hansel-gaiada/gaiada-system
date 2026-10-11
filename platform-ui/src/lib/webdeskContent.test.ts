@@ -9,6 +9,7 @@ vi.mock("./platform", async () => {
 vi.mock("./entities", () => ({ listMembers: vi.fn() }));
 
 import { platformFetch, PlatformError } from "./platform";
+import { isOutcomeUnknown } from "./webdeskContentModel";
 import { listMembers } from "./entities";
 import {
   findPendingPublishRequests, getApprovalRow, getBuildStatus, getItem, getVersion, listCollections, listItems, listOwnPublishRequests, listSites,
@@ -87,6 +88,19 @@ describe("wire validation: a 2xx body that does not match the spec is DRIFT, nev
     expect(() => parseLint({ placeholders: { unresolvedTokens: "x", markers: {} } }, "lint")).toThrow(WireDrift);
   });
 
+  it("lint.unavailable (WebDesk could not RUN the lint) is carried through, never read as a clean lint", () => {
+    // The real shape: `content-reads.service.ts` sends the empty report PLUS `unavailable: "<reason>"`.
+    expect(parseLint({ placeholders: { unresolvedTokens: [], markers: {} }, unavailable: "the collection's stored composition is invalid" }, "lint"))
+      .toEqual({ unresolvedTokens: [], markers: {}, unavailable: "the collection's stored composition is invalid" });
+    expect(parseItemDetail(detail({ lint: { placeholders: { unresolvedTokens: [], markers: {} }, unavailable: "why" } })).lint.unavailable).toBe("why");
+    // a non-string truthy flag, or an empty reason, still means "could not run"
+    expect(parseLint({ unavailable: true }, "lint").unavailable).toBe("lint_unavailable");
+    expect(parseLint({ placeholders: { unresolvedTokens: [], markers: {} }, unavailable: "" }, "lint").unavailable).toBe("lint_unavailable");
+    // and every ordinary lint is byte-identical to before (no `unavailable` key at all)
+    expect("unavailable" in parseLint({ placeholders: { unresolvedTokens: [], markers: {} } }, "lint")).toBe(false);
+    expect("unavailable" in parseLint({ unavailable: null }, "lint")).toBe(false);
+  });
+
   it("validates the real gaiada compositions (the shapes the editor is proven on)", () => {
     for (const c of [service, navigation]) expect(() => parseComposition(c)).not.toThrow();
     expect(parseComposition(navigation).fields?.find((f) => f.name === "primary")?.itemKey).toBe("url");
@@ -107,6 +121,21 @@ describe("wire validation: a 2xx body that does not match the spec is DRIFT, nev
 
 describe("resultFromError: every failure is a typed result (§3.4 / §10)", () => {
   const pe = (status: number, body?: unknown, msg = `platform ${status}`) => new PlatformError(status, msg, undefined, undefined, undefined, body);
+  it("502 webdesk_ambiguous and 503 webdesk_not_configured keep their (pinned) result shapes; the components recognise them by `reason`", () => {
+    // Real bodies, as the BFF's HttpErrorFilter sends them: `message` = the token, `reason` = the machine cause.
+    const ambiguous = resultFromError(new PlatformError(502, "webdesk_ambiguous", undefined, undefined, "not_observed", { error: "webdesk_ambiguous", reason: "not_observed" }));
+    expect(ambiguous).toEqual({ kind: "unavailable", code: "upstream_error", reason: "not_observed" });
+    expect(isOutcomeUnknown(ambiguous)).toBe(true);
+    expect(isOutcomeUnknown(resultFromError(new PlatformError(502, "webdesk_ambiguous", undefined, undefined, "reconcile_failed", { error: "webdesk_ambiguous", reason: "reconcile_failed" })))).toBe(true);
+    // the same token as a problem document's type is also recognised
+    expect(isOutcomeUnknown(resultFromError(problem(502, "webdesk_ambiguous")))).toBe(true);
+    // other 502s are NOT an unknown outcome: WebDesk refused / errored, the write did not land
+    expect(isOutcomeUnknown(resultFromError(new PlatformError(502, "webdesk_error", undefined, undefined, "http_500", { error: "webdesk_error", reason: "http_500" })))).toBe(false);
+    expect(isOutcomeUnknown(resultFromError(new PlatformError(503, "editorial_unavailable", undefined, undefined, "circuit_open", { error: "editorial_unavailable", reason: "circuit_open" })))).toBe(false);
+
+    const rebuild = resultFromError(new PlatformError(503, "webdesk_not_configured: no staging rebuild target is configured for this site", undefined, undefined, "webdesk_not_configured", { error: "webdesk_not_configured: no staging rebuild target is configured for this site", reason: "webdesk_not_configured" }));
+    expect(rebuild).toEqual({ kind: "unavailable", code: "editorial_unavailable", reason: "webdesk_not_configured" });
+  });
   it.each([
     ["503 editorial_unavailable", pe(503, { error: "editorial_unavailable" }, "editorial_unavailable"), { kind: "unavailable", code: "editorial_unavailable" }],
     ["any 503 (replay store down)", problem(503, "editorial-replay-store-unavailable"), { kind: "unavailable", code: "editorial_unavailable" }],

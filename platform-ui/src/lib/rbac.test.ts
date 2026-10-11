@@ -230,6 +230,20 @@ describe("pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) �
     expect(can(mgrA, "webdev.provision", "co-b")).toBe(false);
   });
 
+  // resource_webdev_provisioned_site.yaml's `promote` rule (WSK-31): ["operate","promote"] -> company_admin, manager (+ the
+  // unmirrored module_manager tier). It is what the "Request an API key" control mirrors: a member and a webdev EDITOR
+  // (module_staff, no UI Role) are denied for both scopes, so they must not be offered the control.
+  it("webdev.promote: company_admin, manager — never member/viewer/org_unit_lead/agency_approver, and only in their own company", () => {
+    for (const who of [admin, exec, coAdminA, mgrA]) {
+      expect(can(who, "webdev.promote", "co-a")).toBe(true);
+    }
+    for (const who of [memberA, viewerA, orgUnitLeadA, approver]) {
+      expect(can(who, "webdev.promote", "co-a")).toBe(false);
+    }
+    expect(can(mgrA, "webdev.promote", "co-b")).toBe(false);
+    expect(can(coAdminA, "webdev.promote", "co-b")).toBe(false);
+  });
+
   // DR-1 must still stand: fixing the collateral damage never restores approvals.decide to manager.
   it("DR-1 still stands — manager holds the new capabilities but NOT approvals.decide", () => {
     expect(can(mgrA, "pipeline.write", "co-a")).toBe(true);

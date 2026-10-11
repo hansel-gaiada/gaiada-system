@@ -28,7 +28,7 @@ const stub = {
   config: (c: Record<string, unknown>) => stub.post("config", c),
   state: async () => (await (await fetch(`${STUB}/__stub/state`, { method: "POST" })).json()) as {
     items: { itemId: string; slug: string; locale: string; headVersion: number; publishedVersion: number | null; publishState: string; deletedAt: string | null; versions: { n: number; createdBy: string; note: string | null; props?: Record<string, any>; seo: Record<string, unknown> }[] }[];
-    approvals: { id: string; status: string; workflowId: string; toolArgs: { items: { itemId: string; version: number }[] } }[];
+    approvals: { id: string; status: string; workflowId: string; toolArgs: { items: { itemId: string; version: number }[]; envId?: string; scope?: string; siteId?: string; tenantSlug?: string } }[];
     build: { state: string } | null;
     stagingStale: boolean;
   },
@@ -319,6 +319,67 @@ test("a write that hits an unavailable API keeps the edits and goes stale instea
   await expect(page.getByTestId("save-error")).toContainText("Your edits are kept here and nothing was saved");
   await expect(page.getByTestId("stale-banner")).toBeVisible();
   await expect(page.locator(P("h1"))).toHaveValue("Typed, then the API died");
+});
+
+test("STATE write outcome unknown (502 webdesk_ambiguous), the write did NOT land: 'couldn't confirm', edits kept, Reload recovers", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await page.locator(P("h1")).fill("Typed, outcome unknown");
+  await stub.config({ ambiguous: "drop" });
+  await page.getByTestId("save").click();
+  const banner = page.getByTestId("unconfirmed-banner");
+  await expect(banner).toContainText("We couldn't confirm the save. Reload to see what happened.");
+  await expect(banner).toHaveAttribute("role", "alert");
+  await expect(page.getByTestId("save-status")).toHaveText("Unsaved changes"); // never "Saved vN"
+  await expect(page.getByTestId("save-error")).toHaveCount(0);                  // never a confident failure
+  await expect(page.getByTestId("save")).toBeDisabled();
+  await expect(page.getByTestId("request-publish")).toBeDisabled();
+  await expect(page.locator(P("h1"))).toHaveValue("Typed, outcome unknown");
+  expect((await stub.item("itm-service-seo-en")).headVersion).toBe(3);
+
+  await stub.config({ ambiguous: null });
+  await page.getByTestId("unconfirmed-reload").click();
+  await expect(banner).toHaveCount(0);
+  await expect(page.getByTestId("save")).toBeEnabled();
+  await expect(page.locator(P("h1"))).toHaveValue("Typed, outcome unknown");
+});
+
+test("STATE write outcome unknown, the write DID land: Reload shows the head moved instead of a false failure", async ({ page }) => {
+  await open(page, SERVICE_SEO);
+  await page.locator(P("h1")).fill("Landed after all");
+  await stub.config({ ambiguous: "land" });
+  await page.getByTestId("save").click();
+  await expect(page.getByTestId("unconfirmed-banner")).toContainText("We couldn't confirm the save");
+  expect((await stub.item("itm-service-seo-en")).headVersion).toBe(4);
+  await stub.config({ ambiguous: null });
+  await page.getByTestId("unconfirmed-reload").click();
+  await expect(page.getByTestId("unconfirmed-banner")).toHaveCount(0);
+  await expect(page.getByTestId("behind-head")).toContainText("v4 was saved since you opened this");
+  await expect(page.locator(P("h1"))).toHaveValue("Landed after all");
+});
+
+test("STATE lint unavailable: the placeholders card says it couldn't check, never 'No unresolved placeholders'", async ({ page }) => {
+  await stub.config({ lintUnavailable: true });
+  await open(page, SERVICE_SEO);
+  const card = page.getByTestId("lint-card");
+  await expect(page.getByTestId("lint-unavailable")).toHaveText("Couldn't check for placeholders. This is not a statement that there are none.");
+  await expect(card).not.toContainText("No unresolved placeholders");
+  await stub.config({ lintUnavailable: false });
+  await page.getByTestId("refresh-now").click();
+  await expect(page.getByTestId("lint-unavailable")).toHaveCount(0);
+});
+
+test("STATE staging rebuild not set up (503 webdesk_not_configured): plain words, no raw slug, no approval filed", async ({ page }) => {
+  await open(page, `${SITE}/service/service.web-design?locale=en`);
+  await page.getByTestId("unpublish").click();
+  await page.getByTestId("confirm-unpublish").click();
+  await expect(page.getByTestId("staging-stale")).toBeVisible();
+  await stub.config({ rebuildNotConfigured: true });
+  await page.getByTestId("request-rebuild").click();
+  const msg = page.getByTestId("publish-message");
+  await expect(msg).toHaveText("Staging rebuild isn't set up for this site.");
+  await expect(msg).not.toContainText("webdesk_not_configured");
+  await expect(page.getByTestId("awaiting-approval")).toHaveCount(0);
+  await expect(page.getByTestId("stale-banner")).toHaveCount(0); // not an outage
 });
 
 // ── publish: pending approval -> rejected | failed | published -> rebuild ──────────────────────────
@@ -655,4 +716,145 @@ test("approvals detail: a webdesk approval with arguments in the wrong format is
   await page.goto("/approvals/ap-0001-publish");
   await expect(page.getByTestId("webdesk-summary-unrecognised")).toContainText("Unrecognised request");
   await expect(page.getByTestId("summary-items")).toHaveCount(0);
+});
+
+// ── API keys: "Request an API key" (filing) and the approver's once-only reveal ────────────────────
+
+const PROD_ENV = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+const STG_ENV = "2b3c4d5e-6f70-4b8c-9d0e-1f2a3b4c5d6e";
+
+test("API keys: a publisher requests a read key -> 'Request filed'; asking again -> 'Already requested'; write is its own request; nothing is minted", async ({ page }) => {
+  await page.goto(SITE);
+  const panel = page.getByTestId("request-key");
+  const submit = panel.getByTestId("request-key-submit");
+  await hydrated(submit);
+  await expect(panel.getByTestId("request-key-hint")).toHaveText("Write keys can change content through the API. Most sites only need read.");
+  await expect(panel.getByLabel("Scope")).toHaveValue("read");
+  await expect(submit).toBeDisabled(); // two environments, no default: a choice is required
+  await panel.getByLabel("Environment").selectOption({ label: "production" });
+
+  await submit.click();
+  const msg = panel.getByTestId("request-key-message");
+  await expect(msg).toContainText("Request filed. Someone else must approve it before the key is created.");
+  await expect(msg.getByRole("link", { name: "View the request" })).toHaveAttribute("href", "/approvals/ap-0001-key");
+  let approvals = (await stub.state()).approvals;
+  expect(approvals.map((a) => [a.id, a.workflowId, a.status])).toEqual([["ap-0001-key", "key.mint", "pending"]]);
+  expect(approvals[0].toolArgs).toMatchObject({ envId: PROD_ENV, scope: "read", siteId: "site-gaiada-com", tenantSlug: "gaiada" });
+
+  // the same environment and scope again is the SAME request, not a second one
+  await submit.click();
+  await expect(msg).toContainText("Already requested: a request for this environment and scope is waiting for approval.");
+  await expect(msg.getByRole("link", { name: "View the request" })).toHaveAttribute("href", "/approvals/ap-0001-key");
+  expect((await stub.state()).approvals).toHaveLength(1);
+
+  // write is a different request
+  await panel.getByLabel("Scope").selectOption("write");
+  await submit.click();
+  await expect(msg).toContainText("Request filed.");
+  await expect(msg.getByRole("link", { name: "View the request" })).toHaveAttribute("href", "/approvals/ap-0002-key");
+  approvals = (await stub.state()).approvals;
+  expect(approvals).toHaveLength(2);
+  expect(JSON.stringify(approvals)).not.toContain("wdk_"); // nothing was minted at filing
+});
+
+test("API keys: a user who cannot promote (plain member) sees no control at all", async ({ page, context }) => {
+  await loginAs(page, context, "gede@gaiada.com");
+  await page.goto(SITE);
+  await expect(page.getByTestId("collections")).toBeVisible();
+  await expect(page.getByTestId("request-key")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "API keys" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /API key/ })).toHaveCount(0);
+});
+
+test("API keys: the requester cannot approve their own request", async ({ page }) => {
+  await stub.post("request-key", { envId: PROD_ENV, scope: "read", by: "demo-hansel" }); // filed by the logged-in user
+  await page.goto("/approvals/ap-0001-key");
+  await expect(page.getByTestId("key-own-request")).toContainText("someone else has to approve it");
+  await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+});
+
+test("STATE key.mint approved: labelled an API-key request (not a publish), and the key is shown ONCE, in exactly one response, never again", async ({ page, context }) => {
+  await stub.post("request-key", { envId: PROD_ENV, scope: "read", by: "dept-manager" }); // filed by someone else (maker != checker)
+
+  // Record EVERY response body from here on.
+  const reads: Promise<{ url: string; method: string; action: boolean; body: string }>[] = [];
+  page.on("response", (r) => {
+    reads.push(r.text().then(
+      (body) => ({ url: r.url(), method: r.request().method(), action: !!r.request().headers()["next-action"], body }),
+      () => ({ url: r.url(), method: r.request().method(), action: false, body: "" }),
+    ));
+  });
+
+  await page.goto("/approvals/ap-0001-key");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Mint a production read API key for gaiada");
+  await expect(page.getByText("API key request").first()).toBeVisible();
+  await expect(page.getByText("Website publish")).toHaveCount(0);
+  await expect(page.getByTestId("webdesk-summary")).toHaveCount(0); // not the publish summary
+  await expect(page.getByTestId("key-summary-env")).toHaveText("production");
+  await expect(page.getByTestId("key-summary-scope")).toHaveText("read");
+
+  const approve = page.getByRole("button", { name: "Approve" });
+  await hydrated(approve);
+  await approve.click();
+
+  const panel = page.getByTestId("key-once");
+  await expect(panel).toBeVisible();
+  const key = await panel.getByTestId("key-once-value").inputValue();
+  expect(key).toMatch(/^wdk_read_[0-9a-f]{48}$/);
+  await expect(panel.getByTestId("key-once-value")).toHaveJSProperty("readOnly", true);
+  await expect(panel.getByTestId("key-once-env")).toHaveText("production");
+  await expect(panel.getByTestId("key-once-scope")).toHaveText("read");
+  await expect(page.getByTestId("key-once-warning")).toHaveText("Copy this key now. It won't be shown again: WebDesk keeps only a fingerprint of it.");
+  await expect(panel.getByRole("button", { name: "Copy" })).toBeVisible();
+
+  // The revalidation that follows re-rendered the page from the decided row; the panel (client state) is still there,
+  // and the row is decided (no second Approve).
+  await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+  const row = (await stub.state()).approvals.find((a) => a.id === "ap-0001-key")!;
+  expect([row.status, (row as unknown as { executionStatus: string }).executionStatus]).toEqual(["approved", "executed"]);
+  expect(JSON.stringify(await stub.state())).not.toContain(key); // not in the stub's store either
+
+  // Client-side navigation away and back (the router cache), then a reload, then a fresh visit from elsewhere.
+  await page.getByRole("link", { name: "Approvals", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/approvals$/);
+  await page.goBack();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Mint a production read API key");
+  await expect(page.getByTestId("key-once")).toHaveCount(0);
+  expect(await page.content()).not.toContain(key);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Mint a production read API key");
+  await expect(page.getByTestId("key-once")).toHaveCount(0);
+  expect(await page.content()).not.toContain(key);
+
+  await page.goto(SITE);
+  await expect(page.getByTestId("collections")).toBeVisible();
+  await page.goto("/approvals/ap-0001-key");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Mint a production read API key");
+  await expect(page.getByTestId("key-once")).toHaveCount(0);
+  expect(await page.content()).not.toContain(key);
+
+  // Custody: no storage, cookie or URL ever held it.
+  expect(page.url()).not.toContain(key);
+  const stored = await page.evaluate(() => JSON.stringify({ l: { ...localStorage }, s: { ...sessionStorage }, h: history.state }));
+  expect(stored).not.toContain(key);
+  expect(JSON.stringify(await context.cookies())).not.toContain(key);
+
+  // THE claim: across every response the browser received, the key occurs in exactly ONE — the server action's.
+  const all = await Promise.all(reads);
+  expect(all.length).toBeGreaterThan(5); // the recorder was actually recording (pages, RSC payloads, the action)
+  const carriers = all.filter((x) => x.body.includes(key));
+  expect(carriers.map((c) => `${c.method} action=${c.action}`)).toEqual(["POST action=true"]);
+});
+
+test("STATE key.mint approved but the mint FAILED: the typed error in plain words, and no key field", async ({ page }) => {
+  await stub.config({ keyMintFails: true });
+  await stub.post("request-key", { envId: STG_ENV, scope: "write", by: "dept-manager" });
+  await page.goto("/approvals/ap-0001-key");
+  const approve = page.getByRole("button", { name: "Approve" });
+  await hydrated(approve);
+  await approve.click();
+  await expect(page.getByTestId("key-failed")).toContainText("The key wasn't created. WebDesk couldn't be reached. Nothing was sent.");
+  await expect(page.getByTestId("key-once")).toHaveCount(0);
+  await expect(page.getByLabel("API key")).toHaveCount(0);
 });

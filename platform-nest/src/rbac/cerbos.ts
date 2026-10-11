@@ -108,6 +108,15 @@ export function principalPayload(p: Principal) {
     roles: ["user"], // base role; the real logic is in derived roles over attr.grants / attr.perms
     attr: {
       assurance: p.assurance,
+      // T7 (WebDesk M3). `users.kind` (employee | client | automation | bot). This function is an
+      // explicit allow-list: an attribute not named here silently never reaches Cerbos, so without
+      // this line the `kind in ["automation","bot"]` DENY in resource_webdesk_content_item.yaml
+      // would read an absent attribute and never fire. `?? ""` is the safe default because every
+      // rule that reads it is an EFFECT_DENY: an absent kind matches no DENY and falls back to the
+      // pre-existing rules, so a fixture (or a caller) that omits it can lose nothing and gain
+      // nothing. A default that matched `automation` would be the unsafe direction for a deny-list
+      // read by an ALLOW; here it is a deny-list, so "" is correct.
+      kind: p.kind ?? "",
       companies: p.companies,
       // MON-00c (Wall 2). `variables.inRoot` reads this. `?? []` is the fail-closed default: a
       // principal assembled before this field existed (or by a test fixture that omits it) denies

@@ -37,8 +37,25 @@ export interface PermissionGrant {
   scopeId: string | null;
 }
 
+/** `users.kind` (PK-01, migration 202608201442): what the ACCOUNT is. */
+export type PrincipalKind = "employee" | "client" | "automation" | "bot";
+
 export interface Principal {
   userId: string | null; // null = unknown external identity
+  /**
+   * T7 (WebDesk M3) — `users.kind`, so Cerbos can refuse a class of principal outright rather than
+   * relying on a caller's own code to hold back. Sent to Cerbos as `principal.attr.kind`
+   * (`principalPayload()` in ./cerbos.ts, an explicit allow-list). Today the ONLY reader is the
+   * `EFFECT_DENY` on `publish`/`schedule` in resource_webdesk_content_item.yaml, which refuses
+   * `automation` and `bot`.
+   *
+   * OPTIONAL for the same reason `perms` is: dozens of test files hand-construct `Principal`
+   * literals. Absent is SAFE: `principalPayload()` sends `""`, which matches no DENY, so a principal
+   * without a kind behaves exactly as it did before this field existed (the rules that read it are
+   * DENYs, never ALLOWs, so an unknown kind can only fall back to the existing rules, never gain
+   * reach). `assemblePrincipal()` — the one real producer — always sets it from the row.
+   */
+  kind?: PrincipalKind;
   assurance: Assurance;
   companies: string[]; // authorized tenant set (active memberships)
   /** MON-00c (Wall 2). Every company sharing this principal's ROOT company tree. Cerbos's `inRoot`
@@ -193,8 +210,8 @@ export const ANONYMOUS: Principal = {
 
 export async function assemblePrincipal(userId: string, assurance: Assurance): Promise<Principal | null> {
   const user = await withGlobal((c) =>
-    c.query<{ id: string; status: string; session_version: number }>(
-      `SELECT id, status, session_version FROM users WHERE id = $1 AND deleted_at IS NULL`,
+    c.query<{ id: string; status: string; session_version: number; kind: PrincipalKind }>(
+      `SELECT id, status, session_version, kind FROM users WHERE id = $1 AND deleted_at IS NULL`,
       [userId],
     ),
   );
@@ -379,6 +396,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
 
   return {
     userId,
+    kind: user.rows[0].kind, // T7: `users.kind`, NOT NULL with a CHECK — see Principal.kind
     assurance,
     companies: companies.rows.map((r) => r.tenant_id),
     rootCompanies,

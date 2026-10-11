@@ -3,6 +3,8 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "@/lib/session-server";
 import { platformFetch } from "@/lib/platform";
 import { retryAutomationApproval as retryAutomationApprovalCall } from "@/lib/automationApprovals";
+import { parseKeyMintDecision } from "@/lib/webdeskContent";
+import type { KeyMintDecideResult } from "@/lib/webdeskContentModel";
 
 export async function decideApproval(tenantId: string, approvalId: string, decision: "approved" | "rejected"): Promise<{ ok: boolean; error?: string }> {
   const userId = await getSessionUserId();
@@ -90,6 +92,50 @@ export async function decideApprovalItem(
   revalidatePath("/");
   revalidatePath("/departments");
   return { ok: true };
+}
+
+// WebDesk key.mint — the SIBLING of `decideApprovalItem` for the one approval whose decide response carries a secret.
+// WSK-66 mints IN-BAND on approve and the façade answers `{ ok: true, webdesk: { command: "key.mint", executionStatus,
+// apiKeyId, envId, scope, plaintextOnce } }`; `plaintextOnce` is the API key in plaintext and this is the ONLY time it exists
+// anywhere (WebDesk keeps a hash; the approval row, activities, outbox and logs never hold it). `decideApprovalItem` ignores the
+// body, which is right for every other origin and meant a key approved through the UI was minted and thrown away.
+//
+// CUSTODY (hard rules; `KeyMintDecide.test.tsx` pins them):
+//   • the key is RETURNED to the one client component that asked, and goes nowhere else: not logged, not stored, not a cache
+//     tag, and nothing derived from the response reaches `revalidatePath` (the four paths below are constants plus the approval id
+//     the caller already sent). The page that revalidation re-renders reads the decided ROW, which never holds the key.
+//   • the parser (`parseKeyMintDecision`) names a bad field by path and TYPE only, so a malformed `plaintextOnce` cannot leak
+//     through an error message.
+//   • every OTHER caller of the façade keeps `decideApprovalItem`, untouched.
+export async function decideKeyMintApproval(
+  tenantId: string,
+  id: string,
+  decision: "approved" | "rejected",
+  note?: string,
+): Promise<KeyMintDecideResult> {
+  const userId = await getSessionUserId();
+  if (!userId) return { ok: false, error: "Session expired — sign in again." };
+  let body: unknown;
+  try {
+    body = await platformFetch<unknown>(`/api/${tenantId}/approvals/${id}/decide`, userId, {
+      method: "POST",
+      body: JSON.stringify({ origin: "webdesk", decision, note }),
+    });
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+  revalidatePath("/approvals");
+  revalidatePath(`/approvals/${id}`);
+  revalidatePath("/");
+  revalidatePath("/departments");
+  if (decision === "rejected") return { ok: true, decision: "rejected" };
+  try {
+    return { ok: true, decision: "approved", mint: parseKeyMintDecision(body) ?? { status: "unreadable" } };
+  } catch {
+    // Approved, but the answer was not the shape the ERP expects. The drift detail is deliberately dropped: the key is not
+    // recoverable from here either way, and the approver is told so rather than shown a half-parsed value.
+    return { ok: true, decision: "approved", mint: { status: "unreadable" } };
+  }
 }
 
 // D14-08 — retry a FAILED (or stuck-`executing`, per D14-07's staleness window) automation

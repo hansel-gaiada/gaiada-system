@@ -105,7 +105,7 @@ describe.skipIf(!live)("key.mint filing: POST control/sites/:siteId/keys files O
     const r = await file(adminA, prodRead);
     expect(r.statusCode).toBe(202);
     const { approvalId } = r.json<{ approvalId: string }>();
-    expect(Object.keys(r.json())).toEqual(["approvalId"]);
+    expect(Object.keys(r.json())).toEqual(["approvalId"]); // a NEW filing carries no `alreadyPending`
     const a = await row(approvalId);
     expect(a).toMatchObject({ status: "pending", origin: "webdesk", workflow_id: "key.mint", tool_name: "webdesk.key.mint", impact: "high", requested_by: adminA });
     const { summary, commandHash, ...args } = a.tool_args;
@@ -161,8 +161,10 @@ describe.skipIf(!live)("key.mint filing: POST control/sites/:siteId/keys files O
 
   it("de-dup: filing the same (site, env, scope) again returns the SAME pending approval, by anyone; another env or scope is a new one; once decided, a new filing is a new one", async () => {
     const first = (await file(adminA, prodRead)).json<{ approvalId: string }>().approvalId;
-    expect((await file(adminA, prodRead)).json().approvalId).toBe(first);
-    expect((await file(adminA2, { ...prodRead, envId: GAIADA_ENV.production.toUpperCase() })).json().approvalId).toBe(first);
+    const dup = await file(adminA, prodRead);
+    expect(dup.statusCode).toBe(202);
+    expect(dup.json()).toEqual({ approvalId: first, alreadyPending: true });
+    expect((await file(adminA2, { ...prodRead, envId: GAIADA_ENV.production.toUpperCase() })).json()).toEqual({ approvalId: first, alreadyPending: true });
     expect(await pendingKeyMints()).toBe(1);
 
     const write = (await file(adminA, { ...prodRead, scope: "write" })).json().approvalId;
@@ -171,8 +173,9 @@ describe.skipIf(!live)("key.mint filing: POST control/sites/:siteId/keys files O
     expect(await pendingKeyMints()).toBe(3);
 
     expect((await decide(first, adminA2, "rejected")).statusCode).toBe(200);
-    const again = (await file(adminA, prodRead)).json().approvalId;
-    expect(again).not.toBe(first);
+    const again = (await file(adminA, prodRead)).json();
+    expect(again.approvalId).not.toBe(first);
+    expect(again).not.toHaveProperty("alreadyPending");
   });
 
   it("approve by a DIFFERENT company_admin → exactly one key.mint to Zone B with WS4; the plaintext is in the decide response ONCE and nowhere else (approval row, activities, outbox, logs)", async () => {

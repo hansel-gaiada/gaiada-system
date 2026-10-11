@@ -35,6 +35,19 @@
 # An unknown/empty creatorId never satisfies an ALLOW below (fail closed); the DENY ignores it, so
 # only the platform_admin wildcard can act on such a row — the same posture as a legacy invoice.
 #
+# ── NO AUTOMATION OR BOT PRINCIPAL EVER PUBLISHES OR SCHEDULES (T7, WebDesk M3) ─────────────────
+# `publish`/`schedule` are the two actions that make content reachable by a production key, and they
+# are a HUMAN decision (the decide() of an approved WS4 row). The live gaiada.com import files its batch
+# as the automation principal `automation+webdesk-importer@gaiada.system` (users.kind=automation, role
+# webdev_manager); today only the importer's own code stops it publishing. This DENY makes Cerbos refuse
+# too, so a future caller, a mis-granted role or a platform_admin grant on an automation row cannot get
+# there. It reads `principal.attr.kind` (users.kind, sent by principalPayload()), and it names ONLY
+# `publish` and `schedule`: `request_publish` stays ALLOWED, because filing the approval is exactly the
+# importer's job. DELEGATION: authorize() (core/http.ts) checks the CALLER and, when `actFor` is set, the
+# acting human too, and either denial refuses. A persona (kind=bot) acting for a human publisher is
+# therefore denied here as the CALLER; the human's own principal is unaffected. An absent `kind`
+# ("" — a fixture, ANONYMOUS) matches nothing and falls back to the rules above.
+#
 # ── THE INVARIANTS THIS FILE MUST NOT BREAK ─────────────────────────────────────────────────────
 #  - `client` appears NOWHERE: editorial drafts are staff-only. `member` appears nowhere either (§7).
 #  - NO perm_* mirror (IAM-04c): publish/schedule are attribute-instance checks (approvalId, creator
@@ -189,3 +202,17 @@ resourcePolicy:
             !has(request.resource.attr.approvalId) ||
             type(request.resource.attr.approvalId) != string ||
             request.resource.attr.approvalId == ""
+
+    # ══════════ automation and bot principals never publish or schedule (T7, WebDesk M3) ═════════
+    # Same `roles: ["user"]` DENY shape as the two blocks above, so it beats the platform_admin
+    # wildcard and every ALLOW under deny-overrides. `request_publish` is deliberately NOT listed.
+    # `has()` makes a raw caller that omits the attribute evaluate to false (no deny) rather than
+    # raise a CEL error; principalPayload() always sends it, "" when unknown.
+    - actions: ["publish", "schedule"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]

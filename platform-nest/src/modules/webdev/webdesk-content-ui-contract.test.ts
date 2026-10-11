@@ -25,6 +25,9 @@
 // validation judges). Mocked: only the three session seams the actions read (`session-server`'s user id, `tenant`'s
 // active company, `platform`'s `getMe`), because there is no browser session here. Stand-in: Zone B (WebDesk) itself.
 //
+// 2026-10-11: also the control plane's "Request an API key" (`requestKeyAction` -> `POST …/control/sites/:siteId/keys`) and the
+// decide façade's once-only key block (`parseKeyMintDecision`); see the "API keys" describe and the `key-request` route-table entry.
+//
 // Needs DATABASE_URL_TEST + CERBOS_URL (skips otherwise) and platform-ui's sources beside platform-nest.
 import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -41,7 +44,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole } from 
 import { EditorialUnavailableError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests } from "./webdesk-approved-command";
 import { webdeskZoneB } from "./webdesk-content.service";
-import { FakeZoneB, GAIADA_SITE, GAIADA_SLUG, OTHER_SITE, OTHER_SLUG, makeTestSigner, type FakeItem } from "./webdesk-content-testkit";
+import { FakeZoneB, GAIADA_ENV, GAIADA_SITE, GAIADA_SLUG, OTHER_ENV, OTHER_SITE, OTHER_SLUG, makeTestSigner, type FakeItem } from "./webdesk-content-testkit";
 
 const UI_LIB = resolve(__dirname, "../../../../platform-ui/src/lib");
 const UI_COMPOSITIONS = resolve(__dirname, "../../../../platform-ui/e2e/webdesk-stub/compositions");
@@ -80,6 +83,7 @@ interface UiActions {
   requestPublishAction(scope: Scope, items: { itemId: string; version: number }[], publishAt?: string | null): Promise<Wd>;
   withdrawPublishRequestAction(scope: Scope, approvalId: string): Promise<Wd>;
   requestRebuildAction(scope: Scope): Promise<Wd>;
+  requestKeyAction(scope: Scope, envId: string, keyScope: string): Promise<Wd>;
   pollApprovalAction(scope: Scope, approvalId: string): Promise<Wd>;
   pollBuildStatusAction(scope: Scope): Promise<Wd>;
   getItemHeadAction(scope: Scope, itemId: string): Promise<Wd>;
@@ -87,6 +91,7 @@ interface UiActions {
 }
 interface UiModel {
   phaseOf(row: Record<string, unknown>): { phase: string; [k: string]: unknown };
+  [helper: string]: any;
 }
 interface UiPlatform {
   platformFetch<T>(path: string, userId: string, init?: RequestInit): Promise<T>;
@@ -107,6 +112,8 @@ function routeOf(method: string, rawPath: string): { label: string; parser: stri
   const p = STRIP(rawPath);
   const m = (re: RegExp) => re.test(p);
   const base = /^\/api\/[^/]+\/modules\/webdev\/content/;
+  // The control plane's key-request filing (not a content route): `POST …/control/sites/:siteId/keys`.
+  if (/^\/api\/[^/]+\/modules\/webdev\/control\/sites\/[^/]+\/keys$/.test(p)) return method === "POST" ? { label: "key-request", parser: "parseKeyRequest" } : null;
   if (!base.test(p) && !/^\/api\/[^/]+\/automation-approvals\/[^/]+$/.test(p)) return null;
   if (m(/\/automation-approvals\/[^/]+$/)) return method === "GET" ? { label: "approval.detail", parser: "parseApprovalRow" } : null;
   if (m(/\/content\/sites$/)) return { label: "sites", parser: "parseSites" };
@@ -383,10 +390,10 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       const bundle = okData(await step("refreshEditorAction (after reload)", () => actions.refreshEditorAction(SCOPE, "service", "service.seo", "en")));
       expect(bundle.pendingRequests).toEqual([{ approvalId: filed.approvalId }]);
 
-      // FIX 3, the poll: the requester CANNOT read /automation-approvals/:id (403), so the UI falls back to their own requests
-      const detail = await refusal(`/api/${A}/automation-approvals/${filed.approvalId}`, editorA);
-      expect(detail.status).toBe(403);
-      expect(ui.resultFromError(detail)).toMatchObject({ kind: "forbidden" });
+      // FIX 3, the poll: since WebDesk M3 T7 the requester CAN read their own /automation-approvals/:id
+      // (Cerbos own-row read), so the poll reads it directly; the own-list fallback stays for anyone else.
+      const detail = await platform.platformFetch(`/api/${A}/automation-approvals/${filed.approvalId}`, editorA);
+      expect(detail).toMatchObject({ id: filed.approvalId, status: "pending" });
       const polled = okData(await step("pollApprovalAction (editor: 403 → own list)", () => actions.pollApprovalAction(SCOPE, filed.approvalId)));
       expect(polled).toMatchObject({ id: filed.approvalId, status: "pending", executionStatus: "not_applicable" });
       expect(model.phaseOf(polled).phase).toBe("pending");
@@ -423,6 +430,113 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       const viaDetail = okData(await step("pollApprovalAction (admin, executed)", () => actions.pollApprovalAction(SCOPE, filed.approvalId)));
       expect(viaDetail).toMatchObject({ status: "approved", executionStatus: "executed", decidedBy: adminA });
       expect(model.phaseOf(viaDetail)).toMatchObject({ phase: "executed" });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // 2026-10-11 — "Request an API key" (platform-ui `requestKeyAction`) and the approver's once-only reveal
+  // (`parseKeyMintDecision`, which reads the decide façade's in-band `webdesk` block). The filing route is the CONTROL plane's
+  // (`POST …/control/sites/:siteId/keys`, tenantSlug in the body), not a content route, so it has its own route-table entry.
+  // Real: the controller, Cerbos (`promote` on webdev_provisioned_site), Postgres, the UI's egress/parsers/action. Stand-in: Zone B.
+  describe("API keys: requestKeyAction files a key.mint approval; the decide response carries the key once", () => {
+    const BOGUS_ENV = "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f";
+    beforeEach(async () => {
+      // Each test starts with no open key.mint request (the de-dup would otherwise hand back an earlier test's id).
+      await adminPool().query(`UPDATE automation_approvals SET deleted_at = now() WHERE tenant_id = $1 AND workflow_id = 'key.mint' AND deleted_at IS NULL`, [A]);
+    });
+    const lastKeyRec = () => recs.filter((c) => routeOf(c.method, c.path)?.label === "key-request").at(-1)!;
+
+    it("a new filing is `{approvalId}` (not alreadyPending); filing again is the SAME request with `alreadyPending: true`; another scope is a new one — each through the UI's real parser", async () => {
+      as(publisherA);
+      const first = okData(await step("requestKeyAction (new)", () => actions.requestKeyAction(SCOPE, GAIADA_ENV.production, "read")));
+      expect(first).toEqual({ approvalId: expect.stringMatching(/^[0-9a-f-]{36}$/), alreadyPending: false });
+      expect(lastKeyRec()).toMatchObject({ method: "POST", status: 202 });
+      expect(Object.keys(lastKeyRec().body as object)).toEqual(["approvalId"]); // a new filing carries no `alreadyPending`
+      expect(lastKeyRec().path).toBe(`/api/${A}/modules/webdev/control/sites/${GAIADA_SITE}/keys`);
+
+      const again = okData(await step("requestKeyAction (again)", () => actions.requestKeyAction(SCOPE, GAIADA_ENV.production, "read")));
+      expect(again).toEqual({ approvalId: first.approvalId, alreadyPending: true });
+      expect(lastKeyRec().body).toEqual({ approvalId: first.approvalId, alreadyPending: true });
+
+      const write = okData(await step("requestKeyAction (write: a different request)", () => actions.requestKeyAction(SCOPE, GAIADA_ENV.production, "write")));
+      expect(write.alreadyPending).toBe(false);
+      expect(write.approvalId).not.toBe(first.approvalId);
+
+      // Nothing was minted at filing: the row is a pending key.mint and Zone B saw no write.
+      const { rows } = await adminPool().query<{ status: string; workflow_id: string }>(`SELECT status, workflow_id FROM automation_approvals WHERE id = $1`, [first.approvalId]);
+      expect(rows[0]).toEqual({ status: "pending", workflow_id: "key.mint" });
+      expect(zb.mintedKeys).toEqual([]);
+    });
+
+    it("404 environment-not-found (an env that is not this site's) and 404 site-not-found (another company's site) are typed not_found", async () => {
+      as(publisherA);
+      expect(await step("requestKeyAction (random env)", () => actions.requestKeyAction(SCOPE, BOGUS_ENV, "read"))).toEqual({ kind: "not_found", slug: "environment-not-found" });
+      expect(await step("requestKeyAction (another tenant's env)", () => actions.requestKeyAction(SCOPE, OTHER_ENV.production, "read"))).toEqual({ kind: "not_found", slug: "environment-not-found" });
+      expect(await step("requestKeyAction (foreign site)", () => actions.requestKeyAction(OTHER_SCOPE, OTHER_ENV.production, "read"))).toEqual({ kind: "not_found", slug: "site-not-found" });
+      const raw = await refusal(`/api/${A}/modules/webdev/control/sites/${GAIADA_SITE}/keys`, publisherA, { method: "POST", body: JSON.stringify({ tenantSlug: GAIADA_SLUG, envId: BOGUS_ENV, scope: "read" }) });
+      expect(raw.status).toBe(404);
+      expect(ui.problemOf(raw)).toMatchObject({ slug: "environment-not-found" });
+    });
+
+    it("403: a webdev editor and a plain member are forbidden for BOTH scopes (the promote gate), and a malformed envId is `invalid`", async () => {
+      for (const who of [editorA, memberA]) {
+        as(who);
+        for (const scope of ["read", "write"]) {
+          expect(await step(`requestKeyAction (${scope}, no promote)`, () => actions.requestKeyAction(SCOPE, GAIADA_ENV.production, scope)), who).toMatchObject({ kind: "forbidden" });
+        }
+      }
+      as(publisherA);
+      expect(await step("requestKeyAction (envId not a uuid)", () => actions.requestKeyAction(SCOPE, "production", "read"))).toMatchObject({ kind: "invalid" });
+    });
+
+    it("503 editorial_unavailable (breaker open on the site read) is the workspace's unavailable state, never drift", async () => {
+      as(publisherA);
+      zb.failWith = new EditorialUnavailableError(25_000);
+      webdeskZoneB.clearSiteCache();
+      try {
+        const r = await step("requestKeyAction (breaker open)", () => actions.requestKeyAction(SCOPE, GAIADA_ENV.production, "read"));
+        expect(r).toMatchObject({ kind: "unavailable", code: "editorial_unavailable" });
+      } finally {
+        zb.failWith = null;
+      }
+    });
+
+    it("approve by a DIFFERENT user: the façade's decide response parses through the UI's real parseKeyMintDecision to the key (once); the approval row, the detail read and the summary helpers never hold it", async () => {
+      as(publisherA);
+      const filed = okData(await step("requestKeyAction (for the decide round trip)", () => actions.requestKeyAction(SCOPE, GAIADA_ENV.staging, "read")));
+      const path = `/api/${A}/approvals/${filed.approvalId}/decide`;
+      const decideBody = (decision: string) => ({ method: "POST", body: JSON.stringify({ origin: "webdesk", decision }) });
+
+      // maker != checker: the requester's own decide is refused, and nothing was minted.
+      expect((await refusal(path, publisherA, decideBody("approved"))).status).toBe(403);
+      expect(zb.mintedKeys).toEqual([]);
+
+      // The UI's real egress, as the approver; the body is what `decideKeyMintApproval` hands to `parseKeyMintDecision`.
+      const raw = await platform.platformFetch<unknown>(path, adminA, decideBody("approved"));
+      expect(zb.mintedKeys).toHaveLength(1);
+      const outcome = ui.parseKeyMintDecision(raw);
+      expect(outcome).toEqual({ status: "executed", envId: GAIADA_ENV.staging, scope: "read", apiKeyId: expect.any(String), plaintextOnce: zb.mintedKeys[0] });
+      evidence.push({ step: "decide key.mint via the façade (UI parseKeyMintDecision)", http: ["POST /approvals/:id/decide → 200"], ui: "ok (executed, key present once)" });
+
+      // The decided row (what every later server render reads) has no key.
+      const row = okData(await step("getApprovalRow (decided key.mint)", () => ui.getApprovalRow(adminA, A, filed.approvalId)));
+      expect(row).toMatchObject({ status: "approved", executionStatus: "executed", workflowId: "key.mint" });
+      expect(JSON.stringify(row)).not.toContain(zb.mintedKeys[0]);
+      const detailRaw = await platform.platformFetch<unknown>(`/api/${A}/automation-approvals/${filed.approvalId}`, adminA);
+      expect(JSON.stringify(detailRaw)).not.toContain(zb.mintedKeys[0]);
+
+      // The approvals page's labelling helpers read this real row.
+      expect((model as any).isKeyMintApproval({ workflowId: row.workflowId, toolName: (detailRaw as { toolName: string }).toolName })).toBe(true);
+      expect((model as any).parseKeyMintArgs(row.toolArgs)).toEqual({ tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, envId: GAIADA_ENV.staging, scope: "read" });
+      expect(await ui.findKeyTarget(adminA, A, GAIADA_SLUG, GAIADA_SITE, GAIADA_ENV.staging)).toMatchObject({ environmentName: "staging" });
+    });
+
+    it("a rejection carries no in-band `webdesk` block: parseKeyMintDecision reads it as 'nothing to show'", async () => {
+      as(publisherA);
+      const filed = okData(await actions.requestKeyAction(SCOPE, GAIADA_ENV.production, "write"));
+      const raw = await platform.platformFetch<unknown>(`/api/${A}/approvals/${filed.approvalId}/decide`, adminA, { method: "POST", body: JSON.stringify({ origin: "webdesk", decision: "rejected" }) });
+      expect(ui.parseKeyMintDecision(raw)).toBeNull();
+      expect(zb.mintedKeys).toEqual([]);
     });
   });
 
@@ -555,7 +669,7 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
 
     it("covers every route the UI calls (with a real 2xx) and every error class the UI renders", () => {
       const ok2xx = new Set(recs.filter((c) => c.status >= 200 && c.status < 300).map((c) => routeOf(c.method, c.path)?.label));
-      for (const label of ["sites", "collections", "items", "item.get", "versions", "versionGet", "media", "create", "update", "restore", "publish-requests", "publish-requests.list", "withdraw", "unpublish", "delete", "approval.detail"]) {
+      for (const label of ["sites", "collections", "items", "item.get", "versions", "versionGet", "media", "create", "update", "restore", "publish-requests", "publish-requests.list", "withdraw", "unpublish", "delete", "approval.detail", "key-request"]) {
         expect(ok2xx, `no real 2xx recorded for ${label}`).toContain(label);
       }
       const statuses = new Set(recs.map((c) => c.status));
@@ -596,7 +710,7 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
         expect(req.length, `${r.label}: no key removal made ${r.parser} throw, so it validates nothing`).toBeGreaterThan(0);
         fieldsRequired.set(r.label, req);
       }
-      expect(seen.size).toBeGreaterThanOrEqual(14);
+      expect(seen.size).toBeGreaterThanOrEqual(15);
     });
 
     it("negative control: the three drifts WSK-59 found are accepted now, and an invalid status is still refused", () => {

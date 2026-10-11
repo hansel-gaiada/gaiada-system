@@ -3,12 +3,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createItemAction, deleteItemAction, getItemHeadAction, refreshEditorAction, saveItemAction, type SiteScope,
+  createItemAndOpenAction, deleteItemAction, getItemHeadAction, refreshEditorAction, saveItemAction, type SiteScope,
 } from "@/lib/webdeskContentActions";
 import type { EditorBundle } from "@/lib/webdeskContent";
 import {
-  authorLabel, collectionLabel, deepEqual, defaultFields, isLive, issuesAt, overlayNeutrals, publishStateLabel,
-  SEO_CARRIER_COLLECTIONS, splitVersionContent, toWire, writeNeutralsThrough,
+  authorLabel, collectionLabel, deepEqual, defaultFields, isLive, isNextRedirect, isOutcomeUnknown, issuesAt, overlayNeutrals, publishStateLabel,
+  SEO_CARRIER_COLLECTIONS, splitVersionContent, toWire, unconfirmedCopy, writeNeutralsThrough,
   type Block, type CollectionSummary, type EditableContent, type Issue, type ItemDetail, type ItemRef, type Lint,
   type SiteRef, type TenantRef, type WdResult,
 } from "@/lib/webdeskContentModel";
@@ -26,6 +26,8 @@ import "./content.css";
 //   invalid (422)               `issues` -> inline errors by JSON pointer + a summary
 //   conflict (409)              `conflict` -> <ConflictDialog>; the draft is untouched
 //   stale                       a refresh (or a write) failed after a good load -> banner, Save/Publish disabled
+//   unconfirmed (502)           a write's outcome is UNKNOWN (webdesk_ambiguous) -> "couldn't confirm" banner + Reload;
+//                               never "saved", never "failed"; writes stay disabled until a re-read succeeds
 //   read-only                   `readOnlyReason` (server-known) or a 403 on a write -> form disabled, reason shown
 //   pending / rejected / published / rebuild   <PublishBar>
 //
@@ -134,6 +136,8 @@ export function ItemEditor({
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [conflictBusy, setConflictBusy] = useState(false);
   const [stale, setStale] = useState<string | null>(null);
+  /** The words for a write whose outcome is unknown (502 webdesk_ambiguous); null when nothing is in doubt. */
+  const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [headSeen, setHeadSeen] = useState<number | null>(null);
   const [banner, setBanner] = useState<{ tone: "warn" | "bad" | "info"; text: string } | null>(null);
@@ -149,7 +153,7 @@ export function ItemEditor({
   const nonDefaultLocale = locale !== tenant.defaultLocale && !localeNeutralCollection;
   const readOnlyWhy = readOnlyReason ?? (forbidden ? "You can read this item but not change it. Ask a Web Dev editor or publisher for access." : null);
   const readOnly = readOnlyWhy !== null;
-  const canWrite = !readOnly && stale === null;
+  const canWrite = !readOnly && stale === null && unconfirmed === null;
 
   const ctx: FormCtx = {
     issues, readOnly, neutralLock: nonDefaultLocale, neutralLocale: tenant.defaultLocale,
@@ -180,6 +184,7 @@ export function ItemEditor({
       return;
     }
     setStale(null);
+    setUnconfirmed(null); // a good re-read is the "reload" the unknown-outcome notice asks for
     setLoadedAt(r.data.loadedAt);
     setBuild(r.data.build);
     if (!dirtyRef.current) adopt(r.data.detail, r.data.authoritative);
@@ -222,6 +227,12 @@ export function ItemEditor({
         setSaveState({ s: "error", message: "You don't have permission to change this item. Your edits are still here." });
         return;
       case "unavailable":
+        if (isOutcomeUnknown(r)) {
+          // Unknown, not failed: the write may have landed. Edits are kept; writes stay off until a re-read.
+          setUnconfirmed(unconfirmedCopy(verb === "created" ? "the new item" : "the save"));
+          setSaveState({ s: "idle" });
+          return;
+        }
         if (r.code !== "contract_drift") goStale(r.reason);
         setSaveState({ s: "error", message: r.code === "contract_drift" ? `WebDesk answered unexpectedly (${r.reason}). Nothing was assumed saved — your edits are still here.` : "Couldn't reach WebDesk. Your edits are kept here and nothing was saved." });
         return;
@@ -250,13 +261,16 @@ export function ItemEditor({
         setSaveState({ s: "error", message: "The slug isn't valid." });
         return;
       }
-      const r = await createItemAction(scope, { collectionKey: collection.key, locale, slug, twinOf: seed?.twinOf ?? null, fields: sentFields, blocks: extraBlocks, seo: sentSeo, note });
-      if (!mounted.current) return;
-      if (r.kind === "ok") {
-        setBaseline({ fields: draft.fields, seo: draft.seo });
-        router.push(`${routeBase}/${encodeURIComponent(collection.key)}/${encodeURIComponent(r.data.item.slug)}?locale=${encodeURIComponent(r.data.item.locale)}`);
-        return;
+      // Success opens the new item from the SERVER (`createItemAndOpenAction` redirects; see webdeskContentActions.ts):
+      // a client push here was sometimes dropped by the router. Only a failure comes back, typed as before.
+      let r: Awaited<ReturnType<typeof createItemAndOpenAction>>;
+      try {
+        r = await createItemAndOpenAction(scope, { collectionKey: collection.key, locale, slug, twinOf: seed?.twinOf ?? null, fields: sentFields, blocks: extraBlocks, seo: sentSeo, note }, routeBase);
+      } catch (e) {
+        if (isNextRedirect(e)) return; // created, and already on its editor
+        throw e;
       }
+      if (!mounted.current) return;
       handleWriteFailure(r, "created");
       return;
     }
@@ -312,20 +326,24 @@ export function ItemEditor({
     if (!item) return;
     if (dirty && !window.confirm("You have unsaved changes. Create the twin from the last saved version?")) return;
     setBanner(null);
-    const r = await createItemAction(scope, {
-      collectionKey: collection.key, locale: target, slug: item.slug, twinOf: item.itemId,
-      fields: toWire(baseline.fields), blocks: extraBlocks, seo: toWire(baseline.seo),
-    });
-    if (!mounted.current) return;
-    if (r.kind === "ok") {
-      setBaseline(draft); // leaving the page: nothing left to warn about
-      router.push(`${routeBase}/${encodeURIComponent(collection.key)}/${encodeURIComponent(r.data.item.slug)}?locale=${encodeURIComponent(target)}`);
-      return;
+    // Success opens the twin from the SERVER (see `save` above); only a failure comes back.
+    let r: Awaited<ReturnType<typeof createItemAndOpenAction>>;
+    try {
+      r = await createItemAndOpenAction(scope, {
+        collectionKey: collection.key, locale: target, slug: item.slug, twinOf: item.itemId,
+        fields: toWire(baseline.fields), blocks: extraBlocks, seo: toWire(baseline.seo),
+      }, routeBase);
+    } catch (e) {
+      if (isNextRedirect(e)) return; // created, and already on the twin's editor
+      throw e;
     }
+    if (!mounted.current) return;
     if (r.kind === "invalid") {
       setBanner({ tone: "bad", text: `The ${target} twin couldn't be created: ${r.issues.map((i) => i.message).slice(0, 3).join("; ") || r.message}` });
     } else if (r.kind === "conflict") {
       setBanner({ tone: "bad", text: CONFLICT_COPY[r.slug] ?? r.message });
+    } else if (isOutcomeUnknown(r)) {
+      setUnconfirmed(unconfirmedCopy(`the ${target} twin`));
     } else {
       setBanner({ tone: "bad", text: `The ${target} twin couldn't be created (${describeFailure(r)}).` });
     }
@@ -341,6 +359,7 @@ export function ItemEditor({
       router.push(`${routeBase}/${encodeURIComponent(collection.key)}`);
       return;
     }
+    if (isOutcomeUnknown(r)) { setUnconfirmed(unconfirmedCopy("the delete")); return; }
     if (r.kind === "unavailable" && r.code !== "contract_drift") goStale(r.reason);
     setBanner({ tone: "bad", text: r.kind === "conflict" ? (CONFLICT_COPY[r.slug] ?? r.message) : `Couldn't delete (${describeFailure(r)}).` });
   };
@@ -402,6 +421,14 @@ export function ItemEditor({
           <div className="wc-banner wc-banner--warn" role="status" data-testid="stale-banner">
             <span className="wc-banner__body"><strong>Couldn&apos;t refresh</strong> — showing what loaded at {formatDateTime(loadedAt)}. Save and publish are disabled until WebDesk answers again.<br /><span className="wc-muted">{stale}</span></span>
             <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={refresh} disabled={refreshing} data-testid="refresh">{refreshing ? "Refreshing…" : "Try again"}</button>
+          </div>
+        )}
+        {unconfirmed !== null && (
+          <div className="wc-banner wc-banner--warn" role="alert" data-testid="unconfirmed-banner">
+            <span className="wc-banner__body"><strong>{unconfirmed}</strong>{mode === "edit" ? " Your edits are still here." : ""}</span>
+            {mode === "edit" && (
+              <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={refresh} disabled={refreshing} data-testid="unconfirmed-reload">{refreshing ? "Reloading…" : "Reload"}</button>
+            )}
           </div>
         )}
         {readOnlyWhy && (
@@ -483,7 +510,7 @@ export function ItemEditor({
           >
             {mode === "create" ? "Create" : "Save"}
           </button>
-          {!canWrite && <span id="wc-save-why" className="wc-muted">{readOnly ? "Read-only" : "Disabled until WebDesk answers again"}</span>}
+          {!canWrite && <span id="wc-save-why" className="wc-muted">{readOnly ? "Read-only" : unconfirmed !== null && stale === null ? "Disabled until you reload" : "Disabled until WebDesk answers again"}</span>}
         </div>
       </div>
 
@@ -511,7 +538,7 @@ export function ItemEditor({
               item={item}
               version={baseVersion}
               dirty={dirty}
-              blocked={readOnly ? "Read-only." : stale !== null ? "Disabled until WebDesk answers again." : null}
+              blocked={readOnly ? "Read-only." : stale !== null ? "Disabled until WebDesk answers again." : unconfirmed !== null ? "Disabled until you reload." : null}
               initialPending={bundle?.pendingRequests ?? null}
               pendingProblem={bundle?.pendingProblem ?? null}
               initialBuild={build}
@@ -519,11 +546,17 @@ export function ItemEditor({
               stagingUrl={stagingItemUrl}
               onItemChanged={(it) => { setItem(it); }}
               onUnavailable={goStale}
+              onUnconfirmed={(what) => setUnconfirmed(unconfirmedCopy(what))}
             />
 
             <section className="wc-side-card" data-testid="lint-card">
               <h3>Placeholders</h3>
-              {lint.unresolvedTokens.length === 0 && Object.values(lint.markers).every((n) => n === 0) ? (
+              {lint.unavailable !== undefined ? (
+                // The lint could not RUN. Its empty lists are not a finding, so this is never the all-clear.
+                <p className="wc-publish__sub" role="note" data-testid="lint-unavailable">
+                  Couldn&apos;t check for placeholders. This is not a statement that there are none.
+                </p>
+              ) : lint.unresolvedTokens.length === 0 && Object.values(lint.markers).every((n) => n === 0) ? (
                 <p className="wc-publish__sub">No unresolved placeholders.</p>
               ) : (
                 <>

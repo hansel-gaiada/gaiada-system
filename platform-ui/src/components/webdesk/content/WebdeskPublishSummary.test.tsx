@@ -87,6 +87,22 @@ describe("WebdeskPublishSummary (approvals/[id], origin webdesk)", () => {
   });
 });
 
+describe("WebdeskPublishSummary: a lint that could not run is not a zero", () => {
+  const unavailableDetail = (id: string) => { const d = detailFor(id); return { ...d, data: { ...d.data, lint: { unresolvedTokens: [], markers: {}, unavailable: "the collection's stored composition is invalid" } } }; };
+  it("every item unchecked: 'couldn't be checked', no '0 unresolved tokens'", async () => {
+    get.mockImplementation(async (_u, _c, _t, _s, id) => unavailableDetail(String(id)) as never);
+    render(await WebdeskPublishSummary({ userId: "u", company: "c", toolArgs: args(2), workflowId: "content.publish" }));
+    const t = screen.getByTestId("summary-lint").textContent ?? "";
+    expect(t).toContain("couldn't be checked");
+    expect(t).not.toMatch(/\d+ unresolved token/);
+  });
+  it("some unchecked: counts what was checked and says how many were not", async () => {
+    get.mockImplementation(async (_u, _c, _t, _s, id) => (String(id) === "i1" ? unavailableDetail("i1") : detailFor(String(id))) as never);
+    render(await WebdeskPublishSummary({ userId: "u", company: "c", toolArgs: args(2), workflowId: "content.publish" }));
+    expect(screen.getByTestId("summary-lint").textContent).toMatch(/1 unresolved token.*1 couldn't be checked, so they are not counted/);
+  });
+});
+
 describe("WebdeskPublishSummaryView (pure)", () => {
   it("does not offer a diff when the requested version IS the live one", () => {
     const rows: SummaryRow[] = [{ itemId: "i", version: 2, contentHash: null, problem: null, resolved: { collectionKey: "service", slug: "s", locale: "en", publishedVersion: 2, headVersion: 2, publishState: "published", lint: { unresolvedTokens: [], markers: {} } } }];

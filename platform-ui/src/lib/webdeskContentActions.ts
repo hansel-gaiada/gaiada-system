@@ -8,6 +8,7 @@
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/unpublish
 //   POST …/sites/:tenantSlug/:siteId/items/:itemId/delete
 //   POST …/sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw  -> { approvalId, status:"cancelled" }  (WSK-59, built)
+//   POST /api/:t/modules/webdev/control/sites/:siteId/keys  {tenantSlug, envId, scope}   -> 202 {approvalId[, alreadyPending]}  (files a key.mint approval; mints NOTHING)
 //   STILL PROPOSED (WSK-60; a 404 comes back as `not_enabled` and the UI says so):
 //   POST …/sites/:tenantSlug/:siteId/rebuild-requests                       -> 202 { approvalId }
 //
@@ -24,16 +25,30 @@
 // Request bodies carry ONLY the keys §3.2 names. `tenantSlug`, `siteId` and `itemId` travel in the
 // route, never the body: Zone B 400s a body containing them (the command hash merges route params and
 // body, and a colliding key would make it ambiguous).
+//
+// ── A WRITE THAT LEAVES THE PAGE NAVIGATES FROM THE SERVER (`…AndOpenAction`) ────────────────────────
+// Measured on Next 15.5.20: a `router.push` issued right after an awaited server action is sometimes
+// dropped. The router applies the action's response (the page the action STARTED on) and refetches it,
+// and when that wins the push is discarded: the URL never changes, though the write landed. A user could
+// click "Create" and stay on the form with the item already created. So create, twin-create and restore
+// do not push from the client: on SUCCESS the action itself calls `redirect()`, and Next applies the
+// destination inside the same action response (one state commit, nothing to race). Every FAILURE still
+// comes back as the same typed `WdResult` as the plain action, and renders in place exactly as before.
+// The awaited promise of a redirecting action REJECTS with Next's redirect error; the caller treats
+// that one error as "done, navigated" (`isNextRedirect`). The destination is built here from a
+// validated route base, never taken as a free-form URL from the browser.
+import { redirect } from "next/navigation";
 import { getSessionUserId } from "./session-server";
 import { getMe } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
-  wdCall, siteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus,
+  wdCall, siteBase, controlSiteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus, parseKeyRequest,
   loadEditorBundle, getItem, pollApproval,
   type EditorBundle,
 } from "./webdeskContent";
+import { KEY_SCOPES } from "./webdeskContentModel";
 import type {
-  Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, WdResult, WebdeskApprovalRow,
+  Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, KeyRequestFiled, KeyScope, WdResult, WebdeskApprovalRow,
 } from "./webdeskContentModel";
 
 export interface SiteScope { tenantSlug: string; siteId: string }
@@ -128,6 +143,39 @@ export async function restoreVersionAction(scope: SiteScope, itemId: string, ver
   );
 }
 
+/** The Website workspace's own base (`/departments/<dept>/website/content/<tenant>/<site>`): the only
+ *  place a write may send the browser. Anything else is refused before the write. */
+const ROUTE_BASE_RE = /^\/departments\/[^/?#\s]+\/website\/content\/[^/?#\s]+\/[^/?#\s]+$/;
+/** An editor URL under that base: `<base>/<collection>/<slug>[?locale=<tag>]` (RestoreButton's `editorHref`). */
+const EDITOR_HREF_RE = /^\/departments\/[^/?#\s]+\/website\/content\/[^/?#\s]+\/[^/?#\s]+\/[^/?#\s]+\/[^/?#\s]+(\?locale=[A-Za-z0-9-]+)?$/;
+
+/** What a write that leaves the page can RETURN: only its failures (success never returns: it redirects). */
+export type WriteFailure = Exclude<WdResult<ItemWriteResult>, { kind: "ok" }>;
+/** The answer when the destination is not a page of the Website workspace (refused before anything is written). */
+const badDestination: WriteFailure = { kind: "invalid", issues: [], message: "Not a page in the Website workspace." };
+
+const editorPath = (routeBase: string, collectionKey: string, slug: string, locale: string): string =>
+  `${routeBase}/${encodeURIComponent(collectionKey)}/${encodeURIComponent(slug)}?locale=${encodeURIComponent(locale)}`;
+
+/** Create (an item, or a locale twin via `twinOf`), then OPEN it: success redirects from the server (see the
+ *  header); every failure is `createItemAction`'s own typed result, unchanged. */
+export async function createItemAndOpenAction(scope: SiteScope, input: CreateInput, routeBase: string): Promise<WriteFailure> {
+  if (typeof routeBase !== "string" || !ROUTE_BASE_RE.test(routeBase)) return badDestination;
+  const r = await createItemAction(scope, input);
+  if (r.kind !== "ok") return r;
+  redirect(editorPath(routeBase, input.collectionKey, r.data.item.slug, r.data.item.locale));
+}
+
+/** Restore a version as the new draft, then OPEN the editor: same contract as `createItemAndOpenAction`. */
+export async function restoreVersionAndOpenAction(
+  scope: SiteScope, itemId: string, version: number, baseVersion: number, editorHref: string, note?: string,
+): Promise<WriteFailure> {
+  if (typeof editorHref !== "string" || !EDITOR_HREF_RE.test(editorHref)) return badDestination;
+  const r = await restoreVersionAction(scope, itemId, version, baseVersion, note);
+  if (r.kind !== "ok") return r;
+  redirect(editorHref);
+}
+
 export async function unpublishItemAction(scope: SiteScope, itemId: string, expectedPublishedVersion: number): Promise<WdResult<{ item: ItemRef }>> {
   const c = await ctx(); if (!isCtx(c)) return c;
   if (!scopeOk(scope) || !clean(itemId) || !Number.isInteger(expectedPublishedVersion)) return badScope;
@@ -174,6 +222,24 @@ export async function requestRebuildAction(scope: SiteScope): Promise<WdResult<{
   const c = await ctx(); if (!isCtx(c)) return c;
   if (!scopeOk(scope)) return badScope;
   return wdCall(`${siteBase(c.company, scope.tenantSlug, scope.siteId)}/rebuild-requests`, c.userId, parseApprovalId, { method: "POST" });
+}
+
+// ── API keys ─────────────────────────────────────────────────────────────────────────────────────
+
+/** "Request an API key": FILES one key.mint approval for (site, environment, scope). Nothing is minted here — a DIFFERENT authorised
+ *  user approves it, and the key is shown to THAT person once (see `decideKeyMintApproval`). The route is the control plane's, keyed by
+ *  `siteId` alone with `tenantSlug` in the body (unlike every content route above). `alreadyPending` means the BFF returned an open
+ *  request for the same (site, environment, scope) instead of queueing a second one. A 403 (Cerbos `promote`) comes back as
+ *  `{ kind: "forbidden" }`, a foreign site as `not_found/site-not-found`, an environment that is not this site's as
+ *  `not_found/environment-not-found`. */
+export async function requestKeyAction(scope: SiteScope, envId: string, keyScope: KeyScope): Promise<WdResult<KeyRequestFiled>> {
+  const c = await ctx(); if (!isCtx(c)) return c;
+  if (!scopeOk(scope)) return badScope;
+  if (!clean(envId) || !KEY_SCOPES.includes(keyScope)) return { kind: "invalid", issues: [], message: "Choose an environment and a scope." };
+  return wdCall(
+    `${controlSiteBase(c.company, clean(scope.siteId))}/keys`, c.userId, parseKeyRequest,
+    json({ tenantSlug: clean(scope.tenantSlug), envId: clean(envId), scope: keyScope }),
+  );
 }
 
 // ── Client-driven re-reads (poll / refresh) ──────────────────────────────────────────────────────

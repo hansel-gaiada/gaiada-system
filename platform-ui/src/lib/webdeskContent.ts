@@ -11,6 +11,8 @@ import "server-only";
 //   existing (core/automation-approvals.controller.ts; needs `automation_approval:read`, so a requester
 //   without it gets 403 — `pollApproval` falls back to the publish-requests route above):
 //     GET  /api/:company/automation-approvals/:id
+//   control plane (webdesk-control.controller.ts — BUILT): POST /api/:company/modules/webdev/control/sites/:siteId/keys
+//     files a key.mint approval (`parseKeyRequest`); the approver's decide response carries the key ONCE (`parseKeyMintDecision`).
 //   STILL PROPOSED — NOT served (WSK-60 owns them); a 404 here is `not_enabled/not_served`, never drift:
 //     GET  …/sites/:tenantSlug/:siteId/build-status
 //     POST …/sites/:tenantSlug/:siteId/rebuild-requests
@@ -50,6 +52,7 @@ import {
   PRIMITIVE_NAMES,
   type ApprovalStatus, type BuildStatus, type CollectionComposition, type CollectionSummary,
   type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail,
+  type KeyMintOutcome, type KeyRequestFiled, type KeyScope,
   type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type Page,
   type PrimitiveName, type PublishRequestRow, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
   type VersionContent, type VersionFull, type VersionListBody, type WdResult,
@@ -252,14 +255,19 @@ function parseBlock(v: unknown, path: string): Block {
 
 export function parseLint(v: unknown, path: string): Lint {
   const o = obj(v, path);
+  // `unavailable` (a reason string) means the lint could not RUN. Kept only when present, so every existing result is
+  // byte-identical. A non-string truthy value still means "could not run" — it must not be read as a clean lint.
+  const flag = "unavailable" in o && o.unavailable !== undefined && o.unavailable !== null && o.unavailable !== false;
+  const unavailable = flag ? (typeof o.unavailable === "string" && o.unavailable !== "" ? o.unavailable : "lint_unavailable") : undefined;
+  const withFlag = (l: Lint): Lint => (unavailable === undefined ? l : { ...l, unavailable });
   if (!("placeholders" in o) || o.placeholders === undefined || o.placeholders === null) {
-    return { unresolvedTokens: [], markers: {} }; // the collection declares no placeholder rules
+    return withFlag({ unresolvedTokens: [], markers: {} }); // the collection declares no placeholder rules
   }
   const p = obj(o.placeholders, `${path}.placeholders`);
-  return {
+  return withFlag({
     unresolvedTokens: key(p, "unresolvedTokens", arr(str), `${path}.placeholders`),
     markers: key(p, "markers", wire.record(int), `${path}.placeholders`),
-  };
+  });
 }
 
 function parseGroupMember(v: unknown, path: string): GroupMember {
@@ -329,6 +337,54 @@ export function parseApprovalId(v: unknown): { approvalId: string } {
 export function parseWithdraw(v: unknown): { approvalId: string; status: string } {
   const o = obj(v, "withdraw");
   return { approvalId: key(o, "approvalId", str, "withdraw"), status: key(o, "status", str, "withdraw") };
+}
+
+/** `POST …/control/sites/:siteId/keys` -> 202. STRICT, unlike the neighbouring parsers: this answers "was a key requested", and the
+ *  two copies the UI shows ("Request filed" / "Already requested") hang on `alreadyPending`, so a body that carries anything else
+ *  (or a flag that is not exactly `true`) is drift, never a quiet "filed". The route omits `alreadyPending` on a new filing. */
+export function parseKeyRequest(v: unknown): KeyRequestFiled {
+  const o = obj(v, "key-request");
+  for (const k of Object.keys(o)) {
+    if (k !== "approvalId" && k !== "alreadyPending") throw new WireDrift(`key-request.${k}`, "approvalId|alreadyPending", o[k]);
+  }
+  const approvalId = key(o, "approvalId", str, "key-request");
+  if ("alreadyPending" in o && o.alreadyPending !== true) throw new WireDrift("key-request.alreadyPending", "true or absent", o.alreadyPending);
+  return { approvalId, alreadyPending: o.alreadyPending === true };
+}
+
+/** The decide façade's body for a key.mint row: `{ ok: true, webdesk?: {command, executionStatus, apiKeyId, envId, scope, plaintextOnce, error?} }`.
+ *  `null` = nothing in-band to report (a rejection carries no `webdesk`). A `WireDrift` thrown here names the PATH and the TYPE it
+ *  got, never the value (`describeGot`), so a malformed `plaintextOnce` cannot leak into an error message or a log. */
+export function parseKeyMintDecision(v: unknown): KeyMintOutcome | null {
+  const o = obj(v, "decide");
+  if (!("webdesk" in o) || o.webdesk === undefined || o.webdesk === null) return null;
+  const w = obj(o.webdesk, "decide.webdesk");
+  const command = key(w, "command", str, "decide.webdesk");
+  if (command !== "key.mint") throw new WireDrift("decide.webdesk.command", "key.mint", command);
+  const status = key(w, "executionStatus", str, "decide.webdesk");
+  const scopeOf = (x: unknown, path: string): KeyScope => {
+    const s = str(x, path);
+    if (s !== "read" && s !== "write") throw new WireDrift(path, "read|write", s);
+    return s;
+  };
+  if (status === "executed") {
+    return {
+      status: "executed",
+      envId: key(w, "envId", str, "decide.webdesk"),
+      scope: key(w, "scope", scopeOf, "decide.webdesk"),
+      apiKeyId: opt(w, "apiKeyId", strN, "decide.webdesk") ?? null,
+      plaintextOnce: key(w, "plaintextOnce", strN, "decide.webdesk"),
+    };
+  }
+  if (status === "failed") {
+    return {
+      status: "failed",
+      envId: opt(w, "envId", str, "decide.webdesk") ?? null,
+      scope: opt(w, "scope", scopeOf, "decide.webdesk") ?? null,
+      error: key(w, "error", str, "decide.webdesk"),
+    };
+  }
+  throw new WireDrift("decide.webdesk.executionStatus", "executed|failed", status);
 }
 
 export function parseBuildStatus(v: unknown): BuildStatus {
@@ -416,7 +472,9 @@ function parseIssues(ext: Record<string, unknown>): Issue[] | null {
 }
 
 // `approval_not_found` is the withdraw route's 404 (an id that is not a publish request for THIS site): a real answer, not "not served".
-const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found", "version-not-found", "approval_not_found"]);
+// `environment-not-found` is the key-request route's 404 for an environment that is not on THIS site: a real answer, and no existing
+// route emits it, so adding it changes no existing case.
+const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found", "version-not-found", "approval_not_found", "environment-not-found"]);
 
 export function resultFromError(e: unknown): WdResult<never> {
   if (e instanceof WireDrift) return { kind: "unavailable", code: "contract_drift", reason: e.message };
@@ -479,6 +537,9 @@ const enc = encodeURIComponent;
 export const contentBase = (company: string) => `/api/${enc(company)}/modules/webdev/content`;
 export const siteBase = (company: string, tenantSlug: string, siteId: string) =>
   `${contentBase(company)}/sites/${enc(tenantSlug)}/${enc(siteId)}`;
+/** The control plane's site route (`webdesk-control.controller.ts`): keyed by `siteId` ALONE, with `tenantSlug` in the body. */
+export const controlSiteBase = (company: string, siteId: string) =>
+  `/api/${enc(company)}/modules/webdev/control/sites/${enc(siteId)}`;
 
 // ── Readers ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -731,4 +792,17 @@ export async function loadSiteContext(userId: string, company: string, tenantSlu
   const site = tenant?.sites.find((s) => s.siteId === siteId);
   if (!tenant || !site) return { kind: "not_found", slug: "site-not-found" };
   return { kind: "ok", data: { tenant, site, collections: collections.data } };
+}
+
+/** Names for a key.mint approval's environment and site, from the wall's own site read. COSMETIC, like `resolveAuthorNames`: the
+ *  approval's `tool_args` carry only ids, so the summary reads better with names, and a failed read yields `null` (the summary then
+ *  shows the ids) rather than taking the approval page down. */
+export async function findKeyTarget(
+  userId: string, company: string, tenantSlug: string, siteId: string, envId: string,
+): Promise<{ siteName: string; environmentName: string | null } | null> {
+  const sites = await listSites(userId, company);
+  if (sites.kind !== "ok") return null;
+  const site = sites.data.tenants.find((t) => t.slug === tenantSlug)?.sites.find((s) => s.siteId === siteId);
+  if (!site) return null;
+  return { siteName: site.name, environmentName: site.environments.find((e) => e.envId.toLowerCase() === envId.toLowerCase())?.name ?? null };
 }

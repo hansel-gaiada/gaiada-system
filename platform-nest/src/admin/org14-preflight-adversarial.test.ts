@@ -391,9 +391,24 @@ describe.skipIf(!RUN)("ORG-14 pre-flag adversarial gate", () => {
     const memB = await app.inject({ method: "GET", url: `/api/${s.B}/members?module=hr`, headers: asUser(s.uStf) });
     expect(memB.statusCode).toBe(200);
 
-    // (b) automation-approvals?origin=hr forge by a plain hr_staff (NOT hr_manager) → 403.
+    // (b) automation-approvals?origin=hr forge by a plain hr_staff (NOT hr_manager). The forged module
+    //     still buys NOTHING: module_manager needs hr_manager, so staff stay off the ELEVATED tier.
+    //     T7 (WebDesk M3) changed what "off the elevated tier" looks like on the LIST: it is no longer a
+    //     403 but the requester's own-rows-only view, so this pins the real property — no row that
+    //     staff did not file themselves comes back (hr-origin or otherwise) — rather than the old status.
     const apprForge = await app.inject({ method: "GET", url: `/api/${s.B}/automation-approvals?origin=hr`, headers: asUser(s.uStf) });
-    expect(apprForge.statusCode).toBe(403); // module_manager rule needs hr_manager; staff has none
+    expect(apprForge.statusCode).toBe(200);
+    const forgeRows = apprForge.json() as Array<{ requested_by: string | null }>;
+    expect(forgeRows.every((r) => r.requested_by === s.uStf)).toBe(true);
+    // The row-level read still 403s: the forged attr cannot open another user's hr approval.
+    const hrRow = await adminPool().query<{ id: string }>(
+      `SELECT id FROM automation_approvals WHERE tenant_id = $1 AND origin = 'hr' AND (requested_by IS DISTINCT FROM $2) LIMIT 1`,
+      [s.B, s.uStf],
+    );
+    if (hrRow.rows[0]) {
+      const detailForge = await app.inject({ method: "GET", url: `/api/${s.B}/automation-approvals/${hrRow.rows[0].id}`, headers: asUser(s.uStf) });
+      expect(detailForge.statusCode).toBe(403);
+    }
     // the unit MANAGER (hr_manager@B) legitimately can read the hr slice.
     const apprMgr = await app.inject({ method: "GET", url: `/api/${s.B}/automation-approvals?origin=hr`, headers: asUser(s.uMgr) });
     expect(apprMgr.statusCode).toBe(200);
