@@ -20,7 +20,14 @@ export default defineConfig({
   // WSK-44b: `webdesk-content-ui-contract.test.ts` loads platform-ui's REAL `lib/webdeskContent*.ts` (they begin with
   // `import "server-only"`, which throws outside a react-server build) so its parsers judge the real BFF's bodies.
   // Nothing in platform-nest imports `server-only`, so this alias is inert everywhere else.
-  resolve: { alias: { "server-only": path.resolve(__dirname, "src/testing/server-only-stub.ts") } },
+  // `next/navigation` likewise: the same test imports platform-ui's action module, which imports `redirect`, and this
+  // package's CI job does not install platform-ui's node_modules (see src/testing/next-navigation-stub.ts).
+  resolve: {
+    alias: {
+      "server-only": path.resolve(__dirname, "src/testing/server-only-stub.ts"),
+      "next/navigation": path.resolve(__dirname, "src/testing/next-navigation-stub.ts"),
+    },
+  },
   test: {
     globals: true,
     environment: "node",
