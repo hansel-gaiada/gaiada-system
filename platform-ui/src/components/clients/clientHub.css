@@ -69,10 +69,9 @@
   border-bottom-color: var(--status-warning);
 }
 .ch-tab__staff {
-  font: 700 9px/1 var(--font-body);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 3px 5px;
+  font: 700 10px/1 var(--font-body);
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
   border: 1px dashed currentColor;
 }
 
@@ -100,8 +99,7 @@
   margin: 0 0 6px;
   font: 600 12px/1.4 var(--font-body);
   color: var(--ink-muted);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 /* ── Ball columns ──────────────────────────────────────────────────────────────────────────────── */
