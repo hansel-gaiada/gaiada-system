@@ -20,14 +20,17 @@ export interface AttributionSource {
   agt?: string;
   req?: string;
   apr?: string;
+  /** WSK-49b: the principal is a client editor (the signed assertion carried `ce: true`). */
+  clientEditor?: boolean;
 }
 
-/** content_versions.attribution: {pk, agt?, req?, apr?}. Only the fields the principal carries. */
+/** content_versions.attribution: {pk, agt?, req?, apr?, ce?}. Only the fields the principal carries (`ce: "true"` marks a client editor's write, WSK-49b). */
 export function attributionOf(p: AttributionSource): Record<string, string> {
   const a: Record<string, string> = { pk: p.pk };
   if (p.agt) a.agt = p.agt;
   if (p.req) a.req = p.req;
   if (p.apr) a.apr = p.apr;
+  if (p.clientEditor === true) a.ce = "true";
   return a;
 }
 

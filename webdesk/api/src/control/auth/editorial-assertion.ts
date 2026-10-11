@@ -27,6 +27,13 @@
 //   9. cmd ≠ route @Command, cmh ≠ recomputed, apr ≠ WS4         403 -command-mismatch
 // The resolver then consumes the jti (401 -replayed / 503 -store-unavailable). Unknown extra claims
 // are ignored (JWT convention); every claim this file reads is validated.
+//
+// WSK-49b adds ONE optional claim, `ce` (boolean, "client editor", between `apr` and `iat` on the wire).
+// `ce: true` marks the principal as a client: the write plane then holds it to the client-editable paths of
+// a composition (WSK-D59) and to the client command allow-list (./client-editor.ts). Absent or false means
+// a staff principal, exactly as before. A present `ce` that is not a boolean is 401 -claims (step 6), never
+// coerced and never ignored: "true" must not silently read as "not a client". The marker only restricts, and
+// being signed it can neither be added nor stripped in transit. It is not part of `cmh`.
 import { compactVerify, errors as joseErrors } from "jose";
 import type { CommandName } from "../command-types";
 import { ControlProblem } from "../content/content-problem";
@@ -96,6 +103,8 @@ export interface EditorialClaims {
   cmh: string;
   req?: string;
   apr?: string;
+  /** WSK-49b: "client editor". Optional; a present value is always a boolean. */
+  ce?: boolean;
   iat: number;
   exp: number;
   jti: string;
@@ -211,6 +220,7 @@ export async function verifyEditorialAssertion(
     }
   }
   if ((p.pk === "agent") !== (p.agt !== undefined)) throw refuse401(EDITORIAL_SLUG.claims, "agt is present iff pk = agent");
+  if (p.ce !== undefined && typeof p.ce !== "boolean") throw refuse401(EDITORIAL_SLUG.claims, "ce must be a boolean when present");
   if (typeof p.cmh !== "string" || !CMH_RE.test(p.cmh)) throw refuse401(EDITORIAL_SLUG.claims, "cmh must be a lowercase sha256 hex digest");
   if (typeof p.jti !== "string" || !UUID_V4_RE.test(p.jti)) throw refuse401(EDITORIAL_SLUG.claims, "jti must be a UUID v4");
   if (!Number.isSafeInteger(p.iat) || !Number.isSafeInteger(p.exp)) {

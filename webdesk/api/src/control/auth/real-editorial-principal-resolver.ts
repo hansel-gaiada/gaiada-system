@@ -124,6 +124,8 @@ export class RealEditorialPrincipalResolver implements EditorialPrincipalResolve
     if (claims.agt !== undefined) principal.agt = claims.agt;
     if (claims.req !== undefined) principal.req = claims.req;
     if (claims.apr !== undefined) principal.apr = claims.apr;
+    // WSK-49b: only `ce: true` adds anything; absent or false leaves the principal exactly as it was.
+    if (claims.ce === true) principal.clientEditor = true;
     return principal;
   }
 

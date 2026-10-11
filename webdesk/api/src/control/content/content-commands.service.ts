@@ -28,6 +28,19 @@
 // Every public method takes an EditorialCommandContext, which holds the EditorialPrincipal that
 // EditorialAssertionGuard resolved; audit actor, content_versions.created_by and last_published_by
 // are that principal's `sub`, never the control channel's service identity.
+//
+// CLIENT EDITORS (WSK-49b, ruling WSK-D59). A principal whose signed assertion carries `ce: true` is held to
+// two more checks, and ONLY that principal: without the marker every line added for WSK-49 is a no-op.
+//   * commands: assertClientMayRun (../auth/client-editor.ts) at the top of every public method, on top of
+//     the guard's own call: a client may not delete, unpublish or schedule (media.delete is the media
+//     service's).
+//   * paths: create / update / restoreVersion compute which paths of the item's content the write changes
+//     (create: against a blank item; update and restore: against the item's HEAD version) and refuse the
+//     WHOLE write with 422 field-not-client-editable, listing the JSON pointers, unless every one is
+//     client-editable under the vocabulary's one rule (delivery/vocabulary/client-editable.ts). The check
+//     runs BEFORE content validation, so an unauthorised change is never answered as an ordinary 422 about
+//     something else, and inside the command's transaction, so a refusal writes nothing (not even an audit
+//     row: the envelope rolls back).
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -44,9 +57,12 @@ import type {
 } from "../../tenant-webhooks/tenant-webhook-event.types";
 import { validateCollectionComposition, type CollectionComposition } from "../../delivery/vocabulary/composition";
 import { fieldsBlockOf } from "../../delivery/vocabulary/item-fields";
+import { clientCreateViolations, clientEditViolations, collectionAcceptsClientCreate } from "../../delivery/vocabulary/client-editable";
+import { assertClientMayRun, fieldNotClientEditable, isClientEditor } from "../auth/client-editor";
 import {
   assembleItemContent,
   contentHash,
+  fieldsCarrierFor,
   isPlainObject,
   sizeViolation,
   slugIssue,
@@ -283,13 +299,17 @@ export class ContentCommandsService {
     auditArgs: AuditArgs,
     effect: (client: PoolClient) => Promise<EffectOutcome<R>>,
   ): Promise<R & { replayed: boolean }> {
+    // WSK-49b: a client's request never shares an idempotency record with a staff request of the same key and
+    // body (a replay would otherwise hand a client the stored result of a write it was not allowed to make),
+    // and its audit row says so. Both are untouched for every other principal.
+    const client = isClientEditor(ctx.principal);
     return this.envelope.run<R>({
       command: ctx.command,
       scope: { kind: "tenant", tenantId: ctx.tenant.id },
       scopeKey: `${ctx.tenant.slug}:${ctx.command}:${ctx.idempotencyKey}`,
-      requestHash: computeCommandHash(ctx.command, requestArgs),
+      requestHash: computeCommandHash(ctx.command, client ? { ...requestArgs, __clientEditor: true } : requestArgs),
       actor: ctx.principal.sub,
-      auditArgs,
+      auditArgs: client ? { ...auditArgs, clientEditor: true } : auditArgs,
       ws4ApprovalId: ctx.ws4ApprovalId,
       effect,
       mapError: mapDbError,
@@ -409,6 +429,52 @@ export class ContentCommandsService {
     return lintPlaceholders(rules, blocks, registry);
   }
 
+  /** The item's HEAD content as a version holds it. A pre-0009 row (head 0) has no version: its projection is its head. */
+  private async headContent(client: PoolClient, item: ItemRow): Promise<{ blocks: unknown; seo: unknown }> {
+    if (item.head_version === 0) return { blocks: item.blocks, seo: item.seo ?? {} };
+    const v = await this.loadVersion(client, item.id, item.head_version);
+    if (!v) throw new Error(`content item ${item.id} has head_version ${item.head_version} but no such version row`);
+    return { blocks: v.blocks, seo: v.seo };
+  }
+
+  /**
+   * WSK-49b — UPDATE / RESTORE by a client editor: every path the new content changes against the HEAD
+   * version must be client-editable (WSK-D59), else 422 field-not-client-editable for the whole write. A
+   * stale baseVersion is the ordinary 409 first (the head moved, so a diff against it would blame the
+   * client for someone else's change). A no-op for any other principal.
+   */
+  private async assertClientEdit(
+    client: PoolClient,
+    ctx: EditorialCommandContext,
+    item: ItemRow,
+    composition: CollectionComposition,
+    baseVersion: number,
+    blocks: unknown,
+    seo: unknown,
+  ): Promise<void> {
+    if (!isClientEditor(ctx.principal)) return;
+    if (baseVersion !== item.head_version) throw this.versionConflict(item, await this.headRef(client, item));
+    const violations = clientEditViolations(composition, await this.headContent(client, item), { blocks, seo });
+    if (violations.length > 0) throw fieldNotClientEditable(violations);
+  }
+
+  /**
+   * WSK-49b — CREATE by a client editor: allowed only in a collection where something is client-editable,
+   * never in the redirect system collection (its values live under seo, which is never client-editable), and
+   * every non-editable part of the content must be absent or its default (seo empty). A no-op for any other principal.
+   */
+  private assertClientCreate(ctx: EditorialCommandContext, collectionKey: string, composition: CollectionComposition, blocks: unknown, seo: unknown): void {
+    if (!isClientEditor(ctx.principal)) return;
+    if (fieldsCarrierFor(collectionKey) === "seo.redirect" || !collectionAcceptsClientCreate(composition)) {
+      throw fieldNotClientEditable(
+        ["/collectionKey"],
+        `Nothing in collection "${collectionKey}" is client-editable, so a client editor cannot create an item in it. Nothing was written.`,
+      );
+    }
+    const violations = clientCreateViolations(composition, { blocks, seo });
+    if (violations.length > 0) throw fieldNotClientEditable(violations);
+  }
+
   private versionConflict(item: ItemRow, head: VersionRef): ControlProblem {
     return problems.conflict(
       "version-conflict",
@@ -453,6 +519,7 @@ export class ContentCommandsService {
   // content.create
   // ==============================================================================================
   async createItem(ctx: EditorialCommandContext, input: CreateItemInput): Promise<ItemWriteResult> {
+    assertClientMayRun(ctx.principal, "content.create");
     const itemId = randomUUID();
     return this.execute<Omit<ItemWriteResult, "replayed">>(
       ctx,
@@ -479,6 +546,7 @@ export class ContentCommandsService {
         }
         const assembled = assembleItemContent(col.key, composition, input);
         issues.push(...assembled.issues);
+        this.assertClientCreate(ctx, col.key, composition, assembled.blocks, assembled.seo);
         this.contentChecks(composition, assembled.blocks, assembled.seo, issues);
 
         // -- state (409) --------------------------------------------------------------------------
@@ -558,6 +626,7 @@ export class ContentCommandsService {
   // content.update / content.restoreVersion — both append a version from a full {blocks, seo}
   // ==============================================================================================
   async updateItem(ctx: EditorialCommandContext, itemId: string, input: UpdateItemInput): Promise<ItemWriteResult> {
+    assertClientMayRun(ctx.principal, "content.update");
     return this.execute<Omit<ItemWriteResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },
@@ -567,6 +636,7 @@ export class ContentCommandsService {
         this.assertNotDeleted(item);
         const composition = compositionOf(item.collection_key, item.composition);
         const assembled = assembleItemContent(item.collection_key, composition, input);
+        await this.assertClientEdit(client, ctx, item, composition, input.baseVersion, assembled.blocks, assembled.seo);
         this.contentChecks(composition, assembled.blocks, assembled.seo, assembled.issues);
         return { result: await this.writeFromContent(client, ctx, item, composition, input.baseVersion, assembled.blocks, assembled.seo, input.note) };
       },
@@ -578,6 +648,7 @@ export class ContentCommandsService {
     itemId: string,
     input: { version: number; baseVersion: number; note?: string },
   ): Promise<ItemWriteResult> {
+    assertClientMayRun(ctx.principal, "content.restoreVersion");
     return this.execute<Omit<ItemWriteResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },
@@ -589,6 +660,7 @@ export class ContentCommandsService {
         if (!source) throw problems.conflict("version-not-found", "Version not found", `Version ${input.version} does not exist for this item.`);
         const composition = compositionOf(item.collection_key, item.composition);
         // Valid when it was written is not valid now if the composition changed since: re-check.
+        await this.assertClientEdit(client, ctx, item, composition, input.baseVersion, source.blocks, source.seo);
         const issues = validateStoredContent(item.collection_key, composition, source.blocks, source.seo);
         this.contentChecks(composition, source.blocks, source.seo, issues);
         return { result: await this.writeFromContent(client, ctx, item, composition, input.baseVersion, source.blocks, source.seo, input.note) };
@@ -625,6 +697,7 @@ export class ContentCommandsService {
     ctx: EditorialCommandContext,
     input: { items: { itemId: string; version: number }[]; note?: string },
   ): Promise<PublishResult> {
+    assertClientMayRun(ctx.principal, "content.publish");
     return this.execute<Omit<PublishResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, ...input },
@@ -689,6 +762,7 @@ export class ContentCommandsService {
   // content.schedule (HIGH)
   // ==============================================================================================
   async schedule(ctx: EditorialCommandContext, input: ScheduleInput): Promise<ScheduleResult> {
+    assertClientMayRun(ctx.principal, "content.schedule");
     return this.execute<Omit<ScheduleResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, ...input },
@@ -818,6 +892,7 @@ export class ContentCommandsService {
   // content.unpublish (MEDIUM) — a takedown never waits for a second person (D46)
   // ==============================================================================================
   async unpublish(ctx: EditorialCommandContext, itemId: string, input: { expectedPublishedVersion: number }): Promise<ItemStateResult> {
+    assertClientMayRun(ctx.principal, "content.unpublish");
     return this.execute<Omit<ItemStateResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },
@@ -853,6 +928,7 @@ export class ContentCommandsService {
   // content.delete (MEDIUM) — a SOFT delete of a non-live item; history is kept
   // ==============================================================================================
   async deleteItem(ctx: EditorialCommandContext, itemId: string, input: { baseVersion: number }): Promise<ItemStateResult> {
+    assertClientMayRun(ctx.principal, "content.delete");
     return this.execute<Omit<ItemStateResult, "replayed">>(
       ctx,
       { tenantSlug: ctx.tenant.slug, siteId: ctx.siteId, itemId, ...input },

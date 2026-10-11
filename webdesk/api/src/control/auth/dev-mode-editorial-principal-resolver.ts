@@ -6,6 +6,7 @@
 // Header `x-webdesk-editorial-principal`, one of:
 //   - a bare subject:   "user-123"                     -> { sub: "user-123", pk: "human" }
 //   - a JSON object:    {"sub":"bot-1","pk":"agent","agt":"webdev-writer","req":"user-9","apr":"…"}
+//     (WSK-49b: plus an optional boolean "ce", the client-editor marker the signed assertion carries)
 // Missing or unusable -> 401 editorial-assertion-missing / -malformed, the same slugs the real
 // verifier uses, so a test written against this stub asserts the real contract's refusal shapes.
 import { Injectable } from "@nestjs/common";
@@ -63,6 +64,11 @@ export class DevModeEditorialPrincipalResolver implements EditorialPrincipalReso
     }
     if ((principal.pk === "agent") !== (principal.agt !== undefined)) {
       throw malformed("agt is present iff pk = agent");
+    }
+    // WSK-49b: the same optional boolean the signed assertion carries (a non-boolean is refused, never coerced).
+    if (parsed.ce !== undefined) {
+      if (typeof parsed.ce !== "boolean") throw malformed("ce must be a boolean when present");
+      if (parsed.ce) principal.clientEditor = true;
     }
     return principal;
   }
