@@ -57,14 +57,15 @@ other sessions are taking.
 | **M5-G2** | Counsel reviews the addendum; the owner confirms retention and controller entity | **owner** | — | after G1 |
 | **M5-G3** | The site's `/privacy-policy/` page (EN + ID) from the addendum's notice draft, linked from the banner | with the site session | — | after G1; before launch |
 | **M5-G4** | Vendor register rows: Umami, its geo source, the phase 5 IP/company data source | Haiku | — | with A3 / V1 |
-| **M5-G5** | WSK-38 data-subject command covers visitor data: Umami sessions, submissions, leads, replay | Sonnet, Opus review | — | after A3, L4 |
+| **M5-G5** | Data-subject rights across the website's data (addendum §9.3): WSK-38 matches a normalised phone as well as email; a platform-nest `privacy` find/export/erase for `agency_leads` and AD-1, which scrubs the person's fields and keeps the row; retention on `agency_leads` and AD-1; a hashed suppression list so an erased person is not re-imported or re-uploaded; one request fans out to every system | Sonnet, Opus review | platform-nest timestamped | before L4 goes live |
+| **M5-G6** | Server-side consent log (addendum R-V3): the banner's choice is recorded under a random consent id (version, categories, time), so consent can be proven; withdrawal deletes the server-side profile | Sonnet, Opus review | its own | with A3 |
 | **M5-A3** | Umami deploy (D66): compose project, own Postgres, egress default-deny, limits, collector-only nginx vhost, admin UI unpublished, nightly backup, a sumopod probe, runbook. Server work by the orchestrator | Sonnet (compose, runbook), Opus review | Umami's own | after M4's CPU decision + the CNAME |
 | **M5-A4** | ERP read path: `search` pulls Umami summaries with the read-only token (env through compose `environment:`), BFF + MCP tools, an **Analytics** tab in the Website workspace (section map, sources, CTA and form funnel) | Sonnet, Opus review | — | after A3 |
 | **M5-A5** | Site tracker sends the event list to Umami as custom events (cookieless, aggregate, D67); the host CSP allows the collector | with the site session | — | after A3; live after G2 |
-| **M5-L1** | gaiada.com's contact, audit and onboard forms as WebDesk form definitions (field ids equal to the site's; consent text and version; retention; live Turnstile keys); the site moves off Web3Forms | Sonnet; the site part with the site session | — | wave 1 |
-| **M5-L2** | Attribution as a first-class, allow-listed, size-capped member of a submission (landing page, first and last touch, `utm_*`, click ids, external referrer, sections seen); stored in its own column; in the tenant webhook; the Zone B envelope stays ids-only | Sonnet, Opus review | WebDesk next | wave 1 |
+| **M5-L1** | gaiada.com's contact, audit and onboard forms as WebDesk form definitions (field ids equal to the site's; consent text and version; retention; live Turnstile keys); the site moves off Web3Forms and shows a consent notice on each form (the API requires `consent: true`; `FormShell` has no notice today). **Defects found 2026-10-11:** `data_subject_ref` is taken only from a field named `email`, but the site's ids are `email_address` and `contact_email`, so WSK-38 cannot find gaiada.com's submitters; and the forms path has no PAN/national-ID scrub (AD-1 has `scrubText`) | Sonnet, Opus review; the site part with the site session | — | wave 1 |
+| **M5-L2** | Attribution as a first-class, allow-listed, size-capped member of a submission (landing page, first and last touch, `utm_*`, click ids, external referrer, sections seen), plus a **snapshot of the visitor's marketing consent** (given or not, banner version, time) that P2–P4 require before any upload; stored in their own columns; in the tenant webhook; the Zone B envelope stays ids-only | Sonnet, Opus review | WebDesk next | wave 1 |
 | **M5-L4** | `form.received` → `agency_leads`: the ERP fetches the submission over the authenticated API (never trusts the event as data), maps it, and creates the lead idempotently on the submission id; `source` gains `web`; attribution and submission id stored on the lead; an MCP tool for the same action | Sonnet, Opus review | platform-nest timestamped | after L1, L2, M3's Zone B bridge box; live after G2 |
-| **M5-L5** | Staff alert for a new web lead through wa-chat-bot (org name and a link only, never the message body) | Sonnet | — | after L4 |
+| **M5-L5** | Staff alert for a new web lead through wa-chat-bot (lead id, first name and a link only, never the message body), to a group outside the work-summary bot's ingestion (addendum R-V13) | Sonnet | — | after L4 |
 | **M5-L6** | A **Leads** tab in the Website workspace: submissions, attribution, the lead's ERP status | Sonnet | — | after L4 |
 | **M5-W1** | Writers' room roles: writer, editor, SEO reviewer, translator, publisher on `webdesk_content_item`, as data-driven grants using the carried `collectionKey`/`locale` (aligned with the IAM program's roles-as-data); six-artifact Cerbos work | Opus design, Sonnet build, Opus review | platform-nest timestamped | after O-4 |
 | **M5-W2** | Review flow: brief → draft → review → SEO/AEO sign-off → approve → schedule → publish, as an editorial state on the item version in WebDesk's control plane (`/v1` untouched); publish stays WS4 | Opus design, Sonnet build, Opus review | WebDesk next | after W1 design |
@@ -98,7 +99,9 @@ Cerbos restart or a deploy. Release numbers are claimed one step at a time.
 | O-2 | The collector's name under `erp.gaiada.com` (proposed `insights.erp.gaiada.com`, a CNAME to `aicenter.erp.gaiada.com`) and its record in the gaiada.com zone | **owner** (DNS) | A3 |
 | O-3 | Counsel for the addendum: who, and when | **owner** | G2, and everything live after it |
 | O-4 | Freelance writers get ERP logins (staff-side, writers' room only)? The plan assumes yes; it adds a new kind of external principal | **owner** | W1 |
-| O-5 | Does our own replay (V6) replace Clarity, or run beside it? | **owner** | V6 |
+| O-5 | Does our own replay (V6) replace Clarity, or run beside it? Until then, Clarity is a session recorder filed under "analytics", so the banner must say so, and its masking must cover typed input (addendum §11.10) | **owner** | V6; the banner wording before launch |
+| O-9 | **GA4 advanced vs basic Consent Mode.** The site, as built, sends cookieless pings to Google before consent; D67 allows only our own counts before consent. Basic mode (no Google contact until consent) matches D67; advanced keeps Google's modelled conversions. Recommended: basic | **owner** | the site's launch |
+| O-10 | Interim Web3Forms: acceptable for real lead data until L1, or hold the forms until L1? (terms, region and retention unknown) | **owner** | the site's launch |
 | O-6 | Production Turnstile keys for gaiada.com's forms | **owner** (Cloudflare) | L1 live |
 | O-7 | Meta Business Verification | SMM team | P3 |
 | O-8 | The purpose of Google Ads `AW-630595339`, and an access audit of the old GTM container and both Ads accounts (the handoff found ~50 unknown linker domains) | ads team / owner | P2 |
@@ -107,5 +110,7 @@ Cerbos restart or a deploy. Release numbers are claimed one step at a time.
 
 **2026-10-11.** M5 started. The owner ruled D66 to D69 in one round of questions. The ERP sweep corrected the
 handoff in five places: scheduled publish exists; `form.received` carries no attribution; the intake flow
-creates no leads; `agency_leads` forbids stages by design; the sentinel client does not exist. G1 drafting
-started. No server work, because the ERP cut-over to `erp.gaiada.com` (M1) held the box.
+creates no leads; `agency_leads` forbids stages by design; the sentinel client does not exist. G1 was drafted
+(Sonnet, 531 lines) and reviewed. One error was corrected: the forms purge IS scheduled, by WSK-61. Its findings
+became L1's two defects, L2's consent snapshot, G5, G6, O-9 and O-10. No server work, because the ERP cut-over to
+`erp.gaiada.com` (M1) held the box.
