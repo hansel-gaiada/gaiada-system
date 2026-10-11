@@ -17,6 +17,11 @@ describe("portal company resolver guard", () => {
   const files = [
     ...walk(path.join(ROOT, "app", "(portal)")).filter((f) => /\.(ts|tsx)$/.test(f)),
     path.join(ROOT, "lib", "portalActions.ts"),
+    // WSK-49d: the Website area's own server modules resolve the company the same way.
+    path.join(ROOT, "lib", "portalWebsite.ts"),
+    path.join(ROOT, "lib", "portalWebsiteActions.ts"),
+    path.join(ROOT, "lib", "portalWebsiteDriver.ts"),
+    ...walk(path.join(ROOT, "components", "portal", "website")).filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\./.test(f)),
   ];
 
   it("finds the portal files (the guard is not vacuous)", () => {
@@ -27,5 +32,11 @@ describe("portal company resolver guard", () => {
   it("no portal file imports or calls getActiveTenant", () => {
     const offenders = files.filter((f) => readFileSync(f, "utf8").includes("getActiveTenant"));
     expect(offenders).toEqual([]);
+  });
+
+  it("the Website area's server modules resolve the company through the portal's own resolver", () => {
+    for (const f of ["portalWebsite.ts", "portalWebsiteActions.ts"]) {
+      expect(readFileSync(path.join(ROOT, "lib", f), "utf8"), f).toContain("getActivePortalCompany");
+    }
   });
 });
