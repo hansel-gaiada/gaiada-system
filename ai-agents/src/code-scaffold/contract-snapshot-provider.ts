@@ -43,7 +43,7 @@ export interface ContractSnapshotArtifacts {
    *  documented in hub-client.ts's header — reported as a third gap. */
   blockLibraryTarball: Buffer;
   /** WSK-34's generated PHP SDK source (`sdk.php`, plain UTF-8 text — never a tarball, it is vendored
-   *  as a single file per `webdesk/wordpress/scaffold-template/wp-site.ts`'s `vendoredSdkPhp`).
+   *  as a single file per `templates/wp-site.ts`'s `vendoredSdkPhp`).
    *  `null` when `meta.artifacts.sdkPhp` itself is null (a tenant/contract generated before WSK-34,
    *  or — until webdesk/api's codegen output is actually wired into a live Zone B contract read —
    *  simply not produced yet). `undefined` only for pre-WSK-D28 fixtures that predate this field;
