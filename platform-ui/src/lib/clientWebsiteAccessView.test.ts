@@ -38,16 +38,21 @@ describe("parseWebsiteAccessList", () => {
 });
 
 describe("staff-side mirror of who may manage", () => {
-  it("website editor: company_admin, manager, owner (this company) and a global platform_admin", () => {
+  it("website editor: company_admin, manager (this company) and a global platform_admin", () => {
     expect(canManageWebsiteEditor(me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
     expect(canManageWebsiteEditor(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
-    expect(canManageWebsiteEditor(me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
     expect(canManageWebsiteEditor(me([{ role: "platform_admin", scopeType: "global", scopeId: null }]), "co-a")).toBe(true);
   });
 
   it("admin: NOT a manager (manage_admin has no manager rule)", () => {
     expect(canManageClientAdmin(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(false);
     expect(canManageClientAdmin(me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
+  });
+
+  it("owner is NOT included: it is permission-native and the server refuses it (docs §16i), so it gets the read-only list", () => {
+    const owner = me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]);
+    expect(canManageWebsiteEditor(owner, "co-a")).toBe(false);
+    expect(canManageClientAdmin(owner, "co-a")).toBe(false);
   });
 
   it("never for a member, a viewer or a client, nor for another company's admin", () => {

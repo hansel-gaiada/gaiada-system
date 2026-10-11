@@ -18,7 +18,7 @@ import "server-only";
 // be an ACTIVE, client-wide ADMIN of the client in the URL.
 //
 // Who is who (see lib/demoIdentity.ts):
-//   staff    demo-hansel (platform_admin) · demo-owner (owner) · dept-manager (manager: website editor
+//   staff    demo-hansel (platform_admin) · demo-owner (owner: read only, the server refuses it) · dept-manager (manager: website editor
 //            yes, admin NO) · gede-ic (member: may read, may not manage)
 //   clients  demo-client = Dana, a signer · demo-client-admin = Aria, an ADMIN · demo-client-viewer =
 //            Vera, a viewer. Everyone else is refused on the portal routes.
@@ -64,8 +64,8 @@ const ok = (json: unknown): DemoResult => ({ status: 200, json });
 const err = (status: number, error: string): DemoResult => ({ status, json: { error } });
 
 const STAFF_READ = new Set(["demo-hansel", "demo-owner", "dept-manager", "gede-ic", "seo-staff"]);
-const STAFF_EDITOR = new Set(["demo-hansel", "demo-owner", "dept-manager"]);
-const STAFF_ADMIN = new Set(["demo-hansel", "demo-owner"]);
+const STAFF_EDITOR = new Set(["demo-hansel", "dept-manager"]);
+const STAFF_ADMIN = new Set(["demo-hansel"]);
 
 const listBody = () => ({
   clientId: CLIENT_ID,

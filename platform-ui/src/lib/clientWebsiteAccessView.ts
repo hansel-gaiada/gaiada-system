@@ -79,16 +79,17 @@ export function parseWebsiteAccessList(body: unknown): WebsiteAccessList | null 
 }
 
 // ── The staff-side mirror ─────────────────────────────────────────────────────────────────────────
-// `resource_client_contact.yaml`: `manage_website_editor` is company_admin | manager (and the
-// `owner` / `platform_admin` tiers that sit above them); `manage_admin` is company_admin only,
-// likewise with owner / platform_admin above. This is a UI MIRROR, never a second opinion: the page
+// `resource_client_contact.yaml`: `manage_website_editor` is company_admin | manager (and platform_admin,
+// which matches everything); `manage_admin` is company_admin only (likewise platform_admin). `owner` is
+// NOT in either set: it is permission-native with no role rules, and these two actions deliberately have no
+// permission key, so the server refuses an owner (tracked as a defect, docs §16i). This is a UI MIRROR, never a second opinion: the page
 // shows the controls to whoever this says may, and a 403 still wins.
 //
 // Deliberately NOT a new `Capability` in `rbac.ts`: both actions are role-arm only in Cerbos (no
 // `perm_*` mirror, no permission-catalog key), so the capability-parity guard has nothing to compare
 // a new capability against. Roles are read straight from `me`, scoped the way `can()` scopes them.
-const EDITOR_ROLES: ReadonlySet<string> = new Set(["platform_admin", "owner", "company_admin", "manager"]);
-const ADMIN_ROLES: ReadonlySet<string> = new Set(["platform_admin", "owner", "company_admin"]);
+const EDITOR_ROLES: ReadonlySet<string> = new Set(["platform_admin", "company_admin", "manager"]);
+const ADMIN_ROLES: ReadonlySet<string> = new Set(["platform_admin", "company_admin"]);
 
 function holdsRoleFor(me: Me, roles: ReadonlySet<string>, tenant: string | null | undefined): boolean {
   return me.roles.some((g) => {

@@ -47,6 +47,12 @@ describe("staff writes", () => {
     expect((staffEditor("DELETE", "demo-hansel", "cc-dana")!.json as { changed: boolean }).changed).toBe(false);
   });
 
+  it("an owner is refused on both staff writes (permission-native, no permission key), but may read", () => {
+    expect(staffList("demo-owner")!.status).toBe(200);
+    expect(staffEditor("PUT", "demo-owner", "cc-dana")!.status).toBe(403);
+    expect(staffAdmin("PUT", "demo-owner", "cc-dana")!.status).toBe(403);
+  });
+
   it("a project-scoped contact cannot be granted", () => {
     const r = staffEditor("PUT", "demo-hansel", "cc-erica")!;
     expect(r.status).toBe(400);
