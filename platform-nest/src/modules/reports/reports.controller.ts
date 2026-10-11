@@ -101,7 +101,7 @@ function resolveGrain(raw?: string): ReportGrain {
 
 /** §6.2's range validation, shared by document/overview/export. `end` is REQUIRED when
  *  `periodKind=custom` and IGNORED (re-derived from `start`) otherwise. */
-function resolveRange(periodKindRaw?: string, start?: string, end?: string): { periodKind: ReportPeriodKind; start: string; end: string } {
+export function resolveRange(periodKindRaw?: string, start?: string, end?: string): { periodKind: ReportPeriodKind; start: string; end: string } {
   if (!periodKindRaw || !PERIOD_KINDS.has(periodKindRaw)) {
     throw new BadRequestException({ message: "periodKind must be one of day, week, month, custom", field: "periodKind" });
   }
@@ -204,8 +204,11 @@ async function authorizeReportDocumentRead(principal: Principal, tenantId: strin
  *  create endpoint fetches through the IDENTICAL path — an export built from a second,
  *  independently-written fetch could silently diverge on the sealed/live branch (e.g. always
  *  live-computing and mislabelling a genuinely sealed period as ad hoc). Caller must authorize
- *  first; this function does no authz of its own. */
-async function fetchReportDocumentForRead(
+ *  first; this function does no authz of its own.
+ *
+ *  PV1-06a: exported (with `resolveRange`) so the group report reads each company's figures
+ *  through this same path, and a group card always matches that company's own Company Report. */
+export async function fetchReportDocumentForRead(
   tenantId: string,
   grain: ReportGrain,
   scopeRef: string,
