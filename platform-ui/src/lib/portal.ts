@@ -541,6 +541,46 @@ export function projectUrgencyTier(
   return taskUrgency({ dueDate: project.dueDate, isDone: project.progressPercent >= 100 }, today);
 }
 
+/** What the contract page's signing card shows, decided from the SERVER's read of the agreement.
+ *
+ *  ── WHY THE SIGNED STATE IS DECIDED HERE AND NOT IN THE SIGN FORM'S LOCAL STATE ─────────────────────
+ *  The sign action revalidates the contract page. Since Next 16.3 that refresh is actually applied in
+ *  the same response as the action's result (16.2 silently dropped it — vercel/next.js#88343), and the
+ *  refreshed read says `canSign: false`, so the form that held "Signed — thank you" in its
+ *  `useActionState` state is unmounted the moment the signature lands. `PortalLive` does the same on the
+ *  next `contracts` frame or idle poll, on ANY Next version. So the confirmation has to be something the
+ *  server renders from the recorded signature, or the client never sees it.
+ *
+ *  ── ORDER MATTERS: A CLIENT SIGNATURE WINS OVER EVERY "CAN'T SIGN" REASON ─────────────────────────────
+ *  A signed agreement is signed whoever is looking. Checking `viewOnly` first told a view-only colleague
+ *  that "a colleague with signing rights needs to sign this" about an agreement already signed. */
+export type ContractSigningState =
+  | { kind: "signed"; signerName: string | null; signerTitle: string | null; signedAt: string }
+  | { kind: "sign" }
+  | { kind: "closed"; reason: string };
+
+export function contractSigningState(
+  k: Pick<PortalContractDetail, "canSign" | "viewOnly" | "termEnded" | "status" | "signatures" | "document" | "bodyMd">,
+): ContractSigningState {
+  const clientSig = k.signatures.find((s) => s.party === "client");
+  if (clientSig) {
+    return { kind: "signed", signerName: clientSig.signerName, signerTitle: clientSig.signerTitle, signedAt: clientSig.signedAt };
+  }
+  // Only offered when the DOCUMENT exists: a signature on terms the client cannot read is the one state
+  // the contract page must refuse to produce.
+  if (k.canSign && (k.document || k.bodyMd)) return { kind: "sign" };
+  return {
+    kind: "closed",
+    reason: k.viewOnly
+      ? "Your access to this portal is view-only, so a colleague with signing rights needs to sign this. You can read everything here and forward it to them."
+      : k.termEnded
+        ? "This agreement's term has ended. Ask your account manager to re-issue it."
+        : k.status !== "sent"
+          ? `This agreement is ${clientStatus(k.status).toLowerCase()} and can't be signed here.`
+          : "The document needs to be attached before this can be signed.",
+  };
+}
+
 // ── MI-04 pure helpers ─────────────────────────────────────────────────────────────────────────────
 
 const CHANGE_REQUEST_KIND_WORDS: Record<PortalChangeRequestKind, string> = {

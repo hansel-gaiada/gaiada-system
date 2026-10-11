@@ -1,5 +1,6 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { loginAsPersona } from "./personas";
+import { tenantCookie } from "./appCookies";
 
 // GM-10 — the GM console suite (`docs/plans/2026-08-24-gm-console-PROGRESS.md`), over DEMO_MODE.
 //
@@ -60,7 +61,7 @@ async function login(page: Page, context: BrowserContext, persona: "superadmin" 
   // Fresh DEMO_MODE sessions default to `companies[0]` (co-holding, a HOLDING that seeds no
   // departments at all — so every `/departments/*` route 404s until this is set). Setting the tenant
   // cookie directly is this repo's established workaround; see social-console.spec.ts.
-  await context.addCookies([{ name: "gaiada_tenant", value: "co-agency", url: page.url() }]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 test.describe("GM cockpit (GM-03)", () => {

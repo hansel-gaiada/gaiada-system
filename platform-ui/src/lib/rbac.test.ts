@@ -463,6 +463,32 @@ describe("isClient — external client routing", () => {
     }
   });
 
+  // WSK-D60: `/me` returns a client contact's `client_website_editor` grant as-is (scopeType "client", scopeId = the
+  // client record). Before CLIENT_SIDE_ROLES, any non-`client` role counted as staff, so this grant alone kept a client
+  // in the staff shell and out of the portal.
+  it("a client contact granted client_website_editor is still client-only (portal, not the staff shell)", () => {
+    const editor = me([
+      { role: "client", scopeType: "company", scopeId: "co-a" },
+      { role: "client_website_editor", scopeType: "client", scopeId: "client-1" },
+    ]);
+    expect(isClient(editor)).toBe(true);
+    expect(isStaff(editor)).toBe(false);
+    expect(isClientOnly(editor)).toBe(true);
+    for (const cap of ["admin.access", "people.directory", "pm.manage", "approvals.decide"] as const) {
+      expect(can(editor, cap, "co-a")).toBe(false);
+    }
+  });
+
+  it("staff holding client_website_editor as well keep the staff surface (positive control)", () => {
+    const both = me([
+      { role: "manager", scopeType: "company", scopeId: "co-a" },
+      { role: "client_website_editor", scopeType: "client", scopeId: "client-1" },
+      { role: "client", scopeType: "company", scopeId: "co-a" },
+    ]);
+    expect(isStaff(both)).toBe(true);
+    expect(isClientOnly(both)).toBe(false);
+  });
+
   it("a client cannot reach staff capabilities", () => {
     // Nav and routing are cosmetic; this asserts the capability model agrees, so a client who types a
     // staff URL is not merely un-navigated but un-permitted. Cerbos + the portal BFF remain authority.

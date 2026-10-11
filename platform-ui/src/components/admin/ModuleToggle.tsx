@@ -7,6 +7,8 @@ export interface AdminActionState {
   error?: string;
 }
 
+type ToggleState = AdminActionState & { turnedOn: boolean };
+
 // One module row: name + enabled/disabled badge + a toggle button. `action`
 // is already bound by the page to (module, nextEnabled) — it just needs
 // prev/formData to satisfy useActionState. `label`/`paths` come from the
@@ -26,7 +28,17 @@ export function ModuleToggle({
   enabled: boolean;
   action: (prev: AdminActionState | null, formData?: FormData) => Promise<AdminActionState>;
 }) {
-  const [state, formAction, pending] = useActionState(action, null);
+  // The toast names what THIS submission asked for, captured when it was submitted — never the
+  // `enabled` prop. The action revalidates /admin/modules and (since Next 16.3, which stopped dropping
+  // that refresh) the result arrives together with the refreshed prop, already flipped: reading
+  // `enabled` here toasted "Module disabled." straight after enabling one.
+  const [state, formAction, pending] = useActionState(
+    async (prev: ToggleState | null, formData?: FormData): Promise<ToggleState> => ({
+      ...(await action(prev, formData)),
+      turnedOn: !enabled,
+    }),
+    null,
+  );
 
   return (
     <div
@@ -55,7 +67,7 @@ export function ModuleToggle({
         </form>
       </div>
       {state?.error && <Toast message={state.error} />}
-      {state?.ok && <Toast message={`Module ${enabled ? "disabled" : "enabled"}.`} />}
+      {state?.ok && <Toast message={`Module ${state.turnedOn ? "enabled" : "disabled"}.`} />}
     </div>
   );
 }

@@ -531,6 +531,8 @@ services:
       # ISSUER must match the `iss` claim the IdP actually stamps, which is the PUBLIC url once
       # Keycloak sits behind a reverse proxy. JWKS stays INTERNAL so token verification never
       # hairpins out through nginx and back. Splitting them is deliberate, not an inconsistency.
+      # Comma-separated since ERP names Phase B: a token from ANY listed issuer verifies. During the
+      # name move list new,old (the first one is used wherever a single URL is needed).
       OIDC_ISSUER: ${OIDC_ISSUER:-http://keycloak:8080/realms/gaiada}
       OIDC_JWKS_URI: ${OIDC_JWKS_URI:-http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-gaiada-platform}
@@ -644,6 +646,10 @@ services:
       # WSK-61 — how long past a schedule's effective time to wait for Zone B to show it (default 15 min when
       # empty). A value outside [60000, 86400000] REFUSES BOOT (config.ts readScheduleSupersedeGraceMs).
       WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS: ${WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS:-}
+      # WSK-43b — the PUBLIC origin of the WebDesk api (the host serving /v1, e.g. https://api.erp.gaiada.com).
+      # Media upload URLs are built on it, so image bytes go from the browser straight to WebDesk, never through
+      # the ERP. Empty means uploads answer "not enabled" (fail closed; the ERP still boots).
+      WEBDESK_PUBLIC_BASE_URL: ${WEBDESK_PUBLIC_BASE_URL:-}
       # The SAME omission again, and this one had been silently disabling THREE shipped features on
       # this box: a 43-char value sat in .env while the container saw an empty string, because no row
       # forwarded it. It signs W0 client-invite tokens (`core/client-invites.ts`), signs SEO's Google
@@ -1196,8 +1202,19 @@ services:
       # The address the BROWSER used. Without it, redirects are built from the container's bind
       # address and the OIDC callback lands on an unreachable host.
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+      # ERP names Phase B (B0): the exact origins a state-changing request (server action, POST/PUT/
+      # PATCH/DELETE) may come from, comma-separated. src/proxy.ts refuses any other `Origin` with 403.
+      # Empty falls back to PUBLIC_ORIGIN. During the name move both are listed:
+      # https://erp.gaiada.com,https://erp.gaiada.online
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      # WSK-43c — the same WebDesk public origin the platform builds upload URLs on; the media library reads it
+      # server-side for thumbnails. Empty means the grid shows type tiles instead of images. Not a secret.
+      WEBDESK_PUBLIC_BASE_URL: ${WEBDESK_PUBLIC_BASE_URL:-}
     ports:
-      - "3005:3005"
+      # Loopback only (Phase B0, like platform's 127.0.0.1:3004): nginx is the one public way in, so
+      # its headers, rate limits and Host handling cannot be bypassed. Everything else reaches this
+      # service by its compose name (platform-ui:3005).
+      - "127.0.0.1:3005:3005"
     # FAULT REGISTER FINDING 14 (2026-09-08) — measured 194.3MiB working set on gda-aicenter
     # (`docker stats --no-stream`, read-only, 2026-09-08). Next.js standalone server + SSR/RSC
     # streaming; headroom covers report/print-view rendering and concurrent SSE (portal + assistant

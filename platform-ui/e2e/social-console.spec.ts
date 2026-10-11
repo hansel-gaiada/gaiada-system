@@ -1,5 +1,6 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { loginAsPersona } from "./personas";
+import { tenantCookie } from "./appCookies";
 
 // SMM-25 — the Social Media (dept-4) console suite, over DEMO_MODE (src/lib/demoSocial.ts).
 //
@@ -40,7 +41,7 @@ async function loginStaff(page: Page, context: BrowserContext, persona: "superad
   // Fresh (no-cookie) DEMO_MODE sessions default-fallback to `companies[0]` regardless of role
   // scope (demoFixtures.ts's own `/api/me` gap, named in webdev-change-requests.spec.ts) — setting
   // the tenant cookie directly is this repo's established workaround (smoke.spec.ts / a11y-axe.spec.ts).
-  await context.addCookies([{ name: "gaiada_tenant", value: "co-agency", url: page.url() }]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 test.describe("Composer — quota strip: three states, never a fabricated zero", () => {

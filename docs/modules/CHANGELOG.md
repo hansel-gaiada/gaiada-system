@@ -11,6 +11,91 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.87.0` - before the move to erp.gaiada.com: host-only `__Host-` cookies, an Origin check on every write, no framing; a signed agreement says so (2026-10-11) - PROTOTYPED
+
+ERP names Phase B0 (`docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §3). On `erp.gaiada.com` the ERP is same-site with every
+`*.gaiada.com` site, and it already is with the `*.gaiada.online` client staging sites, so a sibling could plant cookies and send
+same-site POSTs.
+
+- **Cookies.** The session, PKCE, OAuth-pending and four tenant-context cookies are named in one place (`src/lib/cookieNames.ts`):
+  `__Host-` in production (Secure, `Path=/`, no `Domain`), the plain name under `next dev`. Every clear carries the same attributes,
+  so logout really clears. No fallback read of the old names. **Everyone signs in again once on deploy**, and the company,
+  portal and PM-scope choices reset once.
+- **Origin check.** `src/proxy.ts` refuses a POST/PUT/PATCH/DELETE (server actions and route handlers) whose `Origin` is not in
+  `ALLOWED_ORIGINS` (else `PUBLIC_ORIGIN`) with 403 `{"error":"origin_not_allowed"}`; without an Origin it falls back to
+  `Sec-Fetch-Site`; a request with neither is a non-browser client and passes. No path is exempt. A test proves the matcher covers
+  every top-level route with Next's own matcher compiler.
+- **Framing.** `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` from `next.config.ts`, so a
+  request that bypasses nginx is covered too.
+- **Open redirects closed:** the Google OAuth return path and the PM-scope `next` field go through `sanitizeReturnTo`.
+- **Next 16.3 regression (found by the portal e2e):** after signing an agreement the confirmation never showed, because 16.3
+  applies the post-action refresh and the form holding the message unmounted. The contract page now renders
+  "Signed — thank you" from the recorded signature (`contractSigningState`); the same for social-review decisions; the module
+  toggle's toast names what was submitted.
+- e2e: `e2e/appCookies.ts` plants the tenant cookie the way the app names it under `next start`.
+- **Verified on Linux** (sumopod, gate `m1pb`): 251 files / 4815 tests, `next build` on 16.3.8; full Playwright suite in CI mode: 152 passed; every one of the 57 failures fails identically on clean main (0 new), and the portal signing test that fails on clean main passes.
+
+### platform-nest `0.66.0` - accepts tokens from a list of issuers (ERP name move) (2026-10-11) - PROTOTYPED
+
+- `OIDC_ISSUER` is a comma-separated list (`src/auth/oidc-issuers.ts`); a token from ANY listed issuer verifies; the first entry is
+  used wherever one URL is needed. Validated at boot (empty entry, duplicate, non-URL, http except localhost/keycloak). During the
+  move: `https://erp.gaiada.com/idp/realms/gaiada,https://erp.gaiada.online/idp/realms/gaiada`.
+- **Verified on Linux:** 556 files / 7851 passed; the one red (`agency-lead-convert-race.db.test.ts`, "the racers never collided")
+  passed 3/3 alone; static gates and the IAM chain alignment green.
+
+### webdesk `0.6.0` - the control channel accepts a list of token issuers (2026-10-11) - DEV-VERIFIED
+
+- `WEBDESK_CONTROL_OIDC_ISSUER` is a comma-separated list; the JWKS derives from the FIRST issuer unless
+  `WEBDESK_CONTROL_OIDC_JWKS_URI` is set. Cut-over order `old,new` → `new,old` → `new`. 13 new pure unit tests (PR #14, GitHub CI
+  green); Linux gate webdesk-api 1101/0, migrations 435/0. No migration; the live swap needs only the image.
+
+### infra `0.10.0` - the ERP answers erp.gaiada.com; a scripted cut-over with automatic rollback; a reference-aware registry prune (2026-10-11) - PROTOTYPED
+
+- **nginx** (`infra/nginx/erp.gaiada.online.conf`, hand-applied by the cut-over): one server block for both names on the
+  `erp.gaiada.com` certificate (it covers both); `proxy_redirect` follows `$host`; `snippets/erp-legacy-redirect.{off,on}.conf`
+  switches a 301 for browser GET/HEAD on the legacy name, keeping `/api/webhooks/`, `/api/mail/`, `/n8n`, `/idp/` and ACME served.
+- **compose:** platform-ui gets `ALLOWED_ORIGINS` and binds `127.0.0.1:3005`.
+- **scripts/phaseb/**: `run-erp-name-cutover.sh` (operator) drives `erp-name-cutover.sh` (box) stage by stage with a real PKCE
+  login proof and a full rollback on any failure; `github-app-hook.cjs` moves the App webhook through GitHub's API. Runbook
+  `infra/runbooks/erp-name-cutover.md`. Nothing runs on deploy.
+- **release.yml:** the disabled `delete-package-versions` step is replaced by a `ghcr-prune` job after a green deploy:
+  `scripts/ci/ghcr-prune.mjs` protects the closure of every tagged digest (index children, `.sig`/`.att`, `sha256-<hex>`
+  referrers, `subject` links, buildcache) and deletes only unreferenced untagged versions older than 14 days; dry-run unless the
+  repo variable `GHCR_PRUNE_DELETE` is `1`. Real dry run 2026-10-11: 8 candidates across 11 packages, report-renderer's
+  `249e5e4c` and its referrers protected.
+
+### platform-nest `0.65.0` - WebDesk in the ERP: the media library's authorisation, BFF and MCP tools; a draft preview action; client website-editor grants, and a client admin who also signs (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3 (`docs/plans/2026-10-11-webdesk-m3-plan.md`), rulings WSK-D52, D53, D54, D60 (amended twice) in `docs/blueprints/webdesk-design-v2.md` §14.
+
+- **Media library, ERP half (WSK-43b).** A new Cerbos kind `webdesk_media_asset` (read, upload, update, delete) with its six artifacts: catalog 422 pairs / 102 kinds / 407 grantable, bundles 1847. BFF routes for list, usage, upload token, update and delete, and five MCP tools (`webdesk.media.*`). The upload token goes to the browser as a public WebDesk URL (`WEBDESK_PUBLIC_BASE_URL`), so image bytes never pass through the ERP; it is never stored, and the upload-token tool is deliberately not an approval-replayable action. `resource_mcp_tool.yaml` gains the media update/delete executables.
+- **Draft preview action (WSK-46, D52).** `POST …/items/:itemId/preview` and the MCP tool `webdesk.content.preview` mint a preview token and answer `https://<site staging domain>/preview/#t=<token>`: the token rides in the URL fragment, never a query string or a log. Honest refusals when preview isn't set up or the site has no preview page yet.
+- **Client website editors, grant path (WSK-49f, D60).** A role-as-data `client_website_editor`, scoped to one client record; derived roles `client_website_editor` and `client_contact_admin`; a new client-contact capability `admin`, assigned by staff, which lets a client grant website editing to their own contacts (bounded, audited). Three CHECKs widened by self-verifying migrations that read the live definition. **A client admin also signs** (owner ruling): signing, signature notifications and Client Centre editing accept `admin`.
+- Verified on the Linux gate (sumopod `m3r354c`, nest + ui + next build, with the M2 editor fixes merged; `m3r354d` re-ran ui + next build + the nest webdev suite after the M2 author-name fix).
+
+### infra `0.9.4` - the WebDesk public origin reaches the ERP and its UI (2026-10-11) - PROTOTYPED
+
+- `docker-compose.vps.yml` forwards `WEBDESK_PUBLIC_BASE_URL` to `platform` (media upload URLs, WSK-43b) and `platform-ui` (library thumbnails, WSK-43c). Empty default: uploads answer "not enabled" and the grid shows type tiles. Set it to `https://api.erp.gaiada.com` (WSK-D61).
+
+### platform-ui `0.85.2` - version authors that are automation accounts show their name (2026-10-11) - PROTOTYPED
+
+WebDesk M2, the last open WSK-44 box. Seen on erp.gaiada.online: every gaiada.com v1 was written by the importer, an automation account, and History, the editor's "saved by" and the item list's last-edited column read "user 01a12709".
+
+- `resolveAuthorNames` asked `GET /api/:t/members`, which leaves out non-human accounts unless asked (PK-02). It now passes `includeService=1`, through an optional flag on the shared `listMembers` (existing callers unchanged), so the importer reads "Automation — WebDesk importer", its users row name. On live the flag returns 64 rows instead of 30, the importer among them. `authorLabel` is unchanged. Unit test: a service-account author resolves to its name, and the lookup asks for service accounts (it fails with the old call).
+
+### platform-ui `0.85.1` - the Website editor's controls are styled, and a pending publish keeps its version after a reload (2026-10-11) - PROTOTYPED
+
+WebDesk M2. Both defects were found by driving the editor live on erp.gaiada.online (1.0.0-alpha.351/352) as hansel@gaiada.com.
+
+- **Bare form controls.** The editor's generated form, the item filters, the save bar and the key-request panel use the shared `.lux-field*` controls, but no Website component imported `forms/forms.css`, so a direct load of an item drew plain browser inputs. `content.css` now `@import`s it (the `appraisals.css` precedent), so every surface that loads `content.css` gets it. The stub e2e pins it: the H1 control carries the 13px inline padding (a browser input pads 2px), and the assertion fails without the import.
+- **"Publish of v? was requested".** After a reload, the pending card is rebuilt from `…/publish-requests`, which carried `itemIds` only. `parsePublishRequests` reads the new `items:[{itemId,version}]` (malformed → `WireDrift`; absent → `[]`, for a BFF one release behind), `findPendingPublishRequests` returns the item's version, and `PublishBar` restores it. The e2e reload assertion fails without the PublishBar line (it reads "v?").
+- **Verified on Linux** (sumopod, on 352 / Next 16.3.8): tsc clean, vitest 237 files / 4682, `next build`, Website e2e 44/45. The one red is "STATE loading: a skeleton shows…", which also fails on the 352 base under load (base 3/5, fix 4/5).
+
+### platform-nest `0.64.1` - the editor's own-requests read carries each item's version (2026-10-11) - PROTOTYPED
+
+- `GET /api/:t/modules/webdev/content/sites/:ts/:site/publish-requests` rows gain `items:[{itemId,version}]` from the approval's `tool_args.items`. It keeps only entries with a string `itemId` and a positive integer `version`. Additive: `itemIds` is unchanged. Contract: BFF §27.
+- **Verified on Linux** (sumopod): tsc clean, `src/modules/webdev` 33 files / 532 passed (1 file skipped: the editorial-signer e2e, which needs a real signer), including the real-contract test (32/32) that feeds the controller's bodies through the UI's parsers.
+
 ### platform-nest `0.64.0` - companies carry a vertical; owners of the root get the Platform and Group surfaces (2026-10-11) - PROTOTYPED
 
 PV-1 (company context), rulings PV-D11 and PV-D14 to PV-D20. Tickets: `docs/plans/2026-10-11-pv1-company-context-tickets.md`.
@@ -33,6 +118,14 @@ PV-1 (company context), rulings PV-D11 and PV-D14 to PV-D20. Tickets: `docs/plan
   - New `GET /api/:t/reports/group` (root owner or `platform_admin`; 404 unless `:t` is a root) returns per-company cards from each company's own report, plus Sum of companies for additive metrics only. `consolidated` is null until F9.
   - **Cerbos must restart on deploy.**
 - **Verified on Linux** (352 + PV-1): nest 551 passed, 3 skipped, plus the regenerated capability inventory (its one red before regeneration). Teeth on all four new rules: no owner arm, any owner in the tree, no root-only 404, a summed ratio, and no vertical guard. Each turned its tests red.
+
+### platform-ui `0.86.0` - WebDesk in the ERP: a visual Markdown editor, a Preview button and the media library (2026-10-11) - DEV-VERIFIED
+
+- **Visual Markdown editor (WSK-45, D49).** TipTap on `markdown` fields. 305 of gaiada.com's 315 real bodies open visually and round-trip byte-identical; an unchanged body always saves the original bytes; the other 10 open as source with a plain notice. Placeholders stay verbatim.
+- **Preview (WSK-46).** A Preview button opens the draft on the site's own preview page, with honest states when preview isn't available yet.
+- **Media library (WSK-43c).** A Media tab in the Website workspace: upload straight to WebDesk with progress, alt text per language, tags, "where it's used", and delete refused while in use; a picker for media fields in the editor.
+- **Fix: a client editor stays in the portal.** A client contact granted `client_website_editor` (WSK-D60) was counted as staff, so they got the staff shell instead of the portal. Client-side roles are now one list (`CLIENT_SIDE_ROLES`), and holding one never makes someone staff.
+- Verified on the Linux gate (sumopod `m3r354c`) and in Playwright (WebDesk suite 68/68 on the built app).
 
 ### platform-ui `0.85.0` - the staff menu follows the company: agency rows by vertical, Group on the root, Platform for operators (2026-10-11) - PROTOTYPED
 

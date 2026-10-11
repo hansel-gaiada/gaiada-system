@@ -8,6 +8,7 @@ import { Card, Eyebrow } from "@/components/ui";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalLink, PortalPageHead, PortalSocialReviewStatus } from "@/components/portal/PortalBits";
 import { PortalSocialReviewDecideForm } from "@/components/portal/PortalSocialReviewDecideForm";
+import { PortalSocialReviewDecidedNote } from "@/components/portal/PortalSocialReviewDecidedNote";
 import "@/components/pipeline/pipeline.css";
 
 // SMM-32 — one drafted social post, in full: the exact preview the client is deciding against, plus
@@ -59,6 +60,11 @@ export default async function PortalSocialReviewPage({ params }: { params: Promi
           )}
 
           {review.status === "pending" && <PortalSocialReviewDecideForm reviewId={review.id} />}
+          {/* The confirmation comes from the RECORDED decision, not only from the form's local state:
+              deciding revalidates this page and the refreshed read unmounts the form above. */}
+          {(review.status === "approved" || review.status === "changes_requested") && (
+            <PortalSocialReviewDecidedNote status={review.status} />
+          )}
 
           {review.status !== "pending" && review.comment && (
             <p style={{ margin: "12px 0 0", font: "400 13px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>

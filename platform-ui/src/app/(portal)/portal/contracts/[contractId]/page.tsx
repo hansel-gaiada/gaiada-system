@@ -3,12 +3,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalContract } from "@/lib/portal-data";
-import { clientStatus, money, portalDate } from "@/lib/portal";
+import { contractSigningState, money, portalDate } from "@/lib/portal";
 import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
 import { PortalLive } from "@/components/portal/PortalLive";
 import { PortalSignForm } from "@/components/portal/PortalSignForm";
+import { PortalSignedNote } from "@/components/portal/PortalSignedNote";
 import { PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 import "@/components/pipeline/pipeline.css";
 
@@ -24,6 +25,11 @@ import "@/components/pipeline/pipeline.css";
 // conjunction `POST /sign` enforces. Recomputing it here from the parts would be a second implementation
 // free to disagree, and the way it would disagree is by offering a button that 403s. So the page reads
 // the flag and, when it is false, says WHICH reason applies (view-only, already signed, term ended).
+//
+// ── "SIGNED — THANK YOU" IS RENDERED HERE, FROM THE RECORDED SIGNATURE ────────────────────────────
+// Not only from the sign form's local action state: the sign action revalidates this page, and the
+// refreshed read (canSign false) unmounts the form together with that state — which is exactly what
+// Next 16.3 started doing correctly. `contractSigningState` (lib/portal.ts) has the full reasoning.
 export default async function PortalContractPage({ params }: { params: Promise<{ contractId: string }> }) {
   const { contractId } = await params;
   const userId = await getSessionUserId();
@@ -37,6 +43,7 @@ export default async function PortalContractPage({ params }: { params: Promise<{
 
   const clientSig = k.signatures.find((s) => s.party === "client");
   const providerSig = k.signatures.find((s) => s.party === "provider");
+  const signing = contractSigningState(k);
 
   return (
     <>
@@ -105,25 +112,21 @@ export default async function PortalContractPage({ params }: { params: Promise<{
           )}
         </Card>
 
-        {/* Sign, or say precisely why not. Only rendered when the DOCUMENT exists: offering a signature on
-            terms the client cannot read is the one state this page must refuse to produce. */}
-        {k.canSign && (k.document || k.bodyMd) ? (
+        {/* Signed, sign, or say precisely why not. The form is only offered when the DOCUMENT exists:
+            offering a signature on terms the client cannot read is the one state this page must refuse to
+            produce (`contractSigningState` enforces it). */}
+        {signing.kind === "signed" ? (
+          <Card title="Signed">
+            <PortalSignedNote title={k.title} signerName={signing.signerName}
+                              signerTitle={signing.signerTitle} signedAt={signing.signedAt} />
+          </Card>
+        ) : signing.kind === "sign" ? (
           <Card title="Sign this agreement">
             <PortalSignForm contractId={k.id} title={k.title} />
           </Card>
         ) : (
           <Card title="Signing">
-            <EmptyNote>
-              {k.viewOnly
-                ? "Your access to this portal is view-only, so a colleague with signing rights needs to sign this. You can read everything here and forward it to them."
-                : clientSig
-                  ? "You've already signed this agreement."
-                  : k.termEnded
-                    ? "This agreement's term has ended. Ask your account manager to re-issue it."
-                    : k.status !== "sent"
-                      ? `This agreement is ${clientStatus(k.status).toLowerCase()} and can't be signed here.`
-                      : "The document needs to be attached before this can be signed."}
-            </EmptyNote>
+            <EmptyNote>{signing.reason}</EmptyNote>
           </Card>
         )}
 

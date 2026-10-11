@@ -395,10 +395,10 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
       const filed = okData(await step("requestPublishAction", () => actions.requestPublishAction(SCOPE, [{ itemId: item.itemId, version: 1 }])));
       expect(filed.approvalId).toMatch(/^[0-9a-f-]{36}$/);
       const own = okData(await step("listOwnPublishRequests", () => ui.listOwnPublishRequests(editorA, A, GAIADA_SLUG, GAIADA_SITE, "pending")));
-      expect(own).toEqual([{ approvalId: filed.approvalId, status: "pending", createdAt: expect.any(String), itemIds: [item.itemId], executionStatus: "not_applicable" }]);
-      expect(okData(await step("findPendingPublishRequests", () => ui.findPendingPublishRequests(editorA, A, GAIADA_SLUG, GAIADA_SITE, item.itemId)))).toEqual([{ approvalId: filed.approvalId }]);
+      expect(own).toEqual([{ approvalId: filed.approvalId, status: "pending", createdAt: expect.any(String), itemIds: [item.itemId], items: [{ itemId: item.itemId, version: 1 }], executionStatus: "not_applicable" }]);
+      expect(okData(await step("findPendingPublishRequests", () => ui.findPendingPublishRequests(editorA, A, GAIADA_SLUG, GAIADA_SITE, item.itemId)))).toEqual([{ approvalId: filed.approvalId, version: 1 }]);
       const bundle = okData(await step("refreshEditorAction (after reload)", () => actions.refreshEditorAction(SCOPE, "service", "service.seo", "en")));
-      expect(bundle.pendingRequests).toEqual([{ approvalId: filed.approvalId }]);
+      expect(bundle.pendingRequests).toEqual([{ approvalId: filed.approvalId, version: 1 }]);
 
       // FIX 3, the poll: since WebDesk M3 T7 the requester CAN read their own /automation-approvals/:id
       // (Cerbos own-row read), so the poll reads it directly; the own-list fallback stays for anyone else.

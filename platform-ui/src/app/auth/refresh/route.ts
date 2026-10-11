@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/session-server";
-import { sealSession, encodeSession, SESSION_COOKIE } from "@/lib/session";
+import { sealSession, encodeSession } from "@/lib/session";
+import { clearHostCookie, setHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 import { sanitizeReturnTo } from "@/lib/returnTo";
 
 // Silent OIDC access-token refresh (fault register finding 01, 2026-09-08).
@@ -45,7 +46,7 @@ function backToLogin(req: NextRequest, returnTo: string, reason: string): NextRe
   // Clear the stale session so a failed refresh cannot leave a cookie that keeps triggering this
   // route. Belt to `/auth/login`'s braces: the redirect alone breaks the loop, this removes the
   // cause. `reason` rides on the response for debugging without leaking into the URL.
-  res.cookies.set(SESSION_COOKIE, "", { maxAge: 0, path: "/" });
+  clearHostCookie(res.cookies, HOST_COOKIES.session);
   res.headers.set("x-gaiada-refresh", `failed:${reason}`);
   return res;
 }
@@ -112,12 +113,7 @@ export async function GET(req: NextRequest) {
   );
 
   const res = NextResponse.redirect(new URL(returnTo, req.nextUrl.origin));
-  res.cookies.set(SESSION_COOKIE, sealed, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: process.env.NODE_ENV === "production",
-  });
+  setHostCookie(res.cookies, HOST_COOKIES.session, sealed);
   res.headers.set("x-gaiada-refresh", "ok");
   return res;
 }

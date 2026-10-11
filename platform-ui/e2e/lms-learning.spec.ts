@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 
 // LMS L1c. Drives the four learning surfaces against the real rendered app under DEMO_MODE, because
 // a green vitest run has never proved a Next.js route renders — a `server-only` import reaching a
@@ -16,7 +17,7 @@ test.describe("Learning (LMS L1c)", () => {
     await context.addCookies([
       // Absolute URL required by addCookies; built from the configured baseURL so an
       // E2E_PORT-shifted run (a sibling agent already on 3005) still sets the cookie.
-      { name: "gaiada_tenant", value: "co-agency", url: new URL("/", test.info().project.use.baseURL ?? "http://localhost:3005").toString() },
+      tenantCookie(new URL("/", test.info().project.use.baseURL ?? "http://localhost:3005").toString()),
     ]);
     await page.goto("/");
   });

@@ -884,7 +884,14 @@ export function isClient(me: Me): boolean {
   return me.roles.some((r) => r.role === "client");
 }
 
-/** Any staff grant at all — i.e. any role that is not `client`.
+/** Raw grant roles that belong to the CLIENT side, modelled outside `Role`/`ROLE_CAPS` because the portal BFF, not
+ *  `can()`, is their boundary. `client` is the portal grant itself. `client_website_editor` (WSK-D60) is granted only to
+ *  a client contact, scoped to their client record (`scopeType: "client"`), and `/me` returns it as-is: holding it must
+ *  never make someone staff, or `(app)/layout.tsx` stops sending them to the portal. A new client-side role goes here
+ *  (the parity test reads this set), never into `ROLE_CAPS`. */
+export const CLIENT_SIDE_ROLES: ReadonlySet<string> = new Set(["client", "client_website_editor"]);
+
+/** Any staff grant at all — i.e. any role outside `CLIENT_SIDE_ROLES`.
  *
  *  This is the correct companion to `isClient` for deciding "is this person EXTERNAL ONLY", and it
  *  replaces an `isElevated` check that was subtly wrong: `isElevated` is only global `platform_admin`
@@ -893,10 +900,10 @@ export function isClient(me: Me): boolean {
  *  portal-only navigation, losing the entire staff surface. A PM added as a contact on their own
  *  client is an ordinary thing to do, so this was reachable, not theoretical.
  *
- *  Deliberately "has any non-client role" rather than a list of staff roles: a role added later is
+ *  Deliberately "has any non-client-side role" rather than a list of staff roles: a role added later is
  *  staff by default, which fails toward keeping someone's workspace rather than silently taking it. */
 export function isStaff(me: Me): boolean {
-  return me.roles.some((r) => r.role !== "client");
+  return me.roles.some((r) => !CLIENT_SIDE_ROLES.has(r.role));
 }
 
 /** External client with no staff standing — the one case that gets the portal instead of the app. */

@@ -44,7 +44,7 @@ export interface VerifiedToken {
 
 export async function verifyToken(token: string): Promise<VerifiedToken> {
   const { payload } = await jwtVerify(token, getJwks(), {
-    issuer: config.oidcIssuer,
+    issuer: config.oidcIssuers, // any listed issuer (jose accepts string[])
     audience: config.oidcAudience,
   });
   const p = payload as JWTPayload & {

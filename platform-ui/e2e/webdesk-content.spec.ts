@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 import zlib from "node:zlib";
 
 // WSK-44 — the Website workspace, against the STUBBED WSK-59 BFF (e2e/webdesk-stub/, run by
@@ -47,7 +48,7 @@ async function loginAs(page: Page, context: BrowserContext, email: string) {
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL("**/");
   // Web Dev (dept-1) lives under co-agency — the cookie is the established workaround (webdev-change-requests.spec.ts).
-  await context.addCookies([{ name: "gaiada_tenant", value: "co-agency", url: page.url() }]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 const main = (page: Page) => page.locator(".dept-shell__main");
@@ -182,6 +183,8 @@ test("STATE dirty -> saving -> saved vN: the real composition renders and a save
   await expect(page.locator(P("source_path"))).not.toBeEditable(); // ui.readOnly
   await expect(page.locator(P("schema")).locator("li")).toHaveCount(4);
   await expect(page.locator(P("schema_notes"))).toHaveCSS("font-family", /mono/i);
+  // forms.css reaches the editor on a direct load (it rendered bare browser inputs live; a UA input pads 1px 2px)
+  await expect(page.locator(P("h1"))).toHaveCSS("padding-left", "13px");
 
   const h1 = page.locator(P("h1"));
   await h1.fill("SEO Agency in Bali — Edited");
@@ -502,6 +505,7 @@ test("STATE pending approval -> Withdraw; the pending request survives a reload"
 
   await page.reload();
   await expect(page.getByTestId("awaiting-approval")).toContainText("Awaiting approval #ap-0001");
+  await expect(page.getByTestId("awaiting-approval")).toContainText("Publish of v3 was requested");
 
   await page.getByRole("button", { name: "Withdraw" }).click();
   await expect(page.getByTestId("awaiting-approval")).toHaveCount(0);
