@@ -30,6 +30,7 @@
 // 404 to the dispatch AND to a plain `GET /repos/{repo}`. A 404 on the dispatch alone is ambiguous (the
 // repo is visible but the workflow file or ref is missing), so a 404 is resolved by that second read.
 import { ForbiddenException } from "@nestjs/common";
+import { withTenants } from "../../db";
 import { authorize } from "../http";
 import { resolveGithubOrgTenant } from "../github-org-tenant";
 import type { Principal } from "../../rbac/principal";
@@ -56,6 +57,9 @@ export const WORKFLOW_DISPATCH_FAILURES = [
   "workflow_not_dispatchable",
   /** Cerbos refused `github_repo · deploy` for the decider. Nothing was sent. */
   "deploy_denied",
+  /** WSK-D65: a client's publish could not be re-verified at dispatch time (the approval is not an executed client publish
+   *  decided by this client, or its client is no longer linked to the site). Nothing was sent. */
+  "client_publish_unverified",
   /** The GitHub org's tenant could not be resolved for this company (misconfigured or a foreign root). */
   "github_org_unavailable",
   "github_rate_limited",
@@ -74,6 +78,43 @@ export class WorkflowDispatchError extends Error {
   }
 }
 
+/**
+ * WSK-D65 — the ONE narrow authority, other than `github_repo . deploy`, that may start a staging rebuild: the executed
+ * publish of a CLIENT editor ("a client publish rebuilds staging automatically").
+ *
+ * A client is never granted `deploy` and no policy changes. Instead the executor, after a publish that a client editor decided
+ * has EXECUTED, issues one of these and hands it to `startSiteRebuild`; `dispatchApprovedWorkflow` then re-verifies the claim
+ * against the database (below) before any GitHub call.
+ *
+ * What protects it, honestly ranked (Opus review, round 2):
+ *   1. The server-side re-check in `authorizeClientPublish` is THE control: an executed webdesk `content.publish` decided by this
+ *      principal, carrying `clientId`, the principal's own `client_website_editor` grant for that client in this tenant, and that
+ *      client still linked to this exact site. Every refusal in review came from here.
+ *   2. `startSiteRebuild` binds the authority to the site it rebuilds (tenant, approval, slug, site must all match), and its
+ *      `ON CONFLICT (tenant_id, approval_id)` ledger row makes it once per approval. A direct in-process caller of
+ *      `dispatchApprovedWorkflow` would bypass that dedup, and there is exactly one such caller (`startSiteRebuild`).
+ *   3. This class is a LABEL, not a lock: it keeps a request body from ever reaching the dispatcher (a plain JSON object fails
+ *      `instanceof`), but in-process code could still construct one (`issue` is public; `Object.create` passes `instanceof`).
+ * Nothing here carries a repo, workflow or ref: those come from `rebuildTargetFor`, i.e. config.
+ * A staff decider's dispatch has no authority and runs `authorizeDeploy` exactly as before.
+ */
+export class ClientPublishAuthority {
+  private constructor(
+    readonly tenantId: string,
+    readonly approvalId: string,
+    readonly tenantSlug: string,
+    readonly siteId: string,
+    readonly deciderId: string,
+  ) {}
+
+  /** Called only by the approved-command executor, after a client-decided `content.publish` executed. */
+  static issue(a: { tenantId: string; approvalId: string; tenantSlug: string; siteId: string; deciderId: string }): ClientPublishAuthority {
+    return new ClientPublishAuthority(a.tenantId, a.approvalId, a.tenantSlug, a.siteId, a.deciderId);
+  }
+}
+
+export const CLIENT_PUBLISH_BASIS = { kind: "client-publish", ruling: "WSK-D65" } as const;
+
 export interface WorkflowDispatchInput {
   /** The human who decided the approval; authorised against `github_repo · deploy`. */
   decider: Principal;
@@ -88,6 +129,8 @@ export interface WorkflowDispatchInput {
   ref: string;
   /** Workflow inputs. GitHub requires strings. */
   inputs: Record<string, string>;
+  /** WSK-D65: set ONLY by the executor for a client-decided publish. Absent (the staff path) means `authorizeDeploy`, unchanged. */
+  authority?: ClientPublishAuthority;
 }
 
 export interface WorkflowDispatchResult {
@@ -123,6 +166,55 @@ export async function authorizeDeploy(
       throw new WorkflowDispatchError("deploy_denied", `github_repo deploy was refused for the decider: ${err.message}`);
     }
     throw err;
+  }
+  return org.tenantId;
+}
+
+/**
+ * WSK-D65: re-verify a client-publish authority on the server, in this tenant, before any GitHub call. ALL must hold:
+ *   (a) the approval row exists here, is a WebDesk `content.publish`, `status = approved` and `execution_status = executed`,
+ *       for the very site the authority names;
+ *   (b) it was DECIDED by this principal, the principal is a client editor of the client the row was filed for
+ *       (`tool_args.clientId`, set only by the portal BFF; the grant is the principal's own, server-derived), and clientId is set;
+ *   (c) that client is STILL linked to this exact (tenantSlug, siteId) in `webdesk_site_clients` (a re-pointed or unlinked site
+ *       fails here, even though the publish itself already happened).
+ * Returns the org tenant (for the ledger and the App credential), resolved exactly as `authorizeDeploy` resolves it.
+ */
+async function authorizeClientPublish(authority: ClientPublishAuthority, decider: Principal, requestTenantId: string, approvalId: string): Promise<string> {
+  const refuse = (why: string) => new WorkflowDispatchError("client_publish_unverified", `a client publish could not be verified: ${why}`);
+  if (authority.tenantId !== requestTenantId || authority.approvalId !== approvalId || !decider.userId || authority.deciderId !== decider.userId) {
+    throw refuse("the authority does not match this dispatch");
+  }
+  const found = await withTenants([requestTenantId], (c) =>
+    c.query<{ client_id: string | null; linked: boolean }>(
+      `SELECT aa.tool_args->>'clientId' AS client_id,
+              EXISTS (SELECT 1 FROM webdesk_site_clients wsc
+                        JOIN clients cl ON cl.id = wsc.client_id AND cl.tenant_id = wsc.tenant_id AND cl.deleted_at IS NULL
+                       WHERE wsc.tenant_id = $2 AND wsc.tenant_slug = $4 AND wsc.site_id::text = lower($5)
+                         AND wsc.client_id::text = aa.tool_args->>'clientId') AS linked
+         FROM automation_approvals aa
+        WHERE aa.id = $1 AND aa.tenant_id = $2 AND aa.deleted_at IS NULL
+          AND aa.origin = 'webdesk' AND aa.workflow_id = 'content.publish'
+          AND aa.status = 'approved' AND aa.execution_status = 'executed'
+          AND aa.decided_by = $3
+          AND aa.tool_args->>'tenantSlug' = $4 AND lower(aa.tool_args->>'siteId') = lower($5)`,
+      [approvalId, requestTenantId, decider.userId, authority.tenantSlug, authority.siteId],
+    ),
+  );
+  const row = found.rows[0];
+  if (!row || !row.client_id) throw refuse("the approval is not an executed client publish decided by this principal for this site");
+  if (!decider.roles.some((g) => g.role === "client_website_editor" && g.scopeType === "client" && g.scopeId === row.client_id && g.scopeTenantId === requestTenantId)) {
+    throw refuse("the decider is not a website editor of the client the request was filed for");
+  }
+  if (!row.linked) throw refuse("the client is no longer linked to this site");
+  const org = await resolveGithubOrgTenant(requestTenantId);
+  if (!org.ok) {
+    throw new WorkflowDispatchError(
+      "github_org_unavailable",
+      org.reason === "unconfigured"
+        ? "the GitHub org tenant is not configured (GITHUB_REPO_SYNC_TENANT_ID)"
+        : "this company has no GitHub org registered for its root",
+    );
   }
   return org.tenantId;
 }
@@ -194,12 +286,22 @@ export async function dispatchApprovedWorkflow(input: WorkflowDispatchInput): Pr
   const actorId = input.decider.userId;
   if (!actorId) throw new WorkflowDispatchError("deploy_denied", "an authenticated decider is required");
 
-  const orgTenantId = await authorizeDeploy(input.decider, input.requestTenantId, input.approvalId);
+  // WSK-D65: a client publish is authorised by its own executed approval (re-verified), never by `deploy`. The staff path (no
+  // `authority`) is exactly what it was: `authorizeDeploy`. Anything that is not a real `ClientPublishAuthority` is refused outright.
+  if (input.authority !== undefined && !(input.authority instanceof ClientPublishAuthority)) {
+    throw new WorkflowDispatchError("client_publish_unverified", "a client publish could not be verified: not an issued authority");
+  }
+  const orgTenantId = input.authority
+    ? await authorizeClientPublish(input.authority, input.decider, input.requestTenantId, input.approvalId)
+    : await authorizeDeploy(input.decider, input.requestTenantId, input.approvalId);
   const [owner, name] = input.repo.split("/");
 
   try {
     const outcome = await withGithubLedger(
-      { tenantId: orgTenantId, actorId, repo: input.repo, ref: input.ref, action: "deploy", approvalId: input.approvalId },
+      {
+        tenantId: orgTenantId, actorId, repo: input.repo, ref: input.ref, action: "deploy", approvalId: input.approvalId,
+        ...(input.authority ? { basis: CLIENT_PUBLISH_BASIS } : {}),
+      },
       async () => {
         const res = await githubRequest<unknown>(orgTenantId, "erp", actorId, {
           method: "POST",

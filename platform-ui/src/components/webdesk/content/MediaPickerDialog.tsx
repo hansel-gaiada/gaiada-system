@@ -15,7 +15,7 @@ export default function MediaPickerDialog({
       <MediaLibrary
         mode="pick" headingId={labelledBy}
         scope={ctx.scope} routeBase={ctx.routeBase} locales={ctx.locales} pickLocale={ctx.locale}
-        initial={null} authors={ctx.authors} publicBase={ctx.publicBase}
+        initial={null} authors={ctx.authors} publicBase={ctx.publicBase} driver={ctx.driver}
         onPick={(value) => onPick(value)} onClose={onClose}
       />
       {multiple && <p className="wc-muted">This field takes several images: the one you choose is added to the end of the list.</p>}

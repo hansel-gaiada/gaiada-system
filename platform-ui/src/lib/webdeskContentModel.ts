@@ -253,13 +253,15 @@ export type UnavailableCode = "editorial_unavailable" | "upstream_error" | "cont
 export type WdResult<T> =
   | { kind: "ok"; data: T }
   | { kind: "unavailable"; code: UnavailableCode; reason: string }
-  | { kind: "forbidden"; reason: string }
+  /** `slug` is set ONLY by the portal's own mapper (`lib/portalWebsite.ts`) from a 403 problem document (`client-command-not-allowed`);
+   *  `resultFromError` never sets it, so every staff result is exactly what it was. */
+  | { kind: "forbidden"; reason: string; slug?: string }
   | { kind: "not_enabled"; reason: "module_disabled" | "not_served" }
   | { kind: "not_found"; slug: string }
   /** 409. `slug` is the problem type's last segment (`version-conflict`, `slug-taken`, …). */
   | { kind: "conflict"; slug: string; message: string; currentHeadVersion: number | null; currentContentHash: string | null; updatedAt: string | null }
   /** 400 / 422. `issues` are located by RFC 6901 pointer (§2.2 `ItemIssue.path`). */
-  | { kind: "invalid"; issues: Issue[]; message: string };
+  | { kind: "invalid"; issues: Issue[]; message: string; slug?: string };
 
 export type WdOk<T> = Extract<WdResult<T>, { kind: "ok" }>;
 

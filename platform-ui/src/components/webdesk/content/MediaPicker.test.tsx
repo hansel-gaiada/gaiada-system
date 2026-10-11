@@ -65,7 +65,9 @@ describe("the picker for a media field", () => {
     expect(a.listMediaAction).not.toHaveBeenCalled(); // nothing is read until the dialog opens
     const dlg = await choose(/Choose from library: Hero image/);
     expect(dlg.getAttribute("aria-labelledby")).toBeTruthy();
-    expect(within(dlg).getByRole("heading", { name: "Choose from the media library" })).toBeTruthy();
+    // The <dialog> exists before its content is exposed to the accessibility tree; on a loaded gate host (sumopod m3c356,
+    // load ~30) the synchronous query ran too early. Wait for it; this bounds the render time, it asserts nothing weaker.
+    expect(await within(dlg).findByRole("heading", { name: "Choose from the media library" }, { timeout: 5000 })).toBeTruthy();
     await waitFor(() => expect(within(dlg).getAllByTestId("media-tile")).toHaveLength(2));
     expect(a.listMediaAction).toHaveBeenCalledWith(SCOPE, expect.objectContaining({ limit: 48 }));
   });

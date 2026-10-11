@@ -40,6 +40,14 @@ describe("demoIdentityFor — dev-login identity tiers", () => {
     expect(demoIdentityFor("Two-Companies@Deity-Labs.example")).toBe("demo-two-company-client");
   });
 
+  it("WSK-49f: the Northwind admin and viewer resolve to their own identities, not the generic client", () => {
+    expect(demoIdentityFor("admin@northwind.example")).toBe("demo-client-admin");
+    expect(demoIdentityFor("ADMIN@Northwind.example")).toBe("demo-client-admin");
+    expect(demoIdentityFor("viewer@northwind.example")).toBe("demo-client-viewer");
+    // Every other Northwind address is still Dana.
+    expect(demoIdentityFor("dana@northwind.example")).toBe("demo-client");
+  });
+
   it("group-owner resolves to the demo owner, while plain owner@ stays an ordinary staff address", () => {
     expect(demoIdentityFor("group-owner@gaiada.com")).toBe("demo-owner");
     expect(demoIdentityFor("Group-Owner@Gaiada.com")).toBe("demo-owner");

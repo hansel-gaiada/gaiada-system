@@ -17,6 +17,7 @@ import { HttpAdapterHost } from "@nestjs/core";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { UPLOADABLE_MIME_TYPES } from "./mime-allowlist";
 import { isUploadPath } from "./media-upload-token";
+import { finalizeUploadError } from "./upload-problem";
 
 function unsupported(contentType: string | undefined): Error {
   return Object.assign(new Error(`Unsupported Media Type: ${contentType ?? ""}`), { statusCode: 415, code: "FST_ERR_CTP_INVALID_MEDIA_TYPE" });
@@ -32,6 +33,16 @@ export class MediaUploadParserRegistrar implements OnModuleInit {
       const path = String(req.raw.url ?? "").split("?")[0];
       if (req.method !== "POST" || !isUploadPath(path)) return done(unsupported(req.headers["content-type"]));
       done(null, payload); // the unread request stream
+    });
+
+    // Refusals Fastify makes before the handler runs (an unlisted or missing content type: 415; a malformed JSON
+    // body: 400) are answered in Fastify's own body. On the upload route only, turn them into problem+json too
+    // (upload-problem.ts); every other route's answers are untouched, and a 2xx never reaches the rewrite.
+    fastify.addHook("onSend", (req, reply, payload, done) => {
+      const path = String(req.raw.url ?? "").split("?")[0];
+      if ((req.method !== "POST" && req.method !== "OPTIONS") || !isUploadPath(path) || reply.statusCode < 400) return done(null, payload);
+      const origin = req.headers.origin;
+      done(null, finalizeUploadError(reply, typeof origin === "string" ? origin : undefined, payload) as typeof payload);
     });
   }
 }

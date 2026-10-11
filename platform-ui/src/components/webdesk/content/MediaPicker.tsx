@@ -2,6 +2,7 @@
 import { lazy, Suspense, useId, useState } from "react";
 import type { SiteScope } from "@/lib/webdeskContentActions";
 import type { MediaValue } from "@/lib/webdeskMediaModel";
+import type { MediaDriver } from "@/lib/webdeskEditorDriver";
 import "./media.css";
 
 // "Choose from library" for a `media` field. The button is all that ships with the item editor: the library itself (grid,
@@ -24,6 +25,8 @@ export interface MediaPickerCtx {
   authors: Record<string, string>;
   /** Where WebDesk serves media from (thumbnails); null = type tiles. */
   publicBase: string | null;
+  /** WSK-49d CLIENT MODE: the portal's media calls (no usage, no delete). Absent = the staff actions, as before. */
+  driver?: MediaDriver;
 }
 
 export function MediaPickButton({

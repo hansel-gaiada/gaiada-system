@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PORTAL_AREAS, activePortalNav } from "@/lib/portalNav";
+import { PORTAL_AREAS, PORTAL_WEBSITE_HREF, activePortalNav } from "@/lib/portalNav";
 
 // The portal's navigation: five areas, each with sub-tabs (ruling PV-D4,
 // docs/plans/2026-10-10-three-perspectives.md; PV2-04). A client component only because the active
@@ -23,11 +23,16 @@ import { PORTAL_AREAS, activePortalNav } from "@/lib/portalNav";
 // `portal/overview`'s `needsYou`, so a badge would cost every portal page load a second always-on fetch
 // just to produce one, or claim an unverified number. The list page surfaces its own pending count once
 // opened.
-export function PortalTabs({ projectsBadge, billingBadge }: { projectsBadge: number; billingBadge: number }) {
+//
+// WEBSITE (WSK-49d): the Business area's second tab exists for everyone in `PORTAL_AREAS` (so every page maps to an
+// area), but is OFFERED only when `showWebsite` is true: the viewer holds a website-editor grant for the active client.
+// Cosmetic, never a gate; the Website pages and the BFF refuse everyone else on their own.
+export function PortalTabs({ projectsBadge, billingBadge, showWebsite = false }: { projectsBadge: number; billingBadge: number; showWebsite?: boolean }) {
   const pathname = usePathname() ?? "/portal";
   const { areaKey, tabHref } = activePortalNav(pathname);
   const badges: Record<string, number> = { projects: projectsBadge, billing: billingBadge };
-  const active = PORTAL_AREAS.find((a) => a.key === areaKey) ?? null;
+  const found = PORTAL_AREAS.find((a) => a.key === areaKey) ?? null;
+  const active = found && { ...found, tabs: found.tabs.filter((t) => showWebsite || t.href !== PORTAL_WEBSITE_HREF) };
   return (
     <>
       <nav className="cp-tabs" aria-label="Portal sections">

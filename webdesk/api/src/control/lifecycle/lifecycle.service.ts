@@ -31,6 +31,8 @@ interface TenantRow {
   company_ref: string;
   status: string;
   created_at: string;
+  default_locale: string;
+  locales: string[];
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -70,8 +72,20 @@ export class LifecycleService {
   // Tenant
   // ---------------------------------------------------------------------------
 
-  async provisionTenant(input: { slug: string; companyRef: string; actor: string; idempotencyKey: string }) {
-    const args = { slug: input.slug, companyRef: input.companyRef };
+  async provisionTenant(input: {
+    slug: string;
+    companyRef: string;
+    /** Both or neither (the controller validates). Absent: the column defaults ('id-ID') apply, as before. */
+    defaultLocale?: string;
+    locales?: string[];
+    actor: string;
+    idempotencyKey: string;
+  }) {
+    // The locale keys join the hashed body ONLY when declared, so a replay with different locales is a
+    // key reuse (409), while every pre-existing body hashes exactly as it did.
+    const declared = input.locales ? { defaultLocale: input.defaultLocale as string, locales: input.locales } : null;
+    // AuditArgs are scalars, so the list is hashed as its JSON text (order matters: it is part of the body).
+    const args = { slug: input.slug, companyRef: input.companyRef, ...(declared ? { defaultLocale: declared.defaultLocale, locales: JSON.stringify(declared.locales) } : {}) };
     const tenantId = randomUUID();
 
     return this.envelope.run<{ tenant: TenantRow }>({
@@ -84,11 +98,17 @@ export class LifecycleService {
       ws4ApprovalId: null,
       effect: async (client) => {
         try {
-          const { rows } = await client.query<TenantRow>(
-            `INSERT INTO tenants (id, slug, company_ref) VALUES ($1, $2, $3)
-             RETURNING id, slug, company_ref, status, created_at`,
-            [tenantId, input.slug, input.companyRef],
-          );
+          const { rows } = declared
+            ? await client.query<TenantRow>(
+                `INSERT INTO tenants (id, slug, company_ref, default_locale, locales) VALUES ($1, $2, $3, $4, $5::text[])
+                 RETURNING id, slug, company_ref, status, created_at, default_locale, locales`,
+                [tenantId, input.slug, input.companyRef, declared.defaultLocale, declared.locales],
+              )
+            : await client.query<TenantRow>(
+                `INSERT INTO tenants (id, slug, company_ref) VALUES ($1, $2, $3)
+                 RETURNING id, slug, company_ref, status, created_at, default_locale, locales`,
+                [tenantId, input.slug, input.companyRef],
+              );
           return { result: { tenant: rows[0] } };
         } catch (err) {
           if (isUniqueViolation(err)) {

@@ -42,7 +42,7 @@ unfalsifiable after.
 | agency | `agency` | 9 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 9 |
+| clients | `clients` | 11 |
 | core | `agency` · `positions` · `role-grants` | 13 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 16 |
 | search | `search` | 16 |
 | social | `social` | 12 |
-| webdev | `webdev` | 16 |
+| webdev | `webdev` | 17 |
 
 ## Capabilities
 

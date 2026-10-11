@@ -5,6 +5,7 @@
 // UNDER the resolved tenant's context, so a row belonging to a different tenant is invisible to
 // the query (RLS), not merely filtered after the fact.
 import { BadRequestException, ForbiddenException, Inject, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { uploadRefusal } from "./upload-problem";
 import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
@@ -28,7 +29,7 @@ export class InfectedUploadError extends Error {
   }
 
   toForbidden(): ForbiddenException {
-    return new ForbiddenException(`upload refused: malware scan matched '${this.signature}'`);
+    return uploadRefusal(new ForbiddenException(`upload refused: malware scan matched '${this.signature}'`), "upload-infected");
   }
 }
 
@@ -113,29 +114,30 @@ export class MediaService {
   ): Promise<{ sniffed: string }> {
     // 1. Size cap — cheapest check first, refuses before any I/O.
     if (input.buffer.length === 0) {
-      throw new BadRequestException("empty upload");
+      throw uploadRefusal(new BadRequestException("empty upload"), "upload-empty");
     }
     const cap = Math.min(storageConfig.maxUploadSizeBytes, policy.maxBytes ?? Number.POSITIVE_INFINITY);
     if (input.buffer.length > cap) {
-      throw new BadRequestException(`upload exceeds the ${cap}-byte limit (${input.buffer.length} bytes)`);
+      throw uploadRefusal(new BadRequestException(`upload exceeds the ${cap}-byte limit (${input.buffer.length} bytes)`), "upload-too-large");
     }
 
     // 2. Declared-type allowlist (the bucket's, narrowed by the token's set when there is one).
     if (!isMimeAllowedForBucket(bucket, input.contentType) || (policy.allowedMimes && !policy.allowedMimes.includes(input.contentType))) {
-      throw new BadRequestException(`content-type '${input.contentType}' is not allowed for bucket '${bucket}'`);
+      throw uploadRefusal(new BadRequestException(`content-type '${input.contentType}' is not allowed for bucket '${bucket}'`), "upload-type-not-allowed");
     }
 
     // 3. Magic-byte sniff must agree with the declared type — never trust the header alone.
     const sniffed = sniffMime(input.buffer);
     if (sniffed !== input.contentType) {
-      throw new BadRequestException(
-        `declared content-type '${input.contentType}' does not match the file's actual signature (${sniffed ?? "unrecognized"})`,
+      throw uploadRefusal(
+        new BadRequestException(`declared content-type '${input.contentType}' does not match the file's actual signature (${sniffed ?? "unrecognized"})`),
+        "upload-type-mismatch",
       );
     }
 
     // 4. Per-tenant storage quota (§11a), counted in bytes storage still holds (quota.service.ts).
     if (await this.quota.wouldExceedQuota(tenantId, input.buffer.length)) {
-      throw new ForbiddenException("tenant storage quota exceeded");
+      throw uploadRefusal(new ForbiddenException("tenant storage quota exceeded"), "upload-quota-exceeded");
     }
 
     // 5. ClamAV scan — FAIL CLOSED. A scanner that cannot be reached must refuse the upload, never
@@ -148,7 +150,7 @@ export class MediaService {
         timeoutMs: mediaConfig.clamAvTimeoutMs,
       });
     } catch (err) {
-      throw new ServiceUnavailableException(`malware scan unavailable — upload refused: ${String(err)}`);
+      throw uploadRefusal(new ServiceUnavailableException(`malware scan unavailable — upload refused: ${String(err)}`), "upload-scan-unavailable");
     }
     if (scanResult.infected) throw new InfectedUploadError(scanResult.signature);
     return { sniffed };

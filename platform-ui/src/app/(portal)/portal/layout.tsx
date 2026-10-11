@@ -7,6 +7,7 @@ import { getPortalOverview } from "@/lib/portal-data";
 import { PortalShell } from "@/components/portal/PortalShell";
 import { portalBadges } from "@/lib/portalNav";
 import { isStaff } from "@/lib/rbac";
+import { websiteEditorClients } from "@/lib/portalWebsiteAccess";
 
 // CP-7 — the client portal's own route group.
 //
@@ -50,6 +51,9 @@ export default async function PortalLayout({ children }: { children: React.React
     : null;
 
   const { projectsBadge, billingBadge } = portalBadges(overview);
+  // WSK-49d: the Website tab is offered only to a holder of `client_website_editor` for one of THIS company's clients.
+  // Cosmetic: the Website pages and the BFF refuse everyone else themselves.
+  const showWebsite = websiteEditorClients(me.roles, (overview?.clients ?? []).map((c) => c.id)).length > 0;
 
   const initials = (me.name ?? me.email ?? "?")
     .split(/\s+/)
@@ -67,6 +71,7 @@ export default async function PortalLayout({ children }: { children: React.React
       projectsBadge={projectsBadge}
       billingBadge={billingBadge}
       staff={isStaff(me)}
+      showWebsite={showWebsite}
     >
       {children}
     </PortalShell>

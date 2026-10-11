@@ -7,6 +7,7 @@ import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { ClientContactsPanel } from "@/components/clients/ClientContactsPanel";
+import { ClientWebsiteAccessSection } from "@/components/clients/ClientWebsiteAccessSection";
 import { ScheduleMeetingPanel } from "@/components/meetings/ScheduleMeetingPanel";
 import { listClientContacts } from "@/lib/clientContacts";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
@@ -72,6 +73,7 @@ export default async function ClientContactsPage({ params }: { params: Params })
           />
         </Card>
       </div>
+      <ClientWebsiteAccessSection me={me} userId={userId} tenant={tenant} clientId={clientId} clientName={client.name} />
       <div style={{ marginTop: 20 }}>
         <Card title={`Scheduled${upcoming.length ? ` · ${upcoming.length}` : ""}`}>
           {upcomingRefusal ? (

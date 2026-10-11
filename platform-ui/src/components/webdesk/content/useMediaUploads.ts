@@ -2,10 +2,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mintUploadTokenAction } from "@/lib/webdeskMediaActions";
 import type { SiteScope } from "@/lib/webdeskContentActions";
+import type { WdResult } from "@/lib/webdeskContentModel";
 import { uploadFile } from "@/lib/mediaUpload";
 import {
   bucketFor, checkFileAgainstToken, failureFromMint, isUploadDenial, originOf,
-  type MediaAsset, type UploadFailure,
+  type MediaAsset, type UploadFailure, type UploadToken,
 } from "@/lib/webdeskMediaModel";
 
 // The upload queue of the media library. One row per file; each file asks the BFF for its OWN token (a token is single-use and
@@ -49,6 +50,8 @@ export function useMediaUploads(opts: {
   onDenied: (failure: UploadFailure) => void;
   /** The origin WebDesk serves media from, learned from a minted upload URL (origin only; the token never leaves this hook). */
   onOrigin?: (origin: string) => void;
+  /** WSK-49d: the portal's token mint (client mode). Absent = the staff action, as before. */
+  mint?: (scope: SiteScope, bucket: "media" | "video") => Promise<WdResult<UploadToken>>;
 }): UseMediaUploads {
   const [rows, setRows] = useState<UploadRow[]>([]);
   const [announcement, setAnnouncement] = useState("");
@@ -71,7 +74,7 @@ export function useMediaUploads(opts: {
       if (isUploadDenial(f)) optsRef.current.onDenied(f);
     };
     patch(id, { state: "minting", failure: null, progress: 0 });
-    const minted = await mintUploadTokenAction(optsRef.current.scope, bucketFor(file.type));
+    const minted = await (optsRef.current.mint ?? mintUploadTokenAction)(optsRef.current.scope, bucketFor(file.type));
     if (minted.kind !== "ok") { failWith(failureFromMint(minted)); return; }
     const token = minted.data;
     const origin = originOf(token.uploadUrl);

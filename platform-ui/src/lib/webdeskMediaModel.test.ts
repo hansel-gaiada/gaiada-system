@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  altFor, assetLabel, bucketFor, checkFileAgainstToken, failureFromMint, failureFromUploadResponse, formatBytes, isUsableUploadUrl,
+  altFor, assetLabel, bucketFor, checkFileAgainstToken, failureFromMint, failureFromUploadResponse, formatBytes, isUsableUploadUrl, problemSlugOf,
   MediaShapeError, mediaValueFor, normalizeTags, originOf, parseMediaDeleted, parseMediaList, parseMediaUpdated, parseMediaUsage, parseUploadedAsset,
   parseUploadToken, previewUrl, usageLabel, type MediaAsset,
 } from "./webdeskMediaModel";
@@ -92,7 +92,7 @@ describe("the media field's value", () => {
   });
 });
 
-describe("an upload refusal is told in plain words, by status and message (the public route has no problem slugs)", () => {
+describe("an upload refusal from an OLDER WebDesk is told in plain words, by status and message (Nest's {statusCode, message, error} body, no slug)", () => {
   const f = (status: number, message?: string, ctx = {}) => failureFromUploadResponse(status, message === undefined ? null : { statusCode: status, message }, ctx);
 
   it.each([
@@ -145,5 +145,67 @@ describe("an upload refusal is told in plain words, by status and message (the p
     expect(checkFileAgainstToken({ name: "a.svg", type: "image/svg+xml", size: 10 }, token)).toMatchObject({ kind: "type_not_allowed", detail: expect.stringContaining("PNG image, PDF") });
     expect(checkFileAgainstToken({ name: "a", type: "", size: 10 }, token)?.detail).toContain("type is unknown");
     expect(checkFileAgainstToken({ name: "a.png", type: "image/png", size: 5000 }, token)).toMatchObject({ kind: "too_large", detail: "The limit is 1000 B." });
+  });
+});
+
+describe("an upload refusal from a current WebDesk is told by its problem+json `type` slug first", () => {
+  const BASE = "https://webdesk.gaiada.online/errors/";
+  const problem = (slug: string, status: number, detail = "prose that may change") => ({ type: `${BASE}${slug}`, title: "x", status, detail });
+  const f = (status: number, body: unknown, ctx = {}) => failureFromUploadResponse(status, body, ctx);
+
+  it.each([
+    ["upload-not-found", 404, "token_expired"],
+    ["upload-busy", 503, "busy"],
+    ["upload-type-not-allowed", 415, "type_not_allowed"],
+    ["upload-type-not-allowed", 400, "type_not_allowed"],
+    ["upload-type-mismatch", 400, "type_mismatch"],
+    ["upload-too-large", 413, "too_large"],
+    ["upload-too-large", 400, "too_large"],
+    ["upload-empty", 400, "empty"],
+    ["upload-quota-exceeded", 403, "quota"],
+    ["upload-infected", 403, "infected"],
+    ["upload-scan-unavailable", 503, "scan_unavailable"],
+    ["upload-timeout", 408, "timeout"],
+    ["upload-interrupted", 400, "failed"],
+  ])("%s (HTTP %i) -> %s", (slug, status, kind) => {
+    expect(f(status, problem(slug, status), { maxBytes: 1024 }).kind).toBe(kind);
+  });
+
+  it("the slug wins over the message wording: rewording `detail` changes nothing, and a misleading wording does not mislead", () => {
+    expect(f(403, problem("upload-quota-exceeded", 403, "malware virus words")).kind).toBe("quota");
+    expect(f(403, problem("upload-infected", 403, "storage quota")).kind).toBe("infected");
+    expect(f(503, problem("upload-busy", 503, "the scan is down")).kind).toBe("busy");
+    expect(f(400, problem("upload-empty", 400, "limit exceeds signature")).kind).toBe("empty");
+  });
+
+  it("too large names the limit from the slug path as well", () => {
+    expect(f(413, problem("upload-too-large", 413), { maxBytes: 5 * 1024 * 1024 }).detail).toBe("The limit is 5.0 MB.");
+    expect(f(413, problem("upload-too-large", 413)).detail).toBeNull();
+  });
+
+  it("a slug this code does not know (invalid-request, internal-error, a future one) falls back to status plus the problem's detail", () => {
+    expect(f(400, problem("invalid-request", 400, "empty upload")).kind).toBe("empty");
+    expect(f(403, problem("some-future-slug", 403, "tenant storage quota exceeded")).kind).toBe("quota");
+    expect(f(500, problem("internal-error", 500)).kind).toBe("failed");
+    expect(f(404, problem("some-future-slug", 404)).kind).toBe("token_expired");
+  });
+
+  it("a body that only looks like a problem is not trusted for a slug: other hosts' types, non-slugs, a missing type", () => {
+    expect(problemSlugOf({ type: `${BASE}upload-busy` })).toBe("upload-busy");
+    expect(problemSlugOf({ type: "https://elsewhere.example/x/upload-busy" })).toBe("upload-busy"); // the slug is the contract; the status still has to fit via the fallback for anything else
+    expect(problemSlugOf({ type: `${BASE}Not A Slug` })).toBeNull();
+    expect(problemSlugOf({ type: 7 })).toBeNull();
+    expect(problemSlugOf({ statusCode: 503, message: "x" })).toBeNull();
+    expect(problemSlugOf(null)).toBeNull();
+  });
+
+  it("status 0 (no answer) is never read from a body", () => {
+    expect(f(0, problem("upload-busy", 503)).kind).toBe("not_enabled");
+  });
+
+  it("no failure text carries a token or a raw status field", () => {
+    for (const slug of ["upload-not-found", "upload-busy", "upload-too-large", "upload-infected"]) {
+      expect(JSON.stringify(f(400, problem(slug, 400), { maxBytes: 10 }))).not.toMatch(/statusCode|TOKEN|errors\//);
+    }
   });
 });

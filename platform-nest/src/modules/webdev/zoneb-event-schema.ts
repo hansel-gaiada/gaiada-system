@@ -8,7 +8,7 @@
 // Mirrors `webdesk/api/src/events/zoneb-event.types.ts`'s `ZoneBEventKind`/`FormReceivedData`
 // EXACTLY — the two lists are kept in sync by hand across the zone boundary, same as the migration
 // header (202608261440_webdev_zoneb_event_log.sql) already documents for the DB CHECK constraint.
-const ZONEB_EVENT_KINDS = [
+export const ZONEB_EVENT_KINDS = [
   "form.received", "deploy.done", "promote.done", "rollback.done",
   "contract.published", "alert.raised",
   // WSK-61 (202610110441_webdev_schedule_firings.sql): the content tick made a schedule effective.

@@ -150,6 +150,8 @@ import { ConsoleReadsController } from "./modules/webdev/console-reads.controlle
 import { WebdeskControlController } from "./modules/webdev/webdesk-control.controller";
 // WSK-59: /api/:t/modules/webdev/content/* — the content BFF (reads, drafts, publish-requests, unpublish/delete).
 import { WebdeskContentController } from "./modules/webdev/webdesk-content.controller";
+import { WebdeskSiteClientsController } from "./modules/webdev/webdesk-site-clients.controller";
+import { WebdeskClientWebsiteController } from "./modules/webdev/webdesk-client-website.controller";
 // WSK-60: /api/:t/modules/webdev/content/sites/:slug/:siteId/{build-status,rebuild-requests} — the
 // publish → rebuild → staging ledger's read and the editor's "request a rebuild".
 import { SiteBuildsController } from "./modules/webdev/site-builds.controller";
@@ -226,6 +228,10 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     WebdeskControlController,
     // WSK-59: the content BFF over the WebDesk control channel.
     WebdeskContentController,
+    // WSK-49c: which client a WebDesk site serves (staff-managed link) and the CLIENT-MODE website BFF under the
+    // portal's own prefix, /api/:t/portal/clients/:clientId/website/*.
+    WebdeskSiteClientsController,
+    WebdeskClientWebsiteController,
     // WSK-60: build-status + rebuild-requests (the staging rebuild ledger).
     SiteBuildsController,
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,

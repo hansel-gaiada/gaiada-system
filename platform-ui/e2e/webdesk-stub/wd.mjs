@@ -34,7 +34,10 @@ const PROBLEM = "https://webdesk.gaiada.online/errors/";
 //   demo-hansel / dept-manager -> publisher (read, write, request_publish, unpublish, delete)
 //   gede-ic                    -> viewer    (read only: every write is a Cerbos 403)
 //   anything else              -> none      (reads are 403 too)
-const ROLE = { "demo-hansel": "publisher", "dept-manager": "publisher", "gede-ic": "viewer" };
+//   wd-client-a / wd-client-b  -> the two CLIENT editors of the portal Website area (WSK-49d, `portal.mjs`): the portal stub delegates
+//                                 its reads and writes here, as the real client BFF delegates to the staff service. A client is never
+//                                 let in on the staff routes by `server.mjs` (it only serves `/portal/…` to them); the role is for the delegation.
+const ROLE = { "demo-hansel": "publisher", "dept-manager": "publisher", "gede-ic": "viewer", "wd-client-a": "publisher", "wd-client-b": "publisher" };
 export const roleOf = (userId) => ROLE[userId] ?? "none";
 
 const sha = (v) => crypto.createHash("sha256").update(canonical(v)).digest("hex");
@@ -538,7 +541,7 @@ function deleteItem(S, it, body) {
 }
 
 // ── approvals (publish is one WS4 approval, §6) ──────────────────────────────────────────────────
-const NAME = { "demo-hansel": "Hansel Tanaka", "dept-manager": "Dewi Manager", "gede-ic": "Gede Ic" };
+const NAME = { "demo-hansel": "Hansel Tanaka", "dept-manager": "Dewi Manager", "gede-ic": "Gede Ic", "wd-client-a": "Dana Editor", "wd-client-b": "Ewan Editor" };
 
 function approvalRow(S, id, workflowId, userId, toolArgs, reason) {
   return {
