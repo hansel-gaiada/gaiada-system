@@ -1,34 +1,34 @@
 #!/bin/sh
-# WebDesk (Zone B) — bootstrap the owner/migrator/app role split (WSK-01/03, design §04) plus the
+# WebDesk (Zone B) â€” bootstrap the owner/migrator/app role split (WSK-01/03, design Â§04) plus the
 # read-only backup role (WSK-68).
 #
 # Runs once, on first cluster init, via docker-entrypoint-initdb.d, connected as the CLUSTER
-# SUPERUSER ($POSTGRES_USER — a Postgres-image bootstrap identity, never used by any application
+# SUPERUSER ($POSTGRES_USER â€” a Postgres-image bootstrap identity, never used by any application
 # code or migration). It creates three ordinary, NOSUPERUSER, **NOBYPASSRLS** roles and hands the
-# target database to them — mirroring platform-nest's `infra/db/init-cluster.sh` pattern
+# target database to them â€” mirroring platform-nest's `infra/db/init-cluster.sh` pattern
 # (`CREATE ROLE ... NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`, run by the cluster
 # superuser, never by an app-visible role):
 #
-#   - webdesk_owner    — nominal database owner (custody role; WSK-03 refines what, if anything,
+#   - webdesk_owner    â€” nominal database owner (custody role; WSK-03 refines what, if anything,
 #                        it does at runtime beyond owning the database itself).
-#   - webdesk_migrator — runs migrations/*.sql (MIGRATE_DATABASE_URL). Granted CREATE on schema
+#   - webdesk_migrator â€” runs migrations/*.sql (MIGRATE_DATABASE_URL). Granted CREATE on schema
 #                        public so it can execute DDL; the objects it creates are owned by IT
-#                        (WSK-03 may reassign ownership to webdesk_owner as schema work matures —
+#                        (WSK-03 may reassign ownership to webdesk_owner as schema work matures â€”
 #                        not done here, this ticket only stands the roles up).
-#   - webdesk_app      — the runtime role every service connects as. DML only, via
+#   - webdesk_app      â€” the runtime role every service connects as. DML only, via
 #                        ALTER DEFAULT PRIVILEGES on webdesk_migrator's future objects (the same
 #                        "you don't normally write GRANTs in a migration" hand-off platform-nest
-#                        uses) — never DDL, never BYPASSRLS.
+#                        uses) â€” never DDL, never BYPASSRLS.
 #
-# None of those three gets BYPASSRLS: that is the entire point of the split (design §04 —
+# None of those three gets BYPASSRLS: that is the entire point of the split (design Â§04 â€”
 # "roles webdesk_owner / webdesk_migrator / webdesk_app (NOBYPASSRLS)"), and it is what makes the
 # migration-backfill RLS lint (../scripts/lint-migration-rls.mjs) a real guard rather than a
-# no-op — a migrator with BYPASSRLS would never hit the silent-zero-rows trap that lint exists
+# no-op â€” a migrator with BYPASSRLS would never hit the silent-zero-rows trap that lint exists
 # to catch.
 #
 # THE FOURTH ROLE (WSK-68, owner ruling WSK-D48 (6)) is the one deliberate BYPASSRLS role:
 #
-#   - webdesk_backup   — read-only, socket-only, for the nightly pg_dump
+#   - webdesk_backup   â€” read-only, socket-only, for the nightly pg_dump
 #                        (ops/scripts/webdesk-backup-nightly.sh). Every tenant table is FORCE RLS,
 #                        so a dump by any of the three roles above reads ZERO rows (or fails with
 #                        "query would be affected by row-level security policy"); a superuser dump
@@ -36,7 +36,7 @@
 #                        without write access is the narrowest identity that produces a real dump.
 #                        It holds NO password: scram-sha-256 over TCP therefore fails for it, and
 #                        the only way in is the unix socket inside the container (`docker exec`,
-#                        where the official image keeps `local all all trust`) — i.e. only someone
+#                        where the official image keeps `local all all trust`) â€” i.e. only someone
 #                        who already controls the docker daemon. Read-only is enforced twice: it is
 #                        granted SELECT and nothing else (default privileges below, GRANT SELECT
 #                        for existing objects by ops/scripts/ensure-backup-role.sh), and
