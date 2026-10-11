@@ -1856,6 +1856,22 @@ export function registerAgencyIntakeExecutableApprovals(): void {
     },
     precondition: agencyIntakeConvertPrecondition,
   });
+  // M5-L4 — `agency_intake.createFromWebSubmission` is medium-impact, so an unattended call suspends and
+  // an approved row needs an entry or it sits at `not_applicable` forever. The write itself is idempotent
+  // on (tenant, submission) (`ux_lead_tenant_submission`), which is why the precondition only checks that
+  // the args are well-formed: a retry after a landed attempt returns the existing lead, it never doubles.
+  registerExecutableApproval({
+    toolName: "agency_intake.createFromWebSubmission",
+    lockKey: (args) => {
+      const t = typeof args?.tenantId === "string" ? args.tenantId : "";
+      const s = typeof args?.submissionId === "string" ? args.submissionId : "";
+      return t && s ? `agency-intake:web-lead:${t}:${s}` : `agency-intake:web-lead:malformed:${JSON.stringify(args ?? {})}`;
+    },
+    precondition: async (_client, args) => {
+      const ok = ["tenantId", "siteSlug", "submissionId"].every((k) => typeof args?.[k] === "string" && args[k] !== "");
+      return ok ? { ok: true } : { ok: false, reason: "missing_web_lead_args" };
+    },
+  });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
