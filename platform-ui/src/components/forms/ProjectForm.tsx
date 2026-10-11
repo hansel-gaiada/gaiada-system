@@ -7,7 +7,10 @@ import { CustomFields } from "./CustomFields";
 import { Button } from "@/components/ui";
 import "./forms.css";
 
-const STATUS_OPTIONS = ["active", "on_hold", "completed", "archived"];
+// PV2-09: exactly the `projects.status` CHECK set, in the same order as `PROJECT_STATUSES`
+// (platform-nest/src/core/project-status.ts). platform-nest's project-status.test.ts reads this line
+// and fails if the two drift; the API refuses any other value with a 400.
+const STATUS_OPTIONS = ["planned", "active", "on_hold", "completed", "cancelled", "archived"];
 
 // `members` is accepted for parity with the task's owner-select ask, but is
 // intentionally unused here: neither POST /projects nor PATCH /projects/:id

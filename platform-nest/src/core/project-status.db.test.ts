@@ -21,7 +21,8 @@ import { newId, withTenants } from "../db";
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 
-// The four statuses the staff project form offers (ProjectForm.tsx:10).
+// The four statuses the staff form offered at PV2-01. PV2-09 added planned and cancelled; the counts
+// below are for these four, and project-status-check.db.test.ts covers the closed set.
 const FORM_STATUSES = ["active", "on_hold", "completed", "archived"] as const;
 
 describe.skipIf(!TEST_URL)("PV2-01 · finished project statuses", () => {

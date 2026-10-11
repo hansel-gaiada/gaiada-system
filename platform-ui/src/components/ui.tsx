@@ -72,6 +72,8 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   proposal: "progress", negotiation: "progress", discovery: "progress",
   // champagne — inactive/unpublished states
   draft: "idle", archived: "idle", absent: "idle",
+  // PV2-09: the project form now offers these; without an entry they fell to "progress" (in flight).
+  planned: "idle", cancelled: "idle",
   // rust — attention/negative states
   "at risk": "critical", overdue: "critical", low: "critical", critical: "critical", blocked: "critical",
   "on hold": "critical", rejected: "critical", error: "critical",
