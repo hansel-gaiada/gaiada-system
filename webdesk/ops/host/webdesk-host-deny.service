@@ -1,0 +1,17 @@
+# /etc/systemd/system/webdesk-host-deny.service on gda-aicenter (design v2.3 §03 AC 6, WSK-D34; M4).
+# Was a 4-port deny-list written on the box on 2026-09-04 and kept in no repo file; the M4 containment
+# probe found it left the WireGuard peer, the cloud metadata service and most host listeners reachable.
+# Now a default-deny from ops/host/webdesk-egress-guard.sh, installed at /usr/local/sbin/.
+[Unit]
+Description=Default-deny for the webdesk network: no host service, no private range, no metadata (WSK-D34 AC 6)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/webdesk-egress-guard.sh apply
+ExecStop=/usr/local/sbin/webdesk-egress-guard.sh remove
+
+[Install]
+WantedBy=multi-user.target
