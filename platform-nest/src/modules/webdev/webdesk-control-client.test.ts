@@ -20,6 +20,7 @@ import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inspect } from "node:util";
+import { generateKeyPairSync, verify as cryptoVerify } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { config } from "../../config";
 import {
@@ -353,6 +354,64 @@ describe("WSK-63b control client — WS4 on a HIGH command", () => {
     await expect(c.send({ ...base, path: "/v1/t/a", params: {} })).rejects.toThrow(/must start with \/control\//);
     await expect(c.send({ ...base, params: { tenantSlug: "a" }, idempotencyKey: "short" })).rejects.toThrow(/idempotencyKey/);
     expect(good.connections).toBe(0);
+  });
+
+  // M4 F1 — v2 (Ed25519 JWS) when a WS4 signing key is configured.
+  it("M4 F1: with a WS4 signing key it mints v2, a JWS that verifies with the PUBLIC key over the same args, and never v1", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const c = makeClient({ ws4Key: "", ws4Signing: { privateKey, kid: "ws4-test-1" } });
+    const approvalId = "11111111-2222-4333-8444-666666666666";
+    const res = await c.send({
+      command: "tenant.archive",
+      method: "POST",
+      path: "/control/v1/tenants/:tenantSlug/archive",
+      params: { tenantSlug: "acme" },
+      body: { reason: "x" },
+      idempotencyKey: "idem-m4f1-0001",
+      ws4: { approvalId },
+    });
+    expect(res.status).toBe(200);
+    const seen = good.seen[good.seen.length - 1];
+    const header = String(seen.headers["x-ws4-assertion"]);
+    const [h, p, s] = header.split(".");
+    expect(JSON.parse(Buffer.from(h, "base64url").toString("utf8"))).toEqual({ alg: "EdDSA", kid: "ws4-test-1", typ: "ws4+jwt" });
+    const claims = JSON.parse(Buffer.from(p, "base64url").toString("utf8")) as Record<string, unknown>;
+    expect(Object.keys(claims)).toEqual(["approvalId", "commandHash", "exp", "aud"]);
+    expect(claims.aud).toBe("webdesk-control-plane");
+    expect(claims.approvalId).toBe(approvalId);
+    const zoneBArgs = { tenantSlug: "acme", ...JSON.parse(seen.body) };
+    expect(claims.commandHash).toBe(computeCommandHash("tenant.archive", zoneBArgs));
+    expect(cryptoVerify(null, Buffer.from(`${h}.${p}`, "ascii"), publicKey, Buffer.from(s, "base64url"))).toBe(true);
+
+    // Cross-repo fixture: webdesk/api/test/ws4-assertion-v2-vectors.spec.ts verifies THIS wire header with
+    // WebDesk's real verifyWs4Assertion when pointed at the file (WS4_V2_FIXTURE_IN).
+    const out = process.env.WS4_V2_FIXTURE_OUT;
+    if (out) {
+      const x = publicKey.export({ format: "jwk" }).x;
+      const jwks = JSON.stringify({ keys: [{ kty: "OKP", crv: "Ed25519", kid: "ws4-test-1", x, use: "sig", alg: "EdDSA" }] });
+      writeFileSync(out, JSON.stringify({ jwks, header, command: "tenant.archive", args: zoneBArgs, approvalId }));
+    }
+  });
+
+  it("M4 F1: a set-but-unusable v2 kid answers 503 for a WS4 call BEFORE any I/O, and never falls back to v1", async () => {
+    const c = makeClient({ ws4Key: WS4_KEY, ws4SigningError: "WEBDESK_CONTROL_WS4_SIGNING_KEY_FILE ('/run/x') cannot be read (ENOENT)" });
+    const before = good.connections;
+    const tokensBefore = c.describe().tokenRequests;
+    const err = await c
+      .send({ command: "tenant.archive", method: "POST", path: "/control/v1/tenants/:tenantSlug/archive", params: { tenantSlug: "acme" }, ws4: { approvalId: "a-1" } })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WebdeskControlNotConfiguredError);
+    expect((err as Error).message).toMatch(/WS4 v2 signing key: .*cannot be read/);
+    expect(good.connections).toBe(before);
+    expect(c.describe().tokenRequests).toBe(tokensBefore);
+    // A non-WS4 call still goes through: the channel is up, only Layer 4 is refused.
+    expect((await c.getContract("acme")).status).toBe(200);
+  });
+
+  it("M4 F1: phase 3 shape (no HMAC key, a v2 signing key) constructs and serves; neither → the v1 name is reported missing", () => {
+    const { privateKey } = generateKeyPairSync("ed25519");
+    expect(() => makeClient({ ws4Key: "", ws4Signing: { privateKey, kid: "ws4-test-1" } })).not.toThrow();
+    expect(() => makeClient({ ws4Key: "" })).toThrow(/WEBDESK_CONTROL_WS4_KEY/);
   });
 });
 
