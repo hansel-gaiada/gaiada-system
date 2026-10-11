@@ -245,3 +245,10 @@ capacity statement is the interim ceiling (OQ-2.7).
 - T4 proof order: an `apply` with the live tag (351) would swap in 351's tree, which lacks the WSK-68 scripts, and
   break the backup cron. So: `plan` with 351 first (changes nothing); `apply` only with the first release that
   contains the M4 commits.
+- 13:20Z: after the erp.gaiada.com cut-over recreated the api (355), probes 39/39 again.
+- 13:28Z: T4 `plan` dispatch with `v1.0.0-alpha.355`: `RESULT: plan OK` on the box (run 38143307486). Its proxy/
+  NOTE is comments only (the live Caddyfile predates WSK-48b).
+- T5 landed (main `696d3464`): gate run m4t5 had legacy 15/0/1 (c1 needs the docker socket). c1 then went to CI's
+  `webdesk-api` job (PR #15).
+- 14:03Z: per-source offsite staleness alert `OffsiteBackupOneSourceStale` live on sumopod (main `d248af5d`). Before
+  it, every backup metric was an aggregate, so one stopped source (e.g. the WebDesk dump) could never fire.
