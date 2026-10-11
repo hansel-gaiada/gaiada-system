@@ -30,10 +30,59 @@ export interface TokenClaims {
 
 export type TokenVerificationResult = { ok: true; claims: TokenClaims } | { ok: false; reason: string };
 
+/** A malformed issuer list is a configuration error: fail loudly at construction, never at first request. */
+export class ControlIssuerConfigError extends Error {
+  constructor(message: string) {
+    super(`[webdesk:api] WEBDESK_CONTROL_OIDC_ISSUER ${message}`);
+    this.name = "ControlIssuerConfigError";
+  }
+}
+
+/**
+ * Parses a comma-separated issuer list (whitespace around entries trimmed). During an issuer move
+ * (e.g. erp.gaiada.online -> erp.gaiada.com) list `old,new` so both verify.
+ */
+export function parseIssuerList(raw: string): string[] {
+  return raw.split(",").map((s) => s.trim());
+}
+
+/** Validates issuers: non-empty list, no empty entry, no duplicate, each an absolute https URL (http only for localhost/127.0.0.1). */
+export function validateIssuers(issuers: readonly string[]): string[] {
+  if (issuers.length === 0) throw new ControlIssuerConfigError("is an empty list: at least one issuer is required. Refusing to boot.");
+  const seen = new Set<string>();
+  for (const entry of issuers) {
+    if (entry.trim() === "") throw new ControlIssuerConfigError("contains an empty entry (stray comma?). Refusing to boot.");
+    let url: URL;
+    try {
+      url = new URL(entry);
+    } catch {
+      throw new ControlIssuerConfigError(`entry ${JSON.stringify(entry)} is not an absolute URL. Refusing to boot.`);
+    }
+    const localHttp = url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    if (url.protocol !== "https:" && !localHttp) {
+      throw new ControlIssuerConfigError(
+        `entry ${JSON.stringify(entry)} must be an absolute https: URL (http: is allowed only for localhost/127.0.0.1). Refusing to boot.`,
+      );
+    }
+    if (seen.has(entry)) throw new ControlIssuerConfigError(`lists ${JSON.stringify(entry)} more than once. Refusing to boot.`);
+    seen.add(entry);
+  }
+  return [...issuers];
+}
+
 export interface OfflineJwksVerifierOptions {
-  /** Expected `iss` claim — the public issuer URL, e.g. `https://erp.gaiada.online/idp/realms/gaiada`. */
-  issuer: string;
-  /** JWKS endpoint to fetch from. Defaults to the OIDC-conventional path under `issuer`. */
+  /**
+   * Accepted `iss` claim(s) — the public issuer URL, e.g. `https://erp.gaiada.com/idp/realms/gaiada`.
+   * A string or a list: a token whose `iss` equals ANY listed issuer verifies (issuer-move window).
+   * Give this or `issuers`.
+   */
+  issuer?: string | string[];
+  /** Alias of `issuer`, list form. */
+  issuers?: string[];
+  /**
+   * JWKS endpoint to fetch from. Defaults to the OIDC-conventional path under the FIRST listed issuer:
+   * during an issuer move both hostnames front the same Keycloak realm, so the keys are identical.
+   */
   jwksUri?: string;
   /** Expected `aud` claim — design §03: audience `webdesk-control-plane`. */
   audience: string;
@@ -48,15 +97,16 @@ export interface OfflineJwksVerifierOptions {
  */
 export class OfflineJwksVerifier {
   private readonly jwks: JWTVerifyGetKey;
-  private readonly issuer: string;
+  private readonly issuers: string[];
   private readonly audience: string;
   private readonly clockTolerance: number;
 
   constructor(opts: OfflineJwksVerifierOptions) {
-    this.issuer = opts.issuer;
+    const given = opts.issuers ?? opts.issuer;
+    this.issuers = validateIssuers(given === undefined ? [] : typeof given === "string" ? [given] : given);
     this.audience = opts.audience;
     this.clockTolerance = opts.clockToleranceSec ?? 5;
-    const jwksUri = opts.jwksUri ?? `${opts.issuer.replace(/\/+$/, "")}/protocol/openid-connect/certs`;
+    const jwksUri = opts.jwksUri ?? `${this.issuers[0].replace(/\/+$/, "")}/protocol/openid-connect/certs`;
     this.jwks = createRemoteJWKSet(new URL(jwksUri), {
       cacheMaxAge: 10 * 60 * 1000, // 10 min — matches design §03's "cached"
       cooldownDuration: 30 * 1000, // don't hammer the issuer if a burst of unknown kids arrives
@@ -66,7 +116,7 @@ export class OfflineJwksVerifier {
   async verify(bearerToken: string): Promise<TokenVerificationResult> {
     try {
       const { payload } = await jwtVerify(bearerToken, this.jwks, {
-        issuer: this.issuer,
+        issuer: this.issuers,
         audience: this.audience,
         clockTolerance: this.clockTolerance,
       });
