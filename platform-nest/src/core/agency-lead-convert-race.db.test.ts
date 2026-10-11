@@ -74,9 +74,10 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     const id = newId();
     await withTenants([co], (c) =>
       c.query(
-        `INSERT INTO agency_leads (id, tenant_id, org_name, contact_name, contact_email, contact_phone, source, status, owner_id, origin_site, declined_reason)
-         VALUES ($1, $2, $3, 'Prospect Contact', $4, '+62-811-000-000', 'invite', $5, $6, 'test', $7)`,
-        [id, co, orgName, `${id}@prospect.test`, status, admin, status === "declined" ? "no budget" : null],
+        // M5-P1: `stage` must agree with `status` at the ends (lead_lost_iff_declined), so a declined fixture is 'lost'.
+        `INSERT INTO agency_leads (id, tenant_id, org_name, contact_name, contact_email, contact_phone, source, status, stage, owner_id, origin_site, declined_reason)
+         VALUES ($1, $2, $3, 'Prospect Contact', $4, '+62-811-000-000', 'invite', $5, $8, $6, 'test', $7)`,
+        [id, co, orgName, `${id}@prospect.test`, status, admin, status === "declined" ? "no budget" : null, status === "declined" ? "lost" : "enquiry"],
       ),
     );
     return { id, orgName };
@@ -179,7 +180,7 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
       const insClient = `INSERT INTO clients (id, tenant_id, name, origin_site) VALUES (gen_random_uuid(), $1, $2, 'test') RETURNING id`;
       const clientA = (await a.query<{ id: string }>(insClient, [co, lead.orgName])).rows[0].id;
       const clientB = (await b.query<{ id: string }>(insClient, [co, lead.orgName])).rows[0].id;
-      const link = `UPDATE agency_leads SET status='converted', converted_client_id=$2 WHERE id = $1 AND status = ANY(ARRAY['submitted','in_review','nurturing'])`;
+      const link = `UPDATE agency_leads SET status='converted', stage='won', converted_client_id=$2 WHERE id = $1 AND status = ANY(ARRAY['submitted','in_review','nurturing'])`;
       const upA = await a.query(link, [lead.id, clientA]);
       await a.query("COMMIT");
       // B's UPDATE blocks on A's row lock, re-evaluates the WHERE against the COMMITTED row, and
@@ -285,12 +286,14 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
       });
 
       // Schema backstop: ux_lead_client / ux_lead_run hold even if some future hand-written path
-      // tried to link a SECOND lead to the same client/run.
+      // tried to link a SECOND lead to the same client/run. (M5-P1: the UPDATE sets stage='won' too.
+      // Postgres checks CHECK constraints BEFORE unique indexes, so without it lead_won_iff_converted
+      // would fire first and this would no longer be testing ux_lead_client.)
       const other = await newLead();
       await expect(
         withTenants([co], (c) =>
           c.query(
-            `UPDATE agency_leads SET status='converted', converted_client_id=$2, pipeline_run_id=$3 WHERE id = $1`,
+            `UPDATE agency_leads SET status='converted', stage='won', converted_client_id=$2, pipeline_run_id=$3 WHERE id = $1`,
             [other.id, winner.clientId, winner.runId],
           ),
         ),
