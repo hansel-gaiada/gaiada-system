@@ -785,7 +785,7 @@ other — a demo-only artifact that read exactly like "saving silently reverts".
 | Google OAuth client (GSC/GA4/Ads) + real property + Ads test account | **SM-41G staging acceptance + SM-26's real push ONLY** — construction unblocked 2026-07-30 (§6x.3, §A12: SM-51 sandbox + local Keycloak) | create in Google Cloud console | open |
 | pgvector extension | SM-09 native-vector mode (fallback works) | enable on PG | open (OQ-8) |
 | Semrush MCP OAuth | SM-28 only (deferred anyway) | authorize in claude.ai connector settings | open |
-| OQ-5 Umami | SM-27 | decide deploy vs defer | **ruled 2026-10-11: unparked on `gda-aicenter` (WSK-D66)** |
+| OQ-5 Umami | SM-27 | decide deploy vs defer | **ruled 2026-10-11: unparked on `sumopod` (WSK-D66)** |
 
 None of these block M1 or M2.
 

@@ -16,7 +16,7 @@ other sessions are taking.
 
 | Ruling | In short |
 |---|---|
-| WSK-D66 | Umami unparked, stock, in its own compose project on `gda-aicenter`. Only the collector is public; the ERP pulls read-only. **Precondition: M4's CPU-budget decision** |
+| WSK-D66 | Umami unparked, stock, in its own compose project on **`sumopod`** (first ruled onto `gda-aicenter`, which measured 2 vCPU). Only the collector is public; the ERP pulls read-only; nightly backup off the box |
 | WSK-D67 | Tracking covers the whole plan (phases 0–5), consent-first. Each phase goes live only once the visitor addendum covers it and counsel has reviewed it |
 | WSK-D68 | `/onboard` seeds the lead; AD-1 follows the first call; the website never links straight to AD-1 |
 | WSK-D69 | A small pipeline adopts `agency_leads`: stages, value, currency, stage history. A stage change drives conversion uploads |
@@ -59,7 +59,7 @@ other sessions are taking.
 | **M5-G4** | Vendor register rows: Umami, its geo source, the phase 5 IP/company data source | Haiku | — | with A3 / V1 |
 | **M5-G5** | Data-subject rights across the website's data (addendum §9.3): WSK-38 matches a normalised phone as well as email; a platform-nest `privacy` find/export/erase for `agency_leads` and AD-1, which scrubs the person's fields and keeps the row; retention on `agency_leads` and AD-1; a hashed suppression list so an erased person is not re-imported or re-uploaded; one request fans out to every system | Sonnet, Opus review | platform-nest timestamped | before L4 goes live |
 | **M5-G6** | Server-side consent log (addendum R-V3): the banner's choice is recorded under a random consent id (version, categories, time), so consent can be proven; withdrawal deletes the server-side profile | Sonnet, Opus review | its own | with A3 |
-| **M5-A3** | Umami deploy (D66): compose project, own Postgres, egress default-deny, limits, collector-only nginx vhost, admin UI unpublished, nightly backup, a sumopod probe, runbook. Server work by the orchestrator | Sonnet (compose, runbook), Opus review | Umami's own | after M4's CPU decision + the CNAME |
+| **M5-A3** | Umami deploy on `sumopod` (D66): its own compose project, own Postgres, no egress, hard limits, a collector-only public route, admin UI unpublished, nightly backup **off the box**, a probe on the status page, runbook. Server work by the orchestrator. Sumopod is at 81% disk and runs every session's test gates, so measure first | Sonnet (compose, runbook), Opus review | Umami's own | after the CNAME (O-2) |
 | **M5-A4** | ERP read path: `search` pulls Umami summaries with the read-only token (env through compose `environment:`), BFF + MCP tools, an **Analytics** tab in the Website workspace (section map, sources, CTA and form funnel) | Sonnet, Opus review | — | after A3 |
 | **M5-A5** | Site tracker sends the event list to Umami as custom events (cookieless, aggregate, D67); the host CSP allows the collector | with the site session | — | after A3; live after G2 |
 | **M5-L1** | gaiada.com's contact, audit and onboard forms as WebDesk form definitions (field ids equal to the site's; consent text and version; retention; live Turnstile keys); the site moves off Web3Forms and shows a consent notice on each form (the API requires `consent: true`; `FormShell` has no notice today). **Defects found 2026-10-11:** `data_subject_ref` is taken only from a field named `email`, but the site's ids are `email_address` and `contact_email`, so WSK-38 cannot find gaiada.com's submitters; and the forms path has no PAN/national-ID scrub (AD-1 has `scrubText`) | Sonnet, Opus review; the site part with the site session | — | wave 1 |
@@ -95,13 +95,14 @@ Cerbos restart or a deploy. Release numbers are claimed one step at a time.
 
 | # | Question | Owner | Gates |
 |---|---|---|---|
-| O-1 | M4's CPU budget on `gda-aicenter` (lower WebDesk to ~1.0 vCPU, or resize the box). Umami is counted inside it | **owner** (M4) | A3 |
-| O-2 | The collector's name under `erp.gaiada.com` (proposed `insights.erp.gaiada.com`, a CNAME to `aicenter.erp.gaiada.com`) and its record in the gaiada.com zone | **owner** (DNS) | A3 |
+| ~~O-1~~ | **Settled 2026-10-11: Umami goes to `sumopod`** (D66 amended), so it no longer waits on M4's CPU budget for `gda-aicenter` (measured: `e2-highmem-2`, 2 vCPU) | — | — |
+| O-2 | The collector's name under `erp.gaiada.com` (proposed `insights.erp.gaiada.com`, a CNAME to `sumopod.erp.gaiada.com`) and its record in the gaiada.com zone | **owner** (DNS) | A3 |
 | O-3 | Counsel for the addendum: who, and when | **owner** | G2, and everything live after it |
 | O-4 | Freelance writers get ERP logins (staff-side, writers' room only)? The plan assumes yes; it adds a new kind of external principal | **owner** | W1 |
 | O-5 | Does our own replay (V6) replace Clarity, or run beside it? Until then, Clarity is a session recorder filed under "analytics", so the banner must say so, and its masking must cover typed input (addendum §11.10) | **owner** | V6; the banner wording before launch |
 | O-9 | **GA4 advanced vs basic Consent Mode.** The site, as built, sends cookieless pings to Google before consent; D67 allows only our own counts before consent. Basic mode (no Google contact until consent) matches D67; advanced keeps Google's modelled conversions. Recommended: basic. Not live anywhere yet; the site session has the change ready (hold the gtag.js load in `vendors.ts` until consent, keep the inline denied defaults) | **owner** | the site's launch |
 | O-10 | Interim Web3Forms: acceptable for real lead data until L1, or hold the forms until L1? (terms, region and retention unknown) | **owner** | the site's launch |
+| O-11 | Sumopod is contracted personally: move the contract to the controller entity, or a written arrangement with the contract holder (addendum R-V18, item 20) | **owner**, counsel | A5 live |
 | O-6 | Production Turnstile keys for gaiada.com's forms | **owner** (Cloudflare) | L1 live |
 | O-7 | Meta Business Verification | SMM team | P3 |
 | O-8 | The purpose of Google Ads `AW-630595339`, and an access audit of the old GTM container and both Ads accounts (the handoff found ~50 unknown linker domains) | ads team / owner | P2 |
@@ -114,3 +115,8 @@ creates no leads; `agency_leads` forbids stages by design; the sentinel client d
 (Sonnet, 531 lines) and reviewed. One error was corrected: the forms purge IS scheduled, by WSK-61. Its findings
 became L1's two defects, L2's consent snapshot, G5, G6, O-9 and O-10. No server work, because the ERP cut-over to
 `erp.gaiada.com` (M1) held the box.
+
+**2026-10-11, later.** The owner said `gda-aicenter` is 4 vCPU and named `sumopod` as the alternative. Measured:
+`gda-aicenter` is `e2-highmem-2` (2 vCPU, 9 GiB of 15 free, 15-min load 4.2 just after the cut-over); `sumopod` is
+4 vCPU with a load of 21, 4 GiB free and its disk at 81%. Shown both, the owner chose `sumopod`, so D66 is amended the
+same day, O-1 is settled, and O-11 plus the addendum's R-V18 cover the personally contracted box.

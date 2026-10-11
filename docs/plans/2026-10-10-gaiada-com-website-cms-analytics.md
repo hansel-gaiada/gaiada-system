@@ -199,7 +199,7 @@ accept later.
    v2 "internal proof site" wording disagree today.
 2. Ratify D37 (WebDesk owns the editor, Payload is removed, editors use ERP
    identity).
-3. Unpark Umami (OQ-5 / SM-27). **Ruled: unparked, on `gda-aicenter` (WSK-D66).**
+3. Unpark Umami (OQ-5 / SM-27). **Ruled: unparked, on `sumopod` (WSK-D66).**
 4. How far tracking goes: company identification, session replay, retention
    periods. **Ruled: the whole plan, consent-first (WSK-D67); retention stays in the addendum's drafts.**
 5. The `/onboard/` vs AD-1 split. **Ruled: `/onboard` first, AD-1 after the call (WSK-D68).**
