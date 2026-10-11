@@ -61,14 +61,16 @@ FROM scratch AS blocks-export
 COPY --from=blocks /out/ /
 
 FROM node:22-alpine
-ARG BLOCKS_SHA256=""
-ARG BLOCKS_VERSION=""
-LABEL org.gaiada.webdesk-blocks.sha256="$BLOCKS_SHA256" \
-      org.gaiada.webdesk-blocks.version="$BLOCKS_VERSION"
 WORKDIR /app
 COPY api/package.json api/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/api/dist ./dist
 COPY --from=blocks /out/ ./artifacts/blocks/
+# Declared LAST so a new block-library hash never invalidates the npm ci layer above (release.yml's
+# registry cache, MON-09o-b).
+ARG BLOCKS_SHA256=""
+ARG BLOCKS_VERSION=""
+LABEL org.gaiada.webdesk-blocks.sha256="$BLOCKS_SHA256" \
+      org.gaiada.webdesk-blocks.version="$BLOCKS_VERSION"
 EXPOSE 3000
 CMD ["node", "dist/main.js"]
