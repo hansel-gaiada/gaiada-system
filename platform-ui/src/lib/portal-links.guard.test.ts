@@ -89,3 +89,27 @@ describe("links the backend sends clients open a portal page in an area", () => 
     expect(activePortalNav("/portal/runs/x").areaKey).toBeNull();
   });
 });
+
+// WSK-49d — the Website area's OWN links (built by the pages and the editor from `portalWebsiteHref`) resolve to pages in the
+// portal route group, inside the Business area. The BFF sends no `/portal/website` links (§16j "what is deliberately NOT done": no
+// notification links into /portal yet), so the backend scan above cannot see them; this pins the in-app ones instead.
+describe("the Website area's links open a portal page in an area", () => {
+  const links = [
+    "/portal/website",
+    "/portal/website/:id/:id", // a site
+    "/portal/website/:id/:id/:id", // a collection
+    "/portal/website/:id/:id/:id/:id", // a page (the editor)
+    "/portal/website/:id/:id/:id/:id/history",
+    "/portal/website/:id/:id/:id/~new",
+    "/portal/website/:id/:id/~media",
+  ];
+  it.each(links)("%s resolves to a page", (link) => {
+    expect(routeExists(link)).toBe(true);
+  });
+  it.each(links)("%s sits in the Business area", (link) => {
+    expect(activePortalNav(link.replace(/:id/g, "x")).areaKey).toBe("business");
+  });
+  it("the Website routes live in the portal route group, never the staff one", () => {
+    expect(existsSync(path.join(UI_SRC, "app", "(app)", "portal"))).toBe(false);
+  });
+});

@@ -104,7 +104,7 @@ export class WebdeskMediaService {
   async list(gate: ContentGate, site: SiteRef, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "read");
     const query = strictQuery(rawQuery, LIST_QUERY);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     return this.zoneB.read({
       command: "media.list",
       path: MEDIA_PATH,
@@ -117,7 +117,7 @@ export class WebdeskMediaService {
   async usage(gate: ContentGate, site: SiteRef, assetId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "read");
     strictQuery(rawQuery, []);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
     return this.zoneB.read({
       command: "media.usage",
@@ -135,7 +135,7 @@ export class WebdeskMediaService {
    */
   async mintUploadToken(gate: ContentGate, site: SiteRef, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "upload");
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     const b = strictBody(rawBody, MINT_KEYS);
     if (typeof b.bucket !== "string" || b.bucket === "") throw invalidRequest("bucket is a required string");
     // Before anything is minted: a deployment that cannot say where the browser should upload mints nothing.
@@ -150,6 +150,7 @@ export class WebdeskMediaService {
       body: b,
       idempotencyKey,
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      ...gate.egressClient(),
       entity: { type: "webdesk_media_asset", id: null },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, bucket: b.bucket, maxBytes: typeof b.maxBytes === "number" ? b.maxBytes : null },
     });
@@ -180,7 +181,7 @@ export class WebdeskMediaService {
   /** `PATCH …/media/:assetId` body `{title?, alt?, tags?}` (at least one) → 200 `{asset}`. Zone B validates the values. */
   async update(gate: ContentGate, site: SiteRef, assetId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "update");
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     const b = strictBody(rawBody, UPDATE_KEYS);
     if (Object.keys(b).length === 0) throw invalidRequest(`the body must carry at least one of: ${UPDATE_KEYS.join(", ")}`);
     if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
@@ -193,6 +194,7 @@ export class WebdeskMediaService {
       body: b,
       idempotencyKey,
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      ...gate.egressClient(),
       entity: { type: "webdesk_media_asset", id: assetId },
       // Which fields changed, never their values (a title or alt text is content).
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, assetId, fields: Object.keys(b) },
@@ -206,7 +208,7 @@ export class WebdeskMediaService {
   async delete(gate: ContentGate, site: SiteRef, assetId: string, rawQuery: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "delete");
     strictQuery(rawQuery, []);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
+    await gate.resolveSite(this.zoneB, site);
     if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
     return this.zoneB.write(gate.principal, gate.tenantId, {
       command: "media.delete",
@@ -216,6 +218,7 @@ export class WebdeskMediaService {
       params: { tenantSlug: site.tenantSlug, siteId: site.siteId, assetId },
       idempotencyKey,
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+      ...gate.egressClient(),
       entity: { type: "webdesk_media_asset", id: assetId },
       ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, assetId },
     });

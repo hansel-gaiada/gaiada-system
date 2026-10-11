@@ -85,6 +85,9 @@ interface GithubLedgerBase {
    *  without a join. Absent for callers that have no approval; the key is then omitted, not null, so
    *  every pre-existing row shape is byte-identical. */
   approvalId?: string;
+  /** WSK-D65: a dispatch authorised by something other than `github_repo . deploy` says so, on all three rows of the attempt
+   *  (`metadata.basis`, `metadata.ruling`). Absent for every other caller: the keys are then omitted, so existing rows are byte-identical. */
+  basis?: { kind: string; ruling: string };
 }
 
 /** Discriminated on `action`: `attribution` is REQUIRED for `push`/`merge` (the two commit-producing
@@ -120,6 +123,7 @@ function baseMetadata(req: GithubLedgerRequest, correlationId?: string): Record<
     repoId: req.repoId ?? null,
     ref: req.ref ?? null,
     ...(req.approvalId ? { approvalId: req.approvalId } : {}),
+    ...(req.basis ? { basis: req.basis.kind, ruling: req.basis.ruling } : {}),
     ...(correlationId ? { correlationId } : {}),
     attribution: req.attribution ? { name: req.attribution.name, email: req.attribution.email } : null,
   };

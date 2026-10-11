@@ -11,6 +11,48 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.7.0` - a new tenant declares its languages; upload refusals answer problem+json (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3 follow-ups. No migration.
+
+- **`tenant.provision` takes `defaultLocale` and `locales`** (both or neither; `defaultLocale` must be in `locales`, no duplicates, non-empty; a locale is an opaque string of at most 35 characters, the content create rule). Without them a tenant still gets the old `id-ID` default, so existing callers are unchanged. The locales join the hashed body only when declared, so a replay with different locales is a key reuse (409). Before this, every tenant provisioned over the channel got `id-ID` only and every create in another language failed `422 composition-violation /locale` (the live `gaiada` tenant was fixed by hand, WSK-D48). The ERP has no provisioning call yet (WSK-57 provisioned over the channel by hand).
+- **The public media upload route answers every refusal as `application/problem+json`** with a stable `type` slug (`upload-not-found`, `upload-type-not-allowed`, `upload-type-mismatch`, `upload-too-large`, `upload-empty`, `upload-quota-exceeded`, `upload-infected`, `upload-scan-unavailable`, `upload-busy`, `upload-timeout`, `upload-interrupted`, `invalid-request`, `internal-error`), statuses unchanged, CORS kept on errors, the token never echoed. Refusals Fastify makes before the handler are rewritten on the upload path only. The api-key upload route is unchanged.
+- **Goes live through the WebDesk api swap** (`deploy-webdesk` apply with this tag, M4 T4), not the ERP deploy. That swap also installs the M4 WebDesk-side tree on the box: the hardened compose files, `ops/scripts` (WSK-68 nightly backups), `ops/probes` and `ops/deploy`. Afterwards every compose call on the box uses all three compose files plus `--no-build`.
+- Verified on the Linux gate (sumopod): WebDesk `m3r357` — api 1132/0/2, migrations 454, vocabulary 267, blocks 32, root 25, legacy 15/0/1 (the cross-machine determinism check needs the docker socket); ERP `m3u357` — ui 5514/5514, next build OK, repo checks PASS.
+
+### platform-ui `0.88.1` - media upload refusals are read by their slug (2026-10-11) - DEV-VERIFIED
+
+- `failureFromUploadResponse` maps an upload refusal by WebDesk's problem+json `type` slug first (webdesk 0.7.0), falling back to status plus message for an older WebDesk.
+- The media picker test waits for the dialog heading (a load-sensitive timing in the 356 gate).
+- Verified on the Linux gate (sumopod): WebDesk `m3r357` — api 1132/0/2, migrations 454, vocabulary 267, blocks 32, root 25, legacy 15/0/1 (the cross-machine determinism check needs the docker socket); ERP `m3u357` — ui 5514/5514, next build OK, repo checks PASS.
+
+### platform-nest `0.67.0` - clients edit their own website: Cerbos rules, a client-mode portal BFF that checks every change, and a client publish that rebuilds staging (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3, WSK-49c. Rulings WSK-D58, D59, D60 (amended twice), D62, D65 in `docs/blueprints/webdesk-design-v2.md` §14.
+
+- **Which client a site serves.** Migration `202610111200_webdesk_site_clients.sql`: one row per (serving company, WebDesk tenant slug, site) → `clients.id`, tenant RLS with FORCE, a composite FK so a site can only point at a client of its own company. Staff manage it: `GET /site-clients`, `GET|PUT|DELETE /sites/:slug/:siteId/client` (audited).
+- **Cerbos.** The derived role `client_website_editor` may read, create, update and request publish on `webdesk_content_item`, and publish under D58 (one item they requested themselves, or a batch another editor of the same client requested); and read, upload and update on `webdesk_media_asset`. Never delete, unpublish, schedule or anything on schema. Staff rules unchanged. **Cerbos restart on deploy.**
+- **The portal BFF** (`/api/:t/portal/clients/:clientId/website/…`, contract §16j): sites, collections with a per-field `clientEditable` map, items, versions, update, restore, create, preview, publish requests (file, self-publish one item, approve another editor's batch, withdraw), and media list, upload token and update. Every route authorises first, then checks the portal scope and the site link, then pre-checks, then calls WebDesk.
+- **The ERP-side D59/D62 check** refuses a change to a field a client may not edit, a publish carrying Gaiada-only changes, and a stale base (409 first), with WebDesk's own slugs, before any WebDesk call. The editability rule is vendored from `webdesk/delivery/vocabulary` with a drift check (`npm run vendor:check`). WebDesk stays the authority: every client call carries the `ce: true` editorial-assertion claim, byte-pinned to WebDesk's vector v4.
+- **A client publish rebuilds staging (WSK-D65).** No client ever holds deploy: the rebuild is authorised by the executed publish itself, re-verified on the server (executed webdesk publish, decided by this client editor, their grant, the site still linked to their client), bound to the site it rebuilds, once per approval, and audited (`basis: client-publish`, `ruling: WSK-D65`). The staff path is unchanged.
+- **Zone B:** the n8n intake now accepts `schedule.fired`, pinned to the ERP's kinds by `zoneb-intake-workflow-parity.test.ts` (automation 0.4.2).
+- Reviewed twice by an Opus reviewer (round 1: 1 major fixed; round 2: 3 minor fixed). Verified on the Linux gate (sumopod `m3c356`): nest 8180/8181 (the one red is the known flaky `agency-lead-convert-race`, red on main), ui 5494/5495 (`MediaPicker.test.tsx` timed out under load ~30; 3/3 green on re-run), `next build` OK, repo checks PASS.
+
+### platform-ui `0.88.0` - the client portal's Website area, and who may edit a client's website (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3, WSK-49d and the WSK-49f UI.
+
+- **Portal → Business → Website**, shown only to a client's website editors: their linked sites, which collections they can edit, the editor in client mode (Gaiada-only fields read-only, "Managed by Gaiada"; SEO read-only), history with restore, Publish now for one page, Request publish for several, approve a colleague's request, withdraw your own, preview, and images without delete. Every refusal is said in plain words (a stale page asks for a reload and keeps your text).
+- **Website access.** Staff, on a client's Contacts page: a Website editor switch per contact, and Make admin / Remove admin (keep Signer or Viewer). A client's own admin, on People: a Website access switch per colleague. `owner` is not offered these controls yet (the server refuses it; tracked).
+- The shared staff editor gains optional client-mode props; staff behaviour is unchanged (staff WebDesk e2e 68/68 on the merged tree).
+- A client contact granted website editing stays in the portal (`CLIENT_SIDE_ROLES`, from 354).
+- Reviewed by an Opus reviewer (49d: 1 major, 5 minor fixed; 49f: 3 minor fixed) and by the PV program for the shared portal files. Verified on the Linux gate (sumopod `m3c356`): nest 8180/8181 (the one red is the known flaky `agency-lead-convert-race`, red on main), ui 5494/5495 (`MediaPicker.test.tsx` timed out under load ~30; 3/3 green on re-run), `next build` OK, repo checks PASS. Playwright on the merged tree: portal Website + staff WebDesk 88/88, website access 11/11.
+
+### automation (n8n) `0.4.2` - the Zone B intake accepts `schedule.fired` (2026-10-11) - PROTOTYPED
+
+- `automation/workflows/wd-zoneb-intake.json`'s schema check lists `schedule.fired` (WSK-61's wake-up hint) with a cheap first-wall shape check; the ERP's validator stays strict. Before, the hint would have been refused 400 at n8n once the live bridge URL was set.
+- Live steps after deploy: re-import the workflow (CLI only), check `WEBDEV_ZONEB_INTAKE_ENABLED` and the shared `WEBDESK_EVENT_SECRET`, then set `WEBDESK_ZONEB_BRIDGE_URL` on WebDesk to the PUBLIC https webhook (the egress guard drops private paths).
+
 ### platform-ui `0.87.0` - before the move to erp.gaiada.com: host-only `__Host-` cookies, an Origin check on every write, no framing; a signed agreement says so (2026-10-11) - PROTOTYPED
 
 ERP names Phase B0 (`docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §3). On `erp.gaiada.com` the ERP is same-site with every

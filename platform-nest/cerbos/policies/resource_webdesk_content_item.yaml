@@ -49,7 +49,10 @@
 # ("" — a fixture, ANONYMOUS) matches nothing and falls back to the rules above.
 #
 # ── THE INVARIANTS THIS FILE MUST NOT BREAK ─────────────────────────────────────────────────────
-#  - `client` appears NOWHERE: editorial drafts are staff-only. `member` appears nowhere either (§7).
+#  - the `client` ROLE appears NOWHERE: editorial drafts are staff-only. `member` appears nowhere either (§7).
+#    WSK-49c adds exactly ONE non-staff consumer, the derived role `client_website_editor` (WSK-D58/D60, below): an
+#    attribute-gated role (a grant scoped to ONE client record, matched against `resource.attr.clientId`), never a
+#    role name, never a `perm_*` mirror, never reachable without the server-loaded site -> client link.
 #  - NO perm_* mirror (IAM-04c): publish/schedule are attribute-instance checks (approvalId, creator
 #    vs decider) that a flat `perms` array cannot express; a mirror would hand a self-approving maker
 #    the publish right (iam-04-reg1-mirror-reach-invariant.test.ts's over-grant class).
@@ -69,7 +72,7 @@
 # They match through the attribute-gated derived roles in derived_roles.yaml (`webdesk_editorial_reader`
 # for read, one per role for everything else), which compare the grant's scope rows with
 # resource.attr.siteId / collectionKey / locale. NO bundle and NO perm_* mirror, for the same reason as
-# publish: a flat key cannot say "this site, these collections, these locales" (PERMISSION-CONTRACT §26).
+# publish: a flat key cannot say "this site, these collections, these locales" (PERMISSION-CONTRACT §27).
 #
 # Additional resource attributes, every one from WebDesk's own read or a validated route param, never a
 # body (design §2.3): `siteId` (route :siteId after resolveEditableSite()), `reviewState` (WebDesk
@@ -194,6 +197,55 @@ resourcePolicy:
             type(request.resource.attr.creatorId) == string &&
             request.resource.attr.creatorId != "" &&
             request.resource.attr.creatorId != request.principal.id
+
+    # ══════════ CLIENT EDITORS — WSK-49c (rulings WSK-D58, D59, D60) ═════════════════════════════
+    # The derived role `client_website_editor` (derived_roles.yaml, WSK-49f) matches only when the principal holds the
+    # `client_website_editor` grant for the client the RESOURCE is about (`resource.attr.clientId`) AND the grant's
+    # tenant is the resource's tenant. Every rule below also keeps the tenant, assurance and module tests the staff
+    # editor tier has, and none uses `variables.local` (it hides the self-scope and mis-routes IAM overrides).
+    #
+    # `clientId` is fed ONLY by the portal BFF (webdesk-client-website.service.ts), from the site -> client link it
+    # loaded in the request's tenant (`webdesk_site_clients`), never from a body; an unfed resource ("") matches
+    # nothing. WHAT A CLIENT EDITOR CAN NEVER DO appears here as ABSENCE: `delete`, `unpublish`, `schedule` and the
+    # whole of `webdesk_collection` (schema) are in no client rule, so Cerbos denies them by default.
+    #
+    # read / create / update / request_publish: the editor tier, narrowed to one client. WHICH FIELDS a client may
+    # change (WSK-D59) is not a Cerbos question: the BFF and WebDesk both enforce it from the composition.
+    - actions: ["read", "create", "update", "request_publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["client_website_editor"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+
+    # publish (WSK-D58): reachable only at the decide step of an approved WS4 row (approval id present, a KNOWN
+    # creator), and
+    #   * the editor may approve a publish THEY requested only when it covers exactly ONE item
+    #     (creatorId == principal.id && itemCount == 1: the client-side analogue of R4), or
+    #   * a batch (or anyone's request) needs a DIFFERENT person: creatorId != principal.id. The BFF only offers
+    #     this for a request another client editor of the same client filed (the approval row carries the client).
+    # `itemCount` is computed by the executor from the STORED row, never from a request; omitted -> 0 -> the
+    # two-person rule applies (fail closed). The roles:["user"] DENYs at the bottom of this file still apply to
+    # every principal, client editors included: a self-approved batch is denied twice.
+    - actions: ["publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["client_website_editor"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev" &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != "" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            ((request.resource.attr.creatorId == request.principal.id &&
+              has(request.resource.attr.itemCount) && request.resource.attr.itemCount == 1) ||
+             request.resource.attr.creatorId != request.principal.id)
 
     # ══════════ M5-W1a · the review actions for the EXISTING tiers (design §2.4) ═════════════════
     # webdev_staff (module_staff, the unscoped editor tier) gains submit and comment. webdev_manager

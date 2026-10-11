@@ -56,6 +56,7 @@ import { readImageDimensions } from "./image-dimensions";
 import { toLibraryAsset, type LibraryAsset } from "./library-asset";
 import { InfectedUploadError, MediaService } from "./media.service";
 import { hashUploadToken, UPLOAD_TOKEN_RE } from "./media-upload-token";
+import { uploadRefusal } from "./upload-problem";
 import { uploadCorsOrigins } from "./upload-cors";
 
 /** The longest the body may take to arrive, from the moment the token is proven. */
@@ -161,14 +162,14 @@ export function readBounded(stream: Readable, maxBytes: number, timeoutMs: numbe
     const onData = (chunk: Buffer | string) => {
       const c = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
       total += c.length;
-      if (total > maxBytes) return finish(new PayloadTooLargeException(`upload exceeds the ${maxBytes}-byte limit of this token`));
+      if (total > maxBytes) return finish(uploadRefusal(new PayloadTooLargeException(`upload exceeds the ${maxBytes}-byte limit of this token`), "upload-too-large"));
       chunks.push(c);
     };
     const onEnd = () => finish(null, Buffer.concat(chunks, total));
     const onError = (e: Error) => finish(e);
     // A client that goes away mid-body: 'close' without 'end'.
-    const onClose = () => finish(new BadRequestException("the upload was interrupted"));
-    const timer = setTimeout(() => finish(new RequestTimeoutException("the upload did not arrive in time")), timeoutMs);
+    const onClose = () => finish(uploadRefusal(new BadRequestException("the upload was interrupted"), "upload-interrupted"));
+    const timer = setTimeout(() => finish(uploadRefusal(new RequestTimeoutException("the upload did not arrive in time"), "upload-timeout")), timeoutMs);
     stream.on("data", onData);
     stream.on("end", onEnd);
     stream.on("error", onError);
@@ -219,7 +220,7 @@ export class MediaUploadService implements OnModuleInit {
     filename: string | null;
     body: Readable;
   }): Promise<LibraryAsset> {
-    if (!UPLOAD_TOKEN_RE.test(p.token)) throw new NotFoundException();
+    if (!UPLOAD_TOKEN_RE.test(p.token)) throw uploadRefusal(new NotFoundException(), "upload-not-found");
     const hash = hashUploadToken(p.token);
 
     // a. Look the token up (no lock, no transaction held) and refuse what the headers alone can refuse.
@@ -231,15 +232,15 @@ export class MediaUploadService implements OnModuleInit {
       );
       return rows[0] ?? null;
     });
-    if (!found) throw new NotFoundException();
+    if (!found) throw uploadRefusal(new NotFoundException(), "upload-not-found");
 
     const contentType = baseContentType(p.contentType);
     if (!contentType || !found.allowed_mimes.includes(contentType)) {
-      throw new UnsupportedMediaTypeException(`content-type '${contentType ?? "(none)"}' is not allowed for this upload token`);
+      throw uploadRefusal(new UnsupportedMediaTypeException(`content-type '${contentType ?? "(none)"}' is not allowed for this upload token`), "upload-type-not-allowed");
     }
     const cap = Math.min(Number(found.max_bytes), storageConfig.maxUploadSizeBytes);
     if (p.contentLength !== null && p.contentLength > cap) {
-      throw new PayloadTooLargeException(`upload exceeds the ${cap}-byte limit of this token`);
+      throw uploadRefusal(new PayloadTooLargeException(`upload exceeds the ${cap}-byte limit of this token`), "upload-too-large");
     }
 
     // b. Claim it: its own short transaction, committed before the body is read. From here the token is spent.
@@ -254,7 +255,7 @@ export class MediaUploadService implements OnModuleInit {
         return rows[0] ?? null;
       }),
     );
-    if (!token) throw new NotFoundException(); // lost the race: another request spent it between a and b
+    if (!token) throw uploadRefusal(new NotFoundException(), "upload-not-found"); // lost the race: another request spent it between a and b
 
     // The transfer: no database connection is held from here until the row insert.
     const buffer = await readBounded(p.body, cap, uploadTimeoutMs());

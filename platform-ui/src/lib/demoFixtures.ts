@@ -25,6 +25,7 @@ import { financeDemo } from "./demoFinance";
 import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
 import { NETWORK_FIXTURES } from "./demoNetwork";
+import { websiteAccessDemo } from "./demoWebsiteAccess";
 
 export interface DemoResult {
   status: number;
@@ -51,6 +52,8 @@ const DEMO_USER_VICEROY_MARKETING_ID = "demo-viceroy-marketing";  // PV2-02: sta
 const DEMO_USER_TWO_COMPANY_CLIENT_ID = "demo-two-company-client";
 const DEMO_USER_OWNER_ID = "demo-owner";  // PV1-01: owner of the group (owner role on the root and its companies)  // PV2-05: client of co-agency AND co-resort
 const DEMO_USER_CLIENT_ID = "demo-client";
+const DEMO_USER_CLIENT_ADMIN_ID = "demo-client-admin";    // WSK-49f: Northwind's client admin
+const DEMO_USER_CLIENT_VIEWER_ID = "demo-client-viewer";  // WSK-49f: Northwind's view-only contact
 
 let demoSeq = 1000;
 const demoId = (p: string) => `${p}-${++demoSeq}`;
@@ -114,6 +117,23 @@ const ME_CLIENT = {
   // One company: a client belongs to the company that SERVES them and must never see a switcher.
   companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
   roles: [{ role: "client", scopeType: "company", scopeId: "co-agency" }],
+};
+
+// WSK-49f: two more external contacts of Northwind Traders. Client-only like ME_CLIENT (ONE role: a staff role
+// here would turn them back into staff and stop exercising the portal shell).
+const ME_CLIENT_ADMIN = {
+  ...ME_CLIENT,
+  userId: DEMO_USER_CLIENT_ADMIN_ID,
+  name: "Aria Hartono",
+  email: "admin@northwind.example",
+  title: "Operations Director, Northwind Traders",
+};
+const ME_CLIENT_VIEWER = {
+  ...ME_CLIENT,
+  userId: DEMO_USER_CLIENT_VIEWER_ID,
+  name: "Vera Santoso",
+  email: "viewer@northwind.example",
+  title: "Analyst, Northwind Traders",
 };
 
 const ME_IC = {
@@ -227,6 +247,8 @@ const ME_OWNER = {
 // PV2-02: per-identity `clientOf` for the /api/me route (the route overrides `companies` for everyone).
 const DEMO_CLIENT_OF: Record<string, { companyId: string; companyName: string }[]> = {
   [DEMO_USER_CLIENT_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
+  [DEMO_USER_CLIENT_ADMIN_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
+  [DEMO_USER_CLIENT_VIEWER_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
   [DEMO_USER_VICEROY_MARKETING_ID]: [{ companyId: "co-agency", companyName: "Gaia Digital Agency" }],
   [DEMO_USER_TWO_COMPANY_CLIENT_ID]: [
     { companyId: "co-agency", companyName: "Gaia Digital Agency" },
@@ -2078,6 +2100,8 @@ function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_MANAGER_ID) return ME_MANAGER;
   if (userId === DEMO_USER_IC_ID) return ME_IC;
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
+  if (userId === DEMO_USER_CLIENT_ADMIN_ID) return ME_CLIENT_ADMIN;
+  if (userId === DEMO_USER_CLIENT_VIEWER_ID) return ME_CLIENT_VIEWER;
   if (userId === DEMO_USER_VICEROY_MARKETING_ID) return ME_VICEROY_MARKETING;
   if (userId === DEMO_USER_TWO_COMPANY_CLIENT_ID) return ME_TWO_COMPANY_CLIENT;
   if (userId === DEMO_USER_OWNER_ID) return ME_OWNER;
@@ -2088,6 +2112,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const url = new URL(fullPath, "http://demo");
   const p = url.pathname;
   const m = method.toUpperCase();
+
+  // WSK-49f — client website access (§16i): staff Contacts list + grants, portal People grants.
+  // Stateful (lib/demoWebsiteAccess.ts) and placed first so no generic `/clients/:id/…` matcher below
+  // can answer one of these paths with an empty list or a bare {ok:true}.
+  const websiteAccess = websiteAccessDemo(method, p, userId, body);
+  if (websiteAccess) return websiteAccess;
 
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);

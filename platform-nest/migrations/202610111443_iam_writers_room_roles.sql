@@ -1,6 +1,6 @@
 -- 202610111443 — M5-W1a: the writers' room roles and review permissions (IAM seed; no DDL).
 -- docs/plans/2026-10-11-m5-writers-room-design.md §2 (roles as data-driven grants), §6 (this file), §7 (the six
--- artifacts), §9 row W1a. PERMISSION-CONTRACT §26.
+-- artifacts), §9 row W1a. PERMISSION-CONTRACT §27.
 --
 -- WHAT THIS ADDS
 --   1. Four GLOBAL roles stored as data: webdesk_writer, webdesk_translator, webdesk_seo_reviewer, webdesk_editor.

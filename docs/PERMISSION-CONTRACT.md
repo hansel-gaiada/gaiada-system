@@ -1440,7 +1440,65 @@ entry on `role-bundle-completeness.db.test.ts`'s exemption list, with the reason
 `RoleGrant.scopeTenantId` (client-scoped grants only) are resolved in `assemblePrincipal()` and sent to Cerbos by `principalPayload()`;
 `Resource.clientId` is sent by `resourcePayload()`. All three are allow-list entries and default to "matches nothing".
 
-## 26. M5-W1a — the writers' room roles and review actions (2026-10-11, PROTOTYPED)
+## 26. WSK-49c — client editors on `webdesk_content_item` and `webdesk_media_asset` (2026-10-11, WSK-D58 / D59 / D60)
+
+No migration, no new kind, no new action, no catalog change. **The first resource rules that consume the derived role
+`client_website_editor` (§25).** The role is a grant scoped to ONE client record; it matches only when that client is the one the RESOURCE
+is about (`resource.attr.clientId`, fed only by the portal BFF from the site -> client link it loaded in the request's tenant, never from a
+body) and the grant's tenant is the resource's tenant. An unfed resource (`""`) matches nothing.
+
+```yaml
+# resource_webdesk_content_item.yaml (new block, before the self-approval DENYs; every existing rule is byte-identical)
+- actions: ["read", "create", "update", "request_publish"]
+  effect: EFFECT_ALLOW
+  derivedRoles: ["client_website_editor"]
+  condition: { match: { expr: 'variables.inTenant && variables.notLow && request.resource.attr.module == "webdev"' } }
+- actions: ["publish"]
+  effect: EFFECT_ALLOW
+  derivedRoles: ["client_website_editor"]
+  condition: # tenant/assurance/module as above, plus: approvalId present, creatorId known, and
+    (creatorId == principal.id && itemCount == 1) || creatorId != principal.id
+# resource_webdesk_media_asset.yaml
+- actions: ["read", "upload", "update"]
+  effect: EFFECT_ALLOW
+  derivedRoles: ["client_website_editor"]
+  condition: { match: { expr: 'variables.inTenant && variables.notLow && request.resource.attr.module == "webdev"' } }
+```
+
+| Action | A client editor of THIS client | Why |
+|---|---|---|
+| `webdesk_content_item` read / create / update / request_publish | allowed | the editor tier, narrowed to one client. WHICH fields they may change (D59) is not a Cerbos question: the BFF and WebDesk both enforce it from the composition. |
+| `publish`, ONE item they requested (`creatorId == principal.id`, `itemCount == 1`) | allowed | D58: the client-side analogue of R4. |
+| `publish`, a BATCH they requested | **DENIED** | maker != checker; also denied by the existing `roles:["user"]` self-approval DENY (denied twice). |
+| `publish`, a request ANOTHER client editor filed (`creatorId != principal.id`) | allowed | D58: a batch needs a second client person with the same grant. The BFF only offers this for an approval row that carries the client (filed through the portal BFF, `tool_args.clientId`); a staff-filed request is not theirs. |
+| `delete`, `unpublish`, `schedule`, anything on `webdesk_collection` (schema) | **DENIED** | absent from every client rule (default deny); `schedule` also keeps its strict maker != checker. |
+| `webdesk_media_asset` read / upload / update | allowed | D59 / D53: library reads and metadata for their site. |
+| `webdesk_media_asset` delete | **DENIED** | D59: "media deletion ... never reachable". |
+
+**WSK-D65: a client publish rebuilds staging, and no policy changed.** `github_repo . deploy` is NOT granted to a client; there is no new
+rule, action or role. The dispatch of the staging rebuild after a client-decided publish is authorised in code by an explicit, narrow
+basis: `ClientPublishAuthority` (core/github/workflow-dispatch.ts), a class with a private constructor that only the approved-command
+executor issues, after a publish decided by a client editor has EXECUTED. `dispatchApprovedWorkflow` accepts nothing else as a basis
+(`instanceof`; a JSON object from a request is refused) and, before any GitHub call, re-verifies in this tenant that (a) the approval
+is an executed WebDesk `content.publish` for this site, (b) it was decided by this principal, who holds the `client_website_editor`
+grant for the client the row was filed for (`tool_args.clientId`), and (c) that client is still linked to this exact site. Otherwise
+the build is `failed: client_publish_unverified`. Repo, workflow and ref come from `rebuildTargetFor` (config) only. A staff
+decider carries no authority and still runs `authorizeDeploy`; a client can still never decide a `content.rebuild`, a schedule or a
+key mint. The attempt is audited with `metadata.basis = 'client-publish'` and `metadata.ruling = 'WSK-D65'` on the `github.deploy` rows.
+
+Unchanged on purpose: publish is HIGH for every principal (no approval id, no publish); automation / bot principals never publish
+(the T7 DENY by kind still bites a client-granted automation principal); a LOW-assurance session gets nothing (`notLow`). No `variables.local`.
+A client rule never reads `collectionKey` / `locale`. **Staff roles pass these rules on a resource that carries a `clientId`** (they hold
+the staff tier) and are stopped at the BFF's second step (the portal scope predicate: not a contact of the client), so the portal surface
+is closed to staff and the staff surface is closed to clients (the client-editor rule needs the CLIENT grant; a client editor has no
+staff role). **Restart `gaiada-test-cerbos` and the live sidecar after deploying the two policy files** (nothing hot-reloads).
+
+**Proof.** `src/rbac/client-website-editor-consumer.cerbos.test.ts` (structural pin + 14 live decisions through the real `check()`),
+`client-website-editor-cerbos.test.ts` (49f's derived-role matrix, un-skipped now that a rule consumes the role), and a 282-row probe
+matrix (every staff tier unchanged, the client rows above, the 49f `client_contact` rows) run against Cerbos 0.54.0: ALL ROWS AS EXPECTED.
+The BFF's behaviour (scope isolation, no egress on a refusal, D58 flows, the `ce` claim) is `src/modules/webdev/webdesk-client-website.test.ts`.
+
+## 27. M5-W1a — the writers' room roles and review actions (2026-10-11, PROTOTYPED)
 
 `202610111443_iam_writers_room_roles.sql`; design [`plans/2026-10-11-m5-writers-room-design.md`](plans/2026-10-11-m5-writers-room-design.md)
 §2 and §7. **Four new global roles stored as data (no bundle), seven catalog keys on two EXISTING kinds, no new kind. Catalog 422 -> 429

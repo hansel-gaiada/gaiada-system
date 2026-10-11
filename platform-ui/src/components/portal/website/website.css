@@ -1,0 +1,7 @@
+/* WSK-49d - the portal's Website area. Prefix `pw-` (portal website); the editor, tables and chips are the shared `wc-` classes.
+   Tokens only (styles/tokens.test.ts fails the build on a colour literal in a component stylesheet).
+
+   A link that sits in a table cell next to other text must be told from that text by more than colour (WCAG 1.4.1, axe
+   `link-in-text-block`): the Website workspace's table links are accent-coloured with no underline, which is fine for a link on its
+   own and not for a link followed by "single page" or a description. Underlined here, for the portal's tables only. */
+.pw-links .wc-table a { text-decoration: underline; text-underline-offset: 2px; }

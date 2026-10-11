@@ -7,7 +7,10 @@
 // Pure. The caller loads the registry (a list field of a singleton collection) and passes it as a
 // Map from token key to value; `null` means "no registry available".
 import type { PlaceholderRule } from "../../delivery/vocabulary/composition";
-import type { ContentLintReport } from "./lint-rules/run";
+import type { PoolClient } from "pg";
+import type { CollectionComposition } from "../../delivery/vocabulary/composition";
+import { DEFAULT_CONTENT_RULES } from "./lint-rules/config";
+import { lintContent, type ContentLintReport } from "./lint-rules/run";
 
 // M5-W3: the editorial content checks (h1, meta, alt, sources, links, ID twin, AEO) live in ./lint-rules
 // and are re-exported here so callers have one import. They are advisory exactly like the placeholders.
@@ -102,4 +105,37 @@ export function lintPlaceholders(
     }
   }
   return { placeholders: { unresolvedTokens: unresolved, markers } };
+}
+
+/**
+ * The M5-W3 content checks, shared by the write plane (save) and the read plane (item.get) so an item
+ * reads back exactly the `content` member its last save returned. Returns undefined when the rules
+ * are disabled. Degrades (to `unavailable`), never throws. The ID-twin rule's group-locale read runs
+ * under a savepoint so a failed read cannot abort the caller's transaction.
+ */
+export async function computeContentLint(
+  client: PoolClient,
+  siteId: string,
+  groupId: string,
+  input: { blocks: unknown; seo: unknown; composition: CollectionComposition; locale: string },
+): Promise<ContentLintReport | undefined> {
+  const cfg = DEFAULT_CONTENT_RULES; // per-tenant config: needs a vocabulary key, see lint-rules/config.ts
+  if (!cfg.enabled) return undefined;
+  try {
+    let groupLocales: string[] | null = null;
+    await client.query("SAVEPOINT content_lint_twin");
+    try {
+      const { rows } = await client.query<{ locale: string }>(
+        `SELECT locale FROM content_items WHERE site_id = $1 AND localization_group_id = $2 AND deleted_at IS NULL`,
+        [siteId, groupId],
+      );
+      groupLocales = rows.map((r) => r.locale);
+      await client.query("RELEASE SAVEPOINT content_lint_twin");
+    } catch {
+      await client.query("ROLLBACK TO SAVEPOINT content_lint_twin").catch(() => undefined);
+    }
+    return lintContent({ ...input, groupLocales }, cfg);
+  } catch (e) {
+    return { findings: [], aeo: null, unavailable: [{ rule: "content", reason: e instanceof Error ? e.message.slice(0, 200) : "unexpected error" }] };
+  }
 }

@@ -104,7 +104,13 @@ services:
       STORAGE_BUCKET_ARTIFACTS: ${STORAGE_BUCKET_ARTIFACTS:-artifacts}
       WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
-      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      # M4: 5 GiB = the code default and the live value (was 10 GiB; cost doc s5).
+      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-5368709120}
+      # M4 (cost doc s5): per-tenant content-read quota; the defaults equal the code defaults (api/src/config.ts).
+      # `:-` defaults on purpose: an EMPTY var would reach the api as '' and Number('') is 0 (the estate's
+      # "empty env var becomes zero" trap), which would deny every read.
+      WEBDESK_READ_QUOTA_PER_MIN: ${WEBDESK_READ_QUOTA_PER_MIN:-300}
+      WEBDESK_READ_QUOTA_WINDOW_MS: ${WEBDESK_READ_QUOTA_WINDOW_MS:-60000}
       # WSK-43a: the bucket retention the media-purge job waits out (the SAME variable storage-bootstrap.mjs applies; empty = 1).
       WEBDESK_STORAGE_LOCK_DAYS: ${WEBDESK_STORAGE_LOCK_DAYS:-}
       # WSK-43a: the browser origins (https://host[:port], comma separated) that may call the public media upload route; the ERP editor's origin. Empty = no CORS headers.

@@ -1,0 +1,63 @@
+# WebDesk public status page (WSK-D64, routed per WSK-D70; M4 T6b). Runs on SUMOPOD, never on gda-aicenter:
+# a status page on the box it reports on goes down with it.
+#
+#   cd ~/erp-status && docker compose up -d        (this directory, copied as-is; LF only)
+#
+# * renderer: reads sumopod's Prometheus (`prometheus:9090` on the obs network) and writes static
+#   index.html + status.json into a volume every 60 s. Its ONLY network is the obs network.
+# * web: Caddy serving that volume read-only, published ONLY on docker0's 172.17.0.1:18480. The
+#   owner's mimi Traefik routes status.erp.gaiada.com there via ONE file, traefik-erp-status.yml,
+#   copied as /home/ubuntu/mimi/infrastructure/tls/dynamic/erp-status.yml (WSK-D70). Never 0.0.0.0:
+#   on this box Docker's DNAT runs before ufw. Never mimi's network.
+name: erp-status
+
+services:
+  renderer:
+    # node:22-alpine, multi-arch index pinned 2026-10-11
+    image: node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
+    command: ["node", "/app/render.mjs"]
+    environment:
+      PROM_URL: http://prometheus:9090
+      OUT_DIR: /out
+      INTERVAL_S: "60"
+    volumes:
+      - ./render.mjs:/app/render.mjs:ro
+      - site:/out
+    networks: [obs]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=8m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    cpus: 0.10
+    mem_limit: 64m
+    pids_limit: 32
+    restart: unless-stopped
+
+  web:
+    # caddy:2-alpine, the same index digest the WebDesk aicenter overlay pins (2026-10-11)
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - site:/srv:ro
+    ports:
+      - "172.17.0.1:18480:80"
+    read_only: true
+    tmpfs: ["/data:rw,size=4m", "/config:rw,size=4m"]
+    cap_drop: [ALL]
+    # The caddy binary carries the file capability cap_net_bind_service=ep: exec fails without it in the
+    # bounding set, whatever port it listens on.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    cpus: 0.20
+    mem_limit: 64m
+    pids_limit: 64
+    depends_on: [renderer]
+    restart: unless-stopped
+
+networks:
+  obs:
+    external: true
+    name: gaiada-obs_default
+
+volumes:
+  site: {}

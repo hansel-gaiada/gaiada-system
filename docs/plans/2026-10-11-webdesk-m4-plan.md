@@ -209,10 +209,14 @@ capacity statement is the interim ceiling (OQ-2.7).
   only a public key.
 - **F2** Pin the `webdesk_default` subnet in compose. The guard reads the subnet at boot, so a network recreated
   later is uncovered until the unit restarts; probe 3 catches it. The live-swap runbook should re-apply the guard
-  after any `down`.
+  after any `down`. **LIVE 2026-10-11 14:14Z**: the aicenter overlay pins `172.19.0.0/16`; applied by `docker compose down`, then
+  `up -d --no-build` and `systemctl restart webdesk-host-deny`.
 - **F3** The aicenter overlay's header promises full `cap_drop`, but no service has `cap_drop` (resolved config and
-  live `CapDrop` empty). Add `cap_drop: [ALL]` with the minimum `cap_add` per service.
-- **F4** `redis` runs an older image than `redis:7-alpine` now names (an unpinned tag). Pin it by digest like RustFS.
+  live `CapDrop` empty). Add `cap_drop: [ALL]` with the minimum `cap_add` per service. **LIVE 2026-10-11 14:14Z**: `cap_drop: [ALL]` on all five overlay services, `cap_add` only where an entrypoint
+  needs it (see the overlay comments); CI gate `webdesk/scripts/check-compose-hardening.mjs`. Boot proof
+  `webdesk/ops/probes/compose-boot-proof.sh` on sumopod: 44/44 with the real compose files.
+- **F4** `redis` runs an older image than `redis:7-alpine` now names (an unpinned tag). Pin it by digest like RustFS. **LIVE 2026-10-11 14:14Z**: redis, postgres and caddy are digest-pinned in the aicenter overlay (indexes as of
+  2026-10-11), and those images are what runs.
 - **F5** The box's project dir still carries the deleted `payload/` tree. The live-swap install step copies listed
   paths and never deletes; T4's staging-dir swap fixes it.
 - **F6** AC 7 (rootless Docker for the webdesk project) is not built; the daemon is rootful. ACs 3–5 have no probe
@@ -252,3 +256,27 @@ capacity statement is the interim ceiling (OQ-2.7).
   `webdesk-api` job (PR #15).
 - 14:03Z: per-source offsite staleness alert `OffsiteBackupOneSourceStale` live on sumopod (main `d248af5d`). Before
   it, every backup metric was an aggregate, so one stopped source (e.g. the WebDesk dump) could never fire.
+- 14:12Z–14:14Z: compose hardening applied live (owner-approved).
+  - Before the downtime: backup in `~/webdesk-backups/m4-hardening-<ts>/` (dump + compose files), the five running
+    images tagged `webdesk-rollback/<svc>:pre-hardening`, pinned images pulled.
+  - Then `down`, `up -d --no-build` and the guard restart: **56 s of downtime**.
+  - After: CapDrop ALL with the designed CapAdd and 0 restarts on all five; subnet `172.19.0.0/16`; redis PONG; the
+    api's JWKS loaded and listening; content tick `errors=0`; probes 39/39; `/v1` 401 from outside.
+  - The read quota now in effect is the configured 3000/min (`.env`; was the accidental code default 300).
+- CI on PR #15: c1 cross-machine determinism PASSED (acme and globex byte-identical across two independent
+  containers).
+- 14:45Z: `https://status.erp.gaiada.com` live on sumopod (T6b). Main `f2b965c0`: probe job `blackbox-webdesk-api`,
+  alert `WebDeskApiDown`, and the blackbox-estate drift fix. WSK-D70 (mimi file per name) is amended by WSK-D71 (M5):
+  the page moves behind the shared `erp-edge` Traefik at M5's cut-over.
+- T6a built and tested (guard harness 32/32 on sumopod, after fixing its control), branch `webdesk/m4-t6a-otlp`.
+  Held: the WebDesk api has no OpenTelemetry SDK yet, so nothing would send.
+- 15:06Z: rehearsal of the deploy's tools step on the live box: rc=0 in 22 s, changes=0.
+- 15:41Z: release 356 (ERP-only) deployed; probes 39/39 afterwards.
+- 15:57–15:59Z: **release 357 deployed to WebDesk by `deploy-webdesk`**, its first live apply (owner-approved).
+  - plan run 38153324995 OK; apply run 38153398370 OK.
+  - The api now runs `ghcr.io/hansel-gaiada/gaiada-webdesk-api@sha256:5560bb9d…` on the release overlay (three
+    compose files).
+  - Backup taken as `webdesk_backup`; migrations 0 applied twice; RLS gate OK; health all PASS.
+  - Probes 39/39. The nightly backup script survived the tree swap. The upload refusal is 404 problem+json
+    `upload-not-found`.
+  - From now on every manual compose call on the box needs all three files plus `--no-build`.

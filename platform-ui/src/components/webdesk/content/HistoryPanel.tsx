@@ -3,13 +3,13 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Card } from "@/components/ui";
 import { authorLabel, type FieldChange, type ItemSummary, type VersionListBody } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
-import type { SiteScope } from "@/lib/webdeskContentActions";
+import type { SiteScope, WriteFailure } from "@/lib/webdeskContentActions";
 import { RestoreButton } from "./RestoreButton";
 import "./content.css";
 
 /** `…/[slug]/history` — versions (author resolved in the ERP), diff against live, Restore as draft. */
 export function HistoryPanel({
-  scope, item, versions, authors, historyHref, editorHref, compare,
+  scope, item, versions, authors, historyHref, editorHref, compare, restoreAndOpen, clientMode = false,
 }: {
   scope: SiteScope;
   item: ItemSummary;
@@ -19,6 +19,10 @@ export function HistoryPanel({
   editorHref: string;
   /** The diff for `?compare=n`, when asked for. `null` = not asked. */
   compare: { version: number; liveVersion: number | null; changes: FieldChange[] } | { version: number; problem: string } | null;
+  /** WSK-49d CLIENT MODE: the portal's restore (a server action bound to the client; a function cannot cross from a server
+   *  component any other way) and the client's own wording. Absent = the staff history, exactly as before. */
+  restoreAndOpen?: (scope: SiteScope, itemId: string, version: number, baseVersion: number, editorHref: string, note?: string) => Promise<WriteFailure>;
+  clientMode?: boolean;
 }) {
   return (
     <div className="wc-page">
@@ -55,7 +59,7 @@ export function HistoryPanel({
       ) : (
         <div className="wc-scroll">
           <table className="wc-table" data-testid="versions-table">
-            <thead><tr><th scope="col">Version</th><th scope="col">When</th><th scope="col">Author</th><th scope="col">Note</th><th scope="col">Hash</th><th scope="col">Actions</th></tr></thead>
+            <thead><tr><th scope="col">Version</th><th scope="col">When</th><th scope="col">Author</th><th scope="col">Note</th>{!clientMode && <th scope="col">Hash</th>}<th scope="col">Actions</th></tr></thead>
             <tbody>
               {versions.versions.map((v) => (
                 <tr key={v.version}>
@@ -63,14 +67,14 @@ export function HistoryPanel({
                   <td>{formatDateTime(v.createdAt)}</td>
                   <td>{authorLabel(v.createdBy, authors)}</td>
                   <td>{v.note ?? <span className="wc-muted">—</span>}</td>
-                  <td className="wc-mono">{v.contentHash.slice(0, 10)}</td>
+                  {!clientMode && <td className="wc-mono">{v.contentHash.slice(0, 10)}</td>}
                   <td>
                     <span className="wc-publish__actions">
                       {item.publishedVersion !== null && v.version !== item.publishedVersion && (
                         <Link href={`${historyHref}&compare=${v.version}`} className="lux-btn lux-btn--ghost lux-btn--sm">Diff against live</Link>
                       )}
                       {v.version !== item.headVersion && (
-                        <RestoreButton scope={scope} itemId={item.itemId} version={v.version} baseVersion={item.headVersion} editorHref={editorHref} />
+                        <RestoreButton scope={scope} itemId={item.itemId} version={v.version} baseVersion={item.headVersion} editorHref={editorHref} restoreAndOpen={restoreAndOpen} clientMode={clientMode} />
                       )}
                     </span>
                   </td>

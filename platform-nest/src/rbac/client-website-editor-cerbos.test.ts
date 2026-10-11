@@ -31,7 +31,9 @@ const base = {
 function editorPrincipal(grants: RoleGrant[], extra: Partial<Principal> = {}): Principal {
   return { userId: ME, assurance: "high", companies: [T1], rootCompanies: [T1], roles: grants, sessionVersion: 1, ...extra };
 }
-const editorGrant = (clientId: string, tenantId: string | undefined = T1): RoleGrant => ({
+// `null` = a grant that arrives WITHOUT its tenant. (It was `undefined` until WSK-49c un-skipped this suite: an
+// `undefined` argument takes the DEFAULT, so the "without its tenant" case silently sent T1 and the test could never fail.)
+const editorGrant = (clientId: string, tenantId: string | null = T1): RoleGrant => ({
   role: "client_website_editor", scopeType: "client", scopeId: clientId, ...(tenantId ? { scopeTenantId: tenantId } : {}),
 });
 
@@ -54,11 +56,10 @@ async function effectiveDerived(p: Principal, resource: { kind: string; attr: Re
 
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
-// ── Cerbos only reports a derived role as effective for a kind whose policy REFERENCES it in a rule, and no
-// resource rule references `client_website_editor` until WSK-49c adds the client-editor rules. So the live
-// matrix below runs against whichever kind first consumes it, and switches itself on the day 49c lands one.
-// Until then the role's condition is pinned structurally (next describe) and was proven live against a
-// throwaway Cerbos with a test-only consumer policy (reported in the WSK-49f hand-off).
+// ── Cerbos only reports a derived role as effective for a kind whose policy REFERENCES it in a rule. WSK-49f shipped
+// before any resource rule did, so this live matrix switched itself off ("NO CONSUMER YET"); WSK-49c added the
+// client-editor rules on `webdesk_content_item` / `webdesk_media_asset`, which is what turns it on. The decisions those
+// rules make are pinned in client-website-editor-consumer.cerbos.test.ts.
 const POLICIES = join(__dirname, "../../cerbos/policies");
 function consumerKind(role: string): string | null {
   for (const f of readdirSync(POLICIES)) {
@@ -126,7 +127,7 @@ describe.skipIf(!live || !EDITOR_KIND)(`WSK-49f — derived role client_website_
     expect(await effectiveDerived(p, { kind, attr: { tenantId: T1, clientId: "" } })).not.toContain("client_website_editor");
   });
   it("DENIED: a client-scoped grant that arrives WITHOUT its tenant (fail closed)", async () => {
-    const noTenant = editorPrincipal([editorGrant(CA, undefined)]);
+    const noTenant = editorPrincipal([editorGrant(CA, null)]);
     expect(await effectiveDerived(noTenant, { kind, attr: { tenantId: T1, clientId: CA } })).not.toContain("client_website_editor");
   });
   it("DENIED: the same role name at COMPANY scope (impossible in the DB, still refused by the policy)", async () => {

@@ -892,7 +892,7 @@ export function isClient(me: Me): boolean {
 export const CLIENT_SIDE_ROLES: ReadonlySet<string> = new Set(["client", "client_website_editor"]);
 
 /** STAFF-side raw grant roles whose reach comes from DATA scope rows that Cerbos checks (site, collections, locales),
- *  never from capabilities (M5-W1a; docs/plans/2026-10-11-m5-writers-room-design.md, docs/PERMISSION-CONTRACT.md §26).
+ *  never from capabilities (M5-W1a; docs/plans/2026-10-11-m5-writers-room-design.md, docs/PERMISSION-CONTRACT.md §27).
  *  `derived_roles.yaml` names all four, but they have NO permission bundle and NO `perm_*` mirror, on purpose: a flat key
  *  cannot say "this site, these collections, these locales". So they are modelled OUTSIDE `Role`/`ROLE_CAPS`, and the UI
  *  grants them NO capability by role name: `can()` returns false for them, and a surface that wants to show something to a

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { deleteMediaAction, mediaUsageAction, updateMediaAction, type MediaPatch } from "@/lib/webdeskMediaActions";
 import type { SiteScope } from "@/lib/webdeskContentActions";
+import type { MediaDriver } from "@/lib/webdeskEditorDriver";
 import { authorLabel, isOutcomeUnknown, unconfirmedCopy, type WdResult } from "@/lib/webdeskContentModel";
 import {
   altFor, assetLabel, dimensionsLabel, formatBytes, mimeLabel, normalizeTags, previewUrl, usageLabel,
@@ -33,7 +34,7 @@ const newKey = (): string =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 export function MediaDetail({
-  asset, scope, routeBase, locales, authors, previewBase, mode, caps, onSaved, onDeleted, onDenied, onDirty, onNotice, onUse, pickLocale,
+  asset, scope, routeBase, locales, authors, previewBase, mode, caps, onSaved, onDeleted, onDenied, onDirty, onNotice, onUse, pickLocale, driver,
 }: {
   asset: MediaAsset;
   scope: SiteScope;
@@ -52,6 +53,8 @@ export function MediaDetail({
   /** Pick mode: choose this asset for the field. */
   onUse?: (asset: MediaAsset) => void;
   pickLocale?: string;
+  /** WSK-49d CLIENT MODE (see `MediaLibrary`): the portal's calls; no `usage` = no "Where it's used", no `remove` = no Delete. */
+  driver?: MediaDriver;
 }) {
   const uid = useId();
   const [base, setBase] = useState(asset);
@@ -102,7 +105,7 @@ export function MediaDetail({
     const key = unconfirmed && keyRef.current?.fp === fp ? keyRef.current.key : newKey();
     keyRef.current = { fp, key };
     setSaving(true); setProblem(null);
-    const r = await updateMediaAction(scope, base.assetId, patch, key);
+    const r = await (driver?.update ?? updateMediaAction)(scope, base.assetId, patch, key);
     if (!mounted.current) return;
     setSaving(false);
     if (r.kind === "ok") {
@@ -148,13 +151,16 @@ export function MediaDetail({
   // ── where it's used ────────────────────────────────────────────────────────────────────────────
   type UsageState = { s: "loading" } | { s: "ok"; usage: MediaUsage } | { s: "error"; message: string };
   const [usage, setUsage] = useState<UsageState>({ s: "loading" });
+  const showUsage = driver === undefined || driver.usage !== undefined;
+  const usageCall = driver ? driver.usage : mediaUsageAction;
   const loadUsage = useCallback(async () => {
+    if (!usageCall) return;
     setUsage({ s: "loading" });
-    const r = await mediaUsageAction(scope, asset.assetId);
+    const r = await usageCall(scope, asset.assetId);
     if (!mounted.current) return;
     if (r.kind === "ok") { setUsage({ s: "ok", usage: r.data }); return; }
     setUsage({ s: "error", message: r.kind === "unavailable" ? r.reason : r.kind === "forbidden" ? "you don't have access" : r.kind === "not_found" ? "the asset no longer exists" : "not available on this deployment" });
-  }, [scope, asset.assetId]);
+  }, [scope, asset.assetId, usageCall]);
   useEffect(() => { void loadUsage(); }, [loadUsage]);
 
   // ── copy the canonical URL ─────────────────────────────────────────────────────────────────────
@@ -192,7 +198,7 @@ export function MediaDetail({
         <div className="wc-banner wc-banner--info" role="note" data-testid="media-readonly"><span className="wc-banner__body"><strong>Read-only.</strong> {updateReason}</span></div>
       )}
       {problem && (
-        <div className={`wc-banner wc-banner--${problem.tone}`} role="alert" data-testid="media-save-problem">
+        <div className={`wc-banner wc-banner--${problem.tone}`} role={driver ? "status" : "alert"} data-testid="media-save-problem">
           <span className="wc-banner__body">{problem.text}</span>
           {unconfirmed && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => void save()} disabled={saving} data-testid="media-save-retry">Retry</button>}
         </div>
@@ -249,6 +255,7 @@ export function MediaDetail({
         <span className="lux-field__hint">This is what a media field stores. The build resolves it to the real file.</span>
       </div>
 
+      {showUsage && (
       <section className="wm-usage" aria-labelledby={`${uid}-usage`} data-testid="media-usage">
         <h4 id={`${uid}-usage`}>Where it&apos;s used</h4>
         {usage.s === "loading" && <p className="wc-muted">Checking…</p>}
@@ -275,17 +282,21 @@ export function MediaDetail({
           </>
         )}
       </section>
+      )}
 
+      {(driver === undefined || driver.remove !== undefined) && (
       <div className="wm-danger">
         <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => setConfirming(true)} disabled={caps.delete !== null} aria-describedby={caps.delete ? `${uid}-del-why` : undefined} data-testid="media-delete">Delete…</button>
         {caps.delete && <span id={`${uid}-del-why`} className="wc-muted" data-testid="media-delete-why">{caps.delete}</span>}
       </div>
+      )}
 
       <DeleteDialog
         open={confirming}
         asset={base}
         scope={scope}
         routeBase={routeBase}
+        remove={driver?.remove}
         onClose={() => setConfirming(false)}
         onDenied={() => onDenied("delete")}
         onDeleted={(purgeAfter) => { setConfirming(false); onDeleted(base.assetId, purgeAfter); }}
@@ -304,9 +315,11 @@ type DeleteState =
   | { s: "failed"; message: string };
 
 function DeleteDialog({
-  open, asset, scope, routeBase, onClose, onDenied, onDeleted,
+  open, asset, scope, routeBase, remove, onClose, onDenied, onDeleted,
 }: {
   open: boolean; asset: MediaAsset; scope: SiteScope; routeBase: string; onClose: () => void; onDenied: () => void; onDeleted: (purgeAfter: string | null) => void;
+  /** WSK-49d: the client driver's delete (it has none, so the dialog is never opened there). Absent = the staff action. */
+  remove?: MediaDriver["remove"];
 }) {
   const uid = useId();
   const [st, setSt] = useState<DeleteState>({ s: "confirm" });
@@ -320,7 +333,7 @@ function DeleteDialog({
     const key = st.s === "unconfirmed" && keyRef.current ? keyRef.current : newKey();
     keyRef.current = key;
     setSt({ s: "busy" });
-    const r = await deleteMediaAction(scope, asset.assetId, key);
+    const r = await (remove ?? deleteMediaAction)(scope, asset.assetId, key);
     if (!mounted.current) return;
     switch (r.kind) {
       case "ok": onDeleted(r.data.purgeAfter); return;

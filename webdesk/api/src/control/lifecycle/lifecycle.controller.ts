@@ -13,7 +13,7 @@ import { ControlAuthGuard } from "../auth/control-auth.guard";
 import { CommandAuthorizationGuard } from "../policy/command-authorization.guard";
 import { Command } from "../command.decorator";
 import { requireControlContext, type ControlRequest } from "../auth/control-request";
-import { assertIdempotencyKey, assertNonEmptyString, assertSiteKind, assertSlug, assertEnvName, assertUuid } from "../dto";
+import { assertIdempotencyKey, assertNonEmptyString, assertSiteKind, assertSlug, assertEnvName, assertUuid, assertTenantLocales } from "../dto";
 
 @Controller("control/v1/tenants")
 @UseGuards(ControlAuthGuard, CommandAuthorizationGuard)
@@ -25,13 +25,14 @@ export class LifecycleController {
   async provisionTenant(
     @Req() req: ControlRequest,
     @Headers("idempotency-key") idempotencyKeyRaw: string | undefined,
-    @Body() body: { slug?: string; companyRef?: string },
+    @Body() body: { slug?: string; companyRef?: string; defaultLocale?: unknown; locales?: unknown },
   ) {
     const { principal } = requireControlContext(req);
     const idempotencyKey = assertIdempotencyKey(idempotencyKeyRaw);
     const slug = assertSlug(body?.slug);
     const companyRef = assertUuid(body?.companyRef, "companyRef");
-    return this.lifecycle.provisionTenant({ slug, companyRef, actor: principal.subject, idempotencyKey });
+    const declared = assertTenantLocales(body?.defaultLocale, body?.locales);
+    return this.lifecycle.provisionTenant({ slug, companyRef, ...(declared ?? {}), actor: principal.subject, idempotencyKey });
   }
 
   @Post(":tenantSlug/archive")

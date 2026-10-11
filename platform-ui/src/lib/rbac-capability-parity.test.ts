@@ -424,7 +424,7 @@ const ROLES_CHECKED = Object.keys(ROLE_CAPS).filter(
 const rolesInRoleCapsNotInBundles = Object.keys(ROLE_CAPS).filter((r) => !(r in bundles.roles));
 
 // M5-W1a: `SCOPED_DATA_ROLES` are deliberately OUTSIDE this biconditional. Their reach is data scope rows checked by
-// Cerbos (docs/PERMISSION-CONTRACT.md §26), so they have no bundle and no capability mirror by design; there is no
+// Cerbos (docs/PERMISSION-CONTRACT.md §27), so they have no bundle and no capability mirror by design; there is no
 // (role, capability) pair to compare. This pins the exemption in both directions so it cannot rot into a silencer.
 describe("SCOPED_DATA_ROLES are an explicit exemption, not a gap", () => {
   it("none of them is in ROLE_CAPS (the UI grants no capability by role name)", () => {

@@ -59,6 +59,8 @@
     "check:shards": "node scripts/check-shards.mjs",
     "gen:role-bundles": "node scripts/generate-role-bundles.mjs",
     "gen:scope-constrained-roles": "node scripts/generate-scope-constrained-roles.mjs",
+    "vendor:webdesk-vocabulary": "node scripts/vendor-webdesk-vocabulary.mjs",
+    "vendor:check": "node scripts/vendor-webdesk-vocabulary.mjs --check",
     "seed:hr-statutory-ratify": "node dist/seed/hr-statutory-ratify.js",
     "provision:client-portal-logins": "node dist/admin/provision-client-portal-logins.js"
   },

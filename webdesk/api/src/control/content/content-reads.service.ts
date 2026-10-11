@@ -43,7 +43,7 @@ import { VOCABULARY_VERSION } from "../../delivery/vocabulary/version";
 import { fieldsBlockOf } from "../../delivery/vocabulary/item-fields";
 import { ContentCommandsService } from "./content-commands.service";
 import { contentHash, isPlainObject } from "./content-projection";
-import { lintPlaceholders, type LintReport } from "./content-lint";
+import { computeContentLint, lintPlaceholders, type LintReport } from "./content-lint";
 import { ControlProblem, problems } from "./content-problem";
 import { findMediaUsage } from "./media-usage";
 import { canonicalAssetPath, toLibraryAsset } from "../../media/library-asset";
@@ -479,12 +479,18 @@ export class ContentReadsService {
     rawComposition: unknown,
     blocks: unknown,
     locale: string,
+    seo: unknown,
+    groupId: string,
   ): Promise<LintReport & { unavailable?: string }> {
     const empty: LintReport = { placeholders: { unresolvedTokens: [], markers: {} } };
     const valid = validateCollectionComposition(collectionKey, rawComposition);
     if (!valid.valid) return { ...empty, unavailable: "the collection's stored composition is invalid" };
     const rules = (rawComposition as CollectionComposition).lint?.placeholders ?? [];
-    if (rules.length === 0) return empty;
+    const withContent = async (report: LintReport): Promise<LintReport> => {
+      const content = await computeContentLint(c, siteId, groupId, { blocks, seo, composition: rawComposition as CollectionComposition, locale });
+      return content ? { ...report, content } : report;
+    };
+    if (rules.length === 0) return withContent(empty);
     let registry: Map<string, string | null> | null = null;
     const withRegistry = rules.find((r) => r.kind === "token" && r.registry);
     if (withRegistry && withRegistry.kind === "token" && withRegistry.registry) {
@@ -507,7 +513,7 @@ export class ContentReadsService {
         }
       }
     }
-    return lintPlaceholders(rules, blocks, registry);
+    return withContent(lintPlaceholders(rules, blocks, registry));
   }
 
   /**
@@ -570,7 +576,7 @@ export class ContentReadsService {
         [siteId, row.localization_group_id],
       );
 
-      const lint = await this.lint(c, siteId, tenant.defaultLocale, row.collection_key, row.composition, selected.blocks, row.locale);
+      const lint = await this.lint(c, siteId, tenant.defaultLocale, row.collection_key, row.composition, selected.blocks, row.locale, selected.seo, row.localization_group_id);
 
       return {
         item: {
