@@ -30,7 +30,7 @@ R() { ssh -o BatchMode=yes -o ConnectTimeout=20 "$BOX" "cd '$REMOTE_DIR' && MIN_
 
 say "shipping the cut-over files to $BOX:$REMOTE_DIR"
 ( cd "$ROOT" && tar -cf - \
-    --transform 's#^infra/nginx/snippets/##; s#^infra/nginx/##; s#^scripts/phaseb/##' \
+    --transform 's#^infra/nginx/snippets/##' --transform 's#^infra/nginx/##' --transform 's#^scripts/phaseb/##' \
     infra/nginx/erp.gaiada.online.conf infra/nginx/snippets/erp-legacy-redirect.off.conf \
     infra/nginx/snippets/erp-legacy-redirect.on.conf scripts/phaseb/erp-name-cutover.sh scripts/phaseb/github-app-hook.cjs ) \
   | ssh -o BatchMode=yes "$BOX" "mkdir -p '$REMOTE_DIR' && tar -xf - -C '$REMOTE_DIR' && sed -i 's/\r$//' '$REMOTE_DIR'/*"
