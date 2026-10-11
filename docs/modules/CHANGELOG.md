@@ -136,6 +136,14 @@ Ticket PV2-07 in `docs/plans/2026-10-10-pv2-portal-recut-tickets.md`. It renders
 - Pure helpers: `src/lib/portalPeople.ts` (`splitProjects`, `groupPeople`, `describeAccess`), 9 tests.
 - **Verified on Linux:** ui 228/228 files (4,516 tests); `next build` ok; portal e2e 12/12 in DEMO_MODE.
 
+### webdesk `0.5.0` - M3 wave 5: client editors' WebDesk half (vocabulary 1.2.0, client-editable enforcement) and the scheduler's rebuild hint (2026-10-11) - DEV-VERIFIED
+
+Plan `docs/plans/2026-10-11-webdesk-m3-plan.md` ("WSK-49", "WSK-61"); rulings WSK-D58…D60 and D62 in `docs/blueprints/webdesk-design-v2.md` §14.
+
+- **Vocabulary 1.2.0** (WSK-49a, MINOR): `ui.clientEditable` on compositions and fields, with one editability rule (field, then group, then collection; `seo` never). The classifier was blind to new `ui` keys and now computes the bump.
+- **Client editors, WebDesk half** (WSK-49b, D59, D62). An editorial assertion with `ce: true` marks a client. A client's create, update or restore that touches a non-editable path is `422 field-not-client-editable`; a client's publish is `422 publish-not-client-editable` unless everything changing on the live page is client-editable; delete, unpublish, schedule and media delete are `403 client-command-not-allowed`. Without the marker nothing changes. The ERP and portal halves are separate tickets.
+- **The rebuild hint** (WSK-61 producer). When the scheduler makes content go live or come down, it sends a signed Zone B `schedule.fired` event to the ERP (grouped per approval and transition, a deterministic id that includes each item's effective time), so the ERP can rebuild the static site at publish time. The ERP consumer shipped in 1.0.0-alpha.352.
+
 ### webdesk `0.4.0` - M3 waves 1-4: Payload removed, the scheduler, the media library, the public `/v1` read path hardened, deleted items release their slug, promotion fits the write plane, approvals claimed before the effect, codegen and AI drafting on vocabulary 1.1.0 (2026-10-11) - DEV-VERIFIED
 
 Plan `docs/plans/2026-10-11-webdesk-m3-plan.md`; rulings WSK-D49…D51 in `docs/blueprints/webdesk-design-v2.md` §14; board `TASKS.md` (M3).
