@@ -4,7 +4,8 @@
 // Companies are a GLOBAL table (no per-tenant RLS) — reads/writes go through withGlobal;
 // membership + the outbox event are tenant-scoped and go through withTenants.
 import {
-  BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Req, UseGuards,
+  BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Patch, Post, Req,
+  UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withGlobal, withTenants } from "../db";
@@ -12,8 +13,15 @@ import { config } from "../config";
 import { authorize, writeActivity } from "../core/http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
+import { packFor, VERTICALS } from "../core/packs";
+import { isElevated } from "./elevated";
 
-const COMPANY_COLS = "id, name, type, enabled_modules, status, parent_company_id, settings";
+const COMPANY_COLS = "id, name, type, vertical, enabled_modules, status, parent_company_id, settings";
+
+// `vertical` must be one of the registry's verticals (the company_verticals FK is the DB twin of this check).
+function isVertical(v: unknown): v is (typeof VERTICALS)[number] {
+  return typeof v === "string" && (VERTICALS as readonly string[]).includes(v);
+}
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -30,20 +38,28 @@ export class CompanyCrudController {
     return rows.rows[0];
   }
 
-  // Create a company (elevated: platform_admin / group_executive). The creator is added
+  // Create a company (elevated: platform_admin at global scope, enforced by Cerbos). The creator is added
   // as a member so the new company appears in their top-bar switcher (matches /api/me).
+  // PV-D17: a body with NO `modules` starts from the vertical's pack defaults; a body that sends
+  // `modules` (even an empty list) keeps exactly those. Only creation applies the pack.
   @Post("companies")
   @HttpCode(201)
   async createCompany(
     @Req() req: FastifyRequest,
-    @Body() body: { name?: string; type?: string; parentCompanyId?: string | null; modules?: string[] },
+    @Body() body: { name?: string; type?: string; parentCompanyId?: string | null; modules?: string[]; vertical?: string },
   ) {
     const name = body?.name?.trim();
     if (!name) throw new BadRequestException("name required");
     // Resource has no tenant yet — only the global-elevated roles clear this gate.
     await authorize(req.principal, { kind: "company" }, "create");
     const type = body?.type?.trim() || "general";
-    const modules = Array.isArray(body?.modules) ? body!.modules!.filter((m) => typeof m === "string") : [];
+    const vertical = body?.vertical ?? "general";
+    if (!isVertical(vertical)) {
+      throw new BadRequestException({ message: `vertical must be one of: ${VERTICALS.join(", ")}`, field: "vertical" });
+    }
+    const modules = Array.isArray(body?.modules)
+      ? body!.modules!.filter((m) => typeof m === "string")
+      : [...packFor(vertical).defaultModules];
     const parentId = body?.parentCompanyId ?? null;
 
     const id = newId();
@@ -55,9 +71,9 @@ export class CompanyCrudController {
         if (!parent.rows[0]) throw new BadRequestException("parent company not found");
       }
       await c.query(
-        `INSERT INTO companies (id, name, type, enabled_modules, parent_company_id, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [id, name, type, modules, parentId, config.originSite],
+        `INSERT INTO companies (id, name, type, vertical, enabled_modules, parent_company_id, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [id, name, type, vertical, modules, parentId, config.originSite],
       );
       if (req.principal.userId) {
         await c.query(
@@ -66,13 +82,18 @@ export class CompanyCrudController {
           [newId(), id, req.principal.userId, config.originSite],
         );
       }
-      await emitEvent(c, id, "company", id, "company.created", { name, type, parentCompanyId: parentId });
+      await emitEvent(c, id, "company", id, "company.created", { name, type, vertical, parentCompanyId: parentId });
     });
     await writeActivity(id, req.principal.userId, "created", "company", id, { name });
     return { id };
   }
 
   // Update a company (company.manage — company_admin on the tenant, or global-elevated).
+  //
+  // PV-D16: `vertical` is the one field company_admin may NOT change — only platform_admin at global
+  // scope (`isElevated`). The gate runs right after `authorize` and before every validation, so a
+  // denied caller learns nothing about what would have been valid. PV-D17: this PATCH never touches
+  // `enabled_modules` because of a vertical change; modules stay a separate, explicit write.
   //
   // D14-07: this is also the write path for `companies.settings.automation.approvalRetry` (OQ-5) —
   // the ticket's constraint 10 forbids a new settings table/subsystem, and this PATCH is the ONLY
@@ -90,9 +111,21 @@ export class CompanyCrudController {
     @Body() b: {
       name?: string; type?: string; parentCompanyId?: string | null; status?: string; modules?: string[];
       settings?: { automation?: { approvalRetry?: { autoRetryCount?: unknown } } };
+      vertical?: unknown;
     },
   ) {
     await authorize(req.principal, { kind: "company", id: companyId, tenantId: companyId }, "update");
+    const setVertical = b?.vertical !== undefined;
+    if (setVertical && !isElevated(req)) {
+      throw new ForbiddenException("only a platform administrator can change a company's vertical");
+    }
+    let vertical: string | null = null;
+    if (setVertical) {
+      if (!isVertical(b.vertical)) {
+        throw new BadRequestException({ message: `vertical must be one of: ${VERTICALS.join(", ")}`, field: "vertical" });
+      }
+      vertical = b.vertical;
+    }
     const modules = b?.modules !== undefined && Array.isArray(b.modules) ? b.modules.filter((m) => typeof m === "string") : null;
     // parentCompanyId is nullable-settable: distinguish "omitted" from "set to null".
     const setParent = Object.prototype.hasOwnProperty.call(b ?? {}, "parentCompanyId");
@@ -131,6 +164,7 @@ export class CompanyCrudController {
         `UPDATE companies SET
            name = COALESCE($2, name),
            type = COALESCE($3, type),
+           vertical = COALESCE($10, vertical),
            status = COALESCE($4, status),
            enabled_modules = COALESCE($5, enabled_modules),
            parent_company_id = CASE WHEN $6 THEN $7 ELSE parent_company_id END,
@@ -142,12 +176,12 @@ export class CompanyCrudController {
            ELSE settings END,
            updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL`,
-        [companyId, b?.name ?? null, b?.type ?? null, b?.status ?? null, modules, setParent, b?.parentCompanyId ?? null, setRetry, autoRetryCount ?? 0],
+        [companyId, b?.name ?? null, b?.type ?? null, b?.status ?? null, modules, setParent, b?.parentCompanyId ?? null, setRetry, autoRetryCount ?? 0, vertical],
       );
       if (res.rowCount === 0) throw new NotFoundException("company not found");
       await emitEvent(c, companyId, "company", companyId, "company.updated", { status: b?.status ?? null });
     });
-    await writeActivity(companyId, req.principal.userId, "updated", "company", companyId, { status: b?.status });
+    await writeActivity(companyId, req.principal.userId, "updated", "company", companyId, { status: b?.status, vertical: vertical ?? undefined });
     return { ok: true };
   }
 }

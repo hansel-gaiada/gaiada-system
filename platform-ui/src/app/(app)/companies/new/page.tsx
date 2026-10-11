@@ -34,7 +34,7 @@ export default async function NewCompanyPage() {
         breadcrumbs={[{ label: "Companies", href: "/companies" }, { label: "New" }]}
       />
       <Card>
-        <CompanyForm action={createCompanyAction} companies={companies} />
+        <CompanyForm action={createCompanyAction} companies={companies} canSetVertical={isElevated(me)} />
       </Card>
     </>
   );

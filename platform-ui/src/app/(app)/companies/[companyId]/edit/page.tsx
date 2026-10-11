@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { isElevated, can } from "@/lib/rbac";
-import { getCompany, listCompanies } from "@/lib/entities";
+import { getCompany, getCompanyDetail, listCompanies } from "@/lib/entities";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -31,6 +31,9 @@ export default async function EditCompanyPage({ params }: { params: Params }) {
 
   const companies = (await listCompanies(userId).catch(() => [])).map((c) => ({ id: c.id, name: c.name }));
   const action = updateCompanyAction.bind(null, companyId);
+  // The list omits `vertical`; the detail read carries it. Only a platform admin sees the picker.
+  const canSetVertical = isElevated(me);
+  const vertical = canSetVertical ? (await getCompanyDetail(userId, companyId))?.vertical : undefined;
 
   return (
     <>
@@ -40,7 +43,7 @@ export default async function EditCompanyPage({ params }: { params: Params }) {
         breadcrumbs={[{ label: "Companies", href: "/companies" }, { label: company.name, href: `/companies/${companyId}` }, { label: "Edit" }]}
       />
       <Card>
-        <CompanyForm action={action} companies={companies} company={company} />
+        <CompanyForm action={action} companies={companies} company={{ ...company, vertical }} canSetVertical={canSetVertical} />
       </Card>
     </>
   );

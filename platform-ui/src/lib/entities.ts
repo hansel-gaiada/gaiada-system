@@ -60,6 +60,8 @@ export interface Company {
   id: string;
   name: string;
   type: string | null;
+  // Business line (PV-D14). Only the detail endpoint returns it today; the list omits it.
+  vertical?: string;
   enabled_modules: string[];
   status: string;
 }
@@ -126,10 +128,10 @@ export async function getCompanyDetail(u: string, id: string): Promise<CompanyDe
 }
 
 // Company CRUD — BFF contract (backend TODO, see docs/FRONTEND-BFF-CONTRACT.md):
-//   POST  /api/companies                 body {name,type,parentCompanyId?,modules?} -> { id }
+//   POST  /api/companies                 body {name,type,parentCompanyId?,modules?,vertical?} -> { id }
 //   PATCH /api/companies/:id              body (partial)                             -> { ok }
 // Elevated / company.manage only (backend RLS is the real boundary).
-export interface CompanyInput { name: string; type?: string | null; parentCompanyId?: string | null; modules?: string[]; status?: string }
+export interface CompanyInput { name: string; type?: string | null; parentCompanyId?: string | null; modules?: string[]; status?: string; vertical?: string }
 export const createCompany = (u: string, body: CompanyInput) =>
   platformFetch<{ id: string }>(`/api/companies`, u, { method: "POST", body: JSON.stringify(body) });
 export const updateCompany = (u: string, id: string, body: Partial<CompanyInput>) =>
