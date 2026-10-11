@@ -162,7 +162,7 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     }
 
     beforeAll(async () => {
-      otherClient = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Facet Other" } })).json().id;
+      otherClient = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Facet Other", businessType: "other" } })).json().id;
       pay.mine = await insertPaymentFor(clientId, 111);
       pay.theirs = await insertPaymentFor(otherClient, 222);
       pay.clientless = await insertPaymentFor(null, 333);

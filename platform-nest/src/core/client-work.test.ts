@@ -122,7 +122,7 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
 
   it("PV3-03: deliverables?clientId= is a strict facet (uuid / internal / garbage)", async () => {
     const other = (await app.inject({
-      method: "POST", url: `/api/${co}/clients`, headers: asUser(member), payload: { name: "Facet Other Retail" },
+      method: "POST", url: `/api/${co}/clients`, headers: asUser(member), payload: { name: "Facet Other Retail", businessType: "retail" },
     })).json().id as string;
     const mk = async (name: string, cid?: string) => {
       const r = await app.inject({
