@@ -47,7 +47,7 @@ export function RestoreButton({ scope, itemId, version, baseVersion, editorHref,
     return (
       <>
         <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => setConfirming(true)} data-testid={`restore-${version}`}>Restore as draft</button>
-        {error && <span className="lux-field__error" role="alert">{error}</span>}
+        {error && <span className="lux-field__error" role={clientMode ? "status" : "alert"}>{error}</span>}
       </>
     );
   }

@@ -252,7 +252,7 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
   if (!hasData && problem) {
     return <section aria-labelledby={heading} data-testid="media-library" data-mode={mode}>
       <h2 id={heading} tabIndex={-1} className="wm-heading">Media library</h2>
-      <LibraryProblem result={problem} onRetry={() => retryRef.current()} />
+      <LibraryProblem result={problem} onRetry={() => retryRef.current()} client={clientMode} />
       {mode === "pick" && onClose && <div className="wc-dialog__actions"><button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={onClose} data-testid="media-pick-close">Close</button></div>}
     </section>;
   }
@@ -403,13 +403,14 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
 }
 
 /** A read that produced no data: says what happened instead of drawing an empty library. */
-function LibraryProblem({ result, onRetry }: { result: Problem; onRetry: () => void }) {
+function LibraryProblem({ result, onRetry, client = false }: { result: Problem; onRetry: () => void; client?: boolean }) {
+  const live = client ? "status" : "alert"; // client mode: polite, never assertive
   const retry = <div className="wc-notice__actions"><button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={onRetry}>Try again</button></div>;
   switch (result.kind) {
     case "unavailable":
       if (result.code === "contract_drift") {
         return (
-          <div className="wc-notice wc-notice--bad" role="alert" data-testid="media-drift">
+          <div className="wc-notice wc-notice--bad" role={live} data-testid="media-drift">
             <h3>The media API answered with something unexpected</h3>
             <p>WebDesk replied, but not in the shape the ERP expects, so nothing is shown rather than a wrong answer. This does <strong>not</strong> mean the library is empty.</p>
             <p className="wc-notice__reason">{result.reason}</p>
@@ -418,7 +419,7 @@ function LibraryProblem({ result, onRetry }: { result: Problem; onRetry: () => v
         );
       }
       return (
-        <div className="wc-notice" role="alert" data-testid="media-unavailable">
+        <div className="wc-notice" role={live} data-testid="media-unavailable">
           <h3>The media library is unavailable</h3>
           <p>WebDesk can&apos;t be reached. Nothing has been lost.</p>
           <p className="wc-notice__reason">{result.reason}</p>
@@ -427,22 +428,22 @@ function LibraryProblem({ result, onRetry }: { result: Problem; onRetry: () => v
       );
     case "forbidden":
       return (
-        <div className="wc-notice" role="alert" data-testid="media-forbidden">
+        <div className="wc-notice" role={live} data-testid="media-forbidden">
           <h3>You don&apos;t have access to the media library</h3>
           <p>{ASK}</p>
         </div>
       );
     case "not_enabled":
       return (
-        <div className="wc-notice" role="alert" data-testid="media-not-enabled">
+        <div className="wc-notice" role={live} data-testid="media-not-enabled">
           <h3>{result.reason === "module_disabled" ? "The Web Dev module is switched off" : "The media library isn't served here yet"}</h3>
           <p>{result.reason === "module_disabled" ? "Nothing has been deleted." : "This deployment doesn't serve the media routes yet."}</p>
         </div>
       );
     case "not_found":
-      return <div className="wc-notice" role="alert" data-testid="media-not-found"><h3>That site isn&apos;t one of your company&apos;s</h3></div>;
+      return <div className="wc-notice" role={live} data-testid="media-not-found"><h3>That site isn&apos;t one of your company&apos;s</h3></div>;
     case "conflict":
     case "invalid":
-      return <div className="wc-notice wc-notice--bad" role="alert"><h3>The library couldn&apos;t be read</h3><p className="wc-notice__reason">{result.message}</p>{retry}</div>;
+      return <div className="wc-notice wc-notice--bad" role={live}><h3>The library couldn&apos;t be read</h3><p className="wc-notice__reason">{result.message}</p>{retry}</div>;
   }
 }

@@ -72,7 +72,9 @@ describe("Publish now (self-publish ONE item, D58)", () => {
     await publishNow();
     const box = await screen.findByTestId("publish-refused");
     expect(box.textContent).toContain("This draft includes changes only Gaiada can publish. Gaiada will publish it, or you can restore the live version and edit again.");
-    expect(box.getAttribute("role")).toBe("alert");
+    // polite, and never a live region NESTED in the polite wrapper
+    expect(box.getAttribute("role")).toBeNull();
+    expect(screen.getByTestId("publish-flow").querySelectorAll("[role], [aria-live]")).toHaveLength(0);
   });
 
   it("403 client-command-not-allowed: no scheduling for clients", async () => {

@@ -13,6 +13,7 @@ export const CLIENT_COPY = {
   versionConflict: "This page changed since you opened it. Reload to see the latest, then make your change again.",
   publishNotClientEditable: "This draft includes changes only Gaiada can publish. Gaiada will publish it, or you can restore the live version and edit again.",
   selfApprovedBatch: "Another person from your company needs to approve this.",
+  accessRevoked: "You no longer have website editing access for this company. Ask your company's admin.",
   noScheduling: "Scheduling isn't available to you. Publish now, or ask a colleague from your company to approve a request.",
   noEditAccess: "You don't have website editing access. Ask your company's admin.",
   itemDeleted: "This page has been deleted, so it can't be changed or published.",
@@ -92,7 +93,7 @@ export function describePaths(paths: string[], defs: FieldDef[] | undefined, ite
 export function clientRefusal(
   r: Exclude<WdResult<unknown>, { kind: "ok" }>,
   op: ClientOp,
-  ctx: { defs?: FieldDef[]; itemLabels?: string[] } = {},
+  ctx: { defs?: FieldDef[]; itemLabels?: string[]; ownRequest?: boolean } = {},
 ): ClientRefusal {
   const w = OP_WORDS[op];
   const nothing = w.nothing ? ` ${w.nothing}` : "";
@@ -121,7 +122,9 @@ export function clientRefusal(
     }
     case "forbidden":
       if (r.slug === SLUG.clientCommandNotAllowed) return { tone: "bad", text: CLIENT_COPY.noScheduling };
-      if (op === "approve") return { tone: "bad", text: CLIENT_COPY.selfApprovedBatch };
+      // A 403 on Approve is "another person must approve" ONLY for the viewer's own request; on anyone else's it can mean the grant was
+      // revoked or the person is no longer a contact, which is a different thing to tell them.
+      if (op === "approve") return { tone: "bad", text: ctx.ownRequest ? CLIENT_COPY.selfApprovedBatch : CLIENT_COPY.accessRevoked };
       return { tone: "bad", text: `You don't have permission to do that. Ask your company's admin.${nothing}` };
     case "not_found":
       if (r.slug === "item-not-found") return { tone: "bad", text: "This page no longer exists." };

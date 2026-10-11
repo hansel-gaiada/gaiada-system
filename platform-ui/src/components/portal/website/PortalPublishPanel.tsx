@@ -141,7 +141,7 @@ export function PortalPublishPanel({
           </div>
         )}
         {outcome?.kind === "refused" && (
-          <div className={`wc-banner wc-banner--${outcome.tone}`} role={outcome.tone === "bad" ? "alert" : "status"} data-testid="publish-refused">
+          <div className={`wc-banner wc-banner--${outcome.tone}`} data-testid="publish-refused">
             <span className="wc-banner__body">{outcome.text}</span>
           </div>
         )}

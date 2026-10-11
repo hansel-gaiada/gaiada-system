@@ -47,8 +47,11 @@ describe("clientRefusal: every refusal a client editor can meet", () => {
     expect(r.text).toMatch(/Scheduling isn't available/);
   });
 
-  it("403 on approve: another person from the company needs to approve it", () => {
-    expect(clientRefusal({ kind: "forbidden", reason: "forbidden" }, "approve").text).toBe("Another person from your company needs to approve this.");
+  it("403 on approve: 'another person must approve' only for the viewer's OWN request; otherwise it may be a revoked grant", () => {
+    expect(clientRefusal({ kind: "forbidden", reason: "forbidden" }, "approve", { ownRequest: true }).text).toBe("Another person from your company needs to approve this.");
+    const other = clientRefusal({ kind: "forbidden", reason: "forbidden" }, "approve").text;
+    expect(other).toBe("You no longer have website editing access for this company. Ask your company's admin.");
+    expect(clientRefusal({ kind: "forbidden", reason: "forbidden" }, "approve", { ownRequest: false }).text).toBe(other);
   });
 
   it("any other 403 is a plain 'ask your admin', never the self-approval sentence", () => {

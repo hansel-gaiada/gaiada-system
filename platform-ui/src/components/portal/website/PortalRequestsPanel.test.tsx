@@ -108,12 +108,12 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     expect(t).not.toContain("Published");
   });
 
-  it("a self-approved batch is a 403 from the server, and the answer is the owner's sentence", async () => {
+  it("a 403 on a COLLEAGUE's request is not 'another person must approve' (the grant may have been revoked)", async () => {
     acts.portalApproveRequestAction.mockResolvedValue({ kind: "forbidden", reason: "forbidden" });
     mount([req("a1")]);
     fireEvent.click(screen.getByTestId("approve-a1"));
     await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
-    expect(within(card("a1")).getByTestId("request-notice").textContent).toBe("Another person from your company needs to approve this.");
+    expect(within(card("a1")).getByTestId("request-notice").textContent).toBe("You no longer have website editing access for this company. Ask your company's admin.");
   });
 
   it("422 publish-not-client-editable on approve (the live page moved since filing): the owner's words, naming the page", async () => {

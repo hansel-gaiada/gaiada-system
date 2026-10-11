@@ -91,7 +91,7 @@ export function PreviewCard({
         </div>
       )}
       {notice && (
-        <div className={`wc-banner wc-banner--${notice.tone}`} role={notice.tone === "bad" ? "alert" : "status"} data-testid="preview-notice" data-tone={notice.tone}>
+        <div className={`wc-banner wc-banner--${notice.tone}`} role={notice.tone === "bad" && !preview ? "alert" : "status"} data-testid="preview-notice" data-tone={notice.tone}>
           <span className="wc-banner__body">{notice.text}</span>
         </div>
       )}

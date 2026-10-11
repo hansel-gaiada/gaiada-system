@@ -23,7 +23,7 @@ describe("a read that did not return data is a state, never an empty list", () =
   it("the service is down: says so, says nothing was lost, offers Try again", () => {
     show({ kind: "unavailable", code: "editorial_unavailable", reason: "circuit_open" });
     const n = screen.getByTestId("website-unavailable");
-    expect(n.getAttribute("role")).toBe("alert");
+    expect(n.getAttribute("role")).toBe("status");
     expect(n.textContent).toContain("Editing is unavailable right now");
     expect(n.textContent).toContain("Nothing has been lost.");
     expect(n.textContent).not.toContain("circuit_open");

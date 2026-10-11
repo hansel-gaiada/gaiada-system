@@ -15,7 +15,8 @@ import "@/components/webdesk/content/content.css";
 //
 //   • each request shows WHO filed it, WHEN, the pages in it (with their latest draft version) and its state in plain words;
 //   • APPROVE appears ONLY on ANOTHER editor's pending request. The server is the authority: a self-approved batch is a 403 and
-//     the answer reads "Another person from your company needs to approve this." (`CLIENT_COPY.selfApprovedBatch`);
+//     the answer reads "Another person from your company needs to approve this." only on the viewer's OWN request (`CLIENT_COPY.selfApprovedBatch`); on a
+//     colleague's a 403 can mean a revoked grant, so it reads `CLIENT_COPY.accessRevoked`;
 //   • WITHDRAW appears on the viewer's OWN pending request;
 //   • on one's own pending request the panel says why there is no Approve, rather than leaving a request with no way forward.
 // "Published" is said only for a request the server reports as executed. After an approve that executes the words are
@@ -45,7 +46,7 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
     if (!mounted.current) return;
     setBusy(null);
     if (res.kind !== "ok") {
-      const f = clientRefusal(res, "approve", { itemLabels: r.items.map((i) => i.title) });
+      const f = clientRefusal(res, "approve", { itemLabels: r.items.map((i) => i.title), ownRequest: r.requestedByMe });
       setNotice({ id: r.approvalId, tone: f.tone, text: f.text });
       // A request that was already decided (or is gone) is stale on this page: show the current list.
       if (res.kind === "conflict" || res.kind === "not_found") router.refresh();
@@ -98,7 +99,7 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
           {r.itemCount > r.items.length && <li className="wc-muted">and {r.itemCount - r.items.length} more</li>}
         </ul>
         {notice?.id === r.approvalId && (
-          <div className={`wc-banner wc-banner--${notice.tone}`} role={notice.tone === "bad" ? "alert" : "status"} data-testid="request-notice"><span className="wc-banner__body">{notice.text}</span></div>
+          <div className={`wc-banner wc-banner--${notice.tone}`} role="status" data-testid="request-notice"><span className="wc-banner__body">{notice.text}</span></div>
         )}
         <div className="wc-publish__actions">
           {showApprove(r) && (

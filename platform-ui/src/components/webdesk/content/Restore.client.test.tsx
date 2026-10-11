@@ -35,18 +35,18 @@ describe("RestoreButton in client mode", () => {
 
   it("409 version-conflict: the owner's words", async () => {
     await restoreWith({ kind: "conflict", slug: "version-conflict", message: "m", currentHeadVersion: 5, currentContentHash: null, updatedAt: null });
-    expect(screen.getByRole("alert").textContent).toBe("This page changed since you opened it. Reload to see the latest, then make your change again.");
+    expect(screen.getByRole("status").textContent).toBe("This page changed since you opened it. Reload to see the latest, then make your change again.");
   });
 
   it("422 field-not-client-editable: names what only Gaiada can change", async () => {
     await restoreWith({ kind: "invalid", slug: "field-not-client-editable", message: "m", issues: [{ path: "/seo/title", message: "x" }] });
-    expect(screen.getByRole("alert").textContent).toContain("These can only be changed by Gaiada: Search appearance (SEO).");
-    expect(screen.getByRole("alert").textContent).toContain("Nothing was restored.");
+    expect(screen.getByRole("status").textContent).toContain("These can only be changed by Gaiada: Search appearance (SEO).");
+    expect(screen.getByRole("status").textContent).toContain("Nothing was restored.");
   });
 
   it("an unknown outcome is 'couldn't confirm', never 'restored' or 'failed'", async () => {
     await restoreWith({ kind: "unavailable", code: "upstream_error", reason: "reconcile_failed" });
-    expect(screen.getByRole("alert").textContent).toBe("We couldn't confirm the restore. Reload to see what happened.");
+    expect(screen.getByRole("status").textContent).toBe("We couldn't confirm the restore. Reload to see what happened.");
   });
 
   it("a redirect from the server is success: no error", async () => {
@@ -54,7 +54,7 @@ describe("RestoreButton in client mode", () => {
     render(<RestoreButton scope={SCOPE} itemId="i1" version={2} baseVersion={3} editorHref="/portal/website/g/s/c/p" restoreAndOpen={portal} clientMode />);
     fireEvent.click(screen.getByTestId("restore-2"));
     await act(async () => { fireEvent.click(screen.getByTestId("confirm-restore-2")); });
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 

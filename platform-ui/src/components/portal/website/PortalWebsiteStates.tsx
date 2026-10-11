@@ -31,7 +31,7 @@ export function WebsiteAccessRefused({ refusal }: { refusal: { refused: "denied"
   return (
     <>
       <PortalPageHead eyebrow="Your website" title="Website" />
-      <div className="wc-notice" role="alert" data-testid="website-unavailable">
+      <div className="wc-notice" role="status" data-testid="website-unavailable">
         <h2>Editing is unavailable right now</h2>
         <p>We couldn&apos;t check your access because the portal can&apos;t be reached. Nothing has been lost. Try again in a moment.</p>
         <div className="wc-notice__actions"><Link href="/portal/website" className="lux-btn lux-btn--ghost lux-btn--sm">Try again</Link></div>
@@ -56,7 +56,7 @@ export function PortalWebsiteRefusal({
   if (result.kind === "unavailable") {
     const drift = result.code === "contract_drift";
     return (
-      <div className={`wc-notice${drift ? " wc-notice--bad" : ""}`} role="alert" data-testid={drift ? "website-drift" : "website-unavailable"}>
+      <div className={`wc-notice${drift ? " wc-notice--bad" : ""}`} role="status" data-testid={drift ? "website-drift" : "website-unavailable"}>
         <h2>{drift ? `We couldn't show ${subject}` : "Editing is unavailable right now"}</h2>
         <p>
           {drift

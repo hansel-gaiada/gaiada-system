@@ -507,7 +507,7 @@ export function ItemEditor({
           </div>
         )}
         {unconfirmed !== null && (
-          <div className="wc-banner wc-banner--warn" role="alert" data-testid="unconfirmed-banner">
+          <div className="wc-banner wc-banner--warn" role={clientMode ? "status" : "alert"} data-testid="unconfirmed-banner">
             <span className="wc-banner__body"><strong>{unconfirmed}</strong>{mode === "edit" ? " Your edits are still here." : ""}</span>
             {mode === "edit" && (
               <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={refresh} disabled={refreshing} data-testid="unconfirmed-reload">{refreshing ? "Reloading…" : "Reload"}</button>
@@ -515,7 +515,7 @@ export function ItemEditor({
           </div>
         )}
         {clientConflict && (
-          <div className="wc-banner wc-banner--bad" role="alert" data-testid="client-conflict">
+          <div className="wc-banner wc-banner--bad" role="status" data-testid="client-conflict">
             <span className="wc-banner__body">
               <strong>{CLIENT_COPY.versionConflict}</strong>
               <br />Your unsaved changes are still on this page, so you can copy them before you reload. Reloading replaces them with the latest version.
@@ -537,10 +537,10 @@ export function ItemEditor({
             </span>
           </div>
         )}
-        {banner && <div className={`wc-banner wc-banner--${banner.tone}`} role={banner.tone === "bad" ? "alert" : "status"} data-testid="editor-banner"><span className="wc-banner__body">{banner.text}</span></div>}
+        {banner && <div className={`wc-banner wc-banner--${banner.tone}`} role={banner.tone === "bad" && !clientMode ? "alert" : "status"} data-testid="editor-banner"><span className="wc-banner__body">{banner.text}</span></div>}
         {authoritativeNote(bundle)}
         {saveState.s === "error" && (
-          <div className="wc-banner wc-banner--bad" role="alert" data-testid="save-error"><span className="wc-banner__body">{saveState.message}
+          <div className="wc-banner wc-banner--bad" role={clientMode ? "status" : "alert"} data-testid="save-error"><span className="wc-banner__body">{saveState.message}
               {/* Every issue, with its pointer: one with no control on this form (an unknown key, a member the
                   composition hides) must still be visible somewhere, never silently counted. */}
               {saveState.issues && saveState.issues.length > 0 && (

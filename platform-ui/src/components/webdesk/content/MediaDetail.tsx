@@ -198,7 +198,7 @@ export function MediaDetail({
         <div className="wc-banner wc-banner--info" role="note" data-testid="media-readonly"><span className="wc-banner__body"><strong>Read-only.</strong> {updateReason}</span></div>
       )}
       {problem && (
-        <div className={`wc-banner wc-banner--${problem.tone}`} role="alert" data-testid="media-save-problem">
+        <div className={`wc-banner wc-banner--${problem.tone}`} role={driver ? "status" : "alert"} data-testid="media-save-problem">
           <span className="wc-banner__body">{problem.text}</span>
           {unconfirmed && <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => void save()} disabled={saving} data-testid="media-save-retry">Retry</button>}
         </div>

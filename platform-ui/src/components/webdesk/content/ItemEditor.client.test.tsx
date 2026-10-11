@@ -156,7 +156,7 @@ describe("client mode: refusals are states, in the client's words (never raw JSO
     await failWith({ kind: "conflict", slug: "version-conflict", message: "m", currentHeadVersion: 5, currentContentHash: null, updatedAt: null });
     const box = await screen.findByTestId("client-conflict");
     expect(box.textContent).toContain("This page changed since you opened it. Reload to see the latest, then make your change again.");
-    expect(box.getAttribute("role")).toBe("alert");
+    expect(box.getAttribute("role")).toBe("status"); // polite, never assertive in client mode
     expect(screen.getByTestId("client-conflict-reload")).toBeTruthy();
     expect(field("h1").value).toBe("Edited"); // the user's text is still there
     expect(saveBtn().disabled).toBe(true); // saving again would just conflict again
@@ -189,6 +189,7 @@ describe("client mode: refusals are states, in the client's words (never raw JSO
     const err = await screen.findByTestId("save-error");
     expect(err.textContent).toContain("These can only be changed by Gaiada: Template; Search appearance (SEO).");
     expect(err.textContent).not.toContain("/blocks");
+    expect(document.querySelector('[role="alert"], [aria-live="assertive"]')).toBeNull(); // client mode is polite throughout
     expect(field("h1").value).toBe("Edited");
   });
 
