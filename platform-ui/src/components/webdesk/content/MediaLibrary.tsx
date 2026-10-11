@@ -12,6 +12,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { MediaDetail, type Cap } from "./MediaDetail";
 import { MediaThumb } from "./MediaThumb";
 import { useMediaUploads } from "./useMediaUploads";
+import "@/components/forms/forms.css";
 import "./content.css";
 import "./media.css";
 
@@ -156,6 +157,15 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
     onDenied: () => deny("upload"),
     onOrigin: (o) => setBase((b) => b ?? o),
   });
+  // Leaving the page while a file is still on its way would lose it silently (the upload belongs to this page), so ask first,
+  // exactly as the item editor does for unsaved edits.
+  const uploadsActive = uploads.active;
+  useEffect(() => {
+    if (!uploadsActive) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [uploadsActive]);
   const uploadOff = off.upload ?? null;
   const pickFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;

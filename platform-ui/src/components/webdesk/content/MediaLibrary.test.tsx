@@ -349,6 +349,21 @@ describe("uploads", () => {
     expect(screen.getByTestId("media-detail-title").textContent).toBe("Second");
   });
 
+  it("leaving the page while a file is still uploading asks first; once nothing is in flight it does not", async () => {
+    a.mintUploadTokenAction.mockResolvedValue(ok(token()));
+    let finish: ((v: UploadOutcome) => void) | undefined;
+    up.mockImplementation(() => new Promise((r) => { finish = r; }));
+    mount(); pick([png("slow.png")]);
+    await waitFor(() => expect(up).toHaveBeenCalled());
+    const during = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(during);
+    expect(during.defaultPrevented).toBe(true);
+    await act(async () => { finish?.({ ok: true as const, asset: asset(7) }); });
+    const after = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+
   it("a video goes to the video bucket", async () => {
     a.mintUploadTokenAction.mockResolvedValue(ok(token({ allowedMimes: ["video/mp4"] })));
     up.mockResolvedValue({ ok: true, asset: asset(5, { mime: "video/mp4" }) });

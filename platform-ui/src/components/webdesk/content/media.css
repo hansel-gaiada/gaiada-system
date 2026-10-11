@@ -12,7 +12,9 @@
 /* ── Toolbar ───────────────────────────────────────────────────────────────────────────────────── */
 .wm-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-16); }
 .wm-upload { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); }
-.wm-filter { flex: 1 1 420px; justify-content: flex-end; }
+.wm-filter { flex: 1 1 auto; justify-content: flex-end; flex-wrap: wrap; }
+.wm-filter .lux-field { flex: 0 1 140px; min-width: 110px; }
+.wm-filter .wc-filter__q { flex: 1 1 170px; }
 
 /* ── Layout: grid + detail ─────────────────────────────────────────────────────────────────────── */
 .wm-layout { display: grid; gap: var(--space-24); grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
@@ -53,7 +55,7 @@
 .wm-form { display: flex; flex-direction: column; gap: var(--space-12); }
 .wm-alts { margin: 0; padding: 10px 12px 12px; border: 1px solid var(--line); min-width: 0; display: flex; flex-direction: column; gap: var(--space-8); }
 .wm-alts > legend { padding: 0 6px; font: 700 12px var(--font-body); color: var(--ink-strong); }
-.wm-use { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.wm-use { display: flex; flex-direction: column; gap: 6px; }
 .wm-facts { margin: 0; }
 .wm-copy { display: flex; gap: var(--space-8); align-items: stretch; }
 .wm-copy .lux-field__control { flex: 1 1 auto; min-width: 0; }

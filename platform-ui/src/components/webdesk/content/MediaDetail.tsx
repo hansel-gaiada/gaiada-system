@@ -181,6 +181,13 @@ export function MediaDetail({
       </div>
       <h3 className="wm-detail__title" data-testid="media-detail-title">{assetLabel(base)}</h3>
 
+      {mode === "pick" && onUse && (
+        <div className="wm-use">
+          <button type="button" className="lux-btn lux-btn--solid lux-btn--md" onClick={() => onUse(base)} data-testid="media-use">Use this image</button>
+          {changed.any && <span className="wc-muted">Your unsaved changes to the details are not part of what is used. Save them first.</span>}
+        </div>
+      )}
+
       {readOnly && (
         <div className="wc-banner wc-banner--info" role="note" data-testid="media-readonly"><span className="wc-banner__body"><strong>Read-only.</strong> {updateReason}</span></div>
       )}
@@ -223,13 +230,6 @@ export function MediaDetail({
           {changed.any && !saving && <span className="wc-muted" data-testid="media-dirty">Unsaved changes</span>}
         </div>
       </div>
-
-      {mode === "pick" && onUse && (
-        <div className="wm-use">
-          <button type="button" className="lux-btn lux-btn--solid lux-btn--md" onClick={() => onUse(base)} data-testid="media-use">Use this image</button>
-          {changed.any && <span className="wc-muted">Your unsaved changes to the details are not part of what is used. Save them first.</span>}
-        </div>
-      )}
 
       <dl className="wc-kv wm-facts">
         <dt>File</dt><dd>{base.originalFilename ?? "—"}</dd>
