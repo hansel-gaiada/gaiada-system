@@ -11,6 +11,46 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.64.0` - companies carry a vertical; owners of the root get the Platform and Group surfaces (2026-10-11) - PROTOTYPED
+
+PV-1 (company context), rulings PV-D11 and PV-D14 to PV-D20. Tickets: `docs/plans/2026-10-11-pv1-company-context-tickets.md`.
+
+- **Verticals (PV1-01).**
+  - Migration `202610110530_company_verticals.sql` adds a `company_verticals` lookup (holding, agency, hospitality, catering, general; PV-D14) and `companies.vertical` (FK, default general).
+  - It is backfilled from `type` (resort, restaurant, bar and spa → hospitality). `companies` has no RLS, so the plain UPDATE reaches every row, and a DO block raises unless every row carries its mapped vertical.
+  - `/api/me` `companies[]` gains `vertical`, `enabledModules` (the effective set `enabledModuleKeys` returns) and `rootCompanyId`.
+- **Pack registry (PV1-02).** `src/core/packs.ts` is keyed by vertical; only the agency pack has content. Parity tests pin it to the migration and to the UI mirror.
+- **Company writes (PV1-03).**
+  - `POST /api/companies` accepts `vertical`; without `modules`, a new company starts from its pack's defaults (PV-D17).
+  - `PATCH` may change `vertical` only as `platform_admin` (403 otherwise, PV-D16, checked after `authorize`), and never touches modules.
+- **Platform gate (PV1-05, PV-D18).**
+  - `isPlatformOperator` = `platform_admin` at global scope, or the `owner` role on a company that is its own root. It is verified with one read, because `principal.rootCompanies` holds the whole tree, not just roots.
+  - It now gates every system surface (`admin-systems`, every `bot-admin` route, observability; IT keeps automation reads).
+  - Other `isElevated` uses are unchanged.
+  - This supersedes D-8's "owner: no platform/system controls" for these surfaces. Open decision D21 limits it to the operator's own root before any customer root exists.
+- **Group reads (PV1-06a, PV-D19).**
+  - Cerbos: an owner on the resource's tenant may read rollups (the caller's root) and the company-grain report.
+  - New `GET /api/:t/reports/group` (root owner or `platform_admin`; 404 unless `:t` is a root) returns per-company cards from each company's own report, plus Sum of companies for additive metrics only. `consolidated` is null until F9.
+  - **Cerbos must restart on deploy.**
+- **Verified on Linux** (352 + PV-1): nest 551 passed, 3 skipped, plus the regenerated capability inventory (its one red before regeneration). Teeth on all four new rules: no owner arm, any owner in the tree, no root-only 404, a summed ratio, and no vertical guard. Each turned its tests red.
+
+### platform-ui `0.85.0` - the staff menu follows the company: agency rows by vertical, Group on the root, Platform for operators (2026-10-11) - PROTOTYPED
+
+PV-1's UI half (PV1-04, PV1-06b).
+
+- **Menu.**
+  - The agency rows (Clients, Deliverables, Timesheets, Invoices, Agency, Meetings, Delivery Pipeline, Monitoring) show only when the active company's pack lists them, and rows with a module key hide when that module is off. Viceroy gets the generic menu (PV-D15).
+  - The ungated **Systems** group is now **Platform**, for `platform_admin` and owners of the root, in every company.
+  - A **Group** area (Group report, Rollups, Company reports) shows to the root owner or `platform_admin` only while the root company is active (PV-D11). Rollups and Company Report left Business and Reports.
+- **`lib/companyContext.ts`:** `activeCompany`, `isRootCompany`, `isRootOwner` (owner on a company whose `rootCompanyId` is itself), `isPlatformOperator`, `moduleOn`.
+- **Org tree and toolkits** key on the vertical; the hard-coded `co-agency` id is gone (PV-D13). `toolkitFor(vertical, department)`.
+- **Systems pages and the bot server actions** use `isPlatformOperator`, so a root owner's controls work end to end.
+- **Group pages.** `/group` renders the group report (cards, Sum of companies across N companies, "Consolidated needs F9"), and `/group/reports` opens each company's report through `switchTenant`.
+  - `switchTenant` gained an optional `return` field, honoured only for a same-site path (`tenant.test.ts` pins that it can't become an open redirect).
+- **Company form:** a Vertical picker, for platform admins only.
+- **Demo:** verticals, roots and one shared module list. A `demo-owner` identity (group-owner@gaiada.com) is owner of the root and its companies.
+- **Verified on Linux:** ui 242/242 files (4,737 tests); `next build` ok. A new `company-context` e2e project covers it, with results in the release record.
+
 ### platform-nest `0.63.0` - a scheduled WebDesk publish rebuilds staging by itself; a scheduled takedown marks it stale (2026-10-11) - PROTOTYPED
 
 - **WSK-61 ERP half:** `settleScheduledFirings` finds approved, executed `content.schedule` approvals with no build yet, reads every item over the control channel, and dispatches ONE staging rebuild as the approval's decider once they are live (the ledger's UNIQUE(approval) makes it exactly once). A scheduled takedown marks staging stale once. A `schedule.fired` Zone B event is only a wake-up; a sweep on the WSK-60 poller is the primary path (live has no event bridge).
