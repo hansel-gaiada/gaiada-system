@@ -28,6 +28,7 @@
 // Like every other `agency_leads` access (agency-leads.service.ts header, design §3.1): `withTenants` with NO
 // `{ modules }` option; passing one would read/write zero rows.
 import { Logger } from "@nestjs/common";
+import { config } from "../config";
 import { newId, withTenants } from "../db";
 import { emitEvent } from "../events/outbox.service";
 import { scrubText } from "./scrub";
@@ -167,8 +168,6 @@ export interface CreateFromWebSubmissionInput {
   tenantId: string;
   siteSlug: string;
   submissionId: string;
-  /** The Zone B event's `originSite`, when the caller has it (the hook does); defaults to `siteSlug`. */
-  originSite?: string;
 }
 
 /** Fetch the submission from WebDesk, map it, insert idempotently. Throws only for infrastructure failures
@@ -213,15 +212,16 @@ export async function createLeadFromWebSubmission(
     const ins = await c.query<{ id: string }>(
       `INSERT INTO agency_leads
          (id, tenant_id, org_name, contact_name, contact_email, contact_phone, source, status,
-          origin_site, origin_form, submission_ref, attribution, visitor_consent)
-       VALUES ($1, $2, $3, $4, $5, $6, 'web', 'new', $7, $8, $9, $10::jsonb, $11::jsonb)
+          origin_site, origin_form, submission_ref, attribution, visitor_consent, web_site_slug)
+       VALUES ($1, $2, $3, $4, $5, $6, 'web', 'new', $7, $8, $9, $10::jsonb, $11::jsonb, $12)
        ON CONFLICT (tenant_id, submission_ref) WHERE submission_ref IS NOT NULL DO NOTHING
        RETURNING id`,
       [
         id, tenantId, mapped.orgName, mapped.contactName, mapped.contactEmail, mapped.contactPhone,
-        (input.originSite || siteSlug).slice(0, 253), formKey, submissionId,
+        config.originSite, formKey, submissionId,
         attribution === null ? null : JSON.stringify(attribution),
         visitorConsent === null ? null : JSON.stringify(visitorConsent),
+        siteSlug.slice(0, 200),
       ],
     );
     if (ins.rows[0]) {
