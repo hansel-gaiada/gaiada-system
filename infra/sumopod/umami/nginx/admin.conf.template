@@ -1,0 +1,23 @@
+# Admin gate: everything proxied, published on 127.0.0.1 only, reached through an SSH tunnel. Profile `admin`;
+# stop it when the session is over.
+upstream umami_app {
+  server app:3000;
+  keepalive 4;
+}
+
+server {
+  listen 8080 default_server;
+  server_name _;
+  client_max_body_size 1m;
+
+  location / {
+    proxy_pass http://umami_app;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
+  }
+}

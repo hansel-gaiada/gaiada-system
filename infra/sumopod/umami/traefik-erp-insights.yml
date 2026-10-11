@@ -1,0 +1,91 @@
+# Traefik v3 dynamic file for the Umami collector. TEMPLATE: using mimi's Traefik (`mimi-tls-le`) is PENDING
+# the owner's OK (see "if not approved" in infra/runbooks/umami-sumopod.md).
+#
+# Install (after the OK): copy to /home/ubuntu/mimi/infrastructure/tls/dynamic/erp-insights.yml. The file
+# provider has watch=true, so no restart. All names carry the `erp-insights-` prefix because file-provider
+# names are global across that directory.
+#
+# The two paths below MUST equal TRACKER_SCRIPT_NAME and COLLECT_API_ENDPOINT in .env.
+#
+# SECURITY (GHSA-3xx8-742v-m4mq: the collector's cache token is replayable as a share token against the
+# read API): the router matches EXACTLY two paths. There is no catch-all router for this host, so every other
+# path (the UI, /api/*, /script.js, /api/send) gets Traefik's own 404. The nginx edge repeats the same
+# allow-list, so a mistake here still does not expose the UI.
+# Do NOT add Cloudflare/CDN country headers in front of this router: Umami ignores them (SKIP_LOCATION_HEADERS).
+http:
+  routers:
+    erp-insights-collector:
+      rule: "Host(`insights.erp.gaiada.com`) && (Path(`/lib/kestrel.js`) || Path(`/lib/kestrel/e`))"
+      entryPoints:
+        - websecure
+      service: erp-insights
+      middlewares:
+        # Outermost first. On the way back the response passes erp-insights-strip, then -cors, so the CORS
+        # headers set last win over anything the upstream sent.
+        - erp-insights-cors
+        - erp-insights-secheaders
+        - erp-insights-ratelimit
+        - erp-insights-body
+        - erp-insights-strip
+      tls:
+        certResolver: letsencrypt
+
+  middlewares:
+    # CORS for a tracker called from the site and the staging hosts. Umami itself answers
+    # `Access-Control-Allow-Origin: *`; the strip middleware removes that so only ONE value reaches the browser.
+    erp-insights-cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Content-Type
+          - x-umami-cache
+        accessControlAllowOriginList:
+          - "https://gaiada.com"
+          - "https://www.gaiada.com"
+          # TODO(orchestrator): add the staging host(s) of the gaiada.com revamp site, e.g.
+          # - "https://<staging-host>"
+        accessControlMaxAge: 86400
+        addVaryHeader: true
+
+    erp-insights-strip:
+      headers:
+        customResponseHeaders:
+          Access-Control-Allow-Origin: ""
+          Access-Control-Allow-Headers: ""
+          Access-Control-Allow-Methods: ""
+          Access-Control-Max-Age: ""
+          X-Powered-By: ""
+
+    erp-insights-secheaders:
+      headers:
+        stsSeconds: 15552000
+        stsIncludeSubdomains: false
+        stsPreload: false
+        contentTypeNosniff: true
+        referrerPolicy: "no-referrer"
+        customResponseHeaders:
+          # The script is loaded cross-origin, so it must be allowed to be embedded cross-origin.
+          Cross-Origin-Resource-Policy: "cross-origin"
+          X-Robots-Tag: "noindex, nofollow"
+
+    # Per visitor address (Traefik sees the real client; if a CDN is ever put in front, set ipStrategy.depth).
+    erp-insights-ratelimit:
+      rateLimit:
+        average: 20
+        period: 1s
+        burst: 40
+
+    erp-insights-body:
+      buffering:
+        maxRequestBodyBytes: 32768
+
+  services:
+    erp-insights:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          # docker0's address on sumopod; reaches the published edge port through the host.
+          - url: "http://172.17.0.1:18742"

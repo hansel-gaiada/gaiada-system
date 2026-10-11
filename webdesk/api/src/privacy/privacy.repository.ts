@@ -19,6 +19,10 @@ export type MatchedSubmissionRow = {
   consent_notice_version: string;
   consent_accepted_at: string;
   data_subject_ref: string | null;
+  data_subject_phone_ref: string | null;
+  /** M5-L2: personal data about the submitter's visit; part of a DSR export. */
+  attribution: Record<string, unknown> | null;
+  visitor_consent: Record<string, unknown> | null;
   created_at: string;
   expires_at: string;
 };
@@ -34,31 +38,39 @@ export type MediaAssetLookupRow = {
 export class PrivacyRepository {
   /**
    * "Matched by the identifying fields a form actually collected" (design §11/WSK-D22b), not by a
-   * hardcoded field-name list: matches EITHER the `data_subject_ref` correlator (populated today
-   * only from an `email` field — forms.service.ts's own `normalizeDataSubjectRef`) OR any VALUE
+   * hardcoded field-name list: matches the `data_subject_ref` (email) correlator, the
+   * `data_subject_phone_ref` correlator when `phoneRef` is given (M5-L1: both derived from the form
+   * DEFINITION, forms/subject-refs.ts), OR any VALUE
    * inside `payload.fields`, whatever that form's own field names happen to be — a generic
    * `jsonb_each_text` scan over the fields object rather than assuming "email"/"phone" are the
    * literal keys. Case-insensitive on both sides (`identifierNormalized` is already lower-cased by
    * identifier.ts before it reaches here). A submission already scrubbed by either purge or a
    * prior erase (`payload = '{}'`) naturally stops matching via the fields scan, but can still
-   * surface via `data_subject_ref` if that column was not also cleared (purge does not clear it —
-   * 0007_privacy_dsr.sql's own comment; erase does).
+   * surface via a correlator column if it was not also cleared (both the purge and erase now clear
+   * data_subject_ref and data_subject_phone_ref).
    */
-  async findByIdentifier(client: PoolClient, tenantId: string, identifierNormalized: string): Promise<MatchedSubmissionRow[]> {
+  async findByIdentifier(
+    client: PoolClient,
+    tenantId: string,
+    identifierNormalized: string,
+    phoneRef: string | null = null,
+  ): Promise<MatchedSubmissionRow[]> {
     const { rows } = await client.query<MatchedSubmissionRow>(
       `SELECT id, form_def_id, status, payload, consent_notice_text, consent_notice_version,
-              consent_accepted_at, data_subject_ref, created_at, expires_at
+              consent_accepted_at, data_subject_ref, data_subject_phone_ref, attribution, visitor_consent,
+              created_at, expires_at
          FROM submissions
         WHERE tenant_id = $1
           AND (
             lower(data_subject_ref) = $2
+            OR ($3::text IS NOT NULL AND data_subject_phone_ref = $3::text)
             OR EXISTS (
               SELECT 1 FROM jsonb_each_text(COALESCE(payload -> 'fields', '{}'::jsonb)) AS kv(k, v)
                WHERE lower(v) = $2
             )
           )
         ORDER BY created_at DESC`,
-      [tenantId, identifierNormalized],
+      [tenantId, identifierNormalized, phoneRef],
     );
     return rows;
   }
@@ -74,8 +86,7 @@ export class PrivacyRepository {
 
   /**
    * The erasure write, per migrations/0007_privacy_dsr.sql's resolution: SCRUB, don't DELETE.
-   * `data_subject_ref` is nulled (unlike the time-based purge job, which leaves it — a known,
-   * reported inconsistency, not fixed here) so the row stops being findable by identity; consent
+   * `data_subject_ref` is nulled (the time-based purge does the same) so the row stops being findable by identity; consent
    * columns are DELIBERATELY untouched (they describe the notice shown/accepted, not the subject's
    * own data — see the migration's header). Caller must already be inside a transaction; this
    * method does not BEGIN/COMMIT itself so it can be composed with the media_assets delete and the
@@ -85,7 +96,8 @@ export class PrivacyRepository {
     if (ids.length === 0) return 0;
     const { rows } = await client.query<{ id: string }>(
       `UPDATE submissions
-          SET status = 'erased', payload = '{}'::jsonb, data_subject_ref = NULL
+          SET status = 'erased', payload = '{}'::jsonb, data_subject_ref = NULL,
+              data_subject_phone_ref = NULL, attribution = NULL, visitor_consent = NULL
         WHERE tenant_id = $1 AND id = ANY($2::uuid[])
         RETURNING id`,
       [tenantId, ids],

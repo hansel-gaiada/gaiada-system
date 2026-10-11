@@ -1,0 +1,43 @@
+# The public collector gate. Rendered by the nginx image's envsubst: only TRACKER_SCRIPT_NAME and
+# COLLECT_API_ENDPOINT are substituted (nginx's own $variables are untouched). Each must be ONE absolute path.
+upstream umami_app {
+  server app:3000;
+  keepalive 8;
+}
+
+# The only peer is Traefik, arriving from a docker bridge address. Trust the docker ranges so the last
+# UNtrusted entry of X-Forwarded-For (the visitor, as Traefik saw it) becomes $remote_addr. Anything a client
+# put at the front of X-Forwarded-For is ignored.
+set_real_ip_from 172.16.0.0/12;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+
+server {
+  listen 8080 default_server;
+  server_name _;
+  client_max_body_size 32k;
+  client_body_timeout 10s;
+  keepalive_timeout 15s;
+
+  location = ${TRACKER_SCRIPT_NAME} {
+    limit_except GET HEAD OPTIONS { deny all; }
+    proxy_pass http://umami_app;
+    include /etc/nginx/proxy-common.inc;
+  }
+
+  location = ${COLLECT_API_ENDPOINT} {
+    limit_except POST OPTIONS { deny all; }
+    proxy_pass http://umami_app;
+    include /etc/nginx/proxy-common.inc;
+  }
+
+  # Docker healthcheck only (127.0.0.1 inside the container); deep: it asks Umami.
+  location = /__ping {
+    allow 127.0.0.1;
+    deny all;
+    proxy_pass http://umami_app/api/heartbeat;
+  }
+
+  # Everything else, including the whole admin UI and the rest of /api: not here.
+  location / { return 404; }
+}

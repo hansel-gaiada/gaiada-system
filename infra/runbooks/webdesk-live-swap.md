@@ -7,13 +7,22 @@ WSK-48b, migrations 0010/0011), 2026-10-11.
 
 **Never build the api on gda-aicenter** (it is the live ERP box; one build drove load to 16 on 4 cores).
 
-## Automated (M4 T4)
+## Automated (M4 T4): every release deploys WebDesk
 
 `.github/workflows/deploy-webdesk.yml` + `webdesk/ops/deploy/deploy-webdesk.sh` automate the manual procedure below.
-It is `workflow_dispatch` only for now; `release.yml` does not call it yet. It shares `concurrency: deploy-vps` with
-`deploy.yml` (one box, never alongside an ERP deploy) and runs in `environment: production` with the same `VPS_*`
-secrets. It never touches the `gaiada` project.
+**Since main `4d104aa1` (owner-approved 2026-10-12), `release.yml` runs it on every release**: job `deploy-webdesk`, after a
+successful ERP `deploy`, with `mode: apply` and `skip_if_current: true`.
+- When the signed `gaiada-webdesk-api:<tag>` digest already runs on the release overlay, no migration is pending and the
+  release tree equals the live one, it changes nothing ("already current"). Most releases do not touch WebDesk.
+- Otherwise it runs the full apply below.
+- A WebDesk failure turns that job red; it never touches the ERP deploy.
+- It shares `concurrency: deploy-vps` with `deploy.yml` and runs in `environment: production` with the same `VPS_*`
+  secrets. It never touches the `gaiada` project.
 
+Live history: 357 (first apply, 2026-10-11 15:57Z); 358 (migration 0015, 16:58Z); the skip path proven on 358 (the api
+was not restarted).
+
+You can still dispatch it by hand (to roll back, or to re-run):
 **Dispatch it** (Actions, deploy-webdesk, Run workflow; or `gh workflow run deploy-webdesk.yml -f tag=<tag> -f mode=plan`):
 
 1. **`mode=plan`, always first.** Changes nothing live. The runner cosign-verifies

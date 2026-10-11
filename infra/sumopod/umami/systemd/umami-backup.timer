@@ -1,0 +1,11 @@
+[Unit]
+Description=Umami nightly backup
+
+[Timer]
+# 02:40 UTC: before the ERP offsite pull (04:15) and away from the test-gate rush.
+OnCalendar=*-*-* 02:40:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

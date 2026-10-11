@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **157** capabilities across **16** owners
-- **84** writes · 73 reads
-- Writes by impact: **high 18** · medium 27 · low 39
+- **158** capabilities across **16** owners
+- **85** writes · 73 reads
+- Writes by impact: **high 18** · medium 28 · low 39
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -66,6 +66,7 @@ unfalsifiable after.
 | automation-console | `automation.listWorkflows` | `GET` | `/api/admin/automation/workflows` | read | — |
 | clients | `clients.listClients` | `GET` | `/api/:tenantId/clients` | read | — |
 | core | `agency_intake.convert` | `POST` | `/api/:tenantId/agency/leads/:leadId/convert` | write | `medium` |
+| core | `agency_intake.createFromWebSubmission` | `POST` | `/api/:tenantId/agency/leads/from-web-submission` | write | `medium` |
 | core | `agency_intake.decline` | `POST` | `/api/:tenantId/agency/leads/:leadId/decline` | write | `low` |
 | core | `agency_intake.getLead` | `GET` | `/api/:tenantId/agency/leads/:leadId` | read | — |
 | core | `agency_intake.invite` | `POST` | `/api/:tenantId/agency/leads/:leadId/invite` | write | `low` |

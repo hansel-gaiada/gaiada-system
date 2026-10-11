@@ -17,7 +17,13 @@ export type InsertSubmissionInput = {
   attachments: SubmissionAttachmentRef[];
   consent: ConsentRecord;
   retentionDays: number;
+  /** The email correlator (see subject-refs.ts). */
   dataSubjectRef: string | null;
+  /** The phone correlator, digits with country code (see subject-refs.ts). */
+  dataSubjectPhoneRef: string | null;
+  /** M5-L2: already sanitised by attribution.ts; null when none survived. */
+  attribution: Record<string, unknown> | null;
+  visitorConsent: Record<string, unknown> | null;
 };
 
 export type SubmissionRow = {
@@ -37,9 +43,11 @@ export class SubmissionsRepository {
       `INSERT INTO submissions (
          tenant_id, site_id, form_def_id, payload, status,
          consent_notice_text, consent_notice_version, consent_accepted_at,
-         data_subject_ref, expires_at
+         data_subject_ref, expires_at,
+         data_subject_phone_ref, attribution, visitor_consent
        )
-       VALUES ($1, $2, $3, $4::jsonb, 'received', $5, $6, now(), $7, now() + make_interval(days => $8))
+       VALUES ($1, $2, $3, $4::jsonb, 'received', $5, $6, now(), $7, now() + make_interval(days => $8),
+               $9, $10::jsonb, $11::jsonb)
        RETURNING id, status, expires_at, created_at`,
       [
         input.tenantId,
@@ -50,6 +58,9 @@ export class SubmissionsRepository {
         input.consent.version,
         input.dataSubjectRef,
         input.retentionDays,
+        input.dataSubjectPhoneRef,
+        input.attribution === null ? null : JSON.stringify(input.attribution),
+        input.visitorConsent === null ? null : JSON.stringify(input.visitorConsent),
       ],
     );
     return rows[0];

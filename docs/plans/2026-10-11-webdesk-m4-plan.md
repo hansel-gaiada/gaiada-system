@@ -203,6 +203,58 @@ The GitHub rebuild cost is already measured: about $0.016 a run.
 Then write quotas for reads per minute (live 3000), storage bytes (default 10 GiB), forms and webhooks. §03's
 capacity statement is the interim ceiling (OQ-2.7).
 
+## F1 · WS4 approval assertion made asymmetric: design (2026-10-12)
+
+**Today.** The header is `x-ws4-assertion: <base64url(claims)>.<hmacHex>`:
+- HMAC-SHA256 over the literal payload bytes;
+- claims `{approvalId, commandHash, exp}` (`webdesk/api/src/control/auth/ws4-assertion.ts` and
+  `platform-nest/src/modules/webdev/webdesk-ws4-assertion.ts`);
+- single use is enforced by `audit_entries.ws4_approval_id`.
+
+The key is shared: the ERP's `WEBDESK_CONTROL_WS4_KEY` must equal WebDesk's `WEBDESK_APPROVAL_ASSERTION_KEY`. The
+containment probe accepts it as "shared by design", because only WebDesk's own control plane accepts it. A WebDesk
+compromise therefore yields a key that can mint approvals for WebDesk itself, which that compromise could do anyway.
+The point of F1 is that **WebDesk holds no signing secret at all**: the same posture the editorial assertion
+already has (WSK-D39).
+
+**Target: v2, a JWS compact token with `alg: EdDSA`.**
+- **Header:** `{alg: "EdDSA", kid, typ: "ws4+jwt"}`.
+- **Payload:** the same claims plus `aud: "webdesk-control-plane"`.
+- **Format detection:** v1 has two dot-separated parts and v2 has three, so the verifier tells them apart without
+  guessing.
+- **Keys:**
+  - A NEW Ed25519 key pair, kid `ws4-<yyyy-mm>`, never the editorial key: the two channels must not be able to
+    replay each other's tokens. `typ` and `aud` are checked as well.
+  - The private key lives only on the ERP, with the same custody as the editorial signing key.
+  - The public key goes in a pinned file `/etc/webdesk/ws4/ws4.jwks.json`, a read-only file mount loaded by the
+    same loader as `editorial-jwks.ts`, generalised. The loader refuses boot on a malformed file and holds 1 or 2
+    keys, 2 during a rotation.
+- **The verifier pins `alg` to EdDSA and looks the key up only by kid in the WS4 set.** It refuses `none`, any HS*
+  (the HMAC-with-public-key confusion), a wrong `typ` or `aud`, an unknown kid, a past `exp` and a `commandHash`
+  mismatch. Replay is refused by the unchanged single-use check.
+
+**Phases (each verified before the next; nothing breaks in between):**
+1. **WebDesk accepts both.**
+   - v2 when the WS4 JWKS file is present.
+   - v1 only while `WEBDESK_APPROVAL_ASSERTION_KEY` is set.
+   - The audit row records which version was used.
+   - Shared test vectors in both repos (the nest signer ↔ the WebDesk verifier) plus the adversarial matrix above,
+     with each row's exact refusal reason.
+   - Ships with a release (auto-deploy).
+2. **The ERP signs v2.**
+   - The platform mints v2 when its WS4 private key is configured, else v1.
+   - Live: provision the key pair (a runbook like `webdesk-editorial-keys.md`), install the JWKS on the box, restart
+     the platform.
+   - Probe: one HIGH command executes and its audit row says v2. A v1 token is still accepted (overlap).
+3. **Remove HMAC.**
+   - Unset both HMAC keys. WebDesk refuses v1 when its key is absent (boot logs it).
+   - Containment probe 6 drops `WEBDESK_CONTROL_WS4_KEY` from its shared-by-design list, so it would then FAIL if
+     the value reappears anywhere in the surface.
+   - Rotation runbook: two kids overlap, then the old one is removed.
+
+**Tier.** The signer and verifier cores are Opus work (alg confusion and replay are the failure modes). The key
+runbook and the probe change are Sonnet work. About 1–2 sessions. **Status: designed, not started.**
+
 ## Follow-ups found (each a box on the board)
 
 - **F1** Make the WS4 approval assertion asymmetric (Ed25519, like the editorial assertion D39), so the surface holds
@@ -265,3 +317,24 @@ capacity statement is the interim ceiling (OQ-2.7).
   - The read quota now in effect is the configured 3000/min (`.env`; was the accidental code default 300).
 - CI on PR #15: c1 cross-machine determinism PASSED (acme and globex byte-identical across two independent
   containers).
+- 14:45Z: `https://status.erp.gaiada.com` live on sumopod (T6b). Main `f2b965c0`: probe job `blackbox-webdesk-api`,
+  alert `WebDeskApiDown`, and the blackbox-estate drift fix. WSK-D70 (mimi file per name) is amended by WSK-D71 (M5):
+  the page moves behind the shared `erp-edge` Traefik at M5's cut-over.
+- T6a built and tested (guard harness 32/32 on sumopod, after fixing its control), branch `webdesk/m4-t6a-otlp`.
+  Held: the WebDesk api has no OpenTelemetry SDK yet, so nothing would send.
+- 15:06Z: rehearsal of the deploy's tools step on the live box: rc=0 in 22 s, changes=0.
+- 15:41Z: release 356 (ERP-only) deployed; probes 39/39 afterwards.
+- 15:57–15:59Z: **release 357 deployed to WebDesk by `deploy-webdesk`**, its first live apply (owner-approved).
+  - plan run 38153324995 OK; apply run 38153398370 OK.
+  - The api now runs `ghcr.io/hansel-gaiada/gaiada-webdesk-api@sha256:5560bb9d…` on the release overlay (three
+    compose files).
+  - Backup taken as `webdesk_backup`; migrations 0 applied twice; RLS gate OK; health all PASS.
+  - Probes 39/39. The nightly backup script survived the tree swap. The upload refusal is 404 problem+json
+    `upload-not-found`.
+  - From now on every manual compose call on the box needs all three files plus `--no-build`.
+- 16:58Z: **358 deployed to WebDesk** (plan 38157565110, apply 38157632390). Migration 0015 applied once; health PASS;
+  probes 39/39; `ensure-backup-role` unchanged (the backup role reads 0015's objects).
+- The skip path proven live on the already-current 358 (run 38157846946, from the branch): "already current", the api's
+  StartedAt unchanged.
+- **release.yml wired** (owner-approved 2026-10-12; main `4d104aa1`): every release runs deploy-webdesk (apply,
+  skip_if_current) after a successful ERP deploy.
