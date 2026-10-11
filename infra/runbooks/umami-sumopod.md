@@ -10,17 +10,18 @@ Artifacts live in `infra/sumopod/umami/`. On the server the directory is copied 
 
 | # | Decision | Needed before |
 |---|---|---|
-| 1 | **May we use mimi's Traefik (`mimi-tls-le`) for `insights.erp.gaiada.com`?** Pending the owner's OK. If not, see "If Traefik is not approved". | Step 6 |
+| 1 | **Edge mechanism: RESOLVED by WSK-D71.** Umami's route lives in the ERP's own `erp-edge` Traefik (`infra/sumopod/erp-edge/`, runbook `erp-edge-sumopod.md`), reached from mimi's Traefik by one TLS-passthrough rule. Nothing about Umami is installed in mimi's directory. | Step 6 |
 | 2 | **ERP read path.** WSK-D66 says the ERP pulls from Umami, but only the collector is public. This design reaches the API over WireGuard: `read-gate` publishes a GET-only API subset on `10.88.0.2:18743`, reachable from gda-aicenter only. Confirm, or A4 must use another route. | Step 9 / M5-A4 |
-| 3 | **Staging origins for CORS** in the Traefik file (placeholder `TODO`). | Step 6 |
+| 3 | **Staging origins for CORS** in `infra/sumopod/erp-edge/dynamic/erp-insights.yml` (placeholder `TODO`). | Step 6 |
 | 4 | **DB-IP attribution (CC BY 4.0)** needs a visible credit on the site's privacy page; counsel to confirm wording. Vendor register rows for Umami and DB-IP (M5-G4). | before go-live |
 | 5 | **Retention vs backups:** the 14-month delete does not reach rows already in backups (90 days; 1st-of-month copies 12 months). Counsel to confirm that is acceptable, else shorten backup retention. | before go-live |
 
 ## Design, in one screen
 
 ```
-visitor -> Traefik (mimi-tls-le :443) -> 172.17.0.1:18742 -> edge (nginx) -> app (Umami) -> db (Postgres)
-                                           docker0 only       [internal net: no gateway, no route out]
+visitor -> mimi-tls-le :443 --(TCP passthrough, PROXY v2)--> 172.17.0.1:18443 -> erp-edge Traefik (TLS ends here)
+        -> 172.17.0.1:18742 -> edge (nginx) -> app (Umami) -> db (Postgres)
+           docker0 only        [internal net: no gateway, no route out]
 ```
 
 * **Egress denial: an `internal: true` network plus a minimal publishing sidecar. Chosen over DOCKER-USER
@@ -31,7 +32,7 @@ visitor -> Traefik (mimi-tls-le :443) -> 172.17.0.1:18742 -> edge (nginx) -> app
   thing with a route out, so it is capped by one DOCKER-USER rule (`egress-guard.sh`, run at boot by
   `umami-egress-guard.service`) that drops NEW connections from the `edge` subnet. The sidecar also enforces
   the path allow-list a second time: only the tracker script and the collect path are proxied, everything else
-  404s, so the admin UI cannot be exposed by a Traefik typo.
+  404s, so the admin UI cannot be exposed by a routing typo in erp-edge.
 * Umami needs no outbound traffic at runtime: telemetry and update checks are off, the geo database is a
   host-side file mounted read-only (refreshed by a host timer, not by the app), and there is no email.
 * Publishing is on **172.17.0.1 only** (docker0 exists at boot; mimi's bridge gateway does not). Docker's DNAT
@@ -39,11 +40,14 @@ visitor -> Traefik (mimi-tls-le :443) -> 172.17.0.1:18742 -> edge (nginx) -> app
 * Umami stays **stock and unforked**: `ghcr.io/umami-software/umami:3.4.0` by tag and digest. v3.x ships Postgres
   only (no `postgresql-*` tag). Postgres is `postgres:16.15-alpine` by tag and digest, in its own container with
   its own named volume; it is never another project's database.
-* `CLIENT_IP_HEADER=x-real-ip`: Traefik forwards the client in `X-Forwarded-For` (it appends the peer address, but
-  a client can prepend its own). The edge uses nginx `real_ip` (trusting only docker ranges, recursive) to take
-  the right-most untrusted entry, then OVERWRITES `X-Real-IP` with it, so Umami never reads a spoofable value.
+* `CLIENT_IP_HEADER=x-real-ip`: mimi's passthrough hands the visitor's address to erp-edge in a PROXY protocol
+  header (trusted only from the one source address mimi arrives from). erp-edge's Traefik discards any
+  `X-Forwarded-For` the visitor sent and writes its own from that address. The nginx edge trusts that header ONLY
+  when the connection comes from erp-edge's source address as nginx sees it (`ERP_EDGE_SOURCE` in `.env`, a single
+  address measured at deploy, never a docker range: see step 6), then OVERWRITES `X-Real-IP` with the result, so
+  Umami never reads a spoofable value. A request from any other peer keeps its own address.
   Cloudflare/Vercel/CloudFront location headers are stripped at the edge and ignored by Umami
-  (`SKIP_LOCATION_HEADERS=1`); Traefik must not add any.
+  (`SKIP_LOCATION_HEADERS=1`); erp-edge must not add any.
 * `SALT_ROTATION=day`: visitor hashes rotate daily (default is monthly).
 
 ## 0. Preflight (measure first; sumopod runs every session's test gates)
@@ -57,7 +61,7 @@ ss -ltnH | awk '{print $4}' | grep -E ':(18742|18743|13000)$' || echo "ports fre
 docker network ls -q | xargs docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | tr ' ' '\n' | grep -E '^172\.28\.91\.' || echo "172.28.91.0/28 free"
 ip -4 addr show docker0 | grep 172.17.0.1       # docker0 is the publish address
 ip -4 addr show wg0 | grep 10.88.0.2            # only if the erp-read profile will be used
-docker inspect mimi-tls-le --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{$v.IPAddress}} {{$v.Gateway}}{{"\n"}}{{end}}'   # note mimi's subnet for step 6
+# erp-edge's own preflight (mimi's subnet, ports, versions) is in infra/runbooks/erp-edge-sumopod.md
 ```
 
 **Advisory re-check (required):** GHSA-3xx8-742v-m4mq (High, 2026-06-30: the collector's cache token is
@@ -82,6 +86,7 @@ mkdir -p ~/umami && cd ~/umami
 chmod +x *.sh
 cp .env.example .env && chmod 600 .env
 # fill UMAMI_DB_PASSWORD, APP_SECRET, TWO_FACTOR_ENCRYPTION_KEY with: openssl rand -hex 32
+# set ERP_EDGE_SOURCE=127.0.0.1 for now (trusts nothing real); step 6 replaces it with the measured address
 ```
 
 Never commit `.env`; the repo is public.
@@ -122,41 +127,45 @@ sudo systemctl daemon-reload && sudo systemctl enable --now umami-egress-guard
 sudo ~/umami/egress-guard.sh status        # shows umami-edge-no-egress (and umami-read-gate-peer-only)
 ```
 
-## 5. ufw: let Traefik reach docker0 (needs root, after step 6's subnet is known)
+## 5. ufw: let erp-edge reach docker0 (needs root; after erp-edge exists, see erp-edge-sumopod.md)
 
-Traffic from mimi's bridge to 172.17.0.1 is host-input traffic, so ufw filters it:
+The caller of 172.17.0.1:18742 is now erp-edge's bridge (`172.28.92.0/28`), not mimi's. Allow exactly that:
 
 ```bash
-MIMI_SUBNET=<subnet from preflight>
-sudo ufw allow from "$MIMI_SUBNET" to 172.17.0.1 port 18742 proto tcp comment 'umami edge from mimi traefik'
-docker exec mimi-tls-le wget -q -T 3 -O /dev/null http://172.17.0.1:18742/lib/kestrel.js && echo reachable
+ERP_EDGE_SUBNET=172.28.92.0/28
+sudo ufw allow from "$ERP_EDGE_SUBNET" to 172.17.0.1 port 18742 proto tcp comment 'umami edge from erp-edge'
+docker exec erp-edge-traefik-1 wget -q -T 3 -O /dev/null http://172.17.0.1:18742/lib/kestrel.js && echo reachable
 ```
 
 If that is refused although ufw allows it, Docker's inter-bridge isolation is dropping the DNAT'd packet
-(mimi bridge -> umami `edge` bridge). Fix without opening anything wider:
-`sudo iptables -I DOCKER-USER -s "$MIMI_SUBNET" -d 172.28.91.0/28 -p tcp --dport 8080 -j ACCEPT` placed ABOVE the
+(erp-edge bridge -> umami `edge` bridge). Fix without opening anything wider:
+`sudo iptables -I DOCKER-USER -s "$ERP_EDGE_SUBNET" -d 172.28.91.0/28 -p tcp --dport 8080 -j ACCEPT` placed ABOVE the
 egress-guard drop (that drop only matches `-s 172.28.91.0/28`, so order does not matter), then add it to
 `egress-guard.sh`. Record which was needed.
 
-## 6. DNS and the Traefik route (after decision 1)
+## 6. DNS, the erp-edge route and the trusted source (after erp-edge is running)
 
 1. DNS (D61): `insights.erp.gaiada.com` CNAME `sumopod.erp.gaiada.com`. Confirm: `dig +short insights.erp.gaiada.com`.
-2. Edit `traefik-erp-insights.yml`: the two `Path(...)` values must equal `TRACKER_SCRIPT_NAME` and
-   `COLLECT_API_ENDPOINT` in `.env`; add the staging origins (decision 3).
-3. Install (file provider has `watch=true`, no restart):
-   `cp ~/umami/traefik-erp-insights.yml /home/ubuntu/mimi/infrastructure/tls/dynamic/erp-insights.yml`
-4. Check Traefik loaded it and no error: `docker logs --tail 30 mimi-tls-le | grep -i -E 'erp-insights|error'`.
-   The Let's Encrypt HTTP challenge needs port 80 to reach Traefik for that name, which it already does.
-
-### If Traefik is not approved
-
-Ports 80/443 are owned by mimi, so a second public listener cannot be added on sumopod. Alternatives, in order of
-preference: (a) ask the owner again with the one-line scope (one dynamic file, two exact paths, no restart);
-(b) terminate TLS for `insights.erp.gaiada.com` on gda-aicenter's existing nginx and proxy to sumopod over
-WireGuard: add `- "10.88.0.2:18742:8080"` to the `edge` ports (plus a DOCKER-USER peer rule like
-`egress-guard.sh` rule 2 for that port), with an nginx server block on aicenter that allows only the same two
-exact paths and 404s the rest. That puts a public listener back on the ERP box D66 moved Umami away from, so
-it needs the owner's explicit OK as well. Do not fall back to publishing on `0.0.0.0`.
+2. The route is `infra/sumopod/erp-edge/dynamic/erp-insights.yml` (it replaces the old mimi-directory template).
+   Its two `Path(...)` values must equal `TRACKER_SCRIPT_NAME` and `COLLECT_API_ENDPOINT` in `.env`; add the
+   staging origins (decision 3). It is installed with the rest of `erp-edge/` (`erp-edge-sumopod.md` step 4);
+   nothing is copied into mimi's directory for Umami.
+3. **Which source does the edge see (sets `ERP_EDGE_SOURCE`).** erp-edge reaches `172.17.0.1:18742` through the
+   host, so the packet is DNAT'd and normally masqueraded; nginx may see erp-edge's own address or the gateway of
+   the umami `edge` bridge (`172.28.91.1`). Do not guess; measure with a held connection:
+   ```bash
+   docker exec -d erp-edge-traefik-1 sh -c '(printf "GET /__x HTTP/1.0\r\nHost: x\r\n\r\n"; sleep 12) | nc 172.17.0.1 18742'
+   sleep 2; docker exec umami-edge-1 netstat -tn | grep ':8080'      # Foreign Address column = the source to trust
+   ```
+   Put that single address in `.env` as `ERP_EDGE_SOURCE=<addr>` (a single IP, never `172.16.0.0/12` or a whole
+   bridge), then `docker compose up -d edge` (nginx re-renders its template on start) and
+   `docker exec umami-edge-1 nginx -T 2>/dev/null | grep set_real_ip_from` must show exactly that one line.
+   Compose refuses to start the edge while it is unset, so the first `up` in step 3 needs a provisional value:
+   use `127.0.0.1` (trusts nothing real) until this measurement.
+   If the measured address is the `edge` bridge's gateway, every container that reaches the published port from
+   another bridge looks the same, so any such container could state a client address. The effect is limited to
+   analytics attribution, and `ufw`/`DOCKER-USER` already restrict who may reach the port (step 5); do not widen it.
+   Check again after anything that recreates either bridge.
 
 ## 7. Admin, users, website
 
@@ -226,9 +235,11 @@ docker exec umami-db-1 psql -U umami -d umami -c "select country, region, city f
 docker exec umami-db-1 psql -U umami -d umami -c "delete from website_event where url_path='/umami-selftest';"
 ```
 
-Step 6 needs care: the `X-Forwarded-For` the client sends is NOT trusted over Traefik's own appended address, so
-the stored country may be the sender's own. If so, run the same POST from `127.0.0.1` against the edge
-(`http://172.17.0.1:18742`), where nginx honours the header from the docker range. A blank country means the
+Step 6 needs care: erp-edge DISCARDS the `X-Forwarded-For` a client sends and uses the PROXY-protocol address, so the
+stored country is the sender's own, not US. To exercise the MMDB with a known IP, send the same POST from inside
+erp-edge's container (it is the trusted source), e.g.
+`docker exec erp-edge-traefik-1 wget -q -O- --header='Content-Type: application/json' --header='X-Forwarded-For: 8.8.8.8' --post-data='<same JSON>' http://172.17.0.1:18742/lib/kestrel/e`.
+The real-IP path from the internet is proven in `erp-edge-sumopod.md` step 7. A blank country means the
 MMDB fields do not match what Umami reads: record it and stop, do not paper over it.
 No raw IP is stored by Umami; also confirm none appears in logs: `docker compose logs --since 10m | grep -c '8\.8\.8\.8'` must be 0.
 
@@ -320,18 +331,18 @@ pipe the dump into `psql`, `docker compose start app`.
 
 * **Bad version:** put the previous `image:` line (tag + digest) back, `docker compose up -d app`. Umami migrates
   forward only; roll back across a migration by restoring the last backup into the old version.
-* **Take it off the air at once:** delete the Traefik file (`rm /home/ubuntu/mimi/infrastructure/tls/dynamic/erp-insights.yml`);
-  the route disappears within seconds, Umami keeps running privately. Tracker calls fail silently in the browser.
+* **Take it off the air at once:** remove the route from erp-edge (`rm ~/erp-edge/dynamic/erp-insights.yml`; the file
+  watcher drops it within seconds; the status page is unaffected), Umami keeps running privately. Tracker calls fail silently in the browser.
 * **Remove entirely:** `docker compose --profile admin --profile erp-read down` (add `-v` to delete the database
   volume: only after a verified off-box backup), `sudo systemctl disable --now umami-egress-guard umami-*.timer`,
-  `sudo ufw delete allow from "$MIMI_SUBNET" to 172.17.0.1 port 18742 proto tcp`.
+  `sudo ufw delete allow from "$ERP_EDGE_SUBNET" to 172.17.0.1 port 18742 proto tcp`.
 * A compose, nginx or env change that breaks the collector never affects any page: the tracker sends in the background.
 
 ## 12. Status page probe note
 
 Another session runs `status.erp.gaiada.com` on sumopod. Hand it exactly one probe:
 `GET https://insights.erp.gaiada.com/lib/kestrel.js` expecting HTTP 200 and a javascript content type. It exercises
-DNS, TLS, Traefik, the edge and Umami in one request, and is inside the 20 req/s rate limit by a wide margin.
+DNS, mimi's passthrough, erp-edge's TLS, the edge and Umami in one request, and is inside the 20 req/s rate limit by a wide margin.
 Do NOT probe the collector with a POST (it would create events), and do not look for a `/api/heartbeat` or a login
 page: they are 404 publicly by design. Expect slow answers at times (sumopod load); alert on sustained failure,
 not on a single slow probe.
@@ -343,6 +354,7 @@ not on a single slow probe.
   `scripts/update-tracker.js`, `src/lib/detect.ts`, `src/lib/constants.ts`, `src/lib/api-key.ts`, `prisma/schema.prisma`).
 * `docker compose config` accepts the file (all profiles). The three nginx templates were rendered by the pinned
   image on a read-only root fs and passed `nginx -t`. Shell scripts pass `bash -n` / `sh -n`.
-* NOT run: the compose project, Traefik loading the dynamic file, CORS single-header behaviour through Traefik's
+* `ERP_EDGE_SOURCE` renders into `set_real_ip_from` and passes `nginx -t` on the pinned image; compose refuses to start without it.
+* NOT run: the compose project, erp-edge on a server (Traefik 3.3.7 did load the route file locally), CORS single-header behaviour through Traefik's
   `headers` middleware (the strip + cors middleware order is reasoned, Verify step 1 proves it), the DOCKER-USER
   rules, the mimi-bridge to docker0 path, `retention.sql` against a real Umami database (it was run against stub tables with the same names and columns, postgres 16.15: deleted old rows and orphan sessions, kept recent ones), the MMDB field fit.
