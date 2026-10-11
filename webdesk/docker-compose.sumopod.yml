@@ -110,6 +110,8 @@ services:
       WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      # WSK-43a: the bucket retention the media-purge job waits out (the SAME variable storage-bootstrap.mjs applies; empty = 1).
+      WEBDESK_STORAGE_LOCK_DAYS: ${WEBDESK_STORAGE_LOCK_DAYS:-}
       # Also absent from the base file's api block, also `requireInProd`:
       API_KEY_PEPPER: ${API_KEY_PEPPER}
       # Control-channel CA (WSK-22), fixed 2026-09-01 — see the corrected reasoning below and
