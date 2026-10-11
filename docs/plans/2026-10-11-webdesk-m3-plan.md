@@ -96,9 +96,11 @@ read `media.list`. The media primitive stores `{url, alt?, width?, height?, mime
 Rulings: WSK-D58 (a client publisher self-publishes a single item; batches need a second client person) and WSK-D59 (clients change
 only what the composition marks client-editable). Built now against a test client tenant, before the first client site moves onto WebDesk.
 
-- **Who is a client editor (proposal, to ratify).** Not every client contact: a client user needs an explicit website-editor grant on
-  their own company, given by Gaiada staff or the client's company admin. Cerbos sees it as a scoped grant; `isClientOnly`, never
-  `!isElevated`, decides the portal shell (estate rule).
+- **Who is a client editor (WSK-D60).** A client user holding `client_website_editor` on their own company. Gaiada staff and the
+  client's company admin can grant it; the self-service path is bounded (this role only, own company only, never staff roles or
+  permissions, within the granter's ceiling, audited). `isClientOnly`, never `!isElevated`, decides the portal shell.
+- **49f · The grant path.** The role as data, its Cerbos attribute check, staff and client-admin grant/revoke in the ERP and the
+  portal, audited; denial tests send valid bodies so validation never pre-empts authorisation.
 - **49a · vocabulary 1.2.0 (MINOR).** `ui.clientEditable` on the composition and on FieldDef; the classifier rates it MINOR; vendored copies
   and codegen follow. No stored value changes.
 - **49b · WebDesk write plane.** The editorial assertion gains a client marker. With it, create, update and restore refuse any change to a
