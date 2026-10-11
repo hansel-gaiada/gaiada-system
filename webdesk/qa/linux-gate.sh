@@ -20,18 +20,30 @@
 #                   Each builds throwaway scratch databases next to the migrated one and drives the REAL
 #                   runner, so it connects as the cluster superuser too (SUPERUSER_DATABASE_URL). CI runs
 #                   the same seven in the webdesk-api job.
+#   legacy          (M4-T5) the August-era checks nothing else ran, driven by webdesk/qa/legacy-suite.sh; each is
+#                   its own named step with PASS/FAIL/SKIP in the summary (`legacy:<step>`) and its time:
+#                   wsk14-breaking-change/-composition-validator/-renderer-invariant + wsk64-snapshot-probe;
+#                   wsk04-cross-path-suite (rls.spec.sql's 15 PASS notices, api content routes, RLS integrity);
+#                   c2-contract-coherence + c3-unknown-block-rejection (WSK-18 P3, DB-free, selftest + real run);
+#                   c1-determinism-selftest + c1-determinism-crossmachine (SKIP without --with-docker-socket: it
+#                   starts two containers itself); c4-artifact-url-expiry-selftest + c4-artifact-url-expiry (against
+#                   the gate's RustFS); wsk15-codegen-gate (seeds two throwaway tenants, runs `npm run codegen:gate`,
+#                   removes them); deploy-typecheck-test (webdesk/deploy); ops-check-cdn-bypass-selftest,
+#                   ops-check-otlp-write-only-selftest, ops-test-deploy-webdesk (T4 harness, fake docker).
+#                   Needs Postgres + RustFS (no ClamAV/Mailpit). Runs after migrations.
 #
 # Design: no host paths, no host ports. The source tar is untarred into a per-run docker VOLUME that
 # every container mounts; one docker network per run; services are reached by container DNS name.
 # Everything is torn down in an EXIT trap (containers, network, volume).
 #
 # Usage:   bash linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [suite,suite,...]
-#   suites: webdesk-root,webdesk-blocks,webdesk-api,vocabulary,migrations (default: all)
+#   suites: webdesk-root,webdesk-blocks,webdesk-api,vocabulary,migrations,legacy (default: all)
 #   --with-docker-socket  OFF by default. Mounts the host docker socket (+ a docker CLI) into the
 #                         webdesk-api runner so mail-retry-backoff.spec.ts can stop/start Mailpit.
 #                         That is root-equivalent control of EVERY container on the host: never on
 #                         a shared box (sumopod) without the box owner's say-so. Without it that
-#                         spec self-skips, and the summary names the skip.
+#                         spec self-skips, and the summary names the skip; likewise the `legacy` step
+#                         c1-determinism-crossmachine (the same flag mounts the socket there too).
 #   The tar MUST come from:  git -c core.autocrlf=false archive --format=tar <ref>
 #   (a Windows checkout has CRLF blobs, which break init-roles.sh).
 # Logs:    ~/wg58-<id>/<suite>.log on the host running this script.
@@ -57,7 +69,7 @@ for a in "$@"; do
     *) POS+=("$a") ;;
   esac
 done
-ID="${POS[0]:-}"; TAR="${POS[1]:-}"; SUITES_ARG="${POS[2]:-webdesk-root,webdesk-blocks,webdesk-api,vocabulary,migrations}"
+ID="${POS[0]:-}"; TAR="${POS[1]:-}"; SUITES_ARG="${POS[2]:-webdesk-root,webdesk-blocks,webdesk-api,vocabulary,migrations,legacy}"
 if [ -z "$ID" ] || [ -z "$TAR" ]; then
   echo "usage: bash linux-gate.sh [--with-docker-socket] <run-id> <source.tar> [suite,suite,...]"
   echo "### done ${ID:-?} FAIL"; exit 2
@@ -99,7 +111,7 @@ mark() { RESULT_LINES+=("$1"); echo "$1"; }  # one summary line per suite
 [ -f "$TAR" ] || setup_failed "source tar not found: $TAR"
 docker info >/dev/null 2>&1 || setup_failed "docker daemon not reachable"
 for s in ${SUITES_ARG//,/ }; do
-  case "$s" in webdesk-root|webdesk-blocks|webdesk-api|vocabulary|migrations) ;; *) setup_failed "unknown suite: $s";; esac
+  case "$s" in webdesk-root|webdesk-blocks|webdesk-api|vocabulary|migrations|legacy) ;; *) setup_failed "unknown suite: $s";; esac
 done
 echo "run $ID  suites=$SUITES_ARG  tar=$TAR  docker-socket=$([ "$WITH_DOCKER_SOCKET" = 1 ] && echo MOUNTED || echo off)"
 docker network create "$NET" >/dev/null || setup_failed "docker network create failed"
@@ -199,6 +211,8 @@ NEED_DB=0; NEED_API=0
 selected webdesk-api && { NEED_DB=1; NEED_API=1; }
 selected vocabulary && NEED_DB=1
 selected migrations && NEED_DB=1
+selected legacy && NEED_DB=1
+NEED_RUSTFS=$NEED_API; selected legacy && NEED_RUSTFS=1   # legacy c4 needs RustFS but not ClamAV/Mailpit
 
 APP_URL="postgres://webdesk_app:throwaway_app@$PG:5432/webdesk"
 MIG_URL="postgres://webdesk_migrator:throwaway_migrator@$PG:5432/webdesk"
@@ -218,9 +232,11 @@ if [ "$NEED_DB" = 1 ]; then
     -c 'cp /src/webdesk/postgres/init-roles.sh /docker-entrypoint-initdb.d/10-init-roles.sh && chmod +x /docker-entrypoint-initdb.d/10-init-roles.sh && exec docker-entrypoint.sh postgres' \
     >/dev/null || setup_failed "could not start postgres"
   docker run -d --name "$REDIS" --network "$NET" redis:7-alpine >/dev/null || setup_failed "could not start redis"
-  if [ "$NEED_API" = 1 ]; then
+  if [ "$NEED_RUSTFS" = 1 ]; then
     docker run -d --name "$RUSTFS" --network "$NET" -e "RUSTFS_ROOT_USER=$RUSTFS_ROOT_USER" \
       -e "RUSTFS_ROOT_PASSWORD=$RUSTFS_ROOT_PASSWORD" "$RUSTFS_IMG" >/dev/null || setup_failed "could not start rustfs"
+  fi
+  if [ "$NEED_API" = 1 ]; then
     # Mailpit runs INSIDE the network namespace of a tiny holder container ($MAILNS, the SMTP/HTTP host
     # name). mail-retry-backoff.spec.ts does `docker stop <mailpit>`; with a plain container the name stops
     # resolving and every connect fails slowly (DNS timeout, ~6s on Docker Desktop), so the spec cannot see
@@ -238,10 +254,12 @@ if [ "$NEED_DB" = 1 ]; then
   [ "$ok" = 1 ] || { docker logs "$PG" 2>&1 | tail -20; setup_failed "postgres never became ready"; }
   ok=0; for i in $(seq 1 30); do docker exec "$REDIS" redis-cli ping >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done
   [ "$ok" = 1 ] || setup_failed "redis never became ready"
-  if [ "$NEED_API" = 1 ]; then
+  if [ "$NEED_RUSTFS" = 1 ]; then
     ok=0; for i in $(seq 1 30); do
       docker exec "$RUSTFS" curl -sf http://127.0.0.1:9000/health >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done
     [ "$ok" = 1 ] || { docker logs "$RUSTFS" 2>&1 | tail -20; setup_failed "rustfs never became healthy"; }
+  fi
+  if [ "$NEED_API" = 1 ]; then
     ok=0; for i in $(seq 1 30); do
       docker exec "$MAILNS" sh -c 'nc -z 127.0.0.1 8025' >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done
     [ "$ok" = 1 ] || setup_failed "mailpit never became ready"
@@ -252,11 +270,11 @@ if [ "$NEED_DB" = 1 ]; then
     # --with-docker-socket does the runner get the docker CLI (static binary from docker:cli, kept in
     # the volume) and the host socket; otherwise the spec's own `docker inspect` probe fails and it
     # self-skips (named in the summary).
-    if [ "$WITH_DOCKER_SOCKET" = 1 ]; then
-      docker run --rm -v "$VOL:/src" --entrypoint sh docker:cli \
-        -c 'mkdir -p /src/.gate-bin && cp /usr/local/bin/docker /src/.gate-bin/docker' \
-        || setup_failed "could not fetch the docker CLI binary (docker:cli image)"
-    fi
+  fi
+  if [ "$WITH_DOCKER_SOCKET" = 1 ] && { [ "$NEED_API" = 1 ] || selected legacy; }; then
+    docker run --rm -v "$VOL:/src" --entrypoint sh docker:cli \
+      -c 'mkdir -p /src/.gate-bin && cp /usr/local/bin/docker /src/.gate-bin/docker' \
+      || setup_failed "could not fetch the docker CLI binary (docker:cli image)"
   fi
 
   # Shared prep: api deps, storage bootstrap (api only), migrations. Logged to prep.log.
@@ -267,7 +285,7 @@ if [ "$NEED_DB" = 1 ]; then
         -e "MIGRATE_DATABASE_URL=$MIG_URL")
   echo "=== prep (npm ci, storage bootstrap, migrate)"
   PREP_SCRIPT='npm ci'
-  [ "$NEED_API" = 1 ] && PREP_SCRIPT="$PREP_SCRIPT && node ../scripts/storage-bootstrap.mjs"
+  [ "$NEED_RUSTFS" = 1 ] && PREP_SCRIPT="$PREP_SCRIPT && node ../scripts/storage-bootstrap.mjs"
   PREP_SCRIPT="$PREP_SCRIPT && cd /src/webdesk && npm ci && npm run migrate"
   if rr webdesk/api "$PREP_SCRIPT" > "$LOGDIR/prep.log" 2>&1; then
     DB_READY=1
@@ -278,11 +296,11 @@ if [ "$NEED_DB" = 1 ]; then
     selected webdesk-api && mark "FAIL  webdesk-api  setup failed (prep.log)"
     selected vocabulary && mark "FAIL  vocabulary  setup failed (prep.log)"
     selected migrations && mark "FAIL  migrations  setup failed (prep.log)"
+    selected legacy && mark "FAIL  legacy  setup failed (prep.log)"
   fi
 fi
 
-# ---- webdesk-api: typecheck + npm test with the full CI env ------------------------------------
-if selected webdesk-api && [ "$DB_READY" = 1 ]; then
+api_env() { # the full CI env for webdesk/api specs (sets RENV)
   RENV=(
     -e "STORAGE_ENDPOINT=$STORAGE_ENDPOINT"
     -e "RUSTFS_ROOT_USER=$RUSTFS_ROOT_USER" -e "RUSTFS_ROOT_PASSWORD=$RUSTFS_ROOT_PASSWORD"
@@ -305,6 +323,11 @@ if selected webdesk-api && [ "$DB_READY" = 1 ]; then
     -e "MAILPIT_HTTP_URL=http://$MAILNS:8025" -e "MAILPIT_CONTAINER_NAME=$MAILPIT"
     -e WEBDESK_MEDIA_MAX_UPLOAD_BYTES=65536
   )
+}
+
+# ---- webdesk-api: typecheck + npm test with the full CI env ------------------------------------
+if selected webdesk-api && [ "$DB_READY" = 1 ]; then
+  api_env
   # Opt-in only (see the header). /src/.gate-bin/docker is the docker CLI for mail-retry-backoff.spec.ts.
   # MAIL_FROM_* stay unset (CI rule).
   if [ "$WITH_DOCKER_SOCKET" = 1 ]; then RENV+=(-v /var/run/docker.sock:/var/run/docker.sock); fi
@@ -339,4 +362,38 @@ for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload
   node --import tsx ../migrations/tests/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
 done
 exit $rc'
+fi
+
+# ---- legacy: the August-era checks nothing else ran (webdesk/qa/legacy-suite.sh) ----------------
+# Own runner (not run_suite): the checks print their own PASS/FAIL lines, so the generic counter would
+# miscount. legacy-suite.sh prints one `LEGACY-STEP <PASS|FAIL|SKIP> <name> ...` line per step; each becomes a
+# summary line, so a step cannot be silently absent. After migrations on purpose (it seeds then removes two
+# throwaway tenants in the migrated database for the codegen gate).
+if selected legacy && [ "$DB_READY" = 1 ]; then
+  api_env
+  RENV+=(-e "SUPERUSER_DATABASE_URL=$SUPER_URL" -e "LEGACY_REPO=/src" -e "LEGACY_DOCKER_SOCKET=$WITH_DOCKER_SOCKET")
+  if [ "$WITH_DOCKER_SOCKET" = 1 ]; then RENV+=(-v /var/run/docker.sock:/var/run/docker.sock); fi
+  echo "=== legacy"
+  SUITE_T0=$SECONDS
+  lrc=0
+  rr webdesk 'export PATH=/src/.gate-bin:$PATH
+bash qa/legacy-suite.sh' > "$LOGDIR/legacy.log" 2>&1 || lrc=$?
+  lsecs=$(( SECONDS - SUITE_T0 ))
+  lp=0; lf=0; lsk=0
+  while IFS= read -r l; do
+    [ -z "$l" ] && continue
+    case "$l" in
+      "LEGACY-STEP PASS "*) lp=$((lp+1)); mark "PASS  legacy:${l#LEGACY-STEP PASS }" ;;
+      "LEGACY-STEP FAIL "*) lf=$((lf+1)); mark "FAIL  legacy:${l#LEGACY-STEP FAIL }" ;;
+      "LEGACY-STEP SKIP "*) lsk=$((lsk+1)); mark "SKIP  legacy:${l#LEGACY-STEP SKIP }" ;;
+    esac
+  done < <(grep -E '^LEGACY-STEP (PASS|FAIL|SKIP) ' "$LOGDIR/legacy.log" || true)
+  if [ "$lrc" -eq 0 ] && [ "$lf" -eq 0 ] && [ "$lp" -gt 0 ]; then
+    mark "PASS  legacy  steps passed=$lp failed=$lf skipped=$lsk  (${lsecs}s)"
+  else
+    OVERALL=FAIL
+    mark "FAIL  legacy  rc=$lrc steps passed=$lp failed=$lf skipped=$lsk  (${lsecs}s)"
+    echo "  last lines of $LOGDIR/legacy.log:"
+    tail -n 25 "$LOGDIR/legacy.log" | sed 's/^/    /'
+  fi
 fi
