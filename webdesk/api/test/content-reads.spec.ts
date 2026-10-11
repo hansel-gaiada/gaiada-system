@@ -566,7 +566,9 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       expect(r.lint.placeholders.markers).toEqual({ CONFIRM: 1, CLIENT: 1 });
       // the head (v2) has none of them
       const head = (await get(itemUrl(fxA, id.seo))).json();
-      expect(head.lint).toEqual({ placeholders: { unresolvedTokens: [], markers: { CONFIRM: 0, CLIENT: 0 } } });
+      expect(head.lint.placeholders).toEqual({ unresolvedTokens: [], markers: { CONFIRM: 0, CLIENT: 0 } });
+      expect(Array.isArray(head.lint.content.findings)).toBe(true);
+      expect(Array.isArray(head.lint.content.unavailable)).toBe(true);
     });
 
     it("lint resolves a token the registry defines", async () => {

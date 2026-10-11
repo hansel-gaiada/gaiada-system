@@ -86,7 +86,7 @@ import {
   type ItemColumnsRow,
   type VersionRow,
 } from "./content-transitions";
-import { DEFAULT_CONTENT_RULES, lintContent, lintPlaceholders, type ContentLintReport, type LintReport } from "./content-lint";
+import { computeContentLint, lintPlaceholders, type ContentLintReport, type LintReport } from "./content-lint";
 import { ControlProblem, problems, type ProblemIssue } from "./content-problem";
 
 // ------------------------------------------------------------------------------------------------
@@ -430,26 +430,7 @@ export class ContentCommandsService {
     seo: unknown,
     groupId: string,
   ): Promise<ContentLintReport | undefined> {
-    const cfg = DEFAULT_CONTENT_RULES; // per-tenant config: needs a vocabulary key, see lint-rules/config.ts
-    if (!cfg.enabled) return undefined;
-    try {
-      let groupLocales: string[] | null = null;
-      // A savepoint, so a failed read cannot abort the save's own transaction.
-      await client.query("SAVEPOINT content_lint_twin");
-      try {
-        const { rows } = await client.query<{ locale: string }>(
-          `SELECT locale FROM content_items WHERE site_id = $1 AND localization_group_id = $2 AND deleted_at IS NULL`,
-          [ctx.siteId, groupId],
-        );
-        groupLocales = rows.map((r) => r.locale);
-        await client.query("RELEASE SAVEPOINT content_lint_twin");
-      } catch {
-        await client.query("ROLLBACK TO SAVEPOINT content_lint_twin").catch(() => undefined);
-      }
-      return lintContent({ blocks, seo, composition, locale, groupLocales }, cfg);
-    } catch (e) {
-      return { findings: [], aeo: null, unavailable: [{ rule: "content", reason: e instanceof Error ? e.message.slice(0, 200) : "unexpected error" }] };
-    }
+    return computeContentLint(client, ctx.siteId, groupId, { blocks, seo, composition, locale });
   }
 
   /** Advisory placeholder lint for `blocks`. Loads the token registry when a rule declares one. */
