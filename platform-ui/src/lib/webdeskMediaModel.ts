@@ -12,8 +12,9 @@
 //     DELETE media/:assetId                                    -> { assetId, deletedAt, purgeAfter, alreadyDeleted } | 409 media-in-use
 //   The upload itself goes from the browser straight to `uploadUrl` (WebDesk's public host), never through
 //   the ERP: `POST <uploadUrl>?filename=<name>` with the raw file and its own Content-Type
-//   (`webdesk/api/README.md` "Media library (WSK-43a)"). That public route answers with Nest's plain
-//   `{statusCode, message, error}`, NOT a problem+json, so its refusals are told apart by status and message.
+//   (`webdesk/api/README.md` "Media library (WSK-43a)"). That public route answers refusals as problem+json
+//   with a stable `type` slug (`upload-*`), which `failureFromUploadResponse` reads first; an older WebDesk answered Nest's
+//   plain `{statusCode, message, error}`, so status plus message stays as the fallback.
 //
 // Parsers throw `MediaShapeError` (path + what was expected, never the value) so a body that is not the
 // spec'd shape becomes a loud "contract drift" result and is never rendered as data.
@@ -332,9 +333,62 @@ export function checkFileAgainstToken(file: { name: string; type: string; size: 
   return null;
 }
 
-/** The public upload route's refusal -> plain words. `status` 0 means the browser never got an answer. */
+/** The failures the public upload route can name, in plain words. One definition for the slug path and the status path. */
+const upload = {
+  tokenExpired: (): UploadFailure => ({ kind: "token_expired", title: "The upload link expired or was already used.", detail: "Nothing was added. Retrying asks for a fresh one." }),
+  tooLarge: (ctx: { maxBytes?: number }, fallbackDetail: string | null): UploadFailure => ({ kind: "too_large", title: "That file is too large.", detail: ctx.maxBytes ? `The limit is ${formatBytes(ctx.maxBytes)}.` : fallbackDetail }),
+  typeNotAllowed: (): UploadFailure => ({ kind: "type_not_allowed", title: "That file type isn't allowed.", detail: "WebDesk doesn't accept this kind of file in the library." }),
+  typeMismatch: (): UploadFailure => ({ kind: "type_mismatch", title: "The file's contents don't match its type.", detail: "For example, a file named .png that is not really a PNG. It was not added." }),
+  empty: (): UploadFailure => ({ kind: "empty", title: "That file is empty.", detail: "Nothing was uploaded." }),
+  infected: (): UploadFailure => ({ kind: "infected", title: "WebDesk's virus scan refused this file.", detail: "It was not added to the library." }),
+  quota: (): UploadFailure => ({ kind: "quota", title: "This site's media storage is full.", detail: "Delete assets you no longer use, or ask an operator to raise the quota." }),
+  scanUnavailable: (): UploadFailure => ({ kind: "scan_unavailable", title: "WebDesk couldn't scan this file right now, so it wasn't accepted.", detail: "Try again in a few minutes." }),
+  busy: (): UploadFailure => ({ kind: "busy", title: "WebDesk is busy with other uploads.", detail: "Try again in a few seconds." }),
+  timeout: (): UploadFailure => ({ kind: "timeout", title: "The upload took too long and was stopped.", detail: "Retrying asks for a fresh upload link." }),
+  interrupted: (): UploadFailure => ({ kind: "failed", title: "The upload was interrupted.", detail: "Retrying asks for a fresh upload link." }),
+};
+
+/**
+ * The stable `type` slug of a problem+json body: the last path segment of `https://webdesk.gaiada.online/errors/<slug>`.
+ * null for any other body (an older WebDesk answered `{statusCode, message, error}`) and for a `type` that is not a plain slug.
+ */
+export function problemSlugOf(body: unknown): string | null {
+  if (!isRec(body) || typeof body.type !== "string") return null;
+  const slug = body.type.slice(body.type.lastIndexOf("/") + 1);
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : null;
+}
+
+/** The upload route's slugs (webdesk/api/README.md "Media library (WSK-43a)") -> the failure to show; null for any other slug. */
+function failureFromUploadSlug(slug: string | null, ctx: { maxBytes?: number }): UploadFailure | null {
+  switch (slug) {
+    case "upload-not-found": return upload.tokenExpired();
+    case "upload-busy": return upload.busy();
+    case "upload-type-not-allowed": return upload.typeNotAllowed();
+    case "upload-type-mismatch": return upload.typeMismatch();
+    case "upload-too-large": return upload.tooLarge(ctx, null);
+    case "upload-empty": return upload.empty();
+    case "upload-quota-exceeded": return upload.quota();
+    case "upload-infected": return upload.infected();
+    case "upload-scan-unavailable": return upload.scanUnavailable();
+    case "upload-timeout": return upload.timeout();
+    case "upload-interrupted": return upload.interrupted();
+    default: return null;
+  }
+}
+
+/**
+ * The public upload route's refusal -> plain words. `status` 0 means the browser never got an answer.
+ * A current WebDesk answers problem+json with a stable `type` slug, which is read first; an older one answered Nest's
+ * `{statusCode, message, error}`, so the status-plus-message mapping stays as the fallback (and serves a slug this
+ * function does not know, such as `invalid-request` or `internal-error`).
+ */
 export function failureFromUploadResponse(status: number, body: unknown, ctx: { maxBytes?: number; online?: boolean } = {}): UploadFailure {
-  const message = isRec(body) && typeof body.message === "string" ? body.message : "";
+  if (status !== 0) {
+    const bySlug = failureFromUploadSlug(problemSlugOf(body), ctx);
+    if (bySlug) return bySlug;
+  }
+  // `detail` is the problem body's prose, `message` the old body's.
+  const message = isRec(body) ? (typeof body.detail === "string" ? body.detail : typeof body.message === "string" ? body.message : "") : "";
   const m = message.toLowerCase();
   if (status === 0) {
     if (ctx.online === false) return { kind: "offline", title: "You're offline.", detail: "Nothing was uploaded. Reconnect and try again." };
@@ -344,25 +398,25 @@ export function failureFromUploadResponse(status: number, body: unknown, ctx: { 
       detail: "The browser couldn't reach WebDesk's upload service. Usually this means this ERP's address isn't on WebDesk's upload allow-list (an operator sets WEBDESK_UPLOAD_CORS_ORIGINS); it can also be a dropped connection. Nothing was uploaded.",
     };
   }
-  if (status === 404) return { kind: "token_expired", title: "The upload link expired or was already used.", detail: "Nothing was added. Retrying asks for a fresh one." };
-  if (status === 413) return { kind: "too_large", title: "That file is too large.", detail: ctx.maxBytes ? `The limit is ${formatBytes(ctx.maxBytes)}.` : "It is over this upload's size limit." };
-  if (status === 415) return { kind: "type_not_allowed", title: "That file type isn't allowed.", detail: "WebDesk doesn't accept this kind of file in the library." };
-  if (status === 408) return { kind: "timeout", title: "The upload took too long and was stopped.", detail: "Retrying asks for a fresh upload link." };
+  if (status === 404) return upload.tokenExpired();
+  if (status === 413) return upload.tooLarge(ctx, "It is over this upload's size limit.");
+  if (status === 415) return upload.typeNotAllowed();
+  if (status === 408) return upload.timeout();
   if (status === 403) {
-    if (m.includes("malware") || m.includes("virus")) return { kind: "infected", title: "WebDesk's virus scan refused this file.", detail: "It was not added to the library." };
-    if (m.includes("quota")) return { kind: "quota", title: "This site's media storage is full.", detail: "Delete assets you no longer use, or ask an operator to raise the quota." };
+    if (m.includes("malware") || m.includes("virus")) return upload.infected();
+    if (m.includes("quota")) return upload.quota();
     return { kind: "failed", title: "WebDesk refused this file.", detail: message || null };
   }
   if (status === 503) {
-    if (m.includes("scan")) return { kind: "scan_unavailable", title: "WebDesk couldn't scan this file right now, so it wasn't accepted.", detail: "Try again in a few minutes." };
-    return { kind: "busy", title: "WebDesk is busy with other uploads.", detail: "Try again in a few seconds." };
+    if (m.includes("scan")) return upload.scanUnavailable();
+    return upload.busy();
   }
   if (status === 400) {
-    if (m.includes("empty")) return { kind: "empty", title: "That file is empty.", detail: "Nothing was uploaded." };
-    if (m.includes("signature") || m.includes("does not match")) return { kind: "type_mismatch", title: "The file's contents don't match its type.", detail: "For example, a file named .png that is not really a PNG. It was not added." };
-    if (m.includes("not allowed")) return { kind: "type_not_allowed", title: "That file type isn't allowed.", detail: "WebDesk doesn't accept this kind of file in the library." };
-    if (m.includes("exceeds") || m.includes("limit")) return { kind: "too_large", title: "That file is too large.", detail: ctx.maxBytes ? `The limit is ${formatBytes(ctx.maxBytes)}.` : null };
-    if (m.includes("interrupted")) return { kind: "failed", title: "The upload was interrupted.", detail: "Retrying asks for a fresh upload link." };
+    if (m.includes("empty")) return upload.empty();
+    if (m.includes("signature") || m.includes("does not match")) return upload.typeMismatch();
+    if (m.includes("not allowed")) return upload.typeNotAllowed();
+    if (m.includes("exceeds") || m.includes("limit")) return upload.tooLarge(ctx, null);
+    if (m.includes("interrupted")) return upload.interrupted();
     return { kind: "failed", title: "WebDesk didn't accept this file.", detail: message || null };
   }
   return { kind: "failed", title: `The upload failed (HTTP ${status}).`, detail: "Retrying asks for a fresh upload link." };
