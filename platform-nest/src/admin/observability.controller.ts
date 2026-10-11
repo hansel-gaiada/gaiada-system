@@ -8,7 +8,10 @@
 //
 // WHY THIS DOES NOT BREAK THE TWO-PLANE RULE (docs/blueprints/monitoring-program.md §8.1). Plane A
 // is OUR infrastructure and must never become a tenant surface. So this endpoint is:
-//   * platform-admin only (`isElevated`), exactly like the other /api/admin consoles,
+//   * platform-operator only (`isPlatformOperator`: platform_admin, or the owner of a ROOT company
+//     per PV-D18/PV-D20), exactly like the other /api/admin system consoles. That ruling treats a
+//     root owner as an operator of the estate; it is safe for Plane A only while every root is
+//     ours (see elevated.ts's SaaS note),
 //   * NOT tenant-scoped and NOT company-filtered — there is nothing per-tenant here to filter,
 //   * read-only, and deliberately a SUMMARY. Grafana remains the analysis tool; this answers
 //     "is the estate healthy right now" without an SSH tunnel. We are not rebuilding Grafana.
@@ -41,7 +44,7 @@
 import { Controller, ForbiddenException, Get, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { AuthGuard } from "../auth/guards";
-import { isElevated } from "./elevated";
+import { isPlatformOperator } from "./elevated";
 import { config } from "../config";
 import { withGlobal } from "../db";
 import {
@@ -177,7 +180,7 @@ async function fetchAlertmanagerAlerts(): Promise<AlertmanagerResult> {
 export class ObservabilityController {
   @Get()
   async snapshot(@Req() req: FastifyRequest): Promise<EstateObservabilitySnapshot> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
 
     const collectedAt = new Date().toISOString();
     const base = (config.observability?.prometheusUrl ?? "").replace(/\/$/, "");

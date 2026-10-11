@@ -4,8 +4,11 @@
 // fabricates data: an unreachable or not-configured system reports ok:false with a reason,
 // and extra reads that a service doesn't expose degrade to an empty list.
 //
-// Access is platform-global admin (platform_admin) or owner (group_executive) — checked in
-// code (these are not tenant resources). Non-admins get 403, which the UI absorbs gracefully.
+// Access is the platform-operator gate (`isPlatformOperator`, ./elevated.ts): platform_admin at
+// global scope, or the owner of a ROOT company (PV-D18/PV-D20, 2026-10-11) — checked in code (these
+// are not tenant resources). Every route in this controller is a system surface, so every route
+// uses it; the automation READS also admit IT staff (isItOrPlatformOperator). Anyone else gets 403,
+// which the UI absorbs gracefully.
 import {
   BadRequestException,
   Body,
@@ -28,7 +31,7 @@ import type { FastifyRequest } from "fastify";
 import { config } from "../config";
 import { authorize } from "../core/http";
 import { AuthGuard } from "../auth/guards";
-import { isElevated } from "./elevated";
+import { isPlatformOperator } from "./elevated";
 import { getBridgeHealth, replayBridgeDeadLetters, type BridgeHealth } from "../events/bridge-health";
 import { allModules } from "../modules/registry";
 import { githubAdminDetail, type GithubRoleAdminDetail } from "../core/github/github-app.service";
@@ -159,12 +162,15 @@ interface HubDetail {
 }
 
 // The n8n workflow VIEWER (read-only canvas in the IT section) is reachable by IT staff too,
-// not just platform admins. Any it_admin/it_manager/it grant (any scope) qualifies.
-function isItOrElevated(req: FastifyRequest): boolean {
-  return (
-    isElevated(req) ||
-    req.principal.roles.some((r) => r.role === "it_admin" || r.role === "it_manager" || r.role === "it")
-  );
+// not just platform operators. Any it_admin/it_manager/it grant (any scope) qualifies.
+// PV-D18: the non-IT arm is the platform-operator gate (platform_admin or owner of the root), the
+// same as every other system surface here. The IT arm is checked first because it is free; the
+// operator arm may cost one DB read (see isPlatformOperator).
+async function isItOrPlatformOperator(req: FastifyRequest): Promise<boolean> {
+  if (req.principal.roles.some((r) => r.role === "it_admin" || r.role === "it_manager" || r.role === "it")) {
+    return true;
+  }
+  return isPlatformOperator(req);
 }
 
 /** GET with a hard timeout; returns parsed JSON or throws. */
@@ -604,7 +610,7 @@ export class AdminSystemsController {
   // never backfilled from the platform's own value.
   @Get("about")
   async about(@Req() req: FastifyRequest): Promise<AboutInfo> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const services = await Promise.all(
       SYSTEMS.map(async (key): Promise<AboutService> => {
         const svc = config.services[key];
@@ -634,14 +640,14 @@ export class AdminSystemsController {
 
   @Get(":system/status")
   async status(@Req() req: FastifyRequest, @Param("system") system: string): Promise<SystemStatus> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     if (!SYSTEMS.includes(system as SystemKey)) throw new ForbiddenException("unknown system");
     return probeStatus(system as SystemKey);
   }
 
   @Get(":system/config")
   async config(@Req() req: FastifyRequest, @Param("system") system: string): Promise<{ fields: ConfigField[] }> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     if (!SYSTEMS.includes(system as SystemKey)) throw new ForbiddenException("unknown system");
     return { fields: await connectionConfig(system as SystemKey) };
   }
@@ -659,7 +665,7 @@ export class AdminSystemsController {
     @Query("capability") capability?: string,
     @Query("decision") decision?: string,
   ) {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const svc = config.services.gateway;
     if (!svc.url) return [];
     const n = Math.min(Math.max(Number(limit) || 100, 1), 1000);
@@ -700,7 +706,7 @@ export class AdminSystemsController {
    *  the security/topology posture. null when the gateway is unreachable (the UI degrades). */
   @Get("gateway/detail")
   async gatewayDetail(@Req() req: FastifyRequest): Promise<GatewayDetail | null> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     return fetchGatewayDetail();
   }
 
@@ -712,7 +718,7 @@ export class AdminSystemsController {
     @Req() req: FastifyRequest,
     @Body() body: { enable?: boolean; durationMinutes?: number },
   ): Promise<{ drMode: boolean; budget?: unknown }> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const svc = config.services.gateway;
     if (!svc?.url) throw new NotFoundException("gateway not configured");
     const ac = new AbortController();
@@ -746,7 +752,7 @@ export class AdminSystemsController {
     @Req() req: FastifyRequest,
     @Body() body: { key?: string; value?: unknown },
   ): Promise<{ ok: boolean; key: string; applied?: unknown }> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const key = typeof body?.key === "string" ? body.key.trim() : "";
     if (!key) throw new BadRequestException("key required");
     return gatewayConfigWrite("PUT", { key, value: body?.value });
@@ -760,7 +766,7 @@ export class AdminSystemsController {
     @Req() req: FastifyRequest,
     @Query("key") key?: string,
   ): Promise<{ ok: boolean; key: string }> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const k = (key ?? "").trim();
     if (!k) throw new BadRequestException("key required");
     return gatewayConfigWrite("DELETE", { key: k });
@@ -769,7 +775,7 @@ export class AdminSystemsController {
   /** Structured hub posture: policy engine, limits, transport, primitives, workflow scopes. */
   @Get("hub/detail")
   async hubDetail(@Req() req: FastifyRequest): Promise<HubDetail | null> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     return fetchHubDetail();
   }
 
@@ -793,7 +799,7 @@ export class AdminSystemsController {
     @Req() req: FastifyRequest,
     @Query("companyId") companyId?: string,
   ): Promise<{ roles: GithubRoleAdminDetail[] } | null> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     if (!companyId) return null;
     return { roles: githubAdminDetail(companyId) };
   }
@@ -801,7 +807,7 @@ export class AdminSystemsController {
   /** The hub's tool-call decision audit — who called what, allowed or denied, and why. */
   @Get("hub/audit")
   async hubAudit(@Req() req: FastifyRequest, @Query("limit") limit?: string) {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const svc = config.services.hub;
     if (!svc?.url) return [];
     const n = Math.min(Math.max(Number(limit) || 100, 1), 1000);
@@ -817,7 +823,7 @@ export class AdminSystemsController {
    *  list only ever summarized as one "last run" cell. */
   @Get("automation/executions")
   async executions(@Req() req: FastifyRequest, @Query("limit") limit?: string) {
-    if (!isItOrElevated(req)) throw new ForbiddenException("IT or platform admin required");
+    if (!(await isItOrPlatformOperator(req))) throw new ForbiddenException("IT or platform operator required");
     const svc = config.services.automation;
     if (!svc.url || !svc.token) return [];
     const n = Math.min(Math.max(Number(limit) || 50, 1), 250);
@@ -856,13 +862,14 @@ export class AdminSystemsController {
    *  A stalled bridge silently stops every event-triggered workflow; this makes that visible. */
   @Get("automation/bridge")
   async bridge(@Req() req: FastifyRequest): Promise<BridgeHealth> {
-    if (!isItOrElevated(req)) throw new ForbiddenException("IT or platform admin required");
+    if (!(await isItOrPlatformOperator(req))) throw new ForbiddenException("IT or platform operator required");
     return getBridgeHealth();
   }
 
   /** Activate or deactivate an n8n workflow.
    *
-   *  This is **platform-admin/owner only, NOT IT** — unlike the read-only viewer. Deactivating a
+   *  This is **platform-operator only (platform_admin or owner of the root), NOT IT** — unlike the
+   *  read-only viewer. Deactivating a
    *  workflow silently stops business automation (SLA chasing, client seeding) with no other signal,
    *  so it is a narrower gate than viewing the canvas. */
   @Post("automation/workflows/:workflowId/:action")
@@ -871,7 +878,7 @@ export class AdminSystemsController {
     @Param("workflowId") workflowId: string,
     @Param("action") action: string,
   ): Promise<{ id: string; active: boolean }> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     if (action !== "activate" && action !== "deactivate") throw new BadRequestException("unknown action");
     const svc = config.services.automation;
     if (!svc.url || !svc.token) throw new NotFoundException("automation not configured (no n8n Public-API key)");
@@ -901,7 +908,7 @@ export class AdminSystemsController {
     @Param("entityType") entityType: string,
     @Query("limit") limit?: string,
   ): Promise<{ entityType: string; replayed: number; remaining: number }> {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const n = Math.min(Math.max(Number(limit) || 100, 1), 1000);
     if (!config.n8nBridge.entityTypes.includes(entityType)) {
       // Refuse an arbitrary stream name: this writes to Redis, so the target must be one the bridge
@@ -918,7 +925,7 @@ export class AdminSystemsController {
   // ---- n8n workflow viewer (IT section, read-only canvas). Fail-soft to []/404. ----
   @Get("automation/workflows")
   async workflows(@Req() req: FastifyRequest) {
-    if (!isItOrElevated(req)) throw new ForbiddenException("IT or platform admin required");
+    if (!(await isItOrPlatformOperator(req))) throw new ForbiddenException("IT or platform operator required");
     const svc = config.services.automation;
     if (!svc.url || !svc.token) return []; // no n8n API key → UI degrades to empty
     const base = svc.url.replace(/\/$/, "");
@@ -934,7 +941,7 @@ export class AdminSystemsController {
 
   @Get("automation/workflows/:workflowId")
   async workflow(@Req() req: FastifyRequest, @Param("workflowId") workflowId: string) {
-    if (!isItOrElevated(req)) throw new ForbiddenException("IT or platform admin required");
+    if (!(await isItOrPlatformOperator(req))) throw new ForbiddenException("IT or platform operator required");
     const svc = config.services.automation;
     if (!svc.url || !svc.token) throw new NotFoundException("automation not configured");
     const base = svc.url.replace(/\/$/, "");
@@ -950,7 +957,7 @@ export class AdminSystemsController {
 
   @Get("hub/tools")
   async hubTools(@Req() req: FastifyRequest) {
-    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
     const svc = config.services.hub;
     if (!svc.url) return [];
     const base = svc.url.replace(/\/$/, "");

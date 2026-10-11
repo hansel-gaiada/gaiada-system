@@ -1,7 +1,7 @@
 // A4 (erp-whatsapp-and-agent-runtime-e2e.md §2.4): thin proxy from the ERP to the bot's own
 // ADMIN_TOKEN-gated /admin/* surface (session lifecycle, group registry, safe config). The UI
-// never talks to the bot directly — every call goes through here, gated by the same isElevated
-// predicate as admin-systems.controller.ts, using the platform-held bot admin token
+// never talks to the bot directly — every call goes through here, gated by the same
+// isPlatformOperator predicate as admin-systems.controller.ts (PV-D18), using the platform-held bot admin token
 // (config.services.bot.token) as the outbound Bearer. Fail-soft, never fabricates: bot not
 // configured (no URL) -> 404 {error}; unreachable/non-2xx (other than a deliberate validation
 // 400) -> 502 {error}; the bot's own 400 {error,field?} is surfaced verbatim.
@@ -16,7 +16,7 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCod
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { config } from "../config";
 import { AuthGuard } from "../auth/guards";
-import { isElevated } from "./elevated";
+import { isPlatformOperator } from "./elevated";
 
 // Session start/QR involve WAHA session bring-up + QR image generation, which can be slower
 // than the shared cross-service probe timeout -> a dedicated, longer budget.
@@ -31,8 +31,11 @@ const DIGEST_TIMEOUT_MS = Number(process.env.ADMIN_DIGEST_TIMEOUT_MS ?? 180_000)
 // PUT config's allow-list: exactly the two fields the bot exposes as editable (§2.3).
 const CONFIG_ALLOW_LIST = new Set(["postToGroups", "managementGroupId"]);
 
-function requireElevated(req: FastifyRequest): void {
-  if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+// PV-D18: the bot console is a system surface, so EVERY route here uses the platform-operator gate
+// (platform_admin at global scope, or the owner of a ROOT company — see ./elevated.ts). Async because
+// the owner arm may need one DB read; every call site awaits it before touching the bot.
+async function requirePlatformOperator(req: FastifyRequest): Promise<void> {
+  if (!(await isPlatformOperator(req))) throw new ForbiddenException("platform operator required");
 }
 
 interface RawBotResult {
@@ -144,20 +147,20 @@ export class BotAdminController {
   @Post("session/start")
   @HttpCode(200)
   async sessionStart(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("POST", "/admin/session/start", { timeoutMs: SESSION_TIMEOUT_MS });
   }
 
   @Get("session/status")
   async sessionStatus(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", "/admin/session/status");
   }
 
   // QR is a pairing secret in transit — never cache it anywhere along the path.
   @Get("session/qr")
   async sessionQr(@Req() req: FastifyRequest, @Res() reply: FastifyReply) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     const json = await botCall("GET", "/admin/session/qr", { timeoutMs: SESSION_TIMEOUT_MS });
     reply.header("cache-control", "no-store").send(json);
   }
@@ -165,34 +168,34 @@ export class BotAdminController {
   @Post("session/stop")
   @HttpCode(200)
   async sessionStop(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("POST", "/admin/session/stop");
   }
 
   @Post("session/logout")
   @HttpCode(200)
   async sessionLogout(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("POST", "/admin/session/logout");
   }
 
   @Post("session/restart")
   @HttpCode(200)
   async sessionRestart(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("POST", "/admin/session/restart");
   }
 
   // ---- Group registry ----
   @Get("groups")
   async getGroups(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", "/admin/groups");
   }
 
   @Put("groups")
   async setGroups(@Req() req: FastifyRequest, @Body() body: { groups?: unknown }) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     // Top-level shape only — the bot owns per-field validation (id regex, isManagement
     // cardinality, length caps) and reports its own 400 {error, field} on failure.
     if (!Array.isArray(body?.groups)) {
@@ -205,7 +208,7 @@ export class BotAdminController {
   // connectionConfig("bot"), which proxies the bot's GET /admin/config) ----
   @Put("config")
   async setConfig(@Req() req: FastifyRequest, @Body() body: { key?: string; value?: unknown }) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     const key = body?.key;
     if (typeof key !== "string" || !CONFIG_ALLOW_LIST.has(key)) {
       throw new BadRequestException({ message: "unsupported config key", field: "key" });
@@ -223,7 +226,7 @@ export class BotAdminController {
     @Query("q") q?: string,
     @Query("kind") kind?: string,
   ) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", `/admin/chats${qs({ limit, q, kind })}`);
   }
 
@@ -234,20 +237,20 @@ export class BotAdminController {
     @Query("limit") limit?: string,
     @Query("beforeTs") beforeTs?: string,
   ) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", `/admin/chats/${encodeURIComponent(chatId)}/messages${qs({ limit, beforeTs })}`);
   }
 
   @Get("session/events")
   async sessionEvents(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", "/admin/session/events");
   }
 
   // Exposes the bot's existing /admin/actions/audit for the Logs tab (no new bot route).
   @Get("actions/audit")
   async actionsAudit(@Req() req: FastifyRequest, @Query("limit") limit?: string) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", `/admin/actions/audit${limitQs(limit)}`);
   }
 
@@ -255,7 +258,7 @@ export class BotAdminController {
   @Post("actions/:state")
   @HttpCode(200)
   async setActionsState(@Req() req: FastifyRequest, @Param("state") state: string) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     if (state !== "on" && state !== "off") {
       throw new BadRequestException({ message: "state must be on or off", field: "state" });
     }
@@ -271,7 +274,7 @@ export class BotAdminController {
   // authoritative record of what a run actually did. ----
   @Post("digests/run/:slot")
   async runDigest(@Req() req: FastifyRequest, @Res() reply: FastifyReply, @Param("slot") slot: string) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     if (slot !== "noon" && slot !== "evening") {
       throw new BadRequestException({ message: "slot must be noon or evening", field: "slot" });
     }
@@ -284,7 +287,7 @@ export class BotAdminController {
 
   @Get("digests")
   async digestHistory(@Req() req: FastifyRequest, @Query("limit") limit?: string) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", `/admin/digests${limitQs(limit)}`);
   }
 
@@ -294,7 +297,7 @@ export class BotAdminController {
   // either way, and this route DOES synchronously wait on it. ----
   @Get("digests/preview")
   async digestPreview(@Req() req: FastifyRequest, @Query("chatId") chatId?: string, @Query("limit") limit?: string) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     if (!chatId) {
       throw new BadRequestException({ message: "chatId is required", field: "chatId" });
     }
@@ -304,21 +307,21 @@ export class BotAdminController {
   // ---- Skills catalog (Controls tab, read-only) ----
   @Get("skills")
   async skills(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", "/admin/skills");
   }
 
   // ---- Media-queue health (Controls tab, read-only) ----
   @Get("media/status")
   async mediaStatus(@Req() req: FastifyRequest) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", "/admin/media/status");
   }
 
   // ---- Group ignore list (Groups tab): full-replace, same shape as PUT groups ----
   @Put("groups/ignored")
   async setIgnoredGroups(@Req() req: FastifyRequest, @Body() body: { ids?: unknown }) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     if (!Array.isArray(body?.ids)) {
       throw new BadRequestException({ message: "ids must be an array", field: "ids" });
     }
@@ -328,7 +331,7 @@ export class BotAdminController {
   // ---- Message search across all chats (Chats tab) ----
   @Get("search")
   async search(@Req() req: FastifyRequest, @Query("q") q?: string, @Query("limit") limit?: string) {
-    requireElevated(req);
+    await requirePlatformOperator(req);
     return botCall("GET", `/admin/search${qs({ q, limit })}`);
   }
 }
