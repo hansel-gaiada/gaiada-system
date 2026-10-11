@@ -67,9 +67,13 @@ export class TenantWebhookDispatcherService {
     }
     if (webhooks.length === 0) return;
 
+    // M5-L2: both members are ALWAYS on the wire (null when absent), so a receiver never has to
+    // distinguish "missing" from "none supplied". visitorConsent null = unknown = NO consent.
+    const payload = { ...data, attribution: data.attribution ?? null, visitorConsent: data.visitorConsent ?? null };
+
     for (const webhook of webhooks) {
       try {
-        await this.enqueueOne(tenantId, webhook.id, "form.received", data);
+        await this.enqueueOne(tenantId, webhook.id, "form.received", payload);
       } catch (err) {
         this.logger.warn(`tenant webhook enqueue failed for webhook ${webhook.id}: ${String(err)}`);
       }

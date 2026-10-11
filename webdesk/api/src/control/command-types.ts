@@ -63,7 +63,9 @@ export type CommandName =
   | "media.uploadToken"
   | "media.update"
   | "media.delete"
-  | "media.usage";
+  | "media.usage"
+  // M5-L1/L2 — one form submission read back by the ERP after it sees a Zone B form.received fact.
+  | "forms.submission.get";
 
 export interface CommandMeta {
   readonly command: CommandName;
@@ -169,6 +171,12 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "media.update": { command: "media.update", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.delete": { command: "media.delete", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.usage": { command: "media.usage", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-L1/L2: read / webdesk:read, the same class and scope as every other control read of tenant data
+  // (item.get, media.list, ...): the form.received fact is ids-only, so the ERP fetches the authoritative
+  // copy here. A submission is personal data, which is why the route is tenant-scoped, refuses a
+  // purged/erased row (410) and is never served from a cache; the DSR commands, which look a PERSON up
+  // across a tenant, stay high/WS4 (privacy.*). No audit row, like the other reads.
+  "forms.submission.get": { command: "forms.submission.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
 });
 
 /**

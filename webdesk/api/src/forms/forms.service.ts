@@ -6,9 +6,10 @@
 //                                                              Turnstile so a tripped honeypot never
 //                                                              spends a Turnstile verification call
 //   3. Turnstile verify                                     — the one external network call
-//   4. zod field validation + sanitize                      — local, but only worth doing once
+//   4. zod field validation + sanitize + PAN/NIK scrub       — local, but only worth doing once
 //                                                              Turnstile has already proven the
 //                                                              caller passed a human/abuse check
+//      (M5-L1: card / national-ID numbers in free text are redacted BEFORE persist, mail and webhook)
 //   5. consent affirmation                                  — local
 //   6. attachments (ClamAV via MediaService, PRIVATE bucket) — the other external-ish call (clamd)
 //   7. persist (one transaction) + audit row
@@ -30,6 +31,9 @@ import { SubmissionsRepository } from "./submissions.repository";
 import { resolveConsentRecord, hasAffirmedConsent } from "./consent";
 import { resolveHoneypotFieldName, isHoneypotTripped } from "./honeypot";
 import { sanitizeFields } from "./sanitize";
+import { scrubFreeTextFields } from "./pii-scrub";
+import { sanitizeAttribution, sanitizeVisitorConsent } from "./attribution";
+import { deriveSubjectRefs } from "./subject-refs";
 import { formsConfig } from "./forms.config";
 import type { TurnstileVerifier } from "./turnstile/turnstile-verifier";
 import { TURNSTILE_VERIFIER } from "./turnstile/turnstile-verifier";
@@ -97,13 +101,30 @@ export class FormsService {
     if (!validation.ok) {
       throw new BadRequestException({ message: "invalid submission", issues: validation.issues });
     }
-    const sanitizedFields = sanitizeFields(validation.fields, formsConfig.maxSchemaFieldTextLength);
+    const sanitizedText = sanitizeFields(validation.fields, formsConfig.maxSchemaFieldTextLength);
+    // M5-L1 — a card or national-ID number pasted into a free-text box never reaches the database, the
+    // notification mail or the tenant's webhook. Count only: what was redacted is never logged.
+    const scrubbed = scrubFreeTextFields(sanitizedText, schemaDef);
+    const sanitizedFields = scrubbed.fields;
+    if (scrubbed.redactions > 0) {
+      this.logger.warn(`form ${form.formId}: ${scrubbed.redactions} card/national-ID number(s) redacted from free text before persist`);
+    }
 
     // 5. Consent.
     if (!hasAffirmedConsent(body)) {
       throw new BadRequestException("consent is required");
     }
     const consent = resolveConsentRecord(schemaDef, form.consentNoticeVersion);
+
+    // 5b. M5-L2 — attribution + the visitor's banner choice. Both OPTIONAL and best-effort: nothing here
+    //     can refuse the submission. Drops are counted, never logged by value.
+    const attribution = sanitizeAttribution(body.attribution);
+    const visitorConsent = sanitizeVisitorConsent(body.visitor_consent);
+    if (attribution.dropped > 0 || visitorConsent.malformed) {
+      this.logger.log(
+        `form ${form.formId}: attribution dropped ${attribution.dropped} key(s)/item(s), visitor_consent ${visitorConsent.malformed ? "malformed (stored as null)" : "ok"}`,
+      );
+    }
 
     // 6. Attachments — PRIVATE `uploads` bucket, ClamAV-scanned, via WSK-07's MediaService (never
     //    a bespoke upload path — reuses the exact size/mime/scan/quota pipeline media.service.ts
@@ -151,7 +172,8 @@ export class FormsService {
     }
 
     // 7. Persist, one transaction.
-    const dataSubjectRef = normalizeDataSubjectRef(sanitizedFields);
+    // M5-L1: the correlators come from the form DEFINITION (first email / tel field), not a field named `email`.
+    const subjectRefs = deriveSubjectRefs(form.schema, sanitizedFields);
     const submission = await this.db.withTenant(form.tenantId, (db) =>
       db.transaction(async (client) => {
         const row = await this.submissions.insert(client, {
@@ -162,7 +184,10 @@ export class FormsService {
           attachments: attachmentRefs,
           consent,
           retentionDays: form.retentionDays,
-          dataSubjectRef,
+          dataSubjectRef: subjectRefs.email,
+          dataSubjectPhoneRef: subjectRefs.phone,
+          attribution: attribution.value,
+          visitorConsent: visitorConsent.value,
         });
         await this.audit.record(client, {
           tenantId: form.tenantId,
@@ -212,6 +237,9 @@ export class FormsService {
         submissionId: submission.id,
         hasAttachments: attachmentRefs.length > 0,
         fields: sanitizedFields,
+        // M5-L2: both members are null when the site sent none; null visitorConsent means unknown = NO consent.
+        attribution: attribution.value,
+        visitorConsent: visitorConsent.value,
       })
       .catch((err) => {
         this.logger.warn(`tenant webhook dispatch failed for submission ${submission.id}: ${String(err)}`);
@@ -232,7 +260,9 @@ export class FormsService {
       return;
     }
     const variables = flattenToStrings({ ...fields, submissionId });
-    const submitterEmail = typeof fields.email === "string" ? fields.email : undefined;
+    // M5-L1: the submitter is whoever the subject-ref derivation picks (the first email field of the form
+    // definition, else the legacy `email` key), not a field literally named `email`.
+    const submitterEmail = deriveSubjectRefs(form.schema, fields).email ?? undefined;
 
     await this.mail.sendNotification({
       tenantId: form.tenantId,
@@ -256,15 +286,6 @@ export class FormsService {
       });
     }
   }
-}
-
-/** `email` (if the form collects one) is the natural correlator for WSK-38's future DSR command —
- *  0003_forms.sql's own comment on `data_subject_ref` calls out "e.g. a normalized email/phone".
- *  Nullable by design: a form with no email field has no correlator, and that is fine. */
-function normalizeDataSubjectRef(fields: Record<string, unknown>): string | null {
-  const email = fields.email;
-  if (typeof email === "string" && email.trim().length > 0) return email.trim().toLowerCase();
-  return null;
 }
 
 /** mail/template-renderer.ts's `variables: Record<string, string>` is flat, string-only — this

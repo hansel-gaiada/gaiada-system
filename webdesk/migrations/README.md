@@ -101,6 +101,7 @@ migrator and app roles, because it builds throwaway scratch databases next to th
 | `0011_drop_payload.test.mjs` | 0011: Payload's nine tables (and sequences) are dropped, WebDesk's catalog and rows are untouched, no CASCADE |
 | `0012_content_schedules.test.mjs` | 0012: pending version swaps on live items (WSK-61): the one-pending rule, RLS, grants, exact catalog diff |
 | `0013_preview_tokens.test.mjs` | 0013: draft-preview tokens (WSK-46): hash-only storage (64 lowercase hex), unique hash, composite FK to content_versions, expiry CHECK, RLS, no DELETE, exact catalog diff |
+| `0015_submission_attribution.test.mjs` | 0015: submissions.attribution / visitor_consent / data_subject_phone_ref (M5): nullable, partial phone index, RLS unchanged, scrub UPDATE, a pre-existing row survives, exact catalog diff |
 
 **Retired: `0009_v1_bytes.test.mjs` (WSK-48b).** It proved 0009 left `/v1`'s bytes unchanged by capturing
 through the old Payload router before and after 0009. The old router is deleted and the api's router cannot
