@@ -209,10 +209,15 @@ capacity statement is the interim ceiling (OQ-2.7).
   only a public key.
 - **F2** Pin the `webdesk_default` subnet in compose. The guard reads the subnet at boot, so a network recreated
   later is uncovered until the unit restarts; probe 3 catches it. The live-swap runbook should re-apply the guard
-  after any `down`.
+  after any `down`. **Built on branch `webdesk/m4-compose-hardening`, proof pending**: the aicenter overlay pins
+  `172.19.0.0/16`; the live apply is `docker compose down` then `systemctl restart webdesk-host-deny`.
 - **F3** The aicenter overlay's header promises full `cap_drop`, but no service has `cap_drop` (resolved config and
-  live `CapDrop` empty). Add `cap_drop: [ALL]` with the minimum `cap_add` per service.
-- **F4** `redis` runs an older image than `redis:7-alpine` now names (an unpinned tag). Pin it by digest like RustFS.
+  live `CapDrop` empty). Add `cap_drop: [ALL]` with the minimum `cap_add` per service. **Built on branch, proof
+  pending**: `cap_drop: [ALL]` on all five overlay services, `cap_add` only where an entrypoint needs it (see the
+  overlay comments); CI gate `webdesk/scripts/check-compose-hardening.mjs`; boot proof
+  `webdesk/ops/probes/compose-boot-proof.sh` still to be run on a Linux host.
+- **F4** `redis` runs an older image than `redis:7-alpine` now names (an unpinned tag). Pin it by digest like RustFS. **Built on branch, proof
+  pending**: redis, postgres and caddy are digest-pinned in the aicenter overlay (indexes as of 2026-10-11).
 - **F5** The box's project dir still carries the deleted `payload/` tree. The live-swap install step copies listed
   paths and never deletes; T4's staging-dir swap fixes it.
 - **F6** AC 7 (rootless Docker for the webdesk project) is not built; the daemon is rootful. ACs 3–5 have no probe

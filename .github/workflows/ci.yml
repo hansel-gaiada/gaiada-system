@@ -594,6 +594,10 @@ jobs:
           npm test
           node scripts/check-compose-ports.mjs --selftest
           node scripts/check-compose-ports.mjs docker-compose.yml
+          # M4 F2/F3/F4: the RESOLVED base+aicenter config keeps cap_drop ALL, no-new-privileges,
+          # digest-pinned images and a pinned default-network subnet (needs the runner's docker CLI).
+          node scripts/check-compose-hardening.mjs --selftest
+          node scripts/check-compose-hardening.mjs
       - name: webdesk-blocks — build (vendor drift + unit + astro check)
         if: ${{ !cancelled() && needs.plan.outputs.webdesk_blocks == 'true' }}
         working-directory: webdesk/blocks
