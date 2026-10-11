@@ -7,8 +7,11 @@ import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { ClientContactsPanel } from "@/components/clients/ClientContactsPanel";
+import { ClientWebsiteAccessPanel } from "@/components/clients/ClientWebsiteAccessPanel";
 import { ScheduleMeetingPanel } from "@/components/meetings/ScheduleMeetingPanel";
 import { listClientContacts } from "@/lib/clientContacts";
+import { getStaffWebsiteAccess } from "@/lib/clientWebsiteAccess";
+import { canManageClientAdmin, canManageWebsiteEditor } from "@/lib/clientWebsiteAccessView";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
 import { formatDateTime } from "@/lib/format";
@@ -39,6 +42,9 @@ export default async function ClientContactsPage({ params }: { params: Params })
   // meeting). Both reads degrade to [] rather than throwing, so one missing grant cannot take the
   // whole client page down.
   const contacts = await listClientContacts(userId, tenant, clientId);
+  // WSK-49f: who may edit this client's website. Read as a typed result (ok / forbidden / unavailable),
+  // never collapsed to [], so a refused or failed read can not render as "nobody has access".
+  const websiteAccess = await getStaffWebsiteAccess(userId, tenant, clientId);
   // W1 (D-3): what is coming up for this client, server-filtered to future scheduled rows.
   const upcomingResult = await listRecordings(userId, tenant, { clientId, scheduled: "upcoming" });
   const upcoming = upcomingResult.kind === "ok" ? upcomingResult.data : [];
@@ -69,6 +75,17 @@ export default async function ClientContactsPage({ params }: { params: Params })
             clientName={client.name}
             contacts={contacts}
             projects={clientProjects}
+          />
+        </Card>
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <Card title="Website access">
+          <ClientWebsiteAccessPanel
+            clientId={clientId}
+            clientName={client.name}
+            initial={websiteAccess}
+            canManageEditor={canManageWebsiteEditor(me, tenant)}
+            canManageAdmin={canManageClientAdmin(me, tenant)}
           />
         </Card>
       </div>

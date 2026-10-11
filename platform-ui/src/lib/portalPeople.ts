@@ -35,7 +35,8 @@ export function groupPeople(profile: Pick<PortalProfile, "clients" | "contacts">
 /** Plain-words access for a contact: what they may do, and how far it reaches. */
 export function describeAccess(c: Pick<PortalContact, "capability" | "projectId">): { capability: string; scope: string } {
   return {
-    capability: c.capability === "signer" ? "Can sign" : "View only",
+    // `admin` implies signer (WSK-D60 amendment, owner ruling 2026-10-11): an admin can always sign.
+    capability: c.capability === "admin" ? "Admin, can sign" : c.capability === "signer" ? "Can sign" : "View only",
     scope: c.projectId ? "One project" : "Whole account",
   };
 }

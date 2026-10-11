@@ -1,0 +1,159 @@
+/* WSK-49f — website access (staff Contacts page + portal People page). Token-only colour and radius,
+   per styles/tokens.test.ts. Shared by both shells: it names only tokens both define. */
+
+.wa-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.wa-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.wa-row__who {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.wa-row__name {
+  font: 500 13px var(--font-body);
+  color: var(--ink-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wa-row__email {
+  font: 400 12px var(--font-body);
+  color: var(--ink-subtle);
+  overflow-wrap: anywhere;
+}
+.wa-row__meta {
+  font: 400 12px var(--font-body);
+  color: var(--ink-muted);
+}
+.wa-row__meta strong {
+  font-weight: 600;
+  color: var(--ink-strong);
+}
+
+.wa-note {
+  margin: 0;
+  font: 400 12px/1.55 var(--font-body);
+  color: var(--ink-subtle);
+}
+.wa-status {
+  margin: 0;
+  font: 400 13px/1.5 var(--font-body);
+  color: var(--ink-muted);
+  min-height: 1.5em;
+}
+.wa-status--error {
+  color: var(--accent-fg);
+}
+
+/* The switch: a real checkbox (role="switch") with the native control visually replaced by a track. The
+   input stays in the layout at full size, transparent, so it is focusable, clickable and announced by
+   every assistive tech without a custom key handler. */
+.wa-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font: 500 12px var(--font-body);
+  color: var(--ink-body);
+}
+.wa-switch input {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 34px;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.wa-switch__track {
+  flex: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: var(--radius-lg);
+  background: var(--line-strong);
+  transition: background var(--dur-quick, 180ms) var(--erp-ease, ease);
+}
+.wa-switch__track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface-modal);
+  transition: transform var(--dur-quick, 180ms) var(--erp-ease, ease);
+}
+.wa-switch input:checked + .wa-switch__track {
+  background: var(--accent-fill);
+}
+.wa-switch input:checked + .wa-switch__track::after {
+  transform: translateX(14px);
+}
+.wa-switch input:focus-visible + .wa-switch__track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.wa-switch input[aria-disabled="true"] {
+  cursor: progress;
+}
+.wa-switch input[aria-disabled="true"] + .wa-switch__track {
+  opacity: 0.55;
+}
+
+.wa-dialog__body {
+  display: grid;
+  gap: 12px;
+  font: 400 13px/1.55 var(--font-body);
+  color: var(--ink-body);
+}
+.wa-dialog__body p {
+  margin: 0;
+}
+.wa-dialog__foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.wa-choice {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  margin: 0;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.wa-choice legend {
+  font: 600 12px var(--font-body);
+  color: var(--ink-strong);
+  padding: 0 4px;
+}
+.wa-choice label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font: 400 13px/1.5 var(--font-body);
+  color: var(--ink-body);
+  cursor: pointer;
+}
+.wa-choice small {
+  display: block;
+  color: var(--ink-subtle);
+  font: 400 12px/1.5 var(--font-body);
+}
