@@ -114,8 +114,8 @@ services:
     profiles: !reset []
     image: !reset null
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     command: !override ["node", "dist/main.js"]
     ports: !reset []
     # Same passthrough-trap fix as the sumopod overlay: these are required in

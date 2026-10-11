@@ -78,7 +78,8 @@ export function planRelease({
     const files = diff(base.commit);
     const sharedHit = files.find((f) => matches(f, shared));
     if (sharedHit) { build.push(comp.name); reasons[comp.name] = `shared input changed since ${base.tag}: ${sharedHit}`; continue; }
-    const hit = files.find((f) => f.startsWith(comp.path));
+    const prefixes = [comp.path, ...(comp.deps ?? [])];
+    const hit = files.find((f) => prefixes.some((p) => f.startsWith(p)));
     if (hit) { build.push(comp.name); reasons[comp.name] = `changed since ${base.tag}: ${hit}`; continue; }
 
     retag.push({ component: comp.name, fromTag: base.tag, digest });
