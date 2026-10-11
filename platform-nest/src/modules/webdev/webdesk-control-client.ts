@@ -19,6 +19,9 @@
 //   3. Scopes. Decided by WebDesk from the token; nothing to do here.
 //   4. WS4, for HIGH commands: `webdesk-ws4-assertion.ts`, byte-identical to WebDesk's verifier. The
 //      hash covers `{...params, ...body}` exactly as WebDesk's guard sees them (that file's header).
+//      M4 F1: v2 (Ed25519 JWS) when a WS4 signing key is configured (`ws4Signing`), else v1 (HMAC,
+//      `ws4Key`). A kid that is set but whose key is unusable (`ws4SigningError`) makes every
+//      WS4-bearing call answer 503 BEFORE any I/O; it never falls back to v1 silently.
 //
 // ── RETRIES: TRANSPORT ERRORS ONLY (the `contract-fetch-http.ts` / `provision-http.ts` doctrine) ──
 // An HTTP response is an ANSWER, whatever its status, and is returned to the caller as data. It is
@@ -67,7 +70,7 @@ import { readFileSync } from "node:fs";
 import { X509Certificate, createPrivateKey } from "node:crypto";
 import { Logger } from "@nestjs/common";
 import { config } from "../../config";
-import { commandArgsAsZoneBSeesThem, mintWs4ForCommand } from "./webdesk-ws4-assertion";
+import { commandArgsAsZoneBSeesThem, loadWs4SigningKey, mintWs4ForCommand, type Ws4SigningKey } from "./webdesk-ws4-assertion";
 
 type FetchImpl = typeof fetch;
 
@@ -171,7 +174,12 @@ export interface WebdeskControlClientOptions {
   clientId: string;
   clientSecret: string;
   tokenScope?: string;
+  /** v1 HMAC key (WEBDESK_CONTROL_WS4_KEY). May be empty once a v2 signing key is configured. */
   ws4Key: string;
+  /** M4 F1: the v2 Ed25519 signing key. When present, every WS4 assertion is minted as v2. */
+  ws4Signing?: Ws4SigningKey;
+  /** M4 F1: why a configured v2 signing kid could not be honoured. Present → WS4-bearing calls answer 503. */
+  ws4SigningError?: string;
   ws4TtlSec?: number;
   timeoutMs?: number;
   retryAttempts?: number;
@@ -429,6 +437,8 @@ export class WebdeskControlClient {
   readonly #breaker: CircuitBreaker;
   readonly #clientSecret: string;
   readonly #ws4Key: string;
+  readonly #ws4Signing: Ws4SigningKey | undefined;
+  readonly #ws4SigningError: string | undefined;
   readonly #ws4TtlSec: number;
   readonly #timeoutMs: number;
   readonly #retryAttempts: number;
@@ -446,7 +456,9 @@ export class WebdeskControlClient {
       ...(o.tokenUrl ? [] : ["WEBDESK_CONTROL_TOKEN_URL"]),
       ...(o.clientId ? [] : ["WEBDESK_CONTROL_CLIENT_ID"]),
       ...(o.clientSecret ? [] : ["WEBDESK_CONTROL_CLIENT_SECRET"]),
-      ...(o.ws4Key ? [] : ["WEBDESK_CONTROL_WS4_KEY"]),
+      // Either WS4 version satisfies Layer 4 (M4 F1). A set-but-unusable v2 kid also counts as configured
+      // here: the channel stays up for reads and non-HIGH writes, and only WS4-bearing calls answer 503.
+      ...(o.ws4Key || o.ws4Signing || o.ws4SigningError ? [] : ["WEBDESK_CONTROL_WS4_KEY"]),
     ];
     if (missing.length) throw new WebdeskControlNotConfiguredError(missing);
 
@@ -481,6 +493,8 @@ export class WebdeskControlClient {
     this.#retryBaseDelayMs = o.retryBaseDelayMs ?? 250;
     this.#clientSecret = o.clientSecret;
     this.#ws4Key = o.ws4Key;
+    this.#ws4Signing = o.ws4Signing;
+    this.#ws4SigningError = o.ws4SigningError;
     this.#ws4TtlSec = o.ws4TtlSec ?? 60;
     this.#tokens = new ClientCredentialsTokenCache({
       tokenUrl: o.tokenUrl,
@@ -524,6 +538,11 @@ export class WebdeskControlClient {
    *  error classes above (or a programming error in the request shape). */
   async send(req: WebdeskControlRequest): Promise<WebdeskControlResponse> {
     const prepared = this.#prepare(req);
+    if (req.ws4) {
+      // M4 F1, before any I/O: a v2 kid was configured but its key is unusable. Never fall back to v1.
+      if (this.#ws4SigningError !== undefined) throw new WebdeskControlNotConfiguredError([], `WS4 v2 signing key: ${this.#ws4SigningError}`);
+      if (!this.#ws4Signing && !this.#ws4Key) throw new WebdeskControlNotConfiguredError(["WEBDESK_CONTROL_WS4_SIGNING_KID", "WEBDESK_CONTROL_WS4_KEY"]);
+    }
 
     const refusedFor = this.#breaker.admit();
     if (refusedFor !== null) throw new EditorialUnavailableError(refusedFor);
@@ -551,6 +570,7 @@ export class WebdeskControlClient {
       // Minted ONCE per logical call: a resend (when one is allowed at all) carries the same approval.
       headers["x-ws4-assertion"] = mintWs4ForCommand({
         key: this.#ws4Key,
+        signing: this.#ws4Signing,
         approvalId: req.ws4.approvalId,
         command: req.command,
         args: prepared.args,
@@ -747,6 +767,21 @@ export class WebdeskControlClient {
 
 // ── Factory + process singleton ──────────────────────────────────────────────────────────────────
 
+/** M4 F1: the v2 signing key from config, as client options. Read once, when the client is built. */
+function ws4SigningFromConfig(keyFile: string, kid: string): Pick<WebdeskControlClientOptions, "ws4Signing" | "ws4SigningError"> {
+  const loaded = loadWs4SigningKey({ keyFile, kid });
+  const log = new Logger("WebdeskControlClient");
+  if (loaded.state === "configured") {
+    log.log(`WS4 assertions: v2 (EdDSA, kid ${loaded.signing.kid})`);
+    return { ws4Signing: loaded.signing };
+  }
+  if (loaded.state === "invalid") {
+    log.error(`WS4 v2 signing key NOT usable (${loaded.reason}); every WS4-bearing WebDesk call answers 503 unsent`);
+    return { ws4SigningError: loaded.reason };
+  }
+  return {};
+}
+
 /** Build a client from `config.webdeskControl`, or throw `WebdeskControlNotConfiguredError`. */
 export function createWebdeskControlClient(overrides: Partial<WebdeskControlClientOptions> = {}): WebdeskControlClient {
   const c = config.webdeskControl;
@@ -760,6 +795,7 @@ export function createWebdeskControlClient(overrides: Partial<WebdeskControlClie
     clientSecret: c.clientSecret,
     tokenScope: c.tokenScope,
     ws4Key: c.ws4Key,
+    ...ws4SigningFromConfig(c.ws4SigningKeyFile, c.ws4SigningKid),
     ws4TtlSec: c.ws4TtlSec,
     timeoutMs: c.timeoutMs,
     retryAttempts: c.retryAttempts,
