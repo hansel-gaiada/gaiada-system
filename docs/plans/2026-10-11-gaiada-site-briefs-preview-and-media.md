@@ -15,8 +15,11 @@ published site's output for existing content, and both stay off the live domain 
 `https://24-pyevq.gaiada.com/preview/#t=<token>`. The page reads the token, fetches the draft from WebDesk, and
 renders it with the site's own components, exactly as the page would look if it were published.
 
+**WebDesk's public host is `api.erp.gaiada.com`** (owner ruling WSK-D61; all ERP names nest under `erp.gaiada.com`). Treat it as
+configuration in the site (one env value), never a literal, in case it moves again.
+
 **Contract (built, on WebDesk main).**
-- `GET https://api.gaiada.com/v1/t/gaiada/preview/<token>` returns the frozen `/v1` item envelope (the same shape the
+- `GET https://api.erp.gaiada.com/v1/t/gaiada/preview/<token>` returns the frozen `/v1` item envelope (the same shape the
   build reads for an item), filled from the draft version the token pins.
   - No API key: the token is the credential. It expires (1 hour by default) and can be revoked.
   - Response headers: `Cache-Control: no-store` and `X-Robots-Tag: noindex, nofollow`.
@@ -28,7 +31,7 @@ renders it with the site's own components, exactly as the page would look if it 
    Browsers never send a fragment to any server, nor in a Referer, so the token stays out of the site host's access
    logs. Do not copy it into the URL, `history`, analytics or error reports.
 2. **Set `<meta name="referrer" content="no-referrer">`** on the page.
-3. **Fetch the envelope client-side**, with the token in the path: `fetch(\`https://api.gaiada.com/v1/t/gaiada/preview/${token}\`)`.
+3. **Fetch the envelope client-side**, with the token in the path: `fetch(\`${WEBDESK_PUBLIC_BASE}/v1/t/gaiada/preview/${token}\`)` with `WEBDESK_PUBLIC_BASE = https://api.erp.gaiada.com``.
 4. **Render it with the same component pipeline the build uses for that collection** (the site picks section
    components from `## ` headings via `lib/sections/split.ts` + `rules.ts`). That pipeline has to run in the
    browser for this page, as an island. Every other page stays static.
@@ -37,7 +40,7 @@ renders it with the site's own components, exactly as the page would look if it 
    - 404: "This preview link has expired or was withdrawn. Open a new preview from the editor".
    - network error: an honest retry.
 6. **`noindex`**, and exclude `/preview/` from the sitemap and `llms.txt`.
-7. **Prerequisite:** `api.gaiada.com` resolves publicly. That needs the DNS A record the owner is creating, after which
+7. **Prerequisite:** `api.erp.gaiada.com` resolves publicly. It is a CNAME to `aicenter.erp.gaiada.com` (D61), after which
    the WebDesk orchestrator enables the vhost.
 
 **How the ERP knows the page exists.** Before minting a token, the ERP checks `HEAD https://24-pyevq.gaiada.com/preview/`.
@@ -53,7 +56,7 @@ appears in any server log or Referer, and the page is unindexable.
 
 **What it does.** Editors can now pick images from WebDesk's media library into content. A picked image is stored in
 the content as a `media` value `{url, alt?, width?, height?, mime?}`. Its `url` is WebDesk's media route,
-`/v1/t/gaiada/media/<assetId>` (or the absolute `https://api.gaiada.com/…` form). The published static site must never
+`/v1/t/gaiada/media/<assetId>` (or the absolute `https://api.erp.gaiada.com/…` form). The published static site must never
 load images from WebDesk at runtime (D53). The build copies them in.
 
 **What the build's pull step must do** (the `CONTENT_SOURCE=webdesk` path that reads `/v1` with the read key):
@@ -66,4 +69,4 @@ load images from WebDesk at runtime (D53). The build copies them in.
 5. Keep determinism: two builds of the same content give byte-identical `dist/`. The WSK-55 parity gate depends on it.
 
 **Done when:** a library image placed in a gaiada.com page appears on the staging build from the site's own origin,
-the built HTML contains no `api.gaiada.com` image URL, and `dist/` stays deterministic.
+the built HTML contains no `api.erp.gaiada.com` image URL, and `dist/` stays deterministic.
