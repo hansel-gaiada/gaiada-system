@@ -27,7 +27,7 @@ export async function maybeFileLeadFromFormReceived(
   const { siteSlug, submissionId } = event.data;
   if (typeof siteSlug !== "string" || typeof submissionId !== "string") return;
   try {
-    const r = await createLeadFromWebSubmission({ tenantId, siteSlug, submissionId, originSite: event.originSite }, deps);
+    const r = await createLeadFromWebSubmission({ tenantId, siteSlug, submissionId }, deps);
     logger.log(`submission ${submissionId}: ${r.outcome}`);
   } catch (err) {
     // Name + HTTP status only: an error message could in principle quote a response body.

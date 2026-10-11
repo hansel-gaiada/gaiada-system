@@ -40,6 +40,7 @@ vi.mock("../events/outbox.service", () => ({
 import {
   createLeadFromWebSubmission, mapSubmissionToLead, WEB_FORM_MAPPINGS, type WebLeadsDeps,
 } from "./agency-web-leads.service";
+import { config } from "../config";
 import { maybeFileLeadFromFormReceived } from "../modules/webdev/form-received-lead";
 
 const TENANT_A = "11111111-1111-4111-8111-111111111111";
@@ -132,12 +133,13 @@ describe("mapSubmissionToLead — one documented table, keyed by form key", () =
 describe("createLeadFromWebSubmission", () => {
   it("creates a source 'web', status 'new' lead carrying form, attribution and visitor consent", async () => {
     const d = deps();
-    const r = await createLeadFromWebSubmission({ tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB, originSite: "gaiada.com" }, d);
+    const r = await createLeadFromWebSubmission({ tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB }, d);
     expect(r.outcome).toBe("created");
     expect(store).toHaveLength(1);
     const p = store[0].params as unknown[];
     expect(p.slice(2, 6)).toEqual([NAME, NAME, EMAIL, PHONE]); // org (fallback), name, email, phone
-    expect(p[6]).toBe("gaiada.com"); // origin_site
+    expect(p[6]).toBe(config.originSite); // origin_site = the platform identity
+    expect(p[11]).toBe("gaiada"); // web_site_slug
     expect(p[7]).toBe("contact"); // origin_form
     expect(p[8]).toBe(SUB); // submission_ref
     expect(JSON.parse(p[9] as string)).toEqual({ landing: "/services/web/", utm_source: "google" });
@@ -248,7 +250,11 @@ describe("the form.received hook", () => {
   it("files a lead when the flag is on and the event is form.received", async () => {
     await maybeFileLeadFromFormReceived(TENANT_A, ev, deps());
     expect(store).toHaveLength(1);
-    expect((store[0].params as unknown[])[6]).toBe("gaiada.com");
+    const p = store[0].params as unknown[];
+    expect(p[6]).toBe(config.originSite);
+    expect(p[6]).not.toBe("webdesk");
+    expect(p[6]).not.toBe("gaiada.com");
+    expect(p[11]).toBe("gaiada");
   });
   it("flag off: nothing happens", async () => {
     delete process.env.AGENCY_WEB_LEADS_ENABLED;

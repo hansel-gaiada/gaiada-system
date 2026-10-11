@@ -3,6 +3,7 @@
 // WebDesk is stubbed (the other half of the shared contract is built by M5-L2).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NotFoundException } from "@nestjs/common";
+import { config } from "../config";
 import { withTenants } from "../db";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany } from "../testing/fixtures";
@@ -49,7 +50,7 @@ describe.skipIf(!TEST_URL)("agency web leads — real Postgres", () => {
     expect(r2).toEqual({ outcome: "existing", leadId: (r1 as { leadId: string }).leadId });
     const { rows } = await withTenants([a], (c) => c.query(`SELECT * FROM agency_leads WHERE submission_ref = $1`, [SUB]));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ source: "web", status: "new", org_name: "Villa Sari", origin_form: "onboard", origin_site: "gaiada" });
+    expect(rows[0]).toMatchObject({ source: "web", status: "new", org_name: "Villa Sari", origin_form: "onboard", origin_site: config.originSite, web_site_slug: "gaiada" });
     expect(rows[0].attribution).toEqual({ landing: "/services/web/", sections_seen: ["home.hero"] });
     expect(rows[0].visitor_consent).toMatchObject({ analytics: true, marketing: false });
   });

@@ -13,6 +13,8 @@
 --   origin_form      WebDesk form key the lead came from ('contact' | 'audit' | 'onboard')
 --   attribution      allow-listed attribution object as fetched from WebDesk (no raw IP)
 --   visitor_consent  the banner choice at submit time; NULL = unknown = NO consent
+--   web_site_slug    the WebDesk site (tenant) slug the visitor submitted on; origin_site stays the
+--                    platform's own site identity (config.originSite), as for every other writer
 
 ALTER TABLE agency_leads DROP CONSTRAINT IF EXISTS agency_leads_source_check;
 ALTER TABLE agency_leads
@@ -22,7 +24,8 @@ ALTER TABLE agency_leads
   ADD COLUMN IF NOT EXISTS submission_ref uuid,
   ADD COLUMN IF NOT EXISTS origin_form text,
   ADD COLUMN IF NOT EXISTS attribution jsonb,
-  ADD COLUMN IF NOT EXISTS visitor_consent jsonb;
+  ADD COLUMN IF NOT EXISTS visitor_consent jsonb,
+  ADD COLUMN IF NOT EXISTS web_site_slug text;
 
 -- Trap (NULL defeats UNIQUE): partial over the non-null set. This is what makes the web-lead insert
 -- idempotent per (tenant, submission), including under a race.
