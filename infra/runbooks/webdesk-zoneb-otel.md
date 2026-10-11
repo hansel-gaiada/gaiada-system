@@ -1,141 +1,215 @@
-# Runbook — WebDesk Zone B OTel export + the Zone A write-only OTLP listener (WSK-28)
+# Runbook — WebDesk telemetry: the one narrow exception (WSK-D63 (2), M4 T6a)
 
-**Status: PLANNED (Zone B side authored + config exists in `webdesk/otel/`) / PROTOTYPED (write-
-only property checked by a selftest-capable script) / BLOCKED (the Zone A listener itself — see
-§4, out of this ticket's file ownership).**
+**Status: BUILT on branch `webdesk/m4-t6a-otlp`, NOT YET DEPLOYED. Config validated with `otelcol-contrib validate`
+and driven end to end on a throwaway collector (token refusal, tagging, rate limit); the guard harness and the live
+probe are still to run on `sumopod` / `gda-aicenter`. Nothing below is DEV-VERIFIED until the rollout's step (e).**
 
-Read first: `docs/blueprints/webdesk-design.md` §02 diagram (`ZB -. "B→A #2: OTLP push
-(write-only)" .-> GRAF`), §03 B→A channel table (channel #2: "Write-only bearer + TLS;
-rate-limited; fail-soft `OTEL_ENABLED` on the Zone B side" / "May never cause: Reads of any kind;
-the listener exposes no query surface").
+Decision: `docs/blueprints/webdesk-design-v2.md` §14, WSK-D63 (2). Design rule (§03 channel 2): *write-only bearer +
+TLS; rate-limited; no query surface; fail-soft on the WebDesk side.*
 
 ---
 
-## 1. The security property, stated precisely
+## 1. The decided path
 
-**Zone B may push telemetry into Zone A. Zone B may never read anything back.** This is not the
-same property as "Zone B has no Zone A credential" (§03's control-channel table already covers
-that) — it's narrower and about a specific listener: even a listener that required strong auth
-would violate this property if it also exposed a way to *query* what had been ingested, because a
-compromised Zone B could then read Zone A's own operational telemetry (error rates, internal
-hostnames in span attributes, trace topology) — a reconnaissance channel into Zone A that the
-design explicitly forbids ("the listener exposes no query surface").
+WebDesk's `api` pushes OTLP to a **second, write-only receiver on the ERP's existing `otel-collector`**. The collector
+forwards it to sumopod over WireGuard exactly as it already does for the ERP.
 
-**What "write-only" has to mean concretely**, for a real OTel Collector:
-1. The **receiver** Zone B talks to is `otlp` (gRPC and/or HTTP) — a receiver, by construction,
-   only *accepts* data; it has no query API of its own.
-2. **No exporter, extension, or receiver on that same collector instance answers a read.** Two
-   collector installs is the cleanest way to guarantee this rather than assert it by config
-   review: a **dedicated collector instance** whose only pipelines are `otlp → (auth-check) →
-   downstream exporters`, with **zero** of the read-side extensions the estate's existing
-   `config.yaml`/`config.tier1-metrics.yaml`/`config.tier2-logs.yaml` never enable either
-   (no `pprofextension`, no `zpagesextension`, no `prometheus` **receiver** scraping this
-   instance back out, no reverse route from downstream Grafana/Mimir/Tempo back through this same
-   listener).
-3. **Auth on the receiver is bearer-token, one direction.** The token authenticates "this sender
-   may push," not "this caller may query." OTel Collector's `bearertokenauth` extension attached
-   to the `otlp` receiver's `auth:` stanza does exactly this — it has no read semantics to misuse.
-4. **Network-level:** the listener's port is reachable from Zone B's egress IP(s) only (firewall
-   allowlist, not the collector's job) and is never the same port/process the internal Grafana
-   stack queries on — so even a network-level scan from a compromised Zone B finds a push-only
-   endpoint, not a path toward `grafana:3000` or `mimir:9009`'s query API.
+```
+webdesk api ──OTLP/HTTP + bearer──▶ 172.17.0.1:4319 ──(DNAT)──▶ gaiada-otel-collector-1 :4319 (otlp/webdesk)
+ (webdesk_default)    egress guard allows ONLY this                 │ memory_limiter/webdesk → resource/webdesk
+                      address:port, TCP                             │ → tail_sampling (traces) → batch
+                                                                    ▼
+                                         otlp/tempo (traces)  /  otlphttp/loki (logs)  ──WireGuard──▶ sumopod 10.88.0.2
+```
 
----
+| | |
+|---|---|
+| **Receiver** | `otlp/webdesk`, OTLP/**HTTP** only, container port **4319** (not 4317/4318, so a firewall rule or an audit can name it) |
+| **Published** | `172.17.0.1:4319:4319` — the docker0 address, both sides literal in `infra/compose/docker-compose.observability.yml`. Never `0.0.0.0`, never a `${VAR}` that could resolve empty |
+| **Auth** | `bearertokenauth/webdesk`, token from `WEBDESK_OTLP_BEARER_TOKEN`. A missing/wrong token is a 401 before any body is read |
+| **Signals** | traces and logs. **No metrics pipeline**: the only metrics exporter is the Prometheus endpoint the ERP's alert rules read, and an untrusted sender must not mint series there (design §03: metric poisoning / alert fatigue). A metrics push gets 404 |
+| **Tagging** | `resource/webdesk` **upserts** `service.namespace=webdesk` and `gaiada.ingest=otlp-push/webdesk`, so a sender cannot claim another namespace (driven: a sender-supplied `service.namespace=spoofed` came out as `webdesk`) |
+| **Reads** | none. No extension besides `file_storage` and the bearer; the ERP receivers (4317/4318), self-metrics (8888) and the Prometheus exporter (8889) are not published |
+| **ERP pipelines** | untouched. The webdesk pipelines are `traces/webdesk` and `logs/webdesk`, separate from `traces`, `metrics`, `metrics/scrape`, `logs` |
 
-## 2. Zone B side (this ticket, already-existing files extended)
+### Empty token means refuse, never open
 
-`webdesk/otel/otel-collector-config.yaml` already runs a **local dev sink** collector (per its own
-header, restated in `docker-compose.yml`: "fail-soft; local dev sink only — WSK-28 wires the real
-Zone A listener"). This ticket does not change that file's dev behavior — it stays a local sink so
-`docker compose --profile dev up` keeps working with zero external dependency. What this ticket
-adds is the **export leg** the `api`/`worker` services use once `OTEL_ENABLED=true` and
-`OTEL_EXPORTER_OTLP_ENDPOINT` points at the real Zone A listener instead of the local collector:
+`bearertokenauth` **refuses to start** on an empty token (`no bearer token provided`), which would crash-loop the ERP's
+own collector on a release that precedes minting the token. The obvious fix, a known placeholder, is an open door:
+it was tried on 2026-10-11 and a request carrying exactly the placeholder text was accepted (200). So compose passes
+`"${WEBDESK_OTLP_BEARER_TOKEN:-\x01}"`: when the variable is empty or unset the token is the lone control character
+U+0001, which no HTTP client can send (the server answers 400 to a header carrying it). Driven against the real
+config: with that default, no header, `Bearer`, `Bearer ` and a wrong token all got 401 and the collector stayed up.
+Compose rejects a newline in a default, hence U+0001. **Do not "simplify" it**: `check-otlp-write-only.mjs` fails CI
+if the default changes. Mint tokens as plain strings starting with a letter (`wdotlp_` + hex).
 
-- `OTEL_ENABLED` — already wired end-to-end (compose `environment:` block on `api`, per the
-  estate's compose-env-passthrough rule) and **fail-soft by construction**: false is a supported
-  steady state, not an error path. This ticket does not change that contract, only documents that
-  the *real* value at `OTEL_EXPORTER_OTLP_ENDPOINT` will one day be the Zone A listener's public
-  URL, never a Zone A-internal hostname (consistent with WSK-01's "zero Zone A hostnames" AC — the
-  listener's *public* address is not a Zone A internal credential/hostname, it is the one address
-  Zone B is explicitly allowed to know, same as the n8n bridge trigger URL).
-- **New:** `OTEL_EXPORTER_OTLP_HEADERS` (bearer token for the write-only listener's auth
-  extension) — added to `.env.example` and the `api`/`worker` `environment:` blocks (§5).
+### Rate limiting: what is used and what it bounds
 
----
+The pinned collector (0.116.1) has no rate-limit processor. Three bounds, none of them a per-sender request quota:
 
-## 3. What Zone B must NOT be able to do to the listener (the check)
+1. **Traces: `tail_sampling/webdesk` with a `rate_limiting` policy, 500 spans/second** (decision wait 5 s, 5000 traces in
+   memory). Driven: 6001 spans sent in three requests, 499 exported.
+2. **Everything: `max_request_body_size` 4 MiB** on the receiver, and `memory_limiter/webdesk` (1024 MiB limit, 256 MiB
+   spike) which checks the whole collector's heap, so WebDesk is shed first while the ERP's own limiter (80% of the
+   host) keeps going. This is a pressure valve, not a rate.
+3. **Network: a per-source packet-rate cap in the egress guard** (`hashlimit`, default 300 packets/s, burst 600,
+   `WEBDESK_OTLP_PPS`; 0 disables). It bounds bandwidth for traces and logs alike. If the module is missing the guard
+   does **not** apply the exception at all.
 
-`webdesk/ops/scripts/check-otlp-write-only.mjs` (this ticket) is a **static config auditor**,
-not a live probe (there is nothing live to probe yet). It takes a Zone A collector config file
-and asserts, by parsing the YAML:
+**Logs have no per-second cap in the collector**; they are bounded by 2 and 3. If log volume ever matters, filter by
+severity in WebDesk first.
 
-1. Every pipeline whose receiver is `otlp` on the write-only listener's named receiver id has
-   **no exporter that is itself queryable by network** in this pipeline's export set beyond the
-   internal downstream (Grafana stack) — i.e. no `otlp`/`otlphttp` exporter pointed back out
-   toward anything Zone B could be the other end of.
-2. The `otlp` receiver in question declares an `auth:` extension.
-3. No `pprofextension`, `zpagesextension`, or a `prometheus` **receiver** exists anywhere in the
-   same config that a Zone-B-reachable network path could reach (this check cannot see the
-   firewall; it flags the config-level exposure so the firewall reviewer has one less thing to
-   trust blindly).
-4. **Selftest mode** (`--selftest`, no file needed, following the `check-rls-integrity.mjs`
-   pattern this project already uses): constructs a known-good config in memory, asserts the
-   checker passes it, then mutates it to add a `zpages` extension (a read-capable surface) and
-   asserts the **same checker now fails** — proving the check would catch the exact regression it
-   exists to catch, not just "look like it checks something."
+### TLS on the docker0 hop: not used, and why
 
-**Verified how:** `node webdesk/ops/scripts/check-otlp-write-only.mjs --selftest` was run on this
-dev machine — see the compose/scripts verification block in the final report for the actual exit
-code. This proves the checker's *logic* is sound. It has **not** been run against a real Zone A
-collector config, because that config does not exist yet (§4).
+Optional per the ruling. Skipped, deliberately:
+- The hop never crosses a NIC: webdesk bridge → host (DNAT) → `gaiada_default`. Only the collector's own bridge segment
+  sees the post-DNAT packet, and that segment is ERP containers.
+- WebDesk containers run `cap_drop ALL`, so they cannot sniff; a host-root attacker already has everything.
+- The token authorises one thing: writing traces and logs into a namespace-stamped, rate-bounded path. Replay value is low.
+- TLS would add a CA, a server cert and a rotation to the ERP collector, and a trust anchor into the webdesk image,
+  for a hop that is private by construction.
+
+**Revisit (TLS becomes mandatory) if** the receiver is ever published beyond docker0, the two projects move to
+different hosts, or the token's reach grows beyond write-only telemetry. `check-otlp-write-only.mjs` already refuses a
+publish on any other address.
+
+### What is still open
+
+- **WebDesk's api has no OTel SDK today.** `webdesk/api` has no `@opentelemetry` dependency and no reference to
+  `OTEL_ENABLED` in `src/`; the env vars are passed through compose and consumed by nothing. Until a fail-soft
+  bootstrap exists (HTTP/protobuf exporter, `Authorization` from `OTEL_EXPORTER_OTLP_HEADERS`), step (d) delivers
+  nothing, and step (e) is verified with the hand-driven push below. That bootstrap is its own ticket.
+- **Log content.** Zone-B logs may carry client-site content. The logs pipeline is on because the ruling asks for logs;
+  review what the api logs before enabling `OTEL_ENABLED` for real.
 
 ---
 
-## 4. The Zone A listener itself — BLOCKED, outside this ticket's file ownership
+## 2. Files
 
-This is the part of WSK-28 that structurally cannot be delivered by this ticket alone. The
-ticket's file ownership is `webdesk/ops/`, `infra/runbooks/webdesk-*.md`, and
-`webdesk/docker-compose*.yml` — **not** `infra/observability/` (the estate's actual Zone A
-collector configs: `config.yaml`, `config.tier1-metrics.yaml`, `config.tier2-logs.yaml`) and
-**not** `.github/workflows/` (owned this cycle by the CI/deploy agent). Standing up a real
-write-only listener means:
+| File | Role |
+|---|---|
+| `infra/observability/otel-collector/config.yaml` | `otlp/webdesk`, `bearertokenauth/webdesk`, `memory_limiter/webdesk`, `resource/webdesk`, `tail_sampling/webdesk`, `traces/webdesk`, `logs/webdesk` |
+| `infra/compose/docker-compose.observability.yml` | the docker0-only publish and the token variable with its unsendable default |
+| `infra/compose/.env.example`, `webdesk/.env.example` | `WEBDESK_OTLP_BEARER_TOKEN` (ERP) / `OTEL_EXPORTER_OTLP_*` (WebDesk), empty-means-refuse stated |
+| `webdesk/ops/host/webdesk-egress-guard.sh` | the exception, off unless `WEBDESK_OTLP_PORT` is set or `apply --otlp` is passed |
+| `webdesk/ops/host/webdesk-host-deny.service` | reads `/etc/webdesk/guard.env` (optional) so the exception survives a reboot |
+| `webdesk/ops/host/test-egress-guard.sh` | proves it on a throwaway network with stand-in listeners |
+| `webdesk/ops/probes/containment-probe.sh` | probe 6 allows exactly `<docker0>:<port>`, only while the guard has it on |
+| `webdesk/ops/scripts/check-otlp-write-only.mjs` | static auditor, run in CI (`observability-lint`) against the real config and compose file |
 
-1. A new receiver (or a wholly new collector instance — recommended, per §1.2) added to
-   `infra/observability/otel-collector/config*.yaml`.
-2. A bearer token minted and placed in Zone A's own secrets custody (not this ticket's to hold —
-   Zone B's copy of that same token is the only half this ticket's `.env.example` may carry).
-3. A firewall rule on whichever Zone A box terminates it, restricting source IPs to Zone B's
-   egress.
-4. Wiring into the existing WS9 Grafana stack so the ingested telemetry is actually visible
-   somewhere (§02 diagram: `GRAF[WS9 Grafana stack<br/>+ OTLP ingest listener NEW]`).
+The guard's two rules (port 4319; the address is `WEBDESK_OTLP_ADDR`, default `172.17.0.1`):
 
-**Deliverable of this ticket instead:** a complete, reviewable **proposal** —
-`webdesk/ops/otel/proposed-zonea-otlp-listener.yaml` — written in the exact shape
-`infra/observability/otel-collector/config.tier1-metrics.yaml` uses (same receiver/processor/
-exporter/service block structure, same `memory_limiter` discipline), with inline comments marking
-every place the write-only property depends on a choice made there. It is **not applied anywhere**
-— applying it requires editing `infra/observability/`, which this ticket explicitly does not
-touch. Whoever owns that directory (or the owner, directly) should review the proposal file,
-apply it as a real addition to the Zone A observability stack, and re-run
-`check-otlp-write-only.mjs` against the applied config as its own verification step before this
-row can move past PLANNED.
+```
+-A WEBDESK-EGRESS -p tcp -m conntrack --ctorigdst 172.17.0.1 --ctorigdstport 4319 -m hashlimit --hashlimit-name wd-otlp-fwd --hashlimit-mode srcip --hashlimit-above 300/second --hashlimit-burst 600 -j DROP
+-A WEBDESK-EGRESS -p tcp -m conntrack --ctorigdst 172.17.0.1 --ctorigdstport 4319 -j RETURN
+-A WEBDESK-HOST-IN -d 172.17.0.1 -p tcp --dport 4319 -m hashlimit --hashlimit-name wd-otlp-in --hashlimit-mode srcip --hashlimit-above 300/second --hashlimit-burst 600 -j DROP
+-A WEBDESK-HOST-IN -d 172.17.0.1 -p tcp --dport 4319 -j RETURN
+```
+
+Both sit before the chains' other rules. The FORWARD pair matches the **original** destination because a published port
+is reached by DNAT (the 172.16/12 drop would otherwise kill it); the INPUT pair covers docker's userland proxy.
 
 ---
 
-## 5. Zone B env vars added (`.env.example` + compose `environment:`)
+## 3. Rollout (order matters; each step is safe to stop after)
 
-| Var | Purpose | Default |
+**(a) Ship the collector change with the next ERP release.** The collector is recreated (a short gap; the Tempo/Loki
+queues are on disk). With the token empty the receiver refuses everything. After the deploy, on `gda-aicenter`:
+
+```bash
+docker ps --filter name=gaiada-otel-collector-1 --format '{{.Status}}  {{.Ports}}'      # ... 172.17.0.1:4319->4319/tcp
+ss -ltn | grep ':4319'                                                                   # bound to 172.17.0.1 only
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer anything' -d '{"resourceSpans":[]}' http://172.17.0.1:4319/v1/traces      # 401
+```
+
+**(b) Mint the token and set it in BOTH env files** (never echo it into a shared log):
+
+```bash
+TOKEN="wdotlp_$(openssl rand -hex 24)"
+# ERP:     /home/Hansel/gaiada/infra/compose/.env       WEBDESK_OTLP_BEARER_TOKEN=$TOKEN
+# WebDesk: /etc/webdesk/.env                            OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer $TOKEN
+```
+
+Recreate only the collector, with the deploy's own `COMPOSE_FILES` set (it has a literal image pin and no
+`depends_on`, so the stale-tag footgun cannot move anything else; confirm only that one container is recreated):
+
+```bash
+cd /home/Hansel/gaiada/infra/compose && docker compose -p gaiada $COMPOSE_FILES up -d --no-deps --no-build otel-collector
+# now: wrong token 401, right token 200
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d '{"resourceSpans":[]}' http://172.17.0.1:4319/v1/traces                                          # 200
+```
+
+**(c) Apply the guard with the port.** First run the harness where it is safe (the orchestrator runs it on `sumopod`):
+`bash webdesk/ops/host/test-egress-guard.sh webdesk/ops/host/webdesk-egress-guard.sh`. Then on `gda-aicenter`:
+
+```bash
+sudo install -m 0755 webdesk/ops/host/webdesk-egress-guard.sh /usr/local/sbin/webdesk-egress-guard.sh
+sudo install -m 0644 webdesk/ops/host/webdesk-host-deny.service /etc/systemd/system/webdesk-host-deny.service
+printf 'WEBDESK_OTLP_PORT=4319\n' | sudo tee /etc/webdesk/guard.env >/dev/null
+sudo systemctl daemon-reload && sudo systemctl restart webdesk-host-deny.service
+sudo /usr/local/sbin/webdesk-egress-guard.sh status          # the four rules above
+```
+
+**(d) Switch WebDesk's OTel on.** In `/etc/webdesk/.env`: `OTEL_ENABLED=true`, `WEBDESK_OTEL_ZONEA_PUSH_ENABLED=true`,
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4319`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, the headers line from (b).
+Then recreate the api without building:
+
+```bash
+cd /home/Hansel/gaiada-webdesk/webdesk && sudo docker compose --env-file /etc/webdesk/.env -p webdesk \
+  -f docker-compose.yml -f docker-compose.aicenter.yml up -d --no-build --no-deps api
+```
+
+(See §1 "still open": with no SDK in the api, this step is inert until that ticket lands.)
+
+**(e) Verify.** Hand-driven push from inside the guarded network (works with or without the SDK):
+
+```bash
+docker run --rm --network webdesk_default -e TOK="$TOKEN" node:22-alpine node -e '
+  const b={resourceSpans:[{resource:{attributes:[{key:"service.name",value:{stringValue:"webdesk-api"}}]},scopeSpans:[{spans:[{traceId:"0af7651916cd43dd8448eb211c80319c",spanId:"b7ad6b7169203331",name:"t6a-rollout-probe",kind:1,startTimeUnixNano:"1760000000000000000",endTimeUnixNano:"1760000001000000000"}]}]}]};
+  fetch("http://172.17.0.1:4319/v1/traces",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+process.env.TOK},body:JSON.stringify(b)}).then(r=>console.log(r.status));'
+```
+
+Expect `200`. About 20 s later, on sumopod's Grafana: Tempo `{ resource.service.namespace = "webdesk" }` shows
+`t6a-rollout-probe`; Loki `{service_namespace="webdesk"}` shows webdesk logs once the api emits any (label name is
+Loki's OTLP mapping of `service.namespace`; confirm in Explore). Then the live probe, which must show **exactly one**
+extra open host port:
+
+```bash
+sudo WEBDESK_OTLP_PORT=4319 bash webdesk/ops/probes/containment-probe.sh      # probe 6: "OTLP exception: 172.17.0.1:4319 answers", no FAIL
+```
+
+## 4. Rollback (each step independent, fastest first)
+
+1. **Close the door:** `sudo rm /etc/webdesk/guard.env && sudo systemctl restart webdesk-host-deny.service` — the guard is pure
+   default-deny again; WebDesk's pushes fail soft.
+2. **Stop the sender:** `OTEL_ENABLED=false` in `/etc/webdesk/.env`, recreate the api as in (d).
+3. **Refuse at the receiver:** blank `WEBDESK_OTLP_BEARER_TOKEN` in the ERP env, recreate the collector as in (b); the receiver answers 401 to everything.
+4. **Remove it:** revert the ERP commit and release; the publish and the receiver disappear. Nothing else changes.
+
+## 5. The check (`webdesk/ops/scripts/check-otlp-write-only.mjs`)
+
+A static auditor with a selftest (23 cases, each a mutation that must be caught). Against the real files
+(CI job `observability-lint`):
+
+```bash
+node webdesk/ops/scripts/check-otlp-write-only.mjs infra/observability/otel-collector/config.yaml \
+  --receiver otlp/webdesk --compose infra/compose/docker-compose.observability.yml --service otel-collector
+```
+
+It fails if: the receiver has no bearer authenticator, or names an undefined one; the token is a literal; a read-capable
+extension (`zpages`, `pprof`, `health_check`, ...) exists; the receiver feeds a metrics pipeline, shares a pipeline, feeds
+a Prometheus exporter, lacks a leading `memory_limiter` or the `service.namespace` upsert; two receivers share a port;
+compose publishes anything but `172.17.0.1:<port>:<port>`, uses host networking, or changes the empty-token default.
+It is static: the live proofs are the guard harness, probe 6 and the step (e) pushes.
+
+## 6. Env vars
+
+| Var | Where | Meaning |
 |---|---|---|
-| `OTEL_EXPORTER_OTLP_HEADERS` | Bearer token for the Zone A write-only listener's `auth:` extension. Empty by default — fail-soft, same discipline as every other WSK-28-adjacent credential in this file | *(empty)* |
-| `WEBDESK_OTEL_ZONEA_PUSH_ENABLED` | Explicit second gate, independent of `OTEL_ENABLED` — lets the dev-sink collector keep running locally while the real Zone A push stays off until an operator deliberately flips this, rather than the endpoint URL alone deciding it | `false` |
-
-Both are additive to the existing `OTEL_ENABLED`/`OTEL_EXPORTER_OTLP_ENDPOINT` pair already wired
-in `docker-compose.yml`'s `api` service — see the compose diff in the final report.
-
-## 6. Status vocabulary reminder
-
-Zone B's export leg config: **PLANNED** (values named, not yet pointed at a real target). The
-write-only checker: **PROTOTYPED** (selftest driven and observed on this machine). The Zone A
-listener: **BLOCKED** — proposal authored, application owned by whoever holds
-`infra/observability/`, verification (an actual OTLP span landing in Zone A Grafana through the
-listener) cannot happen before that application and before A-12.
+| `WEBDESK_OTLP_BEARER_TOKEN` | ERP `infra/compose/.env` | the receiver's token. **Empty = refuse everything** |
+| `OTEL_EXPORTER_OTLP_HEADERS` | WebDesk `/etc/webdesk/.env` | `Authorization=Bearer <same token>`; empty = no credential sent, nothing delivered |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `_PROTOCOL` | WebDesk | `http://172.17.0.1:4319` / `http/protobuf` in production; the dev sink defaults stay |
+| `OTEL_ENABLED`, `WEBDESK_OTEL_ZONEA_PUSH_ENABLED` | WebDesk | two independent gates, both default false |
+| `WEBDESK_OTLP_PORT`, `_PPS`, `_ADDR` | `/etc/webdesk/guard.env` (systemd) | guard: exception port (unset = off), packets/s cap (300, 0 = none), docker0 address (172.17.0.1) |

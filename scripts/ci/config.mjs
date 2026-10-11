@@ -38,7 +38,8 @@ export const CI_GROUPS = {
   // blocks vendors delivery/vocabulary and fails on drift.
   webdesk_blocks: ["webdesk/blocks/", "webdesk/delivery/vocabulary/"],
   webdesk_deploy: ["webdesk/deploy/"],
-  obs: ["infra/observability/", "infra/scripts/"],
+  // + the compose file and the write-only auditor that gate the WebDesk OTLP receiver (WSK-D63 (2)).
+  obs: ["infra/observability/", "infra/scripts/", "infra/compose/docker-compose.observability", "webdesk/ops/scripts/check-otlp-write-only"],
 };
 
 /**
