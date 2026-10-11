@@ -542,7 +542,7 @@ would mean three different things. The canonical vocabulary is **`static` · `wp
 |---|---|---|---|---|
 | `static` | template-static (from `-nonssg`) | `astro` | widen CHECK | works as `vite`/`astro` |
 | `fullstack` | template-fullstack (from `-nextjs`) | `node` | widen CHECK | works as `nextjs`/`node` |
-| `wp` | **template-wp (new)** — theme exists at `webdesk/wordpress/scaffold-template/` | lift `rejected_site_kind`, wire the PHP SDK path | widen CHECK | **refused in 4 places** |
+| `wp` | **template-wp (new)** — the theme is `webdesk/wordpress/theme/gaiada-webdesk/` (one canonical copy since M6-P5a, 2026-10-11; the old `scaffold-template/` is retired) | lift `rejected_site_kind`, wire the PHP SDK path | widen CHECK | **refused in 4 places** |
 
 **Lifting the refusals is a ruling, not a code tweak.** WordPress and full-stack are refused
 deliberately at four points — `webdev_provisioned_sites.framework CHECK`, the tool's `framework`
