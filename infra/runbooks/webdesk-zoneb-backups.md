@@ -6,6 +6,76 @@
 > dedicated backup-writer key (never root). §2, §4 and §7 below are rewritten accordingly; the dated
 > MinIO-era results are kept only where marked.
 
+## Live path (M4, WSK-68)
+
+**What actually runs on the live box (gda-aicenter).** The MinIO-era design below (a push into a
+local object-lock bucket by `webdesk-backup-local.sh`, `OWNER_DATABASE_URL`) was never run and is
+kept for the record. The live path is smaller, and it closes the finding recorded in §7 ("`pg_dump` as
+owner/migrator fails on FORCE RLS"). Owner ruling WSK-D48 (6): a read-only BYPASSRLS backup role in the
+WebDesk database, so the nightly backup produces a real dump.
+
+| Piece | What |
+|---|---|
+| Role | `webdesk_backup`: `LOGIN NOSUPERUSER BYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`, **no password**, `default_transaction_read_only = on`, SELECT-only (tables and sequences). Created by `webdesk/postgres/init-roles.sh` on a new cluster; on an existing one (the live cluster) by `webdesk/ops/scripts/ensure-backup-role.sh`. |
+| Why no password | scram over TCP then fails for it; the only way in is the unix socket inside the container (`docker exec ... pg_dump -U webdesk_backup`, where the official image keeps `local all all trust`). Note the image also trusts loopback (`127.0.0.1`) *inside* the container; that still needs `docker exec`, so it adds no remote path. |
+| Script | `webdesk/ops/scripts/webdesk-backup-nightly.sh` (bash, `set -euo pipefail`) |
+| Cron (03:05 UTC) | `5 3 * * * $HOME/gaiada-webdesk/webdesk/ops/scripts/webdesk-backup-nightly.sh >> $HOME/gaiada-backups/webdesk-backup.log 2>&1` |
+| Output | `~/gaiada-backups/webdesk-<UTC YYYYmmdd-HHMMSS>.sql.gz`, mode 0600, one file, no sidecar. Pruned after `KEEP_DAYS` (default 14), same rule as `infra/scripts/backup.sh`. |
+| Offsite | Nothing to change. sumopod's existing puller (04:15 UTC, `infra/scripts/erp-backup-read.sh`: top-level `*.sql.gz` / `*.tar.gz`, names `[A-Za-z0-9_.-]`, no leading dot) takes the file, encrypts it with `age`, and keeps it 90 days (`infra/runbooks/erp-offsite-backup.md`). This **is** the pull model of §1: the box holds no credential for the target. |
+
+**Enable on the live box (once).** Run the role script, then confirm it is idempotent, then install the cron line:
+
+```sh
+sh webdesk/ops/scripts/ensure-backup-role.sh   # "CHANGED -- created webdesk_backup ..." the first time
+sh webdesk/ops/scripts/ensure-backup-role.sh   # "unchanged -- ..." the second
+webdesk/ops/scripts/webdesk-backup-nightly.sh  # one run by hand: "webdesk-backup ok file=... tenants=<n>"
+node webdesk/scripts/check-rls-integrity.mjs   # role model: only a read-only webdesk_backup may hold BYPASSRLS
+```
+
+`ensure-backup-role.sh` **refuses** (exit 1, role untouched) if `webdesk_backup` already holds any write
+grant (INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER, column-level included), is a member of another
+role, or has SUPERUSER/CREATEROLE/CREATEDB/REPLICATION: a widened backup role is a finding for a human,
+not something to narrow silently. `check-rls-integrity.mjs` enforces the same rule in CI and the gate
+(exactly one BYPASSRLS role may exist, `webdesk_backup`, and only while read-only; absent is allowed, for
+a cluster that predates this ticket).
+
+**What the nightly script verifies before it publishes anything.** `pg_dump` runs to a temp file (never a
+pipe that would hide its exit status), is gzipped, and the compressed file must pass `gzip -t` and
+contain a `COPY public.tenants` and a `COPY public.content_items` data block with **more than zero rows
+in `tenants`**. An RLS-blinded dump has zero rows (or `pg_dump` errors outright with "query would be
+affected by row-level security policy"); that is exactly the failure this ticket exists to catch, so it
+exits non-zero with the reason on stderr and writes nothing the puller could take. Success logs one line:
+`<UTC time> webdesk-backup ok file=<path> bytes=<n> tables=<n> tenants=<n>`.
+
+**Restore** (throwaway container, no network; same shape as `infra/scripts/restore-drill.sh`). The dump is
+made with `--no-owner`, but it still carries `GRANT`s and policies that name the WebDesk roles, so create
+them first (roles live in the `globals-webdesk-*` dump that `infra/scripts/backup.sh` writes; for a
+throwaway restore, empty `NOLOGIN` roles are enough):
+
+```sh
+docker run -d --name wd-restore --network none -e POSTGRES_PASSWORD=x postgres:16-alpine
+docker exec wd-restore psql -U postgres -c 'CREATE DATABASE webdesk' \
+  -c 'CREATE ROLE webdesk_owner NOLOGIN' -c 'CREATE ROLE webdesk_migrator NOLOGIN' \
+  -c 'CREATE ROLE webdesk_app NOLOGIN' -c 'CREATE ROLE webdesk_backup NOLOGIN'
+gunzip -c webdesk-<STAMP>.sql.gz | docker exec -i wd-restore psql -U postgres -d webdesk -v ON_ERROR_STOP=1 -q -o /dev/null
+docker exec wd-restore psql -U postgres -d webdesk -At -c 'select count(*) from tenants'
+docker rm -f wd-restore
+```
+
+(For an offsite copy, decrypt first: `age -d -i <private key> webdesk-<STAMP>.sql.gz.age | gunzip | ...`.)
+
+**Where this path is still thin.** `infra/scripts/backup.sh` also dumps WebDesk as the cluster
+superuser (`dump_container webdesk-postgres-1 postgres webdesk`) into the same directory under the same
+`webdesk-<stamp>.sql.gz` name shape, so until that line is retired the offsite set holds two WebDesk dumps
+a night (03:05 from this script, 03:15 from `backup.sh`); they differ only in the time part of the name.
+No alarm yet fires if this script's cron stops (the §4 sentinel belongs to the retired MinIO design);
+`backup-cron.sh`'s per-stack name check will still be satisfied by either dump.
+
+The rest of this document is the original design. Read it with the above in mind: §1's security property
+is delivered by the existing sumopod puller; §2 (object lock) and §4 (sentinel) were never deployed.
+
+---
+
 **Status: PLANNED (design + scripts authored) / PROTOTYPED where noted.** The box does not exist
 (A-12). Every command here is written against the real `webdesk/docker-compose.yml` service
 names and `webdesk/scripts/storage-bootstrap.mjs`, and the two scripts it references
@@ -211,7 +281,10 @@ follow-up.
 - **Defect found and fixed in `webdesk-backup-local.sh`:** `pg_dump "$URL" | gzip > out || fail` only
   tested gzip's exit status, so a failed `pg_dump` still produced a valid empty `.gz`, was
   "mirrored ok" and recorded `exit_code=0`. It now dumps to a temp file and checks `pg_dump` itself.
-- **Open finding (not fixed here):** with the project's role bootstrap, `webdesk_owner`/`webdesk_migrator`
+- **Open finding — CLOSED by WSK-68 (see "Live path" above; owner ruling WSK-D48 (6)):** the live
+  nightly dumps as `webdesk_backup`, a read-only BYPASSRLS role, and fails loudly on an empty or
+  RLS-blinded dump. `webdesk-backup-local.sh` still reads `OWNER_DATABASE_URL`, so it would hit this
+  again if it were ever run; it is not the live path. Original finding, as recorded: with the project's role bootstrap, `webdesk_owner`/`webdesk_migrator`
   are NOBYPASSRLS and the tables are FORCE RLS, so `pg_dump` as those roles fails ("query would be
   affected by row-level security policy for table api_keys"). Until `OWNER_DATABASE_URL` points at a
   role that may read every row (a superuser or a BYPASSRLS backup role), this nightly job fails — now

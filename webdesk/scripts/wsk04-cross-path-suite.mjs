@@ -94,10 +94,10 @@ function record(pathName, status, detail) {
   let errorDetail = '';
   try {
     await client.query(sql);
-    // The file itself contains exactly 12 `RAISE NOTICE 'PASS ...'` statements today (probes
-    // 0,1,2,3,4a-4e,5,6a,6b) — verified by grep, not assumed; re-derive with
+    // The file itself contains exactly 15 `RAISE NOTICE 'PASS ...'` statements today (probes
+    // 0,1,2,3,4a-4e,5,6a,6b,7a-7c) — verified by grep, not assumed; re-derive with
     // `grep -c "RAISE NOTICE 'PASS" migrations/tests/rls.spec.sql` if this file is ever extended.
-    const EXPECTED_PASS_NOTICES = 12;
+    const EXPECTED_PASS_NOTICES = 15;
     const passCount = notices.filter((n) => /PASS/.test(n)).length;
     ok = passCount === EXPECTED_PASS_NOTICES;
     errorDetail = ok ? '' : `${passCount} PASS notices observed, expected exactly ${EXPECTED_PASS_NOTICES}:\n${notices.join('\n')}`;
