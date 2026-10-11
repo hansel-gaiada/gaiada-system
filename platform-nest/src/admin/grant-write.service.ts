@@ -82,7 +82,7 @@
 // broke, the call would throw a TypeError and `global-only-role-scope.test.ts`'s 400-expectations
 // would go RED rather than quietly passing. Follow-up for the architect: give the map its own
 // module and repoint the scan's path pin, then this import straightens out.
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { newId } from "../db";
 import { assertRoleUiGrantable } from "../rbac/ui-grantable";
@@ -361,8 +361,27 @@ async function assertTwoPersonAppointment(c: PoolClient, spec: GrantSpec, roleNa
  * cannot escape, because the write itself is guarded.
  */
 export async function assertGrantAllowed(c: PoolClient, spec: GrantSpec): Promise<string | null> {
+  // WSK-49f: a `client` scope is reachable ONLY through `grantClientWebsiteEditor()` below, which verifies
+  // the client record and the target contact itself. This runs BEFORE the trusted_internal early return on
+  // purpose: it is a pure tightening (no trusted caller writes a client scope), and it means the one origin
+  // that skips every invariant still cannot mint one. The DB trigger `user_roles_client_scope_guard`
+  // (202610110520) is the layer behind this one.
+  if (spec.scopeType === "client") {
+    throw new BadRequestException(
+      "client_scope_dedicated_path: a client-scoped grant (client_website_editor) can only be made through " +
+        "the client website-editor endpoints, never through the generic grant surfaces (WSK-D60)",
+    );
+  }
   if (spec.origin === "trusted_internal") return null; // see this file's ORIGINS block
   const roleName = await resolveRoleName(c, spec.roleId);
+  if (roleName === CLIENT_WEBSITE_EDITOR_ROLE) {
+    // The role is client-scoped data; every generic origin is refused (the scope guard below would also
+    // refuse it at company scope, this names the real reason).
+    throw new BadRequestException(
+      "client_scope_dedicated_path: client_website_editor can only be granted through the client " +
+        "website-editor endpoints (WSK-D60)",
+    );
+  }
 
   // (1) scope validity — the EXISTING check, byte-unchanged, via the one shared helper both
   //     legacy writers already call. IAM-SEC-02/04/05's fix, untouched by this refactor.
@@ -432,6 +451,110 @@ export async function insertGrantRow(c: PoolClient, spec: GrantSpec): Promise<st
       newId(), spec.targetUserId, spec.roleId, spec.scopeType, spec.scopeId, spec.managedBy ?? null,
       spec.expiresAt ?? null, spec.originApprovalId ?? null,
     ],
+  );
+  return rows[0]?.id ?? null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// WSK-49f / WSK-D60 (amended) — the `client_website_editor` grant, scoped to ONE client record.
+//
+// This is the only code that writes a `scope_type = 'client'` user_roles row, and it lives in the choke
+// point so `user-roles-writer-guard.test.ts` keeps its "every write is in this file" property. It is a
+// DEDICATED pair of functions rather than another `origin` of `insertGrantRow` because everything about it
+// is fixed: the ROLE (one literal name), the SCOPE (one client), and the caller classes (Gaiada staff, or a
+// client contact holding capability `admin` on THAT client). There is no roleId, no scopeType and no
+// permission list for a caller to choose, so "only this role, only own client, never a staff role or any
+// permission" is structural, not a validation that could be skipped.
+//
+// The caller MUST have passed Cerbos (`client_contact` · `manage_website_editor`) first; what is re-checked
+// here is what Cerbos cannot see: the rows.
+//   * the grant runs on a TENANT-SCOPED connection (withTenants), so `clients` / `client_contacts` reads are
+//     RLS-bound to the serving company: another tenant's client or contact is simply not found;
+//   * the client record exists in that tenant and is not deleted (the grant is anchored on `clients.id`);
+//   * the target is a non-deleted, non-revoked, CLIENT-WIDE contact of THAT client (not another client's,
+//     not a user who merely exists, not a project-scoped row);
+//   * self-grant is refused (D-9's no-self-escalation, same refusal as the generic surfaces);
+//   * a client-admin actor's own `clientAdminOf` must contain this exact (tenant, client) — the ceiling.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+export const CLIENT_WEBSITE_EDITOR_ROLE = "client_website_editor";
+
+export interface ClientWebsiteEditorSpec {
+  tenantId: string;
+  clientId: string;
+  targetUserId: string;
+  actorUserId: string | null;
+  /** `staff` = passed Cerbos on a staff role; `client_admin` = passed it as a client contact holding admin. */
+  actorVia: "staff" | "client_admin";
+  /** The actor's own `principal.clientAdminOf`; consulted only for `client_admin`. Absent => holds nothing. */
+  actorClientAdminOf?: Array<{ tenantId: string; clientId: string }>;
+}
+
+async function assertClientWebsiteEditorTarget(c: PoolClient, spec: ClientWebsiteEditorSpec, forGrant: boolean): Promise<void> {
+  const uuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (!uuid.test(spec.tenantId) || !uuid.test(spec.clientId) || !uuid.test(spec.targetUserId)) {
+    throw new BadRequestException("tenantId, clientId and targetUserId must be uuids");
+  }
+  if (spec.actorVia === "client_admin") {
+    const holds = (spec.actorClientAdminOf ?? []).some((a) => a.tenantId === spec.tenantId && a.clientId === spec.clientId);
+    if (!holds) {
+      throw new ForbiddenException(
+        "ceiling_exceeded: a client admin may only manage the website editor of their OWN client (WSK-D60)",
+      );
+    }
+  }
+  if (forGrant) assertNotSelfTarget(spec.actorUserId, spec.targetUserId);
+  if (!forGrant) return; // a revoke is pinned by its own DELETE predicate and must work on a gone client/contact
+  const client = await c.query(
+    `SELECT 1 FROM clients WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+    [spec.clientId, spec.tenantId],
+  );
+  if (!client.rowCount) throw new BadRequestException("client_not_found: no such client in this company");
+  const contact = await c.query(
+    `SELECT 1 FROM client_contacts
+      WHERE tenant_id = $1 AND client_id = $2 AND user_id = $3 AND project_id IS NULL AND deleted_at IS NULL
+        AND status <> 'revoked'`,
+    [spec.tenantId, spec.clientId, spec.targetUserId],
+  );
+  if (!contact.rowCount) {
+    throw new BadRequestException(
+      "target_not_a_contact_of_client: the target is not a client-wide contact of this client",
+    );
+  }
+}
+
+/** Grant `client_website_editor` @ client:<clientId> to a contact of that client. Returns the new
+ *  `user_roles.id`, or `null` when the grant already existed (idempotent: no second row, and the caller
+ *  must not write a second audit row). Must run on a `withTenants([tenantId])` connection. */
+export async function grantClientWebsiteEditor(c: PoolClient, spec: ClientWebsiteEditorSpec): Promise<string | null> {
+  await assertClientWebsiteEditorTarget(c, spec, true);
+  const role = await c.query<{ id: string }>(
+    `SELECT id FROM roles WHERE company_id IS NULL AND name = $1`,
+    [CLIENT_WEBSITE_EDITOR_ROLE],
+  );
+  if (!role.rows[0]) throw new Error("client_website_editor role is not seeded (migration 202610110520)");
+  const { rows } = await c.query<{ id: string }>(
+    `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, managed_by)
+     VALUES ($1, $2, $3, 'client', $4, NULL)
+     ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING RETURNING id`,
+    [newId(), spec.targetUserId, role.rows[0].id, spec.clientId],
+  );
+  return rows[0]?.id ?? null;
+}
+
+/** Revoke `client_website_editor` @ client:<clientId> from a user. Returns the deleted `user_roles.id`, or
+ *  `null` when there was nothing to revoke (idempotent). Pinned on user, role NAME, scope type AND client
+ *  id, and never touches a reconciler-owned row. A revoke is a de-escalation, so the self-target refusal
+ *  does not apply and the target need not still be a live contact (a revoked contact's grant is cleaned up
+ *  through here). */
+export async function revokeClientWebsiteEditor(c: PoolClient, spec: ClientWebsiteEditorSpec): Promise<string | null> {
+  await assertClientWebsiteEditorTarget(c, spec, false);
+  const { rows } = await c.query<{ id: string }>(
+    `DELETE FROM user_roles ur USING roles r
+      WHERE ur.role_id = r.id AND r.company_id IS NULL AND r.name = $1
+        AND ur.user_id = $2 AND ur.scope_type = 'client' AND ur.scope_id = $3
+        AND ur.managed_by IS NULL AND ur.managed_by_position IS NULL
+      RETURNING ur.id`,
+    [CLIENT_WEBSITE_EDITOR_ROLE, spec.targetUserId, spec.clientId],
   );
   return rows[0]?.id ?? null;
 }
