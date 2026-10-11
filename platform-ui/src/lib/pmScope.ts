@@ -41,7 +41,6 @@ export function parsePmScope(raw: string | undefined | null): PmScope {
   return PM_SCOPE_ALL;
 }
 
-/** Cookie name for the persisted scope (P4-A4 — "persist like the company switcher does",
- *  `lib/tenant.ts`'s `gaiada_tenant` is the model). Lives here (not in the "use server" actions
- *  file) so a client component could read/compare it without importing a server-actions module. */
-export const PM_SCOPE_COOKIE = "gaiada_pm_scope";
+// The persisted scope's cookie (P4-A4) is named in `lib/cookieNames.ts` (`HOST_COOKIES.pmScope`,
+// `__Host-gaiada_pm_scope` in production) with the other session/tenant-context cookies, and read and
+// written only by `lib/pmScopeActions.ts`. It is httpOnly, so no client component can read it anyway.

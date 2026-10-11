@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { sealSession, encodeSession, SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/session";
+import { sealSession, encodeSession, SESSION_TTL_SECONDS } from "@/lib/session";
+import { clearHostCookie, readHostCookie, setHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 import { sanitizeReturnTo } from "@/lib/returnTo";
 
 // OIDC callback: verify state, exchange the code (with the PKCE verifier) for tokens, resolve the
@@ -22,7 +23,7 @@ function origin(req: NextRequest): string {
 
 function fail(req: NextRequest, reason: string) {
   const res = NextResponse.redirect(new URL(`/login?error=${reason}`, origin(req)));
-  res.cookies.set("oidc_pkce", "", { maxAge: 0, path: "/" });
+  clearHostCookie(res.cookies, HOST_COOKIES.pkce);
   return res;
 }
 
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const [verifier, savedState, returnB64] = (req.cookies.get("oidc_pkce")?.value ?? "").split(".");
+  const [verifier, savedState, returnB64] = (readHostCookie(req.cookies, HOST_COOKIES.pkce) ?? "").split(".");
   if (!code || !state || !verifier || state !== savedState) return fail(req, "sso");
 
   let returnTo = "/";
@@ -74,17 +75,11 @@ export async function GET(req: NextRequest) {
     encodeSession({ mode: "oidc", userId, accessToken, refreshToken: tok.refresh_token ?? "", expiresAt }),
   );
   const res = NextResponse.redirect(new URL(returnTo, origin(req)));
-  res.cookies.set(SESSION_COOKIE, sealed, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: process.env.NODE_ENV === "production",
-    // Absolute lifetime on the cookie attribute (fault register finding 08). This alone only
-    // stops the BROWSER from replaying it past this point — the load-bearing half is the signed
-    // `exp` inside the payload (see session.ts/session-server.ts), which a stolen cookie value
-    // cannot outrun regardless of what the client does with this attribute.
-    maxAge: SESSION_TTL_SECONDS,
-  });
-  res.cookies.set("oidc_pkce", "", { maxAge: 0, path: "/" });
+  // Absolute lifetime on the cookie attribute (fault register finding 08). This alone only
+  // stops the BROWSER from replaying it past this point — the load-bearing half is the signed
+  // `exp` inside the payload (see session.ts/session-server.ts), which a stolen cookie value
+  // cannot outrun regardless of what the client does with this attribute.
+  setHostCookie(res.cookies, HOST_COOKIES.session, sealed, { maxAge: SESSION_TTL_SECONDS });
+  clearHostCookie(res.cookies, HOST_COOKIES.pkce);
   return res;
 }

@@ -2,14 +2,14 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-// SESSION_COOKIE is exported from lib/session (not session-server, which is
-// the request-context half) — mirrors src/app/login/actions.ts.
-import { SESSION_COOKIE } from "@/lib/session";
+import { clearHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 import { getPrefs, writePrefs, type Density, type Theme, type Width } from "@/lib/prefs";
 
 export async function logout(): Promise<void> {
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, "", { maxAge: 0, path: "/" });
+  // Through the helper, not a bare `maxAge: 0`: in production the cookie is `__Host-gaiada_session`,
+  // and a clear without `Secure` + `Path=/` is ignored by the browser — logout would silently fail.
+  clearHostCookie(jar, HOST_COOKIES.session);
   redirect("/login");
 }
 

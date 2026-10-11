@@ -116,6 +116,18 @@ server-only readers with a `*Actions.ts` sibling. Every actions file follows one
 - Active company = `gaiada_tenant` cookie validated against `me.companies`, falling back to the
   first (`lib/tenant.ts`). Nearly every helper takes `(userId, tenantId)`.
 - `gaiada_prefs` cookie: `density` · `width` · `theme` (`auto | light | dark`).
+- **`__Host-` cookies (B0).** The session, PKCE, Google-OAuth-pending and tenant-context cookies
+  (`gaiada_session`, `oidc_pkce`, `sm_google_oauth_pending`, `gaiada_tenant`, `gaiada_portal_tenant`,
+  `gaiada_portal_client`, `gaiada_pm_scope`) are named and written ONLY through `lib/cookieNames.ts`
+  (`setHostCookie` / `readHostCookie` / `clearHostCookie`): `__Host-<name>` + `Secure` in production,
+  the bare name under `next dev` (so e2e `addCookies({ name: "gaiada_tenant" })` still works). Never
+  spell one as a literal, never `jar.delete()` one (a `__Host-` clear needs `Secure` + `Path=/`);
+  `cookieNames.test.ts` fails on a literal. No fallback to the bare name in production, by design.
+- **Origin check (B0).** `proxy.ts` refuses POST/PUT/PATCH/DELETE whose `Origin` is not in
+  `ALLOWED_ORIGINS` (else `PUBLIC_ORIGIN`, else the request's own origin) with a 403
+  `{"error":"origin_not_allowed"}`; rules in `lib/originCheck.ts`. A new browser-POST callback from a
+  third party needs an exact-path entry in `ORIGIN_CHECK_EXEMPT_PATHS`. `next.config.ts` also sends
+  `frame-ancestors 'self'` + `X-Frame-Options: SAMEORIGIN` on every route.
 
 ### Authorization is mirrored, not owned
 `lib/rbac.ts` is the UI capability model (`Role` → `Capability[]`, `can(me, cap, companyId?)`,

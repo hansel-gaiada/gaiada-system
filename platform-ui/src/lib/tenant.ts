@@ -2,12 +2,11 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Me } from "./platform";
-
-const COOKIE = "gaiada_tenant";
+import { readHostCookie, setHostCookie, HOST_COOKIES } from "./cookieNames";
 
 export async function getActiveTenant(me: Me): Promise<string | null> {
   const jar = await cookies();
-  const raw = jar.get(COOKIE)?.value;
+  const raw = readHostCookie(jar, HOST_COOKIES.tenant);
   if (raw && me.companies.some((c) => c.id === raw)) return raw;
   return me.companies[0]?.id ?? null;
 }
@@ -23,11 +22,6 @@ function safeReturn(raw: FormDataEntryValue | null): string {
 export async function switchTenant(formData: FormData): Promise<void> {
   const id = String(formData.get("tenantId") ?? "");
   const jar = await cookies();
-  jar.set(COOKIE, id, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: process.env.NODE_ENV === "production",
-  });
+  setHostCookie(jar, HOST_COOKIES.tenant, id);
   redirect(safeReturn(formData.get("return")));
 }

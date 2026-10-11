@@ -55,5 +55,24 @@ const nextConfig: NextConfig = {
     // (Named `middlewareClientMaxBodySize` before Next 16.)
     proxyClientMaxBodySize: 520 * 1024 * 1024,
   },
+  // FRAMING (B0, docs/plans/2026-10-11-erp-names-on-gaiada-com.md §3). On `erp.gaiada.com` every
+  // `*.gaiada.com` page is same-site, and nginx's `X-Frame-Options: SAMEORIGIN` covers only requests
+  // that pass through nginx. Set here too, so the app refuses to be framed by anything but itself
+  // however it is reached. `frame-ancestors 'self'` (not 'none') because the ERP frames its own pages
+  // (`/print`, the mail viewer). ONLY `frame-ancestors`: any other CSP directive here would start
+  // governing scripts and styles, which is its own change with its own testing.
+  // nginx sends the same `X-Frame-Options: SAMEORIGIN`; two identical values are valid (the HTML
+  // spec de-duplicates them), two DIFFERENT values would block every frame, so keep them equal.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
+      },
+    ];
+  },
 };
 export default nextConfig;

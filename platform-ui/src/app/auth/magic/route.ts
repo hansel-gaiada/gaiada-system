@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { sealSession, encodeSession, SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/session";
+import { sealSession, encodeSession, SESSION_TTL_SECONDS } from "@/lib/session";
+import { setHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 
 // MAIL-10 (design §9) — the landing page a clicked magic-link email opens. Consumes the token
 // against platform-nest's single-use `POST /auth/magic-link/consume`, then mints the same cookie
@@ -62,12 +63,8 @@ export async function GET(req: NextRequest) {
   // one place a session-shaped secret is most likely to be forwarded or archived. It is still the
   // "dev" cookie SHAPE (a magic link is a login convenience, not an IdP session — see this file's
   // header); the envelope only adds iat/exp, it does not change which mode this is.
-  out.cookies.set(SESSION_COOKIE, sealSession(encodeSession({ mode: "dev", userId })), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
+  setHostCookie(out.cookies, HOST_COOKIES.session, sealSession(encodeSession({ mode: "dev", userId })), {
     maxAge: SESSION_TTL_SECONDS,
-    secure: process.env.NODE_ENV === "production",
   });
   return out;
 }

@@ -7,6 +7,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import { clearHostCookie, readHostCookie, setHostCookie, HOST_COOKIES } from "./cookieNames";
+import { sanitizeReturnTo } from "./returnTo";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
@@ -20,7 +22,8 @@ import {
   type EngagementScope,
 } from "./searchMarketing";
 import {
-  isGoogleProvider,
+  parseGoogleOAuthPending,
+  type GoogleOAuthPending,
   type AuditTriageStatus, type KeywordImportResult, type KeywordEmbedResult, type KeywordClusterResult,
   type CampaignPlanResult, type RsaDraftResponse, type NegativesProposalResponse,
   type RankPullBatchResult, type MetricsPullBatchResult,
@@ -695,7 +698,8 @@ export async function pullKeywordMetrics(
 // `search.manage` gates every write below (starting/refreshing/revoking/binding a connection),
 // matching this file's own "same baseline capability as drafting properties/engagements" convention
 // — Cerbos's real gate is `resource_search_property` + `update`, elevated no further than that.
-const GOOGLE_OAUTH_PENDING_COOKIE = "sm_google_oauth_pending";
+// The pending-flow cookie is `HOST_COOKIES.googleOAuthPending` (`__Host-sm_google_oauth_pending` in
+// production) — named, written, read and cleared through `lib/cookieNames.ts`.
 
 export type StartGoogleAuthResult = { ok: boolean; error?: string };
 
@@ -731,16 +735,11 @@ export async function startGoogleAuthorization(
     throw e;
   }
   const jar = await cookies();
-  jar.set(GOOGLE_OAUTH_PENDING_COOKIE, JSON.stringify({ provider, returnPath }), {
-    httpOnly: true, sameSite: "lax", path: "/", maxAge: 600,
-    secure: process.env.NODE_ENV === "production",
+  // `returnPath` is validated on the way in as well as on the way out (parseGoogleOAuthPending).
+  setHostCookie(jar, HOST_COOKIES.googleOAuthPending, JSON.stringify({ provider, returnPath: sanitizeReturnTo(returnPath) }), {
+    maxAge: 600,
   });
   redirect(started.authorizeUrl);
-}
-
-export interface GoogleOAuthPending {
-  provider: GoogleProvider;
-  returnPath: string;
 }
 
 /** Reads (and clears) the {provider, returnPath} stashed by `startGoogleAuthorization` above —
@@ -750,16 +749,11 @@ export interface GoogleOAuthPending {
  *  fall back to a safe default return path rather than trust an absent value. */
 export async function consumeGoogleOAuthPending(): Promise<GoogleOAuthPending | null> {
   const jar = await cookies();
-  const raw = jar.get(GOOGLE_OAUTH_PENDING_COOKIE)?.value;
-  jar.delete(GOOGLE_OAUTH_PENDING_COOKIE);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as { provider?: string; returnPath?: string };
-    if (!isGoogleProvider(parsed.provider) || typeof parsed.returnPath !== "string" || !parsed.returnPath.startsWith("/")) return null;
-    return { provider: parsed.provider, returnPath: parsed.returnPath };
-  } catch {
-    return null;
-  }
+  const raw = readHostCookie(jar, HOST_COOKIES.googleOAuthPending);
+  // Not `jar.delete()`: that sends neither `Secure` nor `Path=/`, and a `__Host-` cookie ignores a
+  // clear without them.
+  clearHostCookie(jar, HOST_COOKIES.googleOAuthPending);
+  return parseGoogleOAuthPending(raw);
 }
 
 export type GoogleConnectionMutateResult = { ok: boolean; error?: string; connection?: GoogleConnectionView };

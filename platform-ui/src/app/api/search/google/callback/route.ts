@@ -4,6 +4,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getMe, platformFetch, PlatformError } from "@/lib/platform";
 import { consumeGoogleOAuthPending } from "@/lib/searchMarketingActions";
 import type { GoogleConnectionView } from "@/lib/searchMarketingShared";
+import { sanitizeReturnTo } from "@/lib/returnTo";
 
 // SM-25a's front-end half — search-google-oauth.controller.ts's own header note names this
 // requirement explicitly: "the URL registered as Google's redirect_uri therefore points at a fixed,
@@ -34,7 +35,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   const errorDescription = reqUrl.searchParams.get("error_description");
 
   const pending = await consumeGoogleOAuthPending();
-  const returnPath = pending?.returnPath ?? "/departments";
+  // Re-validated here, at the point the redirect is issued (UI-01's rule), even though
+  // `parseGoogleOAuthPending` already did: `new URL("//evil.example", origin)` leaves the site.
+  const returnPath = sanitizeReturnTo(pending?.returnPath ?? "/departments");
 
   const finish = (status: string, detail?: string) => {
     const url = new URL(returnPath, origin);
