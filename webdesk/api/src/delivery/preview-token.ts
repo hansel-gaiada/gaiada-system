@@ -51,8 +51,9 @@ export function allowedPreviewOrigin(origin: string | null | undefined, domains:
 /**
  * The path with a preview token (or, WSK-43a, a media upload token) replaced by `:token`. For log lines and
  * problem `instance` members: a capability must not be copied into logs or error bodies that outlive the request.
+ * `placeholder` is what stands in for the token (default `:token`; the telemetry exporter passes `[redacted]`).
  */
-export function redactPreviewToken(path: string): string {
+export function redactPreviewToken(path: string, placeholder = ":token"): string {
   // ["", "v1", "t", <slug>, "preview", <token>, ...]. The fourth segment is compared DECODED, as the router
   // does, so `%70review` is redacted too.
   const parts = path.split("/");
@@ -65,7 +66,7 @@ export function redactPreviewToken(path: string): string {
   }
   const lower = segment.toLowerCase();
   if (lower === "preview") {
-    parts[5] = ":token";
+    parts[5] = placeholder;
     return parts.join("/");
   }
   // WSK-43a: `/v1/t/<slug>/media/upload/<token>` is a bearer credential too (the media upload token).
@@ -78,7 +79,7 @@ export function redactPreviewToken(path: string): string {
       return path;
     }
     if (sub.toLowerCase() === "upload") {
-      parts[6] = ":token";
+      parts[6] = placeholder;
       return parts.join("/");
     }
   }
