@@ -38,21 +38,27 @@ describe("parseWebsiteAccessList", () => {
 });
 
 describe("staff-side mirror of who may manage", () => {
-  it("website editor: company_admin, manager (this company) and a global platform_admin", () => {
+  it("website editor: company_admin, manager, owner (this company) and a global platform_admin", () => {
     expect(canManageWebsiteEditor(me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
     expect(canManageWebsiteEditor(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
+    expect(canManageWebsiteEditor(me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
     expect(canManageWebsiteEditor(me([{ role: "platform_admin", scopeType: "global", scopeId: null }]), "co-a")).toBe(true);
   });
 
-  it("admin: NOT a manager (manage_admin has no manager rule)", () => {
+  it("admin: company_admin, owner and a global platform_admin; NOT a manager (manage_admin has no manager rule)", () => {
     expect(canManageClientAdmin(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(false);
     expect(canManageClientAdmin(me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
+    expect(canManageClientAdmin(me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]), "co-a")).toBe(true);
+    expect(canManageClientAdmin(me([{ role: "platform_admin", scopeType: "global", scopeId: null }]), "co-a")).toBe(true);
   });
 
-  it("owner is NOT included: it is permission-native and the server refuses it (docs §16i), so it gets the read-only list", () => {
+  it("owner follows company_admin: both controls, in the company it owns and no other (docs §16i, PERMISSION-CONTRACT §27)", () => {
     const owner = me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]);
-    expect(canManageWebsiteEditor(owner, "co-a")).toBe(false);
-    expect(canManageClientAdmin(owner, "co-a")).toBe(false);
+    expect(canManageWebsiteEditor(owner, "co-a")).toBe(true);
+    expect(canManageClientAdmin(owner, "co-a")).toBe(true);
+    expect(canManageWebsiteEditor(owner, "co-b")).toBe(false);
+    expect(canManageClientAdmin(owner, "co-b")).toBe(false);
+    expect(canManageWebsiteEditor(owner, null)).toBe(false);
   });
 
   it("never for a member, a viewer or a client, nor for another company's admin", () => {

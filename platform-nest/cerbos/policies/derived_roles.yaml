@@ -1426,6 +1426,30 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.client_contact.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # WSK-D60 follow-up (2026-10-12) — the two client-website grant actions, for the permission-native `owner`.
+    # Plain global-or-company mirrors, same shape as perm_integration_connection_manage (IAM-14c). The keys
+    # (core.client_contact.manage_website_editor / manage_admin) were catalogued by WSK-49f with their bundle
+    # rows (company_admin, owner, platform_admin; manager for website_editor only) but deliberately given no
+    # mirror there, so `owner` -- which has ZERO role rules and reaches a kind only through a perm_* arm --
+    # was refused both. The RULES in resource_client_contact.yaml restrict these mirrors to resources that
+    # carry NO clientId (the STAFF route's shape), so a permission holder can never ride the PORTAL arm.
+    # These derived roles hold no `variables.local`, no attribute gate: the narrowing lives in the rule.
+    - name: perm_client_contact_manage_admin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.client_contact.manage_admin" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_client_contact_manage_website_editor
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.client_contact.manage_website_editor" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     - name: perm_client_contact_read
       parentRoles: ["user"]
       condition:

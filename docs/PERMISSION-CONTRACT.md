@@ -1425,8 +1425,8 @@ the EXISTING `client_contact` kind. Catalog 416 -> 418 pairs, 401 -> 403 grantab
 |---|---|
 | Role `client_website_editor` | A role stored as DATA, scoped to ONE client record: `user_roles.scope_type = 'client'`, `scope_id = clients.id` (new scope type; the shape CHECK requires a uuid). **No bundle (0 `role_permissions` rows) and NO `perm_*` mirror — permanently.** A flat catalog key cannot express "this one client" and would over-grant to every client. Checked by the attribute condition in `derived_roles.yaml` (grant's client == `resource.attr.clientId`, grant's tenant == `resource.attr.tenantId`). It reaches the principal only while its holder is an ACTIVE client-wide contact of that client. |
 | Capability `admin` | `client_contacts.capability IN ('signer','viewer','admin')`. Assigned ONLY by staff (`manage_admin`). Confers one power of its own: granting `client_website_editor` for its OWN client. **Implies signer** (owner ruling 2026-10-11): every signer test (`portal-scope` `canSign`, `client-notify` signature recipients, `canEditCentre`) accepts `admin`; a viewer still cannot sign. Removing admin takes `{to:'signer'\|'viewer'}`, default `viewer`. |
-| `core.client_contact.manage_website_editor` | sensitive, role-arm only: platform_admin, company_admin, owner, manager (+ the attribute-gated `client_contact_admin` derived role, own client only). |
-| `core.client_contact.manage_admin` | sensitive, role-arm only: platform_admin, company_admin, owner. NO client arm. |
+| `core.client_contact.manage_website_editor` | sensitive: platform_admin, company_admin, owner, manager (+ the attribute-gated `client_contact_admin` derived role, own client only). Role arm for company_admin/manager; **owner reaches it through the permission arm added in §27** (it was role-arm only here, which refused `owner`). |
+| `core.client_contact.manage_admin` | sensitive: platform_admin, company_admin, owner. NO client arm. Role arm for company_admin; **owner reaches it through the permission arm added in §27**. |
 | Role bundles | +7 pairs (1818 -> 1825): platform_admin +2, company_admin +2, owner +2 (it mirrors company_admin both ways), manager +1. |
 
 **Guards, and where each lives.** The grant is written in exactly one place (`grantClientWebsiteEditor` in `admin/grant-write.service.ts`,
@@ -1497,3 +1497,47 @@ staff role). **Restart `gaiada-test-cerbos` and the live sidecar after deploying
 `client-website-editor-cerbos.test.ts` (49f's derived-role matrix, un-skipped now that a rule consumes the role), and a 282-row probe
 matrix (every staff tier unchanged, the client rows above, the 49f `client_contact` rows) run against Cerbos 0.54.0: ALL ROWS AS EXPECTED.
 The BFF's behaviour (scope isolation, no egress on a refusal, D58 flows, the `ce` claim) is `src/modules/webdev/webdesk-client-website.test.ts`.
+
+## 27. WSK-D60 follow-up — `owner` may grant a client's website access and the client `admin` capability (2026-10-12)
+
+**The gap.** WSK-49f catalogued `core.client_contact.manage_website_editor` / `manage_admin` and bundled them (company_admin, owner,
+platform_admin; manager for the website editor only), but wired them role-arm only. `owner` is permission-native (IAM-04c §3: zero
+role rules, a kind is reached only through a `perm_*` derived role), so the keys sat in its bundle and nothing in the policy read them:
+an owner was refused both actions, although WSK-D60 says Gaiada staff may.
+
+**The fix: policy only, no new key and no migration.** Both keys, their `permission-groups.json` entries (advancedOnly), their bundle rows
+(owner mirrors company_admin) and `role-permission-bundles.json` were already in place from 202610110520, so catalog counts, bundle counts
+and every pinned count literal are UNCHANGED (422 pairs, 407 grantable, 196 sensitive, 102 kinds; verified by the pinned-count suites,
+not edited). What was missing is the arm that reads them:
+
+| Artifact | Addition |
+|---|---|
+| `derived_roles.yaml` | `perm_client_contact_manage_website_editor`, `perm_client_contact_manage_admin`: plain global-or-company mirrors of exactly their own key (`g.scopeType == "global" \|\| (company && g.scopeId == resource.attr.tenantId)`), the shape of IAM-14c's `perm_integration_connection_manage`. No `variables.local`, no attribute gate. |
+| `resource_client_contact.yaml` | Two new ALLOW rules appended after every existing rule (which are byte-identical): one per action, `derivedRoles: [<its perm_*>]`, condition `variables.inTenant && variables.notLow && request.resource.attr.clientId == ""`. |
+
+**Why `clientId == ""` (the portal arm stays closed to a key holder).** The STAFF routes send no `clientId`; the PORTAL routes send the
+route's `clientId`, and that attribute is what lets the client-admin arm match. A permission key is a company-level staff authority, never a
+portal one, so the mirror applies to the unfed (staff) shape only. It is therefore NARROWER than the company_admin / manager role arms (which
+match with or without a `clientId`), which the mirror-reach invariant (`iam-04-reg1-mirror-reach-invariant.test.ts`) allows: a mirror may be
+narrower than every holder's role arm, never wider. A key holder sending a `clientId` is a DENY, never a widening. The portal handler's own
+scope check (`resolvePortalScope` + the target contact's row) is a second wall that does not depend on this rule. `cerbos.ts` defaults
+`clientId` to `""`, so the comparison is always over a present string.
+
+**Who holds the keys (unchanged from 202610110520).** manage_website_editor: platform_admin (via `*`), company_admin, manager (role arms),
+owner (permission arm). manage_admin: platform_admin (via `*`), company_admin (role arm), owner (permission arm). NOT manager, member,
+viewer or any client role.
+
+**`ui_grantable` is deliberately left `true` (both keys, already `advancedOnly` in `permission-groups.json`).** Only `portal.*` and the
+relationship class are non-grantable, and `assertRoleUiGrantable` refuses to attach ANY role whose bundle holds a non-grantable key to a
+position: flipping these two to `false` would make `company_admin`, `manager` and `owner` unattachable to positions. No runtime write path
+composes a role's permissions today (`role_permissions` is migration-only data), so a UI-editable role cannot mint these keys; when Phase 4
+adds custom-role composition, that surface must treat these two keys as sensitive (they are `sensitive: true`).
+
+**Restart `gaiada-test-cerbos` and the live sidecar after deploying the two policy files** (nothing hot-reloads).
+
+**Proof.** `client-website-editor-cerbos.test.ts` (structural pins of both perm rules and derived roles + live decisions for a perm-only
+principal: allowed in its own company on the staff shape; denied in another company, on the portal shape, at low assurance, without the
+tenant in `companies`, with the other action's key only; manager keeps `manage_admin` denied), `core/client-website-access.test.ts` (an
+`owner` assembled from the REAL migrated bundle grants/revokes the website editor and assigns/removes admin over HTTP, audited; an owner of
+another company and an owner on the portal route are refused), and the live probe matrix against Cerbos 0.54.0 (the new rows FAIL on the
+previous policy and pass on this one).
