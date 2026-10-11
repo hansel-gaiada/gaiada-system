@@ -246,75 +246,7 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-      # ── GHCR RETENTION (2026-08-04) ───────────────────────────────────────────────────────────
-      # Nothing has ever pruned the REGISTRY. The VPS side is pruned on every deploy (added after a
-      # full disk rolled back a healthy release), but each release pushed 9 more images to GHCR and
-      # none were ever removed: 594 versions across 9 private packages by 2026-08-04. Private package
-      # storage is metered, the free allowance is 500 MB, and `report-renderer` alone carries Chromium
-      # — so the account hit its spending limit and EVERY Actions job stopped starting, which reads as
-      # a broken pipeline rather than a full disk in someone else's datacentre.
-      #
-      # ⚠ 9 VERSIONS = 3 RELEASES. Every release pushes THREE versions per package:
-      #     alpha-01.015.0036a                  the image
-      #     sha256-<imageDigest>.sig            cosign signature
-      #     sha256-<imageDigest>.att            attested SBOM
-      # So this number is releases × 3, and reading it as "keep 9 releases" is the mistake to avoid.
-      # `min-versions-to-keep: 3` would keep ONE release and delete the tag currently running on the
-      # box — the state a rollback needs most.
-      #
-      # The .sig is load-bearing, not decorative: deploy.yml VERIFIES the cosign signature before it
-      # deploys or rolls back, so a tag whose .sig has been pruned can no longer be deployed to at all.
-      # Any change to this number must stay a multiple of 3 for that reason.
-      #
-      # 3 releases is the owner's call (2026-08-04) to stay inside the free Packages allowance. It is a
-      # real trade: rollback now reaches two cuts back, not twelve. If a regression is noticed late,
-      # the tag to roll back to may already be gone — re-cut from git instead.
-      #
-      # `continue-on-error`: a retention failure must never fail a release whose image is already
-      # pushed, signed and attested. Storage creeping back up is a smaller problem than a red release.
-      # ⛔ DISABLED 2026-10-11: "untagged" is NOT "unreferenced". On GHCR the CHILD manifests of an image INDEX are
-      # untagged versions, so `delete-only-untagged-versions` deleted the child of a still-tagged index:
-      # report-renderer's index sha256:249e5e4c (tagged v1.0.0-alpha.303 … .348, a reproducible build) lost its child
-      # sha256:f627854c, the tag became unpullable from GHCR (only the box's cache still had it), and 349's retag
-      # failed copying it. Re-enable only as a REFERENCE-AWARE prune (never delete a digest any tagged index lists).
-      - name: Prune old GHCR versions (keep the last 3 releases = 9 versions)
-        if: ${{ false }}
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          # `matrix.component` is a flat STRING (see the matrix above: `- wa-chat-bot`, ...), not an
-          # object — this must match how IMAGE is built (`gaiada-${{ matrix.component }}`) or it
-          # silently targets a package name that does not exist.
-          package-name: gaiada-${{ matrix.component }}
-          package-type: container
-          # 30 = 10 RELEASES × 3 artifacts. Raised from 9 (3 releases) on 2026-08-05: that number was
-          # chosen purely to fit inside the free PRIVATE Packages allowance, and the repo is public now,
-          # so storage is no longer the constraint — rollback range is. 3 releases meant a regression
-          # noticed late had no tag left to roll back to. Still a multiple of 3 for the reason below.
-          min-versions-to-keep: 30
-          # NEVER delete a TAGGED version. Added 2026-08-23 after `alpha-01.064.0140a` built and
-          # signed all ten components and then failed its own deploy with
-          # `MANIFEST_UNKNOWN: .../gaiada-wa-chat-bot/manifests/alpha-01.064.0140a` — this step runs
-          # inside build-sign, i.e. BEFORE the deploy job it feeds, and reported "Total versions
-          # deleted till now: 4".
-          #
-          # The header above already names the hazard ("a tag whose .sig has been pruned can no
-          # longer be deployed to at all") but nothing enforced it: with this input left at its
-          # `false` default and `ignore-versions` at `^$` (matching nothing), a release's own
-          # artifacts were eligible for deletion by the very job that produced them.
-          #
-          # Untagged versions are orphaned manifests and layers — exactly what garbage collection
-          # is for. Tagged versions are releases, their `.sig`s and their SBOMs, and deleting one
-          # destroys the ability to deploy or roll back to that cut. Retention now shrinks only by
-          # dropping untagged cruft; if storage ever becomes the constraint again, delete old tags
-          # deliberately rather than letting a prune step race a deploy.
-          delete-only-untagged-versions: true
-          # GITHUB_TOKEN can delete versions of a package OWNED BY this repo. These packages are
-          # user-namespace (`ghcr.io/hansel-gaiada/...`), and if they are not linked to the repository
-          # GitHub refuses and this step logs a 403 — which `continue-on-error` turns into a warning
-          # rather than a failed release. If that happens, mint a PAT with `delete:packages`, store it
-          # as the `GHCR_CLEANUP_TOKEN` secret, and it is used instead.
-          token: ${{ secrets.GHCR_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
+      # GHCR retention moved OUT of build-sign: see the `ghcr-prune` job at the bottom of this file.
 
   # WSK-69 - unchanged components: copy the previous release's signed image to the new tag, by DIGEST.
   # Nothing is rebuilt, re-signed or re-attested: the signature and SBOM attestation are bound to the
@@ -380,3 +312,50 @@ jobs:
     with:
       tag: ${{ github.event.inputs.tag || github.ref_name }}
     secrets: inherit
+
+  # ── GHCR RETENTION (reference-aware; rewritten 2026-10-11) ────────────────────────────────────
+  # History: nothing pruned the registry, private package storage hit the spending limit and every
+  # Actions job stopped starting (594 versions by 2026-08-04). A first prune (actions/delete-package-
+  # versions, `delete-only-untagged-versions`) then deleted the untagged CHILD manifest of a still-tagged
+  # index (report-renderer sha256:249e5e4c lost sha256:f627854c; the tag became unpullable from GHCR).
+  # "Untagged" is NOT "unreferenced". Also: deploy.yml verifies the cosign .sig/.att before deploy or
+  # rollback, so a tagged image whose .sig/.att is pruned is undeployable.
+  #
+  # scripts/ci/ghcr-prune.mjs protects (to a fixed point) every tagged version, every child of a protected
+  # index, the sha256-<digest>[.sig|.att] tags of protected digests, `subject`-linked manifests and the
+  # buildcache; it NEVER deletes a tagged version and skips a whole package on any API/registry error.
+  # Candidates are unreferenced AND older than 14 days.
+  #
+  # Runs only AFTER deploy succeeded (never races a release), and is DRY-RUN BY DEFAULT: the candidates
+  # are listed in the job log. To turn deletion on set the repository VARIABLE GHCR_PRUNE_DELETE to "1"
+  # (Settings > Secrets and variables > Actions > Variables); remove it or set it to anything else to
+  # return to dry-run. Check a dry run's candidate list before flipping it.
+  # `continue-on-error`: a retention failure must never fail a release that is already shipped.
+  ghcr-prune:
+    needs: [deploy]
+    if: ${{ !cancelled() && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # DELETE package versions (only used when GHCR_PRUNE_DELETE=1)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # GITHUB_TOKEN can only delete versions of packages linked to this repo; if GitHub answers 403 the
+      # package is reported as skipped. A PAT with `delete:packages` in the GHCR_CLEANUP_TOKEN secret is used if set.
+      - name: Prune unreferenced GHCR versions
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN || secrets.GITHUB_TOKEN }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+          PRUNE_DELETE: ${{ vars.GHCR_PRUNE_DELETE }}
+        run: |
+          if [ "$PRUNE_DELETE" = "1" ]; then
+            GHCR_PRUNE_CONFIRM=delete node scripts/ci/ghcr-prune.mjs --delete --min-age-days 14
+          else
+            echo "GHCR_PRUNE_DELETE != 1: DRY RUN (nothing is deleted)"
+            node scripts/ci/ghcr-prune.mjs --dry-run --min-age-days 14
+          fi
