@@ -49,6 +49,19 @@ this dev machine, observed once. `DEV-VERIFIED` — driven against the real thin
 **nothing in this directory reaches that bar**, because the real thing (Zone B's actual box) does
 not exist. Never read a clean parse or a green selftest here as more than what it is.
 
+## Capabilities and the pinned subnet (M4 F2/F3/F4)
+
+Every service in `docker-compose.aicenter.yml` runs `cap_drop: [ALL]` plus the minimum `cap_add` its image's
+entrypoint needs, each reasoned in a comment next to it: postgres (chown + gosu) `CHOWN DAC_OVERRIDE FOWNER SETGID
+SETUID`, redis (chown + setpriv) `CHOWN SETGID SETUID`, caddy `NET_BIND_SERVICE` (the binary carries that file
+capability, so it fails to exec without it), and none for the api and RustFS. The default network is pinned to
+`172.19.0.0/16`, which the host egress guard (`ops/host/webdesk-egress-guard.sh`) reads at boot: after any
+`docker compose down`, run `systemctl restart webdesk-host-deny`. redis, postgres and caddy are pinned by digest
+like RustFS (re-resolve with `docker buildx imagetools inspect <tag>`). `scripts/check-compose-hardening.mjs`
+audits the RESOLVED config in CI; `ops/probes/compose-boot-proof.sh` boots the real files on a throwaway project
+(own subnet, own port, temp-dir mounts) on a Linux host and checks `docker inspect` plus PID 1's effective caps.
+The api runs as root without `DAC_OVERRIDE`, so its two bind-mounted host files must be mode 0644.
+
 ## Compose-overlay lessons (carried over from the WITHDRAWN helios overlay, 2026-08-29)
 
 `docker-compose.helios.yml` and `nginx/webdesk-vhost.conf.template` were deleted when the owner
