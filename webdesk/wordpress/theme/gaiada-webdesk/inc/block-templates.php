@@ -12,30 +12,82 @@ declare(strict_types=1);
 namespace GaiadaWebDesk\Theme;
 
 /** An <img> whose src has already passed gaiada_safe_img_src(); an empty (refused) src omits the
- *  attribute. $url is NOT yet escaped here, $alt IS already escaped. */
-function gaiada_img_tag(string $url, string $alt): string
+ *  attribute. $url is NOT yet escaped here, $alt IS already escaped. $width/$height are emitted only
+ *  when they are positive integers (Astro passes media.width/height straight through). */
+function gaiada_img_tag(string $url, string $alt, mixed $width = null, mixed $height = null): string
 {
     $src = $url === '' ? '' : ' src="' . gaiada_h($url) . '"';
-    return "<img{$src} alt=\"{$alt}\" loading=\"lazy\">";
+    $dims = '';
+    if (is_int($width) && $width > 0) {
+        $dims .= ' width="' . $width . '"';
+    }
+    if (is_int($height) && $height > 0) {
+        $dims .= ' height="' . $height . '"';
+    }
+    return "<img{$src} alt=\"{$alt}\"{$dims} loading=\"lazy\">";
+}
+
+/** One vocabulary `media` value ({ url, alt?, width?, height? }) as an <img>. The url passes
+ *  gaiada_safe_img_src(), the alt gaiada_h(). */
+function gaiada_media_img(mixed $media): string
+{
+    $m = is_array($media) ? $media : [];
+    return gaiada_img_tag(
+        gaiada_safe_img_src($m['url'] ?? ''),
+        gaiada_h($m['alt'] ?? ''),
+        $m['width'] ?? null,
+        $m['height'] ?? null,
+    );
+}
+
+/** A vocabulary `media` value is a non-empty { url } object. */
+function gaiada_has_media(mixed $media): bool
+{
+    return is_array($media) && is_string($media['url'] ?? null) && $media['url'] !== '';
+}
+
+/** The inert JSON payload Astro emits for a Lexical `{ root }` document (RichText.astro,
+ *  Testimonial.astro): a <script type="application/json"> whose body cannot close the tag. */
+function gaiada_json_payload(mixed $value): string
+{
+    return '<script type="application/json">' . gaiada_safe_json_for_script($value) . '</script>';
 }
 
 /** @param array<string,mixed> $props */
 function gaiada_render_block_hero(array $props): string
 {
     $heading = gaiada_h($props['heading'] ?? '');
-    $subheading = gaiada_h($props['subheading'] ?? '');
-    return "<section class=\"gaiada-block gaiada-block-hero\"><h1>{$heading}</h1><p>{$subheading}</p></section>";
+    $html = "<section class=\"gaiada-block gaiada-block-hero\"><h1>{$heading}</h1>";
+    if (is_string($props['subheading'] ?? null) && $props['subheading'] !== '') {
+        $html .= '<p>' . gaiada_h($props['subheading']) . '</p>';
+    }
+    if (gaiada_has_media($props['media'] ?? null)) {
+        $html .= gaiada_media_img($props['media']);
+    }
+    $ctaLabel = $props['ctaLabel'] ?? '';
+    $ctaHref = $props['ctaHref'] ?? '';
+    if (is_string($ctaLabel) && $ctaLabel !== '' && is_string($ctaHref) && $ctaHref !== '') {
+        $html .= '<a class="gaiada-hero-cta" href="' . gaiada_h(gaiada_safe_href($ctaHref)) . '">' . gaiada_h($ctaLabel) . '</a>';
+    }
+    return $html . '</section>';
 }
 
 /** @param array<string,mixed> $props */
 function gaiada_render_block_richText(array $props): string
 {
-    // richText's `value` is EDITOR-CONTROLLED HTML and is NOT sanitised at write time: the WebDesk API
-    // validates shape only (a string or a `{ root }` object), so this renderer sanitises it here, via
-    // the one route gaiada_sanitize_html() (wp_kses_post() inside WordPress, htmlspecialchars() outside).
-    // RichText.astro does the same with an allow-list sanitiser (M6-P5c).
-    $value = gaiada_sanitize_html(is_string($props['value'] ?? null) ? $props['value'] : '');
-    return "<div class=\"gaiada-block gaiada-block-richtext\">{$value}</div>";
+    // richText's `content` is a RichTextValue: a plain string OR a Lexical `{ root }` document. Both are
+    // EDITOR-CONTROLLED and NOT sanitised at write time (the WebDesk API validates shape only), so this
+    // renderer makes them inert here. A string is sanitised via the one route gaiada_sanitize_html()
+    // (wp_kses_post() inside WordPress, htmlspecialchars() outside); a `{ root }` document is embedded as
+    // an inert JSON payload via gaiada_safe_json_for_script(), exactly as RichText.astro does (M6-P5c).
+    $content = $props['content'] ?? null;
+    $body = '';
+    if (is_string($content)) {
+        $body = gaiada_sanitize_html($content);
+    } elseif (is_array($content) && array_key_exists('root', $content)) {
+        $body = gaiada_json_payload($content);
+    }
+    return "<div class=\"gaiada-block gaiada-block-richtext\">{$body}</div>";
 }
 
 /** @param array<string,mixed> $props */
@@ -44,9 +96,10 @@ function gaiada_render_block_gallery(array $props): string
     $items = is_array($props['items'] ?? null) ? $props['items'] : [];
     $html = '<div class="gaiada-block gaiada-block-gallery">';
     foreach ($items as $item) {
-        $url = gaiada_safe_img_src(is_array($item) ? ($item['url'] ?? '') : '');
-        $alt = gaiada_h(is_array($item) ? ($item['alt'] ?? '') : '');
-        $html .= gaiada_img_tag($url, $alt);
+        $html .= gaiada_media_img($item);
+    }
+    if (is_string($props['caption'] ?? null) && $props['caption'] !== '') {
+        $html .= '<p class="gaiada-gallery-caption">' . gaiada_h($props['caption']) . '</p>';
     }
     return $html . '</div>';
 }
@@ -54,9 +107,24 @@ function gaiada_render_block_gallery(array $props): string
 /** @param array<string,mixed> $props */
 function gaiada_render_block_cta(array $props): string
 {
-    $label = gaiada_h($props['label'] ?? '');
-    $href = gaiada_h(gaiada_safe_href($props['href'] ?? '#'));
-    return "<div class=\"gaiada-block gaiada-block-cta\"><a href=\"{$href}\">{$label}</a></div>";
+    $heading = gaiada_h($props['heading'] ?? '');
+    $label = gaiada_h($props['buttonLabel'] ?? '');
+    $href = gaiada_h(gaiada_safe_href($props['buttonHref'] ?? '#'));
+    $html = "<div class=\"gaiada-block gaiada-block-cta\"><h2>{$heading}</h2>";
+    if (is_string($props['body'] ?? null) && $props['body'] !== '') {
+        $html .= '<p>' . gaiada_h($props['body']) . '</p>';
+    }
+    return $html . "<a href=\"{$href}\">{$label}</a></div>";
+}
+
+/** One vocabulary `relation` value ({ collection, slug }) as a list item carrying the pointer, as
+ *  FeatureGrid.astro / Faq.astro render it: the slug is the visible text. */
+function gaiada_relation_item(mixed $rel, string $class): string
+{
+    $r = is_array($rel) ? $rel : [];
+    $collection = gaiada_h($r['collection'] ?? '');
+    $slug = gaiada_h($r['slug'] ?? '');
+    return "<li class=\"{$class}\" data-relation-collection=\"{$collection}\" data-relation-slug=\"{$slug}\">{$slug}</li>";
 }
 
 /** @param array<string,mixed> $props */
@@ -64,40 +132,60 @@ function gaiada_render_block_featureGrid(array $props): string
 {
     $items = is_array($props['items'] ?? null) ? $props['items'] : [];
     $html = '<div class="gaiada-block gaiada-block-featuregrid">';
-    foreach ($items as $item) {
-        $title = gaiada_h(is_array($item) ? ($item['title'] ?? '') : '');
-        $body = gaiada_h(is_array($item) ? ($item['body'] ?? '') : '');
-        $html .= "<div class=\"gaiada-feature\"><h3>{$title}</h3><p>{$body}</p></div>";
+    if (is_string($props['heading'] ?? null) && $props['heading'] !== '') {
+        $html .= '<h2>' . gaiada_h($props['heading']) . '</h2>';
     }
-    return $html . '</div>';
+    $html .= '<ul>';
+    foreach ($items as $item) {
+        $html .= gaiada_relation_item($item, 'gaiada-feature');
+    }
+    return $html . '</ul></div>';
 }
 
 /** @param array<string,mixed> $props */
 function gaiada_render_block_form(array $props): string
 {
-    $formId = gaiada_h($props['formId'] ?? '');
-    return "<div class=\"gaiada-block gaiada-block-form\" data-gaiada-form-id=\"{$formId}\"></div>";
+    // `formKey` is a relation value { collection, slug } (FormBlock.astro); the slug is the form id.
+    $key = is_array($props['formKey'] ?? null) ? $props['formKey'] : [];
+    $collection = gaiada_h($key['collection'] ?? '');
+    $slug = gaiada_h($key['slug'] ?? '');
+    return "<div class=\"gaiada-block gaiada-block-form\" data-gaiada-form-collection=\"{$collection}\" data-gaiada-form-id=\"{$slug}\"></div>";
 }
 
 /** @param array<string,mixed> $props */
 function gaiada_render_block_testimonial(array $props): string
 {
-    $quote = gaiada_h($props['quote'] ?? '');
+    // `quote` is a richtext value. Testimonial.astro renders a string as escaped text and anything else
+    // as an inert JSON payload; mirrored here.
+    $quote = $props['quote'] ?? '';
+    $quoteHtml = is_string($quote) ? gaiada_h($quote) : gaiada_json_payload($quote);
     $author = gaiada_h($props['author'] ?? '');
-    return "<blockquote class=\"gaiada-block gaiada-block-testimonial\">{$quote}<cite>{$author}</cite></blockquote>";
+    $html = "<blockquote class=\"gaiada-block gaiada-block-testimonial\">{$quoteHtml}<footer>";
+    if (gaiada_has_media($props['avatar'] ?? null)) {
+        $html .= gaiada_media_img($props['avatar']);
+    }
+    $html .= "<cite>{$author}</cite>";
+    if (is_string($props['role'] ?? null) && $props['role'] !== '') {
+        $html .= '<span class="gaiada-testimonial-role">' . gaiada_h($props['role']) . '</span>';
+    }
+    return $html . '</footer></blockquote>';
 }
 
 /** @param array<string,mixed> $props */
 function gaiada_render_block_faq(array $props): string
 {
+    // `items` are relation pointers ({ collection, slug }) to the `faqItem` collection, rendered as
+    // pointers (Faq.astro); there is no inline question/answer in the vocabulary.
     $items = is_array($props['items'] ?? null) ? $props['items'] : [];
     $html = '<div class="gaiada-block gaiada-block-faq">';
-    foreach ($items as $item) {
-        $q = gaiada_h(is_array($item) ? ($item['question'] ?? '') : '');
-        $a = gaiada_h(is_array($item) ? ($item['answer'] ?? '') : '');
-        $html .= "<details><summary>{$q}</summary><p>{$a}</p></details>";
+    if (is_string($props['heading'] ?? null) && $props['heading'] !== '') {
+        $html .= '<h2>' . gaiada_h($props['heading']) . '</h2>';
     }
-    return $html . '</div>';
+    $html .= '<ul>';
+    foreach ($items as $item) {
+        $html .= gaiada_relation_item($item, 'gaiada-faq-item');
+    }
+    return $html . '</ul></div>';
 }
 
 /** @param array<string,mixed> $props */
@@ -105,9 +193,11 @@ function gaiada_render_block_logoCloud(array $props): string
 {
     $logos = is_array($props['logos'] ?? null) ? $props['logos'] : [];
     $html = '<div class="gaiada-block gaiada-block-logocloud">';
+    if (is_string($props['heading'] ?? null) && $props['heading'] !== '') {
+        $html .= '<h2>' . gaiada_h($props['heading']) . '</h2>';
+    }
     foreach ($logos as $logo) {
-        $url = gaiada_safe_img_src(is_array($logo) ? ($logo['url'] ?? '') : '');
-        $html .= gaiada_img_tag($url, '');
+        $html .= gaiada_media_img($logo);
     }
     return $html . '</div>';
 }
