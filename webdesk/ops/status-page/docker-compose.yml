@@ -6,9 +6,9 @@
 # * renderer: reads sumopod's Prometheus (`prometheus:9090` on the obs network) and writes static
 #   index.html + status.json into a volume every 60 s. Its ONLY network is the obs network.
 # * web: Caddy serving that volume read-only, published ONLY on docker0's 172.17.0.1:18480. The
-#   owner's mimi Traefik routes status.erp.gaiada.com there via ONE file, traefik-erp-status.yml,
-#   copied as /home/ubuntu/mimi/infrastructure/tls/dynamic/erp-status.yml (WSK-D70). Never 0.0.0.0:
-#   on this box Docker's DNAT runs before ufw. Never mimi's network.
+#   shared erp-edge Traefik routes status.erp.gaiada.com there (WSK-D71; its route file is
+#   infra/sumopod/erp-edge/dynamic/erp-status.yml, and mimi only passes *.erp.gaiada.com through). Never
+#   0.0.0.0: on this box Docker's DNAT runs before ufw. Never mimi's network.
 name: erp-status
 
 services:
