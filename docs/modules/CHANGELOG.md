@@ -48,6 +48,7 @@ PV-1 (company context), rulings PV-D11 and PV-D14 to PV-D20. Tickets: `docs/plan
 - **Visual Markdown editor (WSK-45, D49).** TipTap on `markdown` fields. 305 of gaiada.com's 315 real bodies open visually and round-trip byte-identical; an unchanged body always saves the original bytes; the other 10 open as source with a plain notice. Placeholders stay verbatim.
 - **Preview (WSK-46).** A Preview button opens the draft on the site's own preview page, with honest states when preview isn't available yet.
 - **Media library (WSK-43c).** A Media tab in the Website workspace: upload straight to WebDesk with progress, alt text per language, tags, "where it's used", and delete refused while in use; a picker for media fields in the editor.
+- **Fix: a client editor stays in the portal.** A client contact granted `client_website_editor` (WSK-D60) was counted as staff, so they got the staff shell instead of the portal. Client-side roles are now one list (`CLIENT_SIDE_ROLES`), and holding one never makes someone staff.
 - Verified on the Linux gate (sumopod `m3r354`) and in Playwright (WebDesk suite 68/68 on the built app).
 
 ### platform-ui `0.85.0` - the staff menu follows the company: agency rows by vertical, Group on the root, Platform for operators (2026-10-11) - PROTOTYPED
