@@ -11,6 +11,59 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.87.0` - before the move to erp.gaiada.com: host-only `__Host-` cookies, an Origin check on every write, no framing; a signed agreement says so (2026-10-11) - PROTOTYPED
+
+ERP names Phase B0 (`docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §3). On `erp.gaiada.com` the ERP is same-site with every
+`*.gaiada.com` site, and it already is with the `*.gaiada.online` client staging sites, so a sibling could plant cookies and send
+same-site POSTs.
+
+- **Cookies.** The session, PKCE, OAuth-pending and four tenant-context cookies are named in one place (`src/lib/cookieNames.ts`):
+  `__Host-` in production (Secure, `Path=/`, no `Domain`), the plain name under `next dev`. Every clear carries the same attributes,
+  so logout really clears. No fallback read of the old names. **Everyone signs in again once on deploy**, and the company,
+  portal and PM-scope choices reset once.
+- **Origin check.** `src/proxy.ts` refuses a POST/PUT/PATCH/DELETE (server actions and route handlers) whose `Origin` is not in
+  `ALLOWED_ORIGINS` (else `PUBLIC_ORIGIN`) with 403 `{"error":"origin_not_allowed"}`; without an Origin it falls back to
+  `Sec-Fetch-Site`; a request with neither is a non-browser client and passes. No path is exempt. A test proves the matcher covers
+  every top-level route with Next's own matcher compiler.
+- **Framing.** `Content-Security-Policy: frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` from `next.config.ts`, so a
+  request that bypasses nginx is covered too.
+- **Open redirects closed:** the Google OAuth return path and the PM-scope `next` field go through `sanitizeReturnTo`.
+- **Next 16.3 regression (found by the portal e2e):** after signing an agreement the confirmation never showed, because 16.3
+  applies the post-action refresh and the form holding the message unmounted. The contract page now renders
+  "Signed — thank you" from the recorded signature (`contractSigningState`); the same for social-review decisions; the module
+  toggle's toast names what was submitted.
+- e2e: `e2e/appCookies.ts` plants the tenant cookie the way the app names it under `next start`.
+- **Verified on Linux** (sumopod, gate `m1pb`): 251 files / 4815 tests, `next build` on 16.3.8; full Playwright suite in CI mode: 152 passed; every one of the 57 failures fails identically on clean main (0 new), and the portal signing test that fails on clean main passes.
+
+### platform-nest `0.66.0` - accepts tokens from a list of issuers (ERP name move) (2026-10-11) - PROTOTYPED
+
+- `OIDC_ISSUER` is a comma-separated list (`src/auth/oidc-issuers.ts`); a token from ANY listed issuer verifies; the first entry is
+  used wherever one URL is needed. Validated at boot (empty entry, duplicate, non-URL, http except localhost/keycloak). During the
+  move: `https://erp.gaiada.com/idp/realms/gaiada,https://erp.gaiada.online/idp/realms/gaiada`.
+- **Verified on Linux:** 556 files / 7851 passed; the one red (`agency-lead-convert-race.db.test.ts`, "the racers never collided")
+  passed 3/3 alone; static gates and the IAM chain alignment green.
+
+### webdesk `0.6.0` - the control channel accepts a list of token issuers (2026-10-11) - DEV-VERIFIED
+
+- `WEBDESK_CONTROL_OIDC_ISSUER` is a comma-separated list; the JWKS derives from the FIRST issuer unless
+  `WEBDESK_CONTROL_OIDC_JWKS_URI` is set. Cut-over order `old,new` → `new,old` → `new`. 13 new pure unit tests (PR #14, GitHub CI
+  green); Linux gate webdesk-api 1101/0, migrations 435/0. No migration; the live swap needs only the image.
+
+### infra `0.10.0` - the ERP answers erp.gaiada.com; a scripted cut-over with automatic rollback; a reference-aware registry prune (2026-10-11) - PROTOTYPED
+
+- **nginx** (`infra/nginx/erp.gaiada.online.conf`, hand-applied by the cut-over): one server block for both names on the
+  `erp.gaiada.com` certificate (it covers both); `proxy_redirect` follows `$host`; `snippets/erp-legacy-redirect.{off,on}.conf`
+  switches a 301 for browser GET/HEAD on the legacy name, keeping `/api/webhooks/`, `/api/mail/`, `/n8n`, `/idp/` and ACME served.
+- **compose:** platform-ui gets `ALLOWED_ORIGINS` and binds `127.0.0.1:3005`.
+- **scripts/phaseb/**: `run-erp-name-cutover.sh` (operator) drives `erp-name-cutover.sh` (box) stage by stage with a real PKCE
+  login proof and a full rollback on any failure; `github-app-hook.cjs` moves the App webhook through GitHub's API. Runbook
+  `infra/runbooks/erp-name-cutover.md`. Nothing runs on deploy.
+- **release.yml:** the disabled `delete-package-versions` step is replaced by a `ghcr-prune` job after a green deploy:
+  `scripts/ci/ghcr-prune.mjs` protects the closure of every tagged digest (index children, `.sig`/`.att`, `sha256-<hex>`
+  referrers, `subject` links, buildcache) and deletes only unreferenced untagged versions older than 14 days; dry-run unless the
+  repo variable `GHCR_PRUNE_DELETE` is `1`. Real dry run 2026-10-11: 8 candidates across 11 packages, report-renderer's
+  `249e5e4c` and its referrers protected.
+
 ### platform-nest `0.65.0` - WebDesk in the ERP: the media library's authorisation, BFF and MCP tools; a draft preview action; client website-editor grants, and a client admin who also signs (2026-10-11) - DEV-VERIFIED
 
 WebDesk M3 (`docs/plans/2026-10-11-webdesk-m3-plan.md`), rulings WSK-D52, D53, D54, D60 (amended twice) in `docs/blueprints/webdesk-design-v2.md` §14.
