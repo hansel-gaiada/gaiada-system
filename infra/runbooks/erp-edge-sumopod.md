@@ -84,8 +84,10 @@ sudo ufw allow from "$ERP_EDGE_SUBNET" to 172.17.0.1 port 18742 proto tcp commen
 
 If a hop is refused although ufw allows it, Docker's inter-bridge isolation is dropping it: add the matching
 `DOCKER-USER` ACCEPT (`-s <caller subnet> -d <target bridge subnet> -p tcp --dport <container port> -j ACCEPT`),
-and record which hops needed it. The old mimi -> status-page rule that exists today stays until the cut-over
-completes and is then removed (step 9).
+and record which hops needed it. These ufw allows are a belt-and-braces default: a published port on `172.17.0.1`
+is reached through Docker's DNAT/FORWARD path ahead of ufw, which is why mimi reaches the status page today with NO
+ufw rule for 18480 (checked 2026-10-11 by the status page's owner). If a hop works without its allow, you may skip
+it; record which you added.
 
 ## 3. First start, and measuring mimi's source address
 
@@ -237,8 +239,8 @@ nc -vz -w 4 <sumopod public IP> 18443 || echo "closed (expected)"
 
 ## 8. After a verified cut-over
 
-* Remove the now-useless ufw rule for the old mimi -> `172.17.0.1:18480` path (the status page is now reached from
-  erp-edge's subnet): `sudo ufw status numbered`, delete that one rule, re-run check 7c.
+* There is no old mimi -> `172.17.0.1:18480` ufw rule to remove (none exists; the path ran through Docker's DNAT). Only
+  if `sudo ufw status numbered` shows one that you or someone else added, delete it and re-run check 7c.
 * Tell the session that owns the status page that its route now lives in `erp-edge/dynamic/erp-status.yml` and that
   its probe of `https://status.erp.gaiada.com/` goes through the passthrough.
 * Record the measured mimi source, which hops needed `DOCKER-USER` rules, and the verification output on the board.
@@ -249,8 +251,11 @@ nc -vz -w 4 <sumopod public IP> 18443 || echo "closed (expected)"
   by TLS-ALPN-01 **through mimi's passthrough**. Renewal therefore depends on mimi's `erp-passthrough.yml` staying
   in place, mimi keeping 443, and erp-edge running. If the owner removes the file, nothing fails loudly until a
   certificate expires.
-* Probe it: alert on `status.erp.gaiada.com` and `insights.erp.gaiada.com` certificate expiry below 14 days (the status
-  page's TLS check already sees the real certificate now), and a failed renewal shows as `ERR ... Unable to renew`
+* Probe it: alert on `status.erp.gaiada.com` and `insights.erp.gaiada.com` certificate expiry below 14 days. Today NOTHING probes
+  either name (the existing probes hit `api.erp.gaiada.com` on aicenter): after the cut-over, the status page's owner
+  adds `https://status.erp.gaiada.com/` and `https://insights.erp.gaiada.com/lib/kestrel.js` to sumopod's blackbox
+  probes (`probe_ssl_earliest_cert_expiry`), once the hairpin to the box's own public address is proven from the obs
+  network. A failed renewal shows as `ERR ... Unable to renew`
   in `docker logs erp-edge-traefik-1`.
 * State: the named volume `erp-edge_acme` holds the account key and certificates. Losing it means re-issuing (rate
   limits: 5 duplicate certificates per week per name). Back it up with the nightly job:
