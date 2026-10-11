@@ -19,10 +19,18 @@ export type Assurance = "low" | "linked" | "high";
 // retires `team`/`record` from it too, in the same change that removes migration 0100's DB-level
 // CHECK values' last writers (`teams.controller.ts`, the `team_lead` persona seeds) — the DB and
 // this TS union are back in agreement: both permit exactly `global | company | org_unit | project`.
+// WSK-49f (2026-10-11) widens both by ONE value, `client` (migration 202610110520): a grant anchored on a
+// `clients.id`, which only the `client_website_editor` role may carry (DB trigger + the grant-write choke point).
 export interface RoleGrant {
   role: string;
-  scopeType: "global" | "company" | "org_unit" | "project";
+  scopeType: "global" | "company" | "org_unit" | "project" | "client";
   scopeId: string | null;
+  /** WSK-49f. Only set on a `scopeType: "client"` grant (the `client_website_editor` role, WSK-D60): the
+   *  SERVING company tenant that client record lives in, read from the grantee's own ACTIVE client-wide
+   *  `client_contacts` row by `assemblePrincipal()` -- never from the grant row (which has no tenant
+   *  column) and never from a request. The derived role compares it with `resource.attr.tenantId`, so a
+   *  client scope is a (tenant, client) pair exactly as the ruling says. Absent on every other grant. */
+  scopeTenantId?: string;
 }
 
 /** IAM-03a: a single resolved (permission key, scope) a principal holds — the role→permission
@@ -33,7 +41,7 @@ export interface RoleGrant {
  *  company, not global ones; a global-scope `platform_admin` grant yields global-scope perms. */
 export interface PermissionGrant {
   key: string;
-  scopeType: "global" | "company" | "org_unit" | "project";
+  scopeType: "global" | "company" | "org_unit" | "project" | "client";
   scopeId: string | null;
 }
 
@@ -85,6 +93,14 @@ export interface Principal {
    *  cerbos.ts sends `?? []`, and the empty set denies. */
   rootCompanies?: string[];
   roles: RoleGrant[];
+  /** WSK-49f / WSK-D60 (amended). The (tenant, client) pairs for which this principal is an ADMIN of the
+   *  client: an ACTIVE, CLIENT-WIDE (`project_id IS NULL`), non-deleted `client_contacts` row with
+   *  `capability = 'admin'`. Resolved by `assemblePrincipal()` from the principal's own contact rows (the
+   *  same `principal_lookup` read that yields `companies`), never from a request, a header or a token.
+   *  Sent to Cerbos as `principal.attr.clientAdminOf` (an explicit allow-list entry in `principalPayload`);
+   *  the `client_contact_admin` derived role is the only reader. OPTIONAL for the same reason `perms` is
+   *  (dozens of hand-built `Principal` literals); absent => `[]` => the derived role can never match. */
+  clientAdminOf?: Array<{ tenantId: string; clientId: string }>;
   /** IAM-03a: STRICTLY ADDITIVE alongside `roles` — every existing call site that only reads
    *  `roles` is unaffected. Resolved from `role_permissions` (IAM-02a); NEVER contains a
    *  `class='relationship'` key (Ruling 3) — enforced twice over, see `assemblePrincipal`'s query
@@ -326,7 +342,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // Fixing it here is not a scope departure: MON-00i's own new client_contacts anchor (below) reads
   // the identical FORCE-RLS/`principal_lookup` shape, so it would have shipped with the exact same
   // defect if the two queries stayed apart.
-  const { companies, rootCompanies } = await withGlobal(async (c) => {
+  const { companies, rootCompanies, clientContacts } = await withGlobal(async (c) => {
     await c.query("BEGIN");
     try {
       await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
@@ -386,13 +402,41 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
         [userId],
       );
 
+      // WSK-49f. The principal's ACTIVE, CLIENT-WIDE contact rows, read under the same `principal_lookup`
+      // GUC as `companies` above. Two things hang off it and BOTH fail closed:
+      //   * a `client`-scoped grant (client_website_editor) only survives into `roles` while its holder is
+      //     still an active client-wide contact of THAT client, and it takes its tenant from this row;
+      //   * `clientAdminOf` is exactly the rows whose capability is `admin`.
+      // Client-wide only (`project_id IS NULL`): a website grant or an admin capability is about the client
+      // record, and a project-scoped contact row confers neither.
+      const contactRes = await c.query<{ client_id: string; tenant_id: string; capability: string }>(
+        `SELECT cc.client_id, cc.tenant_id, cc.capability FROM client_contacts cc
+          WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL AND cc.project_id IS NULL`,
+        [userId],
+      );
+
       await c.query("COMMIT");
-      return { companies: companiesRes, rootCompanies: rootRes.rows.map((r) => r.id) };
+      return {
+        companies: companiesRes,
+        rootCompanies: rootRes.rows.map((r) => r.id),
+        clientContacts: contactRes.rows,
+      };
     } catch (err) {
       await c.query("ROLLBACK");
       throw err;
     }
   });
+
+  // WSK-49f: resolve client-scoped grants against the principal's own contact rows (see the query above).
+  const tenantOfClient = new Map(clientContacts.map((r) => [r.client_id, r.tenant_id] as const));
+  const resolvedRoles = roles.flatMap((g): RoleGrant[] => {
+    if (g.scopeType !== "client") return [g];
+    const tenantId = g.scopeId ? tenantOfClient.get(g.scopeId) : undefined;
+    return tenantId ? [{ ...g, scopeTenantId: tenantId }] : []; // no active client-wide contact row => inert
+  });
+  const clientAdminOf = clientContacts
+    .filter((r) => r.capability === "admin")
+    .map((r) => ({ tenantId: r.tenant_id, clientId: r.client_id }));
 
   return {
     userId,
@@ -400,7 +444,8 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
     assurance,
     companies: companies.rows.map((r) => r.tenant_id),
     rootCompanies,
-    roles,
+    roles: resolvedRoles,
+    clientAdminOf,
     perms,
     sessionVersion: user.rows[0].session_version,
   };

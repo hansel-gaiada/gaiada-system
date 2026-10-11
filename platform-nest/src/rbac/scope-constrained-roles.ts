@@ -35,7 +35,7 @@
 // own dedicated assertion, not just an implicit default.
 import scopeConstrainedRolesDoc from "./scope-constrained-roles.json";
 
-export type ScopeType = "global" | "company" | "org_unit" | "project";
+export type ScopeType = "global" | "company" | "org_unit" | "project" | "client";
 
 interface ScopeConstrainedRolesDoc {
   roles: Record<string, string[]>;

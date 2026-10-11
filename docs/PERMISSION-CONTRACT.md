@@ -1400,3 +1400,27 @@ accounting; it can only apply it.
 **`company_admin` holds `read` only** — the narrowest it has been in the module. An administrative
 role has no business deciding where revenue lands, and no business running the accounting queue.
 
+
+## 25. WSK-49f — the client website editor grant path (2026-10-11, WSK-D60 amended)
+
+`202610110520_iam_client_website_editor_grant_path.sql`. **One new global role, one new client-contact capability, two catalog keys on
+the EXISTING `client_contact` kind. Catalog 416 -> 418 pairs, 401 -> 403 grantable, 193 -> 195 sensitive, kinds unchanged at 101.**
+
+| Thing | Value |
+|---|---|
+| Role `client_website_editor` | A role stored as DATA, scoped to ONE client record: `user_roles.scope_type = 'client'`, `scope_id = clients.id` (new scope type; the shape CHECK requires a uuid). **No bundle (0 `role_permissions` rows) and NO `perm_*` mirror — permanently.** A flat catalog key cannot express "this one client" and would over-grant to every client. Checked by the attribute condition in `derived_roles.yaml` (grant's client == `resource.attr.clientId`, grant's tenant == `resource.attr.tenantId`). It reaches the principal only while its holder is an ACTIVE client-wide contact of that client. |
+| Capability `admin` | `client_contacts.capability IN ('signer','viewer','admin')`. Assigned ONLY by staff (`manage_admin`). Confers one power of its own: granting `client_website_editor` for its OWN client. **Implies signer** (owner ruling 2026-10-11): every signer test (`portal-scope` `canSign`, `client-notify` signature recipients, `canEditCentre`) accepts `admin`; a viewer still cannot sign. Removing admin takes `{to:'signer'\|'viewer'}`, default `viewer`. |
+| `core.client_contact.manage_website_editor` | sensitive, role-arm only: platform_admin, company_admin, owner, manager (+ the attribute-gated `client_contact_admin` derived role, own client only). |
+| `core.client_contact.manage_admin` | sensitive, role-arm only: platform_admin, company_admin, owner. NO client arm. |
+| Role bundles | +7 pairs (1818 -> 1825): platform_admin +2, company_admin +2, owner +2 (it mirrors company_admin both ways), manager +1. |
+
+**Guards, and where each lives.** The grant is written in exactly one place (`grantClientWebsiteEditor` in `admin/grant-write.service.ts`,
+the `user_roles` choke point), which re-checks what Cerbos cannot see: the client exists in the tenant, the target is a client-wide
+non-revoked contact of THAT client, no self-grant, and a client-admin actor's `clientAdminOf` contains this exact (tenant, client). The
+generic grant surfaces refuse a client scope and the role by name; `ROLE_SCOPE_CONSTRAINTS` pins the role to `client`; a DB trigger
+(`user_roles_client_scope_guard`) welds role and scope together for any writer, including seeds. `client_website_editor` is the first
+entry on `role-bundle-completeness.db.test.ts`'s exemption list, with the reason written next to it.
+
+**Principal contract.** `Principal.clientAdminOf` (`[{tenantId, clientId}]`, the principal's own active client-wide admin contact rows) and
+`RoleGrant.scopeTenantId` (client-scoped grants only) are resolved in `assemblePrincipal()` and sent to Cerbos by `principalPayload()`;
+`Resource.clientId` is sent by `resourcePayload()`. All three are allow-list entries and default to "matches nothing".

@@ -7,9 +7,9 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 154,
-      "grantablePermissionsInCatalog": 405,
+      "grantablePermissionsInCatalog": 407,
       "permissionsCoveredByGroups": 371,
-      "permissionsAdvancedOnly": 34,
+      "permissionsAdvancedOnly": 36,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 105
     }
@@ -1915,6 +1915,14 @@
     {
       "key": "webdev.webdesk_content_item.schedule",
       "reason": "WSK-47 (2026-10-10): HIGH and approval-gated in Cerbos (approvalId required; maker != checker, the invoice precedent) -- reachable only at decide() of an approved WS4 row, never by role tier alone. advancedOnly beside core.github_repo.deploy, the same approval-gated precedent. Strict maker != checker (R4 is non-scheduled)."
+    },
+    {
+      "key": "core.client_contact.manage_website_editor",
+      "reason": "WSK-49f (WSK-D60): governance authority over who may edit a client site and who may administer a client. advancedOnly beside core.role_grant.create: it belongs behind a dedicated authoring surface (the client Contacts page and the portal People page), not a friendly group picker."
+    },
+    {
+      "key": "core.client_contact.manage_admin",
+      "reason": "WSK-49f (WSK-D60): governance authority over who may edit a client site and who may administer a client. advancedOnly beside core.role_grant.create: it belongs behind a dedicated authoring surface (the client Contacts page and the portal People page), not a friendly group picker."
     }
   ]
 }
