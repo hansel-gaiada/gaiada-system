@@ -25,6 +25,8 @@
 // validation judges). Mocked: only the three session seams the actions read (`session-server`'s user id, `tenant`'s
 // active company, `platform`'s `getMe`), because there is no browser session here. Stand-in: Zone B (WebDesk) itself.
 //
+// WSK-46: also the editor's Preview (`previewItemAction` -> `POST …/items/:itemId/preview`, parsed by the STRICT `parsePreviewLink`,
+// which refuses anything but an https link to the site's /preview/ page with the token in the fragment) and its refusals.
 // 2026-10-11: also the control plane's "Request an API key" (`requestKeyAction` -> `POST …/control/sites/:siteId/keys`) and the
 // decide façade's once-only key block (`parseKeyMintDecision`); see the "API keys" describe and the `key-request` route-table entry.
 //
@@ -44,6 +46,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole } from 
 import { EditorialUnavailableError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests } from "./webdesk-approved-command";
 import { webdeskZoneB } from "./webdesk-content.service";
+import { setPreviewProbeForTests } from "./webdesk-preview";
 import { FakeZoneB, GAIADA_ENV, GAIADA_SITE, GAIADA_SLUG, OTHER_ENV, OTHER_SITE, OTHER_SLUG, makeTestSigner, type FakeItem } from "./webdesk-content-testkit";
 
 const UI_LIB = resolve(__dirname, "../../../../platform-ui/src/lib");
@@ -84,6 +87,7 @@ interface UiActions {
   withdrawPublishRequestAction(scope: Scope, approvalId: string): Promise<Wd>;
   requestRebuildAction(scope: Scope): Promise<Wd>;
   requestKeyAction(scope: Scope, envId: string, keyScope: string): Promise<Wd>;
+  previewItemAction(scope: Scope, itemId: string, version?: number): Promise<Wd>;
   pollApprovalAction(scope: Scope, approvalId: string): Promise<Wd>;
   pollBuildStatusAction(scope: Scope): Promise<Wd>;
   getItemHeadAction(scope: Scope, itemId: string): Promise<Wd>;
@@ -124,6 +128,7 @@ function routeOf(method: string, rawPath: string): { label: string; parser: stri
   if (m(/\/items\/[^/]+\/restore$/)) return { label: "restore", parser: "parseItemWriteResult" };
   if (m(/\/items\/[^/]+\/unpublish$/)) return { label: "unpublish", parser: "parseItemOnly" };
   if (m(/\/items\/[^/]+\/delete$/)) return { label: "delete", parser: "parseItemOnly" };
+  if (m(/\/items\/[^/]+\/preview$/)) return { label: "preview", parser: "parsePreviewLink" };
   if (m(/\/items\/[^/]+$/)) return method === "GET" ? { label: "item.get", parser: "parseItemDetail" } : { label: "update", parser: "parseItemWriteResult" };
   if (m(/\/publish-requests\/[^/]+\/withdraw$/)) return { label: "withdraw", parser: "parseWithdraw" };
   if (m(/\/publish-requests$/)) return method === "GET" ? { label: "publish-requests.list", parser: "parsePublishRequests" } : { label: "publish-requests", parser: "parseApprovalId" };
@@ -144,6 +149,7 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
   let zb: FakeZoneB;
   const signer = makeTestSigner();
   const cur = { userId: "", company: "" };
+  const previewHead = { status: 200 };
   const prev = { fetch: globalThis.fetch, url: process.env.PLATFORM_URL, token: process.env.PLATFORM_SERVICE_TOKEN, demo: process.env.DEMO_MODE };
 
   let ui: UiContent;
@@ -250,6 +256,9 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
     signer.configured = true;
     webdeskZoneB.clearSiteCache();
     setWebdeskApprovedCommandDepsForTests({ client: zb.asClient(), signer });
+    // WSK-46: the site's /preview/ page, as a stub HEAD (the global fetch here is the recorder for the UI's own egress).
+    previewHead.status = 200;
+    setPreviewProbeForTests({ fetchImpl: (async () => new Response(null, { status: previewHead.status })) as unknown as typeof fetch });
     item = zb.seedItem({ siteId: GAIADA_SITE, slug: "service.seo" });
     live1 = zb.seedItem({ siteId: GAIADA_SITE, slug: "service.live", publishedVersion: 1, publishState: "published" });
     pre = zb.seedPreVersioned({ siteId: GAIADA_SITE, slug: "service.legacy" });
@@ -257,6 +266,7 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
   });
   afterEach(() => {
     setWebdeskApprovedCommandDepsForTests(null);
+    setPreviewProbeForTests(null);
     process.env.PLATFORM_SERVICE_TOKEN = "svc-token";
   });
   afterAll(async () => {
@@ -541,6 +551,104 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
   });
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // WSK-46 — the editor's Preview. Real: the controller, Cerbos (`update` on webdesk_content_item), Postgres, the UI's egress,
+  // `parsePreviewLink`, `problemOf`/`resultFromError` and `previewRefusalCopy`. Stand-ins: Zone B, and the site's /preview/ HEAD.
+  describe("preview: previewItemAction mints a one-time draft link; the refusals reach the editor as typed results with plain words", () => {
+    const lastPreview = () => recs.filter((c) => routeOf(c.method, c.path)?.label === "preview").at(-1)!;
+
+    it("ok: the answer is exactly {previewUrl, expiresAt, version}, the link is https://<staging>/preview/#t=<token>, and the UI's STRICT parser accepts it", async () => {
+      const r = okData(await step("previewItemAction", () => actions.previewItemAction(SCOPE, item.itemId, 1)));
+      expect(Object.keys(r).sort()).toEqual(["expiresAt", "previewUrl", "version"]);
+      expect(r.version).toBe(1);
+      expect(r.previewUrl).toBe(`https://staging.gaiada.test/preview/#t=${zb.mintedPreviewTokens[0]}`);
+      const rec = lastPreview();
+      expect(rec).toMatchObject({ method: "POST", status: 200 });
+      expect(rec.path).toBe(`/api/${A}/modules/webdev/content/sites/${GAIADA_SLUG}/${GAIADA_SITE}/items/${item.itemId}/preview`); // no token in the request URL
+      expect(rec.path).not.toContain(zb.mintedPreviewTokens[0]);
+    });
+
+    it("the head (no version) previews the head; the request body carries only what was asked", async () => {
+      const r = okData(await step("previewItemAction (head)", () => actions.previewItemAction(SCOPE, item.itemId)));
+      expect(r.version).toBe(1);
+      expect(zb.calls.filter((c) => c.command === "content.previewToken")[0].body).toEqual({});
+    });
+
+    it("the strict parser refuses a link that is not safe to open: a query-string token, http, another page, a javascript: URL, an extra key", () => {
+      const good = { previewUrl: "https://stg.example/preview/#t=abc", expiresAt: "2026-10-11T09:00:00Z", version: 1 };
+      expect(ui.parsePreviewLink(good)).toEqual(good);
+      for (const bad of [
+        { ...good, previewUrl: "https://stg.example/preview/?t=abc" },
+        { ...good, previewUrl: "https://stg.example/preview/?t=abc#t=abc" },
+        { ...good, previewUrl: "http://stg.example/preview/#t=abc" },
+        { ...good, previewUrl: "https://stg.example/other/#t=abc" },
+        { ...good, previewUrl: "https://stg.example/preview/#t=" },
+        { ...good, previewUrl: "https://stg.example/preview/" },
+        { ...good, previewUrl: "javascript:alert(1)//preview/#t=abc" },
+        { ...good, previewUrl: "https://u:p@stg.example/preview/#t=abc" },
+        { ...good, previewUrl: "not a url" },
+        { ...good, expiresAt: "soon" },
+        { ...good, version: 1.5 },
+        { ...good, previewPath: "/v1/t/gaiada/preview/abc" },
+      ]) expect(() => ui.parsePreviewLink(bad), JSON.stringify(bad)).toThrow(ui.WireDrift);
+      // and a drift message names a path and a type, never the value (so a token cannot reach an error or a log)
+      try { ui.parsePreviewLink({ ...good, previewUrl: "https://stg.example/preview/?t=SECRETVALUE" }); } catch (e) { expect((e as Error).message).not.toContain("SECRETVALUE"); }
+    });
+
+    it("preview_not_configured: a site with no staging address is a typed `conflict` the editor renders in plain words, and nothing was minted", async () => {
+      zb.stagingDomain = null;
+      webdeskZoneB.clearSiteCache();
+      const r = await step("previewItemAction (no staging)", () => actions.previewItemAction(SCOPE, item.itemId));
+      expect(r).toMatchObject({ kind: "conflict", slug: "preview_not_configured", message: "Preview isn't set up for this site yet" });
+      expect(model.previewRefusalCopy(r)).toMatchObject({ tone: "info", text: expect.stringContaining("Preview isn't set up for this site yet") });
+      expect(zb.mintedPreviewTokens).toHaveLength(0);
+    });
+
+    it("preview_page_missing: the site answers 404 for /preview/ (the honest live state today) is a typed `conflict` in plain words, and nothing was minted", async () => {
+      previewHead.status = 404;
+      const r = await step("previewItemAction (no /preview/ page)", () => actions.previewItemAction(SCOPE, item.itemId));
+      expect(r).toMatchObject({ kind: "conflict", slug: "preview_page_missing", message: "This site doesn't have a preview page yet" });
+      expect(model.previewRefusalCopy(r)).toMatchObject({ tone: "info", text: expect.stringContaining("doesn't have a preview page yet") });
+      expect(zb.calls.filter((c) => c.command === "content.previewToken")).toHaveLength(0);
+      expect(zb.mintedPreviewTokens).toHaveLength(0);
+    });
+
+    it("preview_site_unreachable: the site 5xx's, so the editor says so and mints nothing (an `unavailable`, never a link)", async () => {
+      previewHead.status = 503;
+      const r = await step("previewItemAction (site down)", () => actions.previewItemAction(SCOPE, item.itemId));
+      expect(r).toMatchObject({ kind: "unavailable", code: "upstream_error", reason: "preview_site_unreachable" });
+      expect(model.previewRefusalCopy(r)).toMatchObject({ tone: "bad", text: expect.stringContaining("site didn't answer") });
+      expect(zb.mintedPreviewTokens).toHaveLength(0);
+    });
+
+    it("a reader is `forbidden` (Cerbos `update`); a foreign site is `not_found/site-not-found`; an unknown item is `not_found/item-not-found`; a deleted item is `conflict/item-deleted`; an unknown version is `not_found/version-not-found`", async () => {
+      as(memberA);
+      expect(await step("previewItemAction (reader)", () => actions.previewItemAction(SCOPE, item.itemId))).toMatchObject({ kind: "forbidden" });
+      as(editorA);
+      expect(await step("previewItemAction (foreign site)", () => actions.previewItemAction(OTHER_SCOPE, item.itemId))).toEqual({ kind: "not_found", slug: "site-not-found" });
+      expect(await step("previewItemAction (unknown item)", () => actions.previewItemAction(SCOPE, randomUUID()))).toEqual({ kind: "not_found", slug: "item-not-found" });
+      expect(await step("previewItemAction (unknown version)", () => actions.previewItemAction(SCOPE, item.itemId, 9))).toEqual({ kind: "not_found", slug: "version-not-found" });
+      item.deletedAt = new Date().toISOString();
+      const deleted = await step("previewItemAction (deleted)", () => actions.previewItemAction(SCOPE, item.itemId));
+      expect(deleted).toMatchObject({ kind: "conflict", slug: "item-deleted" });
+      expect(model.previewRefusalCopy(deleted).text).toContain("has been deleted");
+      expect(zb.mintedPreviewTokens).toHaveLength(0);
+    });
+
+    it("breaker open: `unavailable/editorial_unavailable`; an ambiguous mint: an outcome-unknown `unavailable`, which the copy calls \"couldn't confirm\"", async () => {
+      zb.dropAfterApply = true;
+      const amb = await step("previewItemAction (ambiguous)", () => actions.previewItemAction(SCOPE, item.itemId));
+      expect(amb).toMatchObject({ kind: "unavailable", code: "upstream_error", reason: "not_observed" }); // the BFF's machine cause, kept as the reason
+      expect(model.isOutcomeUnknown(amb)).toBe(true);
+      expect(model.previewRefusalCopy(amb).text).toContain("couldn't confirm");
+      zb.failWith = new EditorialUnavailableError(25_000);
+      webdeskZoneB.clearSiteCache();
+      const down = await step("previewItemAction (breaker open)", () => actions.previewItemAction(SCOPE, item.itemId));
+      expect(down).toMatchObject({ kind: "unavailable", code: "editorial_unavailable" });
+      expect(model.previewRefusalCopy(down).text).toContain("Couldn't reach WebDesk");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
   describe("error paths: each is a TYPED result (or a typed refusal), never contract_drift", () => {
     const notDrift = (r: Wd) => expect(r).not.toMatchObject({ kind: "unavailable", code: "contract_drift" });
     const siteUrl = () => ui.siteBase(A, GAIADA_SLUG, GAIADA_SITE);
@@ -669,7 +777,7 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
 
     it("covers every route the UI calls (with a real 2xx) and every error class the UI renders", () => {
       const ok2xx = new Set(recs.filter((c) => c.status >= 200 && c.status < 300).map((c) => routeOf(c.method, c.path)?.label));
-      for (const label of ["sites", "collections", "items", "item.get", "versions", "versionGet", "media", "create", "update", "restore", "publish-requests", "publish-requests.list", "withdraw", "unpublish", "delete", "approval.detail", "key-request"]) {
+      for (const label of ["sites", "collections", "items", "item.get", "versions", "versionGet", "media", "create", "update", "restore", "publish-requests", "publish-requests.list", "withdraw", "unpublish", "delete", "approval.detail", "key-request", "preview"]) {
         expect(ok2xx, `no real 2xx recorded for ${label}`).toContain(label);
       }
       const statuses = new Set(recs.map((c) => c.status));
