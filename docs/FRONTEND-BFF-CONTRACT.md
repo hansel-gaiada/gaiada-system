@@ -5233,6 +5233,36 @@ UI consumer: `platform-ui/src/lib/webdeskContentActions.ts#requestKeyAction` →
 
 The approver's side is the **existing** `POST /api/:t/approvals/:id/decide {origin:"webdesk", decision}` façade, which already answers `{ok:true, webdesk:{command:"key.mint", executionStatus:"executed"\|"failed", apiKeyId, envId, scope, plaintextOnce, error?}}` (see the automation-approvals row). **`plaintextOnce` is the API key in plaintext and this response is the ONLY place it ever exists** (WebDesk keeps a hash; never in the approval row, activities, outbox or logs). The UI parses it with `parseKeyMintDecision` (names a bad field by path and type, never by value) and holds it only in the approver's component state; `executed` with `plaintextOnce: null` is "created, not returned" and shows no key.
 
+### Writers' room grants (M5-W1b, 2026-10-11 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suites are written and need the Linux gate; UI: M5-W2e `writers/people`)
+
+Design: `docs/plans/2026-10-11-m5-writers-room-design.md` §2.6; PERMISSION-CONTRACT §27.1. Code: `webdesk-editorial-grants.{controller,service}.ts`, the
+writes in `admin/grant-write.service.ts` (`grantEditorialRole` / `revokeEditorialRole`). Grants one of the four writers' room roles on ONE site, with its
+collections and locales. Same guards as the content routes (`AuthGuard` + `ModuleEnabledGuard("webdev")`); **the first statement of every handler is
+Cerbos `webdesk_collection` · `manage_editorial`** (company_admin, owner, webdev_manager, platform_admin): everyone else, including a scoped
+`webdesk_editor`, gets **403 for any body**, and nothing is read from WebDesk or the database for them.
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | → `{tenantSlug, siteId, grants: [{grantId, userId, name, email, role, tenantSlug, siteId, allCollections, collections, allLocales, locales, expiresAt, grantedBy, updatedAt}]}`: every UNEXPIRED grant with a scope row on this site in this company. ERP rows only (no WebDesk call). An empty `grants` means none. |
+| POST | same | `{userId (uuid), role: "webdesk_writer"\|"webdesk_translator"\|"webdesk_seo_reviewer"\|"webdesk_editor", collections: string[] \| allCollections: true, locales: string[] \| allLocales: true, expiresAt?: ISO\|null}` (strict: an unknown key is 400 `invalid_request`, after authorization) → **200** `{userId, role, tenantSlug, siteId, grantId, allCollections, collections, allLocales, locales, expiresAt, changed, createdGrant}`. Granting the same role on the same site again REPLACES that site's scope; identical = `changed:false` (no audit row, no session bump). One grant per (person, role, company) carries every site. |
+| DELETE | `…/editorial/grants/:userId/:role` | no body (the hub's `{}` is accepted) → **200** `{userId, role, siteId, changed, removedGrant}`. Removes this site's scope; `removedGrant:true` when that was the grant's last site. Revoking what is not held is `changed:false`. **No WebDesk call**: works while WebDesk is down and for a site WebDesk no longer lists. |
+
+**Rules a consumer must not "simplify".** An empty list never means "all": send `allCollections: true` / `allLocales: true`. Lists are de-duplicated and
+sorted in the answer. `collections` must exist on the site (WebDesk `collection.list`) and `locales` must be the tenant's (`tenant.list`), else
+**400 `unknown_collection`** / **`unknown_locale`**. The target must be an active **employee** with an active membership of THIS company (**400
+`editorial_target_not_eligible`**; freelance contributors are not built yet). **400 `self_grant_forbidden`** for yourself. The expiry belongs to the
+person's grant across all sites: a different `expiresAt` for an existing grant is **409 `editorial_grant_expiry_mismatch`** (revoke, then grant again).
+A site that is not this company's is the uniform **404 problem `…/errors/site-not-found`**. WebDesk unavailable on a POST: the typed **503
+`editorial_unavailable` / `webdesk_not_configured`** of this section. Every change bumps the target's session (they re-authenticate) and writes one
+`activities` row (`webdesk.editorial.role_granted` / `role_revoked`, `target_entity_type user_role`, identifiers only).
+
+**The generic grant surfaces refuse these four roles** with **400 `editorial_role_dedicated_path`**: `POST /api/:t/users/:u/roles` (legacy admin),
+`POST /api/:t/role-grants` (and its overrides), `POST /api/:t/positions` role sets (the composer lists them `attachable:false, reason:"editorial_role_dedicated_path"`).
+
+**MCP tools** (`modules/webdev/index.ts`, same routes): `webdesk.editorial.listGrants` (read) · `webdesk.editorial.grantRole` (`write:true, impact:"high"`) ·
+`webdesk.editorial.revokeRole` (`write:true, impact:"medium"`), `minAssurance: "verified"`. An unattended caller suspends for approval; both writes are D14
+executables and re-drive as the original requester.
+
 ## 28. Website analytics from Umami (M5-A4, 2026-10-11) — `platform-nest/src/modules/search/search-analytics.controller.ts`, `umami-client.ts`, `umami-reads.ts`; `platform-ui/src/lib/websiteAnalytics*.ts` — **STATUS: PROTOTYPED (typechecked + unit-tested locally; the DB-backed route test is written but needs the Linux gate; no live Umami exists yet)**
 
 The ERP reads gaiada.com's analytics from Umami 3.4.0 over WireGuard through the GET-only read gate (`infra/runbooks/umami-sumopod.md`) with a team view-only user's API key. Two env vars, read by `umami-client.ts` on every call: `UMAMI_BASE_URL` (e.g. `http://10.88.0.2:18743`) and `UMAMI_API_KEY` (Bearer); optional `UMAMI_TIMEOUT_MS` (default 10000). Compose must pass both through `environment:`. A property is bound to its Umami website by `search_properties.umami_site_id` (migration 0034).

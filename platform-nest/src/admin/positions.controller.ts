@@ -36,6 +36,7 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { loadUnitAncestors, loadUnitDescendants } from "../core/org-unit-closure";
 import { assertRoleUiGrantable, nonUiGrantableKeysForRole } from "../rbac/ui-grantable";
+import { EDITORIAL_ROLE_DEDICATED_PATH, isEditorialRole } from "../rbac/editorial-roles";
 import { reconcileUser, reconcilePosition } from "./position-reconciler";
 
 const SCOPE_KINDS = new Set(["company", "own_unit"]);
@@ -177,6 +178,11 @@ export class PositionsController {
       for (const r of roles) {
         if (DENIED_REGISTRY.includes(r.name)) {
           out.push({ roleId: r.id, role: r.name, attachable: false, reason: "denied_role_registry" });
+          continue;
+        }
+        if (isEditorialRole(r.name)) {
+          // M5-W1b: a writers' room role carries per-site scope rows, which a role set cannot express.
+          out.push({ roleId: r.id, role: r.name, attachable: false, reason: EDITORIAL_ROLE_DEDICATED_PATH });
           continue;
         }
         const blocked = await nonUiGrantableKeysForRole(c, r.id);
@@ -518,6 +524,15 @@ export class PositionsController {
         throw new BadRequestException(
           `role "${rows[0].name}" is in the denied-role registry and can never be attached to a position ` +
             `(design §2.3/§6.3.6 — the elevated fence)`,
+        );
+      }
+      // M5-W1b: the four writers' room roles are granted ONLY with their per-site scope rows, through the dedicated
+      // path. They carry no bundle, so the allow-list below would pass them vacuously; refuse them by name first.
+      // `position_roles_editorial_guard` (migration 202610111816) is the structural backstop.
+      if (isEditorialRole(rows[0].name)) {
+        throw new BadRequestException(
+          `${EDITORIAL_ROLE_DEDICATED_PATH}: role "${rows[0].name}" can never be attached to a position; grant it ` +
+            "through the writers' room grant endpoints, which carry its site, collection and locale scope",
         );
       }
       // (2) the P2-03 allow-list, server-side and before the write.

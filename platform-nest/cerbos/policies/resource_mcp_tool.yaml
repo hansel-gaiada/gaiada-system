@@ -236,6 +236,10 @@ resourcePolicy:
               #    registered in approval-executables.ts): its result is a one-time upload URL, and a re-drive would
               #    store it in automation_approvals.execution_result. Unlisted, an unattended caller is never let
               #    through, so it can never obtain a token.
+              #  • `webdesk.editorial.grantRole` / `webdesk.editorial.revokeRole` — M5-W1b's writers' room grant tools
+              #    (grantRole HIGH, like iam.grantRole; revokeRole MEDIUM). The same D14 pairing with
+              #    approval-executables.ts (registerWebdeskEditorialExecutableApprovals). The re-drive runs as the
+              #    ORIGINAL principal, so `webdesk_collection:manage_editorial` is decided on their current standing.
               - expr: >
                   !request.principal.attr.isUnattended ||
                   ((!request.resource.attr.write ||
@@ -255,7 +259,8 @@ resourcePolicy:
                                                     "webdesk.key.mint", "webdesk.key.rotate",
                                                     "webdesk.key.revoke", "webdesk.site.archive",
                                                     "webdesk.content.unpublish", "webdesk.content.delete",
-                                                    "webdesk.media.update", "webdesk.media.delete"])))
+                                                    "webdesk.media.update", "webdesk.media.delete",
+                                                    "webdesk.editorial.grantRole", "webdesk.editorial.revokeRole"])))
               # ── WSK-31 (docs/blueprints/webdesk-design.md §07) — ALWAYS-WS4 CONJUNCT ────────────
               # A SEPARATE, INDEPENDENT `all.of` entry, evaluated for EVERY caller regardless of the
               # `isUnattended` conjunct above — that is the whole point. §07's blueprint C-05 rule

@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **169** capabilities across **16** owners
-- **87** writes · 82 reads
-- Writes by impact: **high 18** · medium 28 · low 41
+- **172** capabilities across **16** owners
+- **89** writes · 83 reads
+- Writes by impact: **high 19** · medium 29 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -43,7 +43,7 @@ unfalsifiable after.
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 12 |
-| core | `agency` · `positions` · `role-grants` | 15 |
+| core | `agency` · `positions` · `role-grants` | 16 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 4 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 17 |
+| webdev | `webdev` | 18 |
 
 ## Capabilities
 
@@ -208,6 +208,9 @@ unfalsifiable after.
 | webdev | `webdesk.content.unpublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/unpublish` | write | `medium` |
 | webdev | `webdesk.content.update` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId` | write | `low` |
 | webdev | `webdesk.deploy.staging` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/deploy/staging` | write | `medium` |
+| webdev | `webdesk.editorial.grantRole` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | write | `high` |
+| webdev | `webdesk.editorial.listGrants` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | read | — |
+| webdev | `webdesk.editorial.revokeRole` | `DELETE` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants/:userId/:role` | write | `medium` |
 | webdev | `webdesk.key.mint` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/keys` | write | `high` |
 | webdev | `webdesk.key.revoke` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/revoke` | write | `high` |
 | webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |
