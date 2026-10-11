@@ -65,4 +65,11 @@ export const tenantWebhooksConfig = {
   get maxPayloadBytes(): number {
     return num("TENANT_WEBHOOK_MAX_PAYLOAD_BYTES", 64 * 1024);
   },
+
+  /** Most ENABLED webhooks one tenant may have (M4 cost doc §3, docs/blueprints/webdesk-tenant-cost-and-quotas.md):
+   *  every enabled hook multiplies delivery work per event. Disabled hooks do not count: there is no delete,
+   *  so disabling one is how a tenant frees a slot. Checked at register and at re-enable. */
+  get maxEnabledPerTenant(): number {
+    return num("TENANT_WEBHOOK_MAX_ENABLED_PER_TENANT", 10);
+  },
 };
