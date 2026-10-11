@@ -103,6 +103,7 @@ migrator and app roles, because it builds throwaway scratch databases next to th
 | `0013_preview_tokens.test.mjs` | 0013: draft-preview tokens (WSK-46): hash-only storage (64 lowercase hex), unique hash, composite FK to content_versions, expiry CHECK, RLS, no DELETE, exact catalog diff |
 | `0015_submission_attribution.test.mjs` | 0015: submissions.attribution / visitor_consent / data_subject_phone_ref (M5): nullable, partial phone index, RLS unchanged, scrub UPDATE, a pre-existing row survives, exact catalog diff |
 | `0016_editorial_review.test.mjs` | 0016: the writers' room review state (M5-W2a): editorial_policies (review OFF by default, collection FK), editorial_items (state + per-version composite FKs, approval triple), append-only editorial_events, editorial_comments (only resolve fields updatable); FORCE RLS on all four, no DELETE, exact catalog diff proving no existing table changed; a static scan that `webdesk/api/src/delivery/` never names `editorial_` |
+| `0017_consent_records.test.mjs` | 0017: the server-side consent log (M5-G6): consent_records keyed by the browser-held consent id, no IP / raw user agent column, CHECKs (action, version, UA class, a withdraw grants nothing), append-only for the app role (SELECT, INSERT, DELETE; UPDATE refused), FORCE RLS with no platform escape, exact catalog diff |
 
 **Retired: `0009_v1_bytes.test.mjs` (WSK-48b).** It proved 0009 left `/v1`'s bytes unchanged by capturing
 through the old Payload router before and after 0009. The old router is deleted and the api's router cannot

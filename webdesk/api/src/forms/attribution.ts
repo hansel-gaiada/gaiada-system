@@ -22,6 +22,9 @@
 //   - `visitor_consent` needs BOTH flags as real booleans, a version of 1-32 chars and a parseable ISO-8601
 //     `decided_at` (stored normalised to UTC). Anything less is null: a half-filled consent record is not
 //     evidence of consent, and null already reads as "no consent".
+//   - M5-G6: `visitor_consent` may carry an OPTIONAL `consentId`, the uuid of the server-side consent log
+//     (consent_records) the browser got from POST /v1/t/:tenantSlug/consent. It is allow-listed and must be a uuid;
+//     a missing or malformed one drops THAT key only (the snapshot stays valid), stored lower-cased.
 
 export const ATTRIBUTION_MAX_BYTES = 4096;
 export const ATTRIBUTION_MAX_SECTIONS = 50;
@@ -139,7 +142,9 @@ export function sanitizeAttribution(raw: unknown): AttributionResult {
   return { value: out, dropped };
 }
 
-export type VisitorConsent = { analytics: boolean; marketing: boolean; version: string; decided_at: string };
+export type VisitorConsent = { analytics: boolean; marketing: boolean; version: string; decided_at: string; consentId?: string };
+
+const CONSENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type VisitorConsentResult = {
   value: VisitorConsent | null;
@@ -160,5 +165,7 @@ export function sanitizeVisitorConsent(raw: unknown): VisitorConsentResult {
   const when = new Date(decidedAt);
   if (Number.isNaN(when.getTime())) return { value: null, malformed: true };
 
-  return { value: { analytics, marketing, version, decided_at: when.toISOString() }, malformed: false };
+  const value: VisitorConsent = { analytics, marketing, version, decided_at: when.toISOString() };
+  if (typeof raw.consentId === "string" && CONSENT_ID_RE.test(raw.consentId)) value.consentId = raw.consentId.toLowerCase();
+  return { value, malformed: false };
 }

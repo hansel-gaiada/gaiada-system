@@ -16,6 +16,8 @@ import { MediaModule } from "./media/media.module";
 import { MailModule } from "./mail/mail.module";
 // WSK-10 (wired by coordinator; the ticket reported this rather than editing a shared file).
 import { FormsModule } from "./forms/forms.module";
+// M5-G6 — the server-side consent log (POST /v1/t/:tenantSlug/consent) and its retention purge.
+import { ConsentModule } from "./consent/consent.module";
 // WSK-21 (wired by coordinator). NOT public-proxy-reachable until WSK-22 lands the real
 // mTLS + Keycloak + WS4 channel; webdesk/proxy/Caddyfile 404s /control/* on the public vhost.
 import { ControlModule } from "./control/control.module";
@@ -50,6 +52,7 @@ import { SchedulerModule } from "./scheduler/scheduler.module";
     MediaModule,
     MailModule,
     FormsModule,
+    ConsentModule,
     ControlModule,
     EventsModule,
     TenantWebhooksModule,

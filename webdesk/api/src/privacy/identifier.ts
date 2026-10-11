@@ -32,11 +32,21 @@ export type ResolvedSubject = {
   /** What dsr_requests.subject_ref_hash and the audit args hash are computed from: the phone digits for a phone
    *  (so "+62 812-34" and "62812 34" are one subject in the ledger), else `normalized`. Only ever hashed. */
   hashBasis: string;
+  /**
+   * M5-G6: present ONLY when the identifier is a uuid: it is then also looked up as a CONSENT ID in consent_records
+   * (a browser-held random id, not a person: privacy.find counts its records, export returns them, erase deletes them).
+   * Absent otherwise, so the shape for every other identifier is exactly what it was.
+   */
+  consentId?: string;
 };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** M5-L1: an identifier is looked up as an email/raw value AND, when it parses as a phone number, as a phone ref. */
 export function resolveSubject(raw: string): ResolvedSubject {
   const normalized = normalizeIdentifier(raw);
   const phoneRef = normalized.includes("@") ? null : normalizePhone(raw);
-  return { normalized, phoneRef, hashBasis: phoneRef ?? normalized };
+  const subject: ResolvedSubject = { normalized, phoneRef, hashBasis: phoneRef ?? normalized };
+  if (UUID_RE.test(normalized)) subject.consentId = normalized;
+  return subject;
 }

@@ -30,7 +30,7 @@ export class FormRateLimitService implements OnModuleDestroy {
   /** One fixed window, keyed by `scope:key:windowStart`. Throws on any Redis-level failure —
    *  callers (form-rate-limit.guard.ts) must treat a throw as "refuse the request", never as
    *  "allow it". */
-  async consume(scope: "ip" | "form", key: string, limit: number, windowMs: number): Promise<RateLimitDecision> {
+  async consume(scope: "ip" | "form" | "consent-ip" | "consent-tenant", key: string, limit: number, windowMs: number): Promise<RateLimitDecision> {
     const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
     const redisKey = `webdesk:forms:rl:${scope}:${key}:${windowStart}`;
 
