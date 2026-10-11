@@ -1,0 +1,30 @@
+# ERP read gate (profile `erp-read`): a GET-only subset of Umami's API for the read-only user's API key
+# (`Authorization: Bearer umami_...`). Reached over WireGuard from gda-aicenter only. Login, user, admin, 2FA
+# and API-key management paths are not served (Umami also refuses them for API keys).
+upstream umami_app {
+  server app:3000;
+  keepalive 4;
+}
+
+server {
+  listen 8080 default_server;
+  server_name _;
+  client_max_body_size 4k;
+
+  location ~ ^/api/(websites|me|teams)(/|$) {
+    limit_except GET { deny all; }
+    proxy_pass http://umami_app;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header Cookie "";
+    proxy_read_timeout 60s;
+  }
+
+  location = /api/heartbeat {
+    limit_except GET { deny all; }
+    proxy_pass http://umami_app;
+  }
+
+  location / { return 404; }
+}

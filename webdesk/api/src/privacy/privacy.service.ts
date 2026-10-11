@@ -58,7 +58,7 @@ import { CommandEnvelope, type EnvelopeInput } from "../control/command-envelope
 import type { CommandName } from "../control/command-types";
 import { PrivacyRepository, type MatchedSubmissionRow, type MediaAssetLookupRow } from "./privacy.repository";
 import { PrivacyAttachmentsService, type ExportedAttachment } from "./privacy-attachments.service";
-import { normalizeIdentifier, hashIdentifier } from "./identifier";
+import { resolveSubject, hashIdentifier } from "./identifier";
 import { PRIVACY_COMMAND_REGISTRY, type PrivacyCommandName } from "./command-types";
 import type { SubmissionAttachmentRef } from "../forms/dto";
 
@@ -87,6 +87,10 @@ export type ExportedSubmission = {
   expiresAt: string;
   consent: { text: string; version: string; acceptedAt: string };
   fields: Record<string, unknown>;
+  /** M5-L2 (additive): where the visitor came from, as stored; null when none was supplied (or already purged). */
+  attribution: Record<string, unknown> | null;
+  /** M5-L2 (additive): the visitor's banner choice at submit time; null = unknown = no consent. */
+  visitorConsent: Record<string, unknown> | null;
   attachments: ExportedAttachment[];
 };
 
@@ -176,13 +180,14 @@ export class PrivacyCommandService {
     idempotencyKey?: string;
   }): Promise<FindResult> {
     const tenant = await this.resolveActiveTenant(input.tenantSlug);
-    const normalized = normalizeIdentifier(input.identifier);
-    const subjectRefHash = hashIdentifier(normalized);
+    const subject = resolveSubject(input.identifier);
+    const normalized = subject.normalized;
+    const subjectRefHash = hashIdentifier(subject.hashBasis);
 
     const out = await this.envelope.run<FindResult>({
       ...this.claim("privacy.find", input, tenant.id, subjectRefHash),
       effect: async (client) => {
-        const rows = await this.repo.findByIdentifier(client, tenant.id, normalized);
+        const rows = await this.repo.findByIdentifier(client, tenant.id, normalized, subject.phoneRef);
         const matches: FindMatch[] = rows.map((r) => ({
           submissionId: r.id,
           formDefId: r.form_def_id,
@@ -222,8 +227,9 @@ export class PrivacyCommandService {
     idempotencyKey?: string;
   }): Promise<ExportResult> {
     const tenant = await this.resolveActiveTenant(input.tenantSlug);
-    const normalized = normalizeIdentifier(input.identifier);
-    const subjectRefHash = hashIdentifier(normalized);
+    const subject = resolveSubject(input.identifier);
+    const normalized = subject.normalized;
+    const subjectRefHash = hashIdentifier(subject.hashBasis);
 
     // The personal data stays in this closure: the envelope only ever sees the ledger reference.
     let plan: { rows: MatchedSubmissionRow[]; assetsById: Map<string, MediaAssetLookupRow>; dsrRequestId: string } | undefined;
@@ -231,7 +237,7 @@ export class PrivacyCommandService {
     await this.envelope.run<{ dsrRequestId: string; submissionCount: number }>({
       ...this.claim("privacy.export", input, tenant.id, subjectRefHash),
       effect: async (client) => {
-        const rows = await this.repo.findByIdentifier(client, tenant.id, normalized);
+        const rows = await this.repo.findByIdentifier(client, tenant.id, normalized, subject.phoneRef);
         const totalAttachments = rows.reduce((sum, r) => sum + attachmentRefs(r).length, 0);
         const dsr = await this.repo.insertDsrRequest(client, {
           tenantId: tenant.id,
@@ -279,6 +285,8 @@ export class PrivacyCommandService {
         expiresAt: row.expires_at,
         consent: { text: row.consent_notice_text, version: row.consent_notice_version, acceptedAt: row.consent_accepted_at },
         fields: row.payload?.fields ?? {},
+        attribution: row.attribution ?? null,
+        visitorConsent: row.visitor_consent ?? null,
         attachments: exportedAttachments,
       });
     }
@@ -294,12 +302,13 @@ export class PrivacyCommandService {
     ws4ApprovalId: string | null;
   }): Promise<EraseResult> {
     const tenant = await this.resolveActiveTenant(input.tenantSlug);
-    const normalized = normalizeIdentifier(input.identifier);
-    const subjectRefHash = hashIdentifier(normalized);
+    const subject = resolveSubject(input.identifier);
+    const normalized = subject.normalized;
+    const subjectRefHash = hashIdentifier(subject.hashBasis);
 
     const { replayed, ...summary } = await this.envelope.run<EraseSummary>({
       ...this.claim("privacy.erase", input, tenant.id, subjectRefHash),
-      effect: async (client) => ({ result: await this.performEraseInTx(client, tenant.id, normalized, subjectRefHash, input) }),
+      effect: async (client) => ({ result: await this.performEraseInTx(client, tenant.id, normalized, subject.phoneRef, subjectRefHash, input) }),
     });
 
     return { ...summary, tenantSlug: input.tenantSlug, identifier: input.identifier, replayed };
@@ -313,10 +322,11 @@ export class PrivacyCommandService {
     client: PoolClient,
     tenantId: string,
     normalizedIdentifier: string,
+    phoneRef: string | null,
     subjectRefHash: string,
     input: { actor: string; ws4ApprovalId: string | null },
   ): Promise<EraseSummary> {
-    const rows = await this.repo.findByIdentifier(client, tenantId, normalizedIdentifier);
+    const rows = await this.repo.findByIdentifier(client, tenantId, normalizedIdentifier, phoneRef);
 
     if (rows.length === 0) {
       // Nothing left to erase (already erased, already purged with a cleared ref, or never

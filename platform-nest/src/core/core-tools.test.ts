@@ -37,6 +37,8 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "agency_intake.open",
       "agency_intake.decline",
       "agency_intake.nurture",
+      // M5-L4: a gaiada.com form submission becomes a lead (medium impact; executor in approval-executables.ts).
+      "agency_intake.createFromWebSubmission",
       "agency_intake.convert",
     ]);
   });

@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: plan
+      skip_if_current:
+        description: "apply only: do nothing when the signed digest already runs on the release overlay, no migration is pending and the tree is identical (release.yml's automatic path)"
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       tag:
@@ -36,6 +41,11 @@ on:
         type: choice
         options: [plan, apply]
         default: plan
+      skip_if_current:
+        description: "apply only: skip when already current (digest, overlay, migrations, tree)"
+        required: false
+        type: boolean
+        default: false
 
 # One box, one deploy at a time: never alongside an ERP deploy. Do NOT cancel in progress.
 concurrency:
@@ -54,6 +64,7 @@ jobs:
     env:
       TAG: ${{ inputs.tag }}
       MODE: ${{ inputs.mode }}
+      SKIP_IF_CURRENT: ${{ inputs.skip_if_current && '1' || '0' }}
       OWNER: ${{ github.repository_owner }}
     steps:
       - name: Validate inputs
@@ -161,7 +172,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          ssh vps "GHCR_OWNER='$OWNER_LC' bash '$REMOTE_DIR/deploy-webdesk.sh' '$MODE' '$TAG' '$DIGEST' '$REMOTE_DIR/tree.tar'" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          ssh vps "GHCR_OWNER='$OWNER_LC' WEBDESK_SKIP_IF_CURRENT='$SKIP_IF_CURRENT' bash '$REMOTE_DIR/deploy-webdesk.sh' '$MODE' '$TAG' '$DIGEST' '$REMOTE_DIR/tree.tar'" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
           rc=${PIPESTATUS[0]}
           exit "$rc"
 

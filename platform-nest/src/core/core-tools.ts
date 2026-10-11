@@ -444,6 +444,33 @@ const AGENCY_INTAKE_CORE_TOOLS: McpToolDef[] = [
     },
   },
 
+  // ── M5-L4: a gaiada.com form submission becomes a lead ──────────────────────────────────────────
+  {
+    name: "agency_intake.createFromWebSubmission",
+    description:
+      "File a gaiada.com (WebDesk) form submission as an agency lead (source 'web', status 'new'). The " +
+      "platform FETCHES the submission from WebDesk itself (forms.submission.get) — pass only the " +
+      "submission's id and the WebDesk tenant slug, never field values. Idempotent per (tenant, submission): " +
+      "a repeat returns the existing lead (200, created:false). 410 `submission-gone` = purged or erased, " +
+      "nothing created; 422 `unmapped_form` = the form has no lead mapping; 409 `web_leads_disabled` = " +
+      "AGENCY_WEB_LEADS_ENABLED is off. Authorized as the existing agency-lead create. impact:'medium' — it " +
+      "files a prospect's personal data into the CRM, so an unattended caller SUSPENDS for human approval.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/from-web-submission",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        siteSlug: { type: "string", description: "The WebDesk tenant slug (the form.received event's data.siteSlug). Must belong to this company." },
+        submissionId: { type: "string", description: "The WebDesk submission id (uuid)." },
+      },
+      required: ["tenantId", "siteSlug", "submissionId"],
+    },
+  },
+
   // ── the one medium-impact write ───────────────────────────────────────────────────────────────────
   {
     name: "agency_intake.convert",

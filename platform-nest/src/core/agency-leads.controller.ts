@@ -17,9 +17,10 @@
 // have bought (keeping non-agency staff out) is Cerbos's job below, via the ordinary `authorize()`
 // calls — see agency-leads.service.ts's header for the matching DB-wall argument.
 import {
-  Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, Post, Req, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Get, GoneException, HttpCode, NotFoundException,
+  Param, Post, Req, Res, UnprocessableEntityException, UseGuards,
 } from "@nestjs/common";
-import type { FastifyRequest } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
 import {
@@ -28,6 +29,7 @@ import {
   type TransitionOutcome,
 } from "./agency-leads.service";
 import { mintInviteToken, revokeIntakeToken } from "./agency-intake-tokens.service";
+import { createLeadFromWebSubmission } from "./agency-web-leads.service";
 
 /** Turns a `TransitionOutcome` into the HTTP response for a triage endpoint, or throws the typed
  *  refusal — shared by open/decline/nurture so the three endpoints cannot drift in how they report
@@ -108,6 +110,43 @@ export class AgencyLeadsController {
     // nothing sent to it, and telling the caller otherwise erases exactly the distinction design
     // §4.1 exists to preserve ("we met them and never sent the form" vs "sent, waiting on them").
     return { id, status: "new" };
+  }
+
+  // ── Web-sourced lead (M5-L4) ────────────────────────────────────────────────────────────────
+  /** `source='web'` — the ERP fetches a gaiada.com form submission from WebDesk (`forms.submission.get`) and
+   *  files it as a lead, idempotently on (tenant, submission). Authorized exactly as the staff create above
+   *  (`create` on `agency_lead`; no new Cerbos kind), BEFORE any body validation. 201 = a lead was created, 200
+   *  = the submission already had one (the same lead id comes back). The body names a submission, never data:
+   *  the fields are fetched over the authenticated control channel. Off unless AGENCY_WEB_LEADS_ENABLED=1. */
+  @Post(":tenantId/agency/leads/from-web-submission")
+  async createFromWebSubmission(
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { siteSlug?: unknown; submissionId?: unknown },
+  ) {
+    await authorize(req.principal, { kind: "agency_lead", tenantId, module: "agency" }, "create");
+    if (typeof body?.siteSlug !== "string" || !body.siteSlug || typeof body?.submissionId !== "string" || !body.submissionId) {
+      throw new BadRequestException("siteSlug and submissionId are required");
+    }
+    const r = await createLeadFromWebSubmission({ tenantId, siteSlug: body.siteSlug, submissionId: body.submissionId });
+    switch (r.outcome) {
+      case "disabled":
+        throw new ConflictException({ message: "web leads are not enabled", reason: "web_leads_disabled" });
+      case "invalid":
+        throw new BadRequestException("submissionId must be a uuid");
+      case "gone":
+        throw new GoneException({ message: "the submission was purged or erased", reason: "submission-gone" });
+      case "unmapped_form":
+        throw new UnprocessableEntityException({ message: "this form has no lead mapping", reason: "unmapped_form" });
+      case "existing":
+        reply.status(200);
+        return { id: r.leadId, status: "new", created: false };
+      case "created":
+        reply.status(201);
+        await writeActivity(tenantId, req.principal.userId, "created", "agency_lead", r.leadId, { source: "web" });
+        return { id: r.leadId, status: "new", created: true };
+    }
   }
 
   // ── Invites (AD-2's service, wired here after QA found nothing called it) ────────────────────

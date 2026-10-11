@@ -86,7 +86,7 @@ import {
   type ItemColumnsRow,
   type VersionRow,
 } from "./content-transitions";
-import { lintPlaceholders, type LintReport } from "./content-lint";
+import { computeContentLint, lintPlaceholders, type ContentLintReport, type LintReport } from "./content-lint";
 import { ControlProblem, problems, type ProblemIssue } from "./content-problem";
 
 // ------------------------------------------------------------------------------------------------
@@ -403,8 +403,38 @@ export class ContentCommandsService {
     };
   }
 
-  /** Advisory lint for `blocks` (never fatal). Loads the token registry when a rule declares one. */
-  private async lint(client: PoolClient, ctx: EditorialCommandContext, composition: CollectionComposition, blocks: unknown, locale: string): Promise<LintReport> {
+  /**
+   * Advisory lint (never fatal): the placeholder lint plus, additively, the M5-W3 content checks as
+   * `content`. The content checks can only degrade (to `unavailable`), never throw into the save.
+   */
+  private async lint(
+    client: PoolClient,
+    ctx: EditorialCommandContext,
+    composition: CollectionComposition,
+    blocks: unknown,
+    locale: string,
+    seo: unknown,
+    groupId: string,
+  ): Promise<LintReport> {
+    const report = await this.placeholderLint(client, ctx, composition, blocks, locale);
+    const content = await this.contentLint(client, ctx, composition, blocks, locale, seo, groupId);
+    return content ? { ...report, content } : report;
+  }
+
+  private async contentLint(
+    client: PoolClient,
+    ctx: EditorialCommandContext,
+    composition: CollectionComposition,
+    blocks: unknown,
+    locale: string,
+    seo: unknown,
+    groupId: string,
+  ): Promise<ContentLintReport | undefined> {
+    return computeContentLint(client, ctx.siteId, groupId, { blocks, seo, composition, locale });
+  }
+
+  /** Advisory placeholder lint for `blocks`. Loads the token registry when a rule declares one. */
+  private async placeholderLint(client: PoolClient, ctx: EditorialCommandContext, composition: CollectionComposition, blocks: unknown, locale: string): Promise<LintReport> {
     const rules = composition.lint?.placeholders ?? [];
     if (rules.length === 0) return { placeholders: { unresolvedTokens: [], markers: {} } };
     let registry: Map<string, string | null> | null = null;
@@ -652,7 +682,7 @@ export class ContentCommandsService {
           note: input.note ?? null,
           attribution: attributionOf(ctx.principal),
         });
-        const lint = await this.lint(client, ctx, composition, assembled.blocks, input.locale);
+        const lint = await this.lint(client, ctx, composition, assembled.blocks, input.locale, assembled.seo, rows[0].localization_group_id);
         return {
           result: {
             item: toState({ ...rows[0], collection_key: col.key }),
@@ -723,7 +753,7 @@ export class ContentCommandsService {
   ): Promise<Omit<ItemWriteResult, "replayed">> {
     const head = await this.headRef(client, item);
     if (baseVersion !== item.head_version) throw this.versionConflict(item, head);
-    const lint = await this.lint(client, ctx, composition, blocks, item.locale);
+    const lint = await this.lint(client, ctx, composition, blocks, item.locale, seo, item.localization_group_id);
     if (contentHash(blocks, seo) === head.contentHash) {
       // No change: no version is written, nothing moves (design §3.2 `unchanged`).
       return { item: toState(item), version: head, unchanged: true, lint };

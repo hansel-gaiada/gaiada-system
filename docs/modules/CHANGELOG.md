@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.68.0` - website leads can arrive from the site's forms (off by default), and internal clients are marked (2026-10-12) - PROTOTYPED
+
+WebDesk M5 wave 1 (rulings WSK-D66 to D69). Built by the M5 session.
+
+- **Migrations.** `202610111100_clients_is_internal` (DDL only) and `202610111330_agency_leads_web_source`: a lead `source` of `web`, plus `submission_ref`, `origin_form`, `attribution`, `visitor_consent`, `web_site_slug`, with a self-asserting CHECK.
+- **Web-lead intake** on `form.received`: an endpoint and the MCP tool `agency_intake.createFromWebSubmission`. **All OFF unless `AGENCY_WEB_LEADS_ENABLED=1`.** Leave it unset: it goes live only after counsel.
+- The internal-client sentinel seed script ships but is not run.
+- No Cerbos change, and no new env var required.
+- Verified on the Linux gate (sumopod, run by the M5 session on main + wave 1): platform-nest 569 files / 8230 passed / 0 failed + repo checks PASS (`m5w1n2`); WebDesk root 25/0, blocks 32/0, vocabulary 267/0, migrations 493/0, legacy 15/0 (`m5w1wd2`), api 1248/0 (`m5w1wd3`).
+
+### webdesk `0.8.0` - forms carry attribution and consent, data-subject refs and a PAN/NIK scrub; advisory content checks on save (2026-10-12) - DEV-VERIFIED
+
+WebDesk M5 wave 1. Built by the M5 session.
+
+- **Migration 0015** (`submission_attribution`): form submissions gain attribution and `visitor_consent`. 0016 is the next wave, not this release.
+- The control read `forms.submission.get`; data-subject refs taken from email/tel-typed fields; a PAN/NIK scrub; the purge clears the refs; the Reply-To fix.
+- Advisory on-save content checks (`lint.content`, also returned by `item.get`).
+- **Goes live through the WebDesk api swap** (`deploy-webdesk` plan/apply with this tag), which runs migration 0015.
+- Verified on the Linux gate (sumopod, run by the M5 session on main + wave 1): platform-nest 569 files / 8230 passed / 0 failed + repo checks PASS (`m5w1n2`); WebDesk root 25/0, blocks 32/0, vocabulary 267/0, migrations 493/0, legacy 15/0 (`m5w1wd2`), api 1248/0 (`m5w1wd3`).
+
+### infra `0.10.1` - M5 artifacts staged: Umami and erp-edge Traefik on sumopod (2026-10-12) - PROTOTYPED
+
+- Umami (WSK-D66, on sumopod) and the ERP's erp-edge Traefik behind the owner's mimi Traefik (WSK-D70/D71) are staged as files under `infra/sumopod/`. Nothing deploys from them in this release.
+
 ### webdesk `0.7.0` - a new tenant declares its languages; upload refusals answer problem+json (2026-10-11) - DEV-VERIFIED
 
 WebDesk M3 follow-ups. No migration.

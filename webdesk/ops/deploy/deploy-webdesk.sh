@@ -151,6 +151,23 @@ compose() {
 
 running_image_id() { docker inspect --format '{{.Image}}' "$API_CT" 2>/dev/null; }
 running_image_ref() { docker inspect --format '{{.Config.Image}}' "$API_CT" 2>/dev/null; }
+running_config_files() { docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$API_CT" 2>/dev/null; }
+
+# Is the live api already exactly this release? Pure (arguments only), so the harness can drive it.
+# Used by WEBDESK_SKIP_IF_CURRENT=1, the automatic path release.yml takes after every ERP deploy: most releases
+# do not touch WebDesk, and recreating the api for nothing would blip /v1 on every release (M4, 2026-10-12).
+already_current() { # <running-image-id> <digest> <running-config-files> <pending-migrations-file> <stage> <live>
+  local rid=$1 dig=$2 files=$3 pend=$4 stage=$5 live=$6 e
+  image_matches_digest "$rid" "$dig" || return 1
+  case "$files" in *docker-compose.aicenter-release.yml*) ;; *) return 1 ;; esac
+  [ -f "$pend" ] && [ ! -s "$pend" ] || return 1
+  for e in "$stage"/* "$stage"/.[!.]*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    case "${e##*/}" in .env*) continue ;; esac
+    diff -rq --no-dereference "$e" "$live/${e##*/}" >/dev/null 2>&1 || return 1
+  done
+  return 0
+}
 
 # --- plan ----------------------------------------------------------------------------------------------------
 
@@ -499,7 +516,19 @@ main() {
   trap on_exit EXIT
   case "$MODE" in
     plan) plan_checks ;;
-    apply) plan_checks || die "plan failed; nothing live was changed"; do_apply ;;
+    apply)
+      plan_checks || die "plan failed; nothing live was changed"
+      if [ "${WEBDESK_SKIP_IF_CURRENT:-0}" = 1 ] \
+        && already_current "$(running_image_id)" "$DIGEST" "$(running_config_files)" "$WORK/pending" "$STAGE" "$WD_DIR"; then
+        hdr "already current"
+        say "  running image = signed digest, release overlay in place, 0 pending migrations, tree identical:"
+        say "  nothing to deploy; the api was not touched. Recording $TAG as the deployed tag (same bytes)."
+        printf '%s\n' "$TAG" >"$DEPLOYED_TAG_FILE"
+        SUCCESS=1
+      else
+        do_apply
+      fi
+      ;;
     rollback) do_rollback ;;
   esac
 }

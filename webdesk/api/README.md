@@ -296,6 +296,45 @@ before a tenant context already exists. The tenant slug has to be resolved first
   own address and the per-IP limiter degrades to a per-box limiter. Flagged for whoever wires the
   real ingress.
 
+### Forms API contract additions (M5-L1 / M5-L2) — attribution, visitor consent, submission read, subject refs
+
+Additive to `POST /v1/t/:tenantSlug/forms/:formId/submit`. Status: PROTOTYPED (unit-tested; the DB and HTTP
+specs and migration 0015 await the Linux gate).
+
+**Two optional top-level members**, beside `fields`, `consent`, `turnstileToken`, `attachments`:
+
+```jsonc
+"attribution": {                    // best-effort; NEVER causes a refusal
+  "landing": "/services/web/", "form_page": "/contact/",        // paths, <= 512 chars
+  "referrer": "www.google.com",                                  // external host only, <= 253
+  "utm_source": "...", "utm_medium": "...", "utm_campaign": "...", "utm_term": "...", "utm_content": "...",  // each <= 200
+  "gclid": "...", "gbraid": "...", "wbraid": "...", "fbclid": "...", "msclkid": "...", "li_fat_id": "...",    // each <= 200
+  "fbp": "...", "fbc": "...",                                    // <= 200; send only with marketing consent
+  "sections_seen": ["home.hero"]                                 // <= 50 items, each <= 64, [A-Za-z0-9_.:-]
+},
+"visitor_consent": { "analytics": true, "marketing": false, "version": "3", "decided_at": "2026-10-11T09:00:00Z" }
+```
+
+Drop rules (`src/forms/attribution.ts`; the submission always succeeds):
+- Unknown keys are dropped. A value over its limit, of the wrong type, empty, or containing a control character drops that key.
+- `landing` / `form_page`: anything from the first `?` or `#` is cut off; a value that is not then a `/`-path (a URL, `//host`) is dropped.
+- `referrer`: a bare host name only (no scheme, path or port); lower-cased.
+- `sections_seen`: more than 50 items drops the key; a bad single item is filtered out.
+- A serialized `attribution` over 4096 bytes is dropped whole. An object with no surviving key is stored as null.
+- `visitor_consent` needs both flags as booleans, a `version` of 1-32 chars and an ISO-8601 `decided_at` with a zone (stored in UTC); anything else is stored as null. null or absent means unknown, which every reader treats as NO consent.
+- Drops are counted in one log line per submission, never with values.
+
+Stored in `submissions.attribution` / `submissions.visitor_consent` (jsonb, migration 0015). The tenant webhook `form.received` payload gains `attribution` and `visitorConsent` (camelCase, like the rest of that payload; always present, null when absent). The Zone B `form.received` envelope is unchanged (`siteSlug, formId, submissionId, hasAttachments`).
+
+**Control read `forms.submission.get`**: `GET /control/v1/tenants/:tenantSlug/forms/submissions/:submissionId` (the Zone B `siteSlug` is the tenant slug). Class `read`, scope `webdesk:read` (the same as every control read of tenant data; no WS4, no editorial assertion, no audit row). Response, all top level: `submissionId, formId, formKey, siteSlug, createdAt, status, fields, consent {text, version, acceptedAt}, attribution, visitorConsent`. `formKey` is `form_defs.key` (the stable key, e.g. `contact`). Errors (RFC 9457): `404 submission-not-found` (unknown id, malformed id, other tenant's id, unknown or archived tenant: one uniform answer), `410 submission-gone` (status `purged` or `erased`), `400 invalid-request` (any query parameter).
+
+**Data-subject refs come from the form definition** (`src/forms/subject-refs.ts`), not a field named `email`:
+- Email ref (`data_subject_ref`) = the first field with `"format": "email"` (or the builder's `"type": "email"`), in `fields[]` order or JSON-schema `properties` order; if the definition declares none, the legacy `email` key. Trimmed, lower-cased.
+- Phone ref (`data_subject_phone_ref`, new) = the first field with `"format": "tel"` (or `"type": "tel"`). There is no name-based fallback. Normalisation: digits only; a leading `+` or `00` is dropped (the digits that follow are the country code); 7 to 15 digits or no ref. A national leading `0` is NOT rewritten to a country code (no country is hard-wired; `0812...` and `+62 812...` are different refs, so look both up).
+- `privacy.find / export / erase` match the email ref OR the phone ref (when the identifier parses as a phone number) OR a raw field value (unchanged). `privacy.export` now also returns `attribution` and `visitorConsent`. `privacy.erase` and the retention purge clear `attribution`, `visitor_consent` and `data_subject_phone_ref` and both also clear `data_subject_ref` (the purge used to leave it; personal data must not outlive retention).
+
+**PAN / national-ID scrub** (`src/forms/pii-scrub.ts`): string values of free-text fields (`text`, `textarea`; never email/tel fields) have Luhn-valid 13-19 digit card numbers replaced by `[REDACTED-PAN]` and structurally valid 16-digit Indonesian NIKs by `[REDACTED-NIK]`, before persist, mail and webhook. Ported from platform-nest `scrubText`, with guards: Luhn, no `+` prefix, card-like grouping, NIK structure; emails are not redacted. Only a count is logged.
+
 ### Required `app.module.ts` change (not made here — out of this ticket's owned scope)
 
 ```ts

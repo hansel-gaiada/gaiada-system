@@ -37,6 +37,17 @@ export type TenantWebhookFormReceivedData = {
   submissionId: string;
   hasAttachments: boolean;
   fields: Record<string, unknown>;
+  /**
+   * M5-L2 (additive). Where the visitor came from: allow-listed, size-capped keys (landing, form_page,
+   * referrer host, utm_*, click ids, sections_seen); see forms/attribution.ts. null when the site sent none.
+   * Optional only in this TYPE so older callers compile; the dispatcher always puts both members on the wire.
+   */
+  attribution?: Record<string, unknown> | null;
+  /**
+   * M5-L2 (additive). The visitor's banner choice at submit time: {analytics, marketing, version,
+   * decided_at}. null means UNKNOWN, which a receiver must treat as NO consent.
+   */
+  visitorConsent?: Record<string, unknown> | null;
 };
 
 /**
