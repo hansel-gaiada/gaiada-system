@@ -1,10 +1,10 @@
-import { loadPortalEditorBundle, portalAuthorNames, resolveWebsiteAccess } from "@/lib/portalWebsite";
+import { loadPortalEditorBundle, portalAuthorNames, resolveWebsiteAccess, websiteAccessOk } from "@/lib/portalWebsite";
 import { collectionEditability, PORTAL_COPY, portalWebsiteHref } from "@/lib/portalWebsiteModel";
 import { mediaPublicBase } from "@/lib/webdeskMedia";
 import { collectionLabel } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { PortalPageHead } from "@/components/portal/PortalBits";
-import { NoWebsiteAccess, PortalWebsiteRefusal } from "@/components/portal/website/PortalWebsiteStates";
+import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import { PortalItemEditor } from "@/components/portal/website/PortalItemEditor";
 
 type Params = Promise<{ tenant: string; site: string; collection: string; slug: string }>;
@@ -18,7 +18,7 @@ export default async function PortalWebsiteItemPage({ params, searchParams }: { 
   const { tenant: tenantSlug, site, collection: collectionKey, slug } = await params;
   const sp = await searchParams;
   const access = await resolveWebsiteAccess();
-  if (!access) return <NoWebsiteAccess />;
+  if (!websiteAccessOk(access)) return <WebsiteAccessRefused refusal={access} />;
   const { userId, tenant, clientId, me } = access;
   const siteBase = portalWebsiteHref(tenantSlug, site);
   const listHref = `${siteBase}/${encodeURIComponent(collectionKey)}`;

@@ -34,7 +34,7 @@ import {
 import type { ClientEditable } from "./webdeskEditorDriver";
 import { mediaCall } from "./webdeskMedia";
 import { parseMediaList, type MediaListBody } from "./webdeskMediaModel";
-import { pickWebsiteClient, websiteEditorClients } from "./portalWebsiteAccess";
+import { pickWebsiteClient, WEBSITE_EDITOR_ROLE, websiteEditorClients } from "./portalWebsiteAccess";
 import { itemTitle } from "./portalWebsiteModel";
 import type {
   PortalApproveResult, PortalCollection, PortalPublishRequest, PortalRequestFiled, PortalSite, RequestItemView, RequestView,
@@ -338,21 +338,35 @@ export interface WebsiteAccess {
  * the clients are that company's (`overview.clients`), and the viewer must hold `client_website_editor` for one of them. The
  * remembered client is the same cookie the Business tab uses.
  */
-export async function resolveWebsiteAccess(): Promise<WebsiteAccess | null> {
+export async function resolveWebsiteAccess(): Promise<WebsiteAccess | WebsiteAccessRefusal> {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = (await getActivePortalCompany(me))?.id ?? null;
-  if (!tenant) return null;
-  const { overview } = await getPortalOverview(userId, tenant).catch(() => ({ overview: null }));
+  const holdsGrant = me.roles.some((g) => g.role === WEBSITE_EDITOR_ROLE && g.scopeType === "client");
+  if (!tenant) return { refused: "denied" };
+  let overview: Awaited<ReturnType<typeof getPortalOverview>>["overview"] = null;
+  try {
+    overview = (await getPortalOverview(userId, tenant)).overview;
+  } catch {
+    // The portal's client list could not be read. A viewer who holds a website-editor grant must NOT be told they have no access
+    // because of an outage: that is "unavailable". Anyone else has no access whatever the outage.
+    return { refused: holdsGrant ? "unavailable" : "denied" };
+  }
   const scope = overview?.clients ?? [];
   const granted = websiteEditorClients(me.roles, scope.map((c) => c.id));
   const jar = await cookies();
   const clientId = pickWebsiteClient(granted, readHostCookie(jar, HOST_COOKIES.portalClient));
-  if (!clientId) return null;
+  if (!clientId) return { refused: "denied" };
   const clients = granted.map((id) => ({ id, name: scope.find((c) => c.id === id)?.name ?? "Your company" }));
   return { userId, me, tenant, clientId, clientName: clients.find((c) => c.id === clientId)?.name ?? "Your company", clients };
 }
+
+/** `resolveWebsiteAccess` found no usable client: `denied` (no grant, no client account here: the plain no-access page) or
+ *  `unavailable` (the viewer holds a grant but the portal's client list could not be read: an outage, said as one). */
+export interface WebsiteAccessRefusal { refused: "denied" | "unavailable" }
+
+export const websiteAccessOk = (a: WebsiteAccess | WebsiteAccessRefusal): a is WebsiteAccess => !("refused" in a);
 
 /** Names the viewer can be shown for version authors: the portal cannot read the company directory, so this is the viewer ("You")
  *  and the requesters of the client's publish requests. Anyone else (Gaiada staff, a colleague with no request) reads as a short id,

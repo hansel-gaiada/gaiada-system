@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { loadPortalSiteContext, portalAuthorNames, resolveWebsiteAccess } from "@/lib/portalWebsite";
+import { loadPortalSiteContext, portalAuthorNames, resolveWebsiteAccess, websiteAccessOk } from "@/lib/portalWebsite";
 import { createBlockedCopy, portalWebsiteHref } from "@/lib/portalWebsiteModel";
 import { mediaPublicBase } from "@/lib/webdeskMedia";
 import { collectionLabel, defaultFields } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { PortalPageHead } from "@/components/portal/PortalBits";
-import { NoWebsiteAccess, PortalWebsiteRefusal } from "@/components/portal/website/PortalWebsiteStates";
+import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import { PortalItemEditor } from "@/components/portal/website/PortalItemEditor";
 
 type Params = Promise<{ tenant: string; site: string; collection: string }>;
@@ -20,7 +20,7 @@ export default async function PortalWebsiteNewItemPage({ params, searchParams }:
   const { tenant: tenantSlug, site, collection: collectionKey } = await params;
   const sp = await searchParams;
   const access = await resolveWebsiteAccess();
-  if (!access) return <NoWebsiteAccess />;
+  if (!websiteAccessOk(access)) return <WebsiteAccessRefused refusal={access} />;
   const { userId, tenant, clientId, me } = access;
   const siteBase = portalWebsiteHref(tenantSlug, site);
   const here = `${siteBase}/${encodeURIComponent(collectionKey)}`;

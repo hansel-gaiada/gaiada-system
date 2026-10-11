@@ -1,9 +1,9 @@
-import { listPortalMedia, loadPortalSiteContext, portalAuthorNames, resolveWebsiteAccess } from "@/lib/portalWebsite";
+import { listPortalMedia, loadPortalSiteContext, portalAuthorNames, resolveWebsiteAccess, websiteAccessOk } from "@/lib/portalWebsite";
 import { portalWebsiteHref } from "@/lib/portalWebsiteModel";
 import { mediaPublicBase } from "@/lib/webdeskMedia";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { PortalPageHead } from "@/components/portal/PortalBits";
-import { NoWebsiteAccess, PortalWebsiteRefusal } from "@/components/portal/website/PortalWebsiteStates";
+import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import { PortalMediaLibrary } from "@/components/portal/website/PortalMediaLibrary";
 
 type Params = Promise<{ tenant: string; site: string }>;
@@ -16,7 +16,7 @@ type Params = Promise<{ tenant: string; site: string }>;
 export default async function PortalWebsiteMediaPage({ params }: { params: Params }) {
   const { tenant: tenantSlug, site } = await params;
   const access = await resolveWebsiteAccess();
-  if (!access) return <NoWebsiteAccess />;
+  if (!websiteAccessOk(access)) return <WebsiteAccessRefused refusal={access} />;
   const { userId, tenant, clientId, me } = access;
   const siteBase = portalWebsiteHref(tenantSlug, site);
   const here = portalWebsiteHref(tenantSlug, site, "~media");

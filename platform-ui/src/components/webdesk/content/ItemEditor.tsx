@@ -523,9 +523,13 @@ export function ItemEditor({
             <span className="wc-banner__body"><strong>Read-only.</strong> {readOnlyWhy}</span>
           </div>
         )}
-        {headSeen !== null && headSeen > baseVersion && !conflict && (
+        {headSeen !== null && headSeen > baseVersion && !conflict && !clientConflict && (
           <div className="wc-banner wc-banner--warn" data-testid="behind-head">
-            <span className="wc-banner__body">v{headSeen} was saved since you opened this (you are on v{baseVersion}). Saving will ask you how to combine them; your edits are kept.</span>
+            <span className="wc-banner__body">
+              {clientMode
+                ? <>A newer version (v{headSeen}) was saved since you opened this (you are on v{baseVersion}). Saving will ask you to reload first. Your edits stay on this page until you do, so you can copy them.</>
+                : <>v{headSeen} was saved since you opened this (you are on v{baseVersion}). Saving will ask you how to combine them; your edits are kept.</>}
+            </span>
           </div>
         )}
         {banner && <div className={`wc-banner wc-banner--${banner.tone}`} role={banner.tone === "bad" ? "alert" : "status"} data-testid="editor-banner"><span className="wc-banner__body">{banner.text}</span></div>}

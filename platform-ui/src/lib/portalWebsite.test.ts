@@ -144,13 +144,13 @@ describe("the page guard: resolveWebsiteAccess", () => {
     vi.mocked(getPortalOverview).mockResolvedValue({ isPortalClient: true, overview: { clients: [{ id: "c1", name: "Northwind", status: "active" }, { id: "c2", name: "Other", status: "active" }] } as never });
   });
 
-  it("a viewer WITHOUT the grant gets null (the plain no-access page), never an empty list", async () => {
+  it("a viewer WITHOUT the grant is 'denied' (the plain no-access page), never an empty list", async () => {
     vi.mocked(getMe).mockResolvedValue(me([{ role: "client", scopeType: "company", scopeId: "co-1" }]) as never);
-    expect(await resolveWebsiteAccess()).toBeNull();
+    expect(await resolveWebsiteAccess()).toEqual({ refused: "denied" });
   });
-  it("a staff viewer gets null", async () => {
+  it("a staff viewer is denied", async () => {
     vi.mocked(getMe).mockResolvedValue(me([{ role: "platform_admin", scopeType: "global", scopeId: null }]) as never);
-    expect(await resolveWebsiteAccess()).toBeNull();
+    expect(await resolveWebsiteAccess()).toEqual({ refused: "denied" });
   });
   it("the grant for one of the company's clients opens that client", async () => {
     vi.mocked(getMe).mockResolvedValue(me([{ role: "client", scopeType: "company", scopeId: "co-1" }, { role: "client_website_editor", scopeType: "client", scopeId: "c2" }]) as never);
@@ -159,12 +159,20 @@ describe("the page guard: resolveWebsiteAccess", () => {
   });
   it("a grant for a client of ANOTHER company does not count", async () => {
     vi.mocked(getMe).mockResolvedValue(me([{ role: "client_website_editor", scopeType: "client", scopeId: "elsewhere" }]) as never);
-    expect(await resolveWebsiteAccess()).toBeNull();
+    expect(await resolveWebsiteAccess()).toEqual({ refused: "denied" });
   });
-  it("an overview that cannot be read means no access, not a guess", async () => {
-    vi.mocked(getMe).mockResolvedValue(me([{ role: "client_website_editor", scopeType: "client", scopeId: "c1" }]) as never);
+  it("an outage while the client list is read: a viewer who HOLDS the grant is told it is unavailable (never 'no access'); anyone else is denied", async () => {
     vi.mocked(getPortalOverview).mockRejectedValue(new Error("down"));
-    expect(await resolveWebsiteAccess()).toBeNull();
+    vi.mocked(getMe).mockResolvedValue(me([{ role: "client_website_editor", scopeType: "client", scopeId: "c1" }]) as never);
+    expect(await resolveWebsiteAccess()).toEqual({ refused: "unavailable" });
+    vi.mocked(getMe).mockResolvedValue(me([{ role: "client", scopeType: "company", scopeId: "co-1" }]) as never);
+    expect(await resolveWebsiteAccess()).toEqual({ refused: "denied" });
+  });
+  it("a viewer with no client account here is denied", async () => {
+    vi.mocked(getMe).mockResolvedValue({ ...me([{ role: "client_website_editor", scopeType: "client", scopeId: "c1" }]), clientOf: [] } as never);
+    const { getActivePortalCompany } = await import("./portal-company");
+    vi.mocked(getActivePortalCompany).mockResolvedValueOnce(null);
+    expect(await resolveWebsiteAccess()).toEqual({ refused: "denied" });
   });
 });
 

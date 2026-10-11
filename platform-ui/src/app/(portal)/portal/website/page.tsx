@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { buildRequestViews, listPortalRequests, listPortalSites, resolveWebsiteAccess } from "@/lib/portalWebsite";
+import { buildRequestViews, listPortalRequests, listPortalSites, resolveWebsiteAccess, websiteAccessOk } from "@/lib/portalWebsite";
 import { switchWebsiteClient } from "@/lib/portalWebsiteActions";
 import { PORTAL_COPY, portalWebsiteHref, splitRequests, type RequestView } from "@/lib/portalWebsiteModel";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalPageHead } from "@/components/portal/PortalBits";
-import { NoWebsiteAccess, PortalWebsiteRefusal } from "@/components/portal/website/PortalWebsiteStates";
+import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import { PortalRequestsPanel } from "@/components/portal/website/PortalRequestsPanel";
 import "@/components/webdesk/content/content.css";
 
@@ -19,7 +19,7 @@ import "@/components/webdesk/content/content.css";
 // where a colleague's batch is approved. Pages are reached site -> collection -> page.
 export default async function PortalWebsitePage() {
   const access = await resolveWebsiteAccess();
-  if (!access) return <NoWebsiteAccess />;
+  if (!websiteAccessOk(access)) return <WebsiteAccessRefused refusal={access} />;
   const { userId, tenant, clientId, clientName, clients } = access;
   const head = <PortalPageHead eyebrow="Your website" title="Website" lead="Edit the text and images of your website, preview your changes, and publish them." />;
 

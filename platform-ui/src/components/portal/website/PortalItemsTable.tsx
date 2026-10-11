@@ -7,11 +7,12 @@ import {
   canOfferPublishNow, hasUnpublishedChanges, itemListState, PORTAL_COPY, PUBLISHED_COPY,
 } from "@/lib/portalWebsiteModel";
 import { clientRefusal } from "@/lib/webdeskClientCopy";
-import { authorLabel, describeReasonToken, type ItemSummary } from "@/lib/webdeskContentModel";
+import { authorLabel, describeReasonToken, type FieldDef, type ItemSummary } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
 import type { SiteScope } from "@/lib/webdeskContentActions";
 import { ConfirmAction } from "./ConfirmAction";
 import "@/components/webdesk/content/content.css";
+import "./website.css";
 
 // The item list of one collection, in the client's words: each item's state (live · live with changes not published · draft ·
 // waiting for approval), and the two ways to publish (WSK-D58):
@@ -21,7 +22,7 @@ import "@/components/webdesk/content/content.css";
 type Notice = { tone: "ok" | "warn" | "bad" | "info"; text: string };
 
 export function PortalItemsTable({
-  clientId, scope, editorBase, items, pendingIds, viewerId, authors, labelOf,
+  clientId, scope, editorBase, items, pendingIds, viewerId, authors, labelOf, defs,
 }: {
   clientId: string;
   scope: SiteScope;
@@ -34,6 +35,8 @@ export function PortalItemsTable({
   authors: Record<string, string>;
   /** Display title per item id (the composition's title field, else the slug), computed on the server. */
   labelOf: Record<string, string>;
+  /** The collection's fields, so a refusal can name a field by its label ("Template") rather than its key. */
+  defs?: FieldDef[];
 }) {
   const router = useRouter();
   const pending = useMemo(() => new Set(pendingIds), [pendingIds]);
@@ -56,7 +59,7 @@ export function PortalItemsTable({
     if (!mounted.current) return;
     setBusy(null);
     if (r.kind !== "ok") {
-      const f = clientRefusal(r, "request", { itemLabels: chosen.map(title) });
+      const f = clientRefusal(r, "request", { defs, itemLabels: chosen.map(title) });
       setNotice({ tone: f.tone, text: f.text });
       return;
     }
@@ -71,7 +74,7 @@ export function PortalItemsTable({
     if (!mounted.current) return;
     setBusy(null);
     if (r.kind !== "ok") {
-      const f = clientRefusal(r, "publish", { itemLabels: [title(it)] });
+      const f = clientRefusal(r, "publish", { defs, itemLabels: [title(it)] });
       setNotice({ tone: f.tone, text: f.text });
       return;
     }
@@ -105,7 +108,7 @@ export function PortalItemsTable({
         {notice && <div className={`wc-banner wc-banner--${notice.tone}`}><span className="wc-banner__body">{notice.text}</span></div>}
       </div>
 
-      <div className="wc-scroll">
+      <div className="wc-scroll pw-links">
         <table className="wc-table" data-testid="items-table">
           <caption className="wc-sr">Pages in this collection, with their state and publishing actions</caption>
           <thead>
@@ -120,7 +123,7 @@ export function PortalItemsTable({
               const canSelect = selectable(it);
               const name = title(it);
               return (
-                <tr key={it.itemId} data-testid={`item-row-${it.slug}`} data-state={st.key}>
+                <tr key={it.itemId} data-testid={`item-row-${it.slug}`} data-locale={it.locale} data-state={st.key}>
                   <td>
                     <input
                       type="checkbox" checked={selected.includes(it.itemId) && canSelect} disabled={!canSelect || busy !== null}

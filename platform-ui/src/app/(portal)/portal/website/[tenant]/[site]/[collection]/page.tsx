@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { listPortalItems, listPortalRequests, loadPortalSiteContext, portalAuthorNames, resolveWebsiteAccess } from "@/lib/portalWebsite";
+import { listPortalItems, listPortalRequests, loadPortalSiteContext, portalAuthorNames, resolveWebsiteAccess, websiteAccessOk } from "@/lib/portalWebsite";
 import { collectionEditability, createBlockedCopy, PORTAL_COPY, portalWebsiteHref } from "@/lib/portalWebsiteModel";
 import { collectionLabel } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalPageHead } from "@/components/portal/PortalBits";
-import { NoWebsiteAccess, PortalWebsiteRefusal } from "@/components/portal/website/PortalWebsiteStates";
+import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import { PortalItemsTable } from "@/components/portal/website/PortalItemsTable";
 import "@/components/webdesk/content/content.css";
 
@@ -26,7 +26,7 @@ export default async function PortalWebsiteCollectionPage({ params, searchParams
   const { tenant: tenantSlug, site, collection: collectionKey } = await params;
   const sp = await searchParams;
   const access = await resolveWebsiteAccess();
-  if (!access) return <NoWebsiteAccess />;
+  if (!websiteAccessOk(access)) return <WebsiteAccessRefused refusal={access} />;
   const { userId, tenant, clientId, me } = access;
   const siteBase = portalWebsiteHref(tenantSlug, site);
   const here = `${siteBase}/${encodeURIComponent(collectionKey)}`;
@@ -122,7 +122,7 @@ export default async function PortalWebsiteCollectionPage({ params, searchParams
         ) : (
           <PortalItemsTable
             clientId={clientId} scope={{ tenantSlug, siteId: site }} editorBase={here} items={list.data.items}
-            pendingIds={pendingIds} viewerId={me.userId} authors={authors} labelOf={labelOf}
+            pendingIds={pendingIds} viewerId={me.userId} authors={authors} labelOf={labelOf} defs={collection.composition.fields}
           />
         )}
         {nextHref && <div className="wc-pager"><Link href={nextHref} className="lux-btn lux-btn--ghost lux-btn--sm">Next page</Link></div>}

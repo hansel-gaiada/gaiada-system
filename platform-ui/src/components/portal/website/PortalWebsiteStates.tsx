@@ -24,6 +24,22 @@ export function NoWebsiteAccess() {
   );
 }
 
+/** What a page shows when `resolveWebsiteAccess` found no usable client: the plain no-access page, or (a viewer who DOES hold the grant,
+ *  when the portal's client list could not be read) an outage notice, never "you have no access". */
+export function WebsiteAccessRefused({ refusal }: { refusal: { refused: "denied" | "unavailable" } }) {
+  if (refusal.refused === "denied") return <NoWebsiteAccess />;
+  return (
+    <>
+      <PortalPageHead eyebrow="Your website" title="Website" />
+      <div className="wc-notice" role="alert" data-testid="website-unavailable">
+        <h2>Editing is unavailable right now</h2>
+        <p>We couldn&apos;t check your access because the portal can&apos;t be reached. Nothing has been lost. Try again in a moment.</p>
+        <div className="wc-notice__actions"><Link href="/portal/website" className="lux-btn lux-btn--ghost lux-btn--sm">Try again</Link></div>
+      </div>
+    </>
+  );
+}
+
 export function PortalWebsiteRefusal({
   result, subject, retryHref,
 }: {

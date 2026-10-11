@@ -1,13 +1,14 @@
 import Link from "next/link";
-import { loadPortalSiteContext, resolveWebsiteAccess } from "@/lib/portalWebsite";
+import { loadPortalSiteContext, resolveWebsiteAccess, websiteAccessOk } from "@/lib/portalWebsite";
 import { collectionEditability, PORTAL_COPY, portalWebsiteHref } from "@/lib/portalWebsiteModel";
 import { collectionLabel, groupCollections } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalPageHead } from "@/components/portal/PortalBits";
-import { NoWebsiteAccess, PortalWebsiteRefusal } from "@/components/portal/website/PortalWebsiteStates";
+import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import "@/components/webdesk/content/content.css";
+import "@/components/portal/website/website.css";
 
 type Params = Promise<{ tenant: string; site: string }>;
 
@@ -16,7 +17,7 @@ type Params = Promise<{ tenant: string; site: string }>;
 export default async function PortalWebsiteSitePage({ params }: { params: Params }) {
   const { tenant: tenantSlug, site } = await params;
   const access = await resolveWebsiteAccess();
-  if (!access) return <NoWebsiteAccess />;
+  if (!websiteAccessOk(access)) return <WebsiteAccessRefused refusal={access} />;
   const here = portalWebsiteHref(tenantSlug, site);
   const head = <PortalPageHead eyebrow="Your website" title="Website" />;
 
@@ -38,7 +39,7 @@ export default async function PortalWebsiteSitePage({ params }: { params: Params
             {groupCollections(collections).map(({ group, collections: cs }) => (
               <section key={group} aria-label={group}>
                 <h2 className="wc-group-head">{group}</h2>
-                <div className="wc-scroll">
+                <div className="wc-scroll pw-links">
                   <table className="wc-table">
                     <thead>
                       <tr><th scope="col">Collection</th><th scope="col">Who edits it</th><th scope="col" className="wc-table__num">Pages</th><th scope="col" className="wc-table__num">Live</th><th scope="col" className="wc-table__num">Changes not published</th></tr>

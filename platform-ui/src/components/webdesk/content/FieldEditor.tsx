@@ -179,14 +179,17 @@ function ScalarField({ def, value, onValue, ctx, segments, lock }: {
 }
 
 /** One value of one primitive. Used by scalar fields AND by the elements of a scalar list. */
-export function ScalarControl({ id, def, value, onValue, locked, pointer, describedBy, invalid, label, placeholders, media }: {
+export function ScalarControl({ id, def, value, onValue, locked, pointer, describedBy, invalid, label, placeholders, media, ariaLabel }: {
   id: string; def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string;
   describedBy?: string; invalid: boolean; label: string; placeholders?: PlaceholderSyntax[];
+  /** WSK-49d: an accessible name for a control that has no `<label>` (an element of a scalar list). Client mode passes one; the staff
+   *  editor passes none, so its DOM is unchanged. */
+  ariaLabel?: string;
   /** WSK-43c: the media picker's context (see `FormCtx.media`). */
   media?: MediaPickerCtx | null;
 }) {
   const common = {
-    id, "data-pointer": pointer, "aria-invalid": invalid || undefined, "aria-describedby": describedBy,
+    id, "data-pointer": pointer, "aria-invalid": invalid || undefined, "aria-describedby": describedBy, "aria-label": ariaLabel,
   } as const;
   const cls = `lux-field__control${invalid ? " lux-field__control--error" : ""}`;
   const str = typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
@@ -500,7 +503,7 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
                     inheritedLock={lock ?? inheritedLock}
                   />
                 ) : (
-                  <ScalarItem def={def} value={row} onValue={(v) => { const n = items.slice(); n[i] = v; onValue(n); }} locked={lock !== null} pointer={fieldPointer(...segments, i)} label={`${label} ${i + 1}`} issues={ctx.issues} placeholders={ctx.placeholders} media={ctx.media} />
+                  <ScalarItem def={def} value={row} onValue={(v) => { const n = items.slice(); n[i] = v; onValue(n); }} locked={lock !== null} pointer={fieldPointer(...segments, i)} label={`${label} ${i + 1}`} issues={ctx.issues} placeholders={ctx.placeholders} media={ctx.media} named={ctx.clientEditable !== undefined} />
                 )}
               </div>
             </li>
@@ -529,15 +532,17 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
   );
 }
 
-function ScalarItem({ def, value, onValue, locked, pointer, label, issues, placeholders, media }: {
+function ScalarItem({ def, value, onValue, locked, pointer, label, issues, placeholders, media, named }: {
   def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string; label: string; issues: Issue[]; placeholders?: PlaceholderSyntax[]; media?: MediaPickerCtx | null;
+  /** Client mode: give the control its row label as an accessible name (an element of a scalar list has no `<label>`). */
+  named?: boolean;
 }): ReactNode {
   const id = useId();
   const errs = issuesAt(issues, pointer);
   const errId = `${id}-err`;
   return (
     <div className="wc-field">
-      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={locked} pointer={pointer} describedBy={errs.length ? errId : undefined} invalid={errs.length > 0} label={label} placeholders={placeholders} media={media} />
+      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={locked} pointer={pointer} describedBy={errs.length ? errId : undefined} invalid={errs.length > 0} label={label} placeholders={placeholders} media={media} ariaLabel={named ? label : undefined} />
       <Errors id={errId} issues={errs} />
     </div>
   );

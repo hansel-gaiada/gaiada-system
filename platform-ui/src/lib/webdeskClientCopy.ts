@@ -7,7 +7,7 @@
 //
 // The portal's mapper (`lib/portalWebsite.ts`) puts `slug` on the `invalid` / `forbidden` results it returns, because
 // `resultFromError` keeps the slug only for 409/404. `slug` is absent on every staff result.
-import { fieldLabel, isOutcomeUnknown, unconfirmedCopy, type FieldDef, type WdResult } from "./webdeskContentModel";
+import { fieldLabel, humanize, isOutcomeUnknown, unconfirmedCopy, type FieldDef, type WdResult } from "./webdeskContentModel";
 
 export const CLIENT_COPY = {
   versionConflict: "This page changed since you opened it. Reload to see the latest, then make your change again.",
@@ -72,7 +72,7 @@ export function describePaths(paths: string[], defs: FieldDef[] | undefined, ite
       for (const seg of segs.slice(3)) {
         if (/^\d+$/.test(seg)) continue;
         const def = level.find((d) => d.name === seg);
-        if (!def) { labels.push(seg); break; }
+        if (!def) { labels.push(humanize(seg)); break; }
         labels.push(fieldLabel(def));
         level = def.fields ?? [];
       }

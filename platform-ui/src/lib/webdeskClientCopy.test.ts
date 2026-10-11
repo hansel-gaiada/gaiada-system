@@ -96,8 +96,9 @@ describe("describePaths", () => {
     expect(describePaths(["/blocks/0/props/plan/action", "/blocks/0/props/plan/action"], defs)).toEqual(["Plan > Action"]);
     expect(describePaths(["/blocks/0/props/schema/2"], defs)).toEqual(["Schema"]);
   });
-  it("falls back to the raw name for a field the composition does not know, and handles seo / blocks / junk", () => {
-    expect(describePaths(["/blocks/0/props/ghost"], defs)).toEqual(["ghost"]);
+  it("falls back to a readable name for a field the composition does not know (no composition at all: the key, humanised), and handles seo / blocks / junk", () => {
+    expect(describePaths(["/blocks/0/props/template"], undefined)).toEqual(["Template"]);
+    expect(describePaths(["/blocks/0/props/ghost_field"], defs)).toEqual(["Ghost field"]);
     expect(describePaths(["/seo"], defs)).toEqual(["Search appearance (SEO)"]);
     expect(describePaths(["/blocks/1/props/x"], defs)).toEqual(["Other content on this page"]);
     expect(describePaths(["nonsense"], defs)).toEqual(["Part of this page"]);

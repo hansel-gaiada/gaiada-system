@@ -1,13 +1,11 @@
-import {
-  getPortalVersion, listPortalRequests, listPortalVersions, loadPortalSiteContext, portalAuthorNames, resolvePortalItemBySlug, resolveWebsiteAccess,
-} from "@/lib/portalWebsite";
+import { getPortalVersion, listPortalRequests, listPortalVersions, loadPortalSiteContext, portalAuthorNames, resolvePortalItemBySlug, resolveWebsiteAccess, websiteAccessOk } from "@/lib/portalWebsite";
 import { portalRestoreVersionAndOpenAction } from "@/lib/portalWebsiteActions";
 import { portalWebsiteHref } from "@/lib/portalWebsiteModel";
 import { collectionLabel, diffContent, splitVersionContent } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { PortalPageHead } from "@/components/portal/PortalBits";
 import { HistoryPanel } from "@/components/webdesk/content/HistoryPanel";
-import { NoWebsiteAccess, PortalWebsiteRefusal } from "@/components/portal/website/PortalWebsiteStates";
+import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 
 type Params = Promise<{ tenant: string; site: string; collection: string; slug: string }>;
 type Search = Promise<{ locale?: string; compare?: string }>;
@@ -19,7 +17,7 @@ export default async function PortalWebsiteItemHistoryPage({ params, searchParam
   const { tenant: tenantSlug, site, collection: collectionKey, slug } = await params;
   const sp = await searchParams;
   const access = await resolveWebsiteAccess();
-  if (!access) return <NoWebsiteAccess />;
+  if (!websiteAccessOk(access)) return <WebsiteAccessRefused refusal={access} />;
   const { userId, tenant, clientId, me } = access;
   const siteBase = portalWebsiteHref(tenantSlug, site);
   const itemBase = `${siteBase}/${encodeURIComponent(collectionKey)}/${encodeURIComponent(slug)}`;
