@@ -39,6 +39,26 @@ export function assertClientMayRun(principal: ClientMarked, command: CommandName
   );
 }
 
+/**
+ * 422 publish-not-client-editable (WSK-D62): a client's publish would put a change live that a client could not
+ * have made. `issues[].path` is `/items/<index>` + the JSON pointer, `index` being the item's place in the request.
+ */
+export function publishNotClientEditable(found: { index: number; pointers: string[] }[]): ControlProblem {
+  const MAX_LISTED = 50;
+  const all = found.flatMap((f) => f.pointers.map((p) => `/items/${f.index}${p}`));
+  return new ControlProblem(
+    422,
+    "publish-not-client-editable",
+    "Publish not client-editable",
+    "A client editor may publish only what a client could have changed: this publish would put live a change to a " +
+      "path that is not client-editable (ui.clientEditable). Nothing was published.",
+    {
+      issues: all.slice(0, MAX_LISTED).map((path) => ({ path, message: "this part of the item is not client-editable" })),
+      total: all.length,
+    },
+  );
+}
+
 /** 422 field-not-client-editable, listing every offending JSON pointer (capped; `total` says how many). */
 export function fieldNotClientEditable(pointers: string[], detail?: string): ControlProblem {
   const MAX_LISTED = 50;

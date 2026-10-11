@@ -2170,6 +2170,7 @@ Without the marker none of this runs: the existing specs pass untouched (apart f
 |---|---|---|
 | **create**: allowed only in a collection where something is client-editable (at least one field, or the collection itself is client-editable and allows generic blocks); never in the `redirect` system collection (its values live under `seo`); every non-editable part of the content must be absent or `null` (its default) and `seo` must be empty | `ContentCommandsService.createItem` | `422 field-not-client-editable`, the offending JSON pointers in `issues[]` (`/collectionKey` for a collection-level refusal) |
 | **update / restoreVersion**: every path the new content changes against the item's HEAD version (`fields` props by pointer, generic blocks, `seo`) must be client-editable; **one** non-editable path refuses the **whole** write (nothing is written, not even the editable part) | `updateItem`, `restoreVersion` | `422 field-not-client-editable`, pointers listed |
+| **publish (WSK-D62)**: for EACH item, every path that differs between its currently PUBLISHED version (an empty baseline when never published: all its non-empty paths count) and the version being published must be client-editable; one bad item refuses the **whole** publish (a batch publishes none) | `ContentCommandsService.publish`, a pre-pass after the guards, inside the transaction, before any projection change | `422 publish-not-client-editable`, `issues[].path` = `/items/<index>` + the pointer, `total` |
 | a stale `baseVersion` is decided first | same | `409 version-conflict` (the head moved, so a diff against it would blame the client for someone else's change) |
 | a client **command** outside the allow-list `CLIENT_EDITOR_COMMANDS` (`src/control/command-types.ts`) | `EditorialAssertionGuard` (every editorial route) and the top of each service method | `403 client-command-not-allowed` |
 
@@ -2188,12 +2189,20 @@ an ordinary 422 about something else, and a refusal writes nothing. A client's r
 staff request of the same key and body, its audit row carries `clientEditor: true`, and `content_versions.attribution` carries
 `ce: "true"` for every version a client wrote.
 
+### Publish (WSK-D62: "a client may publish only what a client could have changed")
+
+A client's publish, single item or a batch the client approves, is diffed per item against what is currently published, with the same
+`changedContentPointers` the update check uses (there is no second diff), and every changed path must pass `isClientEditable`. So a
+draft that carries an agency's edit to a non-editable field, or any `seo` change, cannot be published by a client until the agency
+publishes it; re-publishing the version already live is a no-change publish and is allowed. Without the marker a publish is
+unchanged. D58's approval flow (who may approve) stays the ERP's; D62 is WebDesk's independent check of what goes live.
+
 ### Commands a client may and may not run (design defaults the owner may widen)
 
 | Allowed | Refused (`403 client-command-not-allowed`) |
 |---|---|
 | `content.create`, `content.update`, `content.restoreVersion` (each held to the client-editable paths) | `content.delete` |
-| `content.publish` (WS4 + the editorial `apr` binding as for staff; **D58's approval flow is the ERP's**, WebDesk adds nothing) | `content.unpublish` |
+| `content.publish` (WS4 + the editorial `apr` binding as for staff, then **WSK-D62** below; **D58's approval flow is the ERP's**) | `content.unpublish` |
 | `content.previewToken`, `content.previewTokenRevoke` | `content.schedule` |
 | `media.uploadToken`, `media.update` | `media.delete` |
 

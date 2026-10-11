@@ -436,8 +436,10 @@ describe("WSK-49b client editors: enforcement in the write plane (real resolver,
   });
 
   describe("commands allowed to a client (their own checks still apply)", () => {
-    it("content.publish: allowed (WS4 + the editorial apr cross-binding are the only gates WebDesk adds; D58 is the ERP's)", async () => {
-      const { itemId } = await staffItem();
+    it("content.publish: allowed (WS4 + the editorial apr cross-binding, then WSK-D62's client-editable check; D58 is the ERP's)", async () => {
+      const c = await create({ collectionKey: "cpage", locale: "en", slug: slug("cpage"), fields: { headline: "H", intro: "I" } }, true);
+      expect(c.statusCode, c.body).toBe(201);
+      const itemId = c.json().item.itemId as string;
       const r = await publish([{ itemId, version: 1 }], true);
       expect(r.statusCode, r.body).toBe(200);
       expect((await rows(`SELECT published_version, last_published_by FROM content_items WHERE id = $1`, [itemId]))[0]).toEqual({ published_version: 1, last_published_by: "erp-client-user-1" });
@@ -462,6 +464,81 @@ describe("WSK-49b client editors: enforcement in the write plane (real resolver,
       const r = await call({ method: "PATCH", url: `${mediaBase(fx)}/${asset.id}`, command: "media.update", params: { ...params(), assetId: asset.id }, body: { title: "new title" }, ce: true });
       expect(r.statusCode, r.body).toBe(200);
       expect((await rows(`SELECT title FROM media_assets WHERE id = $1`, [asset.id]))[0].title).toBe("new title");
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // WSK-D62: "A client may publish only what a client could have changed."
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("content.publish (WSK-D62): a client publishes only what a client could have changed", () => {
+    const PUB = "publish-not-client-editable";
+    const publishedVersion = async (itemId: string) => (await rows(`SELECT published_version FROM content_items WHERE id = $1`, [itemId]))[0].published_version as number | null;
+    /** staff create + staff publish of v1: the "currently published" baseline. */
+    async function liveItem(fields: Record<string, unknown> = pageFields(), extra: Record<string, unknown> = {}) {
+      const it = await staffItem("cpage", fields, extra);
+      expect((await publish([{ itemId: it.itemId, version: 1 }], false)).statusCode).toBe(200);
+      return it;
+    }
+
+    it("a version differing from the published one ONLY in editable fields is published (200)", async () => {
+      const { itemId } = await liveItem();
+      expect((await update(itemId, { baseVersion: 1, fields: pageFields({ headline: "Client copy", legal: { terms: "Terms v1", summary: "S2" } }) }, true)).statusCode).toBe(200);
+      const r = await publish([{ itemId, version: 2 }], true);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(await publishedVersion(itemId)).toBe(2);
+    });
+
+    it("a draft carrying an AGENCY edit to a non-editable field is 422 publish-not-client-editable listing it, and nothing is published; without ce it is published", async () => {
+      const { itemId } = await liveItem();
+      expect((await update(itemId, { baseVersion: 1, fields: pageFields({ price: 99, headline: "Client copy" }) }, false)).statusCode).toBe(200); // staff
+      const r = await publish([{ itemId, version: 2 }], true);
+      expectProblem(r, 422, PUB);
+      expect(listed(r)).toEqual([`/items/0${P}/price`]);
+      expect(await publishedVersion(itemId)).toBe(1);
+      const staff = await publish([{ itemId, version: 2 }], false);
+      expect(staff.statusCode, staff.body).toBe(200);
+      expect(await publishedVersion(itemId)).toBe(2);
+    });
+
+    it("a seo change is refused (seo is never client-editable); without ce it is published", async () => {
+      const { itemId } = await liveItem(pageFields(), { seo: { title: "Original" } });
+      expect((await update(itemId, { baseVersion: 1, fields: pageFields(), seo: { title: "Agency title" } }, false)).statusCode).toBe(200);
+      const r = await publish([{ itemId, version: 2 }], true);
+      expectProblem(r, 422, PUB);
+      expect(listed(r)).toEqual(["/items/0/seo/title"]);
+      expect(await publishedVersion(itemId)).toBe(1);
+      expect((await publish([{ itemId, version: 2 }], false)).statusCode).toBe(200);
+    });
+
+    it("a batch with ONE bad item is refused as a whole: the pointers carry the item's index and the good item is not published either", async () => {
+      const good = await liveItem();
+      const bad = await liveItem();
+      expect((await update(good.itemId, { baseVersion: 1, fields: pageFields({ headline: "Client copy" }) }, true)).statusCode).toBe(200);
+      expect((await update(bad.itemId, { baseVersion: 1, fields: pageFields({ price: 77 }) }, false)).statusCode).toBe(200);
+      const r = await publish([{ itemId: good.itemId, version: 2 }, { itemId: bad.itemId, version: 2 }], true);
+      expectProblem(r, 422, PUB);
+      expect(listed(r)).toEqual([`/items/1${P}/price`]);
+      expect(await publishedVersion(good.itemId)).toBe(1);
+      expect(await publishedVersion(bad.itemId)).toBe(1);
+      const ok = await publish([{ itemId: good.itemId, version: 2 }, { itemId: bad.itemId, version: 2 }], false);
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect(await publishedVersion(good.itemId)).toBe(2);
+      expect(await publishedVersion(bad.itemId)).toBe(2);
+    });
+
+    it("a NEVER-published item with a non-editable field set is 422 (its empty baseline), listing every such path; without ce it is published", async () => {
+      const { itemId } = await staffItem(); // price, legal.terms and faq[0].badge are set; none is client-editable
+      const r = await publish([{ itemId, version: 1 }], true);
+      expectProblem(r, 422, PUB);
+      expect(listed(r)).toEqual([`/items/0${P}/faq/0/badge`, `/items/0${P}/legal/terms`, `/items/0${P}/price`]);
+      expect(await publishedVersion(itemId)).toBeNull();
+      expect((await publish([{ itemId, version: 1 }], false)).statusCode).toBe(200);
+    });
+
+    it("re-publishing the version that is already live is a no-change publish and is allowed", async () => {
+      const { itemId } = await liveItem();
+      const r = await publish([{ itemId, version: 1 }], true);
+      expect(r.statusCode, r.body).toBe(200);
     });
   });
 });

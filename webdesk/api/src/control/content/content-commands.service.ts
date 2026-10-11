@@ -41,6 +41,9 @@
 //     runs BEFORE content validation, so an unauthorised change is never answered as an ordinary 422 about
 //     something else, and inside the command's transaction, so a refusal writes nothing (not even an audit
 //     row: the envelope rolls back).
+//   * publish (WSK-D62): a client may publish only what a client could have changed. Every item's published
+//     version (empty when never published) is diffed against the version being published, and every changed
+//     path must be client-editable, else 422 publish-not-client-editable for the whole batch.
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -58,7 +61,7 @@ import type {
 import { validateCollectionComposition, type CollectionComposition } from "../../delivery/vocabulary/composition";
 import { fieldsBlockOf } from "../../delivery/vocabulary/item-fields";
 import { clientCreateViolations, clientEditViolations, collectionAcceptsClientCreate } from "../../delivery/vocabulary/client-editable";
-import { assertClientMayRun, fieldNotClientEditable, isClientEditor } from "../auth/client-editor";
+import { assertClientMayRun, fieldNotClientEditable, isClientEditor, publishNotClientEditable } from "../auth/client-editor";
 import {
   assembleItemContent,
   contentHash,
@@ -475,6 +478,46 @@ export class ContentCommandsService {
     if (violations.length > 0) throw fieldNotClientEditable(violations);
   }
 
+  /**
+   * WSK-49b / WSK-D62 ("a client may publish only what a client could have changed") — PUBLISH by a client
+   * editor. For EACH item, the paths that differ between its currently PUBLISHED version (an empty baseline
+   * when it was never published) and the version being published must all be client-editable, else the WHOLE
+   * publish is 422 publish-not-client-editable and nothing is written. It is a pre-pass over every item, run
+   * after the guards and inside the transaction but before any projection change, so a batch with one bad
+   * item publishes none. The diff is changedContentPointers (through clientEditViolations /
+   * clientCreateViolations); there is no second one. A no-op for any other principal.
+   */
+  private async assertClientPublish(
+    client: PoolClient,
+    ctx: EditorialCommandContext,
+    rows: Map<string, ItemRow>,
+    items: { itemId: string; version: number }[],
+  ): Promise<void> {
+    if (!isClientEditor(ctx.principal)) return;
+    const found: { index: number; pointers: string[] }[] = [];
+    for (const [index, req] of items.entries()) {
+      const item = rows.get(req.itemId) as ItemRow;
+      if (item.deleted_at) continue; // the ordinary loop answers 409 item-deleted
+      const source = await this.loadVersion(client, item.id, req.version);
+      if (!source) continue; // the ordinary loop answers 409 version-not-found
+      const composition = compositionOf(item.collection_key, item.composition);
+      const next = { blocks: source.blocks, seo: source.seo };
+      let pointers: string[];
+      if (item.published_version !== null) {
+        const live = await this.loadVersion(client, item.id, item.published_version);
+        if (!live) throw new Error(`content item ${item.id} has published_version ${item.published_version} but no such version row`);
+        pointers = clientEditViolations(composition, { blocks: live.blocks, seo: live.seo }, next);
+      } else if (item.head_version === 0 && (item.publish_state === "published" || item.publish_state === "scheduled")) {
+        // A pre-0009 row: its projection IS what was published.
+        pointers = clientEditViolations(composition, { blocks: item.blocks, seo: item.seo ?? {} }, next);
+      } else {
+        pointers = clientCreateViolations(composition, next); // never published: an empty baseline
+      }
+      if (pointers.length > 0) found.push({ index, pointers });
+    }
+    if (found.length > 0) throw publishNotClientEditable(found);
+  }
+
   private versionConflict(item: ItemRow, head: VersionRef): ControlProblem {
     return problems.conflict(
       "version-conflict",
@@ -709,6 +752,7 @@ export class ContentCommandsService {
       },
       async (client) => {
         const rows = await this.lockAll(client, ctx.siteId, input.items.map((i) => i.itemId));
+        await this.assertClientPublish(client, ctx, rows, input.items);
         const published: PublishResult["published"] = [];
         const refs: TenantWebhookContentItemRef[] = [];
         for (const [index, req] of input.items.entries()) {
