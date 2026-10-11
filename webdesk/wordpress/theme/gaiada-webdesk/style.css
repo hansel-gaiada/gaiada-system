@@ -1,0 +1,9 @@
+/*
+Theme Name: Gaiada WebDesk (headless)
+Description: Headless-consumer theme. Every front-end request renders content fetched from WebDesk's /v1 through the generated PHP SDK (vendor/gaiada-sdk/sdk.php), never WordPress posts or pages. Configure with GAIADA_WEBDESK_* constants in wp-config.php (or environment variables); nothing is stored in the database.
+Author: Gaiada
+Version: 1.0.0
+Requires PHP: 8.1
+*/
+
+.gaiada-draft-banner { background: #fff4ce; padding: 0.5rem 1rem; text-align: center; }
