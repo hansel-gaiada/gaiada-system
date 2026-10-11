@@ -41,8 +41,9 @@
 // (never success, never a plain failure). No reconcile is attempted, because none is needed: a retry with the SAME
 // Idempotency-Key is safe for update and delete (Zone B replays by key, and deleting a deleted asset is a no-op that
 // answers with the original instants), and an unspent upload token simply expires (ten minutes).
-import { BadGatewayException } from "@nestjs/common";
+import { BadGatewayException, Logger } from "@nestjs/common";
 import { config } from "../../config";
+import { principalPayload } from "../../rbac/cerbos";
 import {
   UUID_RE,
   WebdeskProblem,
@@ -64,6 +65,63 @@ const MINT_KEYS = ["bucket", "maxBytes", "mime"] as const;
 const UPDATE_KEYS = ["title", "alt", "tags"] as const;
 /** Exactly what Zone B's `mintUploadToken()` produces: 32 random bytes as unpadded base64url. */
 const UPLOAD_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+/** What the caller may do with this site's media library (WSK-359): the four `webdesk_media_asset` actions, as booleans. */
+export interface MediaCapabilities {
+  read: boolean;
+  upload: boolean;
+  update: boolean;
+  delete: boolean;
+}
+const MEDIA_ACTIONS = ["read", "upload", "update", "delete"] as const;
+const logger = new Logger("WebdeskMedia");
+
+/**
+ * The caller's media capabilities from ONE Cerbos `checkResources` request (one resource, the four actions), asked with
+ * EXACTLY the resource the real handlers ask with: `{kind: webdesk_media_asset, tenantId, module: "webdev"}` plus the client
+ * (`clientId`) on a client gate (`ContentGate.clientAttr`). The attribute set is `resourcePayload()`'s own defaults for those
+ * fields (rbac/cerbos.ts keeps that function private); `webdesk-media.test.ts` pins this answer to the per-action `authorize()`
+ * outcomes for every tier, so a drift between the two fails there.
+ *
+ * ADVISORY: the UI disables controls with it, and the per-action check (and WebDesk) stays the authority on every call. In
+ * client mode `delete` is false whatever Cerbos says (WSK-49c: a client never deletes media). A Cerbos failure is `null`
+ * (unknown, never "denied"): the UI then leaves the controls enabled and the 403 handling is the fallback.
+ */
+export async function mediaCapabilities(gate: ContentGate): Promise<MediaCapabilities | null> {
+  try {
+    const res = await fetch(`${config.cerbosUrl}/api/check/resources`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestId: "platform",
+        principal: principalPayload(gate.principal),
+        resources: [
+          {
+            actions: [...MEDIA_ACTIONS],
+            resource: {
+              kind: "webdesk_media_asset",
+              id: "new",
+              attr: {
+                id: "", tenantId: gate.tenantId, ownerId: "", projectId: "", teamId: "", module: "webdev", subjectUserId: "", origin: "",
+                unitAncestors: [], creatorId: "", subKind: "", targetUserId: "", published: false, panelistUserIds: [],
+                hiringManagerUserId: "", recruiterUserId: "", approvalId: "", collectionKey: "", locale: "", itemCount: 0,
+                clientId: gate.client?.clientId ?? "",
+              },
+            },
+          },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`cerbos ${res.status}`);
+    const data = (await res.json()) as { results?: Array<{ actions?: Record<string, string> }> };
+    const actions = data.results?.[0]?.actions ?? {};
+    const allowed = (a: (typeof MEDIA_ACTIONS)[number]): boolean => actions[a] === "EFFECT_ALLOW";
+    return { read: allowed("read"), upload: allowed("upload"), update: allowed("update"), delete: gate.client ? false : allowed("delete") };
+  } catch (err) {
+    logger.warn(`media capabilities unavailable: ${(err as Error).message}`);
+    return null;
+  }
+}
 
 /** One answer for every way an asset is "not yours" or does not exist, in Zone B's own problem type. */
 function mediaAssetNotFound(): WebdeskProblem {
@@ -100,17 +158,25 @@ export class WebdeskMediaService {
 
   // ── reads ────────────────────────────────────────────────────────────────────────────────────
 
-  /** `GET …/media[?mime&q&tag&includeDeleted&cursor&limit]`: Zone B's `media.list`, allow-listed query only. */
+  /**
+   * `GET …/media[?mime&q&tag&includeDeleted&cursor&limit]`: Zone B's `media.list`, allow-listed query only, plus
+   * `capabilities: {read, upload, update, delete}` (WSK-359, `mediaCapabilities`) so the UI disables a control the caller cannot
+   * use up front. `capabilities` is absent when Cerbos could not answer the batch (unknown, never "denied").
+   */
   async list(gate: ContentGate, site: SiteRef, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "read");
     const query = strictQuery(rawQuery, LIST_QUERY);
     await gate.resolveSite(this.zoneB, site);
-    return this.zoneB.read({
-      command: "media.list",
-      path: MEDIA_PATH,
-      params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
-      query,
-    });
+    const [res, capabilities] = await Promise.all([
+      this.zoneB.read({
+        command: "media.list",
+        path: MEDIA_PATH,
+        params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
+        query,
+      }),
+      mediaCapabilities(gate),
+    ]);
+    return capabilities && isPlainObject(res.body) ? { status: res.status, body: { ...res.body, capabilities } } : res;
   }
 
   /** `GET …/media/:assetId/usage`: which items use the asset (at most 50), so the UI can say where before a delete. */
