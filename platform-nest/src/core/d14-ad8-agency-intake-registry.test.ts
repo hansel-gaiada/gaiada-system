@@ -103,9 +103,10 @@ describe.skipIf(!TEST_URL)("precondition against real Postgres", () => {
     const orgName = `Registry Org ${String.fromCharCode(97 + (seq % 26))}${++seq}`;
     await withTenants([T], (c) =>
       c.query(
-        `INSERT INTO agency_leads (id, tenant_id, org_name, contact_email, source, status, owner_id, origin_site, declined_reason)
-         VALUES ($1, $2, $3, $4, 'invite', $5, $6, 'test', $7)`,
-        [id, T, orgName, `${id}@prospect.test`, status, admin, status === "declined" ? "no budget" : null],
+        // M5-P1: stage must agree with status at the ends (lead_lost_iff_declined), so a declined fixture is 'lost'.
+        `INSERT INTO agency_leads (id, tenant_id, org_name, contact_email, source, status, stage, owner_id, origin_site, declined_reason)
+         VALUES ($1, $2, $3, $4, 'invite', $5, $8, $6, 'test', $7)`,
+        [id, T, orgName, `${id}@prospect.test`, status, admin, status === "declined" ? "no budget" : null, status === "declined" ? "lost" : "enquiry"],
       ),
     );
     return id;
