@@ -38,7 +38,11 @@
 #     numbers below, never left to an interpolated default that could resolve empty.
 #   * `no-new-privileges` + full cap-drop + read-only rootfs where the process can tolerate it
 #     (the api needs a writable /tmp for Node — given as an explicit tmpfs,
-#     never a writable rootfs).
+#     never a writable rootfs). `cap_drop: [ALL]` is on EVERY service below (M4 F3, 2026-10-11),
+#     with the MINIMUM `cap_add` each image's entrypoint needs, each commented with the reason.
+#     scripts/check-compose-hardening.mjs fails CI if a service loses it, and
+#     ops/probes/compose-boot-proof.sh boots these real files and checks `docker inspect`.
+#   * A PINNED network subnet (M4 F2): see the `networks:` block at the bottom of this file.
 #
 # ALWAYS AUDIT THE RESOLVED CONFIG, NEVER THE OVERLAY (same trap as the sumopod file: `!reset`
 # on an empty `ports:` block still exits 0 if written wrong):
@@ -71,6 +75,10 @@ services:
 
   # --- the one published listener, loopback only ------------------------------------------------
   proxy:
+    # M4 F4: pinned by digest (the multi-arch index `caddy:2-alpine` named on 2026-10-11, from
+    # `docker buildx imagetools inspect caddy:2-alpine`). Bump deliberately: re-run that command,
+    # change the digest here, run ops/probes/compose-boot-proof.sh.
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     profiles: !reset []
     ports: !override
       - "127.0.0.1:${WEBDESK_PROXY_HTTP_PORT:-8380}:80"
@@ -83,6 +91,15 @@ services:
     # merges with the base file's WEBDESK_EDGE_VERIFY_SECRET (no !override, which would drop it).
     environment:
       WEBDESK_CONTROL_GATE_SECRET: ${WEBDESK_CONTROL_GATE_SECRET:?WEBDESK_CONTROL_GATE_SECRET is required - 64 hex chars, shared with the host-nginx control.webdesk.internal vhost (infra/runbooks/webdesk-control-channel.md)}
+    # M4 F3. caddy:2-alpine runs as root and binds :80 INSIDE the container, and its binary carries the
+    # file capability `cap_net_bind_service=ep` (checked with getcap on the pinned digest). With the
+    # bounding set emptied by cap_drop, that file cap would make exec FAIL unless the cap is added back.
+    # It writes only /data and /config (root-owned volumes) and reads a world-readable Caddyfile, so it
+    # needs no DAC_OVERRIDE.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
     cpus: 0.50
@@ -112,7 +129,9 @@ services:
       STORAGE_BUCKET_ARTIFACTS: ${STORAGE_BUCKET_ARTIFACTS:-artifacts}
       WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
-      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      # M4: 5 GiB = the code default and the live value (was 10 GiB here; cost doc s5). The read-quota
+      # vars (WEBDESK_READ_QUOTA_*) are passed through in the BASE file's api block.
+      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-5368709120}
       # WSK-43a: the bucket retention the media-purge job waits out (the SAME variable storage-bootstrap.mjs applies; empty = 1).
       WEBDESK_STORAGE_LOCK_DAYS: ${WEBDESK_STORAGE_LOCK_DAYS:-}
       # WSK-43a: the browser origins (https://host[:port], comma separated) that may call the public media upload route; the ERP editor's origin. Empty = no CORS headers.
@@ -152,6 +171,13 @@ services:
       # empty DIRECTORY at the host path; the api treats that as "not configured" (503 on writes), and
       # the runbook removes it before installing the real file.
       - /etc/webdesk/editorial/editorial.jwks.json:/etc/webdesk/editorial/editorial.jwks.json:ro
+    # M4 F3: node:22-alpine, no entrypoint script, no privileged port (listens on 3000), writes only to
+    # the /tmp tmpfs. It runs as root (the image has no USER) but never chowns or switches user, so it
+    # needs NO capability. Live-apply note: without DAC_OVERRIDE, root in the container cannot read a
+    # bind-mounted host file that is mode 0600 and owned by another uid; the two mounted files above
+    # are PUBLIC material and must be readable by "other" (0644). Check before the recreate.
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -163,8 +189,25 @@ services:
 
   # --- datastores: private network only, own containers (never the ERP's host Postgres) ---------
   postgres:
+    # M4 F4: digest of the multi-arch index `postgres:16-alpine` named on 2026-10-11
+    # (`docker buildx imagetools inspect postgres:16-alpine`). The data volume is a 16.x cluster, so a
+    # minor bump is safe; never move the major tag without a dump/restore.
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     profiles: !reset []
     ports: !reset []
+    # M4 F3. The official entrypoint starts as root, chmods PGDATA (0700), chowns PGDATA and
+    # /var/run/postgresql to postgres (`find ... -exec chown`), then `exec gosu postgres`:
+    #   CHOWN + FOWNER (chown/chmod of dirs it may not own yet), DAC_OVERRIDE (traverse 0700
+    #   postgres-owned dirs while still root), SETUID + SETGID (the gosu drop). After the drop the
+    #   server runs as uid 999. The initdb.d script runs as postgres.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     cpus: 1.00
@@ -172,8 +215,21 @@ services:
     pids_limit: 256
 
   redis:
+    # M4 F4: digest of the multi-arch index `redis:7-alpine` named on 2026-10-11 (7.4.11). The live
+    # container ran an OLDER image under this same tag (plan F4); the recreate picks this one up.
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     profiles: !reset []
     ports: !reset []
+    # M4 F3. Entrypoint (read on the pinned digest): as root it runs `find . ! -user redis -exec chown
+    # redis`, then `setpriv --reuid redis --regid redis --clear-groups`: CHOWN, SETUID, SETGID. No
+    # DAC_OVERRIDE: /data is a flat directory of redis-owned files that root only lists and chowns.
+    # Residual risk for the apply: a live volume holding a 0700 redis-owned SUBDIRECTORY would need it.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     cpus: 0.25
@@ -183,6 +239,11 @@ services:
   rustfs:
     profiles: !reset []
     ports: !reset []
+    # M4 F3. The image's USER is rustfs (uid 10001) and /entrypoint.sh has no gosu/su-exec: it only
+    # mkdirs and chowns data dirs best-effort (`chown ... || true`), which are no-ops for a user that
+    # already owns /data. Nothing needs a capability, so none is added. (Image digest-pinned in base.)
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     cpus: 0.50
@@ -193,3 +254,19 @@ services:
   # sumopod box lacked for this purpose. Exposure is `../infra/nginx/webdesk.aicenter.conf`
   # (a vhost) plus the loopback `proxy` above, not a tunnel. Do not port the sumopod file's
   # tunnel service here; it would be a second, redundant public entry point to reason about.
+
+# =============================================================================================
+# M4 F2: the default network's subnet is PINNED to what it is on gda-aicenter today.
+# =============================================================================================
+# The host egress guard (ops/host/webdesk-egress-guard.sh, run at boot by webdesk-host-deny.service)
+# reads this network's subnet from Docker ONCE and writes iptables rules against it. Docker picks the
+# next free 172.x/16 whenever the network is recreated (any `docker compose down`), so an unpinned
+# network could come back on another subnet and sit outside every rule until the unit is restarted.
+# Pinning means a recreate yields the same subnet and the rules stay valid. 172.19.0.0/16 is the live
+# value (2026-10-11); the ERP's `gaiada_default` is 172.18.0.0/16. Do not change it without
+# `systemctl restart webdesk-host-deny` afterwards and containment probe 3.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16

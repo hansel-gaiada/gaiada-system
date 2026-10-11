@@ -11,3 +11,18 @@ modules:
       method: GET
       preferred_ip_protocol: ip4
       fail_if_not_ssl: false
+
+  # M4 (2026-10-11): WebDesk's content API. An unknown tenant on /v1 answers 401 problem+json from the
+  # api itself (through nginx, Caddy and the api's tenant lookup), so this proves the api, not just the
+  # proxy (Caddy answers /healthz on its own). Any other status or content type is a failure.
+  http_401_problem:
+    prober: http
+    timeout: 8s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [401]
+      method: GET
+      preferred_ip_protocol: ip4
+      fail_if_header_not_matches:
+        - header: Content-Type
+          regexp: '^application/problem\+json'
