@@ -2,6 +2,7 @@
 // webdesk/blocks/src/components/Hero.astro — vocabulary block type "hero" (webdesk-design.md §05).
 // Props typed from ../types.ts's HeroProps, itself 1:1 with BLOCKS.hero.fields (../vocabulary/blocks.ts).
 import type { HeroProps } from '../types.ts'
+import { safeHref, safeImgSrc } from '../safety.ts'
 
 export interface Props extends HeroProps {}
 
@@ -13,13 +14,13 @@ const { heading, subheading, media, ctaLabel, ctaHref } = Astro.props
   {media && (
     <img
       class="wd-hero-media"
-      src={media.url}
+      src={safeImgSrc(media.url)}
       alt={media.alt ?? ''}
       width={media.width}
       height={media.height}
     />
   )}
   {ctaLabel && ctaHref && (
-    <a class="wd-hero-cta" href={ctaHref}>{ctaLabel}</a>
+    <a class="wd-hero-cta" href={safeHref(ctaHref)}>{ctaLabel}</a>
   )}
 </section>
