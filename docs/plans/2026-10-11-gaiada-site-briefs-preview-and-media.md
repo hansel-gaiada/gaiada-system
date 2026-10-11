@@ -31,10 +31,8 @@ configuration in the site (one env value), never a literal, in case it moves aga
    Browsers never send a fragment to any server, nor in a Referer, so the token stays out of the site host's access
    logs. Do not copy it into the URL, `history`, analytics or error reports.
 2. **Set `<meta name="referrer" content="no-referrer">`** on the page.
-3. **Fetch the envelope client-side**, with the token in the path: `fetch(\`${WEBDESK_PUBLIC_BASE}/v1/t/gaiada/preview/${token}\`)` with `WEBDESK_PUBLIC_BASE = https://api.erp.gaiada.com`.
-4. **Render it with the same component pipeline the build uses for that collection** (the site picks section
-   components from `## ` headings via `lib/sections/split.ts` + `rules.ts`). That pipeline has to run in the
-   browser for this page, as an island. Every other page stays static.
+3. **Send the token to the preview render service in a POST body** (`/preview/render` on the same host), never in a URL. The service fetches `GET ${WEBDESK_PUBLIC_BASE}/v1/t/gaiada/preview/<token>` server-side, with `WEBDESK_PUBLIC_BASE = https://api.erp.gaiada.com`, and returns the rendered HTML, which the page swaps in. The service redacts the token from its own logs.
+4. **Render with the site's real templates** (AMENDED 2026-10-11 by the owner, WSK-D52). The templates are build-time Astro components, which cannot run in a browser, so the render happens in a small preview render service: a second Astro config (`@astrojs/node`, one SSR route) built from the same templates and pipeline, run on the staging host behind nginx. The main static build and its determinism are untouched. A browser approximation and a build per preview were declined.
 5. **States:**
    - token missing: "Open this page from the ERP's Preview button".
    - 404: "This preview link has expired or was withdrawn. Open a new preview from the editor".
