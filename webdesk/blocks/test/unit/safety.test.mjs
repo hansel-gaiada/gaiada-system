@@ -33,7 +33,9 @@ test('safeHref: dangerous schemes become "#" (case, whitespace, control chars, t
     '//evil.example/x',
     '/\\evil.example/x',
     '\\\\evil.example',
-    'about',
+    'a\\b',
+    'about\\evil',
+    '1:foo',
     '',
     '   ',
   ]
@@ -54,6 +56,10 @@ test('safeHref: allowed schemes and relative forms are kept', () => {
     '../x',
     '?page=2',
     '#section',
+    'about',
+    'about/',
+    'page.html',
+    'a/b?c=1#d',
   ]
   for (const h of ok) assert.equal(safeHref(h), h, h)
   assert.equal(safeHref('  https://example.com/x  '), 'https://example.com/x', 'trimmed')
@@ -101,7 +107,9 @@ test('safeJsonForScript: cannot close or open anything inside a <script>, and ro
 test('sanitizeRichHtml: scripts, handlers, iframes, forms, styles and hostile URLs are removed', () => {
   const cases = [
     ['<p>hi</p><script>alert(1)</script>', ['<script', 'alert']],
-    ['<img src=x onerror=alert(1)>', ['onerror', 'src=']],
+    // "x" is a legitimate relative image path, so src survives; the handler must not.
+    ['<img src=x onerror=alert(1)>', ['onerror', 'alert']],
+    ['<img src="a\\b.png">', ['src=']],
     ['<a href="javascript:alert(1)">x</a>', ['javascript']],
     ['<a href="JaVa&#x73;cript:alert(1)">x</a>', ['javascript', 'JaVa']],
     ['<a href="java\tscript:alert(1)">x</a>', ['javascript', 'script:']],

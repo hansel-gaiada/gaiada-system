@@ -47,7 +47,10 @@ $hostile = [
     'ftp://example.com',
     '//evil.example/x',
     '/\\evil.example/x',
-    'about',
+    '\\\\evil.example',
+    'a\\b',
+    'about\\evil',
+    '1:foo',
     '',
     '   ',
 ];
@@ -61,7 +64,7 @@ foreach ($hostile as $h) {
 check($allHostileBlocked, 'every hostile / unlisted href (javascript: any case, whitespace, tab-split, data:, vbscript:, //host) becomes "#" (' . count($hostile) . ' cases)');
 check(gaiada_safe_href(null) === '#' && gaiada_safe_href(42) === '#' && gaiada_safe_href([]) === '#', 'non-string hrefs become "#"');
 
-foreach (['http://example.com/a?b=1#c', 'https://example.com', 'HTTPS://example.com', 'mailto:hi@example.com', 'tel:+6281234', '/about', '/a/b?c=d', './x', '../x', '?page=2', '#section'] as $ok) {
+foreach (['http://example.com/a?b=1#c', 'https://example.com', 'HTTPS://example.com', 'mailto:hi@example.com', 'tel:+6281234', '/about', '/a/b?c=d', './x', '../x', '?page=2', '#section', 'about', 'about/', 'page.html', 'a/b?c=1#d'] as $ok) {
     check(gaiada_safe_href($ok) === $ok, "allowed href kept verbatim: {$ok}");
 }
 check(gaiada_safe_href('  https://example.com/x  ') === 'https://example.com/x', 'href is trimmed');

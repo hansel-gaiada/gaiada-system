@@ -21,6 +21,9 @@ const IGNORED_IN_SCHEME_CHECK = /[\u0000-\u0020\u007f]+/g
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]+/g
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+// A relative path ("about/", "page.html", "./x", "../x"): no backslash anywhere (browsers read a
+// backslash as "/", so two of them would be scheme-relative) and no ":" before the first "/", "?" or "#".
+const RELATIVE_PATH = /^[^\\:/?#]+(?:[/?#][^\\]*)?$/
 
 const LINK_SCHEMES = new Set(['http:', 'https:', 'mailto:', 'tel:'])
 const IMAGE_SCHEMES = new Set(['http:', 'https:'])
@@ -35,19 +38,21 @@ function checkUrl(value: unknown, allowedSchemes: ReadonlySet<string>, allowFrag
   } else if (cleaned.startsWith('/')) {
     // "//host" and "/\host" are scheme-relative (browsers treat "\" as "/"): not a local path.
     if (cleaned[1] === '/' || cleaned[1] === '\\') return null
-  } else if (!(cleaned.startsWith('./') || cleaned.startsWith('../'))) {
-    if (!(allowFragmentAndQuery && (cleaned.startsWith('?') || cleaned.startsWith('#')))) return null
+  } else if (cleaned.startsWith('?') || cleaned.startsWith('#')) {
+    if (!allowFragmentAndQuery) return null
+  } else if (!RELATIVE_PATH.test(cleaned)) {
+    return null
   }
   // Emit the trimmed original minus control characters (what a browser would see anyway).
   return value.replace(CONTROL_CHARS, '').trim()
 }
 
-/** href allow-list: http, https, mailto, tel, "/x", "./x", "../x", "?x", "#x". Else '#'. */
+/** href allow-list: http, https, mailto, tel, "/x", relative paths ("x", "./x", "../x"), "?x", "#x". Else '#'. */
 export function safeHref(value: unknown): string {
   return checkUrl(value, LINK_SCHEMES, true) ?? '#'
 }
 
-/** img src allow-list: http, https, "/x", "./x", "../x". Else undefined (Astro omits the attribute). */
+/** img src allow-list: http, https, "/x", relative paths. Else undefined (Astro omits the attribute). */
 export function safeImgSrc(value: unknown): string | undefined {
   return checkUrl(value, IMAGE_SCHEMES, false) ?? undefined
 }

@@ -42,22 +42,27 @@ function gaiada_check_url(mixed $value, array $allowedSchemes, bool $allowFragme
         if (isset($cleaned[1]) && ($cleaned[1] === '/' || $cleaned[1] === '\\')) {
             return null;
         }
-    } elseif (!(str_starts_with($cleaned, './') || str_starts_with($cleaned, '../'))) {
-        if (!($allowFragmentAndQuery && ($cleaned[0] === '?' || $cleaned[0] === '#'))) {
+    } elseif ($cleaned[0] === '?' || $cleaned[0] === '#') {
+        if (!$allowFragmentAndQuery) {
             return null;
         }
+    } elseif (preg_match('~^[^\\\\:/?#]+(?:[/?#][^\\\\]*)?$~', $cleaned) !== 1) {
+        // A relative path ("about/", "page.html", "./x", "../x"): no backslash anywhere (browsers
+        // read a backslash as "/", so two of them would be scheme-relative) and no ":" before the
+        // first "/", "?" or "#". (In this single-quoted PHP string "\\\\" is one regex-escaped backslash.)
+        return null;
     }
     $out = preg_replace('/[\x00-\x1f\x7f]+/', '', $value);
     return is_string($out) ? trim($out) : null;
 }
 
-/** href allow-list: http, https, mailto, tel, "/x", "./x", "../x", "?x", "#x". Anything else is "#". */
+/** href allow-list: http, https, mailto, tel, "/x", relative paths ("x", "./x", "../x"), "?x", "#x". Anything else is "#". */
 function gaiada_safe_href(mixed $value): string
 {
     return gaiada_check_url($value, ['http:', 'https:', 'mailto:', 'tel:'], true) ?? '#';
 }
 
-/** img src allow-list: http, https, "/x", "./x", "../x". Anything else is '' (omit the attribute). */
+/** img src allow-list: http, https, "/x", relative paths. Anything else is '' (omit the attribute). */
 function gaiada_safe_img_src(mixed $value): string
 {
     return gaiada_check_url($value, ['http:', 'https:'], false) ?? '';
