@@ -636,9 +636,9 @@ describe.skipIf(!live)("WSK-61 — a scheduled publish going live dispatches ONE
   });
 
   // ─────────────────────────────────────────────────────────────────────────────────────────────
-  describe("migration 202610110119: the kind CHECK keeps every kind and admits schedule.fired", () => {
+  describe("migration 202610110441: the kind CHECK keeps every kind and admits schedule.fired", () => {
     const KINDS = ["form.received", "deploy.done", "promote.done", "rollback.done", "contract.published", "alert.raised", "schedule.fired"];
-    const sql = readFileSync(path.join(__dirname, "../../../migrations/202610110119_webdev_schedule_firings.sql"), "utf8");
+    const sql = readFileSync(path.join(__dirname, "../../../migrations/202610110441_webdev_schedule_firings.sql"), "utf8");
     const doBlock = sql.slice(sql.indexOf("DO $$"), sql.indexOf("END $$;") + "END $$;".length);
     const kindDef = async (c: { query: (q: string) => Promise<{ rows: Array<{ d: string }> }> }) =>
       (await c.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'webdev_zoneb_event_log'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) ILIKE '%form.received%'`)).rows[0].d;

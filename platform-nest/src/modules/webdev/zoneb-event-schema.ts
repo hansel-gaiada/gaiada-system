@@ -11,7 +11,7 @@
 const ZONEB_EVENT_KINDS = [
   "form.received", "deploy.done", "promote.done", "rollback.done",
   "contract.published", "alert.raised",
-  // WSK-61 (202610110119_webdev_schedule_firings.sql): the content tick made a schedule effective.
+  // WSK-61 (202610110441_webdev_schedule_firings.sql): the content tick made a schedule effective.
   "schedule.fired",
 ] as const;
 export type ZoneBEventKind = (typeof ZONEB_EVENT_KINDS)[number];

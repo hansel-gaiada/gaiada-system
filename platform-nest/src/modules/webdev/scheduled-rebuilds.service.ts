@@ -1,6 +1,6 @@
 // WSK-61 — a scheduled publish going live rebuilds staging, under the schedule's OWN approval.
 // Design: docs/plans/2026-10-10-webdesk-write-plane-design.md §9 + §12 WSK-61. Ledger: WSK-60
-// (site-builds.service.ts). Migration: 202610110119_webdev_schedule_firings.sql.
+// (site-builds.service.ts). Migration: 202610110441_webdev_schedule_firings.sql.
 //
 // ── WHY THIS EXISTS ──────────────────────────────────────────────────────────────────────────────
 // A `content.schedule` approval executes at decide() and publishes NOTHING yet (WSK-66 does not

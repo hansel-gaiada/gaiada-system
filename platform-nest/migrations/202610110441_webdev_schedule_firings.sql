@@ -1,10 +1,11 @@
--- 202610110119_webdev_schedule_firings.sql — WSK-61, a scheduled publish going live rebuilds staging.
+-- 202610110441_webdev_schedule_firings.sql — WSK-61, a scheduled publish going live rebuilds staging.
 -- Design: docs/plans/2026-10-10-webdesk-write-plane-design.md §9 + §12 WSK-61; the code is
 -- src/modules/webdev/scheduled-rebuilds.service.ts.
 --
 -- ── NUMBERING (migrations/README.md — timestamp scheme) ─────────────────────────────────────────
--- `ls migrations | sort | tail` immediately before writing this file showed the head as
--- `202610101730_webdev_site_builds.sql`. This takes a later minute.
+-- `ls migrations | sort | tail` immediately before naming this file showed the head as
+-- `202610110151_projects_status_check.sql`. This takes a later minute. (First written as 202610110119;
+-- renamed before merge because 202610110151 shipped in 1.0.0-alpha.351 in between.)
 --
 -- ── PART 1: `schedule.fired` joins the Zone B fact kinds ───────────────────────────────────────
 -- WebDesk's content tick (webdesk/api/src/scheduler/content-tick.service.ts) emits `schedule.fired`
