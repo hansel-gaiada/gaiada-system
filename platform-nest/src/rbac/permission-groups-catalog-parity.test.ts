@@ -116,7 +116,9 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // WSK-49f (2026-10-11): +2 on the EXISTING client_contact kind, both advancedOnly
     // (manage_website_editor, manage_admin). No new authoring group.
     // Merged: 401 base + 4 (webdesk_media_asset) + 2 (client_contact) = 407 grantable.
-    expect(grantable.length).toBe(407);
+    // PV3-01 (2026-10-11): 407 -> 408 (+1 on the EXISTING contract kind, `core.contract.countersign`,
+    // advancedOnly: uiGrantable false, owner-only by a Cerbos grant rule). No new authoring group.
+    expect(grantable.length).toBe(408);
     expect(relationshipKeys.size).toBe(15);
   });
 

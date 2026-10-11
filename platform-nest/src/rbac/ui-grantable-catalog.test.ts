@@ -90,8 +90,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // WSK-49f (2026-10-11): +2 grantable / +2 total on the EXISTING client_contact kind
     // (manage_website_editor, manage_admin), both uiGrantable:true.
     // Merged: 416 base + 4 + 2 = 422 total; 401 base + 4 + 2 = 407 grantable.
-    expect(permissions.length).toBe(422);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(407);
+    // PV3-01 (2026-10-11): +1 grantable / +1 total on the EXISTING contract kind
+    // (`core.contract.countersign`), uiGrantable:FALSE — owner-only by a Cerbos grant rule. 422 -> 423 / 407 -> 408.
+    expect(permissions.length).toBe(423);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(408);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

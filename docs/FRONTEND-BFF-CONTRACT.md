@@ -1744,14 +1744,16 @@ a client-recorded payment can never leave `pending`.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/contracts` | `?clientId`, `?status`. Authz: `contract` read (company_admin/manager). |
-| ✅ | GET | `/api/:t/contracts/:contractId` | Adds `signatures[]`. |
+| ✅ | GET | `/api/:t/contracts` | `?clientId`, `?status`. Authz: `contract` read (company_admin/manager). **PV3-01 (PROTOTYPED):** `?clientId` is the strict CC-1 facet (`parseClientFilter(raw, true)`): a uuid, or `internal` (`client_id IS NULL`, always empty here since a contract always has a client); anything else is a **400** (it used to 500 on a uuid cast). Parsed after the read check, so an unauthorized caller still gets 403. Every row carries `canCountersign` (below). |
+| ✅ | GET | `/api/:t/contracts/:contractId` | Adds `signatures[]`, and `canCountersign` (PV3-01). |
 | ✅ | POST | `/api/:t/contracts` | Always created `draft`. Validates the project belongs to the named client; `supersedesId` bumps `version`. |
 | ✅ | PATCH | `/api/:t/contracts/:contractId` | Draft-only, except `status:'void'`. A sent/signed contract is re-issued via `supersedesId`, never edited. |
 | ✅ | POST | `/api/:t/contracts/:contractId/send` | `draft → sent` + notifies signer contacts. Refuses with no document or `bodyMd`. Action `send`. |
-| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign` — **owner-only** (`platform_admin`/`group_executive`); company_admin deliberately excluded. |
+| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign`. **Corrected 2026-10-11 (PV3-01, PROTOTYPED):** allowed for an **`owner` of the contract's company** (company-scope `owner` grant on this tenant) and for `platform_admin` (its wildcard). `group_executive` no longer exists. company_admin, manager, an owner of another company, and any custom role (even one holding every `core.contract.*` key, `core.contract.countersign` included) get 403: no permission-arm rule reads that key, which is catalogued `uiGrantable: false` only because the policy names the action. Validates `signerName` before it authorizes. |
 | ✅ | GET | `/api/:t/invoice-payments` | `?status`, `?clientId=<uuid>\|internal` — finance's confirmation queue. `clientId` is the strict §22a facet (PV3-03, PROTOTYPED): a uuid lists only that client's payments (filters `invoice_payments.client_id`), `internal` lists payments whose invoice names no client (the column is nullable), a non-uuid is **400**. Authz: `invoice` read, checked before `clientId` is validated. |
 | ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update. |
+
+**`canCountersign` (PV3-01, PROTOTYPED).** On every row of both GETs. True only when all three hold: Cerbos allows `countersign` on `{kind:"contract", tenantId}` for this caller (ONE soft check per request, never per row; for an `actFor` call the acting user must be allowed too), the status is `sent`, and there is no `provider` signature. It is a hint for showing the Countersign control; the POST stays the authority. A probe failure reads as `false`, never a 500.
 
 **⚠ STILL NO STAFF UI FOR §16e's WRITES.** Contracts must be created/sent and payments confirmed via
 API. Whoever owns finance needs to know the decide endpoint exists, or client payments accumulate as

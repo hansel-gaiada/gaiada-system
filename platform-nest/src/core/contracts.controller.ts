@@ -32,6 +32,9 @@ import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
 import { recordInvoiceRevision, snapshotInvoice } from "../modules/invoice/invoice-revisions";
+import { check, type Resource } from "../rbac/cerbos";
+import { assemblePrincipal, type Principal } from "../rbac/principal";
+import { clientFilterSql, parseClientFilter } from "./client-filter";
 
 const CONTRACT_SELECT = `
   SELECT k.id, k.client_id AS "clientId", cl.name AS "clientName", k.project_id AS "projectId",
@@ -50,6 +53,37 @@ const CONTRACT_SELECT = `
     LEFT JOIN projects p ON p.id = k.project_id
    WHERE k.deleted_at IS NULL`;
 
+/** PV3-01 — may this caller countersign contracts in this tenant? Feeds the `canCountersign` row flag.
+ *
+ *  ONE Cerbos check per request, never one per row: the countersign rule depends only on the tenant
+ *  (the contract's `tenantId`), so a single decision covers every row of the response, and a per-row
+ *  batch would hit Cerbos's 50-resource limit on any real list.
+ *
+ *  A soft probe through `check()`, not `authorize()`: a `false` here is a UI hint, not a refusal, so
+ *  it must not write a "denied countersign" audit row every time a company_admin opens the list. The
+ *  POST route still runs the full `authorize()`, which stays the authority. The delegation half of
+ *  `authorize()` is mirrored (an `actFor` caller gets `true` only when the acting user is allowed
+ *  too), so the flag can never promise more than the POST would grant. Any probe failure reads as
+ *  `false`: the read it rides on has already been authorized and must not 500 over a hint. */
+async function mayCountersign(p: Principal, resource: Resource): Promise<boolean> {
+  try {
+    if (!(await check(p, resource, "countersign")).allow) return false;
+    if (p.actFor && p.actFor.userId !== p.userId) {
+      const onBehalfOf = await assemblePrincipal(p.actFor.userId, p.assurance);
+      if (!onBehalfOf) return false;
+      return (await check({ ...onBehalfOf, via: p.via }, resource, "countersign")).allow;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A row is countersignable only while it waits for us: `sent`, and no provider signature yet. */
+function withCountersign<T extends { status: string; providerSigned: boolean }>(row: T, may: boolean) {
+  return { ...row, canCountersign: may && row.status === "sent" && !row.providerSigned };
+}
+
 @Controller("api")
 @UseGuards(AuthGuard)
 export class ContractsController {
@@ -61,30 +95,39 @@ export class ContractsController {
     @Query("status") status?: string,
   ) {
     await authorize(req.principal, { kind: "contract", tenantId }, "read");
-    const rows = await withTenants([tenantId], (c) =>
-      c.query(
-        `${CONTRACT_SELECT}
-           AND ($1::uuid IS NULL OR k.client_id = $1)
-           AND ($2::text IS NULL OR k.status = $2)
-         ORDER BY k.created_at DESC LIMIT 300`,
-        [clientId ?? null, status ?? null],
+    // Parsed AFTER the read check, so an unauthorized caller gets 403, never a 400 about its query.
+    // Strict (PV3-01): a malformed id is a 400. It used to reach a `::uuid` cast and 500.
+    // `internal` means `client_id IS NULL`; `contracts.client_id` is NOT NULL, so it is always empty
+    // here, and that is the honest answer (one vocabulary across every client-filterable list).
+    const filter = clientFilterSql(parseClientFilter(clientId, true), "k.client_id", 2);
+    const [rows, may] = await Promise.all([
+      withTenants([tenantId], (c) =>
+        c.query<{ status: string; providerSigned: boolean }>(
+          `${CONTRACT_SELECT}
+             AND ($1::text IS NULL OR k.status = $1)
+             AND ${filter.sql}
+           ORDER BY k.created_at DESC LIMIT 300`,
+          [status ?? null, ...filter.params],
+        ),
       ),
-    );
-    return rows.rows;
+      mayCountersign(req.principal, { kind: "contract", tenantId }),
+    ]);
+    return rows.rows.map((r) => withCountersign(r, may));
   }
 
   @Get(":tenantId/contracts/:contractId")
   async detail(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("contractId") contractId: string) {
     await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "read");
+    const may = await mayCountersign(req.principal, { kind: "contract", id: contractId, tenantId });
     return withTenants([tenantId], async (c) => {
-      const rows = await c.query(`${CONTRACT_SELECT} AND k.id = $1`, [contractId]);
+      const rows = await c.query<{ status: string; providerSigned: boolean }>(`${CONTRACT_SELECT} AND k.id = $1`, [contractId]);
       if (!rows.rows[0]) throw new NotFoundException("contract not found");
       const sigs = await c.query(
         `SELECT party, signer, signer_name AS "signerName", signer_title AS "signerTitle", signed_at AS "signedAt"
            FROM contract_signatures WHERE contract_id = $1 ORDER BY signed_at ASC`,
         [contractId],
       );
-      return { ...rows.rows[0], signatures: sigs.rows };
+      return { ...withCountersign(rows.rows[0], may), signatures: sigs.rows };
     });
   }
 
