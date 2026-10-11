@@ -9,6 +9,7 @@ import "server-only";
 // file is the one place the fetch actually happens.
 import { platformFetch, PlatformError } from "./platform";
 import type { ReportDocument, ReportGrain, ReportKpi, ReportPeriodKind } from "./reports";
+import type { GroupReport } from "./groupReport";
 
 export { PlatformError };
 
@@ -37,6 +38,21 @@ export function getReportDocument(tenantId: string, userId: string, params: Repo
     start: params.start, end: params.end, servedTenant: params.servedTenant,
   });
   return platformFetch<ReportDocument>(`/api/${tenantId}/reports/document?${qs}`, userId);
+}
+
+export interface GroupReportParams {
+  periodKind: ReportPeriodKind;
+  start: string;
+  end: string;
+}
+
+/** PV1-06b — the group report (§PV-D19, `GET /api/:rootId/reports/group`). `rootId` is the ACTIVE
+ *  company and must be a root: the server answers 403 to anyone but the root owner or
+ *  `platform_admin`, and 404 when `rootId` is not a root. Callers branch on `isForbidden` and
+ *  `isNotFound` below; neither is a crash. */
+export function getGroupReport(rootId: string, userId: string, params: GroupReportParams): Promise<GroupReport> {
+  const qs = buildQuery({ periodKind: params.periodKind, start: params.start, end: params.end });
+  return platformFetch<GroupReport>(`/api/${rootId}/reports/group?${qs}`, userId);
 }
 
 export interface ReportOverviewScope { scopeRef: string; scopeName: string; kpis: ReportKpi[] }
@@ -68,4 +84,8 @@ export function isRangeTooLarge(e: unknown): e is PlatformError {
 
 export function isForbidden(e: unknown): e is PlatformError {
   return e instanceof PlatformError && e.status === 403;
+}
+
+export function isNotFound(e: unknown): e is PlatformError {
+  return e instanceof PlatformError && e.status === 404;
 }
