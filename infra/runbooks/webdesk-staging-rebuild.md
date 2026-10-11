@@ -39,6 +39,36 @@ WebDesk publish approval (WSK-66)            ERP (platform-nest)                
   unpublish, so a rebuild changes no WebDesk content and has no maker-checker arm. The generic `decide` gate (company_admin)
   still applies. **If the owner wants a second person on rebuilds, that is a Cerbos policy change (WSK-47's files), not a code change.**
 
+## Scheduled publishes and takedowns (WSK-61)
+
+A `content.schedule` approval executes at decide() and makes nothing public yet, so it does not rebuild then. Zone B makes it
+public **by time**: production serves a scheduled item once `publishAt` passes, and stops serving any item at `unpublishAt`, whether
+or not WebDesk's content tick has run. The ERP catches up in `src/modules/webdev/scheduled-rebuilds.service.ts`:
+
+* **When.** Every poll tick (the same loop as the stamp poll, so only when a target is configured), and right after WebDesk's
+  `schedule.fired` event is recorded (`POST /api/:tenantId/modules/webdev/zoneb-events`). The event is a **hint only**: it
+  names which site to look at, and the ERP decides from its own executed approvals and a fresh `item.get` of every item. A lost
+  or duplicated event costs at most one tick.
+* **Publish.** Every item live at its approved version: ONE dispatch under **the schedule's own approval id**, as the person who
+  approved it (`github_repo` `deploy` checked again now, at "linked" assurance). The build row is `kind=publish` with no
+  `published_at`, so the stamp proves it by `pulledAt >= dispatchedAt`. Exactly one build per approval, as for a publish.
+* **Takedown.** At least one item went down: `stagingStale` is set **once** (a later verified rebuild clears it and nothing sets
+  it again for that schedule). A takedown dispatches nothing by itself; the editor uses **Request rebuild** as for an unpublish.
+* **When it does not visibly happen.** Within `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS` (default 15 min) of the effective time the
+  ERP waits for every item. After it: some items live → dispatch; none → `superseded` (deleted, unpublished, or replaced by a
+  later publish that rebuilt on its own). A later `schedule.fired` naming the approval re-checks a superseded publish, so a late
+  version swap still rebuilds. Older than 7 days → `expired`. Stored args that no longer match their command hash → `refused`.
+* **A failed build is terminal**, here as everywhere: `deploy_denied`, `decider_inactive` and the dispatch's own reasons are
+  shown as a failed build, and the remedy is **Request rebuild**, never a silent retry.
+
+Every settled schedule leaves one row per transition in `webdev_schedule_firings` (`build_recorded`, `superseded`,
+`stale_marked`, `expired`, `refused`, with a `detail` such as `items_live=2/3`):
+
+```sql
+SELECT approval_id, transition, outcome, detail, build_id, effective_at, settled_at
+  FROM webdev_schedule_firings WHERE site_id = '<site id>' ORDER BY settled_at DESC LIMIT 20;
+```
+
 ## What each state means (and what the editor shows)
 
 `GET /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/build-status` returns exactly
@@ -69,6 +99,7 @@ no other key. The *reason* a build failed is deliberately not on that wire (it i
 | `deploy_denied` | Cerbos refused `github_repo` `deploy` for the decider | the decider needs company_admin / manager / webdev module staff **in the org tenant** |
 | `github_rate_limited` | the shared installation bucket is exhausted | wait; `GET /api/admin/github/detail` shows the bucket |
 | `rebuild_not_configured` | no `WEBDESK_REBUILD_TARGETS` entry for this site | Owner step E |
+| `decider_inactive` | WSK-61 only: a scheduled publish went live, but the person who approved the schedule is no longer an active user, so nobody can authorise the dispatch. Nothing was sent. | the editor files **Request rebuild** (a `content.rebuild` approval) |
 | `dispatch_unconfirmed` | the dispatch outlived 30 s, or the process died before recording GitHub's answer. **A run may have started.** | check the Actions tab; the ledger says so rather than guessing |
 | `github_dispatch_failed`, `build_ledger_unavailable` | anything else; see the platform log and the `github.deploy` activities row | |
 
