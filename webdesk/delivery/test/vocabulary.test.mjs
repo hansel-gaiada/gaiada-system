@@ -42,7 +42,7 @@ check(
     ),
   BLOCK_TYPE_NAMES.join(','),
 )
-check('vocabulary version is set', VOCABULARY_VERSION === '1.1.0', VOCABULARY_VERSION)
+check('vocabulary version is set', VOCABULARY_VERSION === '1.2.0', VOCABULARY_VERSION)
 check('envelope path prefix is the frozen /v1', ENVELOPE_PATH_PREFIX === '/v1', ENVELOPE_PATH_PREFIX)
 check(
   'VOCABULARY_SUMMARY carries both counts (what payload.config.ts exposes via config.custom)',

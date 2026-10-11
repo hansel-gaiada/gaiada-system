@@ -48,10 +48,36 @@ for t in vocabulary wsk64-classifier wsk64-item-fields \
 done
 ```
 
-`webdesk/qa/linux-gate.sh` (suite `vocabulary`) and CI's `webdesk-api` job run the first three
-(`vocabulary`, `wsk64-classifier`, `wsk64-item-fields`). The three `wsk14-*` scripts are pure unit checks of
+`webdesk/qa/linux-gate.sh` (suite `vocabulary`) runs the first three (`vocabulary`, `wsk64-classifier`,
+`wsk64-item-fields`) and, since WSK-49a, `wsk49-client-editable` (CI's `webdesk-api` job runs the first three; it needs one
+more line for the fourth, which is outside `webdesk/**`). The three `wsk14-*` scripts are pure unit checks of
 the breaking-change ruleset, the composition validator and the renderer invariant; they were not in the
 gate before the move either, and are run by hand. `wsk64-snapshot-probe.mjs` is a helper (the classifier
 test imports it) and `test/fixtures/vocabulary-1.0.0.snapshot.json` is the 1.0.0 contract snapshot the
 classifier compares against. (`wsk14-two-tenants.test.mjs`, which needed Payload's fixtures and its
 redirect helper, was deleted with Payload.)
+
+## Vocabulary 1.2.0 and client-editable fields (WSK-49a, ruling WSK-D59)
+
+1.2.0 is a **MINOR**: one optional boolean, `clientEditable`, on the composition's `ui` object and on a FieldDef's `ui` object.
+It is editor metadata only: no stored value changes and the `/v1` envelope is unchanged by a byte (`vocabulary/envelope.ts`
+is still pinned by its sha256). The bump is **computed**, never asserted: `classifyVocabularyChange(<1.1.0 snapshot>, current)`
+is `minor` (`test/fixtures/vocabulary-1.1.0.snapshot.json`, captured with `test/wsk64-snapshot-probe.mjs` against the untouched
+1.1.0 tree). The 1.1.0 classifier was **blind** to this change (it rated it PATCH, "no structural change"), because the keys of the
+two `ui` objects were not snapshot dimensions; `fieldUiKeys` and `collectionUiKeys` are since (a new key is MINOR, a removed one
+MAJOR; a snapshot that has a `ui` object but not its key set is refused loudly). Inside a tenant contract a `clientEditable`
+flip is a `ui` edit, so **PATCH**.
+
+**The one rule** (`vocabulary/client-editable.ts`, `isClientEditable(composition, pointer)`; nothing else restates it):
+
+```
+field is client-editable  iff  field.ui.clientEditable ?? <its parent group's effective value> ?? collection.ui.clientEditable ?? false
+```
+
+A nested group's members inherit from the group (transitively); generic (non-`fields`) blocks are client-editable iff the collection
+is; **`seo` is never client-editable** whatever any flag says (a design default: the agency keeps SEO-critical fields, which is
+D59's reason for the mechanism); the `fields` block itself is structure; anything that does not resolve is not editable.
+`collectionAcceptsClientCreate`, `changedContentPointers`, `clientEditViolations` and `clientCreateViolations` are built on it and
+are what the write plane (`webdesk/api/README.md`, "Client editors (WSK-49)"), the ERP's portal BFF (49c) and the portal UI (49d)
+call. The api's vendored copy gains `client-editable.ts`; the blocks and WordPress vendors re-vendored with no other change.
+The schema-draft prompt teaches the new key (read from the vendored constants).

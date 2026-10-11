@@ -18,6 +18,10 @@
 // `singleton`, `localized`, `ui` and `lint`, the FieldDef keys `fields`, `itemKey`, `localized` and
 // `ui`, the field-name grammar, group nesting (depth <= 4), and the rule that the composition-typed
 // `fields` block is implied by declaring `fields` and is never listed in `blocks`.
+//
+// WSK-49a (vocabulary 1.2.0, ruling WSK-D59) adds one optional key to each `ui` object (the collection's
+// and the field's): `clientEditable`. Editor metadata only, so it is PATCH inside a tenant contract and a
+// MINOR vocabulary release; the rule that resolves it is ./client-editable.ts.
 import {
   FIELD_DEF_KEYS,
   FIELD_NAME_PATTERN,
@@ -50,6 +54,12 @@ export interface CollectionUi {
   order?: number
   /** Names a top-level field whose value is the item's display title in the editor. */
   titleField?: string
+  /**
+   * 1.2.0 (WSK-D59): a client editor may edit this collection's fields and generic blocks. It is the
+   * DEFAULT a field inherits; a field's own `ui.clientEditable` wins. `seo` is never client-editable.
+   * Editor metadata only: no stored value changes. Resolved by `isClientEditable` (./client-editable.ts).
+   */
+  clientEditable?: boolean
 }
 
 /**
@@ -101,7 +111,9 @@ export const COMPOSITION_KEYS = ['fields', 'blocks', 'singleton', 'localized', '
 const KNOWN_COLLECTION_KEYS = new Set<string>(COMPOSITION_KEYS)
 const KNOWN_FIELD_KEYS = new Set<string>(FIELD_DEF_KEYS)
 const KNOWN_FIELD_UI_KEYS = new Set<string>(FIELD_UI_KEYS)
-const KNOWN_COLLECTION_UI_KEYS = new Set(['label', 'description', 'group', 'order', 'titleField'])
+/** 1.1.0: the keys a composition's `ui` object may carry (1.2.0 added `clientEditable`). */
+export const COLLECTION_UI_KEYS = ['label', 'description', 'group', 'order', 'titleField', 'clientEditable'] as const
+const KNOWN_COLLECTION_UI_KEYS = new Set<string>(COLLECTION_UI_KEYS)
 const KNOWN_LINT_KEYS = new Set(['placeholders'])
 const TOKEN_RULE_KEYS = new Set(['kind', 'open', 'close', 'registry'])
 const MARKER_RULE_KEYS = new Set(['kind', 'open', 'close', 'label'])
@@ -133,12 +145,13 @@ function validateBooleanKey(path: string, v: unknown, key: string): CompositionI
 
 function validateFieldUi(path: string, raw: unknown): CompositionIssue[] {
   if (raw === undefined) return []
-  if (!isPlainObject(raw)) return [issue(path, 'ui must be an object', '{ label?, help?, readOnly?, widget? }')]
+  if (!isPlainObject(raw)) return [issue(path, 'ui must be an object', '{ label?, help?, readOnly?, widget?, clientEditable? }')]
   const out = closedKeys(path, raw, KNOWN_FIELD_UI_KEYS, 'field ui')
   for (const k of ['label', 'help'] as const) {
     if (raw[k] !== undefined && typeof raw[k] !== 'string') out.push(issue(`${path}.${k}`, `ui.${k} must be a string when present`, 'string'))
   }
   out.push(...validateBooleanKey(path, raw.readOnly, 'readOnly'))
+  out.push(...validateBooleanKey(path, raw.clientEditable, 'clientEditable'))
   if (raw.widget !== undefined && !(FIELD_WIDGETS as unknown[]).includes(raw.widget)) {
     out.push(issue(`${path}.widget`, `ui.widget must be one of the editor widgets`, FIELD_WIDGETS.join(' | ')))
   }
@@ -246,7 +259,7 @@ function validateFieldDef(path: string, raw: unknown, depth: number): Compositio
 
 function validateCollectionUi(path: string, raw: unknown, fields: unknown): CompositionIssue[] {
   if (raw === undefined) return []
-  if (!isPlainObject(raw)) return [issue(path, 'ui must be an object', '{ label: string, description?, group?, order?, titleField? }')]
+  if (!isPlainObject(raw)) return [issue(path, 'ui must be an object', '{ label: string, description?, group?, order?, titleField?, clientEditable? }')]
   const out = closedKeys(path, raw, KNOWN_COLLECTION_UI_KEYS, 'collection ui')
   if (!isNonEmptyString(raw.label)) out.push(issue(`${path}.label`, 'ui.label is required and must be a non-empty string', 'string'))
   for (const k of ['description', 'group'] as const) {
@@ -255,6 +268,7 @@ function validateCollectionUi(path: string, raw: unknown, fields: unknown): Comp
   if (raw.order !== undefined && !(typeof raw.order === 'number' && Number.isFinite(raw.order))) {
     out.push(issue(`${path}.order`, 'ui.order must be a finite number when present', 'number'))
   }
+  out.push(...validateBooleanKey(path, raw.clientEditable, 'clientEditable'))
   if (raw.titleField !== undefined) {
     const names = Array.isArray(fields) ? fields.filter(isPlainObject).map((f) => f.name) : []
     if (typeof raw.titleField !== 'string' || !names.includes(raw.titleField)) {
