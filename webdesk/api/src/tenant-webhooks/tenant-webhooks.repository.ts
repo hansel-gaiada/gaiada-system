@@ -90,6 +90,22 @@ export class TenantWebhooksRepository {
     });
   }
 
+  /** Serialises the enabled-webhook cap for one tenant until the transaction ends: two concurrent
+   *  registrations could otherwise both count N-1 and both insert. A transaction-scoped advisory lock needs no
+   *  table privilege beyond what the app role has. */
+  async lockEnabledCap(client: PoolClient, tenantId: string): Promise<void> {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('tenant_webhooks:enabled:' || $1, 0))`, [tenantId]);
+  }
+
+  async countEnabled(client: PoolClient, tenantId: string, exceptWebhookId?: string): Promise<number> {
+    const { rows } = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM tenant_webhooks
+        WHERE tenant_id = $1 AND enabled = true AND ($2::uuid IS NULL OR id <> $2::uuid)`,
+      [tenantId, exceptWebhookId ?? null],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
   async setEnabled(client: PoolClient, tenantId: string, webhookId: string, enabled: boolean): Promise<TenantWebhookRow | null> {
     const { rows } = await client.query<TenantWebhookRow>(
       `UPDATE tenant_webhooks SET enabled = $1, updated_at = now()
