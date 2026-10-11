@@ -1,8 +1,8 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **60%** · 125/207<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `██████████████████░░░░░░░░░░░░` **59%** · 125/211<!-- /bar -->
 
-Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
+Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
 **How this file works**
 - A box is ticked **only when the item is verified**: driven on a Linux server and the result observed (DEV-VERIFIED), or — for a decision or document — landed in the repo. Code that exists but is unverified stays unticked.
@@ -201,7 +201,7 @@ Last updated <!-- updated -->2026-10-10<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `███████████░░░░░░░░░` **54%** · 29/53<!-- /bar -->
+<!-- bar -->🟡 `██████████░░░░░░░░░░` **50%** · 29/57<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -211,7 +211,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 - [x] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 
-### CMS features <!-- bar -->🟡 `██░░░░░░░░` **20%** · 2/10<!-- /bar -->
+### CMS features <!-- bar -->🟡 `█░░░░░░░░░` **14%** · 2/14<!-- /bar -->
 - [x] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52, recorded in webdesk-design-v2.md §14 on main `26862851`)
 - [ ] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved
 - [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
@@ -220,7 +220,11 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live)
 - [x] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, recorded in webdesk-design-v2.md §14 on main)
 - [ ] WSK-45 · WYSIWYG editor (TipTap) on the `markdown` primitive; an unchanged body saves byte-identical
-- [ ] WSK-43 · media library
+- [ ] WSK-43 ruled by the owner 2026-10-11: library images reach a static site through its build (WSK-D53); an image in use cannot be deleted (WSK-D54) (ticked when on main)
+- [ ] WSK-43a · WebDesk: asset metadata, token uploads that never pass through the ERP, soft delete refused while in use, purge job, quota in bytes held
+- [ ] WSK-43b · ERP: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools
+- [ ] WSK-43c · Website workspace: Media tab + a picker for media fields (after the M2 editor follow-ups)
+- [ ] WSK-43d · site repo: the pull step downloads library images into the static build (with the site owner)
 - [ ] WSK-49 · client editors through the client portal
 
 ### Defects found on the way <!-- bar -->🟡 `██████░░░░` **58%** · 23/39<!-- /bar -->
@@ -229,7 +233,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Undecodable `%` in a path gets Fastify's 400, not a problem+json body (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A non-integer `limit` (`limit=2.5`) reached `LIMIT $n` and 500ed — now truncated (found and fixed in M3 T1) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
-- [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes)
+- [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes) — lands with WSK-43a's purge job and byte quota
 - [x] The privacy residency statement still names MinIO to customers (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] `check-artifact-url-expiry.mjs` still starts a MinIO container (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [ ] In-memory read quota and idempotency under-enforce with more than one api replica (idempotency: the WSK-21 commands moved to the durable store in T5a; promotion + privacy follow in T5b; the read quota moves to Redis in T6)
