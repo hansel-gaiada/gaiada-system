@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████████░░░░░░░░░░░` **64%** · 144/224<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `███████████████████░░░░░░░░░░░` **64%** · 144/225<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -81,7 +81,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ### WSK-69 · GitHub build time cut before the first release (owner condition, D47) <!-- bar -->🟡 `█░░░░░░░░░` **14%** · 1/7<!-- /bar -->
 - [x] Baseline measured: CI ≈ 34 billed min (21 jobs) + release ≈ 24 min (12 image builds + deploy) per cycle
 - [ ] CI runs only the jobs whose component changed; superseded runs are cancelled — first half PROVEN on main 2026-10-11 (347 push, run 38082096371: only the platform-nest jobs ran, 9 jobs skipped); superseded-run cancellation not yet observed
-- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags; 349 (2026-10-11): the plan built ONLY platform-ui and re-tagged 10, and 7 re-tags kept their digests (the fix works, wa-chat-bot included); the 8th failed for a different reason (below), so not yet proven end to end
+- [ ] Release builds only changed components; unchanged images re-tagged by digest, signatures intact — first real use (346, 2026-10-11) FAILED in retag: a single-manifest image was re-wrapped to a new digest (guard caught it, nothing deployed); fixed with `--prefer-index=false` (`proof branch`), unproven until a partial release retags; 349 (2026-10-11): the plan built ONLY platform-ui and re-tagged 10, and 7 re-tags kept their digests (the fix works, wa-chat-bot included); the 8th failed for a different reason (below), so not yet proven end to end; 351 (2026-10-11): the plan was right (3 builds, 8 retags) but `crane` got no credentials (distroless `nonroot` image never read the /root/.docker mount) — fixed for 352 (`bc637ac7`), reproduced and verified on Linux against GHCR
 - [ ] GHCR prune deleted an untagged ATTESTATION of report-renderer `249e5e4c` (`f627854c`); its `sha256-<digest>` referrers index still lists it, so a referrer-walking copy fails (349's retag). The image itself pulls fine (GET manifest 200; corrected 2026-10-11, it is not an index). Prune DISABLED on main (`5cda7ea5`); retag switched to `crane tag` for 350 (`cc05fce7`)
 - [ ] A reference-aware GHCR prune (never delete a digest that any tagged index lists) before re-enabling retention
 - [ ] Dependency and Docker layer caching
@@ -202,7 +202,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `█████████████░░░░░░░` **65%** · 45/69<!-- /bar -->
+<!-- bar -->🟡 `█████████████░░░░░░░` **64%** · 45/70<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -212,7 +212,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 - [x] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 
-### CMS features <!-- bar -->🟡 `███░░░░░░░` **30%** · 6/20<!-- /bar -->
+### CMS features <!-- bar -->🟡 `███░░░░░░░` **28%** · 6/21<!-- /bar -->
 - [x] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52, recorded in webdesk-design-v2.md §14 on main `26862851`)
 - [x] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
@@ -227,12 +227,13 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43b · ERP: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools
 - [ ] WSK-43c · Website workspace: Media tab + a picker for media fields (after the M2 editor follow-ups)
 - [ ] WSK-43d · site repo: the pull step downloads library images into the static build (with the site owner)
-- [ ] WSK-49 ruled by the owner 2026-10-11: build now; a client publisher self-publishes one item, batches need a second client person (WSK-D58); clients edit only client-editable fields (WSK-D59) (ticked when on main)
+- [ ] WSK-49 ruled by the owner 2026-10-11: build now; a client publisher self-publishes one item, batches need a second client person (WSK-D58); clients edit only client-editable fields (WSK-D59); a `client_website_editor` role granted by staff or the client admin (WSK-D60) (ticked when on main)
 - [ ] WSK-49a · vocabulary 1.2.0: `ui.clientEditable` on compositions and fields
 - [ ] WSK-49b · WebDesk write plane refuses a client's change to a non-editable path; publish obeys D58
 - [ ] WSK-49c · ERP: Cerbos rules for client editors (own company only) + a portal BFF that diff-checks client writes
 - [ ] WSK-49d · client portal: a Website area in the portal's own shell, editor in client mode
 - [ ] WSK-49e · a seeded test client company with its own WebDesk tenant and site, proven end to end
+- [ ] WSK-49f · `client_website_editor` role as data (WSK-D60): Cerbos attribute check, grant/revoke by Gaiada staff and by the client's own admin (bounded: this role, own company, within ceiling, audited)
 
 ### Defects found on the way <!-- bar -->🟡 `████████░░` **77%** · 35/45<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
