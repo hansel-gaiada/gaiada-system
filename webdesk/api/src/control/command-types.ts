@@ -58,7 +58,12 @@ export type CommandName =
   | "item.get"
   | "item.versions"
   | "item.versionGet"
-  | "media.list";
+  | "media.list"
+  // WSK-43a — the media library (owner rulings WSK-D53/D54). The three writes carry an editorial principal.
+  | "media.uploadToken"
+  | "media.update"
+  | "media.delete"
+  | "media.usage";
 
 export interface CommandMeta {
   readonly command: CommandName;
@@ -154,6 +159,16 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "item.versions": { command: "item.versions", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "item.versionGet": { command: "item.versionGet", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "media.list": { command: "media.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // WSK-43a (design: m3 plan, "The media library"). An upload token lets whoever holds it put ONE file into the
+  // tenant's public library, so minting is a write (never `read`): MEDIUM/operate like the other draft writes
+  // (nothing goes live; the token is time-boxed to ten minutes, single-use, size- and type-capped). Update and
+  // delete are MEDIUM/operate too: a delete is soft (the stored object is kept until its retention lapses) and
+  // is REFUSED while content uses the asset (D54), so it cannot break a page, and, unlike content.delete, it
+  // takes no takedown scope. media.usage is a plain read.
+  "media.uploadToken": { command: "media.uploadToken", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "media.update": { command: "media.update", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "media.delete": { command: "media.delete", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "media.usage": { command: "media.usage", impactClass: "read", scope: "webdesk:read", jobTracked: false },
 });
 
 /**
@@ -174,6 +189,9 @@ export const EDITORIAL_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>
   "content.delete",
   "content.previewToken",
   "content.previewTokenRevoke",
+  "media.uploadToken",
+  "media.update",
+  "media.delete",
 ]);
 
 export function commandMeta(command: CommandName): CommandMeta {
