@@ -5,7 +5,7 @@
 // is giving the model the best chance of proposing something valid; it does not change what gets
 // accepted.
 //
-// T2 (D-b): teaches vocabulary 1.1.0. Every list the prompt states (primitives, composable block
+// T2 (D-b): teaches vocabulary 1.1.0; WSK-49a (1.2.0) adds the `ui.clientEditable` line. Every list the prompt states (primitives, composable block
 // types, composition keys, widgets, the group depth) is read from the vendored vocabulary constants,
 // never typed here, so a vocabulary change cannot leave the prompt teaching a stale rule. The block
 // list is COMPOSABLE_BLOCK_TYPE_NAMES (BLOCK_TYPE_NAMES in ./vocabulary-vendor.ts): the composition-typed
@@ -13,6 +13,8 @@
 import {
   BLOCK_TYPE_NAMES,
   COMPOSITION_KEYS,
+  FIELD_UI_KEYS,
+  COLLECTION_UI_KEYS,
   FIELD_WIDGETS,
   MAX_GROUP_DEPTH,
   PRIMITIVE_NAMES,
@@ -62,8 +64,8 @@ export function buildSchemaDraftPrompt(input: { collectionKey: string; prd: stri
     `"name" starts with a letter, then letters, digits or underscores, at most 64 characters. Optional keys: "required": boolean; ` +
     `"options": string[] (only for "select", non-empty); "relationTo": string (only for "relation", a collection key); ` +
     `"multiple": boolean; "fields": FieldDef[] (only for "group"); "itemKey": string (only for "group" with "multiple": true); ` +
-    `"localized": boolean; "ui": {"label"?: string, "help"?: string, "readOnly"?: boolean, "widget"?: ${FIELD_WIDGETS.map((w) => `"${w}"`).join(" | ")}} ` +
-    `(editor-only hints, they never change the stored value). No other key is allowed.\n` +
+    `"localized": boolean; "ui": {"label"?: string, "help"?: string, "readOnly"?: boolean, "widget"?: ${FIELD_WIDGETS.map((w) => `"${w}"`).join(" | ")}, "clientEditable"?: boolean} ` +
+    `(editor-only hints, they never change the stored value; the "ui" keys are: ${FIELD_UI_KEYS.join(", ")}). No other key is allowed.\n` +
     `- "multiple": true works on EVERY primitive and means the value is an ordered list of that primitive. ` +
     `Example, a list of text values: ${ex(PROMPT_EXAMPLES.multiple)}\n` +
     `- "group" is a closed nested object. It REQUIRES a non-empty "fields" array holding its sub-fields (same shape as above). ` +
@@ -76,7 +78,11 @@ export function buildSchemaDraftPrompt(input: { collectionKey: string; prd: stri
     `- "singleton": boolean. true means at most one item per locale (site settings, a footer).\n` +
     `- "localized": boolean, default true. false means items exist only in the default locale.\n` +
     `- "ui": editor presentation {"label": string (REQUIRED), "description"?: string, "group"?: string, "order"?: number, ` +
-    `"titleField"?: string naming a top-level field you declared}.\n` +
+    `"titleField"?: string naming a top-level field you declared, "clientEditable"?: boolean}. The "ui" keys are: ${COLLECTION_UI_KEYS.join(", ")}.\n` +
+    `- "clientEditable" (in a collection's "ui" and in a field's "ui"): true means the CLIENT's own staff may edit that content in the client ` +
+    `portal. A field inherits its group's value, a top-level field inherits the collection's, and the default is false. Set it true ONLY for ` +
+    `copy the PRD says the client maintains; leave structure, settings and anything SEO-critical false ("seo" is never client-editable). ` +
+    `It is editor metadata: it never changes a stored value.\n` +
     `- "lint": {"placeholders": [{"kind": "marker", "open": string, "close": string, "label": string} | ` +
     `{"kind": "token", "open": string, "close": string, "registry"?: {"collection", "listField", "keyField", "valueField"}}]} ` +
     `advisory checks only, literal delimiters, never a regex.\n` +

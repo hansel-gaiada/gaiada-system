@@ -28,9 +28,14 @@
 //     `ui` (PATCH, editor-only), and on the tenant axis `singleton`/`localized` flips (MAJOR) and
 //     `ui`/`lint` edits (PATCH).
 // A snapshot missing one of the 1.1.0 dimensions is refused loudly, never silently compared.
-import { MULTIPLE_CAPABLE_PRIMITIVES, PRIMITIVE_NAMES, FIELD_DEF_KEYS, type FieldDef, type PrimitiveName } from './primitives'
+//
+// WSK-49 (vocabulary 1.2.0) closed one more blind spot: the KEYS of the two `ui` objects were not part of
+// the snapshot, so adding `ui.clientEditable` would have been rated PATCH ("no structural change"). They
+// are snapshot dimensions now (`fieldUiKeys`, `collectionUiKeys`): a new key is MINOR, a removed one MAJOR.
+// A `clientEditable` VALUE flip inside a tenant contract is still a `ui` edit, so PATCH.
+import { MULTIPLE_CAPABLE_PRIMITIVES, PRIMITIVE_NAMES, FIELD_DEF_KEYS, FIELD_UI_KEYS, type FieldDef, type PrimitiveName } from './primitives'
 import { BLOCKS, BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, type BlockDef, type BlockType } from './blocks'
-import { COMPOSITION_KEYS, type CollectionUi, type PlaceholderRule } from './composition'
+import { COLLECTION_UI_KEYS, COMPOSITION_KEYS, type CollectionUi, type PlaceholderRule } from './composition'
 import { buildItemEnvelope, buildListEnvelope } from './envelope'
 import { problemDetails } from './problem-details'
 
@@ -205,6 +210,14 @@ export interface VocabularySnapshot {
   fieldDefKeys: string[]
   /** WSK-64: keys a collection composition may carry. A new key is MINOR, a removed one MAJOR. */
   compositionKeys: string[]
+  /**
+   * WSK-49: keys a FieldDef's `ui` object may carry. A new key is MINOR, a removed one MAJOR (both `ui`
+   * objects are closed, so a composition using a removed key stops validating). Required of a snapshot
+   * whose `fieldDefKeys` include "ui" (1.1.0 onward); a 1.0.0 snapshot has no `ui` at all.
+   */
+  fieldUiKeys?: string[]
+  /** WSK-49: keys a composition's `ui` object may carry. Same rule, required when `compositionKeys` include "ui". */
+  collectionUiKeys?: string[]
 }
 
 function paths(obj: Record<string, unknown>, prefix: string): string[] {
@@ -254,6 +267,8 @@ export function currentVocabularySnapshot(): VocabularySnapshot {
     multipleCapable: [...MULTIPLE_CAPABLE_PRIMITIVES].sort(),
     fieldDefKeys: [...FIELD_DEF_KEYS].sort(),
     compositionKeys: [...COMPOSITION_KEYS].sort(),
+    fieldUiKeys: [...FIELD_UI_KEYS].sort(),
+    collectionUiKeys: [...COLLECTION_UI_KEYS].sort(),
   }
 }
 
@@ -265,6 +280,16 @@ function assertCompleteSnapshot(which: string, snap: VocabularySnapshot): void {
     throw new Error(
       `classifyVocabularyChange: the ${which} snapshot lacks ${missing.join(', ')}, so it predates WSK-64's extended snapshot. ` +
         'Recapture it with payload/test/wsk64-snapshot-probe.mjs rather than comparing blind.',
+    )
+  }
+  // WSK-49: once a vocabulary has a `ui` object, the keys of that object are part of its contract.
+  const needsFieldUi = snap.fieldDefKeys.includes('ui') && snap.fieldUiKeys === undefined
+  const needsCollectionUi = snap.compositionKeys.includes('ui') && snap.collectionUiKeys === undefined
+  if (needsFieldUi || needsCollectionUi) {
+    const lacking = [needsFieldUi ? 'fieldUiKeys' : null, needsCollectionUi ? 'collectionUiKeys' : null].filter(Boolean).join(', ')
+    throw new Error(
+      `classifyVocabularyChange: the ${which} snapshot declares a \`ui\` object but lacks ${lacking}, so it predates WSK-49's ui-key dimensions. ` +
+        'Recapture it with delivery/test/wsk64-snapshot-probe.mjs rather than comparing blind.',
     )
   }
 }
@@ -349,6 +374,16 @@ export function classifyVocabularyChange(before: VocabularySnapshot, after: Voca
 
   reasoned.push(...diffKeySet('FieldDef', before.fieldDefKeys, after.fieldDefKeys))
   reasoned.push(...diffKeySet('composition', before.compositionKeys, after.compositionKeys))
+
+  // WSK-49: the keys of the two `ui` objects. Rated only when the BEFORE vocabulary already had the
+  // object (assertCompleteSnapshot guarantees its key set is present then); when it had none, the `ui`
+  // key's own addition, rated just above, already covers every sub-key.
+  if (before.fieldDefKeys.includes('ui') && before.fieldUiKeys && after.fieldUiKeys) {
+    reasoned.push(...diffKeySet('FieldDef ui', before.fieldUiKeys, after.fieldUiKeys))
+  }
+  if (before.compositionKeys.includes('ui') && before.collectionUiKeys && after.collectionUiKeys) {
+    reasoned.push(...diffKeySet('collection ui', before.collectionUiKeys, after.collectionUiKeys))
+  }
 
   return classify(reasoned)
 }

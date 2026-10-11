@@ -40,6 +40,8 @@ const SOURCE_DIR = path.resolve(HERE, '..', '..', '..', '..', 'delivery', 'vocab
 // WSK-41 adds breaking-change.ts: schema.apply now computes the tenant-contract bump of the change it
 // is about to commit (write-plane design §3.1, `{bump, reasons}`, refusing `major`), and that rating
 // must be the classifier's own, not a hand-restated copy. Still NOT index.ts: nothing needs it.
+// WSK-49 adds client-editable.ts: the write plane refuses a client editor's change to a path that is not
+// client-editable (WSK-D59) using the vocabulary's own rule (isClientEditable), never a restatement.
 export const FILES = [
   'cache-tags.ts',
   'problem-details.ts',
@@ -51,6 +53,7 @@ export const FILES = [
   'composition.ts',
   'item-fields.ts',
   'breaking-change.ts',
+  'client-editable.ts',
 ]
 
 export function banner(file) {

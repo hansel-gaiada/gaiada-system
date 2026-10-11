@@ -3,7 +3,7 @@
 // composition keys. Every worked example in the prompt must itself pass the real validator.
 import { describe, expect, it } from "vitest";
 import { buildSchemaDraftPrompt, PROMPT_EXAMPLES } from "../../src/schema-draft/prompt";
-import { BLOCK_TYPE_NAMES, PRIMITIVE_NAMES, validateCollectionComposition } from "../../src/schema-draft/vocabulary-vendor";
+import { BLOCK_TYPE_NAMES, COLLECTION_UI_KEYS, FIELD_UI_KEYS, PRIMITIVE_NAMES, VOCABULARY_VERSION, validateCollectionComposition } from "../../src/schema-draft/vocabulary-vendor";
 import { BLOCK_TYPE_NAMES as ALL_BLOCK_TYPE_NAMES } from "../../src/delivery/vocabulary/blocks";
 
 const prompt = buildSchemaDraftPrompt({ collectionKey: "faq-page", prd: "an FAQ page", currentSchema: null });
@@ -56,5 +56,36 @@ describe("buildSchemaDraftPrompt — vocabulary 1.1.0", () => {
     const withCurrent = buildSchemaDraftPrompt({ collectionKey: "c", prd: "PRD-TEXT", currentSchema: { blocks: ["hero"] } });
     expect(withCurrent).toContain("PRD-TEXT");
     expect(withCurrent).toContain('{"blocks":["hero"]}');
+  });
+});
+
+// WSK-49a (vocabulary 1.2.0): `ui.clientEditable` is taught, with one line on what it means.
+describe("buildSchemaDraftPrompt — vocabulary 1.2.0 (ui.clientEditable)", () => {
+  it("states the vendored vocabulary version it teaches", () => {
+    expect(VOCABULARY_VERSION).toBe("1.2.0");
+    expect(prompt).toContain(`v${VOCABULARY_VERSION}`);
+  });
+
+  it("names clientEditable among the ui keys of BOTH ui objects, read from the vendored constants", () => {
+    expect(FIELD_UI_KEYS).toContain("clientEditable");
+    expect(COLLECTION_UI_KEYS).toContain("clientEditable");
+    for (const k of FIELD_UI_KEYS) expect(prompt, `field ui key ${k}`).toContain(`"${k}"`);
+    for (const k of COLLECTION_UI_KEYS) expect(prompt, `collection ui key ${k}`).toContain(`"${k}"`);
+    expect(prompt).toContain(`The "ui" keys are: ${COLLECTION_UI_KEYS.join(", ")}`);
+    expect(prompt).toContain(`the "ui" keys are: ${FIELD_UI_KEYS.join(", ")}`);
+  });
+
+  it("explains what it means in one line: the client's staff may edit it, inheritance, default false, seo never", () => {
+    const line = prompt.split("\n").find((l) => l.startsWith('- "clientEditable"'));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/CLIENT's own staff may edit/);
+    expect(line).toMatch(/inherits its group's value/);
+    expect(line).toMatch(/default is false/);
+    expect(line).toMatch(/"seo" is never client-editable/);
+  });
+
+  it("a composition that uses it validates under the real validator (a drafted proposal may carry it)", () => {
+    const r = validateCollectionComposition("x", { ui: { label: "L", clientEditable: true }, fields: [{ name: "a", primitive: "text", ui: { clientEditable: false } }] });
+    expect(r.issues).toEqual([]);
   });
 });
