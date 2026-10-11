@@ -212,6 +212,11 @@ function addLeaves(value: unknown, ptr: string, out: Set<string>, depth: number)
   out.add(ptr)
 }
 
+/** An OWN property or undefined: a hostile `__proto__` key must never be read through the prototype chain. */
+function own(o: Record<string, unknown>, k: string): unknown {
+  return Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined
+}
+
 function diffInto(a: unknown, b: unknown, ptr: string, out: Set<string>, depth: number): void {
   if (deepEqual(a, b, depth)) return
   if (depth > MAX_DIFF_DEPTH) {
@@ -220,7 +225,7 @@ function diffInto(a: unknown, b: unknown, ptr: string, out: Set<string>, depth: 
   }
   if (isPlainObject(a) && isPlainObject(b)) {
     for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
-      diffInto(a[k], b[k], `${ptr}/${escapeSegment(k)}`, out, depth + 1)
+      diffInto(own(a, k), own(b, k), `${ptr}/${escapeSegment(k)}`, out, depth + 1)
     }
     return
   }
@@ -259,7 +264,8 @@ function withoutNulls(v: unknown, depth: number): unknown {
   if (depth > MAX_DIFF_DEPTH) return v
   if (Array.isArray(v)) return v.map((x) => withoutNulls(x, depth + 1))
   if (isPlainObject(v)) {
-    const out: Record<string, unknown> = {}
+    // A null-prototype object, so a "__proto__" key is copied as an ordinary key rather than re-parenting `out`.
+    const out: Record<string, unknown> = Object.create(null)
     for (const [k, x] of Object.entries(v)) if (x !== null && x !== undefined) out[k] = withoutNulls(x, depth + 1)
     return out
   }

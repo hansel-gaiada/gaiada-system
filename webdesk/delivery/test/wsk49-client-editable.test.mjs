@@ -207,6 +207,14 @@ check('object key order is not a change', eq(changedContentPointers({ blocks: [{
   check('a new generic block reports its leaves', eq(changedContentPointers(base(), b), ['/blocks/2/props/heading', '/blocks/2/type']), JSON.stringify(changedContentPointers(base(), b)))
 }
 {
+  // A hostile "__proto__" key (JSON.parse makes it an OWN property): it must be reported as a change, never read through the prototype.
+  const hostile = JSON.parse('{"blocks":[{"type":"fields","props":{"__proto__":{}}}],"seo":{}}')
+  const clean = { blocks: [{ type: 'fields', props: {} }], seo: {} }
+  const ptrs = changedContentPointers(clean, hostile)
+  check('a "__proto__" key is a real key and is reported (never read through the prototype)', eq(ptrs, [`${P}/__proto__`]), JSON.stringify(ptrs))
+  check('and it is never editable, even under a true collection', clientEditViolations(ON, clean, hostile).length === 1 && clientCreateViolations(ON, hostile).length === 1, JSON.stringify([clientEditViolations(ON, clean, hostile), clientCreateViolations(ON, hostile)]))
+}
+{
   let deepA = 'x'
   let deepB = 'y'
   for (let i = 0; i < 5000; i++) {
