@@ -1,6 +1,6 @@
 // WSK-40 — the ERP editorial-assertion signer (design §5; done-when 3 on this side).
 //
-//   * the three fixed vectors: the REAL signer (jose CompactSign) produces exactly the pinned bytes, and
+//   * the four fixed vectors (v4, WSK-49c: the client-editor `ce` claim): the REAL signer (jose CompactSign) produces exactly the pinned bytes, and
 //     jose verifies the pinned bytes with the public key. The SAME literal is pinned in
 //     webdesk/api/test/editorial-assertion-vectors.spec.ts, where WebDesk's production verifier accepts
 //     these bytes and WebDesk's independent node:crypto minter reproduces them;
@@ -127,6 +127,34 @@ const VECTORS = [
     "ttl": 60,
     "jti": "5b6c7d8e-9fa0-4b1c-9d2e-3f405162738a",
     "jws": "eyJhbGciOiJFZERTQSIsInR5cCI6IndkLWVkaXRvcmlhbCtqd3QiLCJraWQiOiJ3ZGUtdmVjLWIifQ.eyJpc3MiOiJ1cm46Z2FpYWRhOmVycDp3ZWJkZXYiLCJhdWQiOiJ1cm46Z2FpYWRhOndlYmRlc2s6Y29udHJvbCIsInN1YiI6InVzZXItMDAwMyIsInBrIjoiaHVtYW4iLCJ0ZW4iOiJnYWlhZGEiLCJzaXRlIjoiMGI2ZjFjMmUtM2Q0YS00YjVjLThkNmUtN2Y4MDkxYTJiM2M0IiwiY21kIjoiY29udGVudC5wdWJsaXNoIiwiY21oIjoiZmJjNzJlZmNjMWZiMzE3ZGExOTRiY2JlMTRhMzRlN2IwZWI1NzFiZjBiYmU4MDNkY2VlOTBjNWE4YTEyYzUwNCIsInJlcSI6InVzZXItMDAwMSIsImFwciI6IjdjMWQyZTNmLTRhNWItNGM2ZC04ZTdmLTkwYTFiMmMzZDRlNSIsImlhdCI6MTc2MDAwMDQ1NiwiZXhwIjoxNzYwMDAwNTE2LCJqdGkiOiI1YjZjN2Q4ZS05ZmEwLTRiMWMtOWQyZS0zZjQwNTE2MjczOGEifQ.jqeW5Qf1OaI6JQvDhZDeWJxEd36rHmKrtPlQTvcPEoULk-xaAmyp8PjC0TChtl5GYh8NOpQ-5HGKrv5Wm4B1Bg"
+  },
+  {
+    "name": "v4-client-editor-update",
+    "keyLabel": "wsk40-vector-key-a",
+    "kid": "wde-vec-a",
+    "x": "V6BcL1SNXUkuAZnXg_wB5CypXAe3bGCWyH6LprGhix4",
+    "args": {
+      "tenantSlug": "gaiada",
+      "siteId": "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4",
+      "itemId": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f60718293",
+      "baseVersion": 4,
+      "fields": {
+        "h1": "Client-edited headline"
+      }
+    },
+    "request": {
+      "sub": "user-0004",
+      "pk": "human",
+      "ten": "gaiada",
+      "site": "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4",
+      "cmd": "content.update",
+      "cmh": "ffbf9280bd1384820d05c4d3a5567e79245a9944c6772cdb10147f7922db267b",
+      "ce": true
+    },
+    "iat": 1760000789,
+    "ttl": 60,
+    "jti": "8c9d0e1f-2a3b-4c4d-8e5f-60718293a4b5",
+    "jws": "eyJhbGciOiJFZERTQSIsInR5cCI6IndkLWVkaXRvcmlhbCtqd3QiLCJraWQiOiJ3ZGUtdmVjLWEifQ.eyJpc3MiOiJ1cm46Z2FpYWRhOmVycDp3ZWJkZXYiLCJhdWQiOiJ1cm46Z2FpYWRhOndlYmRlc2s6Y29udHJvbCIsInN1YiI6InVzZXItMDAwNCIsInBrIjoiaHVtYW4iLCJ0ZW4iOiJnYWlhZGEiLCJzaXRlIjoiMGI2ZjFjMmUtM2Q0YS00YjVjLThkNmUtN2Y4MDkxYTJiM2M0IiwiY21kIjoiY29udGVudC51cGRhdGUiLCJjbWgiOiJmZmJmOTI4MGJkMTM4NDgyMGQwNWM0ZDNhNTU2N2U3OTI0NWE5OTQ0YzY3NzJjZGIxMDE0N2Y3OTIyZGIyNjdiIiwiY2UiOnRydWUsImlhdCI6MTc2MDAwMDc4OSwiZXhwIjoxNzYwMDAwODQ5LCJqdGkiOiI4YzlkMGUxZi0yYTNiLTRjNGQtOGU1Zi02MDcxODI5M2E0YjUifQ.cKb63ELZA-WcUOAndBbxXi6L1ubBCNSX8mEhzqmoXEfvPkF0avtW-g3w9qizv_kXt7Har-pIx53AOkbpRos0Cw"
   }
 ] as const;
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -141,7 +169,7 @@ function vectorKey(label: string) {
 
 const KEYGEN = resolve(__dirname, "../../../scripts/webdesk-editorial-keygen.mjs");
 
-describe("WSK-40 editorial signer — the three shared vectors", () => {
+describe("WSK-40 editorial signer — the four shared vectors (v4 = the client-editor `ce` claim, WSK-49c)", () => {
   for (const v of VECTORS) {
     describe(v.name, () => {
       const { privateKey, publicKey } = vectorKey(v.keyLabel);
@@ -199,6 +227,50 @@ describe("WSK-40 editorial signer — behaviour", () => {
     expect(pa.jti).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(pa.jti).not.toBe(pb.jti); // single-use on WebDesk: every assertion is fresh
     expect(Object.keys(pa)).toEqual(["iss", "aud", "sub", "pk", "ten", "site", "cmd", "cmh", "req", "apr", "iat", "exp", "jti"]);
+  });
+
+  describe("WSK-49c — the client-editor marker `ce`", () => {
+    const iat = 1_800_000_000;
+    const jti = "6f1c2e3d-4a4b-4c8d-9e7f-8091a2b3c4d5";
+    const wire = (input: EditorialAssertionRequest) => editorialClaimsFor(input, iat, 60, jti);
+
+    it("a STAFF assertion is exactly what it was before WSK-49: no `ce` key, whatever else it carries", () => {
+      expect(Object.keys(wire(base))).toEqual(["iss", "aud", "sub", "pk", "ten", "site", "cmd", "cmh", "req", "apr", "iat", "exp", "jti"]);
+      expect(Object.keys(wire(base))).not.toContain("ce");
+      const { ce: _no, ...noCe } = { ...base } as EditorialAssertionRequest & { ce?: true };
+      void _no;
+      expect(JSON.stringify(wire(noCe))).toBe(JSON.stringify(wire(base)));
+    });
+
+    it("a client assertion carries `ce: true` BETWEEN `apr` and `iat` (the position WebDesk's vector v4 pins)", () => {
+      expect(Object.keys(wire({ ...base, ce: true }))).toEqual(["iss", "aud", "sub", "pk", "ten", "site", "cmd", "cmh", "req", "apr", "ce", "iat", "exp", "jti"]);
+      // and without `req`/`apr` (an immediate MEDIUM write): ce follows cmh
+      const { req: _r, apr: _a, ...medium } = base;
+      void [_r, _a];
+      expect(Object.keys(wire({ ...medium, cmd: "content.update", ce: true }))).toEqual(["iss", "aud", "sub", "pk", "ten", "site", "cmd", "cmh", "ce", "iat", "exp", "jti"]);
+      expect(wire({ ...base, ce: true }).ce).toBe(true);
+    });
+
+    it("refuses to sign a `ce` that is not literally true (never coerced, never `false`, never a string)", () => {
+      for (const ce of [false, "true", 1, null] as unknown[]) {
+        expect(() => wire({ ...base, ce } as unknown as EditorialAssertionRequest)).toThrow(EditorialAssertionInputError);
+      }
+    });
+
+    it("signs a client assertion that jose verifies and whose payload says ce:true; a staff one verifies with no ce", async () => {
+      const { privateKey: k, publicKey } = generateKeyPairSync("ed25519");
+      const signer = createWebdeskEditorialSigner({ privateKey: k, kid: "wde-ce", now: () => iat });
+      const client = await signer.sign({ ...base, ce: true });
+      const staff = await signer.sign(base);
+      const cp = JSON.parse(Buffer.from((await compactVerify(client, publicKey, { algorithms: ["EdDSA"] })).payload).toString("utf8"));
+      const sp = JSON.parse(Buffer.from((await compactVerify(staff, publicKey, { algorithms: ["EdDSA"] })).payload).toString("utf8"));
+      expect(cp.ce).toBe(true);
+      expect("ce" in sp).toBe(false);
+      // the marker is covered by the signature: stripping it from the client token breaks verification
+      const [h, , sig] = client.split(".");
+      const stripped = `${h}.${Buffer.from(JSON.stringify({ ...cp, ce: undefined })).toString("base64url")}.${sig}`;
+      await expect(compactVerify(stripped, publicKey, { algorithms: ["EdDSA"] })).rejects.toThrow();
+    });
   });
 
   const bad: Array<[string, Partial<EditorialAssertionRequest> & Record<string, unknown>]> = [

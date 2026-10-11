@@ -272,6 +272,9 @@ export interface EditorialAssertionRequest {
   req?: string;
   /** The approval id; must equal the WS4 assertion's approvalId on Zone B. */
   apr?: string;
+  /** WSK-49c: the client-editor marker (WebDesk's `ce` claim, WSK-D59/D62), set ONLY for a client principal. It only ever
+   *  restricts: WebDesk then refuses non-client-editable changes and obeys D58 on publish. `true` or absent, never `false`. */
+  ce?: true;
 }
 
 export interface EditorialAssertionSigner {
