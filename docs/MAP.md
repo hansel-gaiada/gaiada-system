@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610111030_iam_webdesk_media_permissions.sql`
+- Head: `202610111330_agency_leads_web_source.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 242 (121 legacy `NNNN_`, 121 timestamped)
+- Applied files on disk: 244 (121 legacy `NNNN_`, 123 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -578,7 +578,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `webdesk-control-channel.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-staging-rebuild.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
+Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `umami-sumopod.md`, `webdesk-control-channel.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-staging-rebuild.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 
