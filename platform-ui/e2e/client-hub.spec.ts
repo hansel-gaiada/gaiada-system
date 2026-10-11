@@ -97,18 +97,23 @@ test.describe("client hub", () => {
     for (const name of ["Projects", "Deliverables", "Approvals", "Requests", "Meetings"]) {
       await expect(page.getByRole("heading", { name, level: 2, exact: true })).toBeVisible();
     }
+    // Each assertion is scoped to its own section: the demo meeting shares the run's title, so an
+    // unscoped lookup would match both.
     // Deliverables are read with ?clientId=: Northwind's are here, Cedar Group's (dl-3) are not.
-    await expect(page.getByText("Homepage redesign")).toBeVisible();
+    const deliverables = page.locator("#deliverables");
+    await expect(deliverables.getByText("Homepage redesign")).toBeVisible();
     await expect(page.getByText("Q3 SEO audit report")).toHaveCount(0);
     // Approvals: this client's run, with its client-side gates (a pending scope sign-off).
-    await expect(page.getByRole("link", { name: "Northwind — site redesign kickoff" })).toBeVisible();
-    await expect(page.getByText("Scope sign-off")).toBeVisible();
+    const approvals = page.locator("#approvals");
+    await expect(approvals.getByRole("link", { name: "Northwind — site redesign kickoff" })).toBeVisible();
+    await expect(approvals.getByText("Scope sign-off")).toBeVisible();
     await expect(page.getByText("Mobile app revamp — discovery")).toHaveCount(0);
     // Requests: the client's change requests with no project sit under "Not tied to a project".
-    await expect(page.getByRole("heading", { name: "Not tied to a project" })).toBeVisible();
-    await expect(page.getByText("Add a wishlist to the product page")).toBeVisible();
+    const requests = page.locator("#requests");
+    await expect(requests.getByRole("heading", { name: "Not tied to a project" })).toBeVisible();
+    await expect(requests.getByText("Add a wishlist to the product page")).toBeVisible();
     // Post reviews come from the overview's outstanding reviews.
-    await expect(page.getByText("Launch announcement")).toBeVisible();
+    await expect(requests.getByText("Launch announcement")).toBeVisible();
   });
 
   test("meetings show on Projects and not on People (PV3-05)", async ({ page }) => {
