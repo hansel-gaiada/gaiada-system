@@ -94,9 +94,9 @@ jobs:
         # WSK-69: the list is no longer hand-maintained here. It is the `build` output of the plan job,
         # a subset of COMPONENTS in scripts/ci/config.mjs (the single list; add a component THERE).
         # History that used to live on the entries, kept because it still explains the shape:
-        #   * webdesk-api (WSK-29) - webdesk/api/ Zone B NestJS service. NOT in deploy.yml's COMPONENTS
-        #     and in no compose file on purpose (webdesk/docker-compose.aicenter-release.yml): there is
-        #     no Zone B box yet, so this only closes "nothing builds a webdesk image".
+        #   * webdesk-api (WSK-29) - webdesk/api/ NestJS service. NOT in deploy.yml's COMPONENTS on purpose
+        #     (its own compose project); deployed by the deploy-webdesk job below (M4, 2026-10-12) onto
+        #     webdesk/docker-compose.aicenter-release.yml.
         #   * webdesk-payload (WSK-28) - removed in WSK-48b with the Payload app (WSK-D37).
         #   * synthetic-prober (MON-09f) - lives under infra/observability/, see `context:` below. It is
         #     here because deploy.yml runs `up -d --no-build`: a service that exists only as a local
@@ -311,6 +311,23 @@ jobs:
     uses: ./.github/workflows/deploy.yml
     with:
       tag: ${{ github.event.inputs.tag || github.ref_name }}
+    secrets: inherit
+
+  # WebDesk's own deploy (M4 T4; wired in on the owner's decision 2026-10-12), AFTER the ERP deploy succeeded.
+  # It is NOT in deploy.yml's COMPONENTS: that job runs `up --remove-orphans` against the `gaiada` project, and
+  # WebDesk is its own compose project. deploy-webdesk.yml cosign-verifies gaiada-webdesk-api:<tag>, pulls it by
+  # digest on the box, backs up, migrates (twice; the second must apply 0), swaps the api onto the release
+  # overlay, health-checks and re-pins the previous image on a failed check. skip_if_current: most releases do
+  # not touch WebDesk, and then it changes nothing (same digest running, no pending migration, identical tree)
+  # instead of restarting the api for nothing. A WebDesk failure fails this job, never the ERP deploy above.
+  deploy-webdesk:
+    needs: [deploy]
+    if: ${{ !cancelled() && needs.deploy.result == 'success' }}
+    uses: ./.github/workflows/deploy-webdesk.yml
+    with:
+      tag: ${{ github.event.inputs.tag || github.ref_name }}
+      mode: apply
+      skip_if_current: true
     secrets: inherit
 
   # ── GHCR RETENTION (reference-aware; rewritten 2026-10-11) ────────────────────────────────────
