@@ -124,7 +124,7 @@ describe("codegen — live DB + RustFS integration", () => {
 
     expect(response).not.toBeNull();
     expect(response!.version).toBe("1.0.0");
-    expect(response!.vocabularyVersion).toBe("1.1.0"); // WSK-64: vocabulary 1.1.0
+    expect(response!.vocabularyVersion).toBe("1.2.0"); // WSK-49a: vocabulary 1.2.0 (1.1.0 was WSK-64)
     expect(response!.contentHash).toBe(built.contentHash);
     // WSK-34 — sdkPhpUrl now fills in for a freshly-generated tenant (was `null` pre-WSK-34).
     expect(response!.artifacts.sdkPhpUrl).toContain("X-Amz-Signature");

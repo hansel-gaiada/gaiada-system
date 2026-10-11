@@ -53,7 +53,7 @@ describe("schema-draft vocabulary vendor — drift check against the REAL source
     const match = source.match(/export const VOCABULARY_VERSION = '([^']+)'/);
     if (!match) throw new Error("VOCABULARY_VERSION not found in version.ts");
     expect(match[1]).toBe(VOCABULARY_VERSION);
-    expect(VOCABULARY_VERSION).toBe("1.1.0");
+    expect(VOCABULARY_VERSION).toBe("1.2.0"); // WSK-49a (1.1.0 was WSK-64)
   });
 
   it("both vendored unions are non-empty (a marker-regex silently matching nothing must not read as a pass)", () => {

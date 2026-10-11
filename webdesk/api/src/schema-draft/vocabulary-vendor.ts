@@ -37,5 +37,5 @@ export { validateCollectionComposition, formatCompositionIssues } from "../deliv
 
 // T2 (D-b): the 1.1.0 vocabulary constants the drafting prompt teaches from, so the prompt never
 // carries a hand-typed list. Same mechanically vendored copy as everything above.
-export { FIELD_WIDGETS, MAX_GROUP_DEPTH } from "../delivery/vocabulary/primitives";
-export { COMPOSITION_KEYS } from "../delivery/vocabulary/composition";
+export { FIELD_WIDGETS, FIELD_UI_KEYS, MAX_GROUP_DEPTH } from "../delivery/vocabulary/primitives";
+export { COMPOSITION_KEYS, COLLECTION_UI_KEYS } from "../delivery/vocabulary/composition";

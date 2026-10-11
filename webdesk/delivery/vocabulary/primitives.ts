@@ -9,6 +9,7 @@
 //   - three new primitives: `group` (a closed nested object), `boolean`, `markdown`;
 //   - `multiple` is honoured for EVERY primitive (1.0.0 honoured it for media/relation only);
 //   - FieldDef gains the optional keys `fields`, `itemKey`, `localized` and `ui`.
+// 1.2.0 (WSK-49a, ruling WSK-D59) adds one optional key to the FieldDef `ui` object: `clientEditable`.
 // Nothing here changed meaning for a value 1.0.0 accepted: no shipped composition declared a scalar
 // `multiple` (checked in the WSK-62 design, §2.3 row 5), so no stored value changes validity.
 //
@@ -41,6 +42,13 @@ export interface FieldUi {
   help?: string
   readOnly?: boolean
   widget?: FieldWidget
+  /**
+   * 1.2.0 (WSK-D59): this field may be edited by a client editor. Absent = inherit: a nested group's
+   * members inherit from the group, a top-level field from the collection's `ui.clientEditable`, else
+   * false. Editor metadata only: it never changes a stored value or the wire shape. The ONE rule that
+   * resolves it is `isClientEditable` in ./client-editable.ts.
+   */
+  clientEditable?: boolean
 }
 
 /** A field on a block or a collection, described in terms of one primitive (§05 Layer 2). */
@@ -88,8 +96,8 @@ export const FIELD_DEF_KEYS = [
   'ui',
 ] as const
 
-/** 1.1.0: the keys a FieldDef's `ui` object may carry. */
-export const FIELD_UI_KEYS = ['label', 'help', 'readOnly', 'widget'] as const
+/** 1.1.0: the keys a FieldDef's `ui` object may carry (1.2.0 added `clientEditable`). */
+export const FIELD_UI_KEYS = ['label', 'help', 'readOnly', 'widget', 'clientEditable'] as const
 export const FIELD_WIDGETS: FieldWidget[] = ['input', 'textarea', 'code']
 
 /** 1.1.0: the grammar every field name follows (it is also a JSON-pointer segment and a TS property). */

@@ -18,6 +18,16 @@
 //                     accepted, so a stale `expected` string cannot lie.
 //   compositionKeys — the same procedure, one level up.
 //
+// WSK-49 (vocabulary 1.2.0) adds two more dimensions, because 1.1.0's classifier was blind to the
+// KEYS OF the two `ui` objects (a new ui key is a new optional key: MINOR, a removed one MAJOR):
+//
+//   fieldUiKeys       — the keys a FieldDef's `ui` object accepts (same unknown-key procedure).
+//   collectionUiKeys  — the keys a composition's `ui` object accepts.
+//
+// Both are readable from a 1.1.0 tree too (its validators already close both objects and list the
+// accepted keys), so the committed 1.1.0 fixture was captured with THIS probe against the untouched
+// 1.1.0 vocabulary (commit 85299efb, before any 1.2.0 edit).
+//
 // Usage:
 //   node --import tsx test/wsk64-snapshot-probe.mjs [vocabularyDir]   — prints the snapshot JSON
 // The committed fixture test/fixtures/vocabulary-1.0.0.snapshot.json was produced by running this
@@ -100,6 +110,32 @@ export function probeCompositionKeys(compositionModule) {
   return [...listed].sort()
 }
 
+export function probeFieldUiKeys(compositionModule) {
+  const r = compositionModule.validateCollectionComposition('probe', {
+    fields: [{ name: 'p', primitive: 'text', ui: { [UNKNOWN_PROBE_KEY]: true } }],
+  })
+  const listed = keysFromUnknownKeyIssue(r.issues, `probe.fields[0].ui.${UNKNOWN_PROBE_KEY}`)
+  for (const k of listed) {
+    const rr = compositionModule.validateCollectionComposition('probe', { fields: [{ name: 'p', primitive: 'text', ui: { [k]: undefined } }] })
+    if (rr.issues.some((i) => i.path === `probe.fields[0].ui.${k}` && /unknown field ui key/.test(i.message))) {
+      throw new Error(`wsk64-snapshot-probe: field ui key "${k}" is listed as accepted but rejected as unknown`)
+    }
+  }
+  return [...listed].sort()
+}
+
+export function probeCollectionUiKeys(compositionModule) {
+  const r = compositionModule.validateCollectionComposition('probe', { ui: { label: 'probe', [UNKNOWN_PROBE_KEY]: true } })
+  const listed = keysFromUnknownKeyIssue(r.issues, `probe.ui.${UNKNOWN_PROBE_KEY}`)
+  for (const k of listed) {
+    const rr = compositionModule.validateCollectionComposition('probe', { ui: { label: 'probe', [k]: undefined } })
+    if (rr.issues.some((i) => i.path === `probe.ui.${k}` && /unknown collection ui key/.test(i.message))) {
+      throw new Error(`wsk64-snapshot-probe: collection ui key "${k}" is listed as accepted but rejected as unknown`)
+    }
+  }
+  return [...listed].sort()
+}
+
 /** The snapshot of the vocabulary at `dir`, computed from that directory's own code only. */
 export async function probeVocabularySnapshot(dir = DEFAULT_VOCABULARY_DIR) {
   const breaking = await load(dir, 'breaking-change.ts')
@@ -115,6 +151,8 @@ export async function probeVocabularySnapshot(dir = DEFAULT_VOCABULARY_DIR) {
     multipleCapable: probeMultipleCapable(primitives),
     fieldDefKeys: probeFieldDefKeys(composition),
     compositionKeys: probeCompositionKeys(composition),
+    fieldUiKeys: probeFieldUiKeys(composition),
+    collectionUiKeys: probeCollectionUiKeys(composition),
   }
 }
 

@@ -74,12 +74,17 @@ export interface ClaimInput {
   cmh: string;
   req?: string;
   apr?: string;
+  /** WSK-49b: "client editor". Optional; absent means false. Written between `apr` and `iat`. */
+  ce?: boolean;
   iat: number;
   exp: number;
   jti: string;
 }
 
-/** The payload in the pinned wire order (see platform-nest webdesk-editorial-signer.ts). */
+/**
+ * The payload in the pinned wire order (see platform-nest webdesk-editorial-signer.ts). WSK-49b added the
+ * optional `ce` claim between `apr` and `iat`; the ERP signer (ticket 49c) must emit it at the same place.
+ */
 export function wirePayload(c: ClaimInput): Record<string, unknown> {
   const p: Record<string, unknown> = { iss: EDITORIAL_ISS, aud: EDITORIAL_AUD, sub: c.sub, pk: c.pk };
   if (c.agt !== undefined) p.agt = c.agt;
@@ -89,6 +94,7 @@ export function wirePayload(c: ClaimInput): Record<string, unknown> {
   p.cmh = c.cmh;
   if (c.req !== undefined) p.req = c.req;
   if (c.apr !== undefined) p.apr = c.apr;
+  if (c.ce !== undefined) p.ce = c.ce;
   p.iat = c.iat;
   p.exp = c.exp;
   p.jti = c.jti;

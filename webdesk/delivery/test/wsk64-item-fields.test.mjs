@@ -404,8 +404,10 @@ for (const [name, composition, expectValid, expectPath, msg] of COMP_CASES) {
 for (const [v, ok] of [
   ['1.0.0', true],
   ['1.1.0', true],
-  ['1.1.1', false],
-  ['1.2.0', false],
+  ['1.1.1', true],
+  ['1.2.0', true],
+  ['1.2.1', false],
+  ['1.3.0', false],
   ['2.0.0', false],
   ['0.9.0', false],
   ['latest', false],
