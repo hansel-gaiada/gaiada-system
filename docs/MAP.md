@@ -393,6 +393,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/[slug]`
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/[slug]/history`
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/~new`
+- `/departments/[deptId]/website/leads`
+- `/departments/[deptId]/website/leads/[tenant]/[site]`
 - `/departments/[deptId]/website/media`
 - `/departments/[deptId]/website/media/[tenant]/[site]`
 - `/finance`
