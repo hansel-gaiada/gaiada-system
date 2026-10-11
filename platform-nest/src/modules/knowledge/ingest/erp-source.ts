@@ -63,7 +63,7 @@ function doc(
 
 async function clients(c: PoolClient, tenantId: string): Promise<IngestDocument[]> {
   const { rows } = await c.query<Row>(
-    `SELECT id, name, status, contact, custom_fields, created_at FROM clients WHERE deleted_at IS NULL`,
+    `SELECT id, name, status, contact, custom_fields, created_at FROM clients WHERE deleted_at IS NULL AND NOT is_internal`,
   );
   return rows
     .map((r) =>

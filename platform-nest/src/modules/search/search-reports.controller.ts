@@ -79,6 +79,8 @@ function assertUuid(value: string, label: string): void {
 
 interface ReportFullRow {
   id: string;
+  /** M5-G0b: the engagement's client is the internal sentinel (WSK-D36); it never receives a client report. */
+  clientIsInternal: boolean;
   engagementId: string;
   propertyId: string;
   clientId: string;
@@ -100,11 +102,11 @@ interface ReportFullRow {
 async function reportFullRow(c: PoolClient, reportId: string): Promise<ReportFullRow | null> {
   const r = await c.query<{
     id: string; engagement_id: string; property_id: string; client_id: string; project_id: string | null;
-    engagement_name: string; client_name: string; period: string | null; kind: string; status: string;
+    engagement_name: string; client_name: string; client_is_internal: boolean; period: string | null; kind: string; status: string;
     metrics: FrozenReportMetrics; narrative_md: string | null; created_at: string;
   }>(
     `SELECT sr.id, sr.engagement_id, se.property_id, se.client_id, se.project_id,
-            se.name AS engagement_name, cl.name AS client_name,
+            se.name AS engagement_name, cl.name AS client_name, cl.is_internal AS client_is_internal,
             sr.period, sr.kind, sr.status, sr.metrics, sr.narrative_md, sr.created_at
        FROM search_reports sr
        JOIN search_engagements se ON se.id = sr.engagement_id
@@ -115,7 +117,7 @@ async function reportFullRow(c: PoolClient, reportId: string): Promise<ReportFul
   const row = r.rows[0];
   if (!row) return null;
   return {
-    id: row.id, engagementId: row.engagement_id, propertyId: row.property_id, clientId: row.client_id,
+    id: row.id, clientIsInternal: row.client_is_internal, engagementId: row.engagement_id, propertyId: row.property_id, clientId: row.client_id,
     projectId: row.project_id, engagementName: row.engagement_name, clientName: row.client_name,
     period: row.period ?? "", kind: row.kind, status: row.status,
     metrics: row.metrics ?? { rankTop10: 0, criticalFindingsOpen: 0, kpiTargets: [] },
@@ -346,6 +348,8 @@ export class SearchReportsController {
     const report = await withTenants([tenantId], (c) => reportFullRow(c, id), { modules: ["search"] });
     if (!report) throw new NotFoundException("report not found");
     await authorize(req.principal, { kind: "resource_search_report", id, tenantId, module: "search" }, "deliver");
+    // M5-G0b (WSK-D36): the internal sentinel client is not a recipient; staff may still preview/approve.
+    if (report.clientIsInternal) throw new BadRequestException("internal client reports are not delivered to a client");
     if (report.status !== "approved") {
       throw new BadRequestException(`cannot deliver a '${report.status}' report — delivery requires status='approved'`);
     }

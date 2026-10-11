@@ -76,6 +76,8 @@ const REPORT_KINDS = new Set<ReportKind>(["monthly", "campaign", "adhoc"]);
 
 interface ReportRow {
   id: string;
+  /** M5-G0b: internal sentinel client (WSK-D36); never receives a client report. */
+  clientIsInternal: boolean;
   tenantId: string;
   engagementId: string;
   clientId: string;
@@ -92,11 +94,11 @@ interface ReportRow {
 
 async function loadReport(c: PoolClient, id: string): Promise<ReportRow | null> {
   const r = await c.query<{
-    id: string; tenant_id: string; engagement_id: string; client_id: string; client_name: string;
+    id: string; tenant_id: string; engagement_id: string; client_id: string; client_name: string; client_is_internal: boolean;
     engagement_name: string; project_id: string | null; period: string | null; kind: string;
     status: string; metrics: FrozenSocialReportMetrics; narrative_md: string | null; created_at: string;
   }>(
-    `SELECT sr.id, sr.tenant_id, sr.engagement_id, se.client_id, cl.name AS client_name,
+    `SELECT sr.id, sr.tenant_id, sr.engagement_id, se.client_id, cl.name AS client_name, cl.is_internal AS client_is_internal,
             se.name AS engagement_name, se.project_id, sr.period, sr.kind, sr.status,
             sr.metrics, sr.narrative_md, sr.created_at
        FROM social_reports sr
@@ -109,7 +111,7 @@ async function loadReport(c: PoolClient, id: string): Promise<ReportRow | null> 
   if (!row) return null;
   return {
     id: row.id, tenantId: row.tenant_id, engagementId: row.engagement_id, clientId: row.client_id,
-    clientName: row.client_name, engagementName: row.engagement_name, projectId: row.project_id,
+    clientName: row.client_name, clientIsInternal: row.client_is_internal, engagementName: row.engagement_name, projectId: row.project_id,
     period: row.period, kind: row.kind as ReportKind, status: row.status,
     metrics: row.metrics ?? { rangeStart: "", rangeEnd: "", kpis: [], series: [], tables: [], highlights: [] },
     narrativeMd: row.narrative_md ?? "", createdAt: row.created_at,
@@ -151,8 +153,8 @@ export class SocialReportsController {
 
     const eng = await withTenants(
       [tenantId],
-      (c) => c.query<{ client_id: string; client_name: string; name: string }>(
-        `SELECT se.client_id, cl.name AS client_name, se.name
+      (c) => c.query<{ client_id: string; client_name: string; name: string; is_internal: boolean }>(
+        `SELECT se.client_id, cl.name AS client_name, cl.is_internal, se.name
            FROM social_engagements se JOIN clients cl ON cl.id = se.client_id
           WHERE se.id = $1 AND se.deleted_at IS NULL`,
         [engagementId],
@@ -161,6 +163,8 @@ export class SocialReportsController {
     );
     const engRow = eng.rows[0];
     if (!engRow) throw new NotFoundException("engagement not found");
+    // M5-G0b (WSK-D36): no client-facing report is generated for the internal sentinel client.
+    if (engRow.is_internal) refuse("internal_client_no_reports");
 
     const { start, end } = periodDateRange(period, new Date());
 
@@ -416,6 +420,7 @@ export class SocialReportsController {
     const report = await withTenants([tenantId], (c) => loadReport(c, id), { modules: ["social"] });
     if (!report) throw new NotFoundException("report not found");
     await authorize(req.principal, { kind: "social_report", id, tenantId, module: "social" }, "deliver");
+    if (report.clientIsInternal) refuse("internal_client_not_deliverable");
     if (report.status !== "approved") refuse("cannot_deliver_from_this_status");
 
     const document = buildSocialReportDocument({

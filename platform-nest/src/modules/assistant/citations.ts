@@ -56,7 +56,7 @@ export async function resolveCitation(c: PoolClient, tenantId: string, sourceRef
 
   switch (kind) {
     case "client": {
-      const row = await one<{ id: string; name: string }>(c, `SELECT id, name FROM clients WHERE id = $1 AND deleted_at IS NULL`, [rest]);
+      const row = await one<{ id: string; name: string }>(c, `SELECT id, name FROM clients WHERE id = $1 AND deleted_at IS NULL AND NOT is_internal`, [rest]);
       return row ? { kind, label: row.name || "Client", href: `/clients/${row.id}` } : null;
     }
     case "project": {
