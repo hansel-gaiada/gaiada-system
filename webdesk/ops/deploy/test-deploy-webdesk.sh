@@ -114,6 +114,25 @@ assert "single quotes stripped" grep -qx 'RUSTFS_ROOT_PASSWORD=quoted-root-pw' "
 refute "keys outside the allowlist are not copied" grep -q 'never-copied-pw' "$T/tools.env"
 assert "storage endpoint passes through" grep -qx 'STORAGE_ENDPOINT=http://rustfs:9000' "$T/tools.env"
 
+echo "== already_current (WEBDESK_SKIP_IF_CURRENT: release.yml's automatic path)"
+D=sha256:$(printf '%064d' 7)
+REL="/x/docker-compose.yml,/x/docker-compose.aicenter.yml,/x/docker-compose.aicenter-release.yml"
+mkdir -p "$T/ac/stage/migrations" "$T/ac/live/migrations"
+printf 'a\n' >"$T/ac/stage/migrations/0001.sql"; printf 'a\n' >"$T/ac/live/migrations/0001.sql"
+printf 'c\n' >"$T/ac/stage/docker-compose.yml"; printf 'c\n' >"$T/ac/live/docker-compose.yml"
+ln -s /nowhere "$T/ac/stage/.env.control" 2>/dev/null || true
+: >"$T/ac/pending"
+assert "same digest, release overlay, no pending, same tree -> current" already_current "$D" "$D" "$REL" "$T/ac/pending" "$T/ac/stage" "$T/ac/live"
+refute "a different running image -> not current" already_current "sha256:$(printf '%064d' 8)" "$D" "$REL" "$T/ac/pending" "$T/ac/stage" "$T/ac/live"
+refute "running from the two-file (local) arrangement -> not current" already_current "$D" "$D" "/x/docker-compose.yml,/x/docker-compose.aicenter.yml" "$T/ac/pending" "$T/ac/stage" "$T/ac/live"
+echo "0015_x.sql" >"$T/ac/pending2"
+refute "a pending migration -> not current" already_current "$D" "$D" "$REL" "$T/ac/pending2" "$T/ac/stage" "$T/ac/live"
+refute "no pending-migrations file (ledger unread) -> not current" already_current "$D" "$D" "$REL" "$T/ac/missing" "$T/ac/stage" "$T/ac/live"
+printf 'changed\n' >"$T/ac/stage/docker-compose.yml"
+refute "a changed release file -> not current" already_current "$D" "$D" "$REL" "$T/ac/pending" "$T/ac/stage" "$T/ac/live"
+printf 'c\n' >"$T/ac/stage/docker-compose.yml"; printf 'b\n' >"$T/ac/stage/migrations/0002.sql"
+refute "a file only the release has -> not current" already_current "$D" "$D" "$REL" "$T/ac/pending" "$T/ac/stage" "$T/ac/live"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]
