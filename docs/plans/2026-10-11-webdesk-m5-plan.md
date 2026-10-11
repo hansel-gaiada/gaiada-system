@@ -100,7 +100,7 @@ Cerbos restart or a deploy. Release numbers are claimed one step at a time.
 | O-3 | Counsel for the addendum: who, and when | **owner** | G2, and everything live after it |
 | O-4 | Freelance writers get ERP logins (staff-side, writers' room only)? The plan assumes yes; it adds a new kind of external principal | **owner** | W1 |
 | O-5 | Does our own replay (V6) replace Clarity, or run beside it? Until then, Clarity is a session recorder filed under "analytics", so the banner must say so, and its masking must cover typed input (addendum §11.10) | **owner** | V6; the banner wording before launch |
-| O-9 | **GA4 advanced vs basic Consent Mode.** The site, as built, sends cookieless pings to Google before consent; D67 allows only our own counts before consent. Basic mode (no Google contact until consent) matches D67; advanced keeps Google's modelled conversions. Recommended: basic | **owner** | the site's launch |
+| O-9 | **GA4 advanced vs basic Consent Mode.** The site, as built, sends cookieless pings to Google before consent; D67 allows only our own counts before consent. Basic mode (no Google contact until consent) matches D67; advanced keeps Google's modelled conversions. Recommended: basic. Not live anywhere yet; the site session has the change ready (hold the gtag.js load in `vendors.ts` until consent, keep the inline denied defaults) | **owner** | the site's launch |
 | O-10 | Interim Web3Forms: acceptable for real lead data until L1, or hold the forms until L1? (terms, region and retention unknown) | **owner** | the site's launch |
 | O-6 | Production Turnstile keys for gaiada.com's forms | **owner** (Cloudflare) | L1 live |
 | O-7 | Meta Business Verification | SMM team | P3 |
