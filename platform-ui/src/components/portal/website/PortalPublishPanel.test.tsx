@@ -108,6 +108,23 @@ describe("Publish now (self-publish ONE item, D58)", () => {
   });
 });
 
+describe("focus after a confirmed publish", () => {
+  it("moves to the outcome line (the opener is disabled once the item is live), whatever the outcome", async () => {
+    act0.portalPublishItemAction.mockResolvedValue(ok(approved()));
+    act0.portalGetItemHeadAction.mockResolvedValue(ok(detailOf(item({ publishedVersion: 4 }))));
+    mount();
+    await publishNow();
+    await screen.findByTestId("published");
+    expect(document.activeElement).toBe(screen.getByTestId("publish-flow"));
+    cleanup();
+    act0.portalPublishItemAction.mockResolvedValue({ kind: "invalid", slug: "publish-not-client-editable", message: "m", issues: [] });
+    mount();
+    await publishNow();
+    await screen.findByTestId("publish-refused");
+    expect(document.activeElement).toBe(screen.getByTestId("publish-flow"));
+  });
+});
+
 describe("when Publish now is off, and why", () => {
   const off = () => (screen.getByTestId("publish-now") as HTMLButtonElement);
   const why = () => screen.getByTestId("publish-block-reason").textContent;

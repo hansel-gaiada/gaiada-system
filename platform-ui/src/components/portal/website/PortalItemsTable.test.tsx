@@ -96,6 +96,14 @@ describe("self-publish ONE item vs request publish for a batch (D58)", () => {
     expect(t).not.toContain("Published.");
   });
 
+  it("focus: a confirmed Publish now moves focus to the outcome line (the opener is gone after the refresh)", async () => {
+    acts.portalPublishItemAction.mockResolvedValue(ok({ ...approved(), reconciled: true }));
+    mount([row(1)]);
+    fireEvent.click(screen.getByTestId("publish-now-page-1"));
+    await act(async () => { fireEvent.click(screen.getByTestId("publish-now-page-1-confirm")); });
+    expect(document.activeElement).toBe(screen.getByTestId("items-notice"));
+  });
+
   it("a batch: select several, ONE request lists every selected item at its head version, and nothing is published", async () => {
     acts.portalRequestPublishAction.mockResolvedValue(ok({ approvalId: "a2", command: "content.publish", itemCount: 2 }));
     mount([row(1), row(2), row(3, { headVersion: 7 })]);

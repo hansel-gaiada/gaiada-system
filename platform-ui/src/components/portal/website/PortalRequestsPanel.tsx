@@ -28,6 +28,11 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
+  const focusOutcome = useRef(false);
+  // The outcome is ONE panel-level line (not per card: a decided request moves lists and its card remounts). A confirmed Approve moves
+  // focus to it, since the Approve button is gone once the list refreshes.
+  useEffect(() => { if (notice && focusOutcome.current) { focusOutcome.current = false; noticeRef.current?.focus(); } }, [notice]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
@@ -41,7 +46,7 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
   const { pending, decided } = splitRequests(requests);
 
   const approve = async (r: RequestView) => {
-    setBusy(r.approvalId); setNotice(null);
+    setBusy(r.approvalId); setNotice(null); focusOutcome.current = true;
     const res = await portalApproveRequestAction(clientId, r.approvalId);
     if (!mounted.current) return;
     setBusy(null);
@@ -65,7 +70,7 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
 
   const withdraw = async (r: RequestView) => {
     if (!r.tenantSlug || !r.siteId) return;
-    setBusy(r.approvalId); setNotice(null);
+    setBusy(r.approvalId); setNotice(null); focusOutcome.current = true;
     const res = await portalWithdrawRequestAction(clientId, { tenantSlug: r.tenantSlug, siteId: r.siteId }, r.approvalId);
     if (!mounted.current) return;
     setBusy(null);
@@ -98,9 +103,6 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
           ))}
           {r.itemCount > r.items.length && <li className="wc-muted">and {r.itemCount - r.items.length} more</li>}
         </ul>
-        {notice?.id === r.approvalId && (
-          <div className={`wc-banner wc-banner--${notice.tone}`} role="status" data-testid="request-notice"><span className="wc-banner__body">{notice.text}</span></div>
-        )}
         <div className="wc-publish__actions">
           {showApprove(r) && (
             <ConfirmAction
@@ -125,6 +127,9 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
 
   return (
     <div className="wc-page" data-testid="requests">
+      <div ref={noticeRef} tabIndex={-1} role="status" data-testid="request-notice">
+        {notice && <div className={`wc-banner wc-banner--${notice.tone}`}><span className="wc-banner__body">{notice.text}</span></div>}
+      </div>
       <h3 style={{ margin: 0 }} id="portal-requests-pending">Waiting for approval</h3>
       {pending.length === 0
         ? <p className="wc-muted" data-testid="requests-none">There are no requests waiting for approval.</p>

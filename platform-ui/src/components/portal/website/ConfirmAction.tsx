@@ -26,10 +26,14 @@ export function ConfirmAction({
   const askRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const wasAsking = useRef(false);
+  /** The question was answered YES. Focus then belongs to the caller's outcome line (the opener is typically disabled or gone by the
+   *  time the answer arrives, `router.refresh()` removes it), so it is not sent back to the opener. A CANCEL returns it to the opener. */
+  const confirmed = useRef(false);
 
   useEffect(() => {
     if (asking) confirmRef.current?.focus();
-    else if (wasAsking.current) askRef.current?.focus();
+    else if (wasAsking.current && !confirmed.current) askRef.current?.focus();
+    if (!asking) confirmed.current = false;
     wasAsking.current = asking;
   }, [asking]);
 
@@ -48,7 +52,7 @@ export function ConfirmAction({
       <span role="status" className="wc-publish__sub">{question}</span>
       <button
         ref={confirmRef} type="button" className="lux-btn lux-btn--solid lux-btn--sm" data-testid={`${testId}-confirm`}
-        disabled={busy} onClick={async () => { await onConfirm(); setAsking(false); }}
+        disabled={busy} onClick={async () => { confirmed.current = true; await onConfirm(); setAsking(false); }}
       >
         {busy ? "Working…" : confirmLabel}
       </button>

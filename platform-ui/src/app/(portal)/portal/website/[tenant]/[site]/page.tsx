@@ -10,6 +10,8 @@ import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/
 import "@/components/webdesk/content/content.css";
 import "@/components/portal/website/website.css";
 
+// `tenant` is the WEBDESK tenant slug of the site (a route segment), NEVER the ERP company: the company always comes from
+// `getActivePortalCompany` (via `resolveWebsiteAccess`), so a URL can never switch which company's data is read (PV-D10).
 type Params = Promise<{ tenant: string; site: string }>;
 
 // Website -> a site: its collections, each saying whether anything in it is yours to edit. The page says so per collection from the

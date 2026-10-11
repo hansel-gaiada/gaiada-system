@@ -43,6 +43,10 @@ export function PortalItemsTable({
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState<null | "request" | string>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
+  /** A confirmed publish moves focus to the outcome line (see ConfirmAction): the opener may be gone once the list refreshes. */
+  const focusOutcome = useRef(false);
+  useEffect(() => { if (notice && focusOutcome.current) { focusOutcome.current = false; noticeRef.current?.focus(); } }, [notice]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
@@ -69,7 +73,7 @@ export function PortalItemsTable({
   };
 
   const publishNow = async (it: ItemSummary) => {
-    setBusy(it.itemId); setNotice(null);
+    setBusy(it.itemId); setNotice(null); focusOutcome.current = true;
     const r = await portalPublishItemAction(clientId, scope, it.itemId, it.headVersion);
     if (!mounted.current) return;
     if (r.kind !== "ok") {
@@ -113,7 +117,7 @@ export function PortalItemsTable({
         </span>
       </div>
 
-      <div role="status" aria-live="polite" data-testid="items-notice">
+      <div ref={noticeRef} tabIndex={-1} role="status" aria-live="polite" data-testid="items-notice">
         {notice && <div className={`wc-banner wc-banner--${notice.tone}`}><span className="wc-banner__body">{notice.text}</span></div>}
       </div>
 

@@ -55,6 +55,10 @@ export function PortalPublishPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const flowRef = useRef<HTMLDivElement>(null);
+  const focusOutcome = useRef(false);
+  // A confirmed publish moves focus to the outcome (ConfirmAction does not send it back to the opener, which is disabled afterwards).
+  useEffect(() => { if (outcome && focusOutcome.current) { focusOutcome.current = false; flowRef.current?.focus(); } }, [outcome]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
@@ -66,7 +70,7 @@ export function PortalPublishPanel({
   const mine = requests?.filter((r) => r.status === "pending") ?? [];
 
   const publish = async () => {
-    setBusy(true); setOutcome(null);
+    setBusy(true); setOutcome(null); focusOutcome.current = true;
     let r: Awaited<ReturnType<typeof portalPublishItemAction>>;
     try {
       r = await portalPublishItemAction(clientId, scope, item.itemId, version);
@@ -124,7 +128,7 @@ export function PortalPublishPanel({
         </p>
       )}
 
-      <div aria-live="polite" data-testid="publish-flow">
+      <div ref={flowRef} tabIndex={-1} aria-live="polite" data-testid="publish-flow">
         {outcome?.kind === "published" && (
           <div className="wc-banner wc-banner--ok" data-testid="published">
             <span className="wc-banner__body"><strong>{PUBLISHED_COPY}</strong><br />Version {outcome.version} is now live.</span>

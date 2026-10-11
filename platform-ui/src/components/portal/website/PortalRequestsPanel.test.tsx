@@ -94,7 +94,7 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     expect(screen.getByTestId("approve-a1-ask").textContent).toContain("Approve and publish 2 pages now?");
     await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
     expect(acts.portalApproveRequestAction).toHaveBeenCalledWith("c1", "a1");
-    expect(within(card("a1")).getByTestId("request-notice").textContent).toBe("Published. Your site updates in a few minutes.");
+    expect(screen.getByTestId("request-notice").textContent).toBe("Published. Your site updates in a few minutes.");
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -103,9 +103,23 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     mount([req("a1")]);
     fireEvent.click(screen.getByTestId("approve-a1"));
     await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
-    const t = within(card("a1")).getByTestId("request-notice").textContent!;
+    const t = screen.getByTestId("request-notice").textContent!;
     expect(t).toBe("The publish went through, but we can't yet see it as live. It may still be on its way: reload in a minute to check.");
     expect(t).not.toContain("Published");
+  });
+
+  it("focus: after a confirmed Approve (the button is gone once the list refreshes) it moves to the outcome line; Cancel returns it to the opener", async () => {
+    acts.portalApproveRequestAction.mockResolvedValue(ok(executed()));
+    mount([req("a1")]);
+    const ask = screen.getByTestId("approve-a1");
+    ask.focus();
+    fireEvent.click(ask);
+    fireEvent.click(screen.getByTestId("approve-a1-cancel"));
+    expect(document.activeElement).toBe(screen.getByTestId("approve-a1"));
+    fireEvent.click(screen.getByTestId("approve-a1"));
+    await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
+    expect(document.activeElement).toBe(screen.getByTestId("request-notice"));
+    expect(screen.getByTestId("request-notice").textContent).toContain("Published.");
   });
 
   it("a 403 on a COLLEAGUE's request is not 'another person must approve' (the grant may have been revoked)", async () => {
@@ -113,7 +127,7 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     mount([req("a1")]);
     fireEvent.click(screen.getByTestId("approve-a1"));
     await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
-    expect(within(card("a1")).getByTestId("request-notice").textContent).toBe("You no longer have website editing access for this company. Ask your company's admin.");
+    expect(screen.getByTestId("request-notice").textContent).toBe("You no longer have website editing access for this company. Ask your company's admin.");
   });
 
   it("422 publish-not-client-editable on approve (the live page moved since filing): the owner's words, naming the page", async () => {
@@ -121,7 +135,7 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     mount([req("a1")]);
     fireEvent.click(screen.getByTestId("approve-a1"));
     await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
-    const t = within(card("a1")).getByTestId("request-notice").textContent!;
+    const t = screen.getByTestId("request-notice").textContent!;
     expect(t).toContain("This draft includes changes only Gaiada can publish. Gaiada will publish it, or you can restore the live version and edit again.");
     expect(t).toContain("Home: Search appearance (SEO)");
   });
@@ -131,7 +145,7 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     mount([req("a1")]);
     fireEvent.click(screen.getByTestId("approve-a1"));
     await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
-    expect(within(card("a1")).getByTestId("request-notice").textContent).toContain("already been decided");
+    expect(screen.getByTestId("request-notice").textContent).toContain("already been decided");
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -140,7 +154,7 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     mount([req("a1")]);
     fireEvent.click(screen.getByTestId("approve-a1"));
     await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
-    const t = within(card("a1")).getByTestId("request-notice").textContent!;
+    const t = screen.getByTestId("request-notice").textContent!;
     expect(t).toContain("Approved, but publishing didn't complete.");
     expect(t).not.toContain("Published.");
   });
@@ -152,7 +166,7 @@ describe("Withdraw (the requester's own pending request)", () => {
     mount([req("own", { requestedByMe: true, canApprove: false })]);
     await act(async () => { fireEvent.click(screen.getByTestId("withdraw-own")); });
     expect(acts.portalWithdrawRequestAction).toHaveBeenCalledWith("c1", { tenantSlug: "gaiada", siteId: "s1" }, "own");
-    expect(within(card("own")).getByTestId("request-notice").textContent).toBe("Request withdrawn. Nothing was published.");
+    expect(screen.getByTestId("request-notice").textContent).toBe("Request withdrawn. Nothing was published.");
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -160,7 +174,7 @@ describe("Withdraw (the requester's own pending request)", () => {
     acts.portalWithdrawRequestAction.mockResolvedValue({ kind: "conflict", slug: "approval_not_pending", message: "m", currentHeadVersion: null, currentContentHash: null, updatedAt: null });
     mount([req("own", { requestedByMe: true, canApprove: false })]);
     await act(async () => { fireEvent.click(screen.getByTestId("withdraw-own")); });
-    expect(within(card("own")).getByTestId("request-notice").textContent).toContain("already been decided");
+    expect(screen.getByTestId("request-notice").textContent).toContain("already been decided");
     expect(refresh).toHaveBeenCalled();
   });
 

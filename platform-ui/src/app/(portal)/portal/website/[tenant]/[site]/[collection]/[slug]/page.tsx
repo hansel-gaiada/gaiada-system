@@ -7,6 +7,8 @@ import { PortalPageHead } from "@/components/portal/PortalBits";
 import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import { PortalItemEditor } from "@/components/portal/website/PortalItemEditor";
 
+// `tenant` is the WEBDESK tenant slug of the site (a route segment), NEVER the ERP company: the company always comes from
+// `getActivePortalCompany` (via `resolveWebsiteAccess`), so a URL can never switch which company's data is read (PV-D10).
 type Params = Promise<{ tenant: string; site: string; collection: string; slug: string }>;
 type Search = Promise<{ locale?: string }>;
 

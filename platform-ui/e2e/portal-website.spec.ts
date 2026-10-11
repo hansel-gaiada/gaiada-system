@@ -183,6 +183,7 @@ test("self-publish ONE item (D58): Publish now asks once, publishes that item, a
   await page.getByTestId("publish-now-confirm").click();
   await expect(page.getByTestId("published")).toContainText("Published. Your site updates in a few minutes.");
   expect((await stub.item("service.web-design")).publishedVersion).toBe(2);
+  await expect(page.getByTestId("publish-flow")).toBeFocused(); // focus follows the outcome (the Publish now button is disabled afterwards)
   // the panel now reads live at v2
   await expect(page.getByTestId("publish-state")).toHaveText("Live · v2");
   await expect(page.getByTestId("publish-now")).toBeDisabled();
@@ -317,7 +318,7 @@ test("files a 2-item request, sees Approve ABSENT on it, withdraws on demand; a 
   await expect(theirs.getByTestId(`approve-${approveId}-ask`)).toContainText("Approve and publish 2 pages now?");
   expect((await stub.state()).items.filter((i) => i.slug.startsWith("banner.")).every((i) => i.publishedVersion === null)).toBe(true);
   await theirs.getByTestId(`approve-${approveId}-confirm`).click();
-  await expect(theirs.getByTestId("request-notice")).toHaveText("Published. Your site updates in a few minutes.");
+  await expect(ewan.page.getByTestId("request-notice")).toHaveText("Published. Your site updates in a few minutes.");
   const after = await stub.state();
   expect(after.items.filter((i) => i.slug === "banner.home" || i.slug === "banner.autumn").map((i) => i.publishedVersion)).toEqual([1, 1]);
   expect(after.approvals.find((a) => a.workflowId === "content.publish")?.status).toBe("approved");
@@ -354,7 +355,7 @@ test("Withdraw cancels the viewer's own request and says nothing was published",
   const mine = page.locator('[data-testid^="request-ap-"][data-mine]');
   await hydrated(mine.getByRole("button", { name: /^Withdraw/ }));
   await mine.getByRole("button", { name: /^Withdraw/ }).click();
-  await expect(mine.getByTestId("request-notice")).toHaveText("Request withdrawn. Nothing was published.");
+  await expect(page.getByTestId("request-notice")).toHaveText("Request withdrawn. Nothing was published.");
   expect((await stub.state()).approvals.find((a) => a.workflowId === "content.publish")?.status).toBe("cancelled");
 });
 

@@ -6,6 +6,8 @@ import { PortalPageHead } from "@/components/portal/PortalBits";
 import { PortalWebsiteRefusal, WebsiteAccessRefused } from "@/components/portal/website/PortalWebsiteStates";
 import { PortalMediaLibrary } from "@/components/portal/website/PortalMediaLibrary";
 
+// `tenant` is the WEBDESK tenant slug of the site (a route segment), NEVER the ERP company: the company always comes from
+// `getActivePortalCompany` (via `resolveWebsiteAccess`), so a URL can never switch which company's data is read (PV-D10).
 type Params = Promise<{ tenant: string; site: string }>;
 
 // The site's images and files (WSK-49d). The shared media library in CLIENT MODE: browse, upload, and edit a file's title, alt text and
