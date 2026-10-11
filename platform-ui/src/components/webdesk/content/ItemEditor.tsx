@@ -19,6 +19,7 @@ import { formatDateTime } from "@/lib/format";
 import { ConflictDialog } from "./ConflictDialog";
 import { placeholderSyntaxes } from "@/lib/markdownCodec";
 import { FieldEditor, type FormCtx } from "./FieldEditor";
+import { ContentChecksCard } from "./ContentChecksCard";
 import { PreviewCard } from "./PreviewCard";
 import { PublishBar } from "./PublishBar";
 import "./content.css";
@@ -676,6 +677,8 @@ export function ItemEditor({
                 </>
               )}
             </section>
+
+            <ContentChecksCard lint={lint} />
 
             {/* WSK-46: preview the DRAFT on the site's own /preview/ page. Off exactly when Save is off (`canWrite`). */}
             {!item.deletedAt && (

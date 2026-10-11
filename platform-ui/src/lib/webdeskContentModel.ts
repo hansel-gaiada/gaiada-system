@@ -151,7 +151,18 @@ export interface Lint {
    *  collection's stored composition is invalid). The lists above are then EMPTY BY DEFAULT, not by finding: an empty
    *  list is a claim, so a reader must check this first and never show "no unresolved placeholders" when it is set. */
   unavailable?: string;
+  /** M5-W3/W3b advisory content checks. OPTIONAL: absent when an older WebDesk does not send them or the checks are
+   *  switched off, which is NOT the same as "no issues" (an empty list is a claim). */
+  content?: ContentLint;
 }
+
+export type ContentFindingSeverity = "info" | "warn";
+export interface ContentFinding { code: string; severity: ContentFindingSeverity; path: string; message: string }
+export interface AeoFactor { id: string; label: string; points: number; max: number; detail: string }
+/** `aeo` is null when the item has no long-form body (no score, which is not a score of 0). */
+export interface AeoScore { score: number; factors: AeoFactor[] }
+export interface ContentCheckUnavailable { rule: string; reason: string }
+export interface ContentLint { findings: ContentFinding[]; aeo: AeoScore | null; unavailable: ContentCheckUnavailable[] }
 
 /** M5-W2b `item.get`'s `editorial` member, narrowed to what the UI reads (M5-W2c: the approver's view). Review data is
  *  control-plane only; `/v1` never carries it. */
