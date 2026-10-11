@@ -47,6 +47,18 @@ groups:
           summary: "{{ $labels.host }} ({{ $labels.instance }}) is unreachable from the estate"
           description: "Blackbox probe to {{ $labels.instance }} (host={{ $labels.host }}, env={{ $labels.env }}) has failed for 5m. This is an OBSERVE-ONLY host (docs/plans/2026-08-21-multi-server-observability.md §12) — we cannot fix anything on it remotely; this page is 'the owner needs to know his box is unreachable', not a dispatchable engineering task on the box itself. Check DNS/CDN/the provider's own status page before assuming the box is down."
 
+      # --- WebDesk's content API (M4). EstateProbeDown above covers the edge (/healthz, answered by
+      # Caddy alone); this one fires when the api itself stops answering /v1, which is what every site
+      # build and the ERP's Website editor depend on.
+      - alert: WebDeskApiDown
+        expr: probe_success{job="blackbox-webdesk-api"} == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "WebDesk content API (/v1) is not answering correctly"
+          description: "The probe of {{ $labels.instance }} has not seen its expected 401 problem+json for 5m. Site builds and the ERP Website editor depend on it. On gda-aicenter: `docker ps --filter label=com.docker.compose.project=webdesk`, the api log, then `webdesk/ops/probes/containment-probe.sh`."
+
       # --- The estate-wide freshness alert (RemoteWriteStalled, alerts.yml) already covers a
       # stalled PIPELINE for any host with `host`/`env` labels, blackbox-estate's series included
       # (they carry both from the target file). No separate freshness rule is needed here — adding
