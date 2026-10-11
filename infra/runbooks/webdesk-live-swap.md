@@ -51,7 +51,11 @@ secrets. It never touches the `gaiada` project.
 variables (add them to `/etc/webdesk/.env` first; `compose config -q` in the plan fails loudly on a missing required
 one), release-note-specific steps.
 
-The manual procedure below stays as the fallback.
+**After the first automated apply, every compose call must use all three files.** The api then runs from the release
+overlay, with `WEBDESK_API_IMAGE` read from `/etc/webdesk/.env`. The two-file form (`docker-compose.yml` +
+`docker-compose.aicenter.yml`) would silently swap the api back to whatever `webdesk-api:latest` is.
+
+The manual procedure below stays as the fallback (with the three files once automation has run).
 
 ## Facts
 

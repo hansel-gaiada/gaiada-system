@@ -363,9 +363,12 @@ health_check() {
 
 # Tools container -------------------------------------------------------------------------------------------
 
+# Runs as the deploy user's uid, not root: with --cap-drop ALL, root cannot preserve ownership (`cp -a`
+# exits 1, "failed to preserve ownership", proven on sumopod 2026-10-11), and nothing here needs root.
 TOOLS_SCRIPT='
 set -euo pipefail
-mkdir /work && cp -a /src/. /work/ && cd /work
+W=/tmp/work
+mkdir -p "$W" && cp -R /src/. "$W/" && cd "$W"
 npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null
 (cd api && npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null)
 echo "-- migrate (run 1)"; node migrations/migrate.mjs | tee /tmp/m1
@@ -379,8 +382,9 @@ run_tools() {
   local envf="$WORK/tools.env"
   make_tools_envfile "$envf"
   docker run --rm --name "wdeploy-tools-$$" --network "$NET" --env-file "$envf" \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp \
     --cpus 1 --memory 768m --pids-limit 512 --cap-drop ALL --security-opt no-new-privileges:true \
-    -v "$WD_DIR:/src:ro" -w / "$TOOLS_IMAGE" bash -c "$TOOLS_SCRIPT"
+    -v "$WD_DIR:/src:ro" -w /tmp "$TOOLS_IMAGE" bash -c "$TOOLS_SCRIPT"
 }
 
 # Apply -----------------------------------------------------------------------------------------------------
