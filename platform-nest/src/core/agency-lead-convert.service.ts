@@ -429,6 +429,8 @@ export type ConvertLeadOutcome =
       stageEventId: string;
       dealValue: string | null;
       dealCurrency: string | null;
+      /** True when a `deal` was sent and it changed the stored value or currency (the caller audits it). */
+      dealChanged: boolean;
     };
 
 /** Task description suffix that makes a fallback VISIBLE on the task itself, not only in the API
@@ -572,6 +574,14 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
     // M5-P1: a deal that rides on the convert is checked against finance_currencies HERE, before anything
     // is spawned, so a bad currency or precision is a clean 400 rather than a rollback of a whole spawn.
     if (deal) await assertDealAllowed(c, deal);
+    // Whether the deal actually changes the stored value (for the caller's audit); read under the row lock.
+    const dealChanged = deal
+      ? (await c.query<{ ch: boolean }>(
+          `SELECT (deal_value IS DISTINCT FROM $3::numeric OR deal_currency IS DISTINCT FROM $4) AS ch
+             FROM agency_leads WHERE id = $1 AND tenant_id = $2`,
+          [leadId, tenantId, deal.value, deal.currency],
+        )).rows[0]?.ch === true
+      : false;
 
     const leadForRender = { id: row.id, orgName: row.org_name, contactName: row.contact_name };
 
@@ -779,6 +789,7 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
       stageEventId: moved.stageEventId,
       dealValue: moved.dealValue,
       dealCurrency: moved.dealCurrency,
+      dealChanged,
     };
   });
 

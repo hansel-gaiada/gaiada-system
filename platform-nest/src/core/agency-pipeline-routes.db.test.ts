@@ -237,4 +237,30 @@ describe.skipIf(!TEST_URL)("M5-P1-c — pipeline routes: authz per action, cross
     const created = await adminPool().query(`SELECT metadata::text AS m FROM activities WHERE target_entity_id = $1`, [c.json().id]);
     expect(created.rows[0].m).not.toContain(orgName);
   });
+
+  it("every deal change is audited, whichever route carries it: same-stage move, convert, and the deal route; unchanged writes nothing", async () => {
+    const verbs = async (id: string) =>
+      (await adminPool().query(`SELECT verb, metadata FROM activities WHERE target_entity_id = $1 AND verb LIKE 'deal_%'`, [id])).rows;
+    const id = await newLead();
+    await post(co, manager, `leads/${id}/stage`, { stage: "contacted" });
+    expect(await verbs(id)).toHaveLength(0);
+    // same-stage move + a NEW deal: no stage change, but the value changed, so deal_set
+    expect((await post(co, manager, `leads/${id}/stage`, { stage: "contacted", deal: DEAL })).json().changed).toBe(false);
+    expect((await verbs(id)).map((v) => v.verb)).toEqual(["deal_set"]);
+    expect((await verbs(id))[0].metadata).toMatchObject({ dealValue: "15000000.0000", dealCurrency: "IDR" });
+    // the identical deal again: nothing new
+    await post(co, manager, `leads/${id}/stage`, { stage: "contacted", deal: DEAL });
+    expect(await verbs(id)).toHaveLength(1);
+    // a different value via a move that also changes the stage: another deal_set
+    await post(co, manager, `leads/${id}/stage`, { stage: "proposal", deal: { value: "20000000", currency: "IDR" } });
+    expect(await verbs(id)).toHaveLength(2);
+    // convert with the same value as stored: unchanged, no deal_set; with a different one: deal_set
+    const same = await newLead();
+    await post(co, member, `leads/${same}/deal`, DEAL);
+    await post(co, admin, `leads/${same}/convert`, { delegations: [], deal: DEAL });
+    expect((await verbs(same)).map((v) => v.verb)).toEqual(["deal_set"]); // only the deal route's, not convert's
+    const conv = await newLead();
+    expect((await post(co, admin, `leads/${conv}/convert`, { delegations: [], deal: DEAL })).statusCode).toBe(200);
+    expect((await verbs(conv)).map((v) => v.verb)).toEqual(["deal_set"]);
+  });
 });

@@ -85,6 +85,13 @@ export class AgencyLeadConvertController {
       clientId: result.clientId, projectId: result.projectId, runId: result.runId,
     });
 
+    // Every deal change is audited, whichever route carries it.
+    if (result.dealChanged) {
+      await writeActivity(tenantId, req.principal.userId, "deal_set", "agency_lead", leadId, {
+        dealValue: result.dealValue, dealCurrency: result.dealCurrency,
+      });
+    }
+
     // Best-effort, AFTER commit (client-notify.ts:63-68: a notify() failure must never turn a real
     // write into a 500 the caller might retry into a duplicate). Design §4.2 step 8: the AM and the
     // new client contact.

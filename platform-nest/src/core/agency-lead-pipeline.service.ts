@@ -357,6 +357,8 @@ export type MoveStageOutcome =
       stageEventId?: string;
       dealValue: string | null;
       dealCurrency: string | null;
+      /** True when a `deal` was sent and it changed the stored value or currency (the caller audits it). */
+      dealChanged: boolean;
     };
 
 /** Move a lead between OPEN stages (design §2), forwards or backwards. Staff decision only: nothing a
@@ -386,6 +388,17 @@ export async function moveLeadStage(
       throw badRequest("stage_terminal", `'${stage}' is reached only through ${st.rows[0].kind === "won" ? "Convert" : "Decline"}`);
     }
 
+    // Does the carried deal change what is stored? Read under the row lock (FOR UPDATE, same transaction as
+    // transitionStage's own lock) so the caller can audit exactly the changes that happened.
+    let dealChanged = false;
+    if (deal) {
+      const pre = await c.query<{ ch: boolean }>(
+        `SELECT (deal_value IS DISTINCT FROM $3::numeric OR deal_currency IS DISTINCT FROM $4) AS ch
+           FROM agency_leads WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL FOR UPDATE`,
+        [leadId, tenantId, deal.value, deal.currency],
+      );
+      dealChanged = pre.rows[0]?.ch === true;
+    }
     const r = await transitionStage(c, {
       tenantId, leadId, to: stage, actorId, deal, requireStatusIn: OPEN_LEAD_STATUSES,
     });
@@ -396,12 +409,12 @@ export async function moveLeadStage(
     if (r.outcome === "changed") {
       return {
         outcome: "ok" as const, id: leadId, stage: r.toStage, changed: true, stageEventId: r.stageEventId,
-        dealValue: r.dealValue, dealCurrency: r.dealCurrency,
+        dealValue: r.dealValue, dealCurrency: r.dealCurrency, dealChanged,
       };
     }
     // unchanged — apply a carried deal as a plain value edit, under the row lock transitionStage took.
     const d = deal === undefined ? await readDeal(c, tenantId, leadId) : (await writeDeal(c, tenantId, leadId, deal)).deal;
-    return { outcome: "ok" as const, id: leadId, stage: r.stage, changed: false, ...d };
+    return { outcome: "ok" as const, id: leadId, stage: r.stage, changed: false, ...d, dealChanged: deal === undefined ? false : dealChanged };
   });
 }
 

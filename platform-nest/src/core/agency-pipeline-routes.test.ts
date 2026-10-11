@@ -234,3 +234,37 @@ describe("hand-off 4: the staff-create activity carries no personal data", () =>
     expect(JSON.stringify(writeActivity.mock.calls)).not.toContain("Sole Trader");
   });
 });
+
+describe("every deal change is audited, whichever route carries it", () => {
+  it("a same-stage move with a CHANGED deal writes deal_set (and no stage_moved); an unchanged deal writes nothing", async () => {
+    moveLeadStage.mockResolvedValueOnce({ outcome: "ok", id: L, stage: "qualified", changed: false, dealValue: "15000000.0000", dealCurrency: "IDR", dealChanged: true });
+    await leads.moveStage(req, T, L, { stage: "qualified", deal: DEAL });
+    expect(writeActivity.mock.calls.map((c) => c[2])).toEqual(["deal_set"]);
+    expect(writeActivity).toHaveBeenCalledWith(T, "u-1", "deal_set", "agency_lead", L, { dealValue: "15000000.0000", dealCurrency: "IDR" });
+
+    writeActivity.mockClear();
+    moveLeadStage.mockResolvedValueOnce({ outcome: "ok", id: L, stage: "qualified", changed: false, dealValue: "15000000.0000", dealCurrency: "IDR", dealChanged: false });
+    await leads.moveStage(req, T, L, { stage: "qualified", deal: DEAL });
+    expect(writeActivity).not.toHaveBeenCalled();
+  });
+
+  it("a stage-changing move with a changed deal writes both stage_moved and deal_set", async () => {
+    moveLeadStage.mockResolvedValueOnce({ outcome: "ok", id: L, stage: "proposal", changed: true, stageEventId: "e", dealValue: "15000000.0000", dealCurrency: "IDR", dealChanged: true });
+    await leads.moveStage(req, T, L, { stage: "proposal", deal: DEAL });
+    expect(writeActivity.mock.calls.map((c) => c[2])).toEqual(["stage_moved", "deal_set"]);
+  });
+
+  it("convert with a changed deal writes deal_set; with an unchanged deal, or none, it writes only `converted`", async () => {
+    const base = {
+      outcome: "converted", clientId: "c", projectId: "p", runId: "r", ownerId: null, contactUserId: null, orgName: "Org",
+      delegations: [], stageEventId: "ev", dealValue: "15000000.0000", dealCurrency: "IDR",
+    };
+    convertAgencyLead.mockResolvedValueOnce({ ...base, dealChanged: true });
+    await convert.convert(req, T, L, { deal: DEAL });
+    expect(writeActivity.mock.calls.map((c) => c[2])).toEqual(["converted", "deal_set"]);
+    writeActivity.mockClear();
+    convertAgencyLead.mockResolvedValueOnce({ ...base, dealChanged: false });
+    await convert.convert(req, T, L, { deal: DEAL });
+    expect(writeActivity.mock.calls.map((c) => c[2])).toEqual(["converted"]);
+  });
+});

@@ -129,6 +129,10 @@ export class AgencyLeadsController {
     if (r.changed) {
       await writeActivity(tenantId, req.principal.userId, "stage_moved", "agency_lead", leadId, { stage: r.stage, stageEventId: r.stageEventId });
     }
+    // Every deal change is audited, whichever route carries it: a changed value on a move, same stage or not.
+    if (r.dealChanged) {
+      await writeActivity(tenantId, req.principal.userId, "deal_set", "agency_lead", leadId, { dealValue: r.dealValue, dealCurrency: r.dealCurrency });
+    }
     return { id: r.id, stage: r.stage, changed: r.changed, ...(r.stageEventId ? { stageEventId: r.stageEventId } : {}) };
   }
 
