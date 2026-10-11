@@ -11,8 +11,8 @@ claim.
 | Path | What | Runbook |
 |---|---|---|
 | `secrets-layout.md` | Where every Zone B secret lives and how it's issued — no values | — |
-| `otel/proposed-zonea-otlp-listener.yaml` | Proposal for the Zone A write-only OTLP listener — **not applied**; `infra/observability/` is outside this ticket's file ownership | `../../infra/runbooks/webdesk-zoneb-otel.md` |
-| `scripts/check-otlp-write-only.mjs` | Static auditor: does a collector config expose any read/query surface alongside the push-only `otlp` receiver | `../../infra/runbooks/webdesk-zoneb-otel.md` |
+| `host/webdesk-egress-guard.sh`, `host/test-egress-guard.sh` | Default-deny for the webdesk network, plus the ONE exception (WebDesk's OTLP push to `172.17.0.1:<port>`, off unless `WEBDESK_OTLP_PORT` is set) and its throwaway-network harness | `../../infra/runbooks/webdesk-zoneb-otel.md` |
+| `scripts/check-otlp-write-only.mjs` | Static auditor, run in CI against the ERP collector's real config and compose file: the `otlp/webdesk` receiver is bearer-authenticated, write-only, published on docker0 alone, and refuses everything while its token is empty | `../../infra/runbooks/webdesk-zoneb-otel.md` |
 | `scripts/check-cdn-bypass.mjs` | Static + probe-capable auditor: would a request that skips the CDN edge reach Zone B media unauthenticated | (this file, §CDN-bypass) |
 | `scripts/webdesk-backup-local.sh` | Nightly PG dump + MinIO mirror into the local versioned/object-locked `backups` bucket | `../../infra/runbooks/webdesk-zoneb-backups.md` |
 | `scripts/wd-backup-sentinel.sh` | Staleness alarm — a stopped backup job must read as a failure, not silence | `../../infra/runbooks/webdesk-zoneb-backups.md` |
