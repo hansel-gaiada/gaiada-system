@@ -30,6 +30,8 @@ export interface LibraryAsset {
   height: number | null;
   createdAt: string;
   updatedAt: string;
+  /** Who uploaded it: the minting editorial principal (null for rows from before 0014). */
+  createdBy: string | null;
 }
 
 const iso = (d: Date | string): string => new Date(d).toISOString();
@@ -52,5 +54,6 @@ export function toLibraryAsset(row: MediaAssetRow, tenantSlug: string): LibraryA
     height: row.height ?? null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at ?? row.created_at),
+    createdBy: row.created_by ?? null,
   };
 }

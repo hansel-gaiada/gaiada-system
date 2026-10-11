@@ -380,6 +380,7 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
         "bucket",
         "bucketKey",
         "createdAt",
+        "createdBy",
         "deletedAt",
         "height",
         "mime",

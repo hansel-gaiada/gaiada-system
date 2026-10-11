@@ -10,7 +10,7 @@
 //   - hold the plaintext token anywhere at rest (the table, the idempotency record, the audit rows).
 // Doctrine (estate memory: "validation pre-empts authz"): every denial sends a request that is valid for its
 // command and is paired with a positive control that sends the IDENTICAL request and succeeds.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomBytes, randomUUID } from "node:crypto";
 import http from "node:http";
 import { Readable } from "node:stream";
@@ -43,6 +43,8 @@ import {
 } from "./media-library-kit";
 import { storageConfig } from "../src/storage/storage.config";
 import { QuotaService } from "../src/media/quota.service";
+import { MediaService } from "../src/media/media.service";
+import { DbService } from "../src/db/db.service";
 
 const BASE64URL_43 = /^[A-Za-z0-9_-]{43}$/;
 const CAP = 65_536;
@@ -267,11 +269,11 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       expect(res.statusCode, res.body).toBe(201);
       const a = res.json();
       expect(a.url).toBe(`/v1/t/${fx.slug}/media/${a.assetId}`);
-      expect(a).toMatchObject({ bucket: "media", mime: "image/png", sizeBytes: 4096, scanStatus: "clean", width: 640, height: 480, originalFilename: "Hero Banner.png", title: null, alt: {}, tags: [] });
+      expect(a).toMatchObject({ bucket: "media", mime: "image/png", sizeBytes: 4096, scanStatus: "clean", width: 640, height: 480, originalFilename: "Hero Banner.png", title: null, alt: {}, tags: [], createdBy: "user-editor-1" });
       expect(res.headers["cache-control"]).toBe("no-store");
 
       const row = (await getAsset(fx, a.assetId)) as Record<string, any>;
-      expect(row).toMatchObject({ tenant_id: fx.tenantId, site_id: fx.siteId, mime: "image/png", scan_status: "clean", original_filename: "Hero Banner.png", width: 640, height: 480, deleted_at: null, purged_at: null });
+      expect(row).toMatchObject({ tenant_id: fx.tenantId, site_id: fx.siteId, mime: "image/png", scan_status: "clean", original_filename: "Hero Banner.png", created_by: "user-editor-1", width: 640, height: 480, deleted_at: null, purged_at: null });
       expect(Number(row.size_bytes)).toBe(4096);
       expect(a.bucketKey).toBe(row.bucket_key);
       const objectKey = String(row.bucket_key).slice("media/".length);
@@ -348,7 +350,7 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       expect((await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).length).toBe(6); // and only the winners' objects were stored
     }, 60_000);
 
-    it("a request that arrives while another holds the token does not queue behind it: while a slow upload is in flight (real socket), the same token answers 404 immediately; when the slow one is refused the token is free again", async () => {
+    it("a request that arrives while another holds the token does not queue behind it: while a slow upload is in flight (real socket), the same token answers 404 immediately (it is already spent: the claim is committed before the body is read)", async () => {
       const f = await createContentFixture("noqueue");
       const t = await mintOk(app, f, { bucket: "media", mime: ["image/png"] });
       const port = await serverPort();
@@ -368,10 +370,11 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       expect((await dumpAssets(f)).length).toBe(1);
     }, 30_000);
 
-    it("a REFUSED upload does not spend the token: the same token then uploads a good file", async () => {
+    it("a refusal the HEADERS decide (a declared size over the cap, a type outside the token's set) does not spend the token: the same token then uploads a good file", async () => {
       const f = await createContentFixture("unspent");
       const t = await mintOk(app, f, { bucket: "media", maxBytes: 1000, mime: ["image/png"] });
       expect((await uploadFile(app, f.slug, t.token, buildPng(1, 1, 5000))).statusCode).toBe(413);
+      expect((await uploadFile(app, f.slug, t.token, Buffer.from("%PDF-1.4 x"), { contentType: "application/pdf" })).statusCode).toBe(415);
       expect((await dumpTokens(f))[0].used_at).toBeNull();
       expect((await uploadFile(app, f.slug, t.token, buildPng(1, 1, 500))).statusCode).toBe(201);
       expect((await dumpTokens(f))[0].used_at).not.toBeNull();
@@ -427,8 +430,12 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       expect(Date.now() - started).toBeLessThan(20_000);
       expect((await dumpAssets(f)).length).toBe(0);
       expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
-      // the same token, a small file, over the same socket: still unspent
-      const ok = await fetch(`http://127.0.0.1:${addr.port}/v1/t/${f.slug}/media/upload/${t.token}`, { method: "POST", headers: { "content-type": "image/png" }, body: buildPng(2, 2, 300) });
+      // the claim was committed before the body was read, so the token is spent (fail closed): a new one is needed
+      expect((await dumpTokens(f))[0].used_at).not.toBeNull();
+      const retry = await fetch(`http://127.0.0.1:${addr.port}/v1/t/${f.slug}/media/upload/${t.token}`, { method: "POST", headers: { "content-type": "image/png" }, body: buildPng(2, 2, 300) });
+      expect(retry.status).toBe(404);
+      const fresh = await mintOk(app, f, { bucket: "media", maxBytes: 4096 });
+      const ok = await fetch(`http://127.0.0.1:${addr.port}/v1/t/${f.slug}/media/upload/${fresh.token}`, { method: "POST", headers: { "content-type": "image/png" }, body: buildPng(2, 2, 300) });
       expect(ok.status).toBe(201);
     }, 60_000);
 
@@ -474,7 +481,9 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       expect(res.statusCode).toBe(400);
       expect(String(res.json().message)).toMatch(/does not match the file's actual signature/);
       expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
-      expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(201);
+      expect((await dumpTokens(f))[0].used_at).not.toBeNull(); // body-level refusal: the token was claimed before the body was read
+      expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(404);
+      expect((await uploadFile(app, f.slug, (await mintOk(app, f)).token, buildPng())).statusCode).toBe(201); // a new token works
     });
 
     it("an empty body is 400", async () => {
@@ -482,10 +491,11 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       const t = await mintOk(app, f);
       const res = await uploadFile(app, f.slug, t.token, Buffer.alloc(0));
       expect(res.statusCode).toBe(400);
-      expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(201);
+      expect((await dumpTokens(f))[0].used_at).not.toBeNull(); // consumed (fail closed)
+      expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(404);
     });
 
-    it("an INFECTED file (EICAR) follows the existing scan behaviour: 403 'malware scan matched', no row, no object, the refusal audited; the token is not spent", async () => {
+    it("an INFECTED file (EICAR) follows the existing scan behaviour: 403 'malware scan matched', no row, no object, the refusal audited; the token is spent (fail closed)", async () => {
       const f = await createContentFixture("eicar");
       const t = await mintOk(app, f, { bucket: "media", mime: ["application/pdf", "image/png"] });
       const res = await uploadFile(app, f.slug, t.token, buildEicarPdf(), { contentType: "application/pdf", filename: "eicar.pdf" });
@@ -497,11 +507,12 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       const refused = await auditRows(f, "webdesk.media.uploadRefused");
       expect(refused).toHaveLength(1);
       expect(refused[0].actor).toBe("user-editor-1");
-      expect((await dumpTokens(f))[0].used_at).toBeNull();
-      expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(201); // the token still takes a clean file
+      expect((await dumpTokens(f))[0].used_at).not.toBeNull();
+      expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(404);
+      expect((await uploadFile(app, f.slug, (await mintOk(app, f)).token, buildPng())).statusCode).toBe(201); // a new token takes a clean file
     });
 
-    it("over the tenant's storage quota: 403, nothing stored, token unspent (the existing quota check, counting bytes held)", async () => {
+    it("over the tenant's storage quota: 403, nothing stored, token spent (the existing quota check, counting bytes held)", async () => {
       const f = await createContentFixture("quota");
       const t = await mintOk(app, f);
       const prev = process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES;
@@ -511,14 +522,98 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
         expect(res.statusCode).toBe(403);
         expect(String(res.json().message)).toMatch(/quota/i);
         expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
-        expect((await dumpTokens(f))[0].used_at).toBeNull();
-        const fits = await uploadFile(app, f.slug, t.token, buildPng(1, 1, 900)); // positive control: it fits
+        expect((await dumpTokens(f))[0].used_at).not.toBeNull();
+        const fits = await uploadFile(app, f.slug, (await mintOk(app, f)).token, buildPng(1, 1, 900)); // positive control: a new token, a file that fits
         expect(fits.statusCode).toBe(201);
         expect(await app.get(QuotaService).usedBytes(f.tenantId)).toBe(900);
       } finally {
         if (prev === undefined) delete process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES;
         else process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES = prev;
       }
+    });
+  });
+
+  // ==============================================================================================
+  // Upload: NO pooled connection is held while bytes stream
+  // ==============================================================================================
+  describe("upload: the database is used in short steps, never across the transfer", () => {
+    it("while TWO slow uploads are mid-body (a real socket, bytes trickling) the pool has ZERO connections checked out; both tokens are already spent (the claim committed before the body); the api serves other requests; the uploads then complete", async () => {
+      const f = await createContentFixture("noconn");
+      const pool = app.get(DbService).pool;
+      const inUse = () => pool.totalCount - pool.idleCount;
+      const [t1, t2] = [await mintOk(app, f), await mintOk(app, f)];
+      const port = await serverPort();
+      await sleep(200);
+      expect(inUse(), "baseline").toBe(0);
+      const slow = (token: string) => {
+        const req = http.request({ host: "127.0.0.1", port, method: "POST", path: `/v1/t/${f.slug}/media/upload/${token}`, headers: { "content-type": "image/png", "transfer-encoding": "chunked" } });
+        req.on("error", () => undefined);
+        const done = new Promise<number>((resolve) => req.on("response", (res) => { res.resume(); resolve(res.statusCode ?? 0); }));
+        req.write(buildPng(1, 1, 128));
+        return { req, done };
+      };
+      const a = slow(t1.token);
+      const b = slow(t2.token);
+      for (let i = 0; i < 6; i++) {
+        await sleep(200);
+        a.req.write(Buffer.alloc(8, 0x61)); // the body trickles in
+        b.req.write(Buffer.alloc(8, 0x61));
+        expect(inUse(), `checked-out connections while streaming (tick ${i})`).toBe(0);
+      }
+      const rows = await dumpTokens(f);
+      expect(rows.filter((r) => r.used_at !== null)).toHaveLength(2); // claimed, committed, before the body ended
+      // the rest of the api is not starved: a control read answers while both uploads are open
+      expect((await app.inject({ method: "GET", url: `/control/v1/tenants/${f.slug}/sites/${f.siteId}/media`, headers: hdr({ editorial: null, idem: null }) })).statusCode).toBe(200);
+      a.req.end(Buffer.alloc(16, 0x61));
+      b.req.end(Buffer.alloc(16, 0x61));
+      expect(await a.done).toBe(201);
+      expect(await b.done).toBe(201);
+      await sleep(300); // the response can leave a moment before the last connection is returned to the pool
+      expect(inUse()).toBe(0);
+      expect((await dumpAssets(f)).length).toBe(2);
+    }, 30_000);
+
+    it("a STORAGE failure after the claim: 500, the token is consumed (fail closed), no row, no object; the same token is then 404 and a new one works", async () => {
+      const f = await createContentFixture("store-fail");
+      const t = await mintOk(app, f);
+      const spy = vi.spyOn(app.get(MediaService), "storeObject").mockRejectedValueOnce(new Error("simulated storage outage"));
+      try {
+        const res = await uploadFile(app, f.slug, t.token, buildPng());
+        expect(res.statusCode).toBe(500);
+        expect(res.body).not.toContain("simulated storage outage"); // the thrown message is not echoed
+      } finally {
+        spy.mockRestore();
+      }
+      expect((await dumpTokens(f))[0].used_at).not.toBeNull();
+      expect((await dumpAssets(f)).length).toBe(0);
+      expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
+      expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(404);
+      expect((await uploadFile(app, f.slug, (await mintOk(app, f)).token, buildPng())).statusCode).toBe(201);
+    });
+
+    it("a ROW-INSERT failure after the object was stored: 500, the object is deleted (no live object), and a soft-deleted tombstone row remembers it so media-purge can free the locked version; nothing appears in the library", async () => {
+      const f = await createContentFixture("row-fail");
+      const t = await mintOk(app, f);
+      const spy = vi.spyOn(app.get(MediaService), "recordAsset").mockRejectedValueOnce(new Error("simulated insert failure"));
+      try {
+        expect((await uploadFile(app, f.slug, t.token, buildPng(1, 1, 700), { filename: "orphan.png" })).statusCode).toBe(500);
+      } finally {
+        spy.mockRestore();
+      }
+      expect((await dumpTokens(f))[0].used_at).not.toBeNull();
+      expect(await liveObjectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]); // deleted
+      const keys = await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId);
+      expect(keys.length).toBe(2); // the locked version and its delete marker remain until the retention lapses
+      const assets = await dumpAssets(f);
+      expect(assets).toHaveLength(1);
+      expect(assets[0]).toMatchObject({ created_by: "user-editor-1", purged_at: null });
+      expect(assets[0].deleted_at).not.toBeNull();
+      expect(assets[0].purge_after).not.toBeNull(); // the purge job frees the locked version
+      expect(String(assets[0].bucket_key)).toBe(`media/${keys[0]}`);
+      expect(Number(assets[0].size_bytes)).toBe(700);
+      const list = await app.inject({ method: "GET", url: `/control/v1/tenants/${f.slug}/sites/${f.siteId}/media`, headers: hdr({ editorial: null, idem: null }) });
+      expect(list.json().assets).toEqual([]); // hidden: soft-deleted
+      expect(await app.get(QuotaService).usedBytes(f.tenantId)).toBe(700); // still held until purged
     });
   });
 
@@ -558,7 +653,7 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
       expect((await post(f.slug, t3.token)).status).toBe(201); // the 503'd token was never touched: it is still good
     }, 30_000);
 
-    it("a stalled sender is cut off at the read deadline (408), its token is NOT spent, and its slot is freed", async () => {
+    it("a stalled sender is cut off at the read deadline (408), its token stays spent (fail closed), and its slot is freed", async () => {
       const f = await createContentFixture("deadline");
       const t = await mintOk(app, f);
       const prev = process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS;
@@ -570,10 +665,11 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
         const status = new Promise<number>((resolve) => req.on("response", (res) => { res.resume(); resolve(res.statusCode ?? 0); }));
         req.write(buildPng(1, 1, 128)); // ... and then silence
         expect(await status).toBe(408);
-        expect((await dumpTokens(f))[0].used_at).toBeNull();
+        expect((await dumpTokens(f))[0].used_at).not.toBeNull();
         expect(await objectKeysUnderTenant(MEDIA_BUCKET, f.tenantId)).toEqual([]);
         process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS = prev ?? "";
-        expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(201);
+        expect((await uploadFile(app, f.slug, t.token, buildPng())).statusCode).toBe(404);
+        expect((await uploadFile(app, f.slug, (await mintOk(app, f)).token, buildPng())).statusCode).toBe(201); // the slot was freed
       } finally {
         if (prev === undefined) delete process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS;
         else process.env.WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS = prev;

@@ -4,25 +4,36 @@
 // body is whatever the caller sends. The rules, in the order they are enforced:
 //
 //   1. THE TOKEN, FIRST AND ALONE. Nothing about the request (its body, its headers) is looked at before the
-//      token is proven. The token is hashed and claimed by ONE statement,
-//        UPDATE media_upload_tokens SET used_at = now()
-//         WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()
-//      under the route's tenant context (RLS). An unknown, malformed, expired, spent or other-tenant's token
-//      is the same zero rows, hence ONE identical 404 (the same body as an unknown tenant slug): the route
-//      cannot be used to learn why a token failed.
-//   2. THE CLAIM IS THE LOCK. The UPDATE runs in the SAME transaction that later creates the asset row, and
-//      that transaction stays open while the body is read, scanned and stored. The claim selects its row
-//      `FOR UPDATE SKIP LOCKED`, so a second request with the token while the first is in flight finds
-//      nothing and gets the same 404 AT ONCE: it neither waits nor holds a pooled connection. Once the first
-//      commits the token is spent (404); if it rolls back, the token is free again. So a token uploads
-//      exactly once even under concurrency, a loser has not read or stored a byte, and a refused upload (too
-//      big, wrong type, infected, storage down) rolls the claim back and leaves the token usable until it
-//      expires.
-//   2b. SLOTS (UploadSlots, below). An in-flight upload holds one pooled connection for the whole transfer, and
-//      the pool is small and shared with the rest of the api, so a slow sender must not be able to drain it.
-//      Before the token is even looked at, a process admits at most WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT uploads
-//      (default 4) and WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT per tenant (default 2); the rest get 503 with
-//      Retry-After. The check comes first on purpose: it says nothing about any token, so it is no oracle.
+//      token is proven. The token is hashed and looked up under the route's tenant context (RLS). An unknown,
+//      malformed, expired, spent or other-tenant's token is the same zero rows, hence ONE identical 404 (the
+//      same body as an unknown tenant slug): the route cannot be used to learn why a token failed.
+//   2. NO POOLED CONNECTION IS HELD WHILE BYTES MOVE. The api's pool is small (10) and shared with every read, so
+//      a slow or stalled sender must never pin a connection. The route therefore uses the database in three
+//      SHORT, separate steps and none of them spans the transfer:
+//        a. look the token up (a query, no lock) and check what the headers alone can refuse: the declared
+//           content type against the token's set (415) and a declared Content-Length against the cap (413).
+//           These refusals leave the token unspent;
+//        b. CLAIM the token in its own transaction, committed before the body is read:
+//             UPDATE media_upload_tokens SET used_at = now()
+//              WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()
+//           Zero rows is the same 404. This one statement is what makes the token single-use under
+//           concurrency: of two racing requests exactly one updates the row (the other waits only for that
+//           statement, milliseconds, then finds it spent). A loser has read and stored nothing;
+//        c. only after the body has been read, screened and stored, insert the asset row (and its audit row) in a
+//           second short transaction.
+//      THE TOKEN IS CONSUMED FROM STEP b ON, whatever happens next (fail closed): if the body, the scan, the store
+//      or the row insert fails, the editor mints a new token. What is left behind: before the scan nothing was
+//      stored, and the scan runs BEFORE the store (today and now), so a refused or infected file never reaches
+//      storage. If the store succeeded and the row insert then failed, the object is deleted at once and a
+//      soft-deleted row is written for it (see MediaService.recordTombstone): on a locked bucket the delete only
+//      adds a marker, and the row is what lets the `media-purge` job free the locked version once its retention
+//      lapses; if even that row cannot be written the failure is logged with the object key.
+//   2b. SLOTS (UploadSlots, below). The slots no longer protect the pool; they BOUND CONCURRENT UPLOADS, that is
+//      the memory (each holds a body of up to the cap), the ClamAV sockets and the storage writes one process
+//      takes on at once, defence in depth against many slow senders each with a valid token. Before the token
+//      is even looked at, a process admits at most WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT uploads (default 4) and
+//      WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT per tenant (default 2); the rest get 503 with Retry-After. The check
+//      comes first on purpose: it says nothing about any token, so it is no oracle.
 //   3. THE BODY IS BOUNDED WHILE IT STREAMS. The cap is min(the token's max_bytes, WEBDESK_MEDIA_MAX_UPLOAD_BYTES).
 //      A declared Content-Length over it is refused (413) before a byte is read; a body without one is
 //      counted as it arrives and refused the moment it crosses the cap, so nothing larger than the cap is ever
@@ -35,9 +46,8 @@
 //      be read by script only from `https://<domain>` of an environment of the token's site. The decision
 //      needs the token's site, so it exists only once the token is proven; errors before that carry no CORS.
 //
-// The asset's attribution (`created_by`) is the token's: the editorial principal that minted it, recorded as
-// the actor of the `webdesk.media.upload` audit row. (media_assets has no created_by column; migration 0014
-// does not add one.)
+// The asset's attribution is the token's `created_by`: the editorial principal that minted it, stored on
+// media_assets.created_by (migration 0014) and as the actor of the `webdesk.media.upload` audit row.
 import { BadRequestException, Injectable, Logger, NotFoundException, PayloadTooLargeException, RequestTimeoutException, UnsupportedMediaTypeException } from "@nestjs/common";
 import type { Readable } from "node:stream";
 import { DbService } from "../db/db.service";
@@ -45,7 +55,7 @@ import { allowedPreviewOrigin } from "../delivery/preview-token";
 import { storageConfig, type BucketName } from "../storage/storage.config";
 import { readImageDimensions } from "./image-dimensions";
 import { toLibraryAsset, type LibraryAsset } from "./library-asset";
-import { InfectedUploadError, MediaService, type StoredObject } from "./media.service";
+import { InfectedUploadError, MediaService } from "./media.service";
 import { hashUploadToken, UPLOAD_TOKEN_RE } from "./media-upload-token";
 
 /** The longest the body may take to arrive, from the moment the token is proven. */
@@ -204,9 +214,10 @@ export class MediaUploadService {
   }
 
   /**
-   * Redeems the token with this request's body. `onAuthorized` is called once the token is proven, with the
-   * Origin to echo for CORS (or null): the controller sets the response header there, so every later answer,
-   * the errors included, is readable by the site's own script.
+   * Redeems the token with this request's body (see the header for the three short database steps).
+   * `onAuthorized` is called once the token is proven, with the Origin to echo for CORS (or null): the
+   * controller sets the response header there, so every later answer, the errors included, is readable by the
+   * site's own script.
    */
   async redeem(p: {
     tenantId: string;
@@ -222,56 +233,65 @@ export class MediaUploadService {
     if (!UPLOAD_TOKEN_RE.test(p.token)) throw new NotFoundException();
     const hash = hashUploadToken(p.token);
 
-    // Facts the failure paths below need after the transaction has rolled back.
-    const left: { claimed?: ClaimedToken; stored?: StoredObject; infected?: InfectedUploadError } = {};
+    // a. Look the token up (no lock, no transaction held) and refuse what the headers alone can refuse.
+    const found = await this.db.withTenant(p.tenantId, async (db) => {
+      const { rows } = await db.query<ClaimedToken>(
+        `SELECT id, site_id, bucket, max_bytes, allowed_mimes, created_by FROM media_upload_tokens
+          WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()`,
+        [hash, p.tenantId],
+      );
+      if (!rows[0]) return null;
+      return { token: rows[0], domains: await this.siteDomains(db, rows[0].site_id, p.tenantId) };
+    });
+    if (!found) throw new NotFoundException();
+    p.onAuthorized(allowedPreviewOrigin(p.origin, found.domains)); // 5. CORS, now that the token's site is known
+
+    const contentType = baseContentType(p.contentType);
+    if (!contentType || !found.token.allowed_mimes.includes(contentType)) {
+      throw new UnsupportedMediaTypeException(`content-type '${contentType ?? "(none)"}' is not allowed for this upload token`);
+    }
+    const cap = Math.min(Number(found.token.max_bytes), storageConfig.maxUploadSizeBytes);
+    if (p.contentLength !== null && p.contentLength > cap) {
+      throw new PayloadTooLargeException(`upload exceeds the ${cap}-byte limit of this token`);
+    }
+
+    // b. Claim it: its own short transaction, committed before the body is read. From here the token is spent.
+    const token = await this.db.withTenant(p.tenantId, (db) =>
+      db.transaction(async (client) => {
+        const { rows } = await client.query<ClaimedToken>(
+          `UPDATE media_upload_tokens SET used_at = now()
+            WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()
+        RETURNING id, site_id, bucket, max_bytes, allowed_mimes, created_by`,
+          [hash, p.tenantId],
+        );
+        return rows[0] ?? null;
+      }),
+    );
+    if (!token) throw new NotFoundException(); // lost the race: another request spent it between a and b
+
+    // The transfer: no database connection is held from here until the row insert.
+    const buffer = await readBounded(p.body, cap, uploadTimeoutMs());
+    const input = { filename: p.filename ?? "file", contentType, buffer };
+    let screened;
     try {
-      return await this.db.withTenant(p.tenantId, (db) =>
-        db.transaction(async (client) => {
-          // 1 + 2. Prove and claim the token in one statement, in the transaction that will create the asset.
-          const { rows } = await client.query<ClaimedToken>(
-            `UPDATE media_upload_tokens SET used_at = now()
-              WHERE id = (SELECT id FROM media_upload_tokens
-                           WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()
-                           FOR UPDATE SKIP LOCKED)
-          RETURNING id, site_id, bucket, max_bytes, allowed_mimes, created_by`,
-            [hash, p.tenantId],
-          );
-          if (!rows[0]) throw new NotFoundException();
-          const token = rows[0];
-          left.claimed = token;
+      screened = await this.media.screen(p.tenantId, token.bucket, input, { maxBytes: cap, allowedMimes: token.allowed_mimes });
+    } catch (err) {
+      if (err instanceof InfectedUploadError) {
+        await this.media
+          .refuseInfected(p.tenantId, token.created_by, token.bucket, input.filename, err.signature)
+          .catch((e) => this.logger.warn(`could not audit the refused upload: ${String(e)}`));
+        throw err.toForbidden();
+      }
+      throw err;
+    }
+    const stored = await this.media.storeObject(p.tenantId, token.site_id, token.bucket, input);
 
-          // 5. CORS, now that the token's site is known.
-          const domains = await this.siteDomains(client, token.site_id, p.tenantId);
-          p.onAuthorized(allowedPreviewOrigin(p.origin, domains));
-
-          // 4. The token's type set, before a byte is read.
-          const contentType = baseContentType(p.contentType);
-          if (!contentType || !token.allowed_mimes.includes(contentType)) {
-            throw new UnsupportedMediaTypeException(`content-type '${contentType ?? "(none)"}' is not allowed for this upload token`);
-          }
-
-          // 3. The size cap, declared first, then counted as the body streams.
-          const cap = Math.min(Number(token.max_bytes), storageConfig.maxUploadSizeBytes);
-          if (p.contentLength !== null && p.contentLength > cap) {
-            throw new PayloadTooLargeException(`upload exceeds the ${cap}-byte limit of this token`);
-          }
-          const buffer = await readBounded(p.body, cap, uploadTimeoutMs());
-
-          // 4. The existing pipeline: allowlist, sniff, quota, scan.
-          const input = { filename: p.filename ?? "file", contentType, buffer };
-          let screened;
-          try {
-            screened = await this.media.screen(p.tenantId, token.bucket, input, { maxBytes: cap, allowedMimes: token.allowed_mimes }, client);
-          } catch (err) {
-            if (err instanceof InfectedUploadError) left.infected = err;
-            throw err;
-          }
-
-          // Store, then record: the row (and the token's spent state) commit together or not at all.
-          const stored = await this.media.storeObject(p.tenantId, token.site_id, token.bucket, input);
-          left.stored = stored;
-          const dims = readImageDimensions(buffer, screened.sniffed);
-          const row = await this.media.recordAsset(client, {
+    // c. The asset row: a second short transaction.
+    const dims = readImageDimensions(buffer, screened.sniffed);
+    try {
+      const row = await this.db.withTenant(p.tenantId, (db) =>
+        db.transaction((client) =>
+          this.media.recordAsset(client, {
             tenantId: p.tenantId,
             siteId: token.site_id,
             bucket: token.bucket,
@@ -280,20 +300,16 @@ export class MediaUploadService {
             actor: token.created_by,
             facts: { originalFilename: p.filename, width: dims?.width ?? null, height: dims?.height ?? null },
             auditExtra: { via: "upload-token", tokenId: token.id },
-          });
-          return toLibraryAsset(row, p.tenantSlug);
-        }),
+          }),
+        ),
       );
+      return toLibraryAsset(row, p.tenantSlug);
     } catch (err) {
-      // The transaction has rolled back (the token is unspent again). What it left behind:
-      if (left.stored && left.claimed) await this.media.discardObject(left.claimed.bucket, left.stored.objectKey);
-      if (left.infected && left.claimed) {
-        const { bucket, created_by } = left.claimed;
-        await this.media
-          .refuseInfected(p.tenantId, created_by, bucket, p.filename ?? "file", left.infected.signature)
-          .catch((e) => this.logger.warn(`could not audit the refused upload: ${String(e)}`));
-        throw left.infected.toForbidden();
-      }
+      // The object is stored but has no row: delete it, and leave a soft-deleted row so a locked version is freed later.
+      await this.media.discardObject(token.bucket, stored.objectKey);
+      await this.media
+        .recordTombstone({ tenantId: p.tenantId, siteId: token.site_id, bucket: token.bucket, input, stored, actor: token.created_by })
+        .catch((e) => this.logger.error(`orphan object ${token.bucket}/${stored.objectKey}: its row insert failed and so did its tombstone: ${String(e)}`));
       throw err;
     }
   }

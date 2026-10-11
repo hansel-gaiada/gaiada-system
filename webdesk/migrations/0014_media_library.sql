@@ -18,6 +18,8 @@
 --    The CHECKs make an impossible lifecycle unrepresentable: purge_after exists exactly when deleted_at
 --    does, never before it, and nothing is purged that was not deleted first. The two indexes serve the
 --    library's tag filter (GIN) and the purge sweep (a partial index over the few rows awaiting it).
+--    created_by is who uploaded it: the editorial principal's sub (opaque, attribution only), copied from the
+--    upload token that authorised the upload; NULL for rows that predate this column.
 --    updated_at is NOT NULL DEFAULT now(): rows that exist today get the migration's own instant (no DML
 --    runs here: a backfill under FORCE RLS would match zero rows, lint-migration-rls.mjs).
 --
@@ -29,8 +31,9 @@
 --    THE TOKEN IS A BEARER CAPABILITY, exactly as a preview token is (0013): 32 random bytes, base64url,
 --    shown once; only sha256 (lowercase hex) is stored, the CHECK refuses anything else, and there is no
 --    pepper (256 bits of entropy). Single use is enforced HERE: the upload claims the row with an UPDATE
---    ... WHERE used_at IS NULL AND expires_at > now() in the same transaction that creates the asset row,
---    so two concurrent uploads with one token cannot both succeed. A row is never deleted (the app role has
+--    ... WHERE used_at IS NULL AND expires_at > now(), in its own short transaction committed BEFORE the
+--    body is read (no pooled connection is held while bytes stream), so two concurrent uploads with one token
+--    cannot both succeed and a token whose upload fails after that stays spent (fail closed). A row is never deleted (the app role has
 --    no DELETE): the table is also the record of who was allowed to upload what, and when.
 --
 -- RLS and grants follow 0002/0009/0012/0013 exactly: FORCE ROW LEVEL SECURITY with the single-mode
@@ -48,6 +51,7 @@ ALTER TABLE media_assets
   ADD COLUMN IF NOT EXISTS alt               jsonb       NOT NULL DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS tags              text[]      NOT NULL DEFAULT '{}',
   ADD COLUMN IF NOT EXISTS original_filename text,
+  ADD COLUMN IF NOT EXISTS created_by        text,
   ADD COLUMN IF NOT EXISTS width             integer,
   ADD COLUMN IF NOT EXISTS height            integer,
   ADD COLUMN IF NOT EXISTS updated_at        timestamptz NOT NULL DEFAULT now(),

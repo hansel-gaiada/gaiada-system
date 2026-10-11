@@ -1989,7 +1989,7 @@ content cannot be deleted). This is the WebDesk api's half: the schema, the cont
 and the purge job. (The ERP's Cerbos kind and routes, and the UI, are WSK-43b and WSK-43c.)
 
 A library asset is a `media_assets` row (migration `0014`): `title`, `alt` (a map locale to text), `tags`,
-`original_filename`, `width`, `height`, `updated_at`, and a lifecycle: **live** (`deleted_at` null), **soft-deleted**
+`original_filename`, `created_by`, `width`, `height`, `updated_at`, and a lifecycle: **live** (`deleted_at` null), **soft-deleted**
 (`deleted_at` set, `purge_after = deleted_at + the bucket's GOVERNANCE retention`, the stored object still exists) and
 **purged** (`purged_at` set: every stored version deleted). CHECKs make the lifecycle impossible to get wrong
 (`purge_after` iff `deleted_at`, never before it; `purged_at` only after `deleted_at`). The asset's **canonical URL** is
@@ -2019,11 +2019,21 @@ uses the asset, so it cannot break a page.
   defaults to and is capped by `WEBDESK_MEDIA_MAX_UPLOAD_BYTES`; `mime` (a string or an array) defaults to and is a
   subset of the bucket's allowlist. `withhold` keeps the token and `uploadPath` out of the idempotency record: a replay
   of a mint is 409 `idempotency-response-withheld`.
-- **The token alone, first.** Nothing about the body is looked at before the token is proven. The route claims it with
-  one `UPDATE ... SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`, in the same
-  transaction that creates the asset row, so a token uploads **exactly once**, even under concurrency (a second request
-  blocks on the row lock, then finds it spent). A refused upload (too big, wrong type, infected, storage down) rolls the
-  claim back: the token stays usable until it expires.
+- **The token alone, first, then three short database steps (no pooled connection is held while bytes stream).**
+  Nothing about the body is looked at before the token is proven. The route then (a) looks the token up and refuses what
+  the headers alone decide: a declared type outside the token's set (415) or a declared `Content-Length` over the cap
+  (413): the token stays unspent; (b) **claims** it in its own transaction, committed *before the body is read*:
+  `UPDATE ... SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`: this single
+  statement is what makes it single-use under concurrency (of two racing requests exactly one updates the row, the
+  loser gets the 404 and has read and stored nothing); (c) reads, screens and stores the body with **no connection
+  held**, then inserts the asset row (and its audit row) in a second short transaction. A slow or stalled sender
+  therefore never pins one of the api's 10 pooled connections.
+- **Fail closed.** From the claim on the token is spent whatever happens: a body over the cap, a wrong signature, an
+  infected file, a quota refusal, a stalled sender (408), a storage or database error: the editor mints a new token.
+  The scan runs before the store, so a refused or infected file never reaches storage. If the object was stored and
+  the row insert then failed, the object is deleted at once and a soft-deleted row is written for it
+  (`MediaService.recordTombstone`): on a locked bucket the delete only adds a marker, so that row (with `purge_after`)
+  is what lets `media-purge` free the locked version later, and it keeps the quota honest until then.
 - **One 404.** Unknown, malformed, expired, spent, another tenant's token, an unknown or archived tenant slug: the same
   bytes (`Connection: close`, so a sender is not read to the end). No oracle, through `OPTIONS` either.
 - **Bounded while streaming.** The cap is `min(token max_bytes, WEBDESK_MEDIA_MAX_UPLOAD_BYTES)`. A declared
@@ -2031,24 +2041,25 @@ uses the asset, so it cannot break a page.
   crosses the cap, so nothing larger is ever held. `WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS` (60000) ends a stalled sender (408).
   The declared type must be in the token's set (415), then the **existing pipeline** runs unchanged (bucket allowlist,
   magic-byte sniff, quota, ClamAV fail-closed with the usual 403 and audit row, store, row).
-- **Slots.** An in-flight upload holds one pooled connection (the pool is 10 and shared with the whole api) for the
-  length of that work, so a process runs at most `WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT` token uploads at once (default 4,
-  1 to 8) and `WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT` per tenant (default 2); the rest get **503 with `Retry-After: 5`**.
-  The check comes before the token is looked at, so it is the same answer for every token (no oracle). A second request
-  with a token that is mid-upload gets the same 404 at once (the claim is `FOR UPDATE SKIP LOCKED`): it does not queue.
-  Known limit: the slots are per process, so N replicas admit N times as many.
+- **Slots.** Defence in depth: they bound concurrent uploads (each holds a body of up to the cap in memory, a ClamAV
+  socket and a storage write), not connections. A process runs at most `WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT` token
+  uploads at once (default 4, 1 to 8) and `WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT` per tenant (default 2); the rest get
+  **503 with `Retry-After: 5`**. The check comes before the token is looked at, so it is the same answer for every
+  token (no oracle). Known limit: the slots are per process, so N replicas admit N times as many.
 - **Body parsing** is scoped: a Fastify parser for exactly the public buckets' media types, handing the route the
   unread stream. On any other path it answers the 415 Fastify would (`media/media-upload-parser.ts`).
 - **CORS** is the draft-preview rule (`allowedPreviewOrigin`): the request `Origin` is echoed only when it is
   `https://<domain>` of an environment of the token's site (set `environments.domain`). Errors after the token is proven
   carry it too; a 404 never does. Responses are `Cache-Control: no-store`.
-- **Attribution.** `created_by` is the minting editorial principal, recorded as the actor of the `webdesk.media.upload`
-  audit row (`media_assets` has no `created_by` column). `original_filename` is a cleaned label (last path segment,
+- **Attribution.** `media_assets.created_by` is the minting editorial principal (the token's `created_by`), so the
+  library can show who uploaded what (`createdBy` in `media.list` and the upload response; null for rows that predate
+  it); it is also the actor of the `webdesk.media.upload` audit row. `original_filename` is a cleaned label (last path segment,
   control characters removed, at most 255 characters); `width`/`height` are read from the header bytes for png, gif,
   jpeg and webp, else null.
-- **Operators:** the token is in the request URL, so any access log in front of the api records it. Redact
-  `/v1/t/*/media/upload/*` there (the api's own `instance` and log lines already do), or accept that log readers could
-  upload one file until it expires or is used.
+- **Operators:** the token is in the request URL, so any access log in front of the api (Caddy, a CDN, a load
+  balancer) records it. **Redact the upload path `/v1/t/*/media/upload/*` at the edge too, exactly as you redact
+  `/v1/t/*/preview/*`** (the api's own `instance` and log lines already do). An unredacted log lets a reader upload one
+  file into the library until the token expires (ten minutes) or is used.
 - `media` was already a reserved collection key.
 
 ### `media.update`
@@ -2116,7 +2127,7 @@ inside their retention (storage really holds those bytes), not purged ones. The 
 
 ### Verify
 
-`test/media-upload-token.spec.ts` (mint, gates, the public route: one-use under concurrency, caps and streaming, types,
+`test/media-upload-token.spec.ts` (mint, gates, the public route: one-use under concurrency, no pooled connection held while a body streams, fail-closed failures, caps and streaming, types,
 EICAR, quota, the identical 404, CORS, the scoped parser), `test/media-library-commands.spec.ts` (update, delete, the
 in-use scan, usage, list filters and cursor, quota), `test/media-purge.spec.ts` (real RustFS: every version gone,
 negative control under a live lock, two parallel runs, a storage error), `test/media-upload-unit.spec.ts` (dimensions

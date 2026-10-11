@@ -11,7 +11,6 @@
 // (`purged_at` set, every stored version deleted by the `media-purge` job) no longer counts: the quota
 // drops when the bytes are actually freed, not when the editor clicked delete.
 import { Injectable } from "@nestjs/common";
-import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
 import { storageConfig } from "../storage/storage.config";
 
@@ -19,26 +18,17 @@ import { storageConfig } from "../storage/storage.config";
 export class QuotaService {
   constructor(private readonly db: DbService) {}
 
-  /**
-   * Bytes storage still holds for this tenant, across every bucket (see the header). With `client`, the read
-   * runs on that connection (an upload that already holds a transaction must not ask the pool for a second
-   * connection while it waits).
-   */
-  async usedBytes(tenantId: string, client?: PoolClient): Promise<number> {
-    const sql = `SELECT sum(size_bytes)::bigint AS total FROM media_assets WHERE purged_at IS NULL`;
-    if (client) {
-      const { rows } = await client.query<{ total: string | null }>(sql);
-      return Number(rows[0]?.total ?? 0);
-    }
+  /** Bytes storage still holds for this tenant, across every bucket (see the header). */
+  async usedBytes(tenantId: string): Promise<number> {
     return this.db.withTenant(tenantId, async (db) => {
-      const { rows } = await db.query<{ total: string | null }>(sql);
+      const { rows } = await db.query<{ total: string | null }>(`SELECT sum(size_bytes)::bigint AS total FROM media_assets WHERE purged_at IS NULL`);
       return Number(rows[0]?.total ?? 0);
     });
   }
 
   /** Would adding `incomingBytes` push this tenant over its quota? */
-  async wouldExceedQuota(tenantId: string, incomingBytes: number, client?: PoolClient): Promise<boolean> {
-    const used = await this.usedBytes(tenantId, client);
+  async wouldExceedQuota(tenantId: string, incomingBytes: number): Promise<boolean> {
+    const used = await this.usedBytes(tenantId);
     return used + incomingBytes > storageConfig.tenantStorageQuotaBytes;
   }
 }

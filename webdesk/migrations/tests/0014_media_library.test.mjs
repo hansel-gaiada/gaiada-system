@@ -65,7 +65,7 @@ const { check, summary } = makeChecker('0014')
 
 const newHash = () => createHash('sha256').update(randomBytes(32).toString('base64url')).digest('hex')
 
-const NEW_ASSET_COLUMNS = ['title', 'alt', 'tags', 'original_filename', 'width', 'height', 'updated_at', 'deleted_at', 'purge_after', 'purged_at']
+const NEW_ASSET_COLUMNS = ['title', 'alt', 'tags', 'original_filename', 'created_by', 'width', 'height', 'updated_at', 'deleted_at', 'purge_after', 'purged_at']
 const TOKEN_COLUMNS = 'id,tenant_id,site_id,token_hash,bucket,max_bytes,allowed_mimes,expires_at,created_by,created_at,used_at'
 
 // A tenant and a site, as the app role, in the caller's open transaction.
@@ -110,11 +110,12 @@ async function partA(roles) {
       [ASSETS],
     )
     const a = Object.fromEntries(acols.rows.map((r) => [r.column_name, r]))
-    check('media_assets keeps its 8 original columns and gains the 10 library columns', acols.rows.length === 18 && NEW_ASSET_COLUMNS.every((n) => a[n]), acols.rows.map((r) => r.column_name))
+    check('media_assets keeps its 8 original columns and gains the 11 library columns', acols.rows.length === 19 && NEW_ASSET_COLUMNS.every((n) => a[n]), acols.rows.map((r) => r.column_name))
     check(
-      'types: title/original_filename text, alt jsonb, tags text[], width/height integer, instants timestamptz',
+      'types: title/original_filename/created_by text, alt jsonb, tags text[], width/height integer, instants timestamptz',
       a.title.data_type === 'text' &&
         a.original_filename.data_type === 'text' &&
+        a.created_by.data_type === 'text' &&
         a.alt.data_type === 'jsonb' &&
         a.tags.data_type === 'ARRAY' &&
         a.width.data_type === 'integer' &&
@@ -123,9 +124,9 @@ async function partA(roles) {
       acols.rows,
     )
     check(
-      'NOT NULL: alt, tags, updated_at; nullable: title, original_filename, width, height, deleted_at, purge_after, purged_at',
+      'NOT NULL: alt, tags, updated_at; nullable: title, original_filename, created_by, width, height, deleted_at, purge_after, purged_at',
       ['alt', 'tags', 'updated_at'].every((n) => a[n].is_nullable === 'NO') &&
-        ['title', 'original_filename', 'width', 'height', 'deleted_at', 'purge_after', 'purged_at'].every((n) => a[n].is_nullable === 'YES'),
+        ['title', 'original_filename', 'created_by', 'width', 'height', 'deleted_at', 'purge_after', 'purged_at'].every((n) => a[n].is_nullable === 'YES'),
       acols.rows,
     )
     check("defaults: alt '{}', tags '{}', updated_at now()", /'\{\}'::jsonb/.test(a.alt.column_default ?? '') && /'\{\}'::text\[\]/.test(a.tags.column_default ?? '') && /now\(\)/.test(a.updated_at.column_default ?? ''), [a.alt.column_default, a.tags.column_default, a.updated_at.column_default])
@@ -220,7 +221,7 @@ async function partB() {
     const old = r.rows?.[0]
     check(
       'an OLD-STYLE insert (the 0002 columns only, what legacy code writes) still works and takes the defaults',
-      !r.err && old.title === null && JSON.stringify(old.alt) === '{}' && old.tags.length === 0 && old.original_filename === null && old.width === null && old.deleted_at === null && old.purge_after === null && old.purged_at === null && old.updated_at instanceof Date,
+      !r.err && old.title === null && JSON.stringify(old.alt) === '{}' && old.tags.length === 0 && old.original_filename === null && old.created_by === null && old.width === null && old.deleted_at === null && old.purge_after === null && old.purged_at === null && old.updated_at instanceof Date,
       errSummary(r) + JSON.stringify(old),
     )
 
@@ -460,7 +461,7 @@ async function partF(roles) {
     }
     for (const k of Object.keys(SNAPSHOT_SQL)) check(`[pos] ${k}: nothing lost`, diff[k].lost.length === 0, diff[k].lost)
     const onlyThese = (rows) => rows.every((r) => r[0] === TOKENS || r[0] === ASSETS)
-    check('[pos] columns: 10 on media_assets + 11 on media_upload_tokens', diff.columns.added.length === 21 && diff.columns.added.filter((r) => r[0] === ASSETS).length === 10 && diff.columns.added.filter((r) => r[0] === TOKENS).length === 11, diff.columns.added.length)
+    check('[pos] columns: 11 on media_assets + 11 on media_upload_tokens', diff.columns.added.length === 22 && diff.columns.added.filter((r) => r[0] === ASSETS).length === 11 && diff.columns.added.filter((r) => r[0] === TOKENS).length === 11, diff.columns.added.length)
     check('[pos] constraints: only on media_assets (8 new CHECKs) and media_upload_tokens', onlyThese(diff.constraints.added) && diff.constraints.added.filter((r) => r[0] === ASSETS).length === 8, diff.constraints.added.map((r) => `${r[0]}.${r[1]}`))
     check('[pos] indexes: 2 on media_assets, the pk + 4 on media_upload_tokens', diff.indexes.added.length === 7 && diff.indexes.added.filter((r) => r[0] === ASSETS).length === 2 && diff.indexes.added.filter((r) => r[0] === TOKENS).length === 5, diff.indexes.added.map((r) => r[1]))
     check('[pos] policies: exactly tenant_isolation on media_upload_tokens (media_assets keeps its own)', diff.policies.added.length === 1 && diff.policies.added[0][0] === TOKENS && diff.policies.added[0][1] === 'tenant_isolation', diff.policies.added)

@@ -561,7 +561,7 @@ describe("WSK-43a media.update / media.delete / media.usage / media.list", () =>
       await seedAsset(f, { sizeBytes: 2000, deleted: { deletedAgo: "1 hour", purgeAfterAgo: "-1 day" } }); // deleted, inside retention
       await seedAsset(f, { sizeBytes: 4000, deleted: { deletedAgo: "3 days", purgeAfterAgo: "1 day" }, purged: true }); // purged: bytes freed
       expect(await quota.usedBytes(f.tenantId)).toBe(3000);
-      expect(await quota.wouldExceedQuota(f.tenantId, 1, undefined)).toBe(false);
+      expect(await quota.wouldExceedQuota(f.tenantId, 1)).toBe(false);
       const prev = process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES;
       process.env.WEBDESK_TENANT_STORAGE_QUOTA_BYTES = "3000";
       try {

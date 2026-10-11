@@ -36,4 +36,5 @@ export type MediaAssetRow = {
   width?: number | null;
   height?: number | null;
   updated_at?: string;
+  created_by?: string | null;
 };
