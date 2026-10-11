@@ -46,8 +46,8 @@ export class PrivacyRepository {
    * literal keys. Case-insensitive on both sides (`identifierNormalized` is already lower-cased by
    * identifier.ts before it reaches here). A submission already scrubbed by either purge or a
    * prior erase (`payload = '{}'`) naturally stops matching via the fields scan, but can still
-   * surface via `data_subject_ref` if that column was not also cleared (purge does not clear it —
-   * 0007_privacy_dsr.sql's own comment; erase does).
+   * surface via a correlator column if it was not also cleared (both the purge and erase now clear
+   * data_subject_ref and data_subject_phone_ref).
    */
   async findByIdentifier(
     client: PoolClient,
@@ -86,8 +86,7 @@ export class PrivacyRepository {
 
   /**
    * The erasure write, per migrations/0007_privacy_dsr.sql's resolution: SCRUB, don't DELETE.
-   * `data_subject_ref` is nulled (unlike the time-based purge job, which leaves it — a known,
-   * reported inconsistency, not fixed here) so the row stops being findable by identity; consent
+   * `data_subject_ref` is nulled (the time-based purge does the same) so the row stops being findable by identity; consent
    * columns are DELIBERATELY untouched (they describe the notice shown/accepted, not the subject's
    * own data — see the migration's header). Caller must already be inside a transaction; this
    * method does not BEGIN/COMMIT itself so it can be composed with the media_assets delete and the

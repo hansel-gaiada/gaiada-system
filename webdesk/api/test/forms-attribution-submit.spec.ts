@@ -14,6 +14,7 @@ import { createFormDef, setEnvironmentDomain, readSubmission, backdateSubmission
 import { turnstileConfig } from "../src/forms/forms.config";
 import { SubmissionsPurgeService } from "../src/forms/submissions-purge.service";
 import { ZoneBEventEmitterService } from "../src/events/zoneb-event-emitter.service";
+import { MailService } from "../src/mail/mail.service";
 import { TenantWebhookDispatcherService } from "../src/tenant-webhooks/tenant-webhook-dispatcher.service";
 
 // gaiada.com's contact form shape: the email field is `contact_email` (NOT `email`) and there is a tel field.
@@ -136,9 +137,12 @@ describe("M5 — attribution, visitor consent, subject refs and the PAN scrub on
     }
   });
 
-  it("the retention purge clears attribution, visitor_consent and the phone ref", async () => {
+  it("the retention purge clears attribution, visitor_consent, the phone ref AND the email ref", async () => {
     const res = await submit({ attribution: { landing: "/p/" }, visitor_consent: GOOD_CONSENT });
     const id = res.json<{ id: string }>().id;
+    const before = (await readSubmission(tenant, id))!;
+    expect(before.data_subject_ref).toBeTruthy();
+    expect(before.data_subject_phone_ref).toBeTruthy();
     await backdateSubmissionExpiry(tenant, id, new Date(Date.now() - 60_000));
     await app.get(SubmissionsPurgeService).purgeDueSubmissions();
     const row = (await readSubmission(tenant, id))!;
@@ -146,5 +150,32 @@ describe("M5 — attribution, visitor consent, subject refs and the PAN scrub on
     expect(row.attribution).toBeNull();
     expect(row.visitor_consent).toBeNull();
     expect(row.data_subject_phone_ref).toBeNull();
+    expect(row.data_subject_ref).toBeNull();
+  });
+
+  it("Reply-To and the autoresponder use the form's email field (`email_address`), not a field named `email`", async () => {
+    const mail = app.get(MailService, { strict: false });
+    const notify = vi.spyOn(mail, "sendNotification").mockResolvedValue(undefined as never);
+    const auto = vi.spyOn(mail, "sendAutoresponder").mockResolvedValue(undefined as never);
+    try {
+      const form = await createFormDef(tenant, {
+        schema: { fields: [{ key: "name", type: "text", required: true }, { key: "email_address", type: "email", required: true }] },
+        notify: { to: { email: "staff@example.test" }, autoresponder: true },
+      });
+      const res = await app.inject({
+        method: "POST",
+        url: `/v1/t/${tenant.slug}/forms/${form.id}/submit`,
+        headers: { origin: `https://${DOMAIN}`, "content-type": "application/json" },
+        remoteAddress: `10.0.9.${++n}`,
+        payload: { fields: { name: "Jane", email_address: "Jane@Example.com" }, consent: true, turnstileToken: turnstileConfig.stubPassToken },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(notify.mock.calls[0][0].submitter).toEqual({ email: "jane@example.com", name: "Jane" });
+      expect(auto).toHaveBeenCalledTimes(1);
+      expect(auto.mock.calls[0][0].to.email).toBe("jane@example.com");
+    } finally {
+      notify.mockRestore();
+      auto.mockRestore();
+    }
   });
 });

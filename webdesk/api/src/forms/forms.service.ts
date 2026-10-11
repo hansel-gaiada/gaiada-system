@@ -260,7 +260,9 @@ export class FormsService {
       return;
     }
     const variables = flattenToStrings({ ...fields, submissionId });
-    const submitterEmail = typeof fields.email === "string" ? fields.email : undefined;
+    // M5-L1: the submitter is whoever the subject-ref derivation picks (the first email field of the form
+    // definition, else the legacy `email` key), not a field literally named `email`.
+    const submitterEmail = deriveSubjectRefs(form.schema, fields).email ?? undefined;
 
     await this.mail.sendNotification({
       tenantId: form.tenantId,

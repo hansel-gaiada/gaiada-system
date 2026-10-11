@@ -8,7 +8,7 @@
 // bypassing RLS.
 //
 // Purge SCRUBS rather than DELETEs: `payload` is overwritten to `{}` and the consent text is
-// replaced with a tombstone marker, the M5 personal-data columns (`attribution`, `visitor_consent`,
+// replaced with a tombstone marker, the personal-data columns (`data_subject_ref`, `attribution`, `visitor_consent`,
 // `data_subject_phone_ref`) are nulled, `status` flips to `purged`, but the row itself (id,
 // created_at, expires_at, form_def_id) survives — matching audit_entries/content_versions'
 // append-only-history precedent elsewhere in this schema, and leaving something for a future
@@ -47,7 +47,7 @@ export class SubmissionsPurgeService {
       const purgedCount = await this.db.withTenant(tenantId, async (db) => {
         const { rows } = await db.query<{ id: string }>(
           `UPDATE submissions
-             SET status = 'purged', payload = '{}'::jsonb, consent_notice_text = $1,
+             SET status = 'purged', payload = '{}'::jsonb, consent_notice_text = $1, data_subject_ref = NULL,
                  attribution = NULL, visitor_consent = NULL, data_subject_phone_ref = NULL
            WHERE tenant_id = $2 AND status <> 'purged' AND expires_at < now()
            RETURNING id`,
