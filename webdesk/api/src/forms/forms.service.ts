@@ -184,8 +184,11 @@ export class FormsService {
     //    emitter is fail-soft internally too: a bridge outage must never turn a persisted
     //    submission into a failed response. Carries CORRELATORS ONLY -- no submitted field
     //    values cross the zone boundary (design section 04: "never the raw blob").
+    //    The envelope's `tenantId` is the ERP's companies.id (`tenants.company_ref`), which the ERP
+    //    intake checks against its route tenant. Sending the internal `tenants.id` here made the
+    //    intake refuse every form.received (found 2026-10-11, M3).
     await this.zoneBEvents
-      .emitFormReceived(form.tenantId, {
+      .emitFormReceived(form.companyRef, {
         // ResolvedForm carries tenantSlug + siteId (no siteSlug field exists); the agent's
         // suggested `form.siteSlug` does not compile. tenantSlug is the meaningful correlator.
         siteSlug: form.tenantSlug,
