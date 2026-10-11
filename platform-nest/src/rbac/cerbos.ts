@@ -102,6 +102,17 @@ export interface Resource {
    *  param the handler then verifies against that row) -- NEVER from a request body. Omitted -> "" -> neither
    *  derived role can match, so an unfed resource confers nothing (fail closed). */
   clientId?: string;
+  /** M5-W1a (docs/plans/2026-10-11-m5-writers-room-design.md §2.3) -- the WebDesk SITE a
+   *  `webdesk_content_item` / `webdesk_collection` / `webdesk_media_asset` resource belongs to. The writers'
+   *  room derived roles (derived_roles.yaml) compare it with the grant's scope rows. It must come from the
+   *  route `:siteId` AFTER resolveEditableSite() has proven the site is this company's -- never from a body
+   *  or a query. Omitted -> "" -> every editorial derived role fails closed (the staff tiers never read it). */
+  siteId?: string;
+  /** M5-W1a -- WebDesk's editorial review state of the item (`editorial_items.state`: draft | in_review |
+   *  changes_requested | approved), from WebDesk's read, never a body. For a translator's twin `create` it is
+   *  the SOURCE item's state. Omitted -> "" -> every rule that reads it (writer/translator update, SEO
+   *  reviewer update, approve) denies. */
+  reviewState?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -138,6 +149,20 @@ export function principalPayload(p: Principal) {
         // Conditional spread: every non-client grant keeps its exact historical shape (the HIER-1 round-trip
         // tests pin it); only a client-scoped grant carries a tenant.
         ...(g.scopeTenantId ? { scopeTenantId: g.scopeTenantId } : {}),
+        // M5-W1a: a writers' room grant's scope rows (RoleGrant.editorialScopes). Same conditional-spread rule:
+        // every other grant keeps its exact shape. Each row is re-listed field by field (an allow-list, like
+        // this whole function), so nothing beyond the five fields the derived roles read reaches Cerbos.
+        ...(g.editorialScopes
+          ? {
+              editorialScopes: g.editorialScopes.map((s) => ({
+                siteId: s.siteId,
+                allCollections: s.allCollections === true,
+                collections: s.collections ?? [],
+                allLocales: s.allLocales === true,
+                locales: s.locales ?? [],
+              })),
+            }
+          : {}),
       })),
       // WSK-49f. An explicit allow-list entry, like every attribute here: an attribute not named in this
       // function never reaches Cerbos. `?? []` is the fail-closed default (the derived role's `exists` is
@@ -201,6 +226,9 @@ function resourcePayload(r: Resource) {
       itemCount: r.itemCount ?? 0,
       // WSK-49f. Listed here or it never reaches derived_roles.yaml (this is an allow-list).
       clientId: r.clientId ?? "",
+      // M5-W1a. Listed here or they never reach derived_roles.yaml / resource_webdesk_*.yaml (allow-list).
+      siteId: r.siteId ?? "",
+      reviewState: r.reviewState ?? "",
     },
   };
 }

@@ -19,7 +19,7 @@
 // `it_manager`/`it`, are mirrored instead, which is the thing that actually matters).
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
-import { ROLE_CAPS, CLIENT_SIDE_ROLES } from "./rbac";
+import { ROLE_CAPS, CLIENT_SIDE_ROLES, SCOPED_DATA_ROLES } from "./rbac";
 
 const DERIVED_ROLES_POLICY_PATH = "../../../platform-nest/cerbos/policies/derived_roles.yaml";
 
@@ -44,7 +44,12 @@ function rawRolesGrantedByCerbos(policyYaml: string): string[] {
 // The set is not a silencer: adding a role to it also makes `isStaff` treat that role as NOT staff,
 // so a staff role put there would lose its workspace. Anything else missing from `Role`/`ROLE_CAPS`
 // below is a real gap and must be added there.
-const DELIBERATELY_OUTSIDE_ROLE_CAPS = CLIENT_SIDE_ROLES;
+//
+// M5-W1a adds a SECOND, different kind of exemption: `SCOPED_DATA_ROLES` (the writers' room roles). They are STAFF, so
+// they are NOT in `CLIENT_SIDE_ROLES` (that would make them non-staff), and they have no bundle, so they cannot be in
+// `ROLE_CAPS` (rbac-capability-parity requires every ROLE_CAPS role to have one). Their reach is data scope rows checked
+// by Cerbos; the UI grants them no capability by role name.
+const DELIBERATELY_OUTSIDE_ROLE_CAPS: ReadonlySet<string> = new Set([...CLIENT_SIDE_ROLES, ...SCOPED_DATA_ROLES]);
 
 describe("Role mirrors every raw role Cerbos actually grants (drift-proof, not a hand-list)", () => {
   it("every g.role == \"...\" literal in derived_roles.yaml is a member of Role (or the documented client exception)", () => {

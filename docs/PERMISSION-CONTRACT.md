@@ -1497,3 +1497,41 @@ staff role). **Restart `gaiada-test-cerbos` and the live sidecar after deploying
 `client-website-editor-cerbos.test.ts` (49f's derived-role matrix, un-skipped now that a rule consumes the role), and a 282-row probe
 matrix (every staff tier unchanged, the client rows above, the 49f `client_contact` rows) run against Cerbos 0.54.0: ALL ROWS AS EXPECTED.
 The BFF's behaviour (scope isolation, no egress on a refusal, D58 flows, the `ce` claim) is `src/modules/webdev/webdesk-client-website.test.ts`.
+
+## 27. M5-W1a — the writers' room roles and review actions (2026-10-11, PROTOTYPED)
+
+`202610111443_iam_writers_room_roles.sql`; design [`plans/2026-10-11-m5-writers-room-design.md`](plans/2026-10-11-m5-writers-room-design.md)
+§2 and §7. **Four new global roles stored as data (no bundle), seven catalog keys on two EXISTING kinds, no new kind. Catalog 422 -> 429
+pairs, 407 -> 414 grantable, 196 -> 199 sensitive, kinds unchanged at 102. Role bundles 1847 -> 1877 pairs.**
+
+| Thing | Value |
+|---|---|
+| Roles `webdesk_writer`, `webdesk_translator`, `webdesk_seo_reviewer`, `webdesk_editor` | Grants stored as DATA: a `user_roles` row at scope_type `company` (the ERP company that owns the WebDesk tenant) plus scope rows (site; collections or all; locales or all) that arrive on the grant as `editorialScopes` (W1b adds the table and `assemblePrincipal()`'s read). Checked by attribute conditions in `derived_roles.yaml` (`webdesk_editorial_site`, `webdesk_editorial_reader`, one per role). **No bundle (0 `role_permissions` rows) and NO `perm_*` mirror — permanently.** A flat key cannot say "this site, these collections, these locales". A grant at any scope other than `company`, a grant without scope rows, and a resource without `siteId` (and, for the per-role arms, `collectionKey`/`locale`) match NOTHING. |
+| `webdev.webdesk_content_item.submit` / `.comment` | not sensitive. webdev_staff, webdev_manager, company_admin (+ owner by bundle, platform_admin by wildcard); writer and translator on their OWN items; SEO reviewer (`comment` only) and editor in scope. |
+| `webdev.webdesk_content_item.request_changes` / `.assign` | not sensitive. webdev_manager, company_admin; SEO reviewer (`request_changes`) and editor in scope. |
+| `webdev.webdesk_content_item.seo_signoff` | **sensitive.** webdev_manager, company_admin; SEO reviewer in scope. **DENY for every automation and bot principal** (platform_admin included). |
+| `webdev.webdesk_content_item.approve` | **sensitive.** webdev_manager, company_admin; editor in scope. Only on an item `in_review`, and **maker ≠ checker against the creator of the version being approved, for every principal**: an inline arm on each ALLOW plus a `roles: ["user"]` DENY that beats the platform_admin wildcard. An approve whose creator is unknown is DENIED for everyone. **DENY for automation, bot and contributor principals.** |
+| `webdev.webdesk_collection.manage_editorial` | **sensitive**, `advancedOnly`. Same holders as `apply_schema` (company_admin, webdev_manager, platform_admin). Grants the writers' room roles and sets a collection's review policy; it is also the live ceiling for an editorial grant (§2.5 of the design). |
+| Reads for the four roles | content `read` on the scoped site + collection in ANY locale; `webdesk_collection:read` and `webdesk_media_asset:read` on any site in their scope rows. No media write. |
+| Unchanged | publish / schedule / unpublish / delete (the publisher tier, WSK-D46); `manager` and `member` gain nothing; `client_website_editor` gains nothing (the editorial commands are not client commands). |
+| Role bundles | +30 pairs: platform_admin, company_admin, owner, webdev_manager +7 each; webdev_staff +2 (submit, comment). selfScoped unchanged (28). |
+
+**Resource attributes (allow-listed in `resourcePayload()`).** `siteId` (route `:siteId` after `resolveEditableSite()`) and
+`reviewState` (WebDesk `editorial_items.state`) are new; `collectionKey`, `locale`, `ownerId` (= the item's author),
+`creatorId` (approve: the version's creator) and `published` already existed. Every one comes from WebDesk's read or a proven route
+param, never a body. Until W1c sends `siteId` and `reviewState`, every editorial rule reads `""` and DENIES; the staff tiers read
+neither, so nothing that works today changes (§11.1's lesson, stated up front).
+
+**Principal contract.** `RoleGrant.editorialScopes` (`[{siteId, allCollections, collections, allLocales, locales}]`) is sent by
+`principalPayload()` field by field on the grants that carry it (a conditional spread, so every other grant keeps its exact shape);
+a non-boolean `all*` flag is sent as `false`. `assemblePrincipal()` does not populate it yet (W1b).
+
+**What proves it.** Bundles and parity are blind to all of this (they treat conditions as satisfied, and the four roles map to no
+bundle). The proof is the decision matrix: `platform-nest/cerbos/tests/webdesk_writers_room_test.yaml` (17 principals × 24 resources ×
+every action, 4 811 decisions, negatives included; `cerbos compile --tests`) and the live probes through `check()` in
+`src/rbac/webdesk-writers-room-cerbos.test.ts`. The four roles are exempted in `role-bundle-completeness` with the reason beside them.
+
+**Not decided here.** The grant path, the `user_roles_editorial_guard` trigger, the refusals on the generic grant surfaces
+(`editorial_role_dedicated_path`) and `ROLE_SCOPE_CONSTRAINTS` entries are W1b. The contributor principal and its DENYs on the
+assistant and agent-run kinds are W1d (owner question O-4). The `approve` DENY already names `contributor`, so that wall exists before
+the kind does.

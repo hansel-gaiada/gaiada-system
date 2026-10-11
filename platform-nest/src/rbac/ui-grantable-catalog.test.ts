@@ -90,8 +90,11 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // WSK-49f (2026-10-11): +2 grantable / +2 total on the EXISTING client_contact kind
     // (manage_website_editor, manage_admin), both uiGrantable:true.
     // Merged: 416 base + 4 + 2 = 422 total; 401 base + 4 + 2 = 407 grantable.
-    expect(permissions.length).toBe(422);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(407);
+    // M5-W1a (2026-10-11): +7 grantable / +7 total on 2 EXISTING kinds (webdesk_content_item: submit/
+    // comment/request_changes/seo_signoff/approve/assign; webdesk_collection: manage_editorial), all
+    // uiGrantable:true like every other key on those kinds. 422 -> 429 / 407 -> 414.
+    expect(permissions.length).toBe(429);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(414);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

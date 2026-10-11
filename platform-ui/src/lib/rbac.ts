@@ -891,6 +891,24 @@ export function isClient(me: Me): boolean {
  *  (the parity test reads this set), never into `ROLE_CAPS`. */
 export const CLIENT_SIDE_ROLES: ReadonlySet<string> = new Set(["client", "client_website_editor"]);
 
+/** STAFF-side raw grant roles whose reach comes from DATA scope rows that Cerbos checks (site, collections, locales),
+ *  never from capabilities (M5-W1a; docs/plans/2026-10-11-m5-writers-room-design.md, docs/PERMISSION-CONTRACT.md §27).
+ *  `derived_roles.yaml` names all four, but they have NO permission bundle and NO `perm_*` mirror, on purpose: a flat key
+ *  cannot say "this site, these collections, these locales". So they are modelled OUTSIDE `Role`/`ROLE_CAPS`, and the UI
+ *  grants them NO capability by role name: `can()` returns false for them, and a surface that wants to show something to a
+ *  writer must ask the server (the scope rows arrive on the grant; Cerbos decides). UI gating stays cosmetic.
+ *
+ *  Not a client list. These people are staff: they are deliberately NOT in `CLIENT_SIDE_ROLES`, so `isStaff` is true and
+ *  `isClientOnly` stays false (the portal shell is decided by `isClientOnly`, never `!isElevated`). The two sets must stay
+ *  disjoint (rbac-scoped-data-roles.test.ts). A new data-scoped staff role goes here, never into `ROLE_CAPS` (parity
+ *  tests read this set) and never into `CLIENT_SIDE_ROLES`. */
+export const SCOPED_DATA_ROLES: ReadonlySet<string> = new Set([
+  "webdesk_writer",
+  "webdesk_translator",
+  "webdesk_seo_reviewer",
+  "webdesk_editor",
+]);
+
 /** Any staff grant at all — i.e. any role outside `CLIENT_SIDE_ROLES`.
  *
  *  This is the correct companion to `isClient` for deciding "is this person EXTERNAL ONLY", and it
