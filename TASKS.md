@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `████████████████████░░░░░░░░░░` **65%** · 149/226<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████████████░░░░░░░░░░` **67%** · 155/229<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████████████░░░` **86%** · 81/94<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **88%** · 83/94<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -64,7 +64,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Design doc: contract, draft/live, authoring + read commands, editorial assertion, Cerbos, loader principal, rebuild path, control channel
 - [x] Reviewed (claims checked against `breaking-change.ts` and the contract test); rulings landed as D44–D48
 
-### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **76%** · 10/13<!-- /bar -->
+### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `█████████░` **92%** · 12/13<!-- /bar -->
 - [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
 - [x] Verification tenants removed (250 `wsk<n>-*` fixtures; none other existed)
 - [x] RustFS up from the pinned digest and bootstrapped (16 changes, then 0); MinIO container removed
@@ -72,8 +72,8 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Defect fixed: compose gave the api `DATABASE_URL` but it reads `APP_DATABASE_URL` — the live api had never had a database
 - [x] Defect fixed: every table was owned by `postgres` and `webdesk_app` had 0 grants — DB rebuilt as the repo intends (migrator-owned, 74 app grants, revokes intact, RLS integrity 19/19)
 - [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
-- [ ] `api.erp.gaiada.com` vhost enabled with TLS (WSK-D61: the name moved under `erp.`; staged as `api.erp.gaiada.com.conf` with token redaction and public 404s; enable + certbot after DNS)
-- [ ] DNS at Hostinger (plan `docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §1): `aicenter.erp.gaiada.com` A 35.240.135.48, `sumopod.erp.gaiada.com` A 150.109.15.108, `api.erp.gaiada.com` CNAME aicenter, `erp.gaiada.com` CNAME aicenter, `cms-proof.gaiada.com` A 72.61.142.88; then TLS (CloudPanel site already created)
+- [x] `api.erp.gaiada.com` vhost enabled with TLS (WSK-D61: the name moved under `erp.`; staged as `api.erp.gaiada.com.conf` with token redaction and public 404s; enable + certbot after DNS) — LIVE 2026-10-11: certbot cert (to 2027-01-09); `/v1` unknown tenant 401 problem+json, `/control` and `/admin` 404 publicly
+- [x] DNS at Hostinger (plan `docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §1): `aicenter.erp.gaiada.com` A 35.240.135.48, `sumopod.erp.gaiada.com` A 150.109.15.108, `api.erp.gaiada.com` CNAME aicenter, `erp.gaiada.com` CNAME aicenter, `cms-proof.gaiada.com` A 72.61.142.88; then TLS (CloudPanel site already created) — DONE by the owner 2026-10-11; all five resolve (checked via 1.1.1.1); cms-proof TLS installed
 - [ ] ERP cut-over to `erp.gaiada.com` (plan Phase B), after `__Host-` cookies + Origin checks
 - [x] The api image on the box built off the live box (sumopod `webdesk-api:1cbee520`, transferred in 30 s)
 - [x] The api image signed via a release (`v1.0.0-alpha.344`, cosign-verified digest `sha256:69abc934…`, live on gda-aicenter 2026-10-11)
@@ -173,10 +173,12 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `█████████░░░░░░░░░░░` **47%** · 9/19<!-- /bar -->
+<!-- bar -->🟡 `████████████░░░░░░░░` **59%** · 13/22<!-- /bar -->
 
-### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **57%** · 4/7<!-- /bar -->
-- [ ] Sites → collections → items for gaiada.com
+### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **55%** · 5/9<!-- /bar -->
+- [x] Sites → collections → items for gaiada.com (driven LIVE on erp.gaiada.online, 1.0.0-alpha.351, as hansel@gaiada.com in a real browser, 2026-10-11: Web Dev → Website redirects straight into gaiada-com; 17 collections with the real counts (326 items, all live, 0 pending); Service pages lists 52 items; an item opens in the editor; its history shows v1 head+live; 0 console errors)
+- [ ] Editor form controls unstyled on live: no Website component loaded `forms.css`, so a direct load drew bare browser inputs. Fix: `content.css` imports it (branch `webdesk/m2-editor-forms-css` @ `d58e8e54`; e2e pins the control padding); Linux gate running
+- [ ] History shows the importer's author as a raw id (`user 01a12709`), not a name
 - [x] Editor generated from the composition: text, Markdown, groups, lists (drag and keyboard reorder) — on gaiada.com's real compositions
 - [ ] Publish with the approval state shown inline
 - [ ] Version history with restore as draft
@@ -184,14 +186,15 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `██████░░░░` **55%** · 5/9<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `████████░░` **80%** · 8/10<!-- /bar -->
 - [x] Restricted deploy user on delphi — for the separate proof site `cms-proof.gaiada.com` (WSK-D56): `gdeploy` (group `ucmsproof` only, no sudo: a gdeploy-only `!ALL` overrides CloudPanel's all-users rule), forced command `gaiada-deploy-forced cms-proof` (site chosen by root; harness 96/0 on Linux), key proven locked (command → 126, no shell) 2026-10-11
 - [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
 - [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
 - [x] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (2026-10-11, as `web-gaiada`; the read key minted through an approval, the host key pinned from the verified session; the deploy key's local copy shredded)
-- [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP — branch `webdesk-rebuild-proof-site` pushed (deploys to cms-proof); the default-branch registration is PR gaiadabali/gaiada-web-revamp#1 (workflow file only, `[skip ci]`), awaiting the owner's merge. ERP target set in the platform `.env` (live from the next deploy)
+- [x] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP — PR gaiadabali/gaiada-web-revamp#1 merged (`13470aa3`); the ERP dispatches ref `webdesk-rebuild-proof-site` (`9ebde12`, deploys to cms-proof; workflow test 12/12 on Linux); ERP target live since 352 (`webdesk staging-rebuild poller on: every 30000ms, 1 target(s)`); a manual dispatch (run 38120681566) pulled 326 items, built 82 pages, deployed, stamp matched on the first read
+- [x] Deploy path: delphi admits SSH only from 5 fixed IPs + the WireGuard mesh, so the first run timed out at deploy. Owner choice 2026-10-11: tunnel-only `wdjump` on sumopod (key only, `PermitOpen 10.88.0.4:22`, no shell, no `-R`; global sshd unchanged), repo vars `DELPHI_JUMP`/`DELPHI_HOST` + secret `DELPHI_JUMP_KEY`, both host keys pinned; delphi's firewall untouched. Proven: banner via `-W`, shell refused, other targets prohibited, `-R` fails; delphi logs the deploy `from=10.88.0.2` (runbook step D2)
 - [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
-- [ ] Cost per run measured and recorded
+- [x] Cost per run measured and recorded — run 38120681566: 82 s job, billed 2 min (private repo, about $0.016 a run); runbook `## Cost`
 - [x] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (only when the item had a live version; best-effort; Linux: webdev 29 files/484, negative control fails exactly 6)
 - [x] Scheduled takedowns (`content.schedule` with `unpublishAt`) also mark staging stale (they take effect inside Zone B later: needs a Zone B event or a check at build-status time) — DONE in WSK-61's ERP half: a `schedule.fired` unpublish (or the sweep) marks staging stale exactly once — 1.0.0-alpha.352 gate (sumopod 2026-10-11): nest 7768/0, ui 4679 + next build on Next 16.3.8
 
@@ -228,9 +231,9 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43b · ERP: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools
 - [ ] WSK-43c · Website workspace: Media tab + a picker for media fields (after the M2 editor follow-ups)
 - [ ] WSK-43d · site repo: the pull step downloads library images into the static build (with the site owner)
-- [ ] WSK-49 ruled by the owner 2026-10-11: build now; a client publisher self-publishes one item, batches need a second client person (WSK-D58); clients edit only client-editable fields (WSK-D59); a `client_website_editor` role granted by staff or the client admin (WSK-D60) (ticked when on main)
+- [ ] WSK-49 ruled by the owner 2026-10-11: build now; a client publisher self-publishes one item, batches need a second client person (WSK-D58); clients edit only client-editable fields (WSK-D59); a `client_website_editor` role granted by staff or a client `admin` contact, scoped to the client record (WSK-D60, amended); a client publishes only what a client could have changed (WSK-D62) (ticked when on main)
 - [ ] WSK-49a · vocabulary 1.2.0: `ui.clientEditable` on compositions and fields
-- [ ] WSK-49b · WebDesk write plane refuses a client's change to a non-editable path; publish obeys D58
+- [ ] WSK-49b · WebDesk write plane refuses a client's change to a non-editable path; a client's publish is refused unless every live change is client-editable (D62)
 - [ ] WSK-49c · ERP: Cerbos rules for client editors (own company only) + a portal BFF that diff-checks client writes
 - [ ] WSK-49d · client portal: a Website area in the portal's own shell, editor in client mode
 - [ ] WSK-49e · a seeded test client company with its own WebDesk tenant and site, proven end to end
