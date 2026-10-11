@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.64.1` | IN PROGRESS | WS1 | 2026-10-11 |
-| platform-ui | `0.85.1` | IN PROGRESS | WS5 | 2026-10-11 |
+| platform-ui | `0.85.2` | IN PROGRESS | WS5 | 2026-10-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -171,7 +171,9 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.85.1` · IN PROGRESS
+## platform-ui — ERP Suite · `0.85.2` · IN PROGRESS
+
+**0.85.2 (2026-10-11, WebDesk M2 — PROTOTYPED):** the Website editor names authors that are automation accounts: History, the editor's "saved by" and the item list showed "user 01a12709" for every gaiada.com v1 (the importer), because the author lookup used the directory, which hides non-human accounts. It now asks `/members?includeService=1` and shows "Automation — WebDesk importer". Linux: see CHANGELOG.
 
 **0.85.1 (2026-10-11, WebDesk M2 editor fixes found live — PROTOTYPED):** the Website editor's form controls were bare browser inputs on erp.gaiada.online, because no Website component loaded `forms.css`; `content.css` now imports it. A pending publish restored after a reload reads "Publish of v2 was requested", not "v?" (parses the BFF's new `items`, absent → none known). Linux: ui 237 files/4682, `next build`, Website e2e 44/45 (the red is "STATE loading", which fails on base too); both fixes have an e2e assertion that fails without them.
 **0.85.0 (2026-10-11, PV-1 company context — PROTOTYPED):** the staff menu follows the active company: agency rows only for agency-vertical companies (Viceroy gets the generic menu), rows for disabled modules hidden, Systems became Platform (platform_admin and owners of the root), and a Group area on the root (group report, rollups, company reports). Org tree and toolkits key on the vertical (no hard-coded ids); `/group` pages; `switchTenant` gains a same-site `return`. (0.84.0 is WebDesk's; see CHANGELOG.) Linux: ui 242/242, `next build` ok.

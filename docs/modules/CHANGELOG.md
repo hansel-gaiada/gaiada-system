@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.85.2` - version authors that are automation accounts show their name (2026-10-11) - PROTOTYPED
+
+WebDesk M2, the last open WSK-44 box. Seen on erp.gaiada.online: every gaiada.com v1 was written by the importer, an automation account, and History, the editor's "saved by" and the item list's last-edited column read "user 01a12709".
+
+- `resolveAuthorNames` asked `GET /api/:t/members`, which leaves out non-human accounts unless asked (PK-02). It now passes `includeService=1`, through an optional flag on the shared `listMembers` (existing callers unchanged), so the importer reads "Automation — WebDesk importer", its users row name. On live the flag returns 64 rows instead of 30, the importer among them. `authorLabel` is unchanged. Unit test: a service-account author resolves to its name, and the lookup asks for service accounts (it fails with the old call).
+
 ### platform-ui `0.85.1` - the Website editor's controls are styled, and a pending publish keeps its version after a reload (2026-10-11) - PROTOTYPED
 
 WebDesk M2. Both defects were found by driving the editor live on erp.gaiada.online (1.0.0-alpha.351/352) as hansel@gaiada.com.
