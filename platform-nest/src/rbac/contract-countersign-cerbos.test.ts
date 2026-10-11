@@ -34,8 +34,9 @@ const grant = (role: string, scopeId: string | null, scopeType: RoleGrant["scope
 const contract = (tenantId: string): Resource => ({ kind: "contract", id: "k-1", tenantId });
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
-/** Every `core.contract.*` key the catalog has today, at company scope on T1. */
-const ALL_CONTRACT_KEYS: PermissionGrant[] = ["read", "create", "update", "delete", "send"].map((a) => ({
+/** Every `core.contract.*` key the catalog has today, at company scope on T1, INCLUDING
+ *  `core.contract.countersign`: the key is catalogued (the policy names the action) but no rule reads it. */
+const ALL_CONTRACT_KEYS: PermissionGrant[] = ["read", "create", "update", "delete", "send", "countersign"].map((a) => ({
   key: `core.contract.${a}`, scopeType: "company", scopeId: T1,
 }));
 
@@ -58,7 +59,7 @@ describe.skipIf(!live)("PV3-01 · contract countersign (live Cerbos)", () => {
     }
   });
 
-  it("🔴 a custom role holding EVERY core.contract.* key does not (no key, no perm arm reaches it)", async () => {
+  it("🔴 a custom role holding EVERY core.contract.* key, core.contract.countersign included, does not (no perm arm reads it)", async () => {
     const p = principal([grant("pv301_contract_everything", T1)], { perms: ALL_CONTRACT_KEYS });
     // The fixture is real: the same principal may send.
     expect(await allow(p, contract(T1), "send")).toBe(true);

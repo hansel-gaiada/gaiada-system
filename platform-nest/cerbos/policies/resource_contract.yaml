@@ -23,9 +23,10 @@ resourcePolicy:
     # permission-arm rule below. Who countersigns (PV3-01, 2026-10-11):
     #   - an `owner` of the contract's company: the rule just below;
     #   - `platform_admin`, through the wildcard above (the operator tier).
-    # Nobody else. There is no `core.contract.countersign` permission key, no bundle holds it, and no
-    # `perm_*` rule names it, so neither company_admin nor any custom role can ever reach it, however
-    # many `core.contract.*` keys it holds.
+    # Nobody else. No `perm_*` rule names countersign, so a permission key cannot reach it: neither
+    # company_admin nor any custom role, however many `core.contract.*` keys it holds. The catalog
+    # does list `core.contract.countersign` (every literal action here must be catalogued), but only
+    # as `uiGrantable: false`, bundled onto platform_admin alone, and read by no rule.
     #
     # ⚠ THIS IS NOT THE CLIENT'S SIGNATURE PATH. A client never touches this resource: their
     # countersignature goes through `resource_portal`'s `sign` action, scoped to their own contracts by
@@ -39,8 +40,8 @@ resourcePolicy:
     # Company-scope grant only (owner is never global — owner-role.db.test.ts), and ON THIS tenant:
     # an owner of another company gets nothing here. Written inline under `roles: ["user"]` for the
     # reason resource_report_document.yaml's PV1-06a rule gives: `owner` has no derived role
-    # (permission-native, IAM-04c §3), and countersign must not gain a perm_* rule. No permission key
-    # moves; owner's bundle is unchanged.
+    # (permission-native, IAM-04c §3), and countersign must not gain a perm_* rule. Owner's bundle is
+    # unchanged: this rule reads the GRANT, never `attr.perms`.
     - actions: ["countersign"]
       effect: EFFECT_ALLOW
       roles: ["user"]

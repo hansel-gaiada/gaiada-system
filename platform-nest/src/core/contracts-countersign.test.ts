@@ -87,9 +87,10 @@ describe.skipIf(!TEST_URL)("PV3-01 · contract reads: canCountersign + strict cl
     outsider = await createUser("outsider@pv301.test");
     await addMembership(tenant, outsider);
 
-    // A tenant-defined custom role holding every `core.contract.*` key the catalog has. No key for
-    // countersign exists, and no permission-arm rule may ever reach it: this caller reads, drafts,
-    // edits and sends, and still cannot countersign.
+    // A tenant-defined custom role holding every `core.contract.*` key the catalog has, INCLUDING
+    // `core.contract.countersign` (catalogued because the policy names the action; uiGrantable false,
+    // so only a direct write like this one can attach it). No permission-arm rule reads it: this caller
+    // reads, drafts, edits and sends, and still cannot countersign.
     allKeys = await createUser("all-keys@pv301.test");
     await addMembership(tenant, allKeys);
     const customRole = newId();
@@ -100,8 +101,14 @@ describe.skipIf(!TEST_URL)("PV3-01 · contract reads: canCountersign + strict cl
          SELECT $1, id FROM permissions WHERE key LIKE 'core.contract.%'`,
         [customRole],
       );
-      // Read, create, update, delete, send: the fixture is only meaningful if it holds them all.
-      expect(ins.rowCount).toBeGreaterThanOrEqual(5);
+      // Read, create, update, delete, send, countersign: the fixture is only meaningful if it holds them all.
+      expect(ins.rowCount).toBeGreaterThanOrEqual(6);
+      const held = await c.query(
+        `SELECT 1 FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
+          WHERE rp.role_id = $1 AND p.key = 'core.contract.countersign'`,
+        [customRole],
+      );
+      expect(held.rowCount).toBe(1);
     });
     await grantRole(allKeys, customRole, "company", tenant);
 

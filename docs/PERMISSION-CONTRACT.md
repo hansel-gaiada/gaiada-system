@@ -45,10 +45,12 @@ build against.
 > the principal holds `owner` at company scope ON the contract's tenant (plus `inTenant && notLow`),
 > the shape of PV1-06a's `report_document` / `read_company` rule. This implements the recorded intent
 > ("owner-only, deliberately narrower than company_admin"); it is not a new ruling. Until now only the
-> `platform_admin` wildcard reached the action. **Unchanged:** there is still no
-> `core.contract.countersign` key, no bundle holds it, and no `perm_*` rule names it, so
-> `company_admin`, `manager` and every custom role stay refused, whatever `core.contract.*` keys they
-> hold. An owner of another company is refused too. The staff contract reads expose the outcome as a
+> `platform_admin` wildcard reached the action. The pair is catalogued as `core.contract.countersign`
+> (grantable, sensitive, **`uiGrantable: false`**, migration `202610112330`) only because every literal
+> policy action must be (`cerbos-catalog-alignment.test.ts` (b)). **Holding the key grants nothing:** no
+> `perm_*` rule names it, it is bundled onto `platform_admin` alone (its wildcard), and not onto
+> `company_admin` or `owner`. So `company_admin`, `manager` and every custom role stay refused, whatever
+> `core.contract.*` keys they hold, the new one included. An owner of another company is refused too. The staff contract reads expose the outcome as a
 > `canCountersign` row flag (BFF §16e).
 
 > **⚠ NEW AXIS (2026-08-13, P2-03): `ui_grantable`.** Every catalog entry now carries a REQUIRED
