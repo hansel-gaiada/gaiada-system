@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   displayName,
   type WebsiteAccessReadResult,
@@ -43,6 +43,14 @@ export function useWebsiteAccess({ clientId, initialRows, setEditor, refresh }: 
   // A second click on the same row while its write is in flight must not fire a second write; `busy`
   // is state (re-renders the disabled switch) and this ref is the synchronous guard.
   const inFlight = useRef<Set<string>>(new Set());
+  // The polite status line is also where focus goes when the control the user was on has been REMOVED
+  // (a 404 drops the row): otherwise focus falls to <body> and the keyboard user loses their place. The
+  // line carries `tabIndex={-1}` and this ref; `focusTick` asks for the move after the commit.
+  const statusRef = useRef<HTMLParagraphElement>(null);
+  const [focusTick, setFocusTick] = useState(0);
+  useEffect(() => {
+    if (focusTick > 0) statusRef.current?.focus();
+  }, [focusTick]);
 
   const mark = useCallback((key: string, on: boolean) => {
     if (on) inFlight.current.add(key);
@@ -59,6 +67,7 @@ export function useWebsiteAccess({ clientId, initialRows, setEditor, refresh }: 
     async (who: string, contactId: string) => {
       setRows((rs) => rs.filter((r) => r.contactId !== contactId));
       const fresh = await refresh(clientId);
+      setFocusTick((t) => t + 1);
       if (fresh.kind === "ok") {
         setRows(fresh.contacts);
         setMessage({ tone: "info", text: `${who} is no longer a contact here, so the list has been refreshed.` });
@@ -118,5 +127,5 @@ export function useWebsiteAccess({ clientId, initialRows, setEditor, refresh }: 
     [clientId, setEditor, handleGone, mark, patchRow],
   );
 
-  return { rows, setRows, patchRow, locked, setLocked, busy, mark, message, setMessage, toggleEditor, handleGone };
+  return { statusRef, rows, setRows, patchRow, locked, setLocked, busy, mark, message, setMessage, toggleEditor, handleGone };
 }

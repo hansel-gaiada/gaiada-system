@@ -32,6 +32,11 @@ const PORTAL_CAPABILITY: Record<WebsiteAccessCapability, string> = {
   viewer: "View only",
 };
 
+// A module-level function, so React calls it once on mount and not again on every re-render.
+function focusOnMount(el: HTMLElement | null): void {
+  el?.focus();
+}
+
 export type PortalWebsiteAccessInitial =
   | { kind: "ok"; contacts: WebsiteAccessRow[] }
   | { kind: "unavailable"; reason: string };
@@ -82,8 +87,21 @@ function Loaded({
   });
 
   // The server said no (a 403 on a write, or on the re-read): this person is not an admin here (any
-  // more). Hide the whole section.
-  if (wa.locked) return null;
+  // more), so the section goes. It does NOT vanish silently: the controls are replaced by ONE polite status
+  // line, and focus moves to it, so a screen-reader or keyboard user is told what happened and is not
+  // dropped onto <body>.
+  if (wa.locked) {
+    return (
+      <p
+        role="status"
+        tabIndex={-1}
+        ref={focusOnMount}
+        className="wa-status"
+      >
+        You no longer manage website access, so this section was removed. Nothing was changed.
+      </p>
+    );
+  }
 
   return (
     <Card title={title}>
@@ -125,7 +143,12 @@ function Loaded({
 
         {/* One polite status line for every outcome, always rendered so assistive tech has the region
             registered before the first message. */}
-        <p role="status" className={`wa-status${wa.message?.tone === "error" ? " wa-status--error" : ""}`}>
+        <p
+          role="status"
+          ref={wa.statusRef}
+          tabIndex={-1}
+          className={`wa-status${wa.message?.tone === "error" ? " wa-status--error" : ""}`}
+        >
           {wa.message?.text ?? ""}
         </p>
       </div>

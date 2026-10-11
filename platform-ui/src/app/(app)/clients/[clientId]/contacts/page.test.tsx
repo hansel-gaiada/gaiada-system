@@ -99,6 +99,14 @@ describe("staff Contacts page: Website access", () => {
     expect(screen.queryByRole("button", { name: /admin:/i })).toBeNull();
   });
 
+  it("an owner gets the read-only list: the server refuses owner on these actions (docs §16i)", async () => {
+    meMock.mockResolvedValue(staff("owner"));
+    await mount();
+    expect(screen.queryAllByRole("switch")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /admin:/i })).toBeNull();
+    expect(screen.getByText("Website editor: Yes")).toBeInTheDocument();
+  });
+
   it("a member (who may read) gets a plain read-only list, no controls", async () => {
     meMock.mockResolvedValue(staff("member"));
     await mount();

@@ -194,6 +194,28 @@ describe("a 404 means the contact is gone", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/Vera Santoso is no longer a contact here, so the list has been refreshed/);
   });
 
+  it("moves focus to the status line, because the switch the user was on no longer exists", async () => {
+    setEditor.mockResolvedValue({ ok: false, kind: "not_found", message: "gone" });
+    refresh.mockResolvedValue({ kind: "ok", contacts: [DANA, ARIA] });
+    mount();
+    const sw = screen.getByRole("switch", { name: "Website editor: Vera Santoso" });
+    sw.focus();
+    fireEvent.click(sw);
+    await waitFor(() => expect(screen.queryByRole("switch", { name: "Website editor: Vera Santoso" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("status")));
+    expect(screen.getByRole("status")).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("an admin-route 404 (from the dialog) also lands focus on the status line", async () => {
+    setAdmin.mockResolvedValue({ ok: false, kind: "not_found", message: "gone" });
+    refresh.mockResolvedValue({ kind: "ok", contacts: [ARIA, VERA] });
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Make admin: Dana Whitfield" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Make admin" }));
+    await waitFor(() => expect(screen.queryByText("Dana Whitfield")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("status")));
+  });
+
   it("if the re-read fails it still drops the row and says the rest may be out of date", async () => {
     setEditor.mockResolvedValue({ ok: false, kind: "not_found", message: "gone" });
     refresh.mockResolvedValue({ kind: "unavailable", reason: "502" });

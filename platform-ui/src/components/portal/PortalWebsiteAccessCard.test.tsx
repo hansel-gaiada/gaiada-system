@@ -127,21 +127,30 @@ describe("granting and removing", () => {
 });
 
 describe("403 hides the section", () => {
-  it("a 403 on a write removes the whole card: no disabled copy of it is left behind", async () => {
+  it("a 403 on a write removes the card, says so in one polite status line, and moves focus to it", async () => {
     setEditor.mockResolvedValue({ ok: false, kind: "forbidden", message: "nope" });
     const { container } = mount();
-    fireEvent.click(screen.getByRole("switch", { name: "Website access for Dana Whitfield" }));
+    const sw = screen.getByRole("switch", { name: "Website access for Dana Whitfield" });
+    sw.focus();
+    fireEvent.click(sw);
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Website access" })).toBeNull());
+    // No disabled copy of the controls is left behind.
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
-    expect(container.textContent).toBe("");
+    // It does not vanish silently: one polite status line, focused, not <body>.
+    const line = screen.getByRole("status");
+    expect(line).toHaveTextContent("You no longer manage website access, so this section was removed. Nothing was changed.");
+    expect(line).toHaveAttribute("tabindex", "-1");
+    expect(document.activeElement).toBe(line);
+    expect(container.textContent).toBe(line.textContent);
   });
 
-  it("a 403 on the re-read after a 404 hides it too", async () => {
+  it("a 403 on the re-read after a 404 removes it the same announced way", async () => {
     setEditor.mockResolvedValue({ ok: false, kind: "not_found", message: "gone" });
     refresh.mockResolvedValue({ kind: "forbidden" });
-    const { container } = mount();
+    mount();
     fireEvent.click(screen.getByRole("switch", { name: "Website access for Dana Whitfield" }));
-    await waitFor(() => expect(container.textContent).toBe(""));
+    await waitFor(() => expect(screen.queryAllByRole("switch")).toHaveLength(0));
+    expect(screen.getByRole("status")).toHaveTextContent(/you no longer manage website access/i);
   });
 });
 
@@ -155,6 +164,18 @@ describe("404: the colleague is gone", () => {
     expect(refresh).toHaveBeenCalledWith(CL);
     expect(screen.getByRole("status")).toHaveTextContent(/Dana Whitfield is no longer a contact here, so the list has been refreshed/);
     expect(screen.getByRole("switch", { name: "Website access for Vera Santoso" })).toBeInTheDocument();
+  });
+
+  it("moves focus to the status line, because the switch the user was on no longer exists", async () => {
+    setEditor.mockResolvedValue({ ok: false, kind: "not_found", message: "gone" });
+    refresh.mockResolvedValue({ kind: "ok", contacts: [ARIA, VERA] });
+    mount();
+    const sw = screen.getByRole("switch", { name: "Website access for Dana Whitfield" });
+    sw.focus();
+    fireEvent.click(sw);
+    await waitFor(() => expect(screen.queryByRole("switch", { name: "Website access for Dana Whitfield" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("status")));
+    expect(screen.getByRole("status")).toHaveAttribute("tabindex", "-1");
   });
 });
 

@@ -213,7 +213,12 @@ function Loaded({
           not `alert`, because nothing here is urgent and an assertive interrupt on a refused toggle
           would be noise. The element is always rendered so a screen reader has it registered before
           the first message arrives. */}
-      <p role="status" className={`wa-status${message?.tone === "error" ? " wa-status--error" : ""}`}>
+      <p
+        role="status"
+        ref={wa.statusRef}
+        tabIndex={-1}
+        className={`wa-status${message?.tone === "error" ? " wa-status--error" : ""}`}
+      >
         {message?.text ?? ""}
       </p>
 
