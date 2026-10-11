@@ -531,6 +531,8 @@ services:
       # ISSUER must match the `iss` claim the IdP actually stamps, which is the PUBLIC url once
       # Keycloak sits behind a reverse proxy. JWKS stays INTERNAL so token verification never
       # hairpins out through nginx and back. Splitting them is deliberate, not an inconsistency.
+      # Comma-separated since ERP names Phase B: a token from ANY listed issuer verifies. During the
+      # name move list new,old (the first one is used wherever a single URL is needed).
       OIDC_ISSUER: ${OIDC_ISSUER:-http://keycloak:8080/realms/gaiada}
       OIDC_JWKS_URI: ${OIDC_JWKS_URI:-http://keycloak:8080/realms/gaiada/protocol/openid-connect/certs}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-gaiada-platform}
@@ -1196,8 +1198,16 @@ services:
       # The address the BROWSER used. Without it, redirects are built from the container's bind
       # address and the OIDC callback lands on an unreachable host.
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+      # ERP names Phase B (B0): the exact origins a state-changing request (server action, POST/PUT/
+      # PATCH/DELETE) may come from, comma-separated. src/proxy.ts refuses any other `Origin` with 403.
+      # Empty falls back to PUBLIC_ORIGIN. During the name move both are listed:
+      # https://erp.gaiada.com,https://erp.gaiada.online
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     ports:
-      - "3005:3005"
+      # Loopback only (Phase B0, like platform's 127.0.0.1:3004): nginx is the one public way in, so
+      # its headers, rate limits and Host handling cannot be bypassed. Everything else reaches this
+      # service by its compose name (platform-ui:3005).
+      - "127.0.0.1:3005:3005"
     # FAULT REGISTER FINDING 14 (2026-09-08) — measured 194.3MiB working set on gda-aicenter
     # (`docker stats --no-stream`, read-only, 2026-09-08). Next.js standalone server + SSR/RSC
     # streaming; headroom covers report/print-view rendering and concurrent SSE (portal + assistant
