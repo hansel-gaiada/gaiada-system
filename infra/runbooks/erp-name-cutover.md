@@ -51,6 +51,16 @@ restores every file, reloads nginx and recreates keycloak, platform, platform-ui
 deployed tag, then waits for the old issuer and `https://erp.gaiada.online/login` 200. The Keycloak clients keep both
 URIs and the certificate keeps both names; neither hurts the old name.
 
-## As executed
+## As executed (2026-10-11, live 1.0.0-alpha.355)
 
-(filled in by the run)
+| Run | Result |
+|---|---|
+| 13:09Z | preflight passed; the nginx stage checked `https://erp.gaiada.com/login` the instant after `systemctl reload` and hit an OLD worker (old config: wrong certificate). Rolled back cleanly in ~1 min: old vhost, old issuer, `erp.gaiada.online/login` 200. Fix `e6004eb2`: every check after a reload retries for 20 s and prints code/ssl_verify/location |
+| 13:11Z | every stage passed: both names; issuer `https://erp.gaiada.com/idp/realms/gaiada`; platform + WebDesk on `new,old`; real PKCE login + `/api/me` + ERP→WebDesk control channel on the new name; legacy 301 (query kept) with webhooks (415 unsigned), `/idp`, `/n8n` kept; n8n moved; App webhook moved (read back); blackbox moved. Backup `~/backups/erp-name-cutover-20261011T131057Z` |
+
+Checked from outside afterwards: new name 200; certificate SAN covers both; `__Host-` cookies; a POST from the sibling
+`https://gaiada.com` refused 403; WebDesk content tick `errors=0`; a signed-in browser drive through the Website pages:
+732 responses, 0 × 429 (the rate-limit retune `b505d44f` went live with this vhost).
+
+**Next issuer step (Phase B4, two quiet weeks, M4):** drop the old issuer from `OIDC_ISSUER` and
+`WEBDESK_CONTROL_OIDC_ISSUER` (they read `new,old` now), then retire the legacy-name exceptions.
