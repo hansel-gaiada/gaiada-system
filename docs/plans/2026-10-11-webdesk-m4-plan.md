@@ -16,9 +16,9 @@ Status words are the estate's: PLANNED · IN PROGRESS · DEV-VERIFIED (driven on
 |---|---|---|---|
 | T1 | Containment probe set (§03, six probes) on gda-aicenter, with controls | orchestrator | **DEV-VERIFIED** 2026-10-11, 39/39 |
 | T1b | Egress guard: default-deny for the webdesk network (probe 6 failed on the 4-port deny-list) | orchestrator | **DEV-VERIFIED** 2026-10-11, live |
-| T2 | WSK-68: read-only `BYPASSRLS` backup role, nightly dump into the existing offsite pull | senior-db (Sonnet) + orchestrator on the box | IN PROGRESS |
-| T3 | Restore drill from the offsite copy, timed | orchestrator | PLANNED (after T2) |
-| T4 | `deploy-webdesk.yml`: WebDesk's own deploy job in the release (signed image, never the `gaiada` project) | devops (Sonnet) + orchestrator | PLANNED |
+| T2 | WSK-68: read-only `BYPASSRLS` backup role, nightly dump into the existing offsite pull | senior-db (Sonnet) + orchestrator on the box | **LIVE** 2026-10-11 (gate m4wsk68 green; role, dump, cron, offsite) |
+| T3 | Restore drill from the offsite copy, timed | orchestrator | **DEV-VERIFIED** 2026-10-11, 26 s end to end |
+| T4 | `deploy-webdesk.yml`: WebDesk's own deploy job in the release (signed image, never the `gaiada` project) | devops (Sonnet) + orchestrator | BUILT, dispatch-only (harness 32/32); not yet run on the box |
 | T5 | The August provisional greens re-run on Linux (the ones nothing runs today) | qa (Sonnet) + orchestrator on sumopod | PLANNED |
 | T6 | OTel to sumopod + public status page | devops (Sonnet) + orchestrator | PLANNED; ruled WSK-D63/D64 |
 | T7 | Per-tenant cost and quotas written (A-10 / OQ-2.7) | orchestrator measures, Sonnet drafts | PLANNED |
@@ -232,3 +232,16 @@ capacity statement is the interim ceiling (OQ-2.7).
 - 12:18Z: run 3, 39/39.
 - 12:20Z: sumopod stale copy archived to `~/webdesk-retired-20261011/` (pg_dumpall, 4 volume tars, project dir,
   SHA256SUMS), then `docker compose -p webdesk down` (volumes kept; containers and network gone; `:8380` free).
+- 12:59Z: WSK-68 live.
+  - `ensure-backup-role.sh` printed CHANGED, then unchanged.
+  - The first `webdesk_backup` dump: 3.86 MB, 25 tables, 1 tenant, 326 items.
+  - The live RLS checker passed: 23 tenant tables, no other BYPASSRLS role.
+  - Cron installed at 03:05 UTC.
+- 13:03Z: sumopod's pull took the dump offsite (age).
+- 13:07Z: restore drill, 26 s end to end (backups runbook §6a).
+- T4 review: the tools container ran as root with `--cap-drop ALL`, where `cp -a` exits 1 (reproduced on sumopod), so
+  the first apply would have died after the tree swap. It now runs unprivileged (`npm install` proven under
+  `--cap-drop ALL`).
+- T4 proof order: an `apply` with the live tag (351) would swap in 351's tree, which lacks the WSK-68 scripts, and
+  break the backup cron. So: `plan` with 351 first (changes nothing); `apply` only with the first release that
+  contains the M4 commits.
