@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.65.0` - WebDesk in the ERP: the media library's authorisation, BFF and MCP tools; a draft preview action; client website-editor grants, and a client admin who also signs (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3 (`docs/plans/2026-10-11-webdesk-m3-plan.md`), rulings WSK-D52, D53, D54, D60 (amended twice) in `docs/blueprints/webdesk-design-v2.md` §14.
+
+- **Media library, ERP half (WSK-43b).** A new Cerbos kind `webdesk_media_asset` (read, upload, update, delete) with its six artifacts: catalog 422 pairs / 102 kinds / 407 grantable, bundles 1847. BFF routes for list, usage, upload token, update and delete, and five MCP tools (`webdesk.media.*`). The upload token goes to the browser as a public WebDesk URL (`WEBDESK_PUBLIC_BASE_URL`), so image bytes never pass through the ERP; it is never stored, and the upload-token tool is deliberately not an approval-replayable action. `resource_mcp_tool.yaml` gains the media update/delete executables.
+- **Draft preview action (WSK-46, D52).** `POST …/items/:itemId/preview` and the MCP tool `webdesk.content.preview` mint a preview token and answer `https://<site staging domain>/preview/#t=<token>`: the token rides in the URL fragment, never a query string or a log. Honest refusals when preview isn't set up or the site has no preview page yet.
+- **Client website editors, grant path (WSK-49f, D60).** A role-as-data `client_website_editor`, scoped to one client record; derived roles `client_website_editor` and `client_contact_admin`; a new client-contact capability `admin`, assigned by staff, which lets a client grant website editing to their own contacts (bounded, audited). Three CHECKs widened by self-verifying migrations that read the live definition. **A client admin also signs** (owner ruling): signing, signature notifications and Client Centre editing accept `admin`.
+- Verified on the Linux gate (sumopod `m3r354`, nest + ui + next build).
+
 ### platform-nest `0.64.0` - companies carry a vertical; owners of the root get the Platform and Group surfaces (2026-10-11) - PROTOTYPED
 
 PV-1 (company context), rulings PV-D11 and PV-D14 to PV-D20. Tickets: `docs/plans/2026-10-11-pv1-company-context-tickets.md`.
@@ -33,6 +42,13 @@ PV-1 (company context), rulings PV-D11 and PV-D14 to PV-D20. Tickets: `docs/plan
   - New `GET /api/:t/reports/group` (root owner or `platform_admin`; 404 unless `:t` is a root) returns per-company cards from each company's own report, plus Sum of companies for additive metrics only. `consolidated` is null until F9.
   - **Cerbos must restart on deploy.**
 - **Verified on Linux** (352 + PV-1): nest 551 passed, 3 skipped, plus the regenerated capability inventory (its one red before regeneration). Teeth on all four new rules: no owner arm, any owner in the tree, no root-only 404, a summed ratio, and no vertical guard. Each turned its tests red.
+
+### platform-ui `0.86.0` - WebDesk in the ERP: a visual Markdown editor, a Preview button and the media library (2026-10-11) - DEV-VERIFIED
+
+- **Visual Markdown editor (WSK-45, D49).** TipTap on `markdown` fields. 305 of gaiada.com's 315 real bodies open visually and round-trip byte-identical; an unchanged body always saves the original bytes; the other 10 open as source with a plain notice. Placeholders stay verbatim.
+- **Preview (WSK-46).** A Preview button opens the draft on the site's own preview page, with honest states when preview isn't available yet.
+- **Media library (WSK-43c).** A Media tab in the Website workspace: upload straight to WebDesk with progress, alt text per language, tags, "where it's used", and delete refused while in use; a picker for media fields in the editor.
+- Verified on the Linux gate (sumopod `m3r354`) and in Playwright (WebDesk suite 68/68 on the built app).
 
 ### platform-ui `0.85.0` - the staff menu follows the company: agency rows by vertical, Group on the root, Platform for operators (2026-10-11) - PROTOTYPED
 
