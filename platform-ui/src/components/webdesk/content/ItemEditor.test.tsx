@@ -499,6 +499,11 @@ describe("preview (WSK-46): the editor hands the card the same gates Save has", 
   });
 });
 
+// The picker reads the library asynchronously inside the full editor (TipTap and all). On a loaded gate host the first
+// tile took longer than Testing Library's 1s default (sumopod m3r354b, load ~17; 3/3 green at load 4), so the tile
+// waits get a longer ceiling. It only bounds how long a correct render may take; it asserts nothing weaker.
+const TILE_WAIT = { timeout: 5000 };
+
 describe("WSK-43c: a media field filled from the library is saved as the exact media value", () => {
   const banner = { fields: [{ name: "title", primitive: "text" }, { name: "hero", primitive: "media", ui: { label: "Hero image" } }, { name: "gallery", primitive: "media", multiple: true, ui: { label: "Gallery" } }], blocks: [], ui: { label: "Banner" } };
   beforeEach(() => { Object.values(M).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset()); });
@@ -514,13 +519,13 @@ describe("WSK-43c: a media field filled from the library is saved as the exact m
 
     const heroBtn = screen.getAllByRole("button", { name: /Choose from library: Hero image/ })[0];
     heroBtn.focus(); fireEvent.click(heroBtn);
-    fireEvent.click((await screen.findAllByTestId("media-tile"))[0]);
+    fireEvent.click((await screen.findAllByTestId("media-tile", undefined, TILE_WAIT))[0]);
     fireEvent.click(await screen.findByTestId("media-use"));
     await waitFor(() => expect(screen.queryByTestId("media-picker")).toBeNull());
 
     const addBtn = screen.getByRole("button", { name: /Add from library: Gallery/ });
     addBtn.focus(); fireEvent.click(addBtn);
-    fireEvent.click((await screen.findAllByTestId("media-tile"))[0]);
+    fireEvent.click((await screen.findAllByTestId("media-tile", undefined, TILE_WAIT))[0]);
     fireEvent.click(await screen.findByTestId("media-use"));
     await waitFor(() => expect(screen.queryByTestId("media-picker")).toBeNull());
 
