@@ -55,7 +55,8 @@ export interface FakeItem {
   publishedVersion: number | null;
   publishState: "draft" | "published" | "unpublished";
   deletedAt: string | null;
-  versions: Array<{ version: number; fields: unknown; contentHash: string; createdBy: string; createdAt: string; note: string | null }>;
+  /** WSK-49c: a version may carry `seo` and generic blocks (after the fields block); both default to empty, as before. */
+  versions: Array<{ version: number; fields: unknown; contentHash: string; createdBy: string; createdAt: string; note: string | null; seo?: Record<string, unknown>; blocks?: unknown[] }>;
 }
 
 export interface FakeCall {
@@ -67,6 +68,8 @@ export interface FakeCall {
   body?: Record<string, unknown>;
   idempotencyKey?: string;
   editorialAssertion?: string;
+  /** WSK-49c: the decoded claims of the editorial assertion, when one rode the request (the test signer's JWS-shaped string). */
+  claims?: Record<string, unknown>;
   hadWs4: boolean;
 }
 
@@ -245,7 +248,7 @@ export class FakeZoneB {
 
   private versionJson(i: FakeItem, n: number) {
     const v = i.versions[n - 1];
-    return { n, version: n, contentHash: v.contentHash, createdAt: v.createdAt, createdBy: v.createdBy, attribution: {}, note: v.note, blocks: [{ type: "fields", props: v.fields }], seo: {} };
+    return { n, version: n, contentHash: v.contentHash, createdAt: v.createdAt, createdBy: v.createdBy, attribution: {}, note: v.note, blocks: [{ type: "fields", props: v.fields }, ...(v.blocks ?? [])], seo: v.seo ?? {} };
   }
 
   /** Zone B's editorial check, restated: the assertion must bind THIS request. */
@@ -260,9 +263,17 @@ export class FakeZoneB {
   }
 
   async send(req: WebdeskControlRequest): Promise<WebdeskControlResponse> {
+    let claims: Record<string, unknown> | undefined;
+    if (req.editorialAssertion) {
+      try {
+        claims = JSON.parse(Buffer.from(req.editorialAssertion.split(".")[1], "base64url").toString("utf8")) as Record<string, unknown>;
+      } catch {
+        claims = undefined;
+      }
+    }
     this.calls.push({
       command: req.command, method: req.method, path: req.path, params: { ...(req.params ?? {}) },
-      query: req.query, body: req.body, idempotencyKey: req.idempotencyKey, editorialAssertion: req.editorialAssertion, hadWs4: !!req.ws4,
+      query: req.query, body: req.body, idempotencyKey: req.idempotencyKey, editorialAssertion: req.editorialAssertion, claims, hadWs4: !!req.ws4,
     });
     if (this.failWith) throw this.failWith;
     const p = req.params ?? {};
@@ -412,17 +423,22 @@ export class FakeZoneB {
         if (dup) return problem(409, "slug-taken");
         if (b.fields && b.fields.h1 === 42) return problem(422, "composition-violation", { issues: [{ path: "/blocks/0/props/h1", message: "must be a string", expected: "text" }] });
         const item = this.seedItem({ siteId: p.siteId, slug: b.slug, locale: b.locale, collectionKey: b.collectionKey });
-        item.versions[0] = { version: 1, fields: b.fields ?? {}, contentHash: hashOf(b.fields ?? {}), createdBy: sub, createdAt: now, note: b.note ?? null };
+        item.versions[0] = {
+          version: 1, fields: b.fields ?? {}, contentHash: hashOf({ f: b.fields ?? {}, s: b.seo ?? {}, b: b.blocks ?? [] }), createdBy: sub, createdAt: now, note: b.note ?? null,
+          seo: b.seo ?? {}, blocks: b.blocks ?? [],
+        };
         return ok({ item: this.stateJson(item), version: { version: 1, contentHash: item.versions[0].contentHash, createdAt: now }, unchanged: false, lint: NO_LINT, replayed: false }, 201);
       }
       case "content.update": {
         const i = this.items.get(p.itemId);
         if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
         if (b.baseVersion !== i.headVersion) return problem(409, "version-conflict", { currentHeadVersion: i.headVersion, currentContentHash: i.versions[i.headVersion - 1].contentHash, updatedAt: now });
+        // WebDesk's assembleItemContent: an OMITTED seo is {} and an omitted blocks is [] (a REMOVAL), exactly the footgun the client BFF guards.
         const fields = b.fields ?? {};
+        const hash = hashOf({ f: fields, s: b.seo ?? {}, b: b.blocks ?? [] });
         i.headVersion += 1;
-        i.versions.push({ version: i.headVersion, fields, contentHash: hashOf(fields), createdBy: sub, createdAt: now, note: b.note ?? null });
-        return ok({ item: this.stateJson(i), version: { version: i.headVersion, contentHash: hashOf(fields), createdAt: now }, unchanged: false, lint: NO_LINT, replayed: false });
+        i.versions.push({ version: i.headVersion, fields, contentHash: hash, createdBy: sub, createdAt: now, note: b.note ?? null, seo: b.seo ?? {}, blocks: b.blocks ?? [] });
+        return ok({ item: this.stateJson(i), version: { version: i.headVersion, contentHash: hash, createdAt: now }, unchanged: false, lint: NO_LINT, replayed: false });
       }
       case "content.restoreVersion": {
         const i = this.items.get(p.itemId);
