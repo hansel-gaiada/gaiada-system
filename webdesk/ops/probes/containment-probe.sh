@@ -7,6 +7,10 @@
 #
 #   bash containment-probe.sh            # all six probes; exit 0 only if every probe passes
 #   PROBE_ONLY=3 bash containment-probe.sh
+#   WS4_HMAC_RETIRED=1 bash containment-probe.sh
+#       M4 F1 phase 3 and after (infra/runbooks/webdesk-ws4-keys.md): the WS4 HMAC key is gone from both
+#       sides, so probe 6 no longer lists WEBDESK_CONTROL_WS4_KEY as shared by design and FAILS if that
+#       ERP value is found anywhere in the WebDesk surface. Leave unset until phase 3 is done.
 #
 # What it changes: nothing in the `webdesk` or `gaiada` projects. It starts short-lived throwaway
 # containers named m4probe-* (removed on exit) on the `webdesk_default` and default `bridge` networks,
@@ -26,6 +30,7 @@ NET=webdesk_default
 PROBE_IMG="${PROBE_IMAGE:-node:22-alpine}"
 RUN="m4probe-$(date +%s)"
 ONLY="${PROBE_ONLY:-}"
+WS4_HMAC_RETIRED="${WS4_HMAC_RETIRED:-0}"
 TMP="$(mktemp -d)"
 PASS=0
 FAIL=0
@@ -233,12 +238,20 @@ for c in $(docker ps -q --filter "label=com.docker.compose.project=$PROJECT"); d
   docker inspect "$c" --format '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}'
 done | sort -u > "$TMP/wd-mounts.txt"
 HITS=""
+# Designed shared values, each authorising nothing beyond WebDesk itself:
+#   WEBDESK_EVENT_SECRET    — the B->A event HMAC (design §03 channel 1; a forged fact is noise, not authority)
+#   WEBDESK_CONTROL_WS4_KEY — the WS4 v1 approval HMAC: the ERP signs, WebDesk verifies (= its
+#                             WEBDESK_APPROVAL_ASSERTION_KEY); it is accepted only by WebDesk's own control plane.
+#                             M4 F1 replaces it with an Ed25519 key WebDesk holds only the public half of;
+#                             after phase 3 (WS4_HMAC_RETIRED=1) it is no longer shared, and finding its value
+#                             in the surface is a FAIL like any other ERP secret.
+SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET WEBDESK_CONTROL_WS4_KEY"
+if [ "$WS4_HMAC_RETIRED" = 1 ]; then
+  SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET"
+  echo "    WS4_HMAC_RETIRED=1: WEBDESK_CONTROL_WS4_KEY is NOT shared by design (M4 F1 phase 3)"
+fi
 while IFS=$'\t' read -r k v; do
-  # Designed shared values, each authorising nothing beyond WebDesk itself:
-  #   WEBDESK_EVENT_SECRET    — the B->A event HMAC (design §03 channel 1; a forged fact is noise, not authority)
-  #   WEBDESK_CONTROL_WS4_KEY — the WS4 approval HMAC: the ERP signs, WebDesk verifies (= its
-  #                             WEBDESK_APPROVAL_ASSERTION_KEY); it is accepted only by WebDesk's own control plane
-  case "$k" in WEBDESK_EVENT_SECRET|WEBDESK_CONTROL_WS4_KEY) echo "    shared by design: $k"; continue;; esac
+  case " $SHARED_BY_DESIGN " in *" $k "*) echo "    shared by design: $k"; continue;; esac
   if grep -qF -- "$v" "$TMP/wd-env.txt" \
      || sudo -n grep -rqsF -- "$v" $SCAN_DIRS $(cat "$TMP/wd-mounts.txt") 2>/dev/null; then HITS="$HITS $k"; fi
 done < "$TMP/erp-needles.tsv"

@@ -153,6 +153,13 @@ services:
       # answers 503 editorial-keys-not-configured. No private key ever lives on this box (D39).
       # Install / rotate: ../infra/runbooks/webdesk-editorial-keys.md.
       WEBDESK_EDITORIAL_JWKS_FILE: /etc/webdesk/editorial/editorial.jwks.json
+      # M4 F1 — the pinned WS4 JWKS: the PUBLIC half of the ERP's WS4 v2 (EdDSA) approval-assertion key,
+      # a SEPARATE key pair and a SEPARATE file from the editorial set above (the api refuses boot if the
+      # two share a kid or a key). Same discipline: literal path, read-only FILE mount, shape-validated at
+      # boot (present but malformed → boot refused). Absent → v2 is unavailable and WS4 v1 (HMAC,
+      # WEBDESK_APPROVAL_ASSERTION_KEY in .env.control) keeps working while it is set. No private key
+      # ever lives on this box. Install / rotate: ../infra/runbooks/webdesk-ws4-keys.md.
+      WEBDESK_WS4_JWKS_FILE: /etc/webdesk/ws4/ws4.jwks.json
     # Everything else control-channel (WSK-22) still comes from its own env file, NOT `.env`
     # (single-line secrets only now — the CA left this file on purpose, see above). On THIS box
     # the file is `/etc/webdesk/.env.control`, owned by the dedicated `webdesk-svc` unix user,
@@ -171,11 +178,15 @@ services:
       # empty DIRECTORY at the host path; the api treats that as "not configured" (503 on writes), and
       # the runbook removes it before installing the real file.
       - /etc/webdesk/editorial/editorial.jwks.json:/etc/webdesk/editorial/editorial.jwks.json:ro
+      # M4 F1 — the pinned WS4 JWKS, public keys only, read-only FILE mount (see the env row above).
+      # Same footgun as the editorial file: a missing host file becomes an empty DIRECTORY, which the
+      # api treats as "v2 unavailable"; the runbook removes it before installing the real file.
+      - /etc/webdesk/ws4/ws4.jwks.json:/etc/webdesk/ws4/ws4.jwks.json:ro
     # M4 F3: node:22-alpine, no entrypoint script, no privileged port (listens on 3000), writes only to
     # the /tmp tmpfs. It runs as root (the image has no USER) but never chowns or switches user, so it
     # needs NO capability. Live-apply note: without DAC_OVERRIDE, root in the container cannot read a
-    # bind-mounted host file that is mode 0600 and owned by another uid; the two mounted files above
-    # are PUBLIC material and must be readable by "other" (0644). Check before the recreate.
+    # bind-mounted host file that is mode 0600 and owned by another uid; the three mounted files above
+    # are PUBLIC material and must be readable by "other" (0644/0444). Check before the recreate.
     cap_drop:
       - ALL
     security_opt:

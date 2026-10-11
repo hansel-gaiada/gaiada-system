@@ -253,7 +253,7 @@ already has (WSK-D39).
    - Rotation runbook: two kids overlap, then the old one is removed.
 
 **Tier.** The signer and verifier cores are Opus work (alg confusion and replay are the failure modes). The key
-runbook and the probe change are Sonnet work. About 1–2 sessions. **Status: designed, not started.**
+runbook and the probe change are Sonnet work. About 1–2 sessions. **Status: phases 1 and 2 BUILT as code (branch `webdesk/m4-f1-ws4-eddsa`, migration 0018, runbook `infra/runbooks/webdesk-ws4-keys.md`); local unit matrix green; Linux/CI suites and every live step pending. Not live.**
 
 ## Follow-ups found (each a box on the board)
 

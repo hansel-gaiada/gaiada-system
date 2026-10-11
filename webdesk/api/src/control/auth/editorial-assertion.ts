@@ -39,7 +39,7 @@ import type { CommandName } from "../command-types";
 import { ControlProblem } from "../content/content-problem";
 import { EDITORIAL_PRINCIPAL_KINDS, type EditorialPrincipal } from "./editorial-principal";
 import type { EditorialKeySet } from "./editorial-jwks";
-import { computeCommandHash } from "./ws4-assertion";
+import { computeCommandHash, peekWs4Assertion } from "./ws4-assertion";
 
 export const EDITORIAL_ASSERTION_HEADER = "x-webdesk-editorial-assertion";
 export const EDITORIAL_ALG = "EdDSA";
@@ -266,18 +266,11 @@ export async function verifyEditorialAssertion(
 }
 
 /**
- * The unverified approvalId of an `x-ws4-assertion` header (`<base64url JSON>.<hmac>`). Layer 4
- * (RealPolicyDecisionPoint) has verified the same header's HMAC, expiry and commandHash before
- * Layer 2e runs on every HIGH command, which is the only case where the value is relied upon.
+ * The unverified approvalId of an `x-ws4-assertion` header: v1 `<base64url JSON>.<hmac>` or (M4 F1)
+ * v2 `<header>.<payload>.<signature>`, read by ws4-assertion.ts peekWs4Assertion so both versions agree.
+ * Layer 4 (RealPolicyDecisionPoint) has verified the same header's signature, expiry and commandHash
+ * before Layer 2e runs on every HIGH command, which is the only case where the value is relied upon.
  */
 export function ws4ApprovalIdOf(header: string | undefined): string | null {
-  if (!header) return null;
-  const dot = header.indexOf(".");
-  if (dot <= 0) return null;
-  try {
-    const parsed = decodeJsonSegment(header.slice(0, dot));
-    return isRecord(parsed) && typeof parsed.approvalId === "string" && parsed.approvalId.length > 0 ? parsed.approvalId : null;
-  } catch {
-    return null;
-  }
+  return peekWs4Assertion(header)?.approvalId ?? null;
 }
