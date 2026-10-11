@@ -63,6 +63,9 @@ import { ContentReadsService } from "./content/content-reads.service";
 import { ContentReadsController } from "./content/content-reads.controller";
 import { TenantReadsService } from "./tenants/tenant-reads.service";
 import { TenantReadsController } from "./tenants/tenant-reads.controller";
+// M5-L1/L2 — forms.submission.get.
+import { FormsReadsService } from "./forms/forms-reads.service";
+import { FormsReadsController } from "./forms/forms-reads.controller";
 
 /**
  * ============================================================================================
@@ -125,6 +128,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     MediaCommandsController,
     ContentReadsController,
     TenantReadsController,
+    FormsReadsController,
   ],
   providers: [
     CommandAuditService,
@@ -143,6 +147,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     MediaCommandsService,
     ContentReadsService,
     TenantReadsService,
+    FormsReadsService,
     { provide: CONTROL_CHANNEL_AUTHENTICATOR, useClass: controlChannelAuthenticatorClass },
     { provide: POLICY_DECISION_POINT, useClass: policyDecisionPointClass },
     { provide: RELEASE_TRANSPORT, useClass: NotYetAvailableReleaseTransport },

@@ -66,6 +66,8 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "media.update": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.delete": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "media.usage": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-L1/L2 — the ERP reads one submission back after a form.received fact: read / webdesk:read.
+  "forms.submission.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
 };
 
 describe("control command registry — the impact-class map (design §07)", () => {
