@@ -79,7 +79,7 @@ export default async function PortalWebsiteItemHistoryPage({ params, searchParam
         scope={{ tenantSlug, siteId: site }}
         item={item.data}
         versions={versions.data}
-        authors={portalAuthorNames(me, requests.kind === "ok" ? requests.data : [])}
+        authors={portalAuthorNames(me, requests.kind === "ok" ? requests.data : [], versions.data.authors)}
         historyHref={`${itemBase}/history${localeQs}`}
         editorHref={`${itemBase}${localeQs}`}
         compare={compare}

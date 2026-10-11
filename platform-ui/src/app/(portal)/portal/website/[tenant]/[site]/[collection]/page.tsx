@@ -68,7 +68,7 @@ export default async function PortalWebsiteCollectionPage({ params, searchParams
   if (list.kind !== "ok") return <>{head}<PortalWebsiteRefusal result={list} subject={`the ${label} pages`} retryHref={here} /></>;
 
   const pendingIds = pendingReqs.kind === "ok" ? [...new Set(pendingReqs.data.flatMap((r) => r.itemIds))] : [];
-  const authors = portalAuthorNames(me, pendingReqs.kind === "ok" ? pendingReqs.data : []);
+  const authors = portalAuthorNames(me, pendingReqs.kind === "ok" ? pendingReqs.data : [], list.data.authors);
   const labelOf = Object.fromEntries(list.data.items.map((i) => [i.itemId, i.title || i.slug]));
   const e = collectionEditability(editable);
   const blocked = createBlockedCopy(editable, collection.composition.fields);

@@ -190,3 +190,30 @@ describe("the picker for a media field", () => {
     expect(document.querySelector('[data-pointer="/blocks/0/props/hero/url"]')).toBeTruthy();
   });
 });
+
+describe("WSK-359 · the picker disables upload up front from the list's capabilities", () => {
+  it("a caller who cannot upload sees Upload off with the reason the moment the dialog's list arrives, and can still choose an asset", async () => {
+    a.listMediaAction.mockResolvedValue({ kind: "ok", data: { ...lib([asset(1), asset(2)]), capabilities: { read: true, upload: false, update: false, delete: false } } });
+    render(<Harness />);
+    const dlg = await choose(/Choose from library: Hero image/);
+    expect(await within(dlg).findAllByTestId("media-tile", undefined, { timeout: 5000 })).toHaveLength(2);
+    expect((within(dlg).getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(true);
+    expect(within(dlg).getByTestId("media-upload-why").textContent).toContain("You can't upload images here.");
+    fireEvent.click(within(dlg).getAllByTestId("media-tile")[0]);
+    expect(await within(dlg).findByTestId("media-use")).toBeTruthy();
+  });
+
+  it("a caller who can upload sees it on, and an answer without capabilities leaves it on", async () => {
+    a.listMediaAction.mockResolvedValue({ kind: "ok", data: { ...lib([asset(1)]), capabilities: { read: true, upload: true, update: true, delete: false } } });
+    const { unmount } = render(<Harness />);
+    let dlg = await choose(/Choose from library: Hero image/);
+    await within(dlg).findAllByTestId("media-tile", undefined, { timeout: 5000 });
+    expect((within(dlg).getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(false);
+    unmount();
+    a.listMediaAction.mockResolvedValue({ kind: "ok", data: lib([asset(1)]) });
+    render(<Harness />);
+    dlg = await choose(/Choose from library: Hero image/);
+    await within(dlg).findAllByTestId("media-tile", undefined, { timeout: 5000 });
+    expect((within(dlg).getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(false);
+  });
+});

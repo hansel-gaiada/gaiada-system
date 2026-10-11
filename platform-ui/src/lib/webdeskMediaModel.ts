@@ -44,7 +44,24 @@ export interface MediaAsset {
   deletedAt: string | null;
 }
 
-export interface MediaListBody { assets: MediaAsset[]; page: Page }
+/** What the caller may do with this site's library (WSK-359; the BFF's one Cerbos batch). `delete` is always false in client mode. */
+export interface MediaCapabilities { read: boolean; upload: boolean; update: boolean; delete: boolean }
+
+/** `capabilities` is absent when the BFF could not ask (unknown, never "denied"): every control then stays on and a 403 is the fallback. */
+export interface MediaListBody { assets: MediaAsset[]; page: Page; capabilities?: MediaCapabilities | null }
+
+export type MediaCap = "upload" | "update" | "delete";
+
+/** The reason on screen when a control is off up front. Staff and client mode name different people to ask. */
+export function capabilityReasons(caps: MediaCapabilities | null | undefined, client: boolean): Partial<Record<MediaCap, string>> {
+  if (!caps) return {};
+  const ask = client ? "Ask your company's admin." : "Ask a Web Dev editor or a company admin for access.";
+  const out: Partial<Record<MediaCap, string>> = {};
+  if (!caps.upload) out.upload = `You can't upload images here. ${ask}`;
+  if (!caps.update) out.update = `You can't edit images here. ${ask}`;
+  if (!caps.delete) out.delete = client ? "You can't delete images here." : "You can't delete images here. Deleting needs a Web Dev publisher or a company admin.";
+  return out;
+}
 
 /** Where an asset is used: `live` (a published item), `head` (an item's working draft), `scheduled` (a pending swap). */
 export interface MediaUsageItem { itemId: string; collectionKey: string; locale: string; slug: string; in: string }
@@ -124,7 +141,21 @@ export function parseMediaList(v: unknown): MediaListBody {
   const o = obj(v, "media");
   const assets = need(o, "assets", "media");
   if (!Array.isArray(assets)) throw new MediaShapeError("media.assets", "array", assets);
-  return { assets: assets.map((a, i) => readMediaAsset(a, `media.assets[${i}]`)), page: readPage(need(o, "page", "media"), "media.page") };
+  return {
+    assets: assets.map((a, i) => readMediaAsset(a, `media.assets[${i}]`)),
+    page: readPage(need(o, "page", "media"), "media.page"),
+    capabilities: readCapabilities(o.capabilities, "media.capabilities"),
+  };
+}
+
+/** Absent (or null) is "unknown". Present, it must be four booleans: anything else is drift, never a guess in either direction. */
+export function readCapabilities(v: unknown, path: string): MediaCapabilities | null {
+  if (v === undefined || v === null) return null;
+  const o = obj(v, path);
+  return {
+    read: bool(need(o, "read", path), `${path}.read`), upload: bool(need(o, "upload", path), `${path}.upload`),
+    update: bool(need(o, "update", path), `${path}.update`), delete: bool(need(o, "delete", path), `${path}.delete`),
+  };
 }
 
 export function readUsageItems(v: unknown, path: string): MediaUsageItem[] {

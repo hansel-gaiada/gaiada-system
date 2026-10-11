@@ -3,7 +3,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { portalApproveRequestAction, portalWithdrawRequestAction } from "@/lib/portalWebsiteActions";
 import {
-  PORTAL_COPY, PUBLISH_SENT_COPY, PUBLISHED_COPY, requesterLabel, requestState, showApprove, showWithdraw, splitRequests, type RequestView,
+  PORTAL_COPY, PUBLISH_SENT_COPY, publishOutcomeCopy, requesterLabel, requestState, showApprove, showWithdraw, splitRequests, type RequestView,
 } from "@/lib/portalWebsiteModel";
 import { clientRefusal } from "@/lib/webdeskClientCopy";
 import { describeReasonToken } from "@/lib/webdeskContentModel";
@@ -13,14 +13,16 @@ import "@/components/webdesk/content/content.css";
 
 // "Publish requests" (WSK-D58): the client's own requests, every editor's.
 //
-//   • each request shows WHO filed it, WHEN, the pages in it (with their latest draft version) and its state in plain words;
+//   • each request shows WHO filed it, WHEN, the pages in it ("v<N> of <title>": the version the request NAMED, never the page's current draft)
+//     and its state in plain words;
 //   • APPROVE appears ONLY on ANOTHER editor's pending request. The server is the authority: a self-approved batch is a 403 and
 //     the answer reads "Another person from your company needs to approve this." only on the viewer's OWN request (`CLIENT_COPY.selfApprovedBatch`); on a
 //     colleague's a 403 can mean a revoked grant, so it reads `CLIENT_COPY.accessRevoked`;
 //   • WITHDRAW appears on the viewer's OWN pending request;
 //   • on one's own pending request the panel says why there is no Approve, rather than leaving a request with no way forward.
-// "Published" is said only for a request the server reports as executed. After an approve that executes the words are
-// `PUBLISHED_COPY`: §16j returns no staging rebuild state to a client, so nothing more is claimed.
+// "Published" is said only for a request the server reports as executed. After an approve that executes, the words come from the staging
+// rebuild state the answer carries (WSK-D65: `publishOutcomeCopy`): "live" is said ONLY for `state === "live"`. An answer with no `build`
+// keeps the older wording (`PUBLISHED_COPY` when reconciled, otherwise `PUBLISH_SENT_COPY`).
 
 type Notice = { id: string | null; tone: "ok" | "warn" | "bad" | "info"; text: string };
 
@@ -59,8 +61,12 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
     }
     if (res.data.executionStatus === "failed") {
       setNotice({ id: r.approvalId, tone: "bad", text: `Approved, but publishing didn't complete. ${describeReasonToken(res.data.error)} The request is closed: make the change again or ask Gaiada.` });
+    } else if (res.data.build) {
+      // Executed, and the BFF says what the staging rebuild is doing. The rebuild only starts after a successful publish.
+      const o = publishOutcomeCopy(res.data.build);
+      setNotice({ id: r.approvalId, tone: o.tone, text: o.text });
     } else if (res.data.reconciled === true) {
-      setNotice({ id: r.approvalId, tone: "ok", text: PUBLISHED_COPY });
+      setNotice({ id: r.approvalId, tone: "ok", text: publishOutcomeCopy(null).text });
     } else {
       // Executed but not confirmed live (the versions a request named are not in the list, so no item read can confirm them).
       setNotice({ id: r.approvalId, tone: "warn", text: PUBLISH_SENT_COPY });
@@ -98,7 +104,9 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
         <ul style={{ margin: "6px 0", paddingLeft: 18 }} aria-label={`Pages in ${label}`}>
           {r.items.map((i) => (
             <li key={i.itemId}>
-              {i.available ? <>{i.title}{i.headVersion !== null ? <span className="wc-muted"> · latest draft v{i.headVersion}</span> : null}</> : <span className="wc-muted">A page that is no longer available</span>}
+              {i.available
+                ? (i.version !== null ? <><span data-testid="request-item-version">v{i.version}</span> of {i.title}</> : <>{i.title}</>)
+                : <span className="wc-muted">A page that is no longer available</span>}
             </li>
           ))}
           {r.itemCount > r.items.length && <li className="wc-muted">and {r.itemCount - r.items.length} more</li>}

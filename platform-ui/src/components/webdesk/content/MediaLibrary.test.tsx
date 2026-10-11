@@ -529,3 +529,105 @@ describe("keyboard and accessibility", () => {
     confirm.mockRestore();
   });
 });
+
+// ── WSK-359 · controls disabled UP FRONT from the list's `capabilities` ─────────────────────────────────────────────
+describe("capabilities from the list: controls are off before any 403", () => {
+  const withCaps = (caps: NonNullable<MediaListBody["capabilities"]>, assets = [asset(1), asset(2), asset(3)]): MediaListBody => ({ ...list(assets), capabilities: caps });
+  const ALL = { read: true, upload: true, update: true, delete: true };
+
+  it("a read-only caller: Upload, Save and Delete are disabled on first paint, each with its reason, and browsing works", () => {
+    mount({ initial: { list: withCaps({ read: true, upload: false, update: false, delete: false }), loadedAt: "t" } });
+    expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("media-upload-why").textContent).toContain("You can't upload images here.");
+    expect(tiles()).toHaveLength(3);
+    open(1);
+    expect(screen.getByTestId("media-readonly").textContent).toContain("You can't edit images here.");
+    expect((screen.getByLabelText("Title") as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByTestId("media-save") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("media-delete") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("media-delete-why").textContent).toContain("You can't delete images here.");
+    // nothing was sent to learn it
+    expect(a.updateMediaAction).not.toHaveBeenCalled();
+    expect(a.mintUploadTokenAction).not.toHaveBeenCalled();
+    expect(a.deleteMediaAction).not.toHaveBeenCalled();
+  });
+
+  it("an editor (no delete): Upload and Save are on, only Delete is off with its reason", () => {
+    mount({ initial: { list: withCaps({ read: true, upload: true, update: true, delete: false }), loadedAt: "t" } });
+    expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(false);
+    open(1);
+    expect(screen.queryByTestId("media-readonly")).toBeNull();
+    expect((screen.getByLabelText("Title") as HTMLInputElement).readOnly).toBe(false);
+    expect((screen.getByTestId("media-delete") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("media-delete-why").textContent).toContain("Deleting needs a Web Dev publisher or a company admin.");
+  });
+
+  it("a publisher: everything on, nothing said", () => {
+    mount({ initial: { list: withCaps(ALL), loadedAt: "t" } });
+    expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId("media-upload-why")).toBeNull();
+    open(1);
+    expect((screen.getByTestId("media-delete") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId("media-delete-why")).toBeNull();
+  });
+
+  it("UNKNOWN capabilities (the BFF could not ask, so the key is absent) leave every control on: unknown is never 'denied'", () => {
+    mount();
+    expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(false);
+    open(1);
+    expect(screen.queryByTestId("media-readonly")).toBeNull();
+    expect((screen.getByTestId("media-delete") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("a drop while Upload is off up front is refused with the reason, and nothing is minted", () => {
+    mount({ initial: { list: withCaps({ read: true, upload: false, update: true, delete: true }), loadedAt: "t" } });
+    fireEvent.drop(screen.getByTestId("media-dropzone"), { dataTransfer: { files: [png()], types: ["Files"] }  });
+    expect(a.mintUploadTokenAction).not.toHaveBeenCalled();
+    expect(screen.getByTestId("media-notice").textContent).toContain("You can't upload images here.");
+  });
+
+  it("FALLBACK: capabilities say yes but the server says 403 anyway: the control still turns off with the 403 reason, and nothing breaks", async () => {
+    a.mintUploadTokenAction.mockResolvedValue({ kind: "forbidden", reason: "no" });
+    mount({ initial: { list: withCaps(ALL), loadedAt: "t" } });
+    expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByTestId("media-file-input"), { target: { files: [png()] } });
+    expect((await screen.findByTestId("media-upload-failed")).textContent).toContain("You can't upload to this library.");
+    await waitFor(() => expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getByTestId("media-upload-why").textContent).toContain("You can browse the library but not add to it");
+  });
+
+  it("a 403 on save with capabilities saying yes still turns the panel read-only (the fallback)", async () => {
+    mount({ initial: { list: withCaps(ALL), loadedAt: "t" } });
+    open(1);
+    a.updateMediaAction.mockResolvedValue({ kind: "forbidden", reason: "no" });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "x" } });
+    await act(async () => { fireEvent.click(screen.getByTestId("media-save")); });
+    expect(screen.getByTestId("media-readonly").textContent).toContain("You can browse the library but not edit assets");
+    expect((screen.getByTestId("media-save") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("the picker's own load (no initial list) reads the capabilities from the answer and disables Upload up front", async () => {
+    a.listMediaAction.mockResolvedValue(ok(withCaps({ read: true, upload: false, update: false, delete: false }, [asset(1)])));
+    mount({ mode: "pick", initial: null, onPick: vi.fn() });
+    await screen.findAllByTestId("media-tile");
+    expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("media-upload-why").textContent).toContain("You can't upload images here.");
+  });
+
+  it("a later refresh replaces what the capabilities said (a promotion turns the control back on); a 403 learned earlier stays", async () => {
+    a.listMediaAction.mockResolvedValueOnce(ok(withCaps(ALL, [asset(1)])));
+    mount({ initial: { list: withCaps({ read: true, upload: false, update: true, delete: true }), loadedAt: "t" } });
+    expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(screen.getByRole("search", { name: "Filter media" }));
+    await waitFor(() => expect((screen.getByTestId("media-upload") as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("CLIENT MODE: the reasons name the company's admin, and a client's delete (always false) shows no Delete control at all", () => {
+    const driver = { list: vi.fn(), mintToken: vi.fn(), update: vi.fn() } as never;
+    mount({ driver, initial: { list: withCaps({ read: true, upload: false, update: false, delete: false }), loadedAt: "t" } });
+    expect(screen.getByTestId("media-upload-why").textContent).toBe("You can't upload images here. Ask your company's admin.");
+    open(1);
+    expect(screen.getByTestId("media-readonly").textContent).toContain("You can't edit images here. Ask your company's admin.");
+    expect(screen.queryByTestId("media-delete")).toBeNull();
+  });
+});

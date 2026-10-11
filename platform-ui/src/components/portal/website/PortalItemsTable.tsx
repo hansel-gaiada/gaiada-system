@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { portalGetItemHeadAction, portalPublishItemAction, portalRequestPublishAction } from "@/lib/portalWebsiteActions";
 import {
-  canOfferPublishNow, hasUnpublishedChanges, itemListState, PORTAL_COPY, PUBLISH_SENT_COPY, PUBLISHED_COPY,
+  canOfferPublishNow, hasUnpublishedChanges, itemListState, PORTAL_COPY, PUBLISH_SENT_COPY, publishOutcomeCopy,
 } from "@/lib/portalWebsiteModel";
 import { clientRefusal } from "@/lib/webdeskClientCopy";
 import { authorLabel, describeReasonToken, type FieldDef, type ItemSummary } from "@/lib/webdeskContentModel";
@@ -96,7 +96,9 @@ export function PortalItemsTable({
     }
     if (!mounted.current) return;
     setBusy(null);
-    setNotice(confirmed ? { tone: "ok", text: `${title(it)}: ${PUBLISHED_COPY}` } : { tone: "warn", text: `${title(it)}: ${PUBLISH_SENT_COPY}` });
+    // Confirmed published: the words come from the rebuild state (WSK-D65), never "live" unless the state is live.
+    const o = publishOutcomeCopy(r.data.build);
+    setNotice(confirmed ? { tone: o.tone, text: `${title(it)}: ${o.text}` } : { tone: "warn", text: `${title(it)}: ${PUBLISH_SENT_COPY}` });
     router.refresh();
   };
 
