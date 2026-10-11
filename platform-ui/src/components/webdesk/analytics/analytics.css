@@ -1,0 +1,20 @@
+/* Website -> Analytics (M5-A4). Prefix `wa-`. Tokens only (styles/tokens.test.ts bans colour literals).
+   No chart library: bars are plain proportional divs, which keeps the page server-rendered. */
+@import "../../forms/forms.css";
+
+.wa-page { display: flex; flex-direction: column; gap: var(--space-20); }
+.wa-range { display: flex; flex-wrap: wrap; gap: var(--space-12); align-items: flex-end; }
+.wa-range .lux-field { width: 160px; }
+.wa-range__err { color: var(--status-critical); font: 400 13px var(--font-body); margin: 0; }
+.wa-kpis { display: grid; gap: var(--space-16); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.wa-grid { display: grid; gap: var(--space-16); grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.wa-table { width: 100%; border-collapse: collapse; font: 400 13px var(--font-body); }
+.wa-table th { text-align: left; font: 700 10px var(--font-body); letter-spacing: 0.1em; color: var(--ink-subtle); padding: 8px 10px; border-bottom: 1px solid var(--line-strong); }
+.wa-table td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; overflow-wrap: anywhere; }
+.wa-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wa-barcell { width: 34%; }
+.wa-bar { height: 8px; background: var(--line-soft); }
+.wa-bar > span { display: block; height: 100%; background: var(--accent); }
+.wa-ai { margin: 0 0 8px; font: 600 13px var(--font-body); color: var(--ink-strong); }
+.wa-note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.wa-foot { margin: 8px 0 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-subtle); }

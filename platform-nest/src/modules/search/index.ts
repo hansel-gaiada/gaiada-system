@@ -13,6 +13,7 @@
 import { config } from "../../config";
 import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
+import { ANALYTICS_MCP_TOOLS } from "./umami-mcp-tools";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -241,6 +242,10 @@ export const searchModule: ModuleContract = {
   // scheduler job (SM-54) authorized by the human-written `tool_scope`, and no allow-list may ever
   // include a money-spending tool.
   mcpTools: [
+    // M5-A4 — website analytics reads from Umami, one tool per read (read-only, no `impact`: nothing is
+    // written; Cerbos resource_search_property · read). The range travels in the PATH because the hub
+    // forwards only path params on a GET. Small cells come back as "<5" (R-V6).
+    ...ANALYTICS_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",
