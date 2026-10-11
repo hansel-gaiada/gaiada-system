@@ -1,0 +1,61 @@
+# erp-edge static config (WSK-D71). TEMPLATE: the runbook (step 3) renders it to ./traefik.yml with
+#   ./render-config.sh <measured address>/32 <acme email>
+# Traefik's static file does no env substitution, so the one measured value is filled in by that sed.
+# An unreplaced placeholder is not a valid CIDR, so Traefik refuses to start: the failure is closed.
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+log:
+  level: INFO
+  format: common
+
+# Access log to stdout. A visitor log is personal data: the client address, host and port are DROPPED, headers
+# are dropped, and Traefik logs the request PATH only (never the query string, so tokens cannot land here).
+accessLog:
+  format: json
+  bufferingSize: 100
+  fields:
+    defaultMode: keep
+    names:
+      ClientAddr: drop
+      ClientHost: drop
+      ClientPort: drop
+    headers:
+      defaultMode: drop
+
+entryPoints:
+  websecure:
+    # Container port; published ONLY as 172.17.0.1:18443 by docker-compose.yml.
+    address: ":8443"
+    # PROXY protocol v2 from mimi's passthrough rule. Trusted ONLY from the one address mimi's connections arrive
+    # from (measured at deploy, runbook step 3). Connections from any other address are never allowed to assert
+    # a client address. Do not widen this.
+    proxyProtocol:
+      trustedIPs:
+        - "__MIMI_SOURCE__"
+    forwardedHeaders:
+      # No inbound X-Forwarded-* is trusted: Traefik discards what the visitor sent and writes
+      # X-Forwarded-For / X-Real-Ip from the (PROXY-protocol) client address.
+      insecure: false
+      trustedIPs: []
+    transport:
+      respondingTimeouts:
+        readTimeout: 30s
+        idleTimeout: 60s
+
+certificatesResolvers:
+  erp-le:
+    acme:
+      email: "__ACME_EMAIL__"
+      storage: /acme/acme.json
+      # TLS-ALPN-01 over the passthrough: the CA's :443 connection reaches this entrypoint. HTTP-01 cannot work
+      # (mimi redirects all of :80 and stays as it is).
+      tlsChallenge: {}
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# No Docker provider (no docker.sock), no dashboard, no API, no ping, no metrics.

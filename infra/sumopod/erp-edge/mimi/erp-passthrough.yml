@@ -1,0 +1,33 @@
+# TEMPLATE for the owner's mimi Traefik (`mimi-tls-le`): the ONE file mimi gets for the ERP (WSK-D71).
+# Install ONLY via the single cut-over command in infra/runbooks/erp-edge-sumopod.md (it also removes
+# erp-status.yml), into /home/ubuntu/mimi/infrastructure/tls/dynamic/. watch=true, so no restart.
+#
+# What it does: every TLS connection on `websecure` whose SNI is exactly ONE label under erp.gaiada.com is
+# forwarded UNTOUCHED (tls.passthrough, no termination in mimi) to erp-edge's published port, with a PROXY
+# protocol v2 header carrying the visitor's address. The bare apex (erp.gaiada.com), deeper names
+# (a.b.erp.gaiada.com) and every other domain do not match and stay with mimi's own routers.
+#
+# Syntax (Traefik v3.3, TCP services): `loadBalancer.proxyProtocol.version` (1 or 2); see
+# https://doc.traefik.io/traefik/v3.3/routing/services/#proxy-protocol (the pre-v3 `terminationDelay` is
+# deprecated and not needed). Passthrough: https://doc.traefik.io/traefik/v3.3/routing/routers/#passthrough
+# HostSNIRegexp takes a Go regexp in v3 (v2's `{subdomain:...}` form is gone).
+#
+# Names are prefixed erp-edge- (file-provider names are global across mimi's directory).
+tcp:
+  routers:
+    erp-edge-passthrough:
+      entryPoints:
+        - websecure
+      rule: 'HostSNIRegexp(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?\.erp\.gaiada\.com$`)'
+      service: erp-edge-tcp
+      tls:
+        passthrough: true
+
+  services:
+    erp-edge-tcp:
+      loadBalancer:
+        proxyProtocol:
+          version: 2
+        servers:
+          # docker0's address on sumopod; erp-edge publishes here and nowhere else.
+          - address: "172.17.0.1:18443"
