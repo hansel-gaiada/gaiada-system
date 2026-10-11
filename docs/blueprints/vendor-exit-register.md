@@ -90,6 +90,9 @@ Payload holds two collections, one of which is a boot stub.
 | Postiz | AGPL-3.0 | No | Mixpost Pro (rejected — EULA forbids reselling workspaces) | 4–8 wk | 🟡 |
 | **WAHA** | ✅ **Core — Apache-2.0**, verified | ✅ **No** | Cloud API covers **DMs only**; **groups have no path at any price** | **no full exit exists** | 🔴⁴ |
 | Cloudflare Pages/Workers | Proprietary | ✅ **No** — $5/mo per *account*, re-checked 2026-09-21 | own deploy pipeline (`webdesk/deploy` rsync driver exists) | 2–4 wk | 🟡⁸ |
+| **Umami 3.x** *(WSK-D66; PLANNED, not yet deployed; self-hosted on `sumopod`, collector-only public)* | MIT | No | Plausible CE (AGPL-3.0), Matomo (GPL-3.0), PostHog; the event list in `src/scripts/tracking/events.ts` is our own contract, so only the endpoint and the reader change | 1–2 wk (history is not portable, and at 14-month retention it need not be) | 🟢¹⁰ |
+| **DB-IP Lite** *(IP to country/city/ASN; local MMDB, no per-request call; PLANNED, recommended for phase V2, M5-V1)* | CC BY 4.0 (attribution link required) | No | MaxMind GeoLite2 (EULA, account + key, 30-day refresh duty), DB-IP paid tier, IPinfo database | days (same MMDB format; swap the file and the attribution line) | 🟢¹¹ |
+| **IP-to-company data** *(CANDIDATE, not chosen; phase 5 only, needs owner ruling + DPA review; M5-V1)*: IPinfo IP-to-Company database (local file) or Snitcher (API) | Proprietary / commercial | No (Snitcher: unlimited team members) | each other; Dealfront/Leadfeeder; or none (country/network only) | 2–4 wk (the profile store keeps only derived attributes) | 🟡¹² |
 
 ³ **AUDITED 2026-09-21 — the single row became two, because the answer was not uniform.**
 Full evidence: [`../assessment/2026-09-21-agentic-native-n8n-audit.md`](../assessment/2026-09-21-agentic-native-n8n-audit.md).
@@ -186,6 +189,12 @@ confirm before budgeting.**** Unofficial WhatsApp client: a paid-tier exposure
 official Business API is the named fallback and it costs per message. **OQ-VI5: confirm whether
 Core or Plus runs today, and cost the fallback — before the next WhatsApp capability ships.**
 
+¹⁰ **Umami — added 2026-10-11 (M5-V1), PLANNED.** Licence MIT, current major 3.x (3.4.0 listed as latest, GHCR tags `postgresql-latest` and `3.4.0`; source: GitHub releases and package page, accessed 2026-10-11). Three standing risks: ① it is a small-maintainer project with a **High advisory GHSA-3xx8-742v-m4mq (2026-06-30) listing no patched version** as fetched, so the public surface must be the collector only and the ERP reader must be network-private; ② its default geo file is a GeoLite2 copy (see ¹¹); ③ self-hosted data is kept indefinitely unless we delete it, so the 14-month retention is OUR job. Review: [`../plans/2026-10-11-m5-geo-and-company-data-review.md`](../plans/2026-10-11-m5-geo-and-company-data-review.md).
+
+¹¹ **DB-IP Lite — added 2026-10-11 (M5-V1), PLANNED.** CC BY 4.0, monthly refresh, country/city/ASN editions in MMDB and CSV (source: db-ip.com/db/lite.php, accessed 2026-10-11). No account, no key, no deletion duty, which is why it is preferred over GeoLite2. Costs: lower accuracy than the paid tier, and a visible "IP Geolocation by DB-IP" link wherever results are shown (confirm placement with counsel for admin-only display). Not yet tested inside Umami; test before relying on it.
+
+¹² **IP-to-company — added 2026-10-11 (M5-V1), a candidate only.** A local dataset (IPinfo, quote-only, enterprise) keeps the IP inside our estate; an API (Snitcher from USD 49/mo, volume-priced) makes the vendor a **new processor** that receives visitor IPs. Amber because the data leaves us or costs real money, and neither fits the "no new processor without a ruling" posture of the visitor addendum (R-V14). Do not wire until the owner rules.
+
 ## 5 · AI
 
 | Dependency | Seat? | Replacement | Exit | Band |
@@ -228,8 +237,8 @@ deliverable. **Protect the interface: no capability may call a provider SDK dire
 
 | Band | Count | Notes |
 |---|---|---|
-| 🟢 Green | 19 | |
-| 🟡 Amber | 18 | all have a named replacement in this file |
+| 🟢 Green | 21 | +Umami, +DB-IP Lite (2026-10-11) |
+| 🟡 Amber | 19 | all have a named replacement in this file; +IP-to-company candidate (2026-10-11) |
 | 🔴 Red | 4 | **Cerbos** (accepted — our asset, no tier dependency) · **WAHA** (corrected 2026-09-21: Core/Apache-2.0, not a paid tier — Red now stands on *"groups have no fallback at any price"*) · **GitHub signing/provenance**⁷ (design decision, not migration) · **n8n WS11 pipeline**³ (the agentic-native bar slipped; 2–3 months, not weeks) |
 | **Seat-priced** | **4** *(was 5)* | GitHub *(being removed — machine identity + WSK-49)* · Payload *(being removed — WSK-40…51)* · Google Workspace *(edge tool)* · Claude Code *(accepted, dev tooling)*. — **Cloudflare dropped off this list 2026-09-21: the re-check found Workers Paid is per account, not per seat.** |
 
@@ -249,3 +258,4 @@ edge tool), and the agent army (deliberately accepted).
 | 2026-09-21 | **WAHA audited — two of three exposures WITHDRAWN, the third sharpened.** It runs **Core**, licensed **Apache-2.0** (verified upstream), with no licence key and no resale restriction — so the "paid tier" and "licence" legs were wrong. The **Meta ToS / unofficial-client** leg stands, and the register's claimed fallback turns out **not to be one: the Cloud API cannot attach to human-created groups or manage participants at all.** Red unchanged, reason corrected. ⏰ Meta begins charging for service messages **2026-10-01**. |
 | 2026-09-21 | **n8n row SPLIT after audit** ([`../assessment/2026-09-21-agentic-native-n8n-audit.md`](../assessment/2026-09-21-agentic-native-n8n-audit.md)). The agentic-native bar holds for 17 of 21 flows and **has silently slipped for the 4 WS11 pipeline flows**, whose logic exists nowhere else (`pipeline-delivery.json` = 64-node state machine). Plus a **hard dependency with no fallback** at `meetings.controller.ts:508`. Red count 3 → 4; the row's honest cost goes 2–6 weeks → **2–3 months**. No Enterprise feature in use — licence compliance verified. |
 | 2026-09-21 | **Two new findings from the sweep, both now rows above:** ① the GitHub row splits — CI/registry is Amber, **cosign-keyless + build-provenance is Red** (GitHub-OIDC-bound, no Forgejo equivalent); ② `fedirz/faster-whisper-server` is **archived upstream**, last built Jan 2025 — digest-pinned, but that is a freeze, not maintenance. **Abandonment is a distinct risk axis this register did not originally model.** |
+| 2026-10-11 | **Analytics and geo rows added (M5-G4/M5-V1):** Umami 3.x (🟢), DB-IP Lite (🟢), IP-to-company candidate (🟡, not chosen). Review in [`../plans/2026-10-11-m5-geo-and-company-data-review.md`](../plans/2026-10-11-m5-geo-and-company-data-review.md). Nothing drilled. |
