@@ -1,4 +1,5 @@
 import { loadEditorBundle, resolveAuthorNames } from "@/lib/webdeskContent";
+import { mediaPublicBase } from "@/lib/webdeskMedia";
 import { collectionLabel } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ItemEditor } from "@/components/webdesk/content/ItemEditor";
@@ -44,6 +45,7 @@ export default async function WebsiteItemPage({ params, searchParams }: { params
         site={b.site}
         bundle={b}
         authors={authors}
+        mediaPublicBase={mediaPublicBase()}
         readOnlyReason={b.detail.item.deletedAt ? "This item has been deleted. Its history is kept; an operator can reverse the deletion." : null}
       />
     </div>

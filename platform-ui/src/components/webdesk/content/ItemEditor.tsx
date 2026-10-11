@@ -82,7 +82,7 @@ const CONFLICT_COPY: Record<string, string> = {
 };
 
 export function ItemEditor({
-  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason,
+  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason, mediaPublicBase = null,
 }: {
   mode: "edit" | "create";
   scope: SiteScope;
@@ -98,6 +98,8 @@ export function ItemEditor({
   authors: Record<string, string>;
   /** Server-known reason the form is read-only (e.g. a deleted item). */
   readOnlyReason: string | null;
+  /** WSK-43c: where WebDesk serves media from (thumbnails in the picker); null = type tiles. */
+  mediaPublicBase?: string | null;
 }) {
   const router = useRouter();
   const defs = useMemo(() => collection.composition.fields ?? [], [collection.composition.fields]);
@@ -155,8 +157,11 @@ export function ItemEditor({
   const readOnly = readOnlyWhy !== null;
   const canWrite = !readOnly && stale === null && unconfirmed === null;
 
+  // The "Choose from library" button of a media field: it needs the site, the language being edited (the asset's alt for it
+  // becomes the value's alt) and who the uploaders are. Picking only fills the field; saving the item is still this editor's.
   const ctx: FormCtx = {
     issues, readOnly, neutralLock: nonDefaultLocale, neutralLocale: tenant.defaultLocale,
+    media: { scope, routeBase, locale, locales: tenant.locales, authors, publicBase: mediaPublicBase },
   };
 
   // ── adopting a freshly read record (initial refresh, Load theirs, restore) ─────────────────────

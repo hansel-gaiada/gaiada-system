@@ -99,6 +99,8 @@
 .wc-list__handle[aria-pressed="true"] { border-color: var(--accent-fg); background: var(--tint-active); color: var(--ink-strong); }
 .wc-list__body { padding: 10px 12px 12px; }
 .wc-list__add { align-self: flex-start; }
+.wc-list__adds { display: flex; flex-wrap: wrap; gap: var(--space-8); align-items: center; }
+.wc-media-pick { margin-top: 6px; }
 
 /* Markdown field */
 .wc-md__tabs { display: flex; gap: 2px; margin-bottom: 6px; }

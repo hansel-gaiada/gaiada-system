@@ -1,4 +1,5 @@
 import { loadSiteContext, resolveAuthorNames } from "@/lib/webdeskContent";
+import { mediaPublicBase } from "@/lib/webdeskMedia";
 import { collectionLabel, defaultFields } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ItemEditor } from "@/components/webdesk/content/ItemEditor";
@@ -39,6 +40,7 @@ export default async function WebsiteNewItemPage({ params, searchParams }: { par
         site={ctx.data.site}
         seed={{ locale, twinOf: null, slug: "", fields: defaultFields(collection.composition.fields ?? []), seo: {}, extraBlocks: [] }}
         authors={authors}
+        mediaPublicBase={mediaPublicBase()}
         readOnlyReason={null}
       />
     </div>
