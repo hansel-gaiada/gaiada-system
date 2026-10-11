@@ -1,0 +1,9 @@
+[Unit]
+Description=Umami retention (weekly)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

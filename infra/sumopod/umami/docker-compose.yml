@@ -1,0 +1,208 @@
+# M5-A3 / WSK-D66 -- Umami (stock, unforked) on `sumopod`, its own compose project.
+# Status: PLANNED (artifacts written, nothing deployed). Runbook: infra/runbooks/umami-sumopod.md
+#
+# Shape (read this before changing anything):
+#
+#   Traefik (mimi-tls-le) --> 172.17.0.1:18742 --> [edge: nginx] --internal net--> [app: Umami] --> [db: Postgres]
+#
+#   * `internal` is `internal: true`: no gateway, no route out. db and app sit only on it, so they have NO
+#     egress by construction (not by a firewall rule that can be flushed, forgotten, or lose a race with a
+#     docker restart). Umami needs no outbound traffic once running: the geo database is a host file mounted
+#     read-only (refreshed by a host timer, never by the app), updates and telemetry are switched off.
+#   * A published port needs a non-internal network, so the app cannot publish itself. `edge` (nginx) is the
+#     minimal publishing sidecar: it joins `internal` + `edge` and forwards ONLY the tracker script path and
+#     the collect path (everything else 404s here, so the admin UI and every other /api route are
+#     unreachable even if the Traefik route is mis-edited). It holds no secrets. Its own egress is cut by the
+#     DOCKER-USER guard (systemd/umami-egress-guard.service) on the `edge` subnet.
+#   * Publish ONLY on docker0's 172.17.0.1. Docker's DNAT runs before ufw, so 0.0.0.0 would be public.
+#   * `admin-gate` (profile `admin`, loopback) and `read-gate` (profile `erp-read`, WireGuard address) are
+#     OFF unless started on purpose. See the runbook.
+#
+# Run:  cd infra/sumopod/umami && cp .env.example .env  (fill it in)  &&  docker compose up -d
+# Project name is pinned so container names are stable (umami-db-1, umami-app-1, umami-edge-1).
+name: umami
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-nginx-gate: &nginx-gate
+  # PINNED: tag + digest (index digest, looked up 2026-10-11). nginx-unprivileged listens on 8080 as uid 101.
+  image: nginxinc/nginx-unprivileged:1.31.6-alpine@sha256:b9241c6e7b8e9a862f129d8d4199ab64b10390949a78bdd5603379b32c844083
+  <<: *hardening
+  read_only: true
+  depends_on:
+    app:
+      condition: service_healthy
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  networks:
+    - internal
+    - edge
+  cpus: 0.25
+  mem_limit: 64m
+  memswap_limit: 64m
+  pids_limit: 64
+
+services:
+  db:
+    # PINNED: tag + digest (index digest, looked up 2026-10-11). Postgres 16 is within Umami 3.x's support range.
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    <<: *hardening
+    # The official entrypoint chowns the data dir and drops to `postgres` via gosu: those caps, nothing else.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=4m,mode=0775
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: ${UMAMI_DB_PASSWORD:?set UMAMI_DB_PASSWORD in .env}
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=128MB
+    volumes:
+      - umami-db-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    cpus: 0.5
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  app:
+    # PINNED: tag + digest (index digest, looked up 2026-10-11). Stock image, no fork, no build.
+    # v3.x ships Postgres only (no separate postgresql-* tag). Re-check GHSA-3xx8-742v-m4mq before deploy
+    # (runbook preflight) and bump this pin if a patched version exists.
+    image: ghcr.io/umami-software/umami:3.4.0@sha256:85909afc45bdcda1917394594a087421fdbb05610fded0fa9f6fb861abb2f367
+    <<: *hardening
+    init: true
+    # NOT read_only, deliberately: scripts/start-docker.sh runs update-tracker.js on every start, which
+    # REWRITES /app/public/script.js to swap the collect path in. A read-only rootfs makes that fail and the
+    # container crash-loops. Compensating controls: cap_drop ALL, no-new-privileges, internal-only network
+    # (no egress), non-root user (nextjs), pids/mem limits.
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://umami:${UMAMI_DB_PASSWORD:?set UMAMI_DB_PASSWORD in .env}@db:5432/umami
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
+      TWO_FACTOR_ENCRYPTION_KEY: ${TWO_FACTOR_ENCRYPTION_KEY:?set TWO_FACTOR_ENCRYPTION_KEY in .env}
+      TRACKER_SCRIPT_NAME: ${TRACKER_SCRIPT_NAME:?set TRACKER_SCRIPT_NAME in .env}
+      COLLECT_API_ENDPOINT: ${COLLECT_API_ENDPOINT:?set COLLECT_API_ENDPOINT in .env}
+      # The nginx edge overwrites X-Real-IP with the visitor address it derived (see edge.conf.template), so
+      # Umami never trusts a client-supplied X-Forwarded-For.
+      CLIENT_IP_HEADER: x-real-ip
+      # Never trust geo headers from the request (cf-ipcountry etc. would be visitor-spoofable); the MMDB decides.
+      SKIP_LOCATION_HEADERS: "1"
+      # Runtime geo database: Umami's detect.ts opens GEOLITE_DB_PATH (GEO_DATABASE_URL is BUILD-time only).
+      GEOLITE_DB_PATH: /geo/dbip-city-lite.mmdb
+      SALT_ROTATION: day
+      DISABLE_TELEMETRY: "1"
+      DISABLE_UPDATES: "1"
+      MCP_ENABLED: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: --max-old-space-size=384
+    volumes:
+      # Directory mount (not a single file) so the monthly refresh can replace the file atomically.
+      - ./geo:/geo:ro
+    networks:
+      - internal
+    cpus: 0.5
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/heartbeat >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  edge:
+    # The ONLY always-on published service.
+    <<: *nginx-gate
+    environment:
+      # Same values as the app's: nginx's envsubst fills them into the two `location =` blocks.
+      TRACKER_SCRIPT_NAME: ${TRACKER_SCRIPT_NAME:?set TRACKER_SCRIPT_NAME in .env}
+      COLLECT_API_ENDPOINT: ${COLLECT_API_ENDPOINT:?set COLLECT_API_ENDPOINT in .env}
+      NGINX_ENVSUBST_OUTPUT_DIR: /tmp
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy-common.inc:/etc/nginx/proxy-common.inc:ro
+      - ./nginx/edge.conf.template:/etc/nginx/templates/umami-edge.conf.template:ro
+    ports:
+      # Never 0.0.0.0. docker0's 172.17.0.1 exists at boot; mimi's bridge gateway does not.
+      - "172.17.0.1:${UMAMI_PUBLISH_PORT:-18742}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://127.0.0.1:8080/__ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ---- optional, OFF by default ------------------------------------------------------------------
+  # Admin UI for the owner, over an SSH tunnel only:
+  #   docker compose --profile admin up -d admin-gate      (then ssh -L 3000:127.0.0.1:13000 sumopod)
+  #   docker compose --profile admin stop admin-gate       (when done)
+  admin-gate:
+    <<: *nginx-gate
+    profiles: ["admin"]
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /tmp
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy-common.inc:/etc/nginx/proxy-common.inc:ro
+      - ./nginx/admin.conf.template:/etc/nginx/templates/umami-admin.conf.template:ro
+    ports:
+      - "127.0.0.1:${UMAMI_ADMIN_PORT:-13000}:8080"
+
+  # The ERP's read path (M5-A4): GET-only subset of Umami's API on sumopod's WireGuard address, for
+  # gda-aicenter (10.88.0.1) ONLY (needs the DOCKER-USER rule in the runbook; ufw does not see published ports).
+  # Start it only after the orchestrator confirms the wg path (runbook "Open decisions").
+  read-gate:
+    <<: *nginx-gate
+    profiles: ["erp-read"]
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /tmp
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy-common.inc:/etc/nginx/proxy-common.inc:ro
+      - ./nginx/read.conf.template:/etc/nginx/templates/umami-read.conf.template:ro
+    ports:
+      - "${UMAMI_WG_BIND:-10.88.0.2}:${UMAMI_READ_PORT:-18743}:8080"
+
+networks:
+  internal:
+    internal: true
+  edge:
+    # Fixed subnet so the egress guard can name it. Check it is free first (runbook preflight).
+    ipam:
+      config:
+        - subnet: 172.28.91.0/28
+
+volumes:
+  umami-db-data:
