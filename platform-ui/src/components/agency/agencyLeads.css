@@ -116,3 +116,80 @@
 .adl-delegation-row:last-child {
   border-bottom: none;
 }
+
+/* M5-P1 — queue stage filters and the Pipeline card. Tokens only. */
+.adl-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.adl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  font: 500 12px var(--font-body);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.adl-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.adl-chip__n {
+  color: var(--ink-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.adl-filters__toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 12px var(--font-body);
+  color: var(--ink-muted);
+}
+
+.adl-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adl-step {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: 500 12px var(--font-body);
+  color: var(--ink-subtle);
+}
+
+.adl-step--current {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.adl-slot {
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  font: 400 12px var(--font-body);
+  color: var(--ink-subtle);
+}
+
+.adl-note {
+  margin: 0;
+  font: 400 12px/1.5 var(--font-body);
+  color: var(--ink-muted);
+}
