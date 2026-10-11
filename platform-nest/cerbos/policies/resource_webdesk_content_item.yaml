@@ -57,8 +57,38 @@
 #  - Module-tier rules pin `module == "webdev"`: module_staff/module_manager compose the role name
 #    from resource.attr.module, so without the pin a handler passing another module would arm that
 #    module's staff. With it, the bundle resolvers' webdev_staff/webdev_manager mapping is literal.
-#  - `collectionKey`/`locale` are carried but read by NO rule yet; the later writer/translator roles
-#    (IAM data-driven roles program, not WSK-47) will. Both default to "" (fail closed).
+#  - `collectionKey`/`locale` were carried but read by no rule until M5-W1a; the writers' room derived
+#    roles (below) now read them, together with `siteId`. All three default to "" (fail closed).
+#
+# ── M5-W1a · THE WRITERS' ROOM (docs/plans/2026-10-11-m5-writers-room-design.md §2, §7) ──────────
+# Six NEW actions on this kind, all of them steps of the per-version review flow WebDesk owns (W2):
+#   submit (also withdraw) · comment · request_changes · seo_signoff · approve · assign
+# and four NEW roles that are grants stored as data, never bundles: webdesk_writer, webdesk_translator,
+# webdesk_seo_reviewer, webdesk_editor. Each is a `company`-scoped `user_roles` row PLUS scope rows (site;
+# collections or all; locales or all) that assemblePrincipal() attaches as `grants[].editorialScopes` (W1b).
+# They match through the attribute-gated derived roles in derived_roles.yaml (`webdesk_editorial_reader`
+# for read, one per role for everything else), which compare the grant's scope rows with
+# resource.attr.siteId / collectionKey / locale. NO bundle and NO perm_* mirror, for the same reason as
+# publish: a flat key cannot say "this site, these collections, these locales" (PERMISSION-CONTRACT §26).
+#
+# Additional resource attributes, every one from WebDesk's own read or a validated route param, never a
+# body (design §2.3): `siteId` (route :siteId after resolveEditableSite()), `reviewState` (WebDesk
+# editorial_items.state: draft | in_review | changes_requested | approved; for a translator's twin
+# `create`, the SOURCE item's), `published` (publishedVersion !== null; for a twin `create`, the
+# source's), `ownerId` (= editorial_items.author_sub), `creatorId` (for `approve`: created_by of the
+# version being approved). Until W1c sends `siteId` and `reviewState`, every rule that reads them reads
+# "" and DENIES; the staff tiers below read neither, so nothing that works today changes.
+#
+# Authoring rules held here:
+#   - Each editorial derived role sits in its OWN rule, never in one rule with a scope-only role (the
+#     org_unit_lead authoring rule, derived_roles.yaml) — so a flat bundle can never mistake one for the other.
+#   - Every instance condition is INLINE (variables.owns, reviewState, creatorId), never variables.local.
+#   - approve is maker != checker against the CREATOR OF THE VERSION being approved, enforced twice:
+#     inline on every approve ALLOW, and as a `roles: ["user"]` DENY that beats the platform_admin
+#     wildcard. An approve with no known creator is DENIED for everyone (four eyes cannot be proven).
+#   - automation, bot and contributor principals never approve; automation and bot never seo_signoff.
+#   - Review state lives in WebDesk; this file only gates WHO may ask for a transition. Whether the
+#     transition is legal (version = submitted, state machine) is WebDesk's 409, not a policy question.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -165,6 +195,146 @@ resourcePolicy:
             request.resource.attr.creatorId != "" &&
             request.resource.attr.creatorId != request.principal.id
 
+    # ══════════ M5-W1a · the review actions for the EXISTING tiers (design §2.4) ═════════════════
+    # webdev_staff (module_staff, the unscoped editor tier) gains submit and comment. webdev_manager
+    # (module_manager) and company_admin (owner mirrors it through its bundle; platform_admin by the
+    # wildcard) gain every review action. `manager` and `member` gain nothing here.
+    - actions: ["submit", "comment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+    - actions: ["submit", "comment", "request_changes", "seo_signoff", "assign"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["submit", "comment", "request_changes", "seo_signoff", "assign"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+    # approve: the item must be in review and its version's creator KNOWN and NOT the caller (inline;
+    # the DENYs at the bottom of this file repeat it for every principal).
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.reviewState) && request.resource.attr.reviewState == "in_review" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId != request.principal.id
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev" &&
+            has(request.resource.attr.reviewState) && request.resource.attr.reviewState == "in_review" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId != request.principal.id
+
+    # ══════════ M5-W1a · the writers' room roles (design §2.1) — each derived role in its OWN rule ══
+    # read: any editorial grant whose scope covers the item's site and collection, in any locale.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_editorial_reader"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # writer — creates in scope; edits, submits and comments on its OWN items only, and edits only
+    # while the item is a draft or has changes requested (never while it is being reviewed).
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_writer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_writer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow && variables.owns &&
+            has(request.resource.attr.reviewState) &&
+            request.resource.attr.reviewState in ["draft", "changes_requested"]
+    - actions: ["submit", "comment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_writer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.owns" } }
+
+    # translator — creates ONLY a locale twin whose SOURCE item has an approved or a live version (for a
+    # twin `create` the handler passes the source's reviewState/published, and the twin's own locale; a
+    # fresh item has neither, so a translator can never start an original). Otherwise the writer's rights.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_translator"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            ((has(request.resource.attr.reviewState) && request.resource.attr.reviewState == "approved") ||
+              (has(request.resource.attr.published) && request.resource.attr.published == true))
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_translator"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow && variables.owns &&
+            has(request.resource.attr.reviewState) &&
+            request.resource.attr.reviewState in ["draft", "changes_requested"]
+    - actions: ["submit", "comment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_translator"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.owns" } }
+
+    # SEO reviewer — edits only while the item is in review (fixing meta in place); comments, requests
+    # changes and signs off in scope. No create, no submit, no approve, no request_publish (design D9).
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_seo_reviewer"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.reviewState) && request.resource.attr.reviewState == "in_review"
+    - actions: ["comment", "request_changes", "seo_signoff"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_seo_reviewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # editor (scoped) — the review desk for its scope: everything up to and including request_publish,
+    # plus approve under maker != checker. No seo_signoff (the SEO check is a separate person's record),
+    # and never publish/schedule/unpublish/delete (the publisher tier, D46).
+    - actions: ["create", "update", "submit", "comment", "request_changes", "assign", "request_publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_editor"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_editor"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.reviewState) && request.resource.attr.reviewState == "in_review" &&
+            has(request.resource.attr.creatorId) &&
+            type(request.resource.attr.creatorId) == string &&
+            request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId != request.principal.id
+
     # ══════════ the self-approval DENYs — every principal, platform_admin included ══════════════
     # `roles: ["user"]` matches every principal Cerbos evaluates (principalPayload() sets the base
     # role unconditionally). These name no derived role, so the static reach computations
@@ -209,6 +379,54 @@ resourcePolicy:
     # `has()` makes a raw caller that omits the attribute evaluate to false (no deny) rather than
     # raise a CEL error; principalPayload() always sends it, "" when unknown.
     - actions: ["publish", "schedule"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # ══════════ M5-W1a · approve is four-eyed on the exact bytes — DENYs for every principal ══════
+    # `creatorId` here is the created_by of the VERSION being approved (WebDesk's read, never a body), so an
+    # editor who rewrites a draft during review cannot approve their own rewrite. Same `roles: ["user"]`
+    # shape as the publish DENYs above: under deny-overrides each beats the platform_admin wildcard and
+    # every ALLOW. The second DENY refuses an approve whose creator is unknown: four eyes cannot be shown,
+    # so nobody (platform_admin included) approves it. resourcePayload() always sends creatorId ("" when
+    # unset); the has()/type() arms cover a raw caller.
+    - actions: ["approve"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.creatorId) && request.resource.attr.creatorId != "" &&
+            request.resource.attr.creatorId == request.principal.id
+    - actions: ["approve"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.resource.attr.creatorId) ||
+            type(request.resource.attr.creatorId) != string ||
+            request.resource.attr.creatorId == ""
+
+    # ══════════ M5-W1a · machine and outside principals never approve (design D7, §3.1) ═════════════
+    # Approval and the SEO sign-off are recorded human judgements. `kind` is users.kind, sent by
+    # principalPayload(); an absent kind ("") matches nothing. `contributor` (design §3.1, owner question
+    # O-4) is listed for approve now so the wall exists before the kind does; a contributor MAY sign off
+    # SEO (its command allow-list includes seoSignoff), so seo_signoff names automation and bot only. The
+    # rest of the contributor DENYs (§3.1 item 6) belong to W1d.
+    - actions: ["approve"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot", "contributor"]
+    - actions: ["seo_signoff"]
       effect: EFFECT_DENY
       roles: ["user"]
       condition:

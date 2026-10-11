@@ -116,7 +116,10 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // WSK-49f (2026-10-11): +2 on the EXISTING client_contact kind, both advancedOnly
     // (manage_website_editor, manage_admin). No new authoring group.
     // Merged: 401 base + 4 (webdesk_media_asset) + 2 (client_contact) = 407 grantable.
-    expect(grantable.length).toBe(407);
+    // M5-W1a (2026-10-11): 407 -> 414 (+7 on 2 EXISTING kinds). submit + comment join webdesk_content_editing;
+    // request_changes/seo_signoff/approve/assign form the NEW group webdesk_editorial_review; manage_editorial is
+    // advancedOnly (governance, behind the writers' room people page). Relationship set untouched.
+    expect(grantable.length).toBe(414);
     expect(relationshipKeys.size).toBe(15);
   });
 

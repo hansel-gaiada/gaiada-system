@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 154,
-      "grantablePermissionsInCatalog": 407,
-      "permissionsCoveredByGroups": 371,
-      "permissionsAdvancedOnly": 36,
+      "groups": 155,
+      "grantablePermissionsInCatalog": 414,
+      "permissionsCoveredByGroups": 377,
+      "permissionsAdvancedOnly": 37,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 105
+      "sensitiveGroups": 106
     }
   },
   "groups": [
@@ -1741,13 +1741,15 @@
       "key": "webdesk_content_editing",
       "name": "WebDesk Content Editing",
       "domain": "webdev",
-      "description": "Read, create and edit WebDesk editorial items and request their publication (files a WS4 approval; publishes nothing by itself). Includes reading collection schemas, which the editor needs to render forms. WSK-47.",
+      "description": "Read, create and edit WebDesk editorial items and request their publication (files a WS4 approval; publishes nothing by itself). Includes reading collection schemas, which the editor needs to render forms. Also submitting an item for editorial review (and withdrawing it) and commenting on it (M5-W1a). WSK-47.",
       "permissions": [
         "webdev.webdesk_content_item.read",
         "webdev.webdesk_content_item.create",
         "webdev.webdesk_content_item.update",
         "webdev.webdesk_content_item.request_publish",
-        "webdev.webdesk_collection.read"
+        "webdev.webdesk_collection.read",
+        "webdev.webdesk_content_item.submit",
+        "webdev.webdesk_content_item.comment"
       ],
       "sensitive": false
     },
@@ -1775,6 +1777,21 @@
         "webdev.webdesk_media_asset.upload",
         "webdev.webdesk_media_asset.update",
         "webdev.webdesk_media_asset.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "webdesk_editorial_review",
+      "name": "WebDesk Editorial Review",
+      "domain": "webdev",
+      "description": "The writers' room review desk: request changes on a WebDesk item under review, record its SEO/AEO sign-off, approve the submitted version for publication (maker != checker against the version's creator; never an automation, bot or contributor principal), and assign items to authors. Approving publishes nothing: publication is still a separate WS4 publish. M5-W1a.",
+      "permissions": [
+        "webdev.webdesk_content_item.read",
+        "webdev.webdesk_content_item.request_changes",
+        "webdev.webdesk_content_item.seo_signoff",
+        "webdev.webdesk_content_item.approve",
+        "webdev.webdesk_content_item.assign",
+        "webdev.webdesk_collection.read"
       ],
       "sensitive": true
     }
@@ -1915,6 +1932,10 @@
     {
       "key": "webdev.webdesk_content_item.schedule",
       "reason": "WSK-47 (2026-10-10): HIGH and approval-gated in Cerbos (approvalId required; maker != checker, the invoice precedent) -- reachable only at decide() of an approved WS4 row, never by role tier alone. advancedOnly beside core.github_repo.deploy, the same approval-gated precedent. Strict maker != checker (R4 is non-scheduled)."
+    },
+    {
+      "key": "webdev.webdesk_collection.manage_editorial",
+      "reason": "M5-W1a (2026-10-11): governance authority over who may write, translate, review and approve on a WebDesk site, and whether a collection requires review. advancedOnly beside core.role_grant.create and core.client_contact.manage_website_editor: it belongs behind the dedicated writers' room people page (writers/people), not a friendly group picker."
     },
     {
       "key": "core.client_contact.manage_website_editor",

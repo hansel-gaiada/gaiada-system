@@ -49,6 +49,13 @@
 #    staff. With it, the bundle resolvers' webdev_staff/webdev_manager mapping is literal.
 #  - No `variables.local` anywhere (cerbos-local-variables trap: a factored condition mis-routes IAM
 #    overrides). The two conditions are written inline, as in the sibling.
+#
+# ── M5-W1a · THE WRITERS' ROOM READ (docs/plans/2026-10-11-m5-writers-room-design.md §2.1) ─────────────
+# Anyone holding a writers' room grant on a site may LIST that site's library (to pick an image), through
+# the attribute-gated derived role `webdesk_editorial_site`, in its own rule. `read` only: no upload, update
+# or delete for these roles. The handler must pass resource.attr.siteId (route :siteId after
+# resolveEditableSite()); until W1c does, the rule reads "" and denies. (This amends "the policy reads
+# NOTHING else" above: the editorial arm reads siteId; the staff tiers still do not.)
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -75,6 +82,12 @@ resourcePolicy:
           expr: >-
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "webdev"
+
+    # M5-W1a: the writers' room site read (its own rule; read only).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_editorial_site"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # ══════════ publisher tier — delete (MEDIUM, immediate; refused while content uses the asset) ══
     - actions: ["delete"]

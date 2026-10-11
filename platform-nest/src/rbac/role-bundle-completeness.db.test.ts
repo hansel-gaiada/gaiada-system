@@ -48,7 +48,21 @@
 // variant-#4 failure this guard catches (a grantable name that authorises nobody) cannot happen here: the
 // role's reach is carried by its derived role, which `role-catalog-drift.db.test.ts` section (A) requires
 // a `roles` row for, and the role can be minted only at client scope (the DB trigger and the choke point).
-const EXEMPT_EMPTY_BUNDLE_ROLES: ReadonlySet<string> = new Set(["client_website_editor"]);
+//
+// M5-W1a (2026-10-11) -- the four writers' room roles, for the SAME reason (docs/plans/2026-10-11-m5-writers-room-
+// design.md §2.5): `webdesk_writer`, `webdesk_translator`, `webdesk_seo_reviewer`, `webdesk_editor` are company-scoped
+// grants whose reach is set by SCOPE ROWS (site, collections or all, locales or all) and checked by attribute
+// conditions in derived_roles.yaml. A flat bundle cannot say "this site, these collections", so a bundle would
+// overstate their reach (and the grant ceiling and the UI's can.scopeOnly() would believe it), and a perm_* mirror
+// would over-grant. Migration 202610111443 asserts they stay EMPTY. Their reach is proven by live probes
+// (webdesk-writers-room-cerbos.test.ts, cerbos/tests/), never by this guard or by role-permission parity.
+const EXEMPT_EMPTY_BUNDLE_ROLES: ReadonlySet<string> = new Set([
+  "client_website_editor",
+  "webdesk_writer",
+  "webdesk_translator",
+  "webdesk_seo_reviewer",
+  "webdesk_editor",
+]);
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
