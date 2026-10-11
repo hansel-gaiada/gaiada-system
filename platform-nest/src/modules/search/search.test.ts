@@ -86,7 +86,7 @@ describe.skipIf(!TEST_URL)("search module (SM-02)", () => {
     expect(res.statusCode).toBe(200);
     const defs = res.json() as Array<{ name: string; method?: string; pathTemplate?: string }>;
     const searchDefs = defs.filter((d) => d.name.startsWith("search."));
-    expect(searchDefs.length).toBe(22); // SM-10's draftReport (1) + SM-74's editReport/approveReport/previewReport/deliverReport (4) + SM-04/05/09/16/17/18/21/30 (13) = 18 base + 4 new
+    expect(searchDefs.length).toBe(29); // M5-A4 adds 7 analytics reads; before: 22 = SM-10's draftReport (1) + SM-74's editReport/approveReport/previewReport/deliverReport (4) + SM-04/05/09/16/17/18/21/30 (13) = 18 base + 4 new
     const listEngagements = searchDefs.find((d) => d.name === "search.listEngagements");
     expect(listEngagements?.method).toBe("GET");
     expect(listEngagements?.pathTemplate).toBe("/api/:tenantId/modules/search/engagements");
