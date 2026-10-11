@@ -36,6 +36,8 @@ import { Injectable, Logger } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
 import { AuditService, type AuditArgs } from "../audit/audit.service";
+import { ZoneBEventEmitterService } from "../events/zoneb-event-emitter.service";
+import { groupFired, type FiredTransition } from "./schedule-fired";
 import { TenantWebhookDispatcherService } from "../tenant-webhooks/tenant-webhook-dispatcher.service";
 import type { TenantWebhookContentEventKind, TenantWebhookContentItemRef } from "../tenant-webhooks/tenant-webhook-event.types";
 import { validateCollectionComposition, type CollectionComposition } from "../delivery/vocabulary/composition";
@@ -87,10 +89,14 @@ type Counter = "published" | "swapped" | "swapsCancelled" | "swapsFailed" | "too
 interface TenantRef {
   id: string;
   slug: string;
+  /** tenants.company_ref: the ERP company id, the Zone B event's tenantId. */
+  company_ref: string;
 }
 
 interface StepOutcome {
   count: Counter | null;
+  /** The transition this transaction committed (what schedule.fired reports). */
+  fired?: FiredTransition;
   after?: () => Promise<void>;
 }
 
@@ -130,6 +136,7 @@ export class ContentTickService {
     private readonly db: DbService,
     private readonly audit: AuditService,
     private readonly webhooks: TenantWebhookDispatcherService,
+    private readonly zoneB: ZoneBEventEmitterService,
   ) {}
 
   /**
@@ -151,21 +158,24 @@ export class ContentTickService {
    */
   async runContentTick(now: Date = new Date()): Promise<ContentTickResult> {
     const tenants = await this.db.withPlatformCtx(async (client) => {
-      const { rows } = await client.query<TenantRef>(`SELECT id, slug FROM tenants WHERE status = 'active' ORDER BY slug`);
+      const { rows } = await client.query<TenantRef>(`SELECT id, slug, company_ref FROM tenants WHERE status = 'active' ORDER BY slug`);
       return rows;
     });
 
     const results: TenantTickResult[] = [];
     for (const tenant of tenants) {
       const r: TenantTickResult = { tenantId: tenant.id, tenantSlug: tenant.slug, published: 0, swapped: 0, swapsCancelled: 0, swapsFailed: 0, tookDown: 0, errors: 0 };
+      const fired: FiredTransition[] = [];
       try {
-        await this.drain(tenant, r, this.duePublishStep(tenant, now));
-        await this.drain(tenant, r, this.dueSwapStep(tenant, now));
-        await this.drain(tenant, r, this.dueTakedownStep(tenant, now));
+        await this.drain(tenant, r, this.duePublishStep(tenant, now), fired);
+        await this.drain(tenant, r, this.dueSwapStep(tenant, now), fired);
+        await this.drain(tenant, r, this.dueTakedownStep(tenant, now), fired);
       } catch (err) {
         r.errors++;
         this.logger.error(`content tick: tenant ${tenant.slug} failed: ${String(err)}`);
       }
+      // Whatever committed is reported, even when a later step failed. Fail-soft, never touches r.
+      await this.emitScheduleFired(tenant, fired);
       results.push(r);
     }
 
@@ -188,7 +198,7 @@ export class ContentTickService {
   }
 
   /** Runs `step` once per due item, one transaction each, until none is left, the cap is hit, or it stops claiming. */
-  private async drain(tenant: TenantRef, counts: TenantTickResult, step: Step): Promise<void> {
+  private async drain(tenant: TenantRef, counts: TenantTickResult, step: Step, fired: FiredTransition[]): Promise<void> {
     // Ids this tick has already claimed in THIS step, pushed by the step the moment it picks one, so
     // an item whose transaction throws is not re-picked in a loop.
     const claimed: string[] = [];
@@ -207,9 +217,22 @@ export class ContentTickService {
       }
       if (!outcome) return;
       if (outcome.count) counts[outcome.count]++;
+      if (outcome.fired) fired.push(outcome.fired);
       if (outcome.after) await outcome.after().catch((err) => this.logger.warn(`content tick: post-commit side effect failed: ${String(err)}`));
     }
     this.logger.warn(`content tick: tenant ${tenant.slug} hit the ${MAX_ITEMS_PER_STEP}-item cap for one step; the rest are next tick's`);
+  }
+
+  /** The schedule.fired rebuild hint: one event per (site, transition, approval) group of what committed. Never throws. */
+  private async emitScheduleFired(tenant: TenantRef, fired: readonly FiredTransition[]): Promise<void> {
+    if (fired.length === 0) return;
+    try {
+      for (const ev of groupFired(tenant.slug, fired)) {
+        await this.zoneB.emitScheduleFired(tenant.company_ref, ev.data, ev.eventId);
+      }
+    } catch (err) {
+      this.logger.warn(`content tick: tenant ${tenant.slug} schedule.fired emit failed (fail-soft): ${String(err)}`);
+    }
   }
 
   // ==============================================================================================
@@ -242,7 +265,11 @@ export class ContentTickService {
         [item.id],
       );
       await this.auditExecuted(client, tenant, { kind: "publish", itemId: item.id, version: item.published_version });
-      return { count: "published", after: this.announce(tenant, item, "content.published", item.published_version) };
+      return {
+        count: "published",
+        fired: { siteId: item.site_id, kind: "publish", itemId: item.id, version: item.published_version, effectiveAt: item.publish_at as Date, approvalId: null },
+        after: this.announce(tenant, item, "content.published", item.published_version),
+      };
     };
   }
 
@@ -322,7 +349,11 @@ export class ContentTickService {
         version: swap.version,
         ...(swap.ws4_approval_id ? { approvalId: swap.ws4_approval_id } : {}),
       });
-      return { count: "swapped", after: this.announce(tenant, item, "content.published", swap.version) };
+      return {
+        count: "swapped",
+        fired: { siteId: item.site_id, kind: "swap", itemId: item.id, version: swap.version, effectiveAt: swap.publish_at, approvalId: swap.ws4_approval_id },
+        after: this.announce(tenant, item, "content.published", swap.version),
+      };
     };
   }
 
@@ -367,7 +398,11 @@ export class ContentTickService {
       // The item is down: a pending swap would bring it back, which nobody asked for.
       await cancelPendingSwap(client, item.id, "unpublished");
       await this.auditExecuted(client, tenant, { kind: "takedown", itemId: item.id, version: takenDownVersion });
-      return { count: "tookDown", after: this.announce(tenant, locked, "content.unpublished", takenDownVersion) };
+      return {
+        count: "tookDown",
+        fired: { siteId: locked.site_id, kind: "takedown", itemId: item.id, version: takenDownVersion, effectiveAt: locked.unpublish_at as Date, approvalId: null },
+        after: this.announce(tenant, locked, "content.unpublished", takenDownVersion),
+      };
     };
   }
 
