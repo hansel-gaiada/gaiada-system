@@ -56,6 +56,8 @@ export interface FakeItem {
   publishState: "draft" | "published" | "unpublished";
   deletedAt: string | null;
   versions: Array<{ version: number; fields: unknown; contentHash: string; createdBy: string; createdAt: string; note: string | null }>;
+  /** M5-W2b/W2c: `item.get`'s `editorial` member. Absent = a WebDesk older than M5-W2b (the member is not sent). */
+  editorial?: { reviewRequired: boolean; state: string; approvedVersion: number | null };
 }
 
 export interface FakeCall {
@@ -332,6 +334,7 @@ export class FakeZoneB {
           live: i.publishedVersion ? this.versionJson(i, i.publishedVersion) : null,
           group: [{ locale: i.locale, itemId: i.itemId, slug: i.slug, headVersion: i.headVersion, publishedVersion: i.publishedVersion, publishState: i.publishState }],
           lint: { placeholders: { unresolvedTokens: [], markers: {} } },
+          ...(i.editorial ? { editorial: { ...i.editorial, approvedIsHead: i.editorial.approvedVersion === i.headVersion } } : {}),
         });
       }
       case "item.versions": {

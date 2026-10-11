@@ -29,6 +29,15 @@
 // a publish or a swap, `content.unpublished` for a takedown) goes out through the same path the
 // commands use (announceContentEvent). A webhook outage can never undo a committed transition.
 //
+// THE REVIEW GATE AT FIRE TIME (M5-W2c). content.schedule already refused any unapproved version on a review-required
+// collection, but a pending swap waits, and the approval can stop matching in the meantime: a newer version is
+// approved, or review is switched on for the collection. So step 2 asks the gate again, under the item lock, with the
+// swap's EXACT version; a refusal marks the swap row failed (`review-not-approved: …`, counted in swapsFailed) and the
+// live version keeps serving. An edit after approval does NOT stale it: approved_version survives the edit (design
+// 4.1), and it is still exactly the bytes that were approved. Step 1 (a non-live item's scheduled publish) cannot be
+// re-gated here: the frozen /v1 read path shows it BY TIME at publish_at, before any tick, and its projection was
+// gated when it was scheduled.
+//
 // The projection effects are NOT written here: applyPublishEffect / applyUnpublishEffect
 // (control/content/content-transitions.ts) are the same functions content.publish and
 // content.unpublish run.
@@ -42,6 +51,7 @@ import { TenantWebhookDispatcherService } from "../tenant-webhooks/tenant-webhoo
 import type { TenantWebhookContentEventKind, TenantWebhookContentItemRef } from "../tenant-webhooks/tenant-webhook-event.types";
 import { validateCollectionComposition, type CollectionComposition } from "../delivery/vocabulary/composition";
 import { validateStoredContent } from "../control/content/content-projection";
+import { reviewRefusals, swapRefusalReason } from "../control/editorial/review-gate";
 import { attributionOf } from "../control/content/content-versions";
 import {
   ITEM_COLUMNS,
@@ -70,7 +80,7 @@ export interface TenantTickResult {
   swapped: number;
   /** step 2: pending swaps cancelled because the item was deleted or no longer live */
   swapsCancelled: number;
-  /** step 2: pending swaps whose version no longer validates (nothing changed) */
+  /** step 2: pending swaps whose version no longer validates, or (M5-W2c) is no longer the approved one (nothing changed) */
   swapsFailed: number;
   /** step 3: published/scheduled -> unpublished */
   tookDown: number;
@@ -329,6 +339,15 @@ export class ContentTickService {
       if (problem !== null || !source) {
         // Nothing else changes: the live version keeps serving, the row records why.
         const reason = (problem ?? "the version could not be loaded").slice(0, FAIL_REASON_MAX);
+        await client.query(`UPDATE content_schedules SET failed_at = now(), fail_reason = $2 WHERE id = $1`, [swap.id, reason]);
+        this.logger.warn(`content tick: swap ${swap.id} of item ${item.id} to version ${swap.version} was not applied: ${reason}`);
+        return { count: "swapsFailed" };
+      }
+
+      // M5-W2c: the review gate again, at fire time (see the header). A no-op where review is off.
+      const [refusal] = await reviewRefusals(client, item.site_id, [{ index: 0, itemId: item.id, collectionKey: item.collection_key, version: swap.version }]);
+      if (refusal) {
+        const reason = swapRefusalReason(refusal).slice(0, FAIL_REASON_MAX);
         await client.query(`UPDATE content_schedules SET failed_at = now(), fail_reason = $2 WHERE id = $1`, [swap.id, reason]);
         this.logger.warn(`content tick: swap ${swap.id} of item ${item.id} to version ${swap.version} was not applied: ${reason}`);
         return { count: "swapsFailed" };

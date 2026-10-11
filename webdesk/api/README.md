@@ -2011,7 +2011,28 @@ WebDesk enforces on its own, besides the ERP's Cerbos: approve and sign-off are 
 principal gets **403 `review-principal-not-allowed`**), and **maker != checker**: the approver may not be the creator of the
 version being approved (**403 `review-self-approval`**, against `content_versions.created_by`). The `editorial_events.kind`
 vocabulary is `review.*` (`EDITORIAL_EVENT_KINDS`); `/v1` never reads these tables (`test/editorial-delivery-isolation.spec.ts`).
-The publish gate that makes an unapproved version unpublishable is W2c, not here.
+The publish gate that makes an unapproved version unpublishable is W2c (next section).
+
+### The publish gate (M5-W2c, PROTOTYPED) — `src/control/editorial/review-gate.ts`
+
+On a collection whose policy has review ON, the only version that may go in front of a production key is the one in
+`editorial_items.approved_version`, compared to the EXACT version being published: not the head (promotion import and
+rollback append versions without the review hooks, so the head can move under an approved item) and not the state alone
+(an edit after approval returns the item to `draft`, and `approved_version` stays publishable). No review row, or no approved
+version, is refused. Where it runs, always under the item locks and inside the command's own transaction:
+
+| Path | When | Refusal |
+|---|---|---|
+| `content.publish` | after the WS4 claim (the envelope's audit row) and D62's client-path check, before any effect | **409 `review-not-approved`** `{ items: [{ itemIndex, itemId, version, approvedVersion }], total }` for the WHOLE batch; the transaction (claim included) rolls back |
+| `content.schedule` with `publishAt` | the same | the same; a takedown-only schedule (`publishAt: null`) is not gated |
+| scheduler, due version swap (WSK-61 step 2) | at fire time, after the composition re-check | the swap row is marked failed, `fail_reason = "review-not-approved: version N is not the approved version (approved: M \| nothing is approved)"`, counted in `swapsFailed`; the live version keeps serving |
+
+It applies to every principal class, client editors included (a client cannot approve, so a client's self-publish on a
+review-required collection needs an agency approval first; D62 still runs first and independently). Review OFF (no
+policy row, the default) is one policy read and nothing else. Not gated: `content.unpublish`, `content.promote`,
+`content.rollback`. A non-live item's scheduled publish (step 1) cannot be re-checked at fire time: the frozen `/v1` read
+path shows it by time at `publish_at`, before any tick; it was gated when it was scheduled. Proof:
+`test/editorial-publish-gate.spec.ts`.
 
 ## Draft preview (WSK-46) — `src/control/content/preview-token-*`, `src/delivery/preview-*`
 
