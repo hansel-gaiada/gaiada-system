@@ -18,7 +18,24 @@ WebDesk M3 (`docs/plans/2026-10-11-webdesk-m3-plan.md`), rulings WSK-D52, D53, D
 - **Media library, ERP half (WSK-43b).** A new Cerbos kind `webdesk_media_asset` (read, upload, update, delete) with its six artifacts: catalog 422 pairs / 102 kinds / 407 grantable, bundles 1847. BFF routes for list, usage, upload token, update and delete, and five MCP tools (`webdesk.media.*`). The upload token goes to the browser as a public WebDesk URL (`WEBDESK_PUBLIC_BASE_URL`), so image bytes never pass through the ERP; it is never stored, and the upload-token tool is deliberately not an approval-replayable action. `resource_mcp_tool.yaml` gains the media update/delete executables.
 - **Draft preview action (WSK-46, D52).** `POST …/items/:itemId/preview` and the MCP tool `webdesk.content.preview` mint a preview token and answer `https://<site staging domain>/preview/#t=<token>`: the token rides in the URL fragment, never a query string or a log. Honest refusals when preview isn't set up or the site has no preview page yet.
 - **Client website editors, grant path (WSK-49f, D60).** A role-as-data `client_website_editor`, scoped to one client record; derived roles `client_website_editor` and `client_contact_admin`; a new client-contact capability `admin`, assigned by staff, which lets a client grant website editing to their own contacts (bounded, audited). Three CHECKs widened by self-verifying migrations that read the live definition. **A client admin also signs** (owner ruling): signing, signature notifications and Client Centre editing accept `admin`.
-- Verified on the Linux gate (sumopod `m3r354`, nest + ui + next build).
+- Verified on the Linux gate (sumopod `m3r354c`, nest + ui + next build, with the M2 editor fixes merged).
+
+### infra `0.9.4` - the WebDesk public origin reaches the ERP and its UI (2026-10-11) - PROTOTYPED
+
+- `docker-compose.vps.yml` forwards `WEBDESK_PUBLIC_BASE_URL` to `platform` (media upload URLs, WSK-43b) and `platform-ui` (library thumbnails, WSK-43c). Empty default: uploads answer "not enabled" and the grid shows type tiles. Set it to `https://api.erp.gaiada.com` (WSK-D61).
+
+### platform-ui `0.85.1` - the Website editor's controls are styled, and a pending publish keeps its version after a reload (2026-10-11) - PROTOTYPED
+
+WebDesk M2. Both defects were found by driving the editor live on erp.gaiada.online (1.0.0-alpha.351/352) as hansel@gaiada.com.
+
+- **Bare form controls.** The editor's generated form, the item filters, the save bar and the key-request panel use the shared `.lux-field*` controls, but no Website component imported `forms/forms.css`, so a direct load of an item drew plain browser inputs. `content.css` now `@import`s it (the `appraisals.css` precedent), so every surface that loads `content.css` gets it. The stub e2e pins it: the H1 control carries the 13px inline padding (a browser input pads 2px), and the assertion fails without the import.
+- **"Publish of v? was requested".** After a reload, the pending card is rebuilt from `…/publish-requests`, which carried `itemIds` only. `parsePublishRequests` reads the new `items:[{itemId,version}]` (malformed → `WireDrift`; absent → `[]`, for a BFF one release behind), `findPendingPublishRequests` returns the item's version, and `PublishBar` restores it. The e2e reload assertion fails without the PublishBar line (it reads "v?").
+- **Verified on Linux** (sumopod, on 352 / Next 16.3.8): tsc clean, vitest 237 files / 4682, `next build`, Website e2e 44/45. The one red is "STATE loading: a skeleton shows…", which also fails on the 352 base under load (base 3/5, fix 4/5).
+
+### platform-nest `0.64.1` - the editor's own-requests read carries each item's version (2026-10-11) - PROTOTYPED
+
+- `GET /api/:t/modules/webdev/content/sites/:ts/:site/publish-requests` rows gain `items:[{itemId,version}]` from the approval's `tool_args.items`. It keeps only entries with a string `itemId` and a positive integer `version`. Additive: `itemIds` is unchanged. Contract: BFF §27.
+- **Verified on Linux** (sumopod): tsc clean, `src/modules/webdev` 33 files / 532 passed (1 file skipped: the editorial-signer e2e, which needs a real signer), including the real-contract test (32/32) that feeds the controller's bodies through the UI's parsers.
 
 ### platform-nest `0.64.0` - companies carry a vertical; owners of the root get the Platform and Group surfaces (2026-10-11) - PROTOTYPED
 
@@ -49,7 +66,7 @@ PV-1 (company context), rulings PV-D11 and PV-D14 to PV-D20. Tickets: `docs/plan
 - **Preview (WSK-46).** A Preview button opens the draft on the site's own preview page, with honest states when preview isn't available yet.
 - **Media library (WSK-43c).** A Media tab in the Website workspace: upload straight to WebDesk with progress, alt text per language, tags, "where it's used", and delete refused while in use; a picker for media fields in the editor.
 - **Fix: a client editor stays in the portal.** A client contact granted `client_website_editor` (WSK-D60) was counted as staff, so they got the staff shell instead of the portal. Client-side roles are now one list (`CLIENT_SIDE_ROLES`), and holding one never makes someone staff.
-- Verified on the Linux gate (sumopod `m3r354`) and in Playwright (WebDesk suite 68/68 on the built app).
+- Verified on the Linux gate (sumopod `m3r354c`) and in Playwright (WebDesk suite 68/68 on the built app).
 
 ### platform-ui `0.85.0` - the staff menu follows the company: agency rows by vertical, Group on the root, Platform for operators (2026-10-11) - PROTOTYPED
 

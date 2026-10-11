@@ -361,7 +361,7 @@ describe("loadEditorBundle", () => {
   });
 });
 
-const reqRow = (over: Record<string, unknown> = {}) => ({ approvalId: "a1", status: "pending", createdAt: "2026-10-10T08:00:00Z", itemIds: ["i1"], executionStatus: "not_applicable", ...over });
+const reqRow = (over: Record<string, unknown> = {}) => ({ approvalId: "a1", status: "pending", createdAt: "2026-10-10T08:00:00Z", itemIds: ["i1"], items: [{ itemId: "i1", version: 3 }], executionStatus: "not_applicable", ...over });
 
 describe("findPendingPublishRequests (WSK-44b: the caller's OWN requests route, not the generic approvals list)", () => {
   it("keeps only pending requests that name the item", async () => {
@@ -370,8 +370,19 @@ describe("findPendingPublishRequests (WSK-44b: the caller's OWN requests route, 
       reqRow({ approvalId: "a2", itemIds: ["other"] }),
       reqRow({ approvalId: "a3", status: "approved", itemIds: ["i1"] }),
     ] });
-    expect(await findPendingPublishRequests("u", "c", "gaiada", "s1", "i1")).toEqual({ kind: "ok", data: [{ approvalId: "a1" }] });
+    expect(await findPendingPublishRequests("u", "c", "gaiada", "s1", "i1")).toEqual({ kind: "ok", data: [{ approvalId: "a1", version: 3 }] });
     expect(fetchMock.mock.calls[0][0]).toBe("/api/c/modules/webdev/content/sites/gaiada/s1/publish-requests?status=pending");
+  });
+  it("an absent `items` (a BFF one release behind) reads as [] and no known version", async () => {
+    fetchMock.mockResolvedValue({ requests: [reqRow({ items: undefined })] });
+    expect(await findPendingPublishRequests("u", "c", "gaiada", "s1", "i1")).toEqual({ kind: "ok", data: [{ approvalId: "a1", version: null }] });
+    expect(parsePublishRequests({ requests: [reqRow({ items: undefined })] })[0].items).toEqual([]);
+  });
+  it("a malformed `items` is drift", () => {
+    expect(() => parsePublishRequests({ requests: [reqRow({ items: "i1" })] })).toThrow(WireDrift);
+    expect(() => parsePublishRequests({ requests: [reqRow({ items: [{ itemId: "i1", version: "3" }] })] })).toThrow(WireDrift);
+    expect(() => parsePublishRequests({ requests: [reqRow({ items: [{ itemId: 7, version: 3 }] })] })).toThrow(WireDrift);
+    expect(() => parsePublishRequests({ requests: [reqRow({ items: [{ itemId: "i1", version: 0 }] })] })).toThrow(WireDrift);
   });
   it("a body that is not {requests:[...]} is drift", async () => {
     fetchMock.mockResolvedValue([]);
