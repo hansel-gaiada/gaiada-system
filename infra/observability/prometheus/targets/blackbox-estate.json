@@ -12,6 +12,14 @@
     "labels": { "host": "gda-aicenter", "env": "production", "plane": "estate", "service": "webdesk-edge" }
   },
   {
+    "targets": ["https://status.erp.gaiada.com/"],
+    "labels": { "host": "sumopod", "env": "production", "plane": "estate", "service": "webdesk-status-page" }
+  },
+  {
+    "targets": ["https://insights.erp.gaiada.com/lib/kestrel.js"],
+    "labels": { "host": "sumopod", "env": "production", "plane": "estate", "service": "umami-collector" }
+  },
+  {
     "targets": ["https://pilot-fullstack-cms.gaiada.online"],
     "labels": { "host": "delphi", "env": "client-staging", "plane": "estate" }
   },
