@@ -5,8 +5,8 @@ proposed model, and the decisions the owner needs to make before anything is tic
 
 **Scope (owner, 2026-10-10): Gaiada first.**
 
-- **Ruled:** PV-D1, PV-D2, PV-D3, PV-D4, PV-D10, PV-D12 and PV-D13. See the decision log at the
-  end, and §11 for how D1, D4 and D10 were worked through.
+- **Ruled:** PV-D1, PV-D2, PV-D3, PV-D4, PV-D10, PV-D11, PV-D12, PV-D13 and PV-D14 to PV-D20. See the
+  decision log at the end, and §11 for how D1, D4 and D10 were worked through.
   - Viceroy is a Gaiada client today, and its own hotel and F&B system is deferred.
   - Each of our companies gets a vertical that selects its modules, and each client keeps a business
     type.
@@ -518,8 +518,11 @@ other work is planned for it.
 
 ### 5.3 Syrowatka group tier
 
+**Ruled: PV-D11** (2026-10-11), with the audience and placement below.
+
 A **Group** area is visible only to owners of the root (finance D-F8: authority comes from owning
-the root entity; `group_executive` is gone). It contains:
+the root entity; `group_executive` is gone), and **only while the root company itself is the
+active company** in the switcher. It contains:
 
 - per-company cards, each in its **own vertical's** KPIs (Gaiada: revenue, AR, client health;
   Viceroy: occupancy, RevPAR, F&B, GOP);
@@ -533,7 +536,12 @@ Holding-level rows move out of the company nav:
 
 - Rollups and the cross-company Company Report move to **Group**.
 - Systems (WA/TG bot, AI gateway, MCP hub, automation, observability) moves to a **Platform** area
-  for `platform_admin`. Today those rows are ungated in every company's nav.
+  for `platform_admin` **and owners of the root, with full controls** (PV-D18). Today those rows are
+  ungated in every company's nav. Hiding a row is not security: the pages and their BFF reads get the
+  same gate (PV-1).
+- A **group report** is built in PV-1 (PV-D19): per-company cards plus **Sum of companies**. The
+  **Consolidated** figure still waits for F9 eliminations.
+- "Owner of the root" means holding the IAM `owner` role on the root company (PV-D20).
 
 ### 5.4 The client grain in reports
 
@@ -576,7 +584,7 @@ code comments.
 | **D8** | Signature tiers: keep the typed-name attestation for routine approvals and use a certified e-signature provider for agreements above a threshold? | **Yes, with counsel setting the threshold.** Indonesian law treats certified and uncertified e-signatures differently. The provider needs a vendor-exit row |
 | **D9** | Payment gateway: hosted checkout (no card data in the ERP), auto-confirming `invoice_payments`, after invoice numbering lands? Bank transfer plus proof stays | **Yes, provider TBD**, fees per transaction only (no per-seat), with a written exit |
 | **D10** | A client of more than one group company? | **RULED: PV-D10.** One record per company, each handling its own scope; the client sees both; the holding sees both, tagged (§3.2, §11.3) |
-| **D11** | A Group area for root owners and a Platform area for `platform_admin`, with holding-level rows moved out of the company nav? | **Yes** |
+| **D11** | A Group area for root owners and a Platform area for `platform_admin`, with holding-level rows moved out of the company nav? | **RULED: PV-D11.** Yes, both. Group shows only while the root company is active; Platform is for `platform_admin` and root owners, with full controls (§5.3, PV-D18 to PV-D20) |
 | **D12** | Viceroy's venues (Apéritif, CasCades, Pinstripe Bar, Akoya Spa) and Bali Catering: separate legal entities (then companies with their own books), or outlets inside Viceroy? | **RULED: PV-D12.** Separate: each is its own company |
 | **D13** | The assessment's open question: an internal operating system or a product to sell? | **RULED: PV-D13.** Internal now, sold much later as a subscription (SaaS and PaaS). See §2.7 |
 
@@ -772,5 +780,13 @@ is optional and defaults to `other`. Making it required is a PV-3 detail, not a 
 | PV-D3 | 2026-10-10 (owner) | **Viceroy's HMS and F&B system will be built much later. The focus now is Gaiada.** PV-8 is deferred, and no Viceroy-specific work is ticketed. The owner's words were "we will build", so the stated intent is to build; how much is native and how much is connected is designed when the work is picked up | §5.2's earlier "integrate the PMS first" recommendation; for Viceroy, the 2026-07-04 rule to integrate commodity verticals such as a hotel PMS (`docs/superpowers/specs/2026-07-04-ws1-gaiada-platform-architecture.md:18`) |
 | PV-D4 | 2026-10-10 (owner delegated: "if it's better, proceed, but plan it properly") | **The client portal and the staff client hub use the same five areas: Overview · Projects · Business · Contracts & billing · People.** The hub adds one staff-only area, Internal. Two-level navigation; **every existing URL is kept**; only labels and grouping change, except the new hub path `/clients/[id]/billing`. The portal sub-tab "Agreements" becomes "Contracts". Visibility markers are computed by the backend. Analysis: §11.2 | CC-D8's hub tab list (Overview · Work · Profile · Contacts & meetings · Notes & history), relabelled with paths kept. CC-D8's one-client-one-page principle stands. Also the portal's 11-tab bar (`PortalTabs.tsx`) |
 | PV-D10 | 2026-10-10 (owner) | **Each client record belongs to exactly one of our companies.** A client engaging two companies has one record in each, and each company handles only its own scope. **The client sees both:** Overview has a section per company, and the other areas are scoped by a company switch. **The holding sees both, tagged:** a company label on every row in the Group tier, and a "same organization" link owned by the root and invisible to the companies. One request per company, merged after; never a cross-company query for client data. Analysis: §3.2, §11.3 | The portal's "first company in the list" fallback (`UI/lib/tenant.ts:8-13`) for contacts |
+| PV-D11 | 2026-10-11 (owner) | **A Group area and a Platform area, with holding-level rows moved out of the company nav.** **Group** (rollups, the cross-company Company Report, later per-company cards and group money) is shown to owners of the root, and only while the root company is the active company. **Platform** (WA/TG bot, AI gateway, MCP hub, automation, observability) is shown to `platform_admin` and owners of the root, in every company. Pages and BFF reads behind both get the same gate as the nav (§5.3) | The ungated Systems rows and the company-nav Rollups and Company Report rows |
 | PV-D12 | 2026-10-10 (owner) | **Viceroy's venues (Apéritif, CasCades, Pinstripe Bar, Akoya Spa) and Bali Catering and Events are separate legal entities.** Each is its own company, with its own tenant and books, when it is created. None is an outlet inside Viceroy | — |
 | PV-D13 | 2026-10-10 (owner) | **The ERP is an internal tool now. It will be sold much later as a subscription product (SaaS and PaaS).** Product-only work (self-signup, subscription billing, customer SSO/SAML, SOC 2, marketplace) is out of scope until the owner opens it. What we build must not hard-wire our own group (§2.7) | Answers the open question in the 2026-09-17 system assessment ("internal operating system or product to sell?"), which is program-wide, not limited to this plan |
+| PV-D14 | 2026-10-11 (owner) | **The verticals are `holding`, `agency`, `hospitality`, `catering` and `general`.** Hotel, restaurant, bar and spa stay as the company `type` inside `hospitality`. Adding a vertical later is a row in `company_verticals` (§2.6) | — |
+| PV-D15 | 2026-10-11 (owner) | **A company outside the agency vertical gets the generic menu.** Viceroy and future non-agency companies see Company dashboard, Departments, Organization, Finance, HR, IT, internal Projects, Reports, Knowledge and Learning; no Clients, Agency, Delivery Pipeline or service consoles. Deep links still land on the module-off page (§2.6, §5.2) | Viceroy's current agency rows |
+| PV-D16 | 2026-10-11 (owner) | **Only `platform_admin` may set or change a company's vertical.** It works like a product edition: set at creation, rarely changed (§2.7) | — |
+| PV-D17 | 2026-10-11 (owner) | **A pack's default modules are switched on only when a company is created.** Existing companies keep exactly the modules they have; for them the pack shapes the menu and hides rows for modules that are off. Changing a vertical never resets modules | — |
+| PV-D18 | 2026-10-11 (owner) | **Owners of the root get FULL platform and system controls in the Platform area** (bots, AI gateway, MCP hub, automation, observability), the same as `platform_admin`. The server gate for those surfaces becomes "`platform_admin` at global scope, or the `owner` role on a root company". **Consequence, recorded:** owner and `platform_admin` stop being disjoint for system surfaces, which D-9's "one platform_admin + one owner" appointment pair leaned on. Owner grants already need that two-person appointment (`owner` is in `ELEVATED_TIER`, `grant-write.service.ts`), so system power still has no single-step path | **D-8 / IAM-14's "owner: NO platform/system controls"**, for the system surfaces only (`PN/src/admin/elevated.ts`); owner's business scope is unchanged |
+| PV-D19 | 2026-10-11 (owner) | **A cross-company group report is built in PV-1.** Owners of the root may read group rollups, each owned company's Company Report, and a new group report: per-company cards plus Sum of companies. Consolidated figures wait for F9 eliminations | Rollups and the Company Report being `platform_admin`-only |
+| PV-D20 | 2026-10-11 (owner) | **"Owner of the root" means holding the IAM `owner` role on the root company** (a `user_roles` grant scoped to the company whose id equals its own `root_company_id`). Not the Finance ownership register | — |
