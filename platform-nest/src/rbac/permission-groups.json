@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 153,
-      "grantablePermissionsInCatalog": 401,
-      "permissionsCoveredByGroups": 367,
+      "groups": 154,
+      "grantablePermissionsInCatalog": 405,
+      "permissionsCoveredByGroups": 371,
       "permissionsAdvancedOnly": 34,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 104
+      "sensitiveGroups": 105
     }
   },
   "groups": [
@@ -1762,6 +1762,19 @@
         "webdev.webdesk_content_item.delete",
         "webdev.webdesk_collection.read",
         "webdev.webdesk_collection.apply_schema"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "webdesk_media_library",
+      "name": "WebDesk Media Library",
+      "domain": "webdev",
+      "description": "Manage a WebDesk site's media library: list assets and see where each is used, start an upload (a single-use token; the browser then uploads straight to WebDesk), edit an asset's title, alt text and tags, and delete an asset that no content uses (refused with 409 media-in-use otherwise). WSK-43b.",
+      "permissions": [
+        "webdev.webdesk_media_asset.read",
+        "webdev.webdesk_media_asset.upload",
+        "webdev.webdesk_media_asset.update",
+        "webdev.webdesk_media_asset.delete"
       ],
       "sensitive": true
     }

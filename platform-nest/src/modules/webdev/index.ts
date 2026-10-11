@@ -46,6 +46,8 @@ export const webdevModule: ModuleContract = {
     "202609011230_webdev_provisioned_sites_framework_widen.sql",
     // WSK-47 (additive): IAM seed for the two WebDesk editorial kinds (no DDL).
     "202610101420_iam_webdesk_content_permissions.sql",
+    // WSK-43b (additive): IAM seed for the WebDesk media library kind (no DDL).
+    "202610111030_iam_webdesk_media_permissions.sql",
     // WSK-60 (additive): the staging rebuild ledger + the stale-staging marker (third wall).
     "202610101730_webdev_site_builds.sql",
   ],
@@ -70,6 +72,11 @@ export const webdevModule: ModuleContract = {
     { key: "webdev.webdesk_content_item.delete", description: "Delete a WebDesk editorial item" },
     { key: "webdev.webdesk_collection.read", description: "View a WebDesk site's collections and compositions" },
     { key: "webdev.webdesk_collection.apply_schema", description: "Apply a composition change to a WebDesk collection" },
+    // WSK-43b (additive): the WebDesk media library (m3 plan "WSK-43 · The media library"). No approval gate: all MEDIUM or lower.
+    { key: "webdev.webdesk_media_asset.read", description: "View a WebDesk site's media library and where each asset is used" },
+    { key: "webdev.webdesk_media_asset.upload", description: "Start a WebDesk media upload (mints a single-use upload token)" },
+    { key: "webdev.webdesk_media_asset.update", description: "Edit a WebDesk media asset's title, alt text and tags" },
+    { key: "webdev.webdesk_media_asset.delete", description: "Delete a WebDesk media asset that no content uses" },
   ],
   customFieldTargets: [],
   mcpTools: [
