@@ -135,7 +135,7 @@
 | Wave | Tickets | Why this order |
 |---|---|---|
 | 1 | PV3-01 (countersign rule), PV3-02 (predicate module), PV3-03 (client facets), PV3-04 (client data), PV3-05 (hub areas and Projects) | disjoint files; nothing here needs another ticket |
-| 2 | PV3-02b (mail thread scope), PV3-06 (billing tools), PV3-07 (`clientVisible` + parity), PV3-08 (Contracts & billing page) | 02b needs 02; 06 needs 01 and 03; 07 needs 02 and 03 (same controllers as 03); 08 needs 01 and 03, and edits the layout after 05 |
+| 2 | PV3-02b (mail thread scope), PV3-02c (isolation fixes), PV3-06 (billing tools), PV3-07 (`clientVisible` + parity), PV3-08 (Contracts & billing page) | 02b and 02c need 02; 06 needs 01 and 03; 07 needs 02 and 03 (same controllers as 03); 08 needs 01 and 03, and edits the layout after 05 |
 | 3 | PV3-09 (markers on every area, hub axe) | needs 05, 07 and 08 merged |
 | 4 | PV3-10 (QA, release, live) | after the merged tree is green |
 
@@ -261,6 +261,29 @@ the owner may overrule it.
 **Tests:** a project-scoped contact gets 404 for a project-less run's thread, and a client-wide contact
 gets 200. Teeth: put back `OR r.project_id IS NULL` and the 404 case fails.
 
+### PV3-02c: portal isolation fixes found while extracting the predicates
+
+**Owner:** senior-be. **Wave 2** (needs PV3-02 merged). Each fix narrows what a client can do or see to
+what the rest of the portal already allows, so none needs a new ruling.
+
+1. **A client can decide an internal gate (moderate).** `POST /:t/portal/runs/:runId/scope-sign`
+   (`PN/src/core/portal.controller.ts:291-297` on 355) marks the gate named by the client-supplied
+   `body.gateId` as decided when the sign-off completes, with no `actor_side = 'client'` check. A
+   client signer can close an internal review gate on their own run. It fires once per run, needs a
+   signer contact, and stays within the client's own run. Fix: add `gateClientVisible("")` (or check
+   that the gate is the run's scope sign-off gate) to that UPDATE. Test: an internal gate id in the body
+   stays pending; teeth: drop the check and it is decided.
+2. **A deliverable file stays downloadable after its project is deleted (low).**
+   `ownsEntity.deliverable` (`portal-commerce.controller.ts:497-499`) uses the project's reach without
+   `p.deleted_at IS NULL`, while every deliverable list hides it. Fix: use `projectInPortalScope`.
+3. **A payment shows without its invoice (low).** The timeline's payments and the receipt download reach
+   a payment by its own `client_id` (`portal-workspace.controller.ts:470`, `portal-commerce.controller.ts:508`)
+   and never check the parent invoice, so a confirmed payment on a deleted invoice still shows. Fix:
+   join the invoice and require `invoiceInPortalScope`.
+
+**Owned paths:** those three call sites, their tests, and the equivalence entries in
+`PN/src/core/portal-visibility.test.ts` that pin the old shapes (update them on purpose).
+
 ### PV3-03: client facets for Contracts & billing (client-centric slice 2, backend)
 
 **Owner:** senior-be. **Wave 1.**
@@ -270,7 +293,9 @@ gets 200. Teeth: put back `OR r.project_id IS NULL` and the 404 case fails.
   `GET contracts`),
   `client-work.controller.ts` (`GET deliverables`), `pipeline.controller.ts` (`GET pipeline/runs`),
   `meetings.controller.ts` (`GET meetings/recordings`), `webdev-change-requests.controller.ts`
-  (`GET webdev/change-requests`), and the staff post-review list in `PN/src/modules/social/`;
+  (`GET webdev/change-requests`), and the social lists in `PN/src/modules/social/`. **No staff
+  post-review list exists** (PV3-03 found only per-variant review routes), so the facet went on the two
+  social lists that already took `clientId`: engagements and accounts;
 - `docs/FRONTEND-BFF-CONTRACT.md` §16e and §22a.
 
 **Change:**
@@ -392,7 +417,9 @@ edit the same write path. **Wave 1.**
   2. deliverables, read with `?clientId=` (finding 6);
   3. approvals: this client's pipeline runs with their client-side gates (`GET /pipeline/runs?clientId=`);
   4. requests: change requests (`GET /webdev/change-requests?clientId=`) and post reviews, with work
-     that has no project under "Not tied to a project";
+     that has no project under "Not tied to a project". No staff post-review list exists, so post
+     reviews come from the hub aggregate's `needsUs` and `needsClient` items; a full list is a new
+     ticket;
   5. meetings: the Scheduled and Meetings cards, moved unchanged from People.
 - **Refusals:** every read on these pages refuses explicitly (the `ReadRefusal` pattern
   `contacts/page.tsx` already uses). No `.catch(() => [])`.
@@ -455,8 +482,8 @@ for the new high and medium tools; activity writes in `contracts.controller.ts`,
   - `GET projects` (`core.controller.ts`), `GET deliverables`, `GET contracts`, `GET contracts/:id`,
     `GET invoice-payments`, `GET invoices`;
   - `GET pipeline/runs` and run detail with its gates;
-  - `GET webdev/change-requests`, the staff post-review list, `GET meetings/recordings`,
-    `GET pm/tasks`;
+  - `GET webdev/change-requests`, `GET meetings/recordings`, `GET pm/tasks` (no staff post-review
+    list exists; post reviews carry the marker through the overview items);
   - `GET clients/:id/contacts`;
   - the `needsUs` and `needsClient` items of `GET clients/:id/overview`.
 - **Docs:** the matching BFF rows.
@@ -478,6 +505,10 @@ for the new high and medium tools; activity writes in `contracts.controller.ts`,
   - client-side and internal gates, and a run with no project;
   - a change request with no project, and a post review;
   - a task and a meeting.
+
+  Add a project-scoped contact too, and assert the NULL-project rules directly: such a contact sees a
+  project-less contract and change request, and does not see a project-less run. PV3-02's teeth run
+  showed that no existing portal suite catches a change to those arms.
 
   Then, per kind, it asserts that the staff ids with `clientVisible = true` equal the ids the portal
   endpoints return to a client-wide signer contact.
