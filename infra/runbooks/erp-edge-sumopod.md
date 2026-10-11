@@ -143,6 +143,12 @@ issued yet and cannot be: the CA still reaches mimi, so the ACME validation erro
 
 ## 5. THE ONE-STEP CUT-OVER
 
+**Let's Encrypt budget (learned 2026-10-12):** every start of erp-edge BEFORE the cut-over asks for both certificates
+and fails (the CA still reaches mimi), and a restart that fires before mimi has reloaded its file provider fails the same
+way. Let's Encrypt allows 5 failed authorizations per name per hour; the first cut-over hit that limit and had to be
+rolled back. So: after the step-4 routing checks, STOP erp-edge (`docker compose stop traefik`), and in the cut-over start
+it only after a TLS probe proves mimi no longer answers the name itself.
+
 Preconditions: steps 2 to 4 pass; preflight backups exist; status page answered 200 through erp-edge; someone
 is ready to run step 6 (rollback). Expect a short window (seconds to about a minute) in which the two names present
 erp-edge's default certificate until TLS-ALPN-01 issues; browsers show a warning in that window. Pick a quiet time.
@@ -153,10 +159,11 @@ inside the file provider's throttle window, so mimi reloads once. The last link 
 its certificates now that the CA's connection reaches it.
 
 ```bash
-D=/home/ubuntu/mimi/infrastructure/tls/dynamic; E=$HOME/erp-edge; test -s "$D/erp-status.yml" && test -s "$E/mimi/erp-passthrough.yml" && cp -p "$D/erp-status.yml" "$E/backup/erp-status.yml.cutover" && cp "$E/mimi/erp-passthrough.yml" "$D/.erp-passthrough.yml.tmp" && mv "$D/.erp-passthrough.yml.tmp" "$D/erp-passthrough.yml" && mv "$D/erp-status.yml" "$E/backup/erp-status.yml.removed" && echo "cut over at $(date -u +%FT%TZ)" && docker compose -f "$E/docker-compose.yml" restart traefik
+D=/home/ubuntu/mimi/infrastructure/tls/dynamic; E=$HOME/erp-edge; MS=$(cut -d= -f2 "$E/backup/status-cert-before.txt" | head -1); test -s "$D/erp-status.yml" && test -s "$E/mimi/erp-passthrough.yml" && test -z "$(docker ps -q -f name=erp-edge-traefik-1)" && cp -p "$D/erp-status.yml" "$E/backup/erp-status.yml.cutover" && cp "$E/mimi/erp-passthrough.yml" "$D/.erp-passthrough.yml.tmp" && mv "$D/.erp-passthrough.yml.tmp" "$D/erp-passthrough.yml" && mv "$D/erp-status.yml" "$E/backup/erp-status.yml.removed" && echo "cut over at $(date -u +%FT%TZ)" && ok=0; for i in $(seq 1 20); do if ! echo | openssl s_client -connect 127.0.0.1:443 -servername status.erp.gaiada.com 2>/dev/null | openssl x509 -noout -serial 2>/dev/null | grep -q "$MS"; then ok=1; break; fi; sleep 1; done; [ "$ok" = 1 ] && echo "mimi passes the name through (after ${i}s)" && docker compose -f "$E/docker-compose.yml" up -d traefik || echo "mimi still serves the name: run step 6 (rollback)"
 ```
 
-Then watch (about 1 to 3 minutes):
+The command refuses to run while erp-edge is up (it must be stopped first, see above), and waits until mimi stops
+presenting its own status certificate before starting erp-edge. Then watch (about 1 to 3 minutes):
 
 ```bash
 docker logs --since 5m mimi-tls-le 2>&1 | grep -i -E 'erp-edge|erp-status|error' | tail
