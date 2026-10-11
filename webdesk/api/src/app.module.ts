@@ -37,6 +37,8 @@ import { SchemaDraftModule } from "./schema-draft/schema-draft.module";
 import { PromotionModule } from "./promotion/promotion.module";
 // WSK-61 — the scheduler: due publishes/takedowns, live-item version swaps, forms purge, idempotency sweep.
 import { SchedulerModule } from "./scheduler/scheduler.module";
+// M4 — flushes OpenTelemetry spans at shutdown; a no-op unless telemetry was started (src/telemetry).
+import { TelemetryModule } from "./telemetry/telemetry.module";
 
 @Module({
   imports: [
@@ -56,6 +58,7 @@ import { SchedulerModule } from "./scheduler/scheduler.module";
     SchemaDraftModule,
     PromotionModule,
     SchedulerModule,
+    TelemetryModule,
   ],
 })
 export class AppModule {}

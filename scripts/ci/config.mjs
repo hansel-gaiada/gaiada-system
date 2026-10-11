@@ -44,7 +44,8 @@ export const CI_GROUPS = {
   // M6-P5b: the WordPress theme + its php-cli probes. The vendored block list derives from
   // delivery/vocabulary, and sdk-php.mts generates the PHP SDK fixture the probes load.
   webdesk_wordpress: ["webdesk/wordpress/", "webdesk/delivery/vocabulary/", "webdesk/api/src/codegen/generator/sdk-php.mts"],
-  obs: ["infra/observability/", "infra/scripts/"],
+  // + the compose file and the write-only auditor that gate the WebDesk OTLP receiver (WSK-D63 (2)).
+  obs: ["infra/observability/", "infra/scripts/", "infra/compose/docker-compose.observability", "webdesk/ops/scripts/check-otlp-write-only"],
 };
 
 /**

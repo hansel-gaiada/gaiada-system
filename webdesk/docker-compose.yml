@@ -62,6 +62,8 @@ services:
       TENANT_WEBHOOK_REQUEST_TIMEOUT_MS: ${TENANT_WEBHOOK_REQUEST_TIMEOUT_MS:-10000}
       TENANT_WEBHOOK_MAX_REDIRECTS: ${TENANT_WEBHOOK_MAX_REDIRECTS:-3}
       TENANT_WEBHOOK_MAX_PAYLOAD_BYTES: ${TENANT_WEBHOOK_MAX_PAYLOAD_BYTES:-262144}
+      # M4 cost doc §3: most ENABLED webhooks per tenant (disabling frees a slot).
+      TENANT_WEBHOOK_MAX_ENABLED_PER_TENANT: ${TENANT_WEBHOOK_MAX_ENABLED_PER_TENANT:-10}
       # WSK-12 Zone B->A events (same passthrough trap).
       WEBDESK_ZONEB_BRIDGE_URL: ${WEBDESK_ZONEB_BRIDGE_URL:-}
       WEBDESK_ZONEB_ORIGIN_SITE: ${WEBDESK_ZONEB_ORIGIN_SITE:-webdesk}
@@ -157,9 +159,12 @@ services:
       TENANT_GUC_NAME: ${TENANT_GUC_NAME}
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
-      # WSK-28: bearer token for the (proposed, not-yet-applied) Zone A write-only OTLP listener —
-      # see infra/runbooks/webdesk-zoneb-otel.md. Second independent gate alongside OTEL_ENABLED
-      # so the local dev-sink collector can keep running without also enabling the real push.
+      # WSK-D63 (2): the bearer for the ERP collector's write-only `otlp/webdesk` receiver (OTLP/HTTP on
+      # 172.17.0.1:4319, the one exception in the egress guard) — see infra/runbooks/webdesk-zoneb-otel.md.
+      # Empty = no credential sent = nothing delivered; never an error. Second independent gate alongside
+      # OTEL_ENABLED so the local dev-sink collector can keep running without also enabling the real push.
+      # PROTOCOL defaults to grpc (the local dev sink); production sets http/protobuf in /etc/webdesk/.env.
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
       OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
       WEBDESK_OTEL_ZONEA_PUSH_ENABLED: ${WEBDESK_OTEL_ZONEA_PUSH_ENABLED:-false}
       # Control-channel placeholders only — see .env.example's hard rule. Never a Zone A host.

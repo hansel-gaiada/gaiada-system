@@ -3,8 +3,10 @@
 // `db.withTenant(...)` + a transaction, and every mutating call writes an `audit_entries` row
 // (design §11: "every command"). The plaintext secret exists in memory for exactly the duration
 // of a register/rotate call and is returned to the caller ONCE — nothing in this file logs it.
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import type { PoolClient } from "pg";
 import { DbService } from "../db/db.service";
+import { tenantWebhooksConfig } from "./tenant-webhooks.config";
 import { AuditService } from "../audit/audit.service";
 import { TenantWebhooksRepository, type TenantWebhookDeliveryRow, type TenantWebhookRow } from "./tenant-webhooks.repository";
 import { generateWebhookSecret, encryptWebhookSecret } from "./webhook-secret";
@@ -52,6 +54,8 @@ export class TenantWebhooksService {
 
     return this.db.withTenant(tenantId, (db) =>
       db.transaction(async (client) => {
+        // A new webhook is enabled (the column defaults to true), so it takes a slot.
+        await this.assertEnabledSlot(client, tenantId);
         const row = await this.repo.insert(client, {
           tenantId,
           targetUrl: input.targetUrl,
@@ -112,9 +116,24 @@ export class TenantWebhooksService {
     );
   }
 
+  /** M4 cost doc §3: at most `maxEnabledPerTenant` enabled webhooks per tenant. Holds a per-tenant
+   *  transaction lock first, so concurrent registrations cannot both pass the count. `exceptWebhookId`: a
+   *  webhook being (re-)enabled does not count against itself. */
+  private async assertEnabledSlot(client: PoolClient, tenantId: string, exceptWebhookId?: string): Promise<void> {
+    await this.repo.lockEnabledCap(client, tenantId);
+    const max = tenantWebhooksConfig.maxEnabledPerTenant;
+    const enabled = await this.repo.countEnabled(client, tenantId, exceptWebhookId);
+    if (enabled >= max) {
+      throw new ConflictException(
+        `tenant webhook limit reached: at most ${max} enabled webhooks per tenant (disable one to free a slot)`,
+      );
+    }
+  }
+
   async setEnabled(tenantId: string, webhookId: string, enabled: boolean): Promise<PublicWebhook> {
     return this.db.withTenant(tenantId, (db) =>
       db.transaction(async (client) => {
+        if (enabled) await this.assertEnabledSlot(client, tenantId, webhookId);
         const row = await this.repo.setEnabled(client, tenantId, webhookId, enabled);
         if (!row) throw new NotFoundException("webhook not found for this tenant");
         await this.audit.record(client, {

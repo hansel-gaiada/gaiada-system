@@ -956,3 +956,10 @@ jobs:
       - name: Install pyyaml + gettext (envsubst)
         run: pip3 install pyyaml && sudo apt-get update && sudo apt-get install -y gettext-base
       - run: sh infra/scripts/lint-observability.sh
+      # WSK-D63 (2) / WebDesk M4 T6a: the collector's WebDesk-only receiver stays write-only, bearer-
+      # authenticated, published on docker0 alone, and refuses everything while its token is empty.
+      # The selftest proves the checker still catches each regression it exists for.
+      - name: WebDesk OTLP receiver is write-only
+        run: |
+          node webdesk/ops/scripts/check-otlp-write-only.mjs --selftest
+          node webdesk/ops/scripts/check-otlp-write-only.mjs infra/observability/otel-collector/config.yaml --receiver otlp/webdesk --compose infra/compose/docker-compose.observability.yml --service otel-collector
