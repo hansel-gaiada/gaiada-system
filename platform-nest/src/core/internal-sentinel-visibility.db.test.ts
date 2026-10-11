@@ -166,10 +166,20 @@ describe.skipIf(!TEST_URL)("M5-G0b · internal sentinel client visibility", () =
     // A second normal client is flipped to internal AFTER its report is approved, to reach the deliver guard.
     const flip = await createClient(co, "Flipped Later");
     const flipReport = await mkApproved(flip, "deliver-flip.example.com");
-    await withTenants([co], (c) => c.query(`UPDATE clients SET is_internal = true WHERE id = $1`, [flip]));
-    const bad = await app.inject({ method: "POST", url: `/api/${co}/modules/search/reports/${flipReport}/deliver`, headers: asUser(staff) });
-    expect(bad.statusCode).toBe(400);
-    expect(JSON.stringify(bad.json())).toMatch(/internal client/);
+    // ux_clients_one_internal_per_tenant allows ONE live internal client per tenant (by design), so the sentinel
+    // is moved from `internal` to `flip` in ONE statement-pair/transaction, and moved back afterwards.
+    const moveSentinel = (from: string, to: string) => withTenants([co], async (c) => {
+      await c.query(`UPDATE clients SET is_internal = false WHERE id = $1`, [from]);
+      await c.query(`UPDATE clients SET is_internal = true WHERE id = $1`, [to]);
+    });
+    await moveSentinel(internal, flip);
+    try {
+      const bad = await app.inject({ method: "POST", url: `/api/${co}/modules/search/reports/${flipReport}/deliver`, headers: asUser(staff) });
+      expect(bad.statusCode).toBe(400);
+      expect(JSON.stringify(bad.json())).toMatch(/internal client/);
+    } finally {
+      await moveSentinel(flip, internal);
+    }
     const ok = await app.inject({ method: "POST", url: `/api/${co}/modules/search/reports/${normalReport}/deliver`, headers: asUser(staff) });
     expect(ok.statusCode).toBe(200);
   });

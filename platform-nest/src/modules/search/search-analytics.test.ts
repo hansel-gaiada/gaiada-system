@@ -16,11 +16,15 @@ import { resetCoreRollupProviders, syncMetricDefinitions } from "../../rollups/e
 
 const calls: Array<{ kind: string; action: string; tenantId?: string }> = [];
 let denyAll = false;
+// The tenant wall IS the Cerbos policy (resource_search_property.yaml: variables.inTenant) plus RLS, so the
+// cross-company case must consult the REAL decision; every other case keeps the allow-all stub.
+let useRealCerbos = false;
 vi.mock("../../rbac/cerbos", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../rbac/cerbos")>();
   return {
     ...actual,
-    check: vi.fn(async (_p: unknown, resource: { kind: string; tenantId?: string }, action: string) => {
+    check: vi.fn(async (p: never, resource: { kind: string; tenantId?: string }, action: string, ...rest: unknown[]) => {
+      if (useRealCerbos) return (actual.check as (...a: unknown[]) => Promise<unknown>)(p, resource, action, ...rest) as never;
       calls.push({ kind: resource.kind, action, tenantId: resource.tenantId });
       return denyAll ? { allow: false as const, reason: "test-forced-deny" } : { allow: true as const };
     }),
@@ -77,7 +81,7 @@ describe.skipIf(!TEST_URL)("M5-A4 · property analytics route", () => {
     await app?.close();
     await teardownTestDb();
   });
-  beforeEach(() => { calls.length = 0; denyAll = false; delete process.env.UMAMI_BASE_URL; delete process.env.UMAMI_API_KEY; });
+  beforeEach(() => { calls.length = 0; denyAll = false; useRealCerbos = false; delete process.env.UMAMI_BASE_URL; delete process.env.UMAMI_API_KEY; });
 
   it("reports not_configured (never an empty dashboard) when the env is unset, gated by search_property read", async () => {
     const r = await app.inject({ method: "GET", url: `/api/${A}/modules/search/properties/${propBound}/analytics/summary?${Q}`, headers: asUser(uA) });
@@ -115,10 +119,12 @@ describe.skipIf(!TEST_URL)("M5-A4 · property analytics route", () => {
   });
 
   it("cross-company: another company's user cannot read A's property analytics (valid ids and dates)", async () => {
+    useRealCerbos = true; // real policy decision: inTenant must refuse C's user on A's path
     // uC is a member of C only: the tenant wall refuses the A-scoped call...
     const viaA = await app.inject({ method: "GET", url: `/api/${A}/modules/search/properties/${propBound}/analytics/summary?${Q}`, headers: asUser(uC) });
-    expect([401, 403, 404]).toContain(viaA.statusCode);
+    expect(viaA.statusCode).toBe(403);
     expect(viaA.json().state).toBeUndefined();
+    useRealCerbos = false; // the 404 below is about RLS, not the policy tier matrix
     // ...and through their own tenant, A's property id is invisible under RLS.
     const viaC = await app.inject({ method: "GET", url: `/api/${C}/modules/search/properties/${propBound}/analytics/summary?${Q}`, headers: asUser(uC) });
     expect(viaC.statusCode).toBe(404);
