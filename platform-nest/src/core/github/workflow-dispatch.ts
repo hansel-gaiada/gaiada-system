@@ -84,9 +84,18 @@ export class WorkflowDispatchError extends Error {
  *
  * A client is never granted `deploy` and no policy changes. Instead the executor, after a publish that a client editor decided
  * has EXECUTED, issues one of these and hands it to `startSiteRebuild`; `dispatchApprovedWorkflow` then re-verifies the claim
- * against the database (below) before any GitHub call. It cannot be forged from a request: it is a class instance with a private
- * constructor, the dispatcher accepts nothing else (`instanceof`; a JSON object from a body is refused), the only issuer is the
- * approved-command executor, and nothing here carries a repo, workflow or ref (those come from `rebuildTargetFor`, i.e. config).
+ * against the database (below) before any GitHub call.
+ *
+ * What protects it, honestly ranked (Opus review, round 2):
+ *   1. The server-side re-check in `authorizeClientPublish` is THE control: an executed webdesk `content.publish` decided by this
+ *      principal, carrying `clientId`, the principal's own `client_website_editor` grant for that client in this tenant, and that
+ *      client still linked to this exact site. Every refusal in review came from here.
+ *   2. `startSiteRebuild` binds the authority to the site it rebuilds (tenant, approval, slug, site must all match), and its
+ *      `ON CONFLICT (tenant_id, approval_id)` ledger row makes it once per approval. A direct in-process caller of
+ *      `dispatchApprovedWorkflow` would bypass that dedup, and there is exactly one such caller (`startSiteRebuild`).
+ *   3. This class is a LABEL, not a lock: it keeps a request body from ever reaching the dispatcher (a plain JSON object fails
+ *      `instanceof`), but in-process code could still construct one (`issue` is public; `Object.create` passes `instanceof`).
+ * Nothing here carries a repo, workflow or ref: those come from `rebuildTargetFor`, i.e. config.
  * A staff decider's dispatch has no authority and runs `authorizeDeploy` exactly as before.
  */
 export class ClientPublishAuthority {

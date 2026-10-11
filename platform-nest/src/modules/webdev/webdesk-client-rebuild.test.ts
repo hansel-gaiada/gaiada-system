@@ -52,6 +52,9 @@ const PEM = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
 const REPO = "gaiadabali/gaiada-web-revamp";
 const WORKFLOW = "webdesk-rebuild.yml";
 const REF = "astro-site";
+// A second configured site, so a mis-bound authority is refused by the binding check, not by "rebuild_not_configured".
+const OTHER_SITE = "019fb652-c68b-7000-8000-00000000d65b";
+const OTHER_REF = "other-site-ref";
 const APP_ID = "4777424";
 const INSTALLATION_ID = "157879245";
 
@@ -87,7 +90,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
   let gh: Awaited<ReturnType<typeof startGithub>>;
   let A: string;
   let cA1: string, cA2: string;
-  let edA1: string, ed2A1: string;
+  let edA1: string, ed2A1: string, edA2: string;
   let staffAdmin: string, staffMember: string, staffEditor: string;
   let zb: FakeZoneB;
   const signer = makeTestSigner();
@@ -146,6 +149,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
     };
     edA1 = await mkClient("ed-a1@d63.test", cA1);
     ed2A1 = await mkClient("ed2-a1@d63.test", cA1);
+    edA2 = await mkClient("ed-a2@d63.test", cA2);
     const staff = async (email: string, role: string) => {
       const u = await createUser(email);
       await addMembership(A, u);
@@ -178,6 +182,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
     gh.calls.length = 0;
     config.webdeskRebuild.targetsJson = JSON.stringify([
       { tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, repo: REPO, workflow: WORKFLOW, ref: REF, stagingUrl: "http://127.0.0.1:1" },
+      { tenantSlug: GAIADA_SLUG, siteId: OTHER_SITE, repo: REPO, workflow: WORKFLOW, ref: OTHER_REF, stagingUrl: "http://127.0.0.1:1" },
     ]);
     config.webdeskRebuild.dispatchDeadlineMs = 30_000;
     config.githubOrgTenantId = A;
@@ -335,7 +340,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
       expect(gh.calls).toEqual([]);
     });
 
-    it("a STAFF member who decided a CLIENT-filed publish cannot borrow the authority (they hold no website grant for the client), and a client editor cannot use it for ANOTHER client's request", async () => {
+    it("a STAFF member who decided a CLIENT-filed publish cannot borrow the authority (they hold no website grant for the client), a co-editor of the SAME client who did not decide it cannot use it, and neither can an editor of ANOTHER client", async () => {
       const it = draft("svc.d63-borrow");
       const id = await file(edA1, [it, draft("svc.d63-borrow2")]);
       // staff decide the client-filed batch through the staff inbox: executed, decided_by staff, row carries clientId
@@ -348,10 +353,34 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
       // ...but the borrowed client-publish authority itself is refused: staff holds no client_website_editor grant
       expect(await rebuildFor(id, staffAdmin, staffAuth)).toMatchObject({ state: "failed", failureReason: "client_publish_unverified" });
       expect(dispatches(gh).length).toBe(before);
-      // client B's editor: the row was decided by a different user
-      const authB = ClientPublishAuthority.issue({ tenantId: A, approvalId: id, tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, deciderId: ed2A1 });
+      // a co-editor of the SAME client (cA1): holds the grant, but the row was decided by someone else
+      const authCo = ClientPublishAuthority.issue({ tenantId: A, approvalId: id, tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, deciderId: ed2A1 });
       await adminPool().query(`DELETE FROM webdev_site_builds WHERE approval_id = $1`, [id]);
-      expect(await rebuildFor(id, ed2A1, authB)).toMatchObject({ state: "failed", failureReason: "client_publish_unverified" });
+      expect(await rebuildFor(id, ed2A1, authCo)).toMatchObject({ state: "failed", failureReason: "client_publish_unverified" });
+      // an editor of ANOTHER client (cA2): no grant for cA1, and not the decider either
+      const authOther = ClientPublishAuthority.issue({ tenantId: A, approvalId: id, tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, deciderId: edA2 });
+      await adminPool().query(`DELETE FROM webdev_site_builds WHERE approval_id = $1`, [id]);
+      expect(await rebuildFor(id, edA2, authOther)).toMatchObject({ state: "failed", failureReason: "client_publish_unverified" });
+      expect(dispatches(gh).length).toBe(before);
+    });
+
+    it("an authority binds to the site it names: a valid client-publish authority for gaiada.com cannot rebuild ANOTHER configured site; control: the right site dispatches", async () => {
+      const it = draft("svc.d65-bind");
+      expect((await call("POST", `${S()}/items/${it.itemId}/publish`, edA1, {})).statusCode).toBe(200);
+      const id = (await adminPool().query<{ id: string }>(`SELECT id FROM automation_approvals WHERE origin = 'webdesk' AND tenant_id = $1`, [A])).rows[0].id;
+      const auth = ClientPublishAuthority.issue({ tenantId: A, approvalId: id, tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, deciderId: edA1 });
+      await adminPool().query(`DELETE FROM webdev_site_builds WHERE approval_id = $1`, [id]);
+      const before = dispatches(gh).length;
+      const wrong = await startSiteRebuild({
+        tenantId: A, tenantSlug: GAIADA_SLUG, siteId: OTHER_SITE, approvalId: id, kind: "publish", publishedAt: null, decider: await principalOf(edA1), authority: auth,
+      });
+      expect(wrong).toMatchObject({ state: "failed", failureReason: "client_publish_unverified" });
+      expect(dispatches(gh).length).toBe(before);
+      expect(dispatches(gh).some((c) => (c.body as { ref?: string } | null)?.ref === OTHER_REF)).toBe(false);
+      await adminPool().query(`DELETE FROM webdev_site_builds WHERE approval_id = $1`, [id]);
+      expect(await rebuildFor(id, edA1, auth)).toMatchObject({ state: "rebuilding", failureReason: null });
+      expect(dispatches(gh).length).toBe(before + 1);
+      expect(dispatches(gh).at(-1)!.body).toMatchObject({ ref: REF });
     });
 
     it("a client can NEVER reach content.rebuild: not by filing it, not by deciding it, and the portal approve route answers 404 for it", async () => {
