@@ -23,11 +23,13 @@
 #             per-client sensitivity gate to apply here the way the portal's own data has.
 #   create  — staff manually logging a lead (source='staff'), or the invite-mint path creating the
 #             lead row up front (design §2.1) so the queue can show "sent, not yet returned".
-#   update  — ordinary field edits (contact details, owner reassignment). Design §5.2: this is
+#   update  — ordinary field edits (contact details, owner reassignment) and, in the P1 pipeline, the
+#             lead's deal value. Design §5.2: this is
 #             DELIBERATELY separate from `triage`/`convert` — "an AM who may edit a phone number
 #             should not automatically be able to [convert]".
 #   triage  — the disposition decision: opening the review, declining, or nurturing (§4.1's state
-#             machine). NOT `update`: mirrors `resource_webdev_change_request.yaml`'s own triage
+#             machine), and in the P1 pipeline, moving the lead's stage (a stage move can start a
+#             WS4-gated ad upload). NOT `update`: mirrors `resource_webdev_change_request.yaml`'s own triage
 #             action, but unlike that file AD-1 keeps `convert` as a SEPARATE, narrower action
 #             rather than folding it into one "triage" verb — see below.
 #   convert — mints a client + project + pipeline_run + delegation tasks in one transaction (design
