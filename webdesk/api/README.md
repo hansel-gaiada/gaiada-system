@@ -1817,7 +1817,7 @@ The read path already honours `publish_at` / `unpublish_at` by time (a `schedule
 scheduler exists for what time alone cannot do: make the stored state catch up with what production already
 sees, swap a new version into an item that is live right now, and run two maintenance sweeps that had no caller.
 
-Three BullMQ **job schedulers** on one queue (`webdesk-scheduler`), one worker (concurrency 1), all in the api
+Four BullMQ **job schedulers** on one queue (`webdesk-scheduler`; the fourth, `media-purge`, is WSK-43a's), one worker (concurrency 1), all in the api
 process. Every replica registers on boot (`upsertJobScheduler` is idempotent) and runs a worker; BullMQ creates
 one job per tick per scheduler id however many replicas run. Registration retries in the background until Redis
 answers, so a Redis outage delays the schedule instead of failing the boot.
@@ -1827,6 +1827,7 @@ answers, so a Redis outage delays the schedule instead of failing the boot.
 | `content-tick` | `WEBDESK_SCHEDULER_TICK_SECONDS` (60) | `ContentTickService.runContentTick(now = new Date())` |
 | `forms-retention-purge` | `WEBDESK_SCHEDULER_HOURLY_SECONDS` (3600) | `MaintenanceJobsService.runFormsPurge()` → `SubmissionsPurgeService.purgeDueSubmissions()` |
 | `idempotency-sweep` | `WEBDESK_SCHEDULER_HOURLY_SECONDS` (3600) | `MaintenanceJobsService.runIdempotencySweep()` → `PgIdempotencyStore.sweepExpired()` |
+| `media-purge` | `WEBDESK_SCHEDULER_HOURLY_SECONDS` (3600) | `MediaPurgeService.runMediaPurge()`: frees the stored versions of soft-deleted media assets once their retention has passed (see "Media library (WSK-43a)") |
 
 The first job of each scheduler runs right after registration, so a fresh deploy makes one catch-up pass.
 
@@ -1981,3 +1982,154 @@ public route: draft not live, headers, CORS, every 404, api keys, quota), `test/
 primitives), `test/delivery/reserved-collection-keys.spec.ts`, and `migrations/tests/0013_preview_tokens.test.mjs`
 (also in `qa/linux-gate.sh`'s `migrations` suite and the CI `webdesk-api` job).
 
+## Media library (WSK-43a) — `src/media/**`, `src/control/content/media-*`, `src/scheduler/media-purge.service.ts`
+
+Owner rulings WSK-D53 (a library image reaches a static site through its build) and WSK-D54 (an image still used by
+content cannot be deleted). This is the WebDesk api's half: the schema, the control commands, the public upload route
+and the purge job. (The ERP's Cerbos kind and routes, and the UI, are WSK-43b and WSK-43c.)
+
+A library asset is a `media_assets` row (migration `0014`): `title`, `alt` (a map locale to text), `tags`,
+`original_filename`, `created_by`, `width`, `height`, `updated_at`, and a lifecycle: **live** (`deleted_at` null), **soft-deleted**
+(`deleted_at` set, `purge_after = deleted_at + the bucket's GOVERNANCE retention`, the stored object still exists) and
+**purged** (`purged_at` set: every stored version deleted). CHECKs make the lifecycle impossible to get wrong
+(`purge_after` iff `deleted_at`, never before it; `purged_at` only after `deleted_at`). The asset's **canonical URL** is
+`/v1/t/<tenantSlug>/media/<assetId>`: that is what an editor writes into a media field, and what the in-use scan looks for.
+
+### Routes
+
+| Route | Auth | What |
+|---|---|---|
+| `POST /control/v1/tenants/:t/sites/:s/media/upload-token` | control channel, `webdesk:operate`, editorial principal, `Idempotency-Key` | `media.uploadToken` (MEDIUM). Body `{ bucket, maxBytes?, mime? }`. 201 `{ tokenId, token, uploadPath, expiresAt, bucket, maxBytes, allowedMimes }` |
+| `PATCH /control/v1/tenants/:t/sites/:s/media/:assetId` | same | `media.update` (MEDIUM). Body `{ title?, alt?, tags? }` (at least one). 200 `{ asset }` |
+| `DELETE /control/v1/tenants/:t/sites/:s/media/:assetId` | same | `media.delete` (MEDIUM, soft). 200 `{ assetId, deletedAt, purgeAfter, alreadyDeleted }`; **409 `media-in-use`** while content uses it |
+| `GET /control/v1/tenants/:t/sites/:s/media/:assetId/usage` | control channel, `webdesk:read` | `media.usage`. 200 `{ assetId, url, total, items: [{ itemId, collectionKey, locale, slug, in }] }` (at most 50 items) |
+| `GET /control/v1/tenants/:t/sites/:s/media` | same | `media.list` (exists): gains `q`, `tag`, `includeDeleted` beside `mime`, and the library fields in each asset |
+| `POST /v1/t/:tenantSlug/media/upload/:token?filename=` | **none** (the token is the credential) | the public upload; the body is the file, `Content-Type` its type. 201 with the asset |
+| `OPTIONS /v1/t/:tenantSlug/media/upload/:token` | none | CORS preflight |
+
+The control routes are internal (mTLS vhost) and pass the same gates as the other content writes: L3 scope, then the
+L2e editorial assertion, then validation. All three writes are MEDIUM and need no WS4 approval. They are all on
+`webdesk:operate`: unlike `content.delete` a media delete takes no takedown scope, because it is refused while content
+uses the asset, so it cannot break a page.
+
+### The upload token and the public upload route (an untrusted-input surface)
+
+- **Mint.** 32 random bytes, base64url; only the sha256 is stored (`media_upload_tokens.token_hash`); valid ten minutes;
+  bound to tenant, site, bucket (`media` or `video`, the public buckets), a byte cap and an allowed mime set. `maxBytes`
+  defaults to and is capped by `WEBDESK_MEDIA_MAX_UPLOAD_BYTES`; `mime` (a string or an array) defaults to and is a
+  subset of the bucket's allowlist. `withhold` keeps the token and `uploadPath` out of the idempotency record: a replay
+  of a mint is 409 `idempotency-response-withheld`.
+- **The token alone, first, then three short database steps (no pooled connection is held while bytes stream).**
+  Nothing about the body is looked at before the token is proven. The route then (a) looks the token up and refuses what
+  the headers alone decide: a declared type outside the token's set (415) or a declared `Content-Length` over the cap
+  (413): the token stays unspent; (b) **claims** it in its own transaction, committed *before the body is read*:
+  `UPDATE ... SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`: this single
+  statement is what makes it single-use under concurrency (of two racing requests exactly one updates the row, the
+  loser gets the 404 and has read and stored nothing); (c) reads, screens and stores the body with **no connection
+  held**, then inserts the asset row (and its audit row) in a second short transaction. A slow or stalled sender
+  therefore never pins one of the api's 10 pooled connections.
+- **Fail closed.** From the claim on the token is spent whatever happens: a body over the cap, a wrong signature, an
+  infected file, a quota refusal, a stalled sender (408), a storage or database error: the editor mints a new token.
+  The scan runs before the store, so a refused or infected file never reaches storage. If the object was stored and
+  the row insert then failed, the object is deleted at once and a soft-deleted row is written for it
+  (`MediaService.recordTombstone`): on a locked bucket the delete only adds a marker, so that row (with `purge_after`)
+  is what lets `media-purge` free the locked version later, and it keeps the quota honest until then.
+- **One 404.** Unknown, malformed, expired, spent, another tenant's token, an unknown or archived tenant slug: the same
+  bytes (`Connection: close`, so a sender is not read to the end). No oracle, through `OPTIONS` either.
+- **Bounded while streaming.** The cap is `min(token max_bytes, WEBDESK_MEDIA_MAX_UPLOAD_BYTES)`. A declared
+  `Content-Length` over it is 413 before a byte is read; a body without one is counted as it arrives and refused when it
+  crosses the cap, so nothing larger is ever held. `WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS` (60000) ends a stalled sender (408).
+  The declared type must be in the token's set (415), then the **existing pipeline** runs unchanged (bucket allowlist,
+  magic-byte sniff, quota, ClamAV fail-closed with the usual 403 and audit row, store, row).
+- **Slots.** Defence in depth: they bound concurrent uploads (each holds a body of up to the cap in memory, a ClamAV
+  socket and a storage write), not connections. A process runs at most `WEBDESK_MEDIA_UPLOAD_MAX_CONCURRENT` token
+  uploads at once (default 4, 1 to 8) and `WEBDESK_MEDIA_UPLOAD_MAX_PER_TENANT` per tenant (default 2); the rest get
+  **503 with `Retry-After: 5`**. The check comes before the token is looked at, so it is the same answer for every
+  token (no oracle). Known limit: the slots are per process, so N replicas admit N times as many.
+- **Body parsing** is scoped: a Fastify parser for exactly the public buckets' media types, handing the route the
+  unread stream. On any other path it answers the 415 Fastify would (`media/media-upload-parser.ts`).
+- **CORS** is the draft-preview rule (`allowedPreviewOrigin`): the request `Origin` is echoed only when it is
+  `https://<domain>` of an environment of the token's site (set `environments.domain`). Errors after the token is proven
+  carry it too; a 404 never does. Responses are `Cache-Control: no-store`.
+- **Attribution.** `media_assets.created_by` is the minting editorial principal (the token's `created_by`), so the
+  library can show who uploaded what (`createdBy` in `media.list` and the upload response; null for rows that predate
+  it); it is also the actor of the `webdesk.media.upload` audit row. `original_filename` is a cleaned label (last path segment,
+  control characters removed, at most 255 characters); `width`/`height` are read from the header bytes for png, gif,
+  jpeg and webp, else null.
+- **Operators:** the token is in the request URL, so any access log in front of the api (Caddy, a CDN, a load
+  balancer) records it. **Redact the upload path `/v1/t/*/media/upload/*` at the edge too, exactly as you redact
+  `/v1/t/*/preview/*`** (the api's own `instance` and log lines already do). An unredacted log lets a reader upload one
+  file into the library until the token expires (ten minutes) or is used.
+- `media` was already a reserved collection key.
+
+### `media.update`
+
+`title` (null or "" clears; 200 characters), `alt` (the COMPLETE locale map: its keys must be locales the tenant
+declares, an empty text drops its key, `{}` clears; 500 characters each), `tags` (the complete list, normalised:
+trimmed, whitespace collapsed, lower-cased, de-duplicated; more than 20 or a tag over 40 characters is a 400, never
+silently cut). A deleted asset is 409 `media-asset-deleted`; an unknown or malformed id, or one on another site or
+tenant, is one 404 `media-asset-not-found`.
+
+### `media.delete` and the in-use scan (D54)
+
+Soft: `deleted_at = now()`, `purge_after = now() + WEBDESK_STORAGE_LOCK_DAYS days` (the variable
+`scripts/storage-bootstrap.mjs` applies as every bucket's GOVERNANCE retention; default 1; the api reads the same one,
+so the compose files pass it). The asset leaves `media.list`, stops being served (404) and **still counts in the quota**.
+Deleting again is idempotent (200, `alreadyDeleted: true`, the original instants).
+
+It is refused with **409 `media-in-use`** (`usage`: at most 50 items, `total`: all of them) while any non-deleted item
+of the site uses it. The scan (`control/content/media-usage.ts`, shared with `media.usage`) looks for `/media/<assetId>`
+(lower-cased substring: the id is a uuid, so any host, `/transform` suffix, case or block shape matches) in the `blocks`
+and `seo` JSON of:
+
+| `in` | where |
+|---|---|
+| `live` | the live projection of an item that is `published` or `scheduled` |
+| `head` | the item's HEAD version (its working draft; older versions are history, not uses) |
+| `scheduled` | the version of a pending live-item swap (WSK-61) |
+
+```sql
+SELECT t.*, count(*) OVER () AS total FROM (
+  SELECT ci.id AS item_id, c.key AS collection_key, ci.locale, ci.slug,
+         (ci.publish_state IN ('published','scheduled') AND (strpos(lower(ci.blocks::text), $3) > 0 OR strpos(lower(ci.seo::text), $3) > 0)) AS in_live,
+         EXISTS (SELECT 1 FROM content_versions v WHERE v.content_item_id = ci.id AND v.version = ci.head_version AND v.tenant_id = $1
+                   AND (strpos(lower(v.blocks::text), $3) > 0 OR strpos(lower(v.seo::text), $3) > 0)) AS in_head,
+         EXISTS (SELECT 1 FROM content_schedules s JOIN content_versions v ON v.content_item_id = s.content_item_id AND v.version = s.version
+                  WHERE s.content_item_id = ci.id AND s.tenant_id = $1 AND s.executed_at IS NULL AND s.cancelled_at IS NULL AND s.failed_at IS NULL
+                    AND (strpos(lower(v.blocks::text), $3) > 0 OR strpos(lower(v.seo::text), $3) > 0)) AS in_scheduled
+    FROM content_items ci JOIN collections c ON c.id = ci.collection_id
+   WHERE ci.site_id = $2 AND ci.tenant_id = $1 AND ci.deleted_at IS NULL ) t
+WHERE t.in_live OR t.in_head OR t.in_scheduled ORDER BY t.collection_key, t.slug, t.locale, t.item_id LIMIT 50   -- $3 = '/media/<assetId>'
+```
+
+Known limit: the scan is a snapshot. A content write that saves a draft naming the asset in the same instant as the
+delete commits can slip past it (content writes do not lock the assets they name); the effect is a draft image that
+404s until re-picked, never a published page.
+
+### The purge job (`media-purge`, hourly) and the quota
+
+A plain delete on a versioned, object-locked bucket only adds a delete marker; the locked versions used to stay forever.
+Now, per tenant (its own `tenant_ctx`), one asset per transaction with `FOR UPDATE SKIP LOCKED` (safe with two
+replicas), for every asset with `deleted_at` set, `purged_at` null and `purge_after <= now()` (the database's clock),
+`StorageAdapter.deleteAllVersions` lists the object's versions and delete markers and deletes each by `VersionId`, then
+`purged_at` is stamped and `webdesk.media.purged` audited. Retention has passed, so GOVERNANCE allows it without a bypass;
+a version still locked is refused by the provider. **A storage error leaves the asset un-purged**, logged with its id and
+retried next run; it is counted, never thrown. At most 200 assets per tenant per run.
+
+**Deploy note (storage policy).** The api's storage key had no `s3:DeleteObjectVersion` or `s3:ListBucketVersions`.
+`scripts/storage-bootstrap.mjs` now grants both on the **public buckets only** (media, video), never the lock bypass.
+Re-run the bootstrap on each environment (it is idempotent and updates the `webdesk-api` policy); until then the purge
+fails soft (every run logs the AccessDenied and nothing is freed). Set `WEBDESK_STORAGE_LOCK_DAYS` on the api to the same
+value the bootstrap used if it is not the default 1.
+
+`QuotaService` now sums `size_bytes` of every asset with `purged_at IS NULL`: live assets **and** soft-deleted ones still
+inside their retention (storage really holds those bytes), not purged ones. The quota drops when the bytes are freed.
+
+### Verify
+
+`test/media-upload-token.spec.ts` (mint, gates, the public route: one-use under concurrency, no pooled connection held while a body streams, fail-closed failures, caps and streaming, types,
+EICAR, quota, the identical 404, CORS, the scoped parser), `test/media-library-commands.spec.ts` (update, delete, the
+in-use scan, usage, list filters and cursor, quota), `test/media-purge.spec.ts` (real RustFS: every version gone,
+negative control under a live lock, two parallel runs, a storage error), `test/media-upload-unit.spec.ts` (dimensions
+from hostile bytes, the bounded reader, cleaners), `test/scheduler-wiring.spec.ts` (four job schedulers),
+`migrations/tests/0014_media_library.test.mjs` (in `qa/linux-gate.sh`'s `migrations` suite and the CI `webdesk-api` job).

@@ -95,6 +95,9 @@ describe("WSK-07 — storage abstraction: no vendor-specific leak into media/**"
         if (!body) throw new Error("not found");
         return { body };
       },
+      async deleteAllVersions(bucket, key) {
+        return stored.delete(`${bucket}/${key}`) ? 1 : 0;
+      },
       async headObject(bucket, key) {
         const body = stored.get(`${bucket}/${key}`);
         return body ? { contentLength: body.length } : null;

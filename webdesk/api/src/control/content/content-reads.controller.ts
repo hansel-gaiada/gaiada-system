@@ -7,6 +7,7 @@
 //   GET /control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:itemId/versions           item.versions
 //   GET /control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:itemId/versions/:n        item.versionGet
 //   GET /control/v1/tenants/:tenantSlug/sites/:siteId/media                                    media.list
+//   GET /control/v1/tenants/:tenantSlug/sites/:siteId/media/:assetId/usage                     media.usage (WSK-43a)
 //
 // Guards: ControlAuthGuard (L1 mTLS + L2 token) -> CommandAuthorizationGuard (L3 `webdesk:read`). There
 // is deliberately NO EditorialAssertionGuard: a read needs no editorial principal (design §4), so the
@@ -160,10 +161,39 @@ export class ContentReadsController {
   @Get("media")
   @Command("media.list")
   async listMedia(@Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Query() raw: RawQuery) {
-    const q = query(raw, ["mime", "cursor", "limit"]);
+    const q = query(raw, ["mime", "q", "tag", "includeDeleted", "cursor", "limit"]);
     if (q.mime !== undefined && !MIME_RE.test(q.mime)) {
       throw problems.invalidRequest("mime must be a media type (image/png) or a type wildcard (image/*)");
     }
-    return this.reads.listMedia(tenantSlug, siteId, { mime: q.mime, cursor: cursorOf(q.cursor), limit: limitOf(q.limit) });
+    if (q.q !== undefined && (q.q.length === 0 || q.q.length > 200)) {
+      throw problems.invalidRequest("q must be a non-empty string of at most 200 characters");
+    }
+    if (q.tag !== undefined && (q.tag.trim().length === 0 || q.tag.length > 100)) {
+      throw problems.invalidRequest("tag must be a non-empty string of at most 100 characters");
+    }
+    if (q.includeDeleted !== undefined && q.includeDeleted !== "true" && q.includeDeleted !== "false") {
+      throw problems.invalidRequest("includeDeleted must be true or false");
+    }
+    return this.reads.listMedia(tenantSlug, siteId, {
+      mime: q.mime,
+      q: q.q,
+      // Tags are stored normalised (trimmed, lower-cased): the filter is spelled the way the library stores them.
+      tag: q.tag === undefined ? undefined : q.tag.trim().replace(/\s+/g, " ").toLowerCase(),
+      includeDeleted: q.includeDeleted === "true",
+      cursor: cursorOf(q.cursor),
+      limit: limitOf(q.limit),
+    });
+  }
+
+  @Get("media/:assetId/usage")
+  @Command("media.usage")
+  async mediaUsage(
+    @Param("tenantSlug") tenantSlug: string,
+    @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string,
+    @Query() raw: RawQuery,
+  ) {
+    query(raw, []);
+    return this.reads.mediaUsage(tenantSlug, siteId, assetId);
   }
 }

@@ -1,6 +1,7 @@
 // WSK-51 — the control plane's live read commands for the content editor (write-plane design §4).
 //
-//   collection.list · collection.get · item.list · item.get · item.versions · item.versionGet · media.list
+//   collection.list · collection.get · item.list · item.get · item.versions · item.versionGet · media.list · media.usage
+//   (media.list and media.usage are the WSK-43a media LIBRARY reads: see listMedia / mediaUsage below)
 //
 // (tenant.list is the platform-level read and lives in ../tenants/tenant-reads.service.ts.)
 //
@@ -44,6 +45,10 @@ import { ContentCommandsService } from "./content-commands.service";
 import { contentHash, isPlainObject } from "./content-projection";
 import { lintPlaceholders, type LintReport } from "./content-lint";
 import { ControlProblem, problems } from "./content-problem";
+import { findMediaUsage } from "./media-usage";
+import { canonicalAssetPath, toLibraryAsset } from "../../media/library-asset";
+import { MEDIA_ASSET_COLUMNS } from "../../media/media.service";
+import type { MediaAssetRow } from "../../media/dto";
 
 // ------------------------------------------------------------------------------------------------
 // Public shapes (design §4)
@@ -660,7 +665,16 @@ export class ContentReadsService {
   // ==============================================================================================
   // media.list
   // ==============================================================================================
-  async listMedia(tenantSlug: string, siteId: string, query: { mime?: string; cursor?: string; limit: number }) {
+  // WSK-43a: the media LIBRARY read. Filters: `mime` (exact, or an `image/*` type prefix), `q` (a substring of
+  // the title, the original filename or any tag, case-insensitive), `tag` (exactly one normalised tag),
+  // `includeDeleted` (default false: soft-deleted and purged assets are hidden, as the library hides them).
+  // The cursor is unchanged: (created_at, id) DESC, immutable columns, so an edit, a delete or a purge
+  // between two pages can never move a row across a page edge.
+  async listMedia(
+    tenantSlug: string,
+    siteId: string,
+    query: { mime?: string; q?: string; tag?: string; includeDeleted?: boolean; cursor?: string; limit: number },
+  ) {
     const { tenant } = await this.commands.resolveTenantSite(tenantSlug, siteId);
     const after = query.cursor ? decodeCursor(query.cursor, ["ts", "uuid"]) : null;
     return this.read(tenant.id, async (c) => {
@@ -670,6 +684,7 @@ export class ContentReadsService {
         return `$${params.length}`;
       };
       const where = [`ma.site_id = $1`];
+      if (!query.includeDeleted) where.push(`ma.deleted_at IS NULL`);
       if (query.mime) {
         // `image/png` is exact; `image/*` is a type prefix (validated by the controller).
         where.push(
@@ -678,20 +693,20 @@ export class ContentReadsService {
             : `ma.mime = ${p(query.mime)}`,
         );
       }
+      if (query.tag) where.push(`ma.tags @> ARRAY[${p(query.tag)}]::text[]`);
+      if (query.q) {
+        const like = p(`%${escapeLike(query.q)}%`);
+        where.push(
+          `(ma.title ILIKE ${like} OR ma.original_filename ILIKE ${like} OR EXISTS (SELECT 1 FROM unnest(ma.tags) AS tg WHERE tg ILIKE ${like}))`,
+        );
+      }
       if (after) {
         where.push(`(ma.created_at, ma.id) < (${p(after[0])}::timestamp AT TIME ZONE 'UTC', ${p(after[1])}::uuid)`);
       }
       const limit = p(query.limit + 1);
-      const { rows } = await c.query<{
-        id: string;
-        bucket_key: string;
-        mime: string;
-        size_bytes: string;
-        scan_status: string;
-        created_at: Date;
-        created_raw: string;
-      }>(
-        `SELECT ma.id, ma.bucket_key, ma.mime, ma.size_bytes, ma.scan_status, ma.created_at,
+      const { rows } = await c.query<MediaAssetRow & { deleted_at: Date | null; purge_after: Date | null; purged_at: Date | null; created_raw: string }>(
+        `SELECT ${MEDIA_ASSET_COLUMNS.split(", ").map((col) => `ma.${col}`).join(", ")},
+                ma.deleted_at, ma.purge_after, ma.purged_at,
                 ${RAW_TS_SQL("ma.created_at")} AS created_raw
            FROM media_assets ma
           WHERE ${where.join(" AND ")}
@@ -704,15 +719,34 @@ export class ContentReadsService {
       const last = slice[slice.length - 1];
       return {
         assets: slice.map((m) => ({
-          assetId: m.id,
-          bucketKey: m.bucket_key,
-          mime: m.mime,
-          sizeBytes: Number(m.size_bytes),
-          scanStatus: m.scan_status,
-          createdAt: iso(m.created_at) as string,
+          ...toLibraryAsset(m, tenant.slug),
+          deletedAt: iso(m.deleted_at),
+          purgeAfter: iso(m.purge_after),
+          purgedAt: iso(m.purged_at),
         })),
         page: { cursor: hasMore && last ? encodeCursor([last.created_raw, last.id]) : null, hasMore, limit: query.limit } satisfies Page,
       };
     });
   }
+
+  // ==============================================================================================
+  // media.usage
+  // ==============================================================================================
+  // WSK-43a (D54): where an asset is used, by the SAME scan media.delete is judged by (media-usage.ts). A
+  // deleted asset answers too (an empty or stale list is information, and the editor can open its history);
+  // an unknown, malformed or other-site asset is one 404.
+  async mediaUsage(tenantSlug: string, siteId: string, assetId: string) {
+    const { tenant } = await this.commands.resolveTenantSite(tenantSlug, siteId);
+    if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
+    return this.read(tenant.id, async (c) => {
+      const found = await c.query(`SELECT 1 FROM media_assets WHERE id = $1 AND site_id = $2 AND tenant_id = $3`, [assetId, siteId, tenant.id]);
+      if (found.rows.length === 0) throw mediaAssetNotFound();
+      const usage = await findMediaUsage(c, { tenantId: tenant.id, siteId, assetId });
+      return { assetId, url: canonicalAssetPath(tenant.slug, assetId), total: usage.total, items: usage.items };
+    });
+  }
+}
+
+function mediaAssetNotFound(): ControlProblem {
+  return new ControlProblem(404, "media-asset-not-found", "Media asset not found", "No such media asset on this site.");
 }

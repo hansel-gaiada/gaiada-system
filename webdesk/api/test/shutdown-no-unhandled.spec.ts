@@ -102,6 +102,7 @@ describe("M3 T8 shutdown: no unhandled rejection when Redis clients close while 
       const scheduler = new SchedulerService(
         { databaseNow: async () => new Date(), runContentTick: async () => ({ totals: { errors: 0 } }) } as never,
         { runFormsPurge: async () => ({}), runIdempotencySweep: async () => ({}) } as never,
+        { runMediaPurge: async () => ({}) } as never,
         { onBeforeEnd: () => undefined } as never,
       );
       webhookWorker.onModuleInit();

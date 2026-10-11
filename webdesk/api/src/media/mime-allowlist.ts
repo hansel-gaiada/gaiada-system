@@ -35,6 +35,14 @@ const BUCKET_ALLOWLIST: Record<BucketName, ReadonlySet<AllowedMime>> = {
   artifacts: new Set([]),
 };
 
+/** Every media type any CLIENT-uploadable public bucket admits (the token upload route's body types). */
+export const UPLOADABLE_MIME_TYPES: readonly AllowedMime[] = [...new Set<AllowedMime>([...BUCKET_ALLOWLIST.media, ...BUCKET_ALLOWLIST.video])];
+
+/** The media types a bucket admits (what an upload token may name; WSK-43a). */
+export function allowedMimesForBucket(bucket: BucketName): readonly string[] {
+  return [...(BUCKET_ALLOWLIST[bucket] ?? [])];
+}
+
 export function isMimeAllowedForBucket(bucket: BucketName, mime: string): boolean {
   return BUCKET_ALLOWLIST[bucket]?.has(mime as AllowedMime) ?? false;
 }

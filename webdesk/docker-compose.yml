@@ -105,6 +105,8 @@ services:
       WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      # WSK-43a: the bucket retention the media-purge job waits out (the SAME variable storage-bootstrap.mjs applies; empty = 1).
+      WEBDESK_STORAGE_LOCK_DAYS: ${WEBDESK_STORAGE_LOCK_DAYS:-}
       # Control channel (WSK-22). The CA is a multi-line PEM — as of the 2026-09-01 crash-loop fix
       # it is read from a FILE (mounted read-only; see docker-compose.aicenter.yml /
       # docker-compose.sumopod.yml), never from `.env` or `env_file`: `docker compose`'s env_file

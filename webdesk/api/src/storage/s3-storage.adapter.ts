@@ -11,6 +11,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectVersionsCommand,
   PutBucketVersioningCommand,
   PutObjectCommand,
   PutObjectLockConfigurationCommand,
@@ -96,6 +97,29 @@ export class S3StorageAdapter implements StorageAdapter {
 
   async deleteObject(bucket: string, key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  }
+
+  async deleteAllVersions(bucket: string, key: string): Promise<number> {
+    // `Prefix: key` also matches siblings ("a" matches "ab"), so every entry is filtered on the exact key.
+    // The listing is collected first and deleted after, so paging is never disturbed by the deletes.
+    const targets: { VersionId: string }[] = [];
+    let keyMarker: string | undefined;
+    let versionIdMarker: string | undefined;
+    for (;;) {
+      const page = await this.client.send(
+        new ListObjectVersionsCommand({ Bucket: bucket, Prefix: key, KeyMarker: keyMarker, VersionIdMarker: versionIdMarker }),
+      );
+      for (const v of [...(page.Versions ?? []), ...(page.DeleteMarkers ?? [])]) {
+        if (v.Key === key && v.VersionId) targets.push({ VersionId: v.VersionId });
+      }
+      if (!page.IsTruncated) break;
+      keyMarker = page.NextKeyMarker;
+      versionIdMarker = page.NextVersionIdMarker;
+    }
+    for (const t of targets) {
+      await this.client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key, VersionId: t.VersionId }));
+    }
+    return targets.length;
   }
 
   async presignGetObject(bucket: string, key: string, expiresInSeconds: number): Promise<string> {
