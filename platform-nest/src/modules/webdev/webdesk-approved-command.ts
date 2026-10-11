@@ -113,13 +113,17 @@ import { rebuildTargetFor, startSiteRebuild } from "./site-builds.service";
 export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint" | "content.rebuild";
 
 /** WSK-59: the editorial writes the BFF executes immediately (not through an approval). They sign through the
- *  SAME registered signer as the approved commands; only the command name differs (design §3.1). */
+ *  SAME registered signer as the approved commands; only the command name differs (design §3.1).
+ *  WSK-43b added the three MEDIUM media-library writes (WebDesk's EDITORIAL_COMMANDS carries them too). */
 export type WebdeskBffEditorialCommand =
   | "content.create"
   | "content.update"
   | "content.restoreVersion"
   | "content.unpublish"
-  | "content.delete";
+  | "content.delete"
+  | "media.uploadToken"
+  | "media.update"
+  | "media.delete";
 
 /** `automation_approvals.origin` for these rows (migration 202610101500). */
 export const WEBDESK_APPROVAL_ORIGIN = "webdesk";
@@ -257,7 +261,7 @@ export interface EditorialAssertionRequest {
   agt?: string;
   ten: string;
   site: string;
-  /** WSK-59 widened this from `WebdeskApprovedCommand` to also carry the five MEDIUM editorial writes the
+  /** WSK-59 widened this from `WebdeskApprovedCommand` to also carry the MEDIUM editorial writes the
    *  BFF signs directly (design §3.1). Every signer implementation takes the string verbatim into `cmd`. */
   cmd: WebdeskApprovedCommand | WebdeskBffEditorialCommand;
   /** The FILED command hash (see this file's header): what the human approved. */

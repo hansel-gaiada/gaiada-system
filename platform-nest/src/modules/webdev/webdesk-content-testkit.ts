@@ -70,8 +70,24 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "schema.apply", "site.provision", "key.mint"]);
-const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "schema.apply", "site.provision", "key.mint", "media.uploadToken", "media.update", "media.delete"]);
+const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "media.uploadToken", "media.update", "media.delete"]);
+
+/** WSK-43b: one library asset as the fake holds it (the real row is `media_assets`, migration 0014). */
+export interface FakeMediaAsset {
+  assetId: string;
+  siteId: string;
+  title: string | null;
+  alt: Record<string, string>;
+  tags: string[];
+  mime: string;
+  sizeBytes: number;
+  originalFilename: string;
+  createdAt: string;
+  deletedAt: string | null;
+  /** The items that use the asset (`media.usage` and the 409 `media-in-use` body list them). */
+  usedBy: Array<{ itemId: string; collectionKey: string; locale: string; slug: string; in: string }>;
+}
 
 export function problem(status: number, slug: string, extra: Record<string, unknown> = {}): WebdeskControlResponse {
   const json = { type: `https://webdesk.gaiada.online/errors/${slug}`, title: slug, status, ...extra };
@@ -98,6 +114,11 @@ export class FakeZoneB {
   readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string; env?: { production: string; staging: string } }> = [];
   /** Every plaintext `key.mint` returned, in order (so a test can scan storage and logs for it). */
   readonly mintedKeys: string[] = [];
+  /** WSK-43b: the media library, by asset id. While it is EMPTY `media.list` answers the legacy one-row fixture. */
+  readonly media = new Map<string, FakeMediaAsset>();
+  /** WSK-43b: every plaintext upload token `media.uploadToken` returned, in order (so a test can scan storage and logs for it). */
+  readonly mintedUploadTokens: string[] = [];
+  private readonly mintKeys = new Set<string>();
   /** Throw this from the NEXT `send` (a breaker-open, a transport failure, ...). Persistent until cleared. */
   failWith: Error | null = null;
   /** Respond to the NEXT write with this instead of applying it. */
@@ -123,6 +144,9 @@ export class FakeZoneB {
   reset(): void {
     this.calls.length = 0;
     this.mintedKeys.length = 0;
+    this.mintedUploadTokens.length = 0;
+    this.mintKeys.clear();
+    this.media.clear();
     this.items.clear();
     this.failWith = null;
     this.nextWriteResponse = null;
@@ -153,6 +177,23 @@ export class FakeZoneB {
     };
     this.items.set(item.itemId, item);
     return item;
+  }
+
+  seedMedia(p: Partial<FakeMediaAsset> & { siteId: string }): FakeMediaAsset {
+    const a: FakeMediaAsset = {
+      assetId: randomUUID(), title: null, alt: {}, tags: [], mime: "image/png", sizeBytes: 1234, originalFilename: "hero.png",
+      createdAt: new Date().toISOString(), deletedAt: null, usedBy: [], ...p,
+    };
+    this.media.set(a.assetId, a);
+    return a;
+  }
+
+  private assetJson(a: FakeMediaAsset) {
+    return {
+      assetId: a.assetId, bucketKey: `media/${a.assetId}`, mime: a.mime, sizeBytes: a.sizeBytes, scanStatus: "clean", createdAt: a.createdAt,
+      title: a.title, alt: a.alt, tags: a.tags, originalFilename: a.originalFilename, width: 640, height: 480, createdBy: null,
+      url: `/v1/t/gaiada/media/${a.assetId}`, updatedAt: a.createdAt, deletedAt: a.deletedAt,
+    };
   }
 
   asClient(): WebdeskControlClient {
@@ -301,8 +342,27 @@ export class FakeZoneB {
         if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
         return i.versions[Number(p.n) - 1] ? ok(this.versionJson(i, Number(p.n))) : problem(404, "version-not-found");
       }
-      case "media.list":
-        return ok({ assets: [{ assetId: randomUUID(), bucketKey: "a/b.png", mime: "image/png", sizeBytes: 12, scanStatus: "clean", createdAt: new Date().toISOString() }], page: { cursor: null, hasMore: false, limit: 50 } });
+      case "media.list": {
+        if (this.media.size === 0) {
+          return ok({ assets: [{ assetId: randomUUID(), bucketKey: "a/b.png", mime: "image/png", sizeBytes: 12, scanStatus: "clean", createdAt: new Date().toISOString() }], page: { cursor: null, hasMore: false, limit: 50 } });
+        }
+        const q = req.query ?? {};
+        const needle = q.q?.toLowerCase();
+        const rows = [...this.media.values()].filter(
+          (a) =>
+            a.siteId === p.siteId &&
+            (q.includeDeleted === "true" || !a.deletedAt) &&
+            (!q.tag || a.tags.includes(q.tag)) &&
+            (!q.mime || (q.mime.endsWith("/*") ? a.mime.startsWith(q.mime.slice(0, -1)) : a.mime === q.mime)) &&
+            (!needle || (a.title ?? "").toLowerCase().includes(needle) || a.originalFilename.toLowerCase().includes(needle) || a.tags.some((t) => t.includes(needle))),
+        );
+        return ok({ assets: rows.map((a) => this.assetJson(a)), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
+      }
+      case "media.usage": {
+        const a = this.media.get(p.assetId);
+        if (!a || a.siteId !== p.siteId) return problem(404, "media-asset-not-found");
+        return ok({ assetId: a.assetId, url: `/v1/t/gaiada/media/${a.assetId}`, total: a.usedBy.length, items: a.usedBy });
+      }
       default:
         break;
     }
@@ -401,6 +461,39 @@ export class FakeZoneB {
           return { itemId, collectionKey: i.collectionKey, locale: i.locale, slug: i.slug, version, publishedAt: now };
         });
         return ok({ published, replayed: false });
+      }
+      case "media.uploadToken": {
+        // WebDesk media-commands.service#mintUploadToken: the token (and the uploadPath that embeds it) is returned ONCE and
+        // withheld from the idempotency record, so a replay under the same key is a 409.
+        if (b.bucket !== "media" && b.bucket !== "video") return problem(400, "invalid-request", { detail: "bucket must be one of media, video" });
+        if (this.mintKeys.has(String(req.idempotencyKey))) return problem(409, "idempotency-response-withheld");
+        this.mintKeys.add(String(req.idempotencyKey));
+        const token = randomBytes(32).toString("base64url");
+        this.mintedUploadTokens.push(token);
+        const allowed = b.bucket === "media" ? ["image/png", "image/jpeg", "image/webp", "image/gif"] : ["video/mp4", "video/webm"];
+        return ok({
+          tokenId: randomUUID(), token, uploadPath: `/v1/t/${p.tenantSlug}/media/upload/${token}`,
+          expiresAt: new Date(Date.now() + 600_000).toISOString(), bucket: b.bucket,
+          maxBytes: Math.min(typeof b.maxBytes === "number" ? b.maxBytes : 10_485_760, 10_485_760),
+          allowedMimes: Array.isArray(b.mime) ? b.mime : typeof b.mime === "string" ? [b.mime] : allowed, replayed: false,
+        }, 201);
+      }
+      case "media.update": {
+        const a = this.media.get(p.assetId);
+        if (!a || a.siteId !== p.siteId) return problem(404, "media-asset-not-found");
+        if (a.deletedAt) return problem(409, "media-asset-deleted");
+        if ("title" in b) a.title = b.title;
+        if ("alt" in b) a.alt = b.alt;
+        if ("tags" in b) a.tags = b.tags;
+        return ok({ asset: this.assetJson(a), replayed: false });
+      }
+      case "media.delete": {
+        const a = this.media.get(p.assetId);
+        if (!a || a.siteId !== p.siteId) return problem(404, "media-asset-not-found");
+        if (a.deletedAt) return ok({ assetId: a.assetId, deletedAt: a.deletedAt, purgeAfter: a.deletedAt, alreadyDeleted: true, replayed: false });
+        if (a.usedBy.length > 0) return problem(409, "media-in-use", { detail: "The asset is used by content.", total: a.usedBy.length, items: a.usedBy });
+        a.deletedAt = now;
+        return ok({ assetId: a.assetId, deletedAt: now, purgeAfter: new Date(Date.now() + 86_400_000).toISOString(), alreadyDeleted: false, replayed: false });
       }
       case "schema.apply":
         return ok({ collectionKey: p.collectionKey, bump: "minor", reasons: [], persisted: true, replayed: false }, 201);
