@@ -39,7 +39,9 @@
 # (The T7 DENY on publish/schedule has no analogue to add here.)
 #
 # ── THE INVARIANTS THIS FILE MUST NOT BREAK ─────────────────────────────────────────────────────
-#  - `client` appears NOWHERE: the media library is staff-only. `member` appears nowhere either.
+#  - the `client` ROLE appears NOWHERE: the media library is staff-only. `member` appears nowhere either.
+#    WSK-49c adds exactly ONE non-staff consumer, the attribute-gated derived role `client_website_editor` (a grant scoped
+#    to one client record; read / upload / update only, NEVER delete), below.
 #  - NO perm_* mirror (IAM-04c): the sibling content kind has none, and this kind has no attribute-instance
 #    check a flat `perms` array would have to express anyway; a mirror would only widen what an
 #    IAM-editable role could reach through the role-permission seed (iam-04-reg1-mirror-reach-invariant).
@@ -70,6 +72,21 @@ resourcePolicy:
     - actions: ["read", "upload", "update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager", "module_staff"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+
+    # ══════════ CLIENT EDITORS — WSK-49c (rulings WSK-D59, D60) ══════════════════════════════════
+    # `client_website_editor` (derived_roles.yaml) may read the library, mint an upload token and update an
+    # asset's metadata for the client the resource is about (`resource.attr.clientId`, fed only by the portal BFF
+    # from the server-loaded site -> client link). NEVER `delete`: D59 says "media deletion ... never reachable",
+    # and it is absent from this rule so Cerbos denies it by default. Same tenant / assurance / module tests as
+    # the staff tier; no `variables.local`.
+    - actions: ["read", "upload", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["client_website_editor"]
       condition:
         match:
           expr: >-

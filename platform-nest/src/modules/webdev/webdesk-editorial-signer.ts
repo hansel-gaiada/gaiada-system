@@ -6,11 +6,20 @@
 // FILED cmh, req, apr); this file adds iss/aud/iat/exp/jti and signs. WebDesk verifies with
 // webdesk/api/src/control/auth/editorial-assertion.ts against a pinned public JWKS file.
 //
+// ── THE CLIENT MARKER `ce` (WSK-49c, WebDesk WSK-49b, rulings WSK-D59/D62) ───────────────────────
+// A write made on behalf of a CLIENT editor carries `ce: true`, between `apr` and `iat` (the position WebDesk's
+// vector v4 pins). With it WebDesk refuses any change to a path that is not client-editable and applies D58/D62 to a
+// publish; without it nothing changes. The marker only ever RESTRICTS, so an assertion that lacks it is a full-power
+// STAFF assertion and WebDesk cannot tell that a client was left unmarked: setting it on every client-mode call is
+// the ERP's whole duty here (WebdeskZoneB.write for the immediate commands, the approved-command executor for a
+// client's publish). It is written only when true: a staff assertion is byte-for-byte what it was before WSK-49, and
+// `ce: false` is never emitted (WebDesk reads absent and false alike, but one spelling keeps the bytes pinned).
+//
 // ── WIRE FORMAT (byte-pinned by the three vectors in this file's test AND in
 //    webdesk/api/test/editorial-assertion-vectors.spec.ts; change one side and both go red) ─────────
 //   compact JWS = base64url(header) "." base64url(payload) "." base64url(Ed25519 signature)
 //   header  = {"alg":"EdDSA","typ":"wd-editorial+jwt","kid":"<kid>"}            (this key order)
-//   payload = {"iss","aud","sub","pk","agt"?,"ten","site","cmd","cmh","req"?,"apr"?,"iat","exp","jti"}
+//   payload = {"iss","aud","sub","pk","agt"?,"ten","site","cmd","cmh","req"?,"apr"?,"ce"?,"iat","exp","jti"}
 //             (this key order; absent optionals are omitted, never null)
 //   iss = "urn:gaiada:erp:webdev", aud = "urn:gaiada:webdesk:control", exp = iat + ttl (60 s),
 //   jti = a fresh UUID v4 per assertion (WebDesk consumes it once).
@@ -63,6 +72,8 @@ export interface EditorialClaimsWire {
   cmh: string;
   req?: string;
   apr?: string;
+  /** WSK-49c: the client-editor marker, between `apr` and `iat` (WebDesk's vector v4). Present only for a client principal. */
+  ce?: true;
   iat: number;
   exp: number;
   jti: string;
@@ -98,6 +109,7 @@ export function editorialClaimsFor(input: EditorialAssertionRequest, iat: number
       throw new EditorialAssertionInputError(`${name} must be a non-empty string (max ${MAX_CLAIM_CHARS}) when present`);
     }
   }
+  if (input.ce !== undefined && input.ce !== true) throw new EditorialAssertionInputError("ce must be true when present (absent for a staff principal)");
   if ((input.pk === "agent") !== (input.agt !== undefined)) throw new EditorialAssertionInputError("agt is present iff pk = agent");
   if (typeof input.cmh !== "string" || !CMH_RE.test(input.cmh)) throw new EditorialAssertionInputError("cmh must be a lowercase sha256 hex digest");
   if (!Number.isSafeInteger(iat) || !Number.isInteger(ttlSec) || ttlSec < 1 || ttlSec > MAX_EDITORIAL_TTL_SEC) {
@@ -112,6 +124,7 @@ export function editorialClaimsFor(input: EditorialAssertionRequest, iat: number
   c.cmh = input.cmh;
   if (input.req !== undefined) c.req = input.req;
   if (input.apr !== undefined) c.apr = input.apr;
+  if (input.ce === true) c.ce = true;
   c.iat = iat;
   c.exp = iat + ttlSec;
   c.jti = jti;

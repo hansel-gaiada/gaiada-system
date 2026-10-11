@@ -3,12 +3,14 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalProfile } from "@/lib/portal-data";
+import { getPortalWebsiteAccess } from "@/lib/clientWebsiteAccess";
 import { portalDate } from "@/lib/portal";
 import { describeAccess, groupPeople } from "@/lib/portalPeople";
 import { Card, Eyebrow, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalChangeRequestForm, PortalOwnDetailsForm } from "@/components/portal/PortalProfileForms";
 import { PortalCopyEmail } from "@/components/portal/PortalCopyEmail";
+import { PortalWebsiteAccessCard } from "@/components/portal/PortalWebsiteAccessCard";
 import { PortalFacts, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 
 // CP-15 — who the client is, who their people are, and what this account may do.
@@ -35,6 +37,15 @@ export default async function PortalProfilePage() {
   }
 
   const groups = groupPeople(profile);
+  // WSK-49f: a client ADMIN also sees who may edit the website. The profile names the caller's own
+  // client-wide admin grants; only for those clients do we ask the BFF, and the BFF stays the authority:
+  // a 403 (or anything that is not an answer) leaves the section out, never a disabled copy of it.
+  const adminClientIds = adminClientsOf(profile);
+  const websiteAccess = (
+    await Promise.all(
+      adminClientIds.map(async (clientId) => ({ clientId, result: await getPortalWebsiteAccess(userId, tenant, clientId) })),
+    )
+  ).flatMap((r) => (r.result.kind === "forbidden" ? [] : [{ clientId: r.clientId, result: r.result }]));
   const client = profile.clients[0] ?? null;
   const contact = (client?.contact ?? {}) as Record<string, unknown>;
   const contactRow = (key: string, label: string) =>
@@ -136,6 +147,17 @@ export default async function PortalProfilePage() {
           )}
         </Card>
 
+        {websiteAccess.map(({ clientId, result }) => (
+          <PortalWebsiteAccessCard
+            key={clientId}
+            clientId={clientId}
+            clientName={profile.clients.find((c) => c.id === clientId)?.name ?? "your account"}
+            showClientName={websiteAccess.length > 1}
+            meUserId={profile.me?.id ?? null}
+            initial={result}
+          />
+        ))}
+
         {groups.accountManagers.length > 0 && (
           <Card title="Your account manager" hint="The person at our company who looks after your account.">
             <PortalFacts
@@ -168,6 +190,12 @@ export default async function PortalProfilePage() {
       </div>
     </>
   );
+}
+
+/** The clients where the caller holds the client-wide `admin` capability, per their own profile. A
+ *  project-scoped admin row carries no website power (the server refuses it), so it is not counted. */
+function adminClientsOf(profile: { access: { grants: Array<{ capability: string; clientId: string; projectId: string | null }> } }): string[] {
+  return [...new Set(profile.access.grants.filter((g) => g.capability === "admin" && g.projectId === null).map((g) => g.clientId))];
 }
 
 function accessText(c: { capability: string; projectId: string | null }): string {

@@ -21,6 +21,7 @@ import "server-only";
 // every navigation.
 import type { DemoResult } from "./demoFixtures";
 import { isDemoPortalClient } from "./demoPortalClients";
+import { portalCallerContact, portalProfileContacts } from "./demoWebsiteAccess";
 
 const CLIENT_ID = "cl-1";              // Northwind Traders — the client `demo-client` represents
 const DEMO_CLIENT_USER = "demo-client";
@@ -580,23 +581,31 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
 
   // ── profile ──
   if (seg === "profile" && m === "GET") {
+    // WSK-49f: the contact rows and the caller's own grant come from the ONE website-access store
+    // (lib/demoWebsiteAccess.ts), so the People page, the staff Contacts page and the grant state agree on
+    // who is an admin, a signer or a viewer. Ids are USER ids, as in the real /portal/profile.
+    const mine = portalCallerContact(userId);
+    const contacts = portalProfileContacts().map((c) =>
+      c.id === DEMO_CLIENT_USER ? { ...c, name: profileName } : c,
+    );
+    const self = contacts.find((c) => c.id === userId) ?? contacts.find((c) => c.id === DEMO_CLIENT_USER)!;
+    const grantCap = mine?.capability ?? "signer";
     return ok({
-      me: { id: DEMO_CLIENT_USER, name: profileName, email: "dana@northwind.example", title: profileTitle, memberSince: stamp(-400) },
+      me: {
+        id: self.id, name: self.id === DEMO_CLIENT_USER ? profileName : self.name, email: self.email,
+        title: self.id === DEMO_CLIENT_USER ? profileTitle : null, memberSince: stamp(-400),
+      },
       clients: [{
         id: CLIENT_ID, name: "Northwind Traders", status: "active", projectCount: PROJECTS.length,
         contact: { email: "accounts@northwind.example", phone: "+62 361 555 0134", address: "Jl. Raya Seminyak 12, Bali" },
         accountManager: { name: "Made Prabowo", email: "made@gaiada.example" },
       }],
-      contacts: [
-        { id: DEMO_CLIENT_USER, name: profileName, email: "dana@northwind.example", capability: "signer", status: "active", clientId: CLIENT_ID, projectId: null, side: "client" },
-        { id: "nw-2", name: "Erica Boonstra", email: "erica@northwind.example", capability: "viewer", status: "active", clientId: CLIENT_ID, projectId: "proj-nw-site", side: "client" },
-        { id: "nw-3", name: "Marco Halim", email: "marco@northwind.example", capability: "viewer", status: "invited", clientId: CLIENT_ID, projectId: null, side: "client" },
-        // Staff holding a contact row (e.g. a placeholder signer): visible, labelled as our side.
-        { id: "nw-4", name: "Made Prabowo", email: "made@gaiada.example", capability: "signer", status: "active", clientId: CLIENT_ID, projectId: null, side: "provider" },
-      ],
+      contacts,
       access: {
-        canSign: true, wholeClient: true,
-        grants: [{ capability: "signer", clientId: CLIENT_ID, clientName: "Northwind Traders", projectId: null, projectName: null }],
+        // An admin implies signer (owner ruling 2026-10-11), as the real scope resolver's canSign does.
+        canSign: grantCap === "signer" || grantCap === "admin",
+        wholeClient: (mine?.projectId ?? null) === null,
+        grants: [{ capability: grantCap, clientId: CLIENT_ID, clientName: "Northwind Traders", projectId: mine?.projectId ?? null, projectName: null }],
       },
     });
   }

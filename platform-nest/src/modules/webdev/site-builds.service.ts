@@ -33,6 +33,7 @@ import { isModuleEnabled } from "../registry";
 import {
   WorkflowDispatchError,
   dispatchApprovedWorkflow,
+  type ClientPublishAuthority,
   type WorkflowDispatchFailure,
 } from "../../core/github/workflow-dispatch";
 import { readStagingStamp, stampProves, type StampFetchOptions } from "./site-build-stamp";
@@ -253,6 +254,10 @@ export interface StartRebuildInput {
   decider: Principal | null;
   /** Recorded as `decided_by` when `decider` is null. */
   decidedBy?: string | null;
+  /** WSK-D65: set ONLY by the approved-command executor when the decider of an executed publish is a CLIENT editor. The dispatch
+   *  then re-verifies it server-side instead of running `authorizeDeploy` (see `ClientPublishAuthority`). Never passed for a staff
+   *  decider, for a `rebuild`, or for a scheduled publish. */
+  authority?: ClientPublishAuthority;
 }
 
 export interface StartRebuildResult {
@@ -287,7 +292,19 @@ async function markFailed(tenantId: string, buildId: string, reason: BuildFailur
  */
 export async function startSiteRebuild(input: StartRebuildInput): Promise<StartRebuildResult> {
   const target = rebuildTargetFor(input.tenantSlug, input.siteId);
-  const refusal: BuildFailureReason | null = !target ? "rebuild_not_configured" : input.decider === null ? "decider_inactive" : null;
+  // WSK-D65: a client-publish authority must name exactly the tenant, approval and site this call rebuilds. The dispatcher
+  // re-verifies the authority against its OWN site, while the target dispatched is this call's: without this check a valid
+  // authority for site X could start site Y's configured rebuild. The only issuer passes the same values; this makes it structural.
+  const a = input.authority;
+  const authorityMismatch =
+    !!a && (a.tenantId !== input.tenantId || a.approvalId !== input.approvalId || a.tenantSlug !== input.tenantSlug || a.siteId !== input.siteId);
+  const refusal: BuildFailureReason | null = !target
+    ? "rebuild_not_configured"
+    : input.decider === null
+      ? "decider_inactive"
+      : authorityMismatch
+        ? "client_publish_unverified"
+        : null;
   let buildId: string | null = null;
   try {
     const id = newId();
@@ -324,11 +341,13 @@ export async function startSiteRebuild(input: StartRebuildInput): Promise<StartR
     return { buildId: null, state: "failed", failureReason: "build_ledger_unavailable", deduplicated: false };
   }
 
-  if (!target || input.decider === null) {
+  if (refusal || !target || input.decider === null) {
     logger.warn(
       !target
         ? `approval ${input.approvalId}: no rebuild target is configured for site ${input.siteId}`
-        : `approval ${input.approvalId}: the decider is no longer active; nothing dispatched`,
+        : input.decider === null
+          ? `approval ${input.approvalId}: the decider is no longer active; nothing dispatched`
+          : `approval ${input.approvalId}: the client-publish authority does not name this site; nothing dispatched`,
     );
     return { buildId, state: "failed", failureReason: refusal, deduplicated: false };
   }
@@ -344,6 +363,7 @@ export async function startSiteRebuild(input: StartRebuildInput): Promise<StartR
       repo: target.repo,
       workflow: target.workflow,
       ref: target.ref,
+      ...(input.authority ? { authority: input.authority } : {}),
       inputs: {
         approval_id: input.approvalId,
         kind: input.kind,
