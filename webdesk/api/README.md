@@ -2048,16 +2048,25 @@ uses the asset, so it cannot break a page.
   token (no oracle). Known limit: the slots are per process, so N replicas admit N times as many.
 - **Body parsing** is scoped: a Fastify parser for exactly the public buckets' media types, handing the route the
   unread stream. On any other path it answers the 415 Fastify would (`media/media-upload-parser.ts`).
-- **CORS** is the draft-preview rule (`allowedPreviewOrigin`): the request `Origin` is echoed only when it is
-  `https://<domain>` of an environment of the token's site (set `environments.domain`). Errors after the token is proven
-  carry it too; a 404 never does. Responses are `Cache-Control: no-store`.
+- **CORS** is configuration, not the preview rule: the upload is made from the ERP editor's origin (bytes never
+  traverse Zone A), not the tenant site's. `WEBDESK_UPLOAD_CORS_ORIGINS` is a comma-separated list of exact origins
+  (`https://erp.gaiada.online,https://erp.gaiada.com`), each `https://host[:port]` (host lower-cased; no path, no
+  trailing slash, no `*`, not `null`). Unset or empty means **no CORS headers at all** (a server-side caller is
+  unaffected); a malformed entry **refuses to boot**, naming the variable. The route (POST and its preflight) echoes
+  `Access-Control-Allow-Origin` only when the request `Origin` equals one configured origin exactly; every answer, the
+  404 included, carries `Vary: Origin` and `Cache-Control: no-store`; never `Allow-Credentials`. The preflight (204 only
+  for a still-redeemable token, else the 404) allows `POST, OPTIONS` and the headers `content-type, x-request-id`
+  (the body is the raw file, so `content-type` is the only non-simple header an upload needs), `Max-Age: 600`. The
+  decision depends on the Origin alone, never on the token, so it is no oracle. The draft-preview route keeps its own
+  site-domain rule, unchanged. The compose files pass the variable to the api (`${WEBDESK_UPLOAD_CORS_ORIGINS:-}`).
 - **Attribution.** `media_assets.created_by` is the minting editorial principal (the token's `created_by`), so the
   library can show who uploaded what (`createdBy` in `media.list` and the upload response; null for rows that predate
   it); it is also the actor of the `webdesk.media.upload` audit row. `original_filename` is a cleaned label (last path segment,
   control characters removed, at most 255 characters); `width`/`height` are read from the header bytes for png, gif,
   jpeg and webp, else null.
-- **Operators:** the token is in the request URL, so any access log in front of the api (Caddy, a CDN, a load
-  balancer) records it. **Redact the upload path `/v1/t/*/media/upload/*` at the edge too, exactly as you redact
+- **Operators:** set `WEBDESK_UPLOAD_CORS_ORIGINS` to the ERP origin(s) on each environment, or no browser upload from
+  the editor can work. The token is also in the request URL, so any access log in front of the api (Caddy, a CDN, a
+  load balancer) records it. **Redact the upload path `/v1/t/*/media/upload/*` at the edge too, exactly as you redact
   `/v1/t/*/preview/*`** (the api's own `instance` and log lines already do). An unredacted log lets a reader upload one
   file into the library until the token expires (ten minutes) or is used.
 - `media` was already a reserved collection key.

@@ -42,21 +42,21 @@
 //      allowed set (415 otherwise, before the body is read). The bytes then go through MediaService.screen /
 //      storeObject / recordAsset, the same code the API-key route runs: bucket allowlist, magic-byte sniff,
 //      quota, ClamAV (fail closed), store, row, audit. This file adds no second pipeline.
-//   5. CORS (preview-token.ts allowedPreviewOrigin, the same rule as the draft-preview route): the response may
-//      be read by script only from `https://<domain>` of an environment of the token's site. The decision
-//      needs the token's site, so it exists only once the token is proven; errors before that carry no CORS.
+//   5. CORS is NOT decided here: it is the controller's, from configuration (upload-cors.ts,
+//      WEBDESK_UPLOAD_CORS_ORIGINS): the upload comes from the ERP's origin, not the tenant site's. It depends on
+//      the request's Origin alone, never on the token, so it is no oracle.
 //
 // The asset's attribution is the token's `created_by`: the editorial principal that minted it, stored on
 // media_assets.created_by (migration 0014) and as the actor of the `webdesk.media.upload` audit row.
-import { BadRequestException, Injectable, Logger, NotFoundException, PayloadTooLargeException, RequestTimeoutException, UnsupportedMediaTypeException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException, type OnModuleInit, PayloadTooLargeException, RequestTimeoutException, UnsupportedMediaTypeException } from "@nestjs/common";
 import type { Readable } from "node:stream";
 import { DbService } from "../db/db.service";
-import { allowedPreviewOrigin } from "../delivery/preview-token";
 import { storageConfig, type BucketName } from "../storage/storage.config";
 import { readImageDimensions } from "./image-dimensions";
 import { toLibraryAsset, type LibraryAsset } from "./library-asset";
 import { InfectedUploadError, MediaService } from "./media.service";
 import { hashUploadToken, UPLOAD_TOKEN_RE } from "./media-upload-token";
+import { uploadCorsOrigins } from "./upload-cors";
 
 /** The longest the body may take to arrive, from the moment the token is proven. */
 function uploadTimeoutMs(): number {
@@ -177,9 +177,14 @@ export function readBounded(stream: Readable, maxBytes: number, timeoutMs: numbe
 }
 
 @Injectable()
-export class MediaUploadService {
+export class MediaUploadService implements OnModuleInit {
   private readonly logger = new Logger(MediaUploadService.name);
   readonly slots = new UploadSlots();
+
+  /** Refuses to boot on a malformed WEBDESK_UPLOAD_CORS_ORIGINS (upload-cors.ts), naming the variable. */
+  onModuleInit(): void {
+    uploadCorsOrigins();
+  }
 
   constructor(
     private readonly db: DbService,
@@ -187,48 +192,32 @@ export class MediaUploadService {
   ) {}
 
   /**
-   * The CORS preflight of the upload route: only a token that could still be redeemed answers (everything
-   * else is `null`, the route's one 404). Returns the Origin to echo, or null (no CORS headers).
-   * Read-only: a preflight never spends a token.
+   * Is this token one that could still be redeemed? (The preflight answers only for such a token; everything
+   * else is the route's one 404.) Read-only: a preflight never spends a token.
    */
-  async preflight(tenantId: string, token: string, origin: string | null): Promise<{ allowOrigin: string | null } | null> {
-    if (!UPLOAD_TOKEN_RE.test(token)) return null;
+  async redeemable(tenantId: string, token: string): Promise<boolean> {
+    if (!UPLOAD_TOKEN_RE.test(token)) return false;
     const hash = hashUploadToken(token);
     return this.db.withTenant(tenantId, async (db) => {
-      const { rows } = await db.query<{ site_id: string }>(
-        `SELECT site_id FROM media_upload_tokens WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()`,
+      const { rows } = await db.query(
+        `SELECT 1 FROM media_upload_tokens WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()`,
         [hash, tenantId],
       );
-      if (!rows[0]) return null;
-      const domains = await this.siteDomains(db, rows[0].site_id, tenantId);
-      return { allowOrigin: allowedPreviewOrigin(origin, domains) };
+      return rows.length > 0;
     });
-  }
-
-  private async siteDomains(db: Pick<DbService, "query">, siteId: string, tenantId: string): Promise<string[]> {
-    const { rows } = await db.query<{ domain: string }>(
-      `SELECT domain FROM environments WHERE site_id = $1 AND tenant_id = $2 AND domain IS NOT NULL AND domain <> ''`,
-      [siteId, tenantId],
-    );
-    return rows.map((r) => r.domain);
   }
 
   /**
    * Redeems the token with this request's body (see the header for the three short database steps).
-   * `onAuthorized` is called once the token is proven, with the Origin to echo for CORS (or null): the
-   * controller sets the response header there, so every later answer, the errors included, is readable by the
-   * site's own script.
    */
   async redeem(p: {
     tenantId: string;
     tenantSlug: string;
     token: string;
-    origin: string | null;
     contentType: string | undefined;
     contentLength: number | null;
     filename: string | null;
     body: Readable;
-    onAuthorized: (allowOrigin: string | null) => void;
   }): Promise<LibraryAsset> {
     if (!UPLOAD_TOKEN_RE.test(p.token)) throw new NotFoundException();
     const hash = hashUploadToken(p.token);
@@ -240,17 +229,15 @@ export class MediaUploadService {
           WHERE token_hash = $1 AND tenant_id = $2 AND used_at IS NULL AND expires_at > now()`,
         [hash, p.tenantId],
       );
-      if (!rows[0]) return null;
-      return { token: rows[0], domains: await this.siteDomains(db, rows[0].site_id, p.tenantId) };
+      return rows[0] ?? null;
     });
     if (!found) throw new NotFoundException();
-    p.onAuthorized(allowedPreviewOrigin(p.origin, found.domains)); // 5. CORS, now that the token's site is known
 
     const contentType = baseContentType(p.contentType);
-    if (!contentType || !found.token.allowed_mimes.includes(contentType)) {
+    if (!contentType || !found.allowed_mimes.includes(contentType)) {
       throw new UnsupportedMediaTypeException(`content-type '${contentType ?? "(none)"}' is not allowed for this upload token`);
     }
-    const cap = Math.min(Number(found.token.max_bytes), storageConfig.maxUploadSizeBytes);
+    const cap = Math.min(Number(found.max_bytes), storageConfig.maxUploadSizeBytes);
     if (p.contentLength !== null && p.contentLength > cap) {
       throw new PayloadTooLargeException(`upload exceeds the ${cap}-byte limit of this token`);
     }
