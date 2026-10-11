@@ -21,7 +21,7 @@ server, result observed). Every ticket's gate is `webdesk/qa/linux-gate.sh` on s
 | **T7** | ERP: Cerbos DENY on publish/schedule for automation and bot principals (never on `request_publish`: the importer files its batch request as automation); requester-own read of an approval, same tenant only | Sonnet, Opus review | — (Cerbos) | ships in 1.0.0-alpha.348; the WebDesk orchestrator gates, releases and probes live Cerbos |
 | **WSK-48b** | Delete Payload; `webdesk/payload/` → `webdesk/delivery/` (vocabulary source); differential → golden suite | Sonnet, Opus review, **then the WebDesk orchestrator reviews before main** (it touches CI, release and compose) | **0011** | after T1, T2, T4 |
 | **WSK-61** | Scheduler: due publishes/takedowns, live-item version swaps, forms purge, idempotency sweep | Sonnet, Opus review | **0012** | after T4, T5a |
-| **WSK-46** | Draft preview as an instant page on the site (D52): hashed expiring tokens + public `/v1/t/:tenant/preview/:token`; an ERP Preview action; a `/preview/` page in gaiada-web-revamp | Sonnet, Opus review; the site part with the site owner | **0013** | WebDesk part after WSK-61; ERP part after the M2 editor follow-ups merge (347); site part needs `api.gaiada.com` public |
+| **WSK-46** | Draft preview as an instant page on the site (D52): hashed expiring tokens + public `/v1/t/:tenant/preview/:token`; an ERP Preview action; a `/preview/` page in gaiada-web-revamp | Sonnet, Opus review; the site part with the site owner | **0013** | WebDesk part after WSK-61; ERP part after the M2 editor follow-ups merge (347); site part needs `api.erp.gaiada.com` public (WSK-D61) |
 | **WSK-43a** | Media library, WebDesk half: asset metadata, token uploads, soft delete refused while in use (D54), purge job (frees locked versions), quota in bytes held | Sonnet, Opus review | **0014** | after wave 3 |
 | **WSK-43b** | Media library, ERP half: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools | Sonnet, Opus review; the WebDesk orchestrator releases it (Cerbos restart) | — | after 43a |
 | **WSK-43c** | Media library UI: a Media tab in the Website workspace, and a picker for media fields in the editor | Sonnet, Opus review | — | after the M2 editor follow-ups (350) and 43b |
@@ -96,9 +96,14 @@ read `media.list`. The media primitive stores `{url, alt?, width?, height?, mime
 Rulings: WSK-D58 (a client publisher self-publishes a single item; batches need a second client person) and WSK-D59 (clients change
 only what the composition marks client-editable). Built now against a test client tenant, before the first client site moves onto WebDesk.
 
-- **Who is a client editor (WSK-D60).** A client user holding `client_website_editor` on their own company. Gaiada staff and the
-  client's company admin can grant it; the self-service path is bounded (this role only, own company only, never staff roles or
-  permissions, within the granter's ceiling, audited). `isClientOnly`, never `!isElevated`, decides the portal shell.
+- **Who is a client editor (WSK-D60, amended).** A client contact holding `client_website_editor` on their own CLIENT RECORD: scope
+  (serving company tenant, client_id), the same for a plain client record and for a CMC client company (the record plus its Client Centre
+  profile). Both log in through the client portal, and D58/D59 apply to both. Gaiada staff, and the client's contacts holding the new
+  client-contact capability `admin` (assigned only by staff), can grant it; the self-service path is bounded (this role only, own client
+  only, never staff roles or permissions, audited). `isClientOnly`, never `!isElevated`, decides the portal shell.
+- **Portal placement (with the PV program).** A Website sub-tab under Business (`/portal/website`, `/portal/website/[itemId]`), shown only
+  when the client has a WebDesk site; batch requests wait on the Website tab and on Overview's `needsYou`, never on `/portal/approvals`.
+  The grant UI sits under People: `/portal/profile` for the client admin, `/clients/[id]/contacts` for staff. The PV program reviews.
 - **49f · The grant path.** The role as data, its Cerbos attribute check, staff and client-admin grant/revoke in the ERP and the
   portal, audited; denial tests send valid bodies so validation never pre-empts authorisation.
 - **49a · vocabulary 1.2.0 (MINOR).** `ui.clientEditable` on the composition and on FieldDef; the classifier rates it MINOR; vendored copies
