@@ -1475,6 +1475,17 @@ body) and the grant's tenant is the resource's tenant. An unfed resource (`""`) 
 | `webdesk_media_asset` read / upload / update | allowed | D59 / D53: library reads and metadata for their site. |
 | `webdesk_media_asset` delete | **DENIED** | D59: "media deletion ... never reachable". |
 
+**WSK-D63: a client publish rebuilds staging, and no policy changed.** `github_repo . deploy` is NOT granted to a client; there is no new
+rule, action or role. The dispatch of the staging rebuild after a client-decided publish is authorised in code by an explicit, narrow
+basis: `ClientPublishAuthority` (core/github/workflow-dispatch.ts), a class with a private constructor that only the approved-command
+executor issues, after a publish decided by a client editor has EXECUTED. `dispatchApprovedWorkflow` accepts nothing else as a basis
+(`instanceof`; a JSON object from a request is refused) and, before any GitHub call, re-verifies in this tenant that (a) the approval
+is an executed WebDesk `content.publish` for this site, (b) it was decided by this principal, who holds the `client_website_editor`
+grant for the client the row was filed for (`tool_args.clientId`), and (c) that client is still linked to this exact site. Otherwise
+the build is `failed: client_publish_unverified`. Repo, workflow and ref come from `rebuildTargetFor` (config) only. A staff
+decider carries no authority and still runs `authorizeDeploy`; a client can still never decide a `content.rebuild`, a schedule or a
+key mint. The attempt is audited with `metadata.basis = 'client-publish'` and `metadata.ruling = 'WSK-D63'` on the `github.deploy` rows.
+
 Unchanged on purpose: publish is HIGH for every principal (no approval id, no publish); automation / bot principals never publish
 (the T7 DENY by kind still bites a client-granted automation principal); a LOW-assurance session gets nothing (`notLow`). No `variables.local`.
 A client rule never reads `collectionKey` / `locale`. **Staff roles pass these rules on a resource that carries a `clientId`** (they hold

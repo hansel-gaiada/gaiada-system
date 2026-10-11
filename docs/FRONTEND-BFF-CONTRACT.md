@@ -1917,7 +1917,7 @@ is the authority for which site belongs to which client.
 | ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId[?version=]` | `{item, version, live, group, lint}` PLUS **`composition`** and **`clientEditable`** (below). A deleted item is `404 item-not-found`. |
 | ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId/versions[/:n]` | The staff version reads. |
 | ✅ | POST | `/website/sites/:slug/:siteId/collections/:key/items` | Create. Body `{locale, slug, twinOf?, fields?, blocks?, note?}`; **no `seo`**. `201` as the staff create. D59 pre-check (below). |
-| ✅ | PUT | `/website/sites/:slug/:siteId/items/:itemId` | Update. Body `{baseVersion, fields?, blocks?, note?}`; **no `seo`**. The BFF fills what you omit FROM THE HEAD (fields, generic blocks, and always the existing `seo`) so a partial edit never removes what the client cannot see; a stale `baseVersion` is WebDesk's `409 version-conflict`. |
+| ✅ | PUT | `/website/sites/:slug/:siteId/items/:itemId` | Update. Body `{baseVersion, fields?, blocks?, note?}`; **no `seo`**. The BFF fills what you omit FROM THE HEAD (fields, generic blocks, and always the existing `seo`) so a partial edit never removes what the client cannot see; a stale `baseVersion` is `409 version-conflict`, decided before the D59 diff (below). |
 | ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/restore` | Body `{version, baseVersion, note?}`. The restored version may differ from the head only in client-editable paths. |
 | ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/preview` | WSK-46's one-time preview link (§27), authorised as the item's `update`. `200 {previewUrl, expiresAt, version}`. |
 | ✅ | POST | `/website/sites/:slug/:siteId/publish-requests` | Body `{items:[{itemId, version}], note?}` → `202 {approvalId, command:'content.publish', itemCount}`. Files ONE WS4 approval with the client on the row; publishes nothing. `publishAt` / `unpublishAt` → `403 client-command-not-allowed` (a client never schedules). D62 pre-check (below). |
@@ -1953,9 +1953,23 @@ piece is how a request becomes the stored `{blocks, seo}` (WebDesk's `assembleIt
 
 **What is deliberately NOT done here (follow-ups).** (1) No notification links into `/portal/...`: the pages are WSK-49d's, so a client
 requester is NOT notified when another client approves their batch (the staff inbox href would dangle); the request list is the read.
-Staff deciders are still notified that a batch awaits (`/approvals/<id>`). (2) A client's publish does not rebuild staging: the
-rebuild dispatch needs `github_repo · deploy`, which a client cannot hold, so the build row records `failed: deploy_denied` and staff
-file a `content.rebuild`. An owner decision is needed if a client publish should rebuild (§27, WSK-60).
+Staff deciders are still notified that a batch awaits (`/approvals/<id>`). The same holds when STAFF decide a client-filed
+request in the inbox: the row carries the client, so the client requester is not sent the staff href either.
+
+**A client publish rebuilds staging automatically (WSK-D63).** When a client editor's publish executes (a self-published item, or a
+batch another client editor approved), the executor starts the same staging rebuild a staff publish starts (§27, WSK-60). The client
+never holds `github_repo · deploy` and no Cerbos policy changed: the rebuild is authorised by the executed publish itself, which the
+dispatch re-verifies on the server before any GitHub call (the approval is an executed `content.publish` in this tenant, decided by
+this client editor, filed for a client that is STILL linked to this exact site; otherwise the build row is
+`failed: client_publish_unverified` and nothing is sent). The target (repo, workflow, ref) comes only from the ERP's rebuild
+configuration; it is once per approval, staging only, and the `github.deploy` ledger rows carry `basis: 'client-publish'` and
+`ruling: 'WSK-D63'` with the client as actor. The build status the editor reads is unchanged (`rebuilding` -> `live`/`unverified`).
+A staff decider's dispatch is untouched (`authorizeDeploy`).
+
+**A stale `baseVersion` is `409 version-conflict` (WebDesk's body: `currentHeadVersion`, `currentContentHash`, `updatedAt`), decided
+before the D59 diff**, on update and on restore: a head that moved (e.g. staff edited a protected field after the client loaded the
+item) is never answered as a `422` about a field the client did not touch. Reload the item and re-apply. A deleted item's version
+history (`/versions`, `/versions/:n`) is `404 item-not-found` to a client, like the item.
 
 #### Site -> client link (staff) — `webdesk_site_clients` (migration `202610111200`)
 
