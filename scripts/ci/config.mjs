@@ -16,10 +16,12 @@ export const CI_SHARED = [".github/workflows/ci.yml", "scripts/ci/"];
  */
 export const CI_GROUPS = {
   // platform-nest jobs: nest-static-gates, platform-nest shards, nest-corpus-perf.
+  // WSK-49c: platform-nest VENDORS webdesk/delivery/vocabulary (src/modules/webdev/vocabulary, drift-checked by
+  // vocabulary-vendor.test.ts), so a change to that source must run the nest tests too.
   // Reads outside platform-nest/: docs/modules/CAPABILITY-INVENTORY.md, automation/workflows/
   // pipeline-delivery.json, root scripts/replay-inbound.mjs, platform-ui/src/lib/rbac*.
   // contracts/ holds cross-package wire fixtures (contracts/zoneb/*: WebDesk -> ERP Zone B envelopes), read by tests on BOTH sides.
-  nest: ["platform-nest/", "docs/modules/", "automation/workflows/", "platform-ui/src/lib/rbac", "scripts/", "contracts/"],
+  nest: ["platform-nest/", "docs/modules/", "automation/workflows/", "platform-ui/src/lib/rbac", "scripts/", "contracts/", "webdesk/delivery/vocabulary/"],
   // platform-ui reads platform-nest's Cerbos derived_roles, rbac catalogs and the clients registry.
   ui: ["platform-ui/", "platform-nest/cerbos/", "platform-nest/src/rbac/", "platform-nest/src/modules/clients/centre/"],
   gateway: ["ai-gateway-go/"],
