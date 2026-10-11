@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { loadSiteContext } from "@/lib/webdeskContent";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CollectionsPanel } from "@/components/webdesk/content/CollectionsPanel";
@@ -26,6 +27,9 @@ export default async function WebsiteSitePage({ params }: { params: Params }) {
         {ctx.data.site.name} · locales {ctx.data.tenant.locales.join(", ")} (default {ctx.data.tenant.defaultLocale}). Pending changes are drafts whose head differs from what is live.
       </p>
       <CollectionsPanel collections={ctx.data.collections} siteBase={here} />
+      <p className="wc-lede" data-testid="media-link">
+        Images and files: <Link href={`/departments/${encodeURIComponent(deptId)}/website/media/${encodeURIComponent(tenant)}/${encodeURIComponent(site)}`}>open this site&apos;s media library</Link>.
+      </p>
       <RequestKeyPanel
         allowed={can(c.me, "webdev.promote", c.company)}
         scope={{ tenantSlug: tenant, siteId: site }}

@@ -4793,7 +4793,11 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint}` |
 | GET | `/sites/:ts/:site/items/:itemId/versions?cursor&limit` | `webdesk_content_item:read` | 200 `{versions:[{version,contentHash,createdAt,createdBy,attribution,note}],page}`, newest first |
 | GET | `/sites/:ts/:site/items/:itemId/versions/:n` | `webdesk_content_item:read` | 200 one full version (`blocks`, `seo`, …) |
-| GET | `/sites/:ts/:site/media?mime&cursor&limit` | `webdesk_content_item:read` | 200 `{assets:[{assetId,bucketKey,mime,sizeBytes,scanStatus,createdAt}],page}` |
+| GET | `/sites/:ts/:site/media?mime&q&tag&includeDeleted&cursor&limit` | `webdesk_media_asset:read` (**WSK-43b**: was `webdesk_content_item:read`; same tiers, see "The media library") | 200 `{assets:[MediaAsset],page:{cursor,hasMore,limit}}`, newest first |
+| GET | `/sites/:ts/:site/media/:assetId/usage` (**WSK-43b**, BUILT) | `webdesk_media_asset:read` | 200 `{assetId,url,total,items:[{itemId,collectionKey,locale,slug,in}]}` (at most 50 items) |
+| POST | `/sites/:ts/:site/media/upload-token` (**WSK-43b**, BUILT) | `webdesk_media_asset:upload` | **201** `{uploadUrl,expiresAt,maxBytes,allowedMimes}`; `Cache-Control: no-store` |
+| PATCH | `/sites/:ts/:site/media/:assetId` (**WSK-43b**, BUILT) | `webdesk_media_asset:update` | 200 `{asset}` |
+| DELETE | `/sites/:ts/:site/media/:assetId` (**WSK-43b**, BUILT) | `webdesk_media_asset:delete` | 200 `{assetId,deletedAt,purgeAfter,alreadyDeleted}`, or **409 `media-in-use`** (below) |
 | POST | `/sites/:ts/:site/collections/:collectionKey/items` | `…:create` | **201** `ItemWriteResult` |
 | PUT (and `PATCH`, the MCP hub's alias) | `/sites/:ts/:site/items/:itemId` | `…:update` | 200 `ItemWriteResult` |
 | POST | `/sites/:ts/:site/items/:itemId/restore` | `…:update` | 200 `ItemWriteResult` |
@@ -4903,13 +4907,73 @@ strict Zone B fake, and pipes every real body through the UI's `parse*` validato
 build-status answers `{build, stagingStale}`, and a rebuild request answers `202 {approvalId}`, or `503 {reason:"webdesk_not_configured"}` when the site has no
 staging rebuild target. On a deployment without those routes the BFF answers a plain Nest 404, which the UI still maps to `not_enabled/not_served`
 ("rebuild status isn't available on this deployment yet"), never to a fabricated build.
-The UI reads nothing from `GET …/media` (it has no media reader); its §27 shape is asserted in the same test. A `502 webdesk_ambiguous` reaches the UI as
+The UI reads nothing from `GET …/media` (it has no media reader; the Media tab is WSK-43c); its pre-WSK-43b shape is asserted in the same test. A `502 webdesk_ambiguous` reaches the UI as
 `unavailable/upstream_error` with the machine reason (`not_observed` / `reconcile_failed`) kept. Since 2026-10-11 the editor renders it as its own UNCONFIRMED
 state (`webdeskContentModel.ts#isOutcomeUnknown`): "We couldn't confirm the save. Reload to see what happened." (per action: the save, the new item, the
 delete, the unpublish, the restore, the publish request, the withdrawal, the rebuild request, the `<locale>` twin), never "saved" and never "failed"; edits
 are kept and writes stay off until a successful re-read. `item.get`'s `lint.unavailable` (a reason string: the lint could not RUN) is carried as
 `Lint.unavailable`, and the editor and the approval summary then say "couldn't check" instead of the all-clear. A rebuild request refused with
 `503 {reason:"webdesk_not_configured"}` reads "Staging rebuild isn't set up for this site." The parsed result shapes are unchanged (rendering decisions).
+
+### The media library (WSK-43b, 2026-10-11 — BACKEND BUILT; UI: WSK-43c)
+
+Design: `docs/plans/2026-10-11-webdesk-m3-plan.md` "WSK-43 · The media library"; rulings WSK-D53 (a library image reaches a static site through its build)
+and WSK-D54 (an image still used by content cannot be deleted), `docs/blueprints/webdesk-design-v2.md` §14. The routes proxy WebDesk's WSK-43a control
+commands `media.list` · `media.usage` · `media.uploadToken` · `media.update` · `media.delete` (`webdesk/api/README.md` "Media library (WSK-43a)"). Code:
+`webdesk-media.service.ts` (the use cases) and the routes in `webdesk-content.controller.ts`. Same wall, same typed errors, same two-row ledger as the content
+writes. The three writes are MEDIUM: they carry the editorial assertion (signed as the caller) and an `Idempotency-Key` (optional on the BFF; generated when
+absent). Replace-all semantics on `update`: `alt` is the COMPLETE locale -> text map (`{}` clears), `tags` the COMPLETE list (`[]` clears), `title` a string or `null`.
+
+`MediaAsset` (WebDesk's own row, passed through): `{assetId,bucketKey,mime,sizeBytes,scanStatus,createdAt,title,alt,tags,originalFilename,width,height,createdBy,url,updatedAt,deletedAt}`.
+`url` is the canonical `/v1/t/<tenant>/media/<assetId>`: what the editor writes into a media field and what the in-use scan looks for.
+
+**Request bodies** (strict: an unknown key is 400 `invalid_request`, after authorization):
+
+| Route | Body |
+|---|---|
+| upload-token | `{bucket: "media"\|"video", maxBytes?, mime?}` (`mime` a type or an array, a subset of the bucket's allowlist; `maxBytes` defaults to and is capped by the platform maximum). WebDesk validates; its typed 400 passes through |
+| update | `{title?, alt?, tags?}`, at least one |
+| delete | none (a DELETE sends no body; the MCP hub's `{}` is accepted) |
+
+**`POST …/media/upload-token` and where the bytes go.** The answer is exactly `{uploadUrl, expiresAt, maxBytes, allowedMimes}`. `uploadUrl` is the **public WebDesk URL**
+`<WEBDESK_PUBLIC_BASE_URL>/v1/t/<tenantSlug>/media/upload/<token>`: the browser `POST`s the raw file to it with `Content-Type` set to the file's type, and **the bytes never
+pass through the ERP**. The URL carries a **one-time secret** (valid about ten minutes, single use, bound to this site, bucket, size cap and types): never log it, store it
+or put it in a link. The BFF drops everything else WebDesk answers (`token`, `tokenId`, `bucket`) and writes the token to no ledger row, approval row, outbox row, log line
+or error. A replay of one `Idempotency-Key` is WebDesk's **409 `idempotency-response-withheld`** (mint again under a new key). The browser upload is allowed only from the origins
+in WebDesk's `WEBDESK_UPLOAD_CORS_ORIGINS`: the ERP origin must be listed there.
+**New config: `WEBDESK_PUBLIC_BASE_URL`** (platform-nest, `config.webdeskPublic.baseUrl`): the PUBLIC origin of the WebDesk api (the host that serves `/v1`, e.g. the site build's
+`WEBDESK_API_URL`), not the internal mTLS control vhost. No default: unset (or not `https://`, or carrying credentials, a query or a fragment) the route answers **503
+`{error:"webdesk_not_configured", reason:"webdesk_public_url_not_configured"|"webdesk_public_url_invalid"}` before anything is minted**. It must be passed through the api's
+`environment:` block in compose (`${WEBDESK_PUBLIC_BASE_URL:-}`); a value only in `.env` never reaches the container.
+
+**`DELETE …/media/:assetId` and `media-in-use` (WSK-D54).** A soft delete: the asset leaves the library and its stored object is purged after its retention. While any live or
+draft item (or a pending scheduled swap) names the asset, WebDesk refuses with **409 `application/problem+json`**, which the BFF passes through untouched so the UI can show where the asset is used:
+
+```json
+{ "type": "https://webdesk.gaiada.online/errors/media-in-use", "title": "…", "status": 409, "detail": "…", "total": 2,
+  "items": [{ "itemId": "…", "collectionKey": "service", "locale": "en", "slug": "service.seo", "in": "live" }] }
+```
+
+(`items` lists at most 50; `total` is the full count.) `GET …/media/:assetId/usage` returns the same list on demand. Deleting an already-deleted asset is a no-op answered with the
+original instants (`alreadyDeleted: true`). Other typed problems: 404 `media-asset-not-found` (unknown, malformed, or another site's or company's asset: one answer), 409 `media-asset-deleted`
+(an update of a deleted asset), 400 `invalid-request`. A write whose link died after it was sent is the 502 `webdesk_ambiguous`; **retry with the SAME `Idempotency-Key`** (WebDesk replays
+by key). No reconcile read is attempted for the media writes.
+
+**Cerbos kind `webdesk_media_asset`** (`resource_webdesk_media_asset.yaml`), module `webdev`, authorized as the caller with only the tenant and the module (no per-asset attribute, no approval).
+`read` (list, usage), `upload` (mint a token), `update`, `delete`. Editor tier (`webdev_staff`, `manager`, `webdev_manager`, `company_admin`): read/upload/update. Publisher tier (`webdev_manager`,
+`company_admin`): also delete. `platform_admin` all four. `member`, `client` and `group_executive` nothing. Every role that can upload can also list. Permission keys
+`webdev.webdesk_media_asset.{read,upload,update,delete}`; authoring group `webdesk_media_library`.
+
+**Ledger.** Verbs `webdesk.media.uploadToken` · `webdesk.media.update` · `webdesk.media.delete`, `target_entity_type` `webdesk_media_asset` (`target_entity_id` = the asset id for update and delete),
+metadata `{outcome: attempted → succeeded|refused|failed|ambiguous, status, problem?, tenantSlug, siteId, assetId?, bucket?, maxBytes?, fields?, idempotencyKey}`: the CHANGED FIELD NAMES, never a title or alt text; never the token.
+
+**MCP tools** (`modules/webdev/index.ts`; each calls the same BFF route as the table above): `webdesk.media.list` · `webdesk.media.usage` (reads, free); `webdesk.media.uploadToken` ·
+`webdesk.media.update` · `webdesk.media.delete` (`write:true, impact:"medium"`: an unattended caller suspends for approval, an attended human does not). `update` and `delete` are D14
+executables (`core/approval-executables.ts` + `resource_mcp_tool.yaml`, both) and re-drive as the original requester. **`uploadToken` is deliberately NOT a D14 executable**: its result is a
+one-time upload URL, and a re-drive would store it in `automation_approvals.execution_result`; so an unattended agent or n8n call suspends and never receives a token, and only an attended
+human is handed one. Hub limitation (as for the content tools): a GET tool passes only path args, so `webdesk.media.list` returns the default first page with no filter, and a WebDesk
+problem reaches an agent as the hub's generic `platform … <status>` error: an agent should call `webdesk.media.usage` before a delete to see where an asset is used. The older
+`webdesk.content.listMedia` tool still exists on the same route; `webdesk.media.list` supersedes it.
 
 ### Errors the UI must render (each a distinct state, §10 of the design)
 
@@ -4940,6 +5004,7 @@ Anything else is the 502 above.
   decide()) and `webdesk_collection` (`read`, `apply_schema`), module `webdev`, as the caller. Editor tier (`webdev_staff`):
   read/create/update/restore/request_publish. Publisher tier (`webdev_manager`, company_admin): also unpublish/delete.
   Item-targeted writes authorize twice: generically first, then with the `collectionKey`/`locale` read from WebDesk.
+  The media library is its own kind, `webdesk_media_asset` (see "The media library").
 * **Ledger.** Every write that reaches WebDesk writes two `activities` rows around the call, verb `webdesk.content.<cmd>`
   (`create`/`update`/`restoreVersion`/`unpublish`/`delete`/`previewToken`, and `webdesk.schema.apply`/`webdesk.site.provision`), actor = the ERP user
   (the same id as the editorial `sub`), `target_entity_type` `webdesk_content_item` (or `webdesk_site`), metadata

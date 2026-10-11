@@ -14,7 +14,7 @@
 //
 // Publish is NOT a route that publishes: `publish-requests` files ONE approval (202 `{approvalId}`) through
 // WSK-66 and never calls Zone B's publish (HIGH for every principal, WSK-D46).
-import { ArgumentsHost, Body, Catch, Controller, ExceptionFilter, Get, Headers, HttpCode, Param, Patch, Post, Put, Query, Req, Res, UseFilters, UseGuards } from "@nestjs/common";
+import { ArgumentsHost, Body, Catch, Controller, Delete, ExceptionFilter, Get, Headers, HttpCode, Param, Patch, Post, Put, Query, Req, Res, UseFilters, UseGuards } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
@@ -25,6 +25,7 @@ import {
   webdeskContent,
   type ZoneBResult,
 } from "./webdesk-content.service";
+import { webdeskMedia } from "./webdesk-media.service";
 
 /** Writes a Zone B problem exactly as Zone B sent it. */
 @Catch(WebdeskProblem)
@@ -99,14 +100,64 @@ export class WebdeskContentController {
     send(reply, await webdeskContent.getVersion(gate, { tenantSlug, siteId }, itemId, n, query));
   }
 
+  // ── the media library (WSK-43b): its own Cerbos kind, `webdesk_media_asset` ──────────────────────
+  // Authorised against `webdesk_media_asset` (read / upload / update / delete), NOT `webdesk_content_item`.
+  // Zone B's problems, `media-in-use` and its using items included, leave here untouched.
+
   @Get("sites/:tenantSlug/:siteId/media")
   async listMedia(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "read");
-    send(reply, await webdeskContent.listMedia(gate, { tenantSlug, siteId }, query));
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "read");
+    send(reply, await webdeskMedia.list(gate, { tenantSlug, siteId }, query));
+  }
+
+  @Get("sites/:tenantSlug/:siteId/media/:assetId/usage")
+  async mediaUsage(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string, @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "read");
+    send(reply, await webdeskMedia.usage(gate, { tenantSlug, siteId }, assetId, query));
+  }
+
+  /** 201 `{uploadUrl, expiresAt, maxBytes, allowedMimes}`: `uploadUrl` carries a ONE-TIME secret, so `no-store`. */
+  @Post("sites/:tenantSlug/:siteId/media/upload-token")
+  async mediaUploadToken(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Headers("idempotency-key") idem: string | undefined, @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "upload");
+    const r = await webdeskMedia.mintUploadToken(gate, { tenantSlug, siteId }, body, idempotencyKeyOf(idem));
+    void reply.header("cache-control", "no-store");
+    send(reply, r);
+  }
+
+  @Patch("sites/:tenantSlug/:siteId/media/:assetId")
+  async mediaUpdate(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "update");
+    send(reply, await webdeskMedia.update(gate, { tenantSlug, siteId }, assetId, body, idempotencyKeyOf(idem)));
+  }
+
+  /** Soft delete. 409 `media-in-use` (listing the items that use the asset) while any content references it. */
+  @Delete("sites/:tenantSlug/:siteId/media/:assetId")
+  async mediaDelete(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("assetId") assetId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "delete");
+    send(reply, await webdeskMedia.delete(gate, { tenantSlug, siteId }, assetId, query, idempotencyKeyOf(idem)));
   }
 
   // ── writes (immediate; the editorial assertion is signed server-side as the caller) ─────────────

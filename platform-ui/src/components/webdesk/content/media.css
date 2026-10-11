@@ -1,0 +1,70 @@
+/* Media library (WSK-43c) — the Media tab and the picker dialog of the item editor.
+
+   Prefix `wm-` (webdesk media). `wc-` (content editor) pieces are reused where they fit: banners, notices, chips, the
+   dialog shell, key/value lists, the sr-only helper. Form controls reuse `.lux-field*`.
+   Tokens only — `styles/tokens.test.ts` fails the build on any colour literal in a component stylesheet. */
+
+.wm-heading { margin: 0; font: 700 18px var(--font-display); color: var(--ink-strong); }
+.wm-heading:focus { outline: none; }
+.wm-heading:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+.wm-library { display: flex; flex-direction: column; gap: var(--space-16); min-width: 0; }
+
+/* ── Toolbar ───────────────────────────────────────────────────────────────────────────────────── */
+.wm-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-16); }
+.wm-upload { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-12); }
+.wm-filter { flex: 1 1 auto; justify-content: flex-end; flex-wrap: wrap; }
+.wm-filter .lux-field { flex: 0 1 140px; min-width: 110px; }
+.wm-filter .wc-filter__q { flex: 1 1 170px; }
+
+/* ── Layout: grid + detail ─────────────────────────────────────────────────────────────────────── */
+.wm-layout { display: grid; gap: var(--space-24); grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+@media (max-width: 1000px) { .wm-layout { grid-template-columns: minmax(0, 1fr); } }
+.wm-main { display: flex; flex-direction: column; gap: var(--space-12); min-width: 0; position: relative; padding: 2px; border: 1px dashed transparent; }
+.wm-main--drop { border-color: var(--accent-fg); background: var(--tint-active); }
+.wm-drop-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; font: 700 16px var(--font-display); color: var(--accent-fg); pointer-events: none; z-index: 1; }
+.wm-side { min-width: 0; position: sticky; top: 12px; }
+@media (max-width: 1000px) { .wm-side { position: static; } }
+
+/* ── The grid ──────────────────────────────────────────────────────────────────────────────────── */
+.wm-grid { display: grid; gap: var(--space-12); grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+.wm-tile { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--line); background: var(--surface-card-solid); cursor: pointer; min-width: 0; }
+.wm-tile:hover { border-color: var(--accent-fg); }
+.wm-tile:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; }
+.wm-tile--on { border-color: var(--accent-fg); background: var(--tint-active); }
+.wm-tile__name { font: 600 12px var(--font-body); color: var(--ink-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-grid-hint { margin: 0; }
+
+.wm-thumb { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--surface-sunken); }
+.wm-thumb--large { aspect-ratio: auto; max-height: 240px; object-fit: contain; }
+.wm-thumb--tile { display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px; font: 600 11px var(--font-body); color: var(--ink-subtle); border: 1px dashed var(--line-strong); box-sizing: border-box; }
+.wm-thumb--tile.wm-thumb--large { min-height: 120px; }
+
+/* ── Uploads ───────────────────────────────────────────────────────────────────────────────────── */
+.wm-uploads { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.wm-upload-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-12); padding: 8px 10px; border: 1px solid var(--line); background: var(--surface-card-solid); font: 400 13px var(--font-body); color: var(--ink-body); }
+.wm-upload-row--failed { border-color: color-mix(in srgb, var(--status-critical) 55%, transparent); background: color-mix(in srgb, var(--status-critical) 6%, transparent); }
+.wm-upload-row__name { flex: 1 1 200px; min-width: 0; word-break: break-word; }
+.wm-upload-row__fail { flex: 2 1 280px; min-width: 0; }
+.wm-upload-row__actions { display: inline-flex; gap: var(--space-8); margin-left: auto; }
+.wm-progress { width: 160px; max-width: 100%; }
+
+/* ── Detail ────────────────────────────────────────────────────────────────────────────────────── */
+.wm-detail { display: flex; flex-direction: column; gap: var(--space-12); border: 1px solid var(--line); background: var(--surface-card-solid); padding: 14px 16px; }
+.wm-detail__preview { display: flex; justify-content: center; }
+.wm-detail__title { margin: 0; font: 700 15px var(--font-display); color: var(--ink-strong); word-break: break-word; }
+.wm-form { display: flex; flex-direction: column; gap: var(--space-12); }
+.wm-alts { margin: 0; padding: 10px 12px 12px; border: 1px solid var(--line); min-width: 0; display: flex; flex-direction: column; gap: var(--space-8); }
+.wm-alts > legend { padding: 0 6px; font: 700 12px var(--font-body); color: var(--ink-strong); }
+.wm-use { display: flex; flex-direction: column; gap: 6px; }
+.wm-facts { margin: 0; }
+.wm-copy { display: flex; gap: var(--space-8); align-items: stretch; }
+.wm-copy .lux-field__control { flex: 1 1 auto; min-width: 0; }
+.wm-usage h4 { margin: 0 0 6px; font: 700 11px var(--font-body); letter-spacing: 0.12em; color: var(--ink-subtle); }
+.wm-usage__list { margin: 0; padding-left: 18px; font: 400 13px var(--font-body); color: var(--ink-body); display: flex; flex-direction: column; gap: 4px; }
+.wm-usage__list a { color: var(--accent-fg); }
+.wm-danger { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8); padding-top: 8px; border-top: 1px solid var(--line-soft); }
+
+/* ── Dialog sizing (the shell is `.wc-dialog`) ─────────────────────────────────────────────────── */
+.wm-dialog { max-width: 560px; }
+.wm-dialog--wide { max-width: min(1180px, calc(100% - 32px)); width: calc(100% - 32px); max-height: calc(100vh - 32px); }
+.wm-dialog__inner { max-height: calc(100vh - 32px); overflow: auto; }

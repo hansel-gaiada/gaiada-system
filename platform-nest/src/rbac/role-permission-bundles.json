@@ -15,11 +15,11 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1818,
+      "totalPairs": 1840,
       "perRole": {
-        "platform_admin": 401,
-        "company_admin": 367,
-        "manager": 177,
+        "platform_admin": 405,
+        "company_admin": 371,
+        "manager": 180,
         "member": 88,
         "viewer": 31,
         "org_unit_lead": 16,
@@ -34,8 +34,8 @@
         "search_manager": 40,
         "reports_staff": 4,
         "reports_manager": 3,
-        "webdev_staff": 14,
-        "webdev_manager": 26,
+        "webdev_staff": 17,
+        "webdev_manager": 30,
         "social_staff": 19,
         "social_manager": 33,
         "monitoring_staff": 10,
@@ -44,7 +44,7 @@
         "finance_manager": 43,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 367
+        "owner": 371
       },
       "selfScopedPairs": 28
     }
@@ -450,6 +450,10 @@
       "webdev.webdesk_content_item.schedule",
       "webdev.webdesk_content_item.unpublish",
       "webdev.webdesk_content_item.update",
+      "webdev.webdesk_media_asset.delete",
+      "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.update",
+      "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ],
@@ -819,6 +823,10 @@
       "webdev.webdesk_content_item.schedule",
       "webdev.webdesk_content_item.unpublish",
       "webdev.webdesk_content_item.update",
+      "webdev.webdesk_media_asset.delete",
+      "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.update",
+      "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ],
@@ -998,6 +1006,9 @@
       "webdev.webdesk_content_item.read",
       "webdev.webdesk_content_item.request_publish",
       "webdev.webdesk_content_item.update",
+      "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.update",
+      "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ],
@@ -1355,7 +1366,10 @@
       "webdev.webdesk_content_item.create",
       "webdev.webdesk_content_item.read",
       "webdev.webdesk_content_item.request_publish",
-      "webdev.webdesk_content_item.update"
+      "webdev.webdesk_content_item.update",
+      "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.update",
+      "webdev.webdesk_media_asset.upload"
     ],
     "webdev_manager": [
       "core.github_repo.deploy",
@@ -1383,7 +1397,11 @@
       "webdev.webdesk_content_item.request_publish",
       "webdev.webdesk_content_item.schedule",
       "webdev.webdesk_content_item.unpublish",
-      "webdev.webdesk_content_item.update"
+      "webdev.webdesk_content_item.update",
+      "webdev.webdesk_media_asset.delete",
+      "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.update",
+      "webdev.webdesk_media_asset.upload"
     ],
     "social_staff": [
       "core.member.read",
@@ -1921,6 +1939,10 @@
       "webdev.webdesk_content_item.schedule",
       "webdev.webdesk_content_item.unpublish",
       "webdev.webdesk_content_item.update",
+      "webdev.webdesk_media_asset.delete",
+      "webdev.webdesk_media_asset.read",
+      "webdev.webdesk_media_asset.update",
+      "webdev.webdesk_media_asset.upload",
       "webdev.zoneb_event.read",
       "webdev.zoneb_event.record"
     ]

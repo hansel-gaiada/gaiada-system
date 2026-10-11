@@ -1,0 +1,91 @@
+# WSK-43b (docs/plans/2026-10-11-webdesk-m3-plan.md "WSK-43 · The media library"; owner rulings WSK-D53 and
+# WSK-D54 in docs/blueprints/webdesk-design-v2.md §14) — authz for the NEW `webdesk_media_asset` resource
+# kind: one image or video in a WebDesk site's media library, managed from the ERP and carried to Zone B over
+# the control channel. Nothing existed for this kind before this file; an unlisted kind/action is a SILENT
+# DENY that reads exactly like a logic bug. Restart `gaiada-test-cerbos` and the live sidecar after adding
+# this file — the bind-mount does not hot-reload.
+#
+# Handlers pass resource.attr = {kind:"webdesk_media_asset", tenantId, module:"webdev", id?}. The policy reads
+# NOTHING else: no collection, no locale, no approval and no creator (see "no WS4" below), so
+# resourcePayload() (rbac/cerbos.ts) needed no new attribute. `id` is the asset id on a per-asset action and
+# is carried for the decision log only.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read   — list the library and read one asset's usage (media.list / media.usage). Granted to EVERY role
+#            that may do anything else on the kind: the editor tier below is the floor, so a role that can
+#            upload can always list (the gap this repo hit before: a role that could act could not list).
+#   upload — mint an upload token (media.uploadToken). The browser then uploads straight to WebDesk, so the
+#            ERP never sees the bytes; this action is the permission to START an upload, nothing more.
+#   update — edit title / alt text / tags (media.update).
+#   delete — soft-delete an asset (media.delete). WebDesk refuses it with 409 `media-in-use` while any
+#            content uses the asset (WSK-D54), so a delete can never break a page.
+#
+# ── TIERS: A MECHANICAL COPY OF resource_webdesk_content_item.yaml ───────────────────────────────
+#   editor tier    read · upload · update  <-  where content `read`/`create`/`update` are allowed:
+#                  company_admin, manager, module_manager, module_staff (+ the platform_admin wildcard).
+#   publisher tier delete                  <-  where content `delete` is allowed (a MEDIUM, immediate action
+#                  in that file's publisher tier): company_admin and module_manager (+ platform_admin).
+#                  `manager` and `module_staff` can upload and edit but not delete, exactly as they can
+#                  create and edit a content item but not delete one.
+#
+# ── NO WS4 APPROVAL, AND NO AUTOMATION DENY ──────────────────────────────────────────────────────
+# All four actions are MEDIUM or lower in WebDesk (media.uploadToken / media.update / media.delete are
+# `webdesk:operate`, media.list / media.usage are `webdesk:read`) and need no approval id: nothing here
+# makes content reachable by a production key (a library asset is only ever SERVED once content that
+# references it is published, and that is gated by webdesk_content_item.publish). So there is no maker-
+# checker rule and no `approvalId` read. An automation principal (users.kind=automation, e.g. the gaiada.com
+# importer, role webdev_manager) is treated like a human holding the same role, the same as it is for
+# `request_publish`: it may list, upload and edit. Its delete is bounded by WSK-D54's media-in-use refusal.
+# (The T7 DENY on publish/schedule has no analogue to add here.)
+#
+# ── THE INVARIANTS THIS FILE MUST NOT BREAK ─────────────────────────────────────────────────────
+#  - `client` appears NOWHERE: the media library is staff-only. `member` appears nowhere either.
+#  - NO perm_* mirror (IAM-04c): the sibling content kind has none, and this kind has no attribute-instance
+#    check a flat `perms` array would have to express anyway; a mirror would only widen what an
+#    IAM-editable role could reach through the role-permission seed (iam-04-reg1-mirror-reach-invariant).
+#  - group_executive is NOT folded into any rule (TRAP #4, resource_webdev_contract_snapshot.yaml).
+#  - Module-tier rules pin `module == "webdev"`: module_staff/module_manager compose the role name from
+#    resource.attr.module, so without the pin a handler passing another module would arm that module's
+#    staff. With it, the bundle resolvers' webdev_staff/webdev_manager mapping is literal.
+#  - No `variables.local` anywhere (cerbos-local-variables trap: a factored condition mis-routes IAM
+#    overrides). The two conditions are written inline, as in the sibling.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: webdesk_media_asset
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    # Operator tier: every action, every company.
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # ══════════ editor tier — read / upload / update ═══════════════════════════════════════════
+    - actions: ["read", "upload", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "upload", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "module_staff"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"
+
+    # ══════════ publisher tier — delete (MEDIUM, immediate; refused while content uses the asset) ══
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.resource.attr.module == "webdev"

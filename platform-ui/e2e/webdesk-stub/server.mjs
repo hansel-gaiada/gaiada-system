@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { COMPANY, concurrentSave, decideApproval, handleKeyRequest, handleWebdesk, listApprovals, seed, setBuild } from "./wd.mjs";
+import { addAsset, COMPANY, concurrentSave, decideApproval, handleKeyRequest, handlePublicMedia, handleWebdesk, listApprovals, mediaState, seed, setBuild } from "./wd.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = Number(process.env.WD_STUB_PORT ?? 3991);
@@ -43,10 +43,11 @@ function send(res, status, json) {
   res.end(body);
 }
 
+// The body as RAW BYTES: the media upload is a binary file, and decoding it as UTF-8 would corrupt it. Everything else reads `raw` (the string).
 const readBody = (req) => new Promise((resolve) => {
   const chunks = [];
   req.on("data", (c) => chunks.push(c));
-  req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  req.on("end", () => resolve(Buffer.concat(chunks)));
 });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -56,18 +57,34 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://stub");
     const pathname = url.pathname;
     const method = (req.method ?? "GET").toUpperCase();
-    const raw = await readBody(req);
+    const rawBuf = await readBody(req);
+    const raw = rawBuf.toString("utf8");
     const userId = String(req.headers["x-user-id"] ?? "demo-hansel");
     let body;
     try { body = raw ? JSON.parse(raw) : undefined; } catch { body = undefined; }
+
+    // ── WebDesk's PUBLIC media routes: the fake upload endpoint (the browser POSTs the file here, never to the ERP) ──
+    if (pathname.startsWith("/v1/t/")) {
+      const m = handlePublicMedia(S, { method, pathname, query: url.searchParams, headers: req.headers, body: rawBuf });
+      if (m) {
+        const headers = { ...(m.headers ?? {}) };
+        if (m.bytes) { headers["content-length"] = m.bytes.length; res.writeHead(m.status, headers); return res.end(m.bytes); }
+        if (m.json !== undefined) { const b = JSON.stringify(m.json); res.writeHead(m.status, { ...headers, "content-type": "application/json", "content-length": Buffer.byteLength(b) }); return res.end(b); }
+        res.writeHead(m.status, headers);
+        return res.end();
+      }
+    }
 
     // ── scenario controls ───────────────────────────────────────────────────────────────────────
     if (pathname.startsWith("/__stub/")) {
       const cmd = pathname.slice("/__stub/".length);
       if (cmd === "reset") { S = seed(); return send(res, 200, { ok: true }); }
       if (cmd === "config") { Object.assign(S.cfg, body ?? {}); return send(res, 200, S.cfg); }
+      // Put an asset straight into the library (no upload): { title?, alt?, tags?, mime?, originalFilename?, width?, height?, createdBy?, createdAt? }
+      if (cmd === "seed-media") return send(res, 200, { assetId: addAsset(S, body ?? {}) });
       if (cmd === "state") {
         return send(res, 200, {
+          ...mediaState(S),
           items: [...S.items.values()].map((i) => ({ itemId: i.itemId, slug: i.slug, locale: i.locale, headVersion: i.versions.at(-1).n, publishedVersion: i.publishedVersion, publishState: i.publishState, deletedAt: i.deletedAt, versions: i.versions.map((v) => ({ n: v.n, createdBy: v.createdBy, note: v.note, props: v.blocks[0]?.props, seo: v.seo })) })),
           approvals: [...S.approvals.values()], build: S.build, stagingStale: S.stagingStale,
         });

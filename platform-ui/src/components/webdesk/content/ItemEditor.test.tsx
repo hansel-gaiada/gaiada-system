@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import service from "../../../../e2e/webdesk-stub/compositions/service.json";
 import navigation from "../../../../e2e/webdesk-stub/compositions/navigation.json";
 import type { CollectionSummary, ItemDetail, ItemWriteResult, ItemRef, TenantRef, SiteRef, WdResult } from "@/lib/webdeskContentModel";
@@ -11,12 +11,16 @@ vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string
 vi.mock("@/lib/webdeskContentActions", () => ({
   createItemAndOpenAction: vi.fn(), deleteItemAction: vi.fn(), getItemHeadAction: vi.fn(), previewItemAction: vi.fn(), refreshEditorAction: vi.fn(), saveItemAction: vi.fn(),
 }));
+vi.mock("@/lib/webdeskMediaActions", () => ({
+  listMediaAction: vi.fn(), mediaUsageAction: vi.fn(), mintUploadTokenAction: vi.fn(), updateMediaAction: vi.fn(), deleteMediaAction: vi.fn(),
+}));
 // The publish bar has its own suite; here it only needs to show what the editor tells it.
 vi.mock("./PublishBar", () => ({
   PublishBar: (p: { dirty: boolean; blocked: string | null; version: number }) => <div data-testid="pb" data-dirty={String(p.dirty)} data-blocked={p.blocked ?? ""} data-version={p.version} />,
 }));
 
 import * as A from "@/lib/webdeskContentActions";
+import * as M from "@/lib/webdeskMediaActions";
 import { ItemEditor } from "./ItemEditor";
 
 const a = vi.mocked(A);
@@ -492,5 +496,46 @@ describe("preview (WSK-46): the editor hands the card the same gates Save has", 
     cleanup();
     mount(bundle(detail(SERVICE_FIELDS, { item: ref({ deletedAt: "2026-10-10" }) })), { readOnlyReason: "This item has been deleted." });
     expect(screen.queryByTestId("preview-card")).toBeNull();
+  });
+});
+
+describe("WSK-43c: a media field filled from the library is saved as the exact media value", () => {
+  const banner = { fields: [{ name: "title", primitive: "text" }, { name: "hero", primitive: "media", ui: { label: "Hero image" } }, { name: "gallery", primitive: "media", multiple: true, ui: { label: "Gallery" } }], blocks: [], ui: { label: "Banner" } };
+  beforeEach(() => { Object.values(M).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset()); });
+  const asset = { assetId: "a1", url: "/v1/t/gaiada/media/a1", mime: "image/webp", sizeBytes: 100, scanStatus: "clean", title: "Hero", alt: { en: "A villa", id: "Sebuah vila" }, tags: [], originalFilename: "hero.webp", width: 1600, height: 900, createdBy: "u1", createdAt: "t", updatedAt: "t", deletedAt: null };
+
+  it.each([["en", "A villa"], ["id", "Sebuah vila"]])("picking in the %s editor writes that locale's alt; Save sends it; the gallery appends", async (locale, alt) => {
+    vi.mocked(M.listMediaAction).mockResolvedValue({ kind: "ok", data: { assets: [asset], page: { cursor: null, hasMore: false, limit: 48 } } });
+    vi.mocked(M.mediaUsageAction).mockResolvedValue({ kind: "ok", data: { assetId: "a1", url: asset.url, total: 0, items: [] } });
+    a.saveItemAction.mockResolvedValue(ok(written(4)));
+    const d = detail({ title: "T", gallery: [{ url: "/old.png" }] }, { item: ref({ locale, collectionKey: "banner" }) });
+    const b = bundle(d, {}, coll("banner", banner));
+    mount(b, { mediaPublicBase: "https://webdesk.example" });
+
+    const heroBtn = screen.getAllByRole("button", { name: /Choose from library: Hero image/ })[0];
+    heroBtn.focus(); fireEvent.click(heroBtn);
+    fireEvent.click((await screen.findAllByTestId("media-tile"))[0]);
+    fireEvent.click(await screen.findByTestId("media-use"));
+    await waitFor(() => expect(screen.queryByTestId("media-picker")).toBeNull());
+
+    const addBtn = screen.getByRole("button", { name: /Add from library: Gallery/ });
+    addBtn.focus(); fireEvent.click(addBtn);
+    fireEvent.click((await screen.findAllByTestId("media-tile"))[0]);
+    fireEvent.click(await screen.findByTestId("media-use"));
+    await waitFor(() => expect(screen.queryByTestId("media-picker")).toBeNull());
+
+    expect(status()).toBe("Unsaved changes");
+    await click(saveBtn());
+    const [, , body] = a.saveItemAction.mock.calls[0];
+    const picked = { url: "/v1/t/gaiada/media/a1", alt, width: 1600, height: 900, mime: "image/webp" };
+    expect(body.fields.hero).toEqual(picked);
+    expect(body.fields.gallery).toEqual([{ url: "/old.png" }, picked]);
+  });
+
+  it("a read-only item has a disabled picker and the library is never read", () => {
+    const b = bundle(detail({ title: "T" }, { item: ref({ collectionKey: "banner" }) }), {}, coll("banner", banner));
+    mount(b, { readOnlyReason: "This item has been deleted." });
+    for (const btn of screen.getAllByTestId("media-choose")) expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(M.listMediaAction).not.toHaveBeenCalled();
   });
 });

@@ -129,10 +129,10 @@ export class AmbiguousWriteError extends HttpException {
 function editorialUnavailable(reason: string, extra?: string): ServiceUnavailableException {
   return new ServiceUnavailableException({ message: "editorial_unavailable", reason, ...(extra ? { detail: extra } : {}) });
 }
-function notConfigured(reason: string): ServiceUnavailableException {
+export function notConfigured(reason: string): ServiceUnavailableException {
   return new ServiceUnavailableException({ message: "webdesk_not_configured", reason });
 }
-function invalidRequest(detail: string): BadRequestException {
+export function invalidRequest(detail: string): BadRequestException {
   return new BadRequestException({ message: `invalid_request: ${detail}`, reason: "invalid_request" });
 }
 function siteNotFound(): WebdeskProblem {
@@ -151,8 +151,9 @@ function siteNotFound(): WebdeskProblem {
 // The gate: authorization as the CALLER, first, as a type
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
-export type ContentKind = "webdesk_content_item" | "webdesk_collection";
-export type ContentAction = "read" | "create" | "update" | "request_publish" | "unpublish" | "delete" | "apply_schema";
+export type ContentKind = "webdesk_content_item" | "webdesk_collection" | "webdesk_media_asset";
+/** `upload` is `webdesk_media_asset`'s (WSK-43b: minting an upload token). */
+export type ContentAction = "read" | "create" | "update" | "request_publish" | "unpublish" | "delete" | "apply_schema" | "upload";
 
 /** Proof that Cerbos allowed `principal` to run `action` on `kind` in company `tenantId`. Its constructor
  *  is private: `authorizeContent()` is the only way to get one. */
@@ -211,18 +212,18 @@ export interface EditableSite {
 
 type Query = Record<string, string>;
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEM_RE = /^[\x21-\x7e]{8,200}$/;
 const SITE_CACHE_TTL_MS = 60_000;
 const SITE_CACHE_REFETCH_ON_MISS_MS = 5_000;
 const ITEM_READ_CONCURRENCY = 8;
 const REQUEST_STATUSES: readonly string[] = ["pending", "approved", "rejected", "cancelled", "all"];
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
+export function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-function strictBody(raw: unknown, allowed: readonly string[]): Record<string, unknown> {
+export function strictBody(raw: unknown, allowed: readonly string[]): Record<string, unknown> {
   if (!isPlainObject(raw)) throw invalidRequest("the request body must be a JSON object");
   for (const k of Object.keys(raw)) {
     if (!allowed.includes(k)) throw invalidRequest(`unknown body key "${k}" (allowed: ${allowed.join(", ")})`);
@@ -259,12 +260,13 @@ export interface EgressWrite {
   command: WebdeskBffEditorialCommand | "schema.apply" | "site.provision";
   /** `webdesk.content.update` etc. */
   verb: string;
-  method: "POST" | "PUT";
+  method: "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   params: Record<string, string>;
-  body: Record<string, unknown>;
+  /** Omitted for a body-less write (WSK-43b's `media.delete`): no body is sent, and Zone B hashes the params alone. */
+  body?: Record<string, unknown>;
   idempotencyKey: string;
-  /** Present for the five editorial commands only (schema.apply and site.provision carry none: design §3.1). */
+  /** Present for the editorial commands only (schema.apply and site.provision carry none: design §3.1). */
   editorial?: { tenantSlug: string; siteId: string };
   entity: { type: string; id: string | null };
   /** Non-secret identifiers copied onto both ledger rows. */
@@ -648,17 +650,8 @@ export class WebdeskContentService {
     });
   }
 
-  async listMedia(gate: ContentGate, site: SiteRef, rawQuery: unknown): Promise<ZoneBResult> {
-    gate.require("webdesk_content_item", "read");
-    const query = strictQuery(rawQuery, ["mime", "cursor", "limit"]);
-    await this.zoneB.resolveEditableSite(gate.tenantId, site.tenantSlug, site.siteId);
-    return this.zoneB.read({
-      command: "media.list",
-      path: "/control/v1/tenants/:tenantSlug/sites/:siteId/media",
-      params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
-      query,
-    });
-  }
+  // The media library's reads and writes (`media.list` and the rest) moved to `webdesk-media.service.ts` in
+  // WSK-43b, authorised as `webdesk_media_asset` rather than `webdesk_content_item:read`.
 
   // ── writes: create ───────────────────────────────────────────────────────────────────────────
 

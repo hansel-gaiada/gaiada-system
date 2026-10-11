@@ -18,6 +18,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { addAsset, handleMediaBff, mediaCfg, mediaState, seedMedia } from "./media.mjs";
+
+export { addAsset, handlePublicMedia, mediaState } from "./media.mjs";
 
 const HERE = import.meta.dirname;
 const comp = (k) => JSON.parse(fs.readFileSync(path.join(HERE, "compositions", `${k}.json`), "utf8"));
@@ -90,6 +93,13 @@ function validateOne(def, v, ptr, out, depth) {
     case "boolean": if (typeof v !== "boolean") bad("expected a boolean (JSON true/false)"); break;
     case "number": if (typeof v !== "number" || !Number.isFinite(v)) bad("expected a finite number"); break;
     case "select": if (typeof v !== "string") bad("expected a string"); else if (def.options && !def.options.includes(v)) bad(`"${v}" is not one of: ${def.options.join(", ")}`); break;
+    case "media": {
+      // WSK-43c: {url, alt?, width?, height?, mime?} and nothing else.
+      if (!v || typeof v !== "object" || Array.isArray(v)) { bad("expected an object (media)"); break; }
+      if (typeof v.url !== "string" || v.url === "") out.push({ path: `${ptr}/url`, message: "url is required" });
+      for (const k of Object.keys(v)) if (!["url", "alt", "width", "height", "mime"].includes(k)) out.push({ path: `${ptr}/${seg(k)}`, message: `unknown key "${k}" (media is closed)` });
+      break;
+    }
     case "group": {
       if (!v || typeof v !== "object" || Array.isArray(v)) { bad("expected an object (group)"); break; }
       const known = new Set(def.fields.map((f) => f.name));
@@ -171,6 +181,7 @@ const COMPANY_FIELDS = {
 export function seed() {
   const compositions = {
     service: comp("service"), navigation: comp("navigation"), "token-registry": comp("token-registry"), company: comp("company"),
+    banner: comp("banner"), // stub-only (WSK-43c): the one composition with media fields
   };
   const items = new Map();
   const add = (o) => {
@@ -200,14 +211,18 @@ export function seed() {
   add({ id: "itm-company-en", collection: "company", locale: "en", slug: "company", groupId: "grp-company", published: 1, state: "published",
     versions: [{ n: 1, at: T0, by: "demo-hansel", note: "import", blocks: fieldsBlock(COMPANY_FIELDS), seo: {} }] });
 
+  add({ id: "itm-banner-en", collection: "banner", locale: "en", slug: "banner.home", groupId: "grp-banner-home",
+    versions: [{ n: 1, at: T1, by: "demo-hansel", note: null, blocks: fieldsBlock({ title: "Home banner" }), seo: {} }] });
+
   return {
+    ...seedMedia(),
     compositions,
     items,
     approvals: new Map(),
     build: null,
     stagingStale: false,
     seq: 0,
-    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, drift: null, forceIssues: null, unavailableOnce: 0 },
+    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, drift: null, forceIssues: null, unavailableOnce: 0, ...mediaCfg() },
     log: [],
   };
 }
@@ -414,7 +429,11 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
     if (!S.cfg.buildStatusServed) return R(404, { error: `Cannot GET ${pathname}` });
     return R(200, { build: S.build, stagingStale: S.stagingStale });
   }
-  if (rest === "/media" && method === "GET") return R(200, { assets: [], page: { cursor: null, hasMore: false, limit: 100 } });
+  // WSK-43c: the media library (its own routes, below the same wall as everything above).
+  if (rest === "/media" || rest.startsWith("/media/")) {
+    const r = handleMediaBff(S, { method, rest, query, body, userId, role });
+    if (r) return r;
+  }
 
   return R(404, { error: `Cannot ${method} ${pathname}` });
 }

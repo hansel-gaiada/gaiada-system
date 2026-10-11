@@ -6,6 +6,7 @@ import {
 } from "@/lib/webdeskContentModel";
 import type { PlaceholderSyntax } from "@/lib/markdownCodec";
 import { MarkdownField } from "./MarkdownField";
+import { MediaPickButton, type MediaPickerCtx } from "./MediaPicker";
 import "./content.css";
 
 // The form generated from a collection's FieldDef[] (§2.2–§2.5). Nothing here is specific to a
@@ -32,6 +33,8 @@ export interface FormCtx {
   neutralLocale: string | null;
   /** The collection's declared placeholder syntaxes (`lint.placeholders`): the visual markdown editor keeps them verbatim. */
   placeholders?: PlaceholderSyntax[];
+  /** WSK-43c: what the "Choose from library" button of a `media` field needs. Absent = no button (the URL and alt inputs only). */
+  media?: MediaPickerCtx | null;
 }
 
 type Lock = null | "readonly" | "neutral";
@@ -140,7 +143,7 @@ function ScalarField({ def, value, onValue, ctx, segments, lock }: {
       {isCheckbox ? null : (
         <label className={`lux-field__label${def.required ? " lux-field__label--req" : ""}`} htmlFor={id}>{label}</label>
       )}
-      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={lock !== null} pointer={pointer} describedBy={describedBy} invalid={errs.length > 0} label={label} placeholders={ctx.placeholders} />
+      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={lock !== null} pointer={pointer} describedBy={describedBy} invalid={errs.length > 0} label={label} placeholders={ctx.placeholders} media={ctx.media} />
       {hint && <span id={hintId} className="lux-field__hint">{hint}</span>}
       <Errors id={errId} issues={errs} />
     </div>
@@ -148,9 +151,11 @@ function ScalarField({ def, value, onValue, ctx, segments, lock }: {
 }
 
 /** One value of one primitive. Used by scalar fields AND by the elements of a scalar list. */
-export function ScalarControl({ id, def, value, onValue, locked, pointer, describedBy, invalid, label, placeholders }: {
+export function ScalarControl({ id, def, value, onValue, locked, pointer, describedBy, invalid, label, placeholders, media }: {
   id: string; def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string;
   describedBy?: string; invalid: boolean; label: string; placeholders?: PlaceholderSyntax[];
+  /** WSK-43c: the media picker's context (see `FormCtx.media`). */
+  media?: MediaPickerCtx | null;
 }) {
   const common = {
     id, "data-pointer": pointer, "aria-invalid": invalid || undefined, "aria-describedby": describedBy,
@@ -234,10 +239,13 @@ export function ScalarControl({ id, def, value, onValue, locked, pointer, descri
       const m = asRecord(value);
       const set = (k: string, v: string) => onValue(setKey(m, k, v === "" ? undefined : v));
       return (
+        <>
         <div className="wc-compound" data-pointer={pointer}>
           <input id={id} className={cls} type="text" placeholder="Image URL" aria-label={`${label} URL`} aria-invalid={invalid || undefined} aria-describedby={describedBy} data-pointer={`${pointer}/url`} value={typeof m.url === "string" ? m.url : ""} readOnly={locked} onChange={(e) => set("url", e.target.value)} />
           <input className={cls} type="text" placeholder="Alt text" aria-label={`${label} alt text`} data-pointer={`${pointer}/alt`} value={typeof m.alt === "string" ? m.alt : ""} readOnly={locked} onChange={(e) => set("alt", e.target.value)} />
         </div>
+        {media && <div className="wc-media-pick"><MediaPickButton ctx={media} label={label} disabled={locked} onPick={(v) => onValue({ ...v })} /></div>}
+        </>
       );
     }
 
@@ -461,7 +469,7 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
                     inheritedLock={lock ?? inheritedLock}
                   />
                 ) : (
-                  <ScalarItem def={def} value={row} onValue={(v) => { const n = items.slice(); n[i] = v; onValue(n); }} locked={lock !== null} pointer={fieldPointer(...segments, i)} label={`${label} ${i + 1}`} issues={ctx.issues} placeholders={ctx.placeholders} />
+                  <ScalarItem def={def} value={row} onValue={(v) => { const n = items.slice(); n[i] = v; onValue(n); }} locked={lock !== null} pointer={fieldPointer(...segments, i)} label={`${label} ${i + 1}`} issues={ctx.issues} placeholders={ctx.placeholders} media={ctx.media} />
                 )}
               </div>
             </li>
@@ -470,22 +478,35 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
       </ol>
       {items.length === 0 && <p className="lux-field__hint">No items yet.</p>}
       {!structureLocked && (
-        <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm wc-list__add" onClick={add}>Add {def.primitive === "group" ? "item" : label.toLowerCase()}</button>
+        <div className="wc-list__adds">
+          <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm wc-list__add" onClick={add}>Add {def.primitive === "group" ? "item" : label.toLowerCase()}</button>
+          {def.primitive === "media" && ctx.media && (
+            // Picking appends: this field takes several images, and the chosen one goes to the end of the list.
+            <MediaPickButton
+              ctx={ctx.media} label={label} multiple text="Add from library"
+              onPick={(v) => {
+                const nextIds = [...ids, `n${Date.now()}${ids.length}`];
+                commit([...items, { ...v }], nextIds);
+                setAnnounce(`Added an image to ${label}. ${items.length + 1} in total.`);
+              }}
+            />
+          )}
+        </div>
       )}
       <div className="wc-sr" role="status" aria-live="polite">{announce}</div>
     </fieldset>
   );
 }
 
-function ScalarItem({ def, value, onValue, locked, pointer, label, issues, placeholders }: {
-  def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string; label: string; issues: Issue[]; placeholders?: PlaceholderSyntax[];
+function ScalarItem({ def, value, onValue, locked, pointer, label, issues, placeholders, media }: {
+  def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string; label: string; issues: Issue[]; placeholders?: PlaceholderSyntax[]; media?: MediaPickerCtx | null;
 }): ReactNode {
   const id = useId();
   const errs = issuesAt(issues, pointer);
   const errId = `${id}-err`;
   return (
     <div className="wc-field">
-      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={locked} pointer={pointer} describedBy={errs.length ? errId : undefined} invalid={errs.length > 0} label={label} placeholders={placeholders} />
+      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={locked} pointer={pointer} describedBy={errs.length ? errId : undefined} invalid={errs.length > 0} label={label} placeholders={placeholders} media={media} />
       <Errors id={errId} issues={errs} />
     </div>
   );

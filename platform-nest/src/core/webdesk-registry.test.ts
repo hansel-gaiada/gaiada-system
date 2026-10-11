@@ -14,6 +14,7 @@ import {
   getExecutable,
   WEBDESK_REGISTRY_TOOLS,
   WEBDESK_CONTENT_REGISTRY_TOOLS,
+  WEBDESK_MEDIA_REGISTRY_TOOLS,
 } from "./approval-executables";
 
 describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools (+ WSK-59 content tools)", () => {
@@ -133,6 +134,50 @@ describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools (+ WSK-59 cont
       expect(u.lockKey({ itemId: item })).toBe(`webdesk:content:${item}`);
       expect(d.lockKey({ itemId: item })).toBe(u.lockKey({ itemId: item })); // an unpublish and a delete of ONE item contend
       expect(new Set([u.lockKey({}), u.lockKey({ itemId: 5 }), u.lockKey({ itemId: "" })]).size).toBe(3);
+    });
+  });
+
+  describe("WSK-43b — webdesk.media.update / delete (the media library's MEDIUM tools); uploadToken is deliberately NOT here", () => {
+    const asset = "9c8b7a65-4d3e-4f21-8a0b-1c2d3e4f5a6b";
+    const site = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+
+    it("exactly update and delete are registered, with a real lockKey and precondition; the token tool and the reads are not", () => {
+      expect(WEBDESK_MEDIA_REGISTRY_TOOLS).toEqual(["webdesk.media.update", "webdesk.media.delete"]);
+      for (const name of WEBDESK_MEDIA_REGISTRY_TOOLS) {
+        expect(getExecutable(name), name).toBeDefined();
+        expect(() => registerExecutableApproval({ toolName: name })).toThrow(/already registered/i);
+      }
+      // uploadToken's result is a one-time secret: a D14 re-drive would store it in automation_approvals.execution_result
+      for (const n of ["webdesk.media.uploadToken", "webdesk.media.list", "webdesk.media.usage"]) {
+        expect(getExecutable(n), n).toBeUndefined();
+      }
+    });
+
+    it("update: structural precondition (a real asset id, at least one field)", async () => {
+      const e = getExecutable("webdesk.media.update")!;
+      const ok = { tenantSlug: "gaiada", siteId: site, assetId: asset, title: "t" };
+      expect(await e.precondition({} as never, ok)).toEqual({ ok: true });
+      expect(await e.precondition({} as never, { ...ok, title: undefined, tags: [] })).toEqual({ ok: true }); // [] clears the tags: a real change
+      expect(await e.precondition({} as never, { tenantSlug: "gaiada", siteId: site, assetId: asset })).toEqual({ ok: false, reason: "no_media_fields" });
+      expect(await e.precondition({} as never, { ...ok, assetId: "x" })).toEqual({ ok: false, reason: "asset_id_invalid" });
+      expect(await e.precondition({} as never, { ...ok, siteId: "x" })).toEqual({ ok: false, reason: "site_id_invalid" });
+      expect(await e.precondition({} as never, { ...ok, tenantSlug: "" })).toEqual({ ok: false, reason: "tenant_slug_invalid" });
+    });
+
+    it("delete: structural precondition", async () => {
+      const e = getExecutable("webdesk.media.delete")!;
+      const ok = { tenantSlug: "gaiada", siteId: site, assetId: asset };
+      expect(await e.precondition({} as never, ok)).toEqual({ ok: true });
+      expect(await e.precondition({} as never, { ...ok, assetId: undefined })).toEqual({ ok: false, reason: "asset_id_invalid" });
+      expect(await e.precondition({} as never, { tenantSlug: "gaiada" })).toEqual({ ok: false, reason: "site_id_invalid" });
+    });
+
+    it("lockKey is the ASSET (an update and a delete of one asset contend), and malformed args never collapse onto one key", () => {
+      const u = getExecutable("webdesk.media.update")!;
+      const d = getExecutable("webdesk.media.delete")!;
+      expect(u.lockKey({ assetId: asset })).toBe(`webdesk:media:${asset}`);
+      expect(d.lockKey({ assetId: asset })).toBe(u.lockKey({ assetId: asset }));
+      expect(new Set([u.lockKey({}), u.lockKey({ assetId: 5 }), u.lockKey({ assetId: "" })]).size).toBe(3);
     });
   });
 

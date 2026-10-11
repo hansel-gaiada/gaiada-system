@@ -128,8 +128,10 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // WSK-47 (2026-10-10): +10 pairs / +2 kinds (webdesk_content_item: read/create/update/
     // request_publish/publish/schedule/unpublish/delete; webdesk_collection: read/apply_schema),
     // 406/99 -> 416/101.
-    expect(catalog.length).toBe(416);
-    expect(catalogKindSet.size).toBe(101);
+    // WSK-43b (2026-10-11): +4 pairs / +1 kind (webdesk_media_asset: read/upload/update/delete),
+    // 416/101 -> 420/102.
+    expect(catalog.length).toBe(420);
+    expect(catalogKindSet.size).toBe(102);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

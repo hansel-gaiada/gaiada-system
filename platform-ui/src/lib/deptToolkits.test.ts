@@ -19,7 +19,7 @@ describe("toolkitFor", () => {
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "build", "website", "connections"]);
     // Flattened tabs preserve the full route set (paths unchanged from the flat model).
     expect(deptTabs(tk).map((t) => t.key)).toEqual([
-      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "content", "connections",
+      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "content", "media", "connections",
     ]);
     expect(tk.launchers.some((l) => l.key === "claude-code")).toBe(true);
   });
@@ -92,8 +92,8 @@ describe("toolkitFor", () => {
 });
 
 // WSK-44 — the Website craft group (write-plane design §10, Decision H). Home · Work · Build ·
-// **Website** · Connections: the group sits AFTER Build and BEFORE Connections, holds one tab today
-// (Content), and no other department inherits it.
+// **Website** · Connections: the group sits AFTER Build and BEFORE Connections, holds two tabs (Content, and
+// since WSK-43c Media), and no other department inherits it.
 describe("Website group (WSK-44)", () => {
   const website = () => toolkitFor("Web Dev").groups.find((g) => g.key === "website");
 
@@ -103,23 +103,26 @@ describe("Website group (WSK-44)", () => {
     expect(keys.indexOf("website")).toBe(keys.indexOf("connections") - 1);
   });
 
-  it("holds exactly one tab, Content, whose path carries the whole /website/content sub-tree", () => {
+  it("holds two tabs: Content, whose path carries the whole /website/content sub-tree, and Media (WSK-43c), whose path carries /website/media", () => {
     expect(website()?.label).toBe("Website");
-    expect(website()?.tabs.map((t) => [t.key, t.label, t.path])).toEqual([["content", "Content", "website/content"]]);
+    expect(website()?.tabs.map((t) => [t.key, t.label, t.path])).toEqual([["content", "Content", "website/content"], ["media", "Media", "website/media"]]);
     expect(tabHref("dept-1", website()!.tabs[0])).toBe("/departments/dept-1/website/content");
+    expect(tabHref("dept-1", website()!.tabs[1])).toBe("/departments/dept-1/website/media");
   });
 
   it("is a Web Dev craft group only: no other department's toolkit advertises it", () => {
     for (const name of ["Creatives", "SEO", "Social Media", "Legal"]) {
       expect(toolkitFor(name).groups.some((g) => g.key === "website")).toBe(false);
-      expect(deptTabs(toolkitFor(name)).some((t) => t.key === "content")).toBe(false);
+      expect(deptTabs(toolkitFor(name)).some((t) => t.key === "content" || t.key === "media")).toBe(false);
     }
   });
 
-  it("keeps the Website tab's path unique among Web Dev tabs (DeptTabs lights the deepest prefix)", () => {
+  it("keeps the Website tabs' paths unique, and neither a prefix of the other (DeptTabs lights the deepest prefix)", () => {
     const paths = deptTabs(toolkitFor("Web Dev")).map((t) => t.path);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths.filter((p) => p.startsWith("website")).length).toBe(1);
+    const web = paths.filter((p) => p.startsWith("website"));
+    expect(web.length).toBe(2);
+    expect(web.some((a) => web.some((b) => a !== b && b.startsWith(`${a}/`)))).toBe(false);
   });
 
   // A tab that links at a route which does not exist is a 404 in the strip. Guard it on disk, the way
@@ -133,6 +136,8 @@ describe("Website group (WSK-44)", () => {
       "content/[tenant]/[site]/[collection]/page.tsx",
       "content/[tenant]/[site]/[collection]/[slug]/page.tsx",
       "content/[tenant]/[site]/[collection]/[slug]/history/page.tsx",
+      "media/page.tsx",
+      "media/[tenant]/[site]/page.tsx",
     ]) {
       expect(existsSync(resolve(root, rel)), rel).toBe(true);
     }

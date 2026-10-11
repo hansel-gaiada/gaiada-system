@@ -224,9 +224,10 @@ function moduleStaffTargets(kind, cond) {
   // WSK-19 used to justify webdev_contract_snapshot's own inclusion here.
   // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
   // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
+  // WSK-43b (2026-10-11): `webdesk_media_asset` (the media library) joins them, same reasoning.
   // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
-      kind === "webdesk_content_item" || kind === "webdesk_collection") {
+      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset") {
     return ["webdev_staff"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
@@ -257,9 +258,10 @@ function moduleManagerTargets(kind, cond) {
   // GH-03 (2026-08-31) — see moduleStaffTargets' own GH-03 note above.
   // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
   // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
+  // WSK-43b (2026-10-11): `webdesk_media_asset` (the media library) joins them, same reasoning.
   // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
-      kind === "webdesk_content_item" || kind === "webdesk_collection") {
+      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset") {
     return ["webdev_manager"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];

@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **152** capabilities across **16** owners
-- **81** writes · 71 reads
-- Writes by impact: **high 18** · medium 24 · low 39
+- **157** capabilities across **16** owners
+- **84** writes · 73 reads
+- Writes by impact: **high 18** · medium 27 · low 39
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |
 | social | `social` | 12 |
-| webdev | `webdev` | 14 |
+| webdev | `webdev` | 15 |
 
 ## Capabilities
 
@@ -201,6 +201,11 @@ unfalsifiable after.
 | webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |
 | webdev | `webdesk.listSites` | `GET` | `/api/:tenantId/modules/webdev/control/sites` | read | — |
 | webdev | `webdesk.listSubmissions` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/submissions` | read | — |
+| webdev | `webdesk.media.delete` | `DELETE` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId` | write | `medium` |
+| webdev | `webdesk.media.list` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media` | read | — |
+| webdev | `webdesk.media.update` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId` | write | `medium` |
+| webdev | `webdesk.media.uploadToken` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/upload-token` | write | `medium` |
+| webdev | `webdesk.media.usage` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/media/:assetId/usage` | read | — |
 | webdev | `webdesk.schema.apply` | `POST` | `/api/:tenantId/modules/webdev/control/schema/apply` | write | `medium` |
 | webdev | `webdesk.schema.propose` | `POST` | `/api/:tenantId/modules/webdev/control/schema/propose` | write | `low` |
 | webdev | `webdesk.site.archive` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/archive` | write | `high` |

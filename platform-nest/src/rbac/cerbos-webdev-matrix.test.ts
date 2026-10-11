@@ -496,3 +496,74 @@ describe.skipIf(!live)("WSK-47 Cerbos matrix — webdesk_content_item / webdesk_
     }
   });
 });
+
+// ══════════ WSK-43b (2026-10-11) — the WebDesk media library kind: webdesk_media_asset ═════════════════════
+// docs/plans/2026-10-11-webdesk-m3-plan.md "WSK-43 · The media library"; owner rulings WSK-D53/D54. The tiers mirror
+// webdesk_content_item: editor tier (read/upload/update <- content read/create/update) and publisher tier (delete <- content
+// delete). No approval id, no maker-checker, no automation DENY. "editor" = webdev_staff, "publisher" = webdev_manager.
+describe.skipIf(!live)("WSK-43b Cerbos matrix — webdesk_media_asset", () => {
+  const asset: Resource = { kind: "webdesk_media_asset", tenantId: T1, module: "webdev", id: "asset-1" };
+  const EDIT = ["read", "upload", "update"];
+  const ALL = [...EDIT, "delete"];
+  const global = (role: string): Principal => ({ userId: ME, assurance: "high", companies: [], roles: [{ role, scopeType: "global", scopeId: null }], sessionVersion: 1 });
+
+  it("editor (webdev_staff) and manager: read/upload/update, never delete", async () => {
+    for (const p of [principal("webdev_staff", "company", T1), principal("manager", "company", T1)]) {
+      for (const a of EDIT) expect(await allow(p, asset, a), a).toBe(true);
+      expect(await allow(p, asset, "delete"), "delete").toBe(false);
+    }
+  });
+
+  it("publisher (webdev_manager), company_admin and platform_admin: all four", async () => {
+    for (const p of [principal("webdev_manager", "company", T1), principal("company_admin", "company", T1), global("platform_admin")]) {
+      for (const a of ALL) expect(await allow(p, asset, a), a).toBe(true);
+    }
+  });
+
+  it("read is held by EVERY role that holds any other action (a role that can act must be able to list)", async () => {
+    const roles = [principal("webdev_staff", "company", T1), principal("manager", "company", T1), principal("webdev_manager", "company", T1), principal("company_admin", "company", T1), global("platform_admin")];
+    for (const p of roles) {
+      let canAct = false;
+      for (const a of ["upload", "update", "delete"]) canAct = canAct || (await allow(p, asset, a));
+      if (canAct) expect(await allow(p, asset, "read"), p.roles[0].role).toBe(true);
+    }
+  });
+
+  it("member, client, group_executive, viewer: nothing (the library is staff-only)", async () => {
+    for (const p of [principal("member", "company", T1), principal("client", "company", T1), principal("viewer", "company", T1), global("group_executive")]) {
+      for (const a of ALL) expect(await allow(p, asset, a), `${p.roles[0].role} ${a}`).toBe(false);
+    }
+  });
+
+  it("a T1 grant gets nothing on a T2 asset, for every tier", async () => {
+    const t2: Resource = { ...asset, tenantId: T2 };
+    for (const role of ["webdev_staff", "manager", "webdev_manager", "company_admin"]) {
+      for (const a of ALL) expect(await allow(principal(role, "company", T1), t2, a), `${role} ${a}`).toBe(false);
+    }
+  });
+
+  it("the module tier is pinned to webdev: another module's manager, and webdev staff on a non-webdev resource, reach nothing", async () => {
+    for (const a of ALL) expect(await allow(principal("hr_manager", "company", T1), asset, a), `hr_manager ${a}`).toBe(false);
+    for (const a of ALL) expect(await allow(principal("webdev_manager", "company", T1), { ...asset, module: "hr" }, a), `webdev_manager on hr ${a}`).toBe(false);
+    for (const a of ALL) expect(await allow(principal("webdev_staff", "company", T1), { ...asset, module: "" }, a), `webdev_staff no module ${a}`).toBe(false);
+  });
+
+  it("low assurance (every automation principal) is denied the module and company tiers", async () => {
+    for (const role of ["webdev_manager", "webdev_staff", "company_admin", "manager"]) {
+      const p: Principal = { userId: ME, assurance: "low", companies: [T1], roles: [{ role, scopeType: "company", scopeId: T1 }], sessionVersion: 1 };
+      for (const a of ALL) expect(await allow(p, asset, a), `${role} ${a}`).toBe(false);
+    }
+  });
+
+  it("an automation or bot principal is treated as its role (no media analogue of T7's publish DENY): the importer can list, upload and edit", async () => {
+    for (const kind of ["automation", "bot"] as const) {
+      const p: Principal = { ...principal("webdev_staff", "company", T1), kind };
+      for (const a of EDIT) expect(await allow(p, asset, a), `${kind} ${a}`).toBe(true);
+      expect(await allow(p, asset, "delete"), `${kind} delete`).toBe(false);
+    }
+  });
+
+  it("an action the kind does not define is denied (deny by default), even for a publisher", async () => {
+    for (const a of ["create", "purge", "publish", "request_publish"]) expect(await allow(principal("webdev_manager", "company", T1), asset, a), a).toBe(false);
+  });
+});

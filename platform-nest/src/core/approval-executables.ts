@@ -834,6 +834,7 @@ export function registerWebdeskExecutableApprovals(): void {
     });
   }
   registerWebdeskContentExecutableApprovals();
+  registerWebdeskMediaExecutableApprovals();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -947,6 +948,63 @@ export function registerWebdeskContentExecutableApprovals(): void {
     toolName: "webdesk.content.delete",
     lockKey: (a) => webdeskContentLockKey(a, "webdesk.content.delete"),
     precondition: webdeskDeletePrecondition,
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// WSK-43b — the media library's MEDIUM tools that can suspend: `webdesk.media.update` and `webdesk.media.delete`.
+// The same D14 pairing as the content tools above: these entries AND the two names in
+// `cerbos/policies/resource_mcp_tool.yaml`'s executable list, in one change.
+//
+// `webdesk.media.uploadToken` is MEDIUM too but is deliberately NOT here, nor in the Cerbos list. Its result is a
+// one-time secret (the upload URL carries the token), and `approval-execute.ts` stores a re-driven tool's result
+// text in `automation_approvals.execution_result`: registering it would write a plaintext token into a durable table.
+// Without an entry an unattended agent/n8n call suspends and does nothing on approval (`not_applicable`), so an
+// unattended caller can never obtain a token; an attended human is not suspended and gets it directly.
+//
+// STRUCTURAL PRECONDITION ONLY, for the content tools' reason: Zone B's own guards are the atomic re-check
+// (`media.delete` answers 409 `media-in-use` when the world moved since filing; deleting a deleted asset is a no-op).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+function mediaAssetArgsOk(a: Record<string, unknown>): string | null {
+  if (!nonEmptyString(a.tenantSlug)) return "tenant_slug_invalid";
+  if (typeof a.siteId !== "string" || !UUID_RE_EXEC.test(a.siteId)) return "site_id_invalid";
+  if (typeof a.assetId !== "string" || !UUID_RE_EXEC.test(a.assetId)) return "asset_id_invalid";
+  return null;
+}
+
+async function webdeskMediaUpdatePrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const bad = mediaAssetArgsOk(a);
+  if (bad) return { ok: false, reason: bad };
+  if (!["title", "alt", "tags"].some((k) => a[k] !== undefined)) return { ok: false, reason: "no_media_fields" };
+  return { ok: true };
+}
+
+async function webdeskMediaDeletePrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const bad = mediaAssetArgsOk(a);
+  return bad ? { ok: false, reason: bad } : { ok: true };
+}
+
+/** The two MEDIUM media tools that can suspend. Mirrored in `resource_mcp_tool.yaml`'s executable list. */
+export const WEBDESK_MEDIA_REGISTRY_TOOLS: readonly string[] = ["webdesk.media.update", "webdesk.media.delete"];
+
+function webdeskMediaLockKey(a: Record<string, unknown>, toolName: string): string {
+  // The unit of consistency is the ASSET: an update and a delete of one asset contend.
+  const assetId = a?.assetId;
+  if (typeof assetId === "string" && assetId.trim().length > 0) return `webdesk:media:${assetId}`;
+  return `${toolName}:invalid-args:${JSON.stringify(a)}`;
+}
+
+export function registerWebdeskMediaExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "webdesk.media.update",
+    lockKey: (a) => webdeskMediaLockKey(a, "webdesk.media.update"),
+    precondition: webdeskMediaUpdatePrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "webdesk.media.delete",
+    lockKey: (a) => webdeskMediaLockKey(a, "webdesk.media.delete"),
+    precondition: webdeskMediaDeletePrecondition,
   });
 }
 
