@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import { portalDecideSocialReview } from "@/lib/portalActions";
 import type { PortalActionResult } from "@/lib/portalActions";
+import { PortalSocialReviewDecidedNote } from "./PortalSocialReviewDecidedNote";
 
 // SMM-31/32 — the client's own approve / request-changes decision on a drafted social post.
 //
@@ -14,21 +15,17 @@ import type { PortalActionResult } from "@/lib/portalActions";
 // server read on every load) — a decided review's detail page never mounts this component in the
 // first place, so there is no "undo" or "change my mind" control anywhere in this UI to guard
 // against. Once `state.ok` is true (this decision just landed), the component swaps itself for a
-// static confirmation and never re-shows the buttons for the rest of this render — the identical
-// local-state guarantee `PortalSignForm` already relies on for a signature.
+// static confirmation and never re-shows the buttons for the rest of this render. That local state is
+// only the bridge: the action revalidates the page, the refreshed review is no longer `pending`, and
+// the page then unmounts this form and renders `PortalSocialReviewDecidedNote` from the recorded
+// decision instead (the same split `PortalSignForm` uses for a signature).
 export function PortalSocialReviewDecideForm({ reviewId }: { reviewId: string }) {
   const [state, formAction, pending] = useActionState<PortalActionResult | null, FormData>(
     portalDecideSocialReview,
     null,
   );
 
-  if (state?.ok) {
-    return (
-      <div className="cp-form__ok" role="status">
-        Thanks — your decision is recorded. Refresh this page to see the current status.
-      </div>
-    );
-  }
+  if (state?.ok) return <PortalSocialReviewDecidedNote />;
 
   return (
     <form action={formAction} className="cp-form">

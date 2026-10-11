@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  changeRequestFormProps, changeRequestKindLabel, clientStatus, isPastDue, money, overallProgress, portalDate,
+  changeRequestFormProps, changeRequestKindLabel, clientStatus, contractSigningState, isPastDue, money, overallProgress, portalDate,
   projectRange, projectUrgencyTier, relativeDays, splitTimeline, statusTone,
-  type PortalProject, type PortalProjectOption, type PortalTimelineEvent,
+  type PortalContractDetail, type PortalProject, type PortalProjectOption, type PortalTimelineEvent,
 } from "./portal";
 
 // CP-16 — the portal's pure layer. Every function here renders text a CLIENT reads, on both the server
@@ -355,5 +355,53 @@ describe("changeRequestFormProps (§5.1 project rule + the viewer/signer ruling)
     const r = changeRequestFormProps({ access: { wholeClient: true } }, []);
     expect(r.allowClientWide).toBe(true);
     expect(r.projects).toEqual([]);
+  });
+});
+
+// CP-14 — the contract page's signing card. The regression this pins: after the sign action's refresh
+// (applied since Next 16.3) the agreement reads `canSign: false`, and the page must render the SIGNED
+// state from the recorded signature — the form that held "Signed — thank you" in its local action state
+// is gone by then.
+describe("contractSigningState", () => {
+  type K = Parameters<typeof contractSigningState>[0];
+  const base: K = {
+    canSign: true, viewOnly: false, termEnded: false, status: "sent", signatures: [], document: null,
+    bodyMd: "## Scope\nThe work.",
+  };
+  const clientSig: PortalContractDetail["signatures"][number] = {
+    party: "client", signerName: "Dana Whitfield", signerTitle: "COO", signedAt: "2026-10-11T03:00:00Z",
+  };
+
+  it("offers the form while it is the client's turn and the terms are readable", () => {
+    expect(contractSigningState(base)).toEqual({ kind: "sign" });
+  });
+
+  it("is SIGNED, from the recorded signature, once the client has signed (the post-action refresh)", () => {
+    expect(contractSigningState({ ...base, canSign: false, signatures: [clientSig] })).toEqual({
+      kind: "signed", signerName: "Dana Whitfield", signerTitle: "COO", signedAt: "2026-10-11T03:00:00Z",
+    });
+  });
+
+  it("a client signature wins over view-only: a signed agreement is never 'a colleague needs to sign this'", () => {
+    const s = contractSigningState({ ...base, canSign: false, viewOnly: true, signatures: [clientSig] });
+    expect(s.kind).toBe("signed");
+  });
+
+  it("only the provider's signature does not count as the client's", () => {
+    const s = contractSigningState({
+      ...base, signatures: [{ ...clientSig, party: "provider", signerName: "Made Prabowo" }],
+    });
+    expect(s).toEqual({ kind: "sign" });
+  });
+
+  it("never offers the form on terms the client cannot read, even when the server says canSign", () => {
+    const s = contractSigningState({ ...base, bodyMd: null, document: null });
+    expect(s).toEqual({ kind: "closed", reason: "The document needs to be attached before this can be signed." });
+  });
+
+  it("says WHICH reason applies when it cannot be signed", () => {
+    expect(contractSigningState({ ...base, canSign: false, viewOnly: true })).toMatchObject({ kind: "closed", reason: expect.stringMatching(/view-only/) });
+    expect(contractSigningState({ ...base, canSign: false, termEnded: true })).toMatchObject({ kind: "closed", reason: expect.stringMatching(/term has ended/) });
+    expect(contractSigningState({ ...base, canSign: false, status: "declined" })).toMatchObject({ kind: "closed", reason: expect.stringMatching(/can't be signed here/) });
   });
 });
