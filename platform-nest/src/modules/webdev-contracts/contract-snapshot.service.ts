@@ -274,4 +274,100 @@ export async function listContractSnapshots(tenantId: string, slug?: string): Pr
   return rows.rows.map(toSnapshotDto);
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** GET …/contracts/:snapshotId (M6-P4a). Through `withWebdev` — the snapshot table carries the third
+ *  wall, so another tenant's id (or an unknown one) reads ZERO rows and is indistinguishable from
+ *  "not found" by design. A non-UUID id is the same not-found rather than a Postgres cast 500.
+ *  Returns null when absent; the controller maps that to 404. */
+export async function getContractSnapshot(tenantId: string, snapshotId: string): Promise<SnapshotDto | null> {
+  if (!UUID_RE.test(snapshotId)) return null;
+  const res = await withWebdev(tenantId, (c) =>
+    c.query<SnapshotRow>(
+      `SELECT ${SNAPSHOT_COLUMNS} FROM webdev_contract_snapshots WHERE id = $1 AND tenant_id = $2`,
+      [snapshotId, tenantId],
+    ),
+  );
+  return res.rows[0] ? toSnapshotDto(res.rows[0]) : null;
+}
+
+export const SNAPSHOT_ARTIFACT_KEYS = ["openapi", "sdkTs", "sdkPhp", "contractMd"] as const;
+export type SnapshotArtifactKey = (typeof SNAPSHOT_ARTIFACT_KEYS)[number];
+
+export interface SnapshotArtifactDto {
+  snapshotId: string;
+  artifact: SnapshotArtifactKey;
+  fileId: string;
+  contentType: string;
+  byteSize: number;
+  sha256: string;
+  base64: string;
+}
+
+export type SnapshotArtifactOutcome =
+  | { outcome: "ok"; artifact: SnapshotArtifactDto }
+  | { outcome: "snapshot_not_found" }
+  /** The snapshot's own pointer for this artifact is null (e.g. `sdkPhp` before P6) — or the
+   *  pointed-at files row / stored object is gone. */
+  | { outcome: "artifact_absent" }
+  /** The bytes read back do not hash to the per-artifact sha256 recorded at mirror time. */
+  | { outcome: "artifact_hash_mismatch"; expected: string; actual: string };
+
+/** GET …/contracts/:snapshotId/artifacts/:artifact (M6-P4a). The file id comes ONLY from the
+ *  snapshot's own `artifacts` pointer — never from the caller — so this can never be a general file
+ *  reader. Bytes are read through the same `storage()` seam `storeArtifact` writes with, then
+ *  re-hashed against `artifacts.hashes[artifact]` (recorded by `refreshContractSnapshot`, which
+ *  stored the sha256 manifest in the pointer JSON — no migration needed). */
+export async function getContractSnapshotArtifact(
+  tenantId: string,
+  snapshotId: string,
+  artifact: SnapshotArtifactKey,
+): Promise<SnapshotArtifactOutcome> {
+  if (!UUID_RE.test(snapshotId)) return { outcome: "snapshot_not_found" };
+  const found = await withWebdev(tenantId, async (c) => {
+    const snap = await c.query<SnapshotRow>(
+      `SELECT ${SNAPSHOT_COLUMNS} FROM webdev_contract_snapshots WHERE id = $1 AND tenant_id = $2`,
+      [snapshotId, tenantId],
+    );
+    const row = snap.rows[0];
+    if (!row) return { kind: "none" as const };
+    const fileId = row.artifacts?.[artifact];
+    if (typeof fileId !== "string" || !fileId) return { kind: "absent" as const };
+    const f = await c.query<{ id: string; content_type: string; byte_size: string | number; storage_key: string }>(
+      `SELECT id, content_type, byte_size, storage_key FROM files
+        WHERE id = $1 AND tenant_id = $2 AND target_entity_type = 'webdev_contract_snapshot'
+          AND target_entity_id = $3 AND deleted_at IS NULL`,
+      [fileId, tenantId, snapshotId],
+    );
+    const file = f.rows[0];
+    if (!file) return { kind: "absent" as const };
+    const hashes = (row.artifacts?.hashes ?? {}) as Record<string, string | null>;
+    return { kind: "ok" as const, fileId, file, expected: hashes[artifact] ?? null };
+  });
+  if (found.kind === "none") return { outcome: "snapshot_not_found" };
+  if (found.kind === "absent") return { outcome: "artifact_absent" };
+
+  let bytes: Buffer;
+  try {
+    bytes = await storage().get(found.file.storage_key);
+  } catch {
+    return { outcome: "artifact_absent" };
+  }
+  const actual = sha256Hex(bytes);
+  // A row with no recorded hash cannot be verified — refuse rather than serve unchecked bytes.
+  if (!found.expected || found.expected !== actual) {
+    return { outcome: "artifact_hash_mismatch", expected: found.expected ?? "(none recorded)", actual };
+  }
+  return {
+    outcome: "ok",
+    artifact: {
+      snapshotId, artifact, fileId: found.fileId,
+      contentType: found.file.content_type,
+      byteSize: bytes.byteLength,
+      sha256: actual,
+      base64: bytes.toString("base64"),
+    },
+  };
+}
+
 export { WebdevControlEgressError };

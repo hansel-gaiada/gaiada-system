@@ -136,6 +136,22 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     if (!d.allow) expect(d.reason).toMatch(/suspend.*medium-impact/);
   });
 
+  // M6-P4a — the code.scaffold v2 snapshot reads. Two READ-ONLY tools; they auto-run (no suspend) and
+  // are scoped to wf:delivery ONLY.
+  it("wf:delivery may call the two snapshot read tools (M6-P4a), they run unattended, and no other workflow sees them", () => {
+    for (const name of ["webdev.contracts.get", "webdev.contracts.artifact"]) {
+      expect(AUTOMATION_ALLOWLIST["wf:delivery"]).toContain(name);
+      registerTool({
+        name, description: "snapshot read", minAssurance: "low", inputSchema: { type: "object" }, handler: async () => "{}",
+      });
+      expect(authorize(wf("wf:delivery"), name).allow).toBe(true);
+      expect(authorize(wf("wf:report"), name).allow).toBe(false);
+      for (const [id, tools] of Object.entries(AUTOMATION_ALLOWLIST)) {
+        if (id !== "wf:delivery") expect(tools, id).not.toContain(name);
+      }
+    }
+  });
+
   it("does NOT grant humans automation scoping (a low human keeps normal visibility)", () => {
     const human: Principal = { provider: "whatsapp", externalId: "628110@c.us", assurance: "low" };
     const names = visibleTools(human).map((t) => t.name);
