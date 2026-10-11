@@ -133,12 +133,12 @@ export function ItemEditor({
   const initial = useMemo(() => {
     if (mode === "create" && seed) {
       const base: EditableContent = { fields: Object.keys(seed.fields).length ? seed.fields : defaultFields(defs), seo: seed.seo, extraBlocks: seed.extraBlocks };
-      return { content: base, item: null as ItemRef | null, version: 0, lint: { unresolvedTokens: [], markers: {} } as Lint, group: [] as ItemDetail["group"], loadedAt: new Date().toISOString() };
+      return { content: base, stored: {} as Record<string, unknown>, item: null as ItemRef | null, version: 0, lint: { unresolvedTokens: [], markers: {} } as Lint, group: [] as ItemDetail["group"], loadedAt: new Date().toISOString() };
     }
     const b = bundle as EditorBundle;
     const content = splitVersionContent(collection.key, b.detail.version.blocks, b.detail.version.seo);
     const shown = b.authoritative ? { ...content, fields: overlayNeutrals(defs, content.fields, b.authoritative.fields) } : content;
-    return { content: shown, item: b.detail.item, version: b.detail.version.n, lint: b.detail.lint, group: b.detail.group, loadedAt: b.loadedAt };
+    return { content: shown, stored: content.fields, item: b.detail.item, version: b.detail.version.n, lint: b.detail.lint, group: b.detail.group, loadedAt: b.loadedAt };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -146,6 +146,9 @@ export function ItemEditor({
   const [lint, setLint] = useState<Lint>(initial.lint);
   const [group, setGroup] = useState(initial.group);
   const [baseVersion, setBaseVersion] = useState(initial.version);
+  /** The item's OWN stored fields: what the head holds, BEFORE `overlayNeutrals` shows a non-default locale the default locale's shared values.
+   *  Client mode builds its wire body from these (never from the overlaid display), so a protected shared field goes back as stored. */
+  const [stored, setStored] = useState<Record<string, unknown>>(initial.stored);
   const [baseline, setBaseline] = useState<{ fields: Record<string, unknown>; seo: Record<string, unknown> }>({ fields: initial.content.fields, seo: initial.content.seo });
   const [draft, setDraft] = useState<{ fields: Record<string, unknown>; seo: Record<string, unknown> }>({ fields: initial.content.fields, seo: initial.content.seo });
   const [extraBlocks, setExtraBlocks] = useState<Block[]>(initial.content.extraBlocks);
@@ -200,6 +203,7 @@ export function ItemEditor({
     setItem(detail.item); setLint(detail.lint); setGroup(detail.group);
     setBaseVersion(detail.version.n);
     setHeadAuthor(detail.version.createdBy);
+    setStored(content.fields);
     setBaseline({ fields: shown, seo: content.seo });
     setDraft({ fields: shown, seo: content.seo });
     setExtraBlocks(content.extraBlocks);
@@ -302,7 +306,7 @@ export function ItemEditor({
     const sentSeo = toWire(draft.seo);
     // CLIENT MODE sends `fields` only: the BFF refills `seo` and generic blocks from the head, and refuses a client that states
     // them. Protected leaves go back exactly as read (`clientFieldsToSend`); a create starts from nothing, so nothing protected is set.
-    const clientFields = clientMode ? clientFieldsToSend(defs, clientMode.editable.fields, mode === "create" ? {} : toWire(baseline.fields), sentFields) : null;
+    const clientFields = clientMode ? clientFieldsToSend(defs, clientMode.editable.fields, mode === "create" ? {} : toWire(stored), sentFields) : null;
 
     if (mode === "create") {
       if (!SLUG_RE.test(slug) || slug.length > 200) {
@@ -334,6 +338,7 @@ export function ItemEditor({
     if (r.kind === "ok") {
       setItem(r.data.item); setLint(r.data.lint); setBaseVersion(r.data.version.version);
       if (clientMode) setHeadAuthor(clientMode.viewerId);
+      setStored(clientFields ?? sentFields);
       setBaseline({ fields: draft.fields, seo: draft.seo });
       setIssues([]); setHeadSeen(null); setConflict(null); setNote("");
       setSaveState({ s: "saved", version: r.data.version.version, unchanged: r.data.unchanged });

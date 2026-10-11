@@ -281,3 +281,49 @@ describe("client mode: the staff calls are never used", () => {
     expect(staff.refreshEditorAction).not.toHaveBeenCalled();
   });
 });
+
+describe("client mode on a NON-default locale: shared (localized:false) fields", () => {
+  // `url` is shared and Gaiada's; `shared_note` is shared and the client's; `h1` is per-locale and the client's.
+  const comp = { fields: [
+    { name: "h1", primitive: "text" },
+    { name: "url", primitive: "text", localized: false },
+    { name: "shared_note", primitive: "text", localized: false },
+  ] };
+  const editable: ClientEditable = { fields: { h1: true, url: false, shared_note: true }, blocks: false, seo: false, create: { allowed: true, reason: null, blockedBy: [] } };
+  const idDetail = (): ItemDetail => ({
+    item: ref({ locale: "id", slug: "page", itemId: "i-id" }),
+    version: { n: 3, contentHash: "h", createdAt: "t", createdBy: "u-me", note: null, blocks: [{ type: "fields", props: { h1: "Judul", url: "/id-stored/", shared_note: "id note" } }], seo: {} },
+    group: [], lint: noLint,
+  });
+  const b = (): EditorBundle => ({
+    ...bundle(idDetail()), collection: coll(comp),
+    authoritative: { locale: "en", fields: { h1: "Title", url: "/en-default/", shared_note: "en note" } },
+  });
+
+  it("a protected shared field is sent with its STORED value, never the default locale's; an editable change is sent", async () => {
+    drv.saveItem.mockResolvedValue(ok(written(4)));
+    cleanup();
+    render(<ItemEditor mode="edit" scope={SCOPE} routeBase={ROUTE} collection={coll(comp)} tenant={tenant} site={site} bundle={b()} authors={{}} readOnlyReason={null}
+      clientMode={{ clientId: "c1", viewerId: "u-me", editable, driver: drv, mediaDriver: { list: vi.fn(), mintToken: vi.fn(), update: vi.fn() } as never, renderPublish: () => null }} />);
+    // the DISPLAY still shows the shared default-locale value, read-only
+    expect(field("url").value).toBe("/en-default/");
+    expect(field("url").readOnly).toBe(true);
+    type("h1", "Judul baru");
+    await click(saveBtn());
+    const input = drv.saveItem.mock.calls[0][2];
+    expect(input.fields.h1).toBe("Judul baru"); // positive control
+    expect(input.fields.url).toBe("/id-stored/"); // protected + shared: as stored on THIS page
+    expect(input.fields.shared_note).toBe("en note"); // client-editable shared field: today's write-through, unchanged
+    expect(Object.keys(input).sort()).toEqual(["baseVersion", "fields", "note"]);
+  });
+
+  it("after a save the stored baseline is what was sent (a second save still sends the stored url)", async () => {
+    drv.saveItem.mockResolvedValue(ok(written(4)));
+    cleanup();
+    render(<ItemEditor mode="edit" scope={SCOPE} routeBase={ROUTE} collection={coll(comp)} tenant={tenant} site={site} bundle={b()} authors={{}} readOnlyReason={null}
+      clientMode={{ clientId: "c1", viewerId: "u-me", editable, driver: drv, mediaDriver: { list: vi.fn(), mintToken: vi.fn(), update: vi.fn() } as never, renderPublish: () => null }} />);
+    type("h1", "A"); await click(saveBtn());
+    type("h1", "B"); await click(saveBtn());
+    expect(drv.saveItem.mock.calls[1][2].fields.url).toBe("/id-stored/");
+  });
+});
