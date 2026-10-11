@@ -26,7 +26,8 @@ server, result observed). Every ticket's gate is `webdesk/qa/linux-gate.sh` on s
 | **WSK-43b** | Media library, ERP half: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools | Sonnet, Opus review; the WebDesk orchestrator releases it (Cerbos restart) | — | after 43a |
 | **WSK-43c** | Media library UI: a Media tab in the Website workspace, and a picker for media fields in the editor | Sonnet, Opus review | — | after the M2 editor follow-ups (350) and 43b |
 | **WSK-43d** | gaiada-web-revamp's pull step downloads library images into the static build (D53) | with the site owner | — | after 43a |
-| WSK-45 · WSK-49 | WYSIWYG Markdown editor (D49), client editors | later waves | | |
+| **WSK-45** | WYSIWYG Markdown editor (D49): 305/315 real gaiada.com bodies open visually and round-trip byte-identical; the rest open as source | Sonnet, Opus review; the WebDesk orchestrator releases it | — | done, awaiting release |
+| **WSK-49a–e** | Client editors through the client portal (D58, D59): see the section below | Sonnet, Opus review; portal parts coordinated with the Three-perspectives program | — | after the ERP-side wave |
 
 **Merging.** Each wave merges to main only after `webdesk/qa/linux-gate.sh` is green on the merged tree (main + the wave), under WSK-D47(b), and the WebDesk orchestrator is told each time.
 
@@ -89,6 +90,28 @@ read `media.list`. The media primitive stores `{url, alt?, width?, height?, mime
   the static output. WebDesk serves no public image traffic for a static site.
 - **ERP and UI.** A Cerbos kind `webdesk_media_asset` (read, upload, update, delete) with its six artifacts, BFF routes and MCP
   tools for every action, then a Media tab and a picker in the Website workspace.
+
+## WSK-49 · Client editors through the client portal
+
+Rulings: WSK-D58 (a client publisher self-publishes a single item; batches need a second client person) and WSK-D59 (clients change
+only what the composition marks client-editable). Built now against a test client tenant, before the first client site moves onto WebDesk.
+
+- **Who is a client editor (WSK-D60).** A client user holding `client_website_editor` on their own company. Gaiada staff and the
+  client's company admin can grant it; the self-service path is bounded (this role only, own company only, never staff roles or
+  permissions, within the granter's ceiling, audited). `isClientOnly`, never `!isElevated`, decides the portal shell.
+- **49f · The grant path.** The role as data, its Cerbos attribute check, staff and client-admin grant/revoke in the ERP and the
+  portal, audited; denial tests send valid bodies so validation never pre-empts authorisation.
+- **49a · vocabulary 1.2.0 (MINOR).** `ui.clientEditable` on the composition and on FieldDef; the classifier rates it MINOR; vendored copies
+  and codegen follow. No stored value changes.
+- **49b · WebDesk write plane.** The editorial assertion gains a client marker. With it, create, update and restore refuse any change to a
+  path that is not client-editable (`422 field-not-client-editable`, listing the paths), and publish obeys D58. Without it, nothing changes.
+- **49c · ERP authorisation and BFF.** Cerbos rules on `webdesk_content_item` (and `read` on `webdesk_media_asset`) for client editors,
+  scoped to their own company: read, update client-editable content, request publish, self-publish one item, approve another client's batch.
+  A portal BFF namespace that reuses the content service in client mode, diff-checks every client write against D59 before it leaves the
+  ERP, and mints the assertion with the client marker.
+- **49d · Portal UI.** A Website area in the client portal's own route group and shell, reusing the editor components in client mode:
+  non-editable fields read-only with a reason, self-publish for one item, a batch request a second client person approves.
+- **49e · Test client.** A seeded test client company with its own WebDesk tenant and site, so every part above is proven end to end.
 
 ## WSK-61 · The scheduler
 
