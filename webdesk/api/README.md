@@ -500,6 +500,28 @@ Two documented departures from design §07's literal wording: `schema.propose` i
 which is what `read` means everywhere else in this map) and `job.get`/`job.list` are this
 ticket's own addition (job-tracking wasn't in the original C-05 list).
 
+### `tenant.provision` and the tenant's locales (WSK-D18, WSK-D48)
+
+`POST /control/v1/tenants` takes `{ slug, companyRef }` and, optionally, `{ defaultLocale, locales }`.
+
+- **Both or neither.** With neither, the tenant gets the column defaults exactly as before (`default_locale 'id-ID'`,
+  `locales {id-ID}`), so every existing caller is unchanged. Only one of the two is a 400: guessing the missing half
+  would be a silent contract decision.
+- **Validation, the rule the rest of the service already applies** (`assertTenantLocales` in `src/control/dto.ts`; there
+  is no BCP 47 grammar anywhere in WebDesk). A locale is an opaque non-empty string of at most 35 characters
+  (`content-commands.controller.ts`), without surrounding whitespace (`delivery/vocabulary/locale.ts` reads a requested
+  locale trimmed, so one with whitespace could never be asked for), compared by exact string equality with the tenant's
+  declared set (content and media commands). `locales` is a non-empty array with no duplicates, and `defaultLocale` is
+  one of its members. Any breach is a `400` before the command envelope, so it claims no idempotency key and creates no
+  tenant.
+- **Stored** in `tenants.default_locale` and `tenants.locales` (migration `0005_tenant_locales.sql`; no new migration).
+  The 201 body's `tenant` carries both. The content composition check (`/locale`, 422) and the `/v1` reads resolve
+  against these columns, so a tenant provisioned with `{ defaultLocale: "en", locales: ["en", "id"] }` takes content in
+  `en` and `id` straight away (the live `gaiada` tenant was set this way by hand, WSK-D48).
+- **Idempotent, and the locales are part of the hashed body.** The request hash covers them (the list as its JSON text, in
+  the order given), only when declared, so a stored key from before this change still replays. The same key with the same
+  body replays (`replayed: true`); the same key with different locales (or with none) is `409`, never silently accepted.
+
 ### Idempotency (ticket AC: "every command double-fired must produce one effect")
 
 Every mutating command requires an `Idempotency-Key` request header (≥8 chars;
@@ -2053,6 +2075,36 @@ uses the asset, so it cannot break a page.
   the row insert then failed, the object is deleted at once and a soft-deleted row is written for it
   (`MediaService.recordTombstone`): on a locked bucket the delete only adds a marker, so that row (with `purge_after`)
   is what lets `media-purge` free the locked version later, and it keeps the quota honest until then.
+- **Refusals are `application/problem+json` with a stable `type` slug.** Every refusal of `POST` and `OPTIONS` on this
+  route answers `{ type: "https://webdesk.gaiada.online/errors/<slug>", title, status, detail }` (the shape the control
+  routes use; `type` is the contract a client maps on, `detail` is prose that may be reworded), never Nest's
+  `{ statusCode, message, error }`. Status codes are exactly what they were. CORS headers, `Vary: Origin` and
+  `Cache-Control: no-store` are on these answers too (the browser reads them cross-origin), and `Retry-After` and
+  `Connection: close` are kept. No body, header or log line carries the token. An answer that is not one of these
+  is `invalid-request` or `internal-error` below, and the thrown message of an unexpected failure is never sent.
+
+  | Slug | Status | Refusal |
+  |---|---|---|
+  | `upload-not-found` | 404 | The token is unknown, malformed, expired, already spent or another tenant's, or the tenant is unknown or archived. One body for all of them (no oracle), through `OPTIONS` too |
+  | `upload-type-not-allowed` | 415 | The declared type is outside the token's set, has no parser at all, or is missing with a body. 400 when the bucket's allowlist refuses it after the body is read |
+  | `upload-type-mismatch` | 400 | The declared type does not match the file's magic bytes |
+  | `upload-too-large` | 413 | Over the cap by a declared `Content-Length`, or by a body that crossed it while streaming. 400 if the screen finds it over the cap |
+  | `upload-empty` | 400 | An empty body |
+  | `upload-quota-exceeded` | 403 | The tenant's storage quota would be exceeded |
+  | `upload-infected` | 403 | The malware scan matched; `detail` names the signature |
+  | `upload-scan-unavailable` | 503 | The scanner could not be reached (fail closed); a fixed `detail`, the scanner's error is not echoed |
+  | `upload-busy` | 503 | The process or tenant upload slots are full; `Retry-After: 5` |
+  | `upload-timeout` | 408 | The body did not arrive before `WEBDESK_MEDIA_UPLOAD_TIMEOUT_MS` |
+  | `upload-interrupted` | 400 | The sender went away mid-body |
+  | `invalid-request` | 400 | Anything else Fastify refuses before the handler, such as a malformed JSON body |
+  | `internal-error` | 500 | An unexpected failure (storage, database); a fixed `detail` |
+
+  There is no "bad filename" refusal: the filename is only a label, and an unusable one is cleaned to nothing and stored
+  as `file`. The ERP's media UI (`platform-ui/src/lib/webdeskMediaModel.ts`) maps on the slug first and keeps status plus
+  message as the fallback for an older WebDesk. The mechanism is `src/media/upload-problem.ts`: the refusals keep their Nest
+  exception classes tagged with a slug (so the api-key upload route, which shares the screening code, still answers as it
+  always did), `UploadProblemFilter` is bound to the two upload handlers only, and an `onSend` hook on the upload path
+  (`media-upload-parser.ts`) rewrites the refusals Fastify makes before the handler runs.
 - **One 404.** Unknown, malformed, expired, spent, another tenant's token, an unknown or archived tenant slug: the same
   bytes (`Connection: close`, so a sender is not read to the end). No oracle, through `OPTIONS` either.
 - **Bounded while streaming.** The cap is `min(token max_bytes, WEBDESK_MEDIA_MAX_UPLOAD_BYTES)`. A declared

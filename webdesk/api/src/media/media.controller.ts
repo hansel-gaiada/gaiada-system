@@ -5,12 +5,13 @@
 //   - serving:   PUBLIC, cookieless, media/video buckets ONLY, long Cache-Control + cache tags
 //   - presigned: authenticated, read-scoped, uploads (PRIVATE) bucket ONLY
 //   - transform: PUBLIC, imgproxy-signed redirect, media/video buckets ONLY
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, NotFoundException, Options, Param, Post, Query, Req, Res, ServiceUnavailableException, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, NotFoundException, Options, Param, Post, Query, Req, Res, ServiceUnavailableException, UnauthorizedException, UseFilters, UseGuards } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { MediaService } from "./media.service";
 import { MediaUploadService, cleanOriginalFilename } from "./media-upload.service";
 import { TenantLookupService } from "../tenants/tenant-lookup.service";
 import { allowedUploadOrigin } from "./upload-cors";
+import { UploadProblemFilter, uploadRefusal } from "./upload-problem";
 import { ImgproxyService } from "./imgproxy.service";
 import { ApiKeyAuthGuard } from "../auth/api-key-auth.guard";
 import { ScopeGuard } from "../auth/scope.guard";
@@ -58,7 +59,7 @@ export class MediaController {
    */
   private tokenNotFound(reply: FastifyReply): NotFoundException {
     reply.header("connection", "close");
-    return new NotFoundException();
+    return uploadRefusal(new NotFoundException(), "upload-not-found");
   }
 
   private async activeTenantId(slug: string): Promise<string | null> {
@@ -68,6 +69,7 @@ export class MediaController {
 
   /** CORS preflight of the token upload route: answers only for a token that could still be redeemed. */
   @Options("upload/:token")
+  @UseFilters(UploadProblemFilter)
   @HttpCode(204)
   async uploadPreflight(
     @Param("tenantSlug") tenantSlug: string,
@@ -93,6 +95,7 @@ export class MediaController {
    * and uploads exactly once. 201 with the asset; see media-upload.service.ts.
    */
   @Post("upload/:token")
+  @UseFilters(UploadProblemFilter)
   async uploadWithToken(
     @Req() req: WebdeskRequest,
     @Param("tenantSlug") tenantSlug: string,
@@ -113,7 +116,7 @@ export class MediaController {
     if (!release) {
       reply.header("retry-after", "5");
       reply.header("connection", "close");
-      throw new ServiceUnavailableException("too many uploads are in progress; retry shortly");
+      throw uploadRefusal(new ServiceUnavailableException("too many uploads are in progress; retry shortly"), "upload-busy");
     }
     try {
       return await this.uploads.redeem({
