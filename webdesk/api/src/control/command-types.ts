@@ -65,7 +65,20 @@ export type CommandName =
   | "media.delete"
   | "media.usage"
   // M5-L1/L2 — one form submission read back by the ERP after it sees a Zone B form.received fact.
-  | "forms.submission.get";
+  | "forms.submission.get"
+  // M5-W2b — the writers' room review flow (design docs/plans/2026-10-11-m5-writers-room-design.md section 4.3).
+  // The nine writes carry an editorial principal (EDITORIAL_COMMANDS); board and history are plain reads.
+  | "editorial.submit"
+  | "editorial.withdraw"
+  | "editorial.requestChanges"
+  | "editorial.seoSignoff"
+  | "editorial.approve"
+  | "editorial.assign"
+  | "editorial.comment"
+  | "editorial.commentResolve"
+  | "editorial.policySet"
+  | "editorial.board"
+  | "editorial.history";
 
 export interface CommandMeta {
   readonly command: CommandName;
@@ -177,6 +190,22 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   // purged/erased row (410) and is never served from a cache; the DSR commands, which look a PERSON up
   // across a tenant, stay high/WS4 (privacy.*). No audit row, like the other reads.
   "forms.submission.get": { command: "forms.submission.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-W2b (design 4.3): every review write is MEDIUM / operate. None is HIGH, because none changes what a
+  // production key sees: approval is a recorded decision, and the publish gate that ENFORCES it (W2c) sits on
+  // content.publish / content.schedule, which stay HIGH. policySet turns review on or off for a collection, and
+  // is MEDIUM for the same reason (it can only make publishing stricter or restore the default). The two reads
+  // are read / webdesk:read like every control read of tenant data; review data is never served on /v1.
+  "editorial.submit": { command: "editorial.submit", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.withdraw": { command: "editorial.withdraw", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.requestChanges": { command: "editorial.requestChanges", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.seoSignoff": { command: "editorial.seoSignoff", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.approve": { command: "editorial.approve", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.assign": { command: "editorial.assign", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.comment": { command: "editorial.comment", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.commentResolve": { command: "editorial.commentResolve", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.policySet": { command: "editorial.policySet", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.board": { command: "editorial.board", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "editorial.history": { command: "editorial.history", impactClass: "read", scope: "webdesk:read", jobTracked: false },
 });
 
 /**
@@ -200,6 +229,16 @@ export const EDITORIAL_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>
   "media.uploadToken",
   "media.update",
   "media.delete",
+  // M5-W2b: the review writes. Never on CLIENT_EDITOR_COMMANDS: a client editor cannot review or approve.
+  "editorial.submit",
+  "editorial.withdraw",
+  "editorial.requestChanges",
+  "editorial.seoSignoff",
+  "editorial.approve",
+  "editorial.assign",
+  "editorial.comment",
+  "editorial.commentResolve",
+  "editorial.policySet",
 ]);
 
 export function commandMeta(command: CommandName): CommandMeta {

@@ -74,6 +74,8 @@ import {
 } from "./content-projection";
 import { extractSearchText } from "./search-text";
 import { attributionOf, insertContentVersion } from "./content-versions";
+// M5-W2b: the review flow follows the version writer (an edit in review / after approval), see editorial-store.ts.
+import { onItemCreated, onVersionAppended } from "../editorial/editorial-store";
 import {
   ITEM_COLUMNS,
   adoptLegacyItem,
@@ -397,6 +399,8 @@ export class ContentCommandsService {
         RETURNING ${ITEM_COLUMNS}`,
       [item.id, v, JSON.stringify(blocks), JSON.stringify(seo), extractSearchText(blocks)],
     );
+    // M5-W2b: in_review follows the new head, approved returns to draft; a no-op for an item with no review row.
+    await onVersionAppended(client, { tenantId: ctx.tenant.id, itemId: item.id, version: v, actor: ctx.principal.sub });
     return {
       state: toState({ ...rows[0], collection_key: item.collection_key }),
       version: { version: v, contentHash: stored.contentHash, createdAt: iso(stored.createdAt) as string },
@@ -701,6 +705,8 @@ export class ContentCommandsService {
           note: input.note ?? null,
           attribution: attributionOf(ctx.principal),
         });
+        // M5-W2b: on a review-required collection the new item enters the flow as a draft by its creator.
+        await onItemCreated(client, { tenantId: ctx.tenant.id, siteId: ctx.siteId, itemId, collectionKey: col.key, actor: ctx.principal.sub });
         const lint = await this.lint(client, ctx, composition, assembled.blocks, input.locale, assembled.seo, rows[0].localization_group_id);
         return {
           result: {

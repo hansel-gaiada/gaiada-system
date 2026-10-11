@@ -49,6 +49,8 @@ import { findMediaUsage } from "./media-usage";
 import { canonicalAssetPath, toLibraryAsset } from "../../media/library-asset";
 import { MEDIA_ASSET_COLUMNS } from "../../media/media.service";
 import type { MediaAssetRow } from "../../media/dto";
+import { EDITORIAL_COLUMNS, countOpenComments, loadPolicy, viewOf, type EditorialRow, type EditorialView } from "../editorial/editorial-store";
+import type { ReviewState } from "../editorial/editorial-model";
 
 // ------------------------------------------------------------------------------------------------
 // Public shapes (design §4)
@@ -59,6 +61,8 @@ export type ItemListState = (typeof ITEM_STATES)[number];
 export interface ItemListQuery {
   locale?: string;
   state?: ItemListState;
+  /** M5-W2b: only items in this review state (an item the flow never touched reads as `draft`). */
+  reviewState?: ReviewState;
   q?: string;
   includeDeleted: boolean;
   cursor?: string;
@@ -98,6 +102,8 @@ export interface ItemSummary {
   headCreatedAt: string | null;
   headCreatedBy: string | null;
   pendingChanges: boolean;
+  /** M5-W2b: the review state (control plane only; /v1 never sees it). */
+  editorial: EditorialView;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -374,6 +380,9 @@ export class ContentReadsService {
         default:
           break;
       }
+      if (query.reviewState) {
+        where.push(`COALESCE((SELECT e.state FROM editorial_items e WHERE e.content_item_id = ci.id), 'draft') = ${p(query.reviewState)}`);
+      }
       if (query.locale) where.push(`ci.locale = ${p(query.locale)}`);
       if (query.q) {
         const like = p(`%${escapeLike(query.q)}%`);
@@ -413,6 +422,23 @@ export class ContentReadsService {
       );
       const hasMore = rows.length > query.limit;
       const slice = hasMore ? rows.slice(0, query.limit) : rows;
+      // M5-W2b: the `editorial` member of each row, from one extra read for the page.
+      const policy = await loadPolicy(c, siteId, collectionKey);
+      const pageIds = slice.map((r) => r.id);
+      const reviewRows = new Map<string, EditorialRow>();
+      const openByItem = new Map<string, number>();
+      if (pageIds.length > 0) {
+        const er = await c.query<EditorialRow & { content_item_id: string }>(
+          `SELECT ei.content_item_id, ${EDITORIAL_COLUMNS} FROM editorial_items ei WHERE ei.content_item_id = ANY($1::uuid[])`,
+          [pageIds],
+        );
+        for (const r of er.rows) reviewRows.set(r.content_item_id, r);
+        const oc = await c.query<{ content_item_id: string; n: string }>(
+          `SELECT content_item_id, count(*)::text AS n FROM editorial_comments WHERE content_item_id = ANY($1::uuid[]) AND resolved_at IS NULL GROUP BY content_item_id`,
+          [pageIds],
+        );
+        for (const r of oc.rows) openByItem.set(r.content_item_id, Number(r.n));
+      }
       const items: ItemSummary[] = slice.map((r) => ({
         itemId: r.id,
         slug: r.slug,
@@ -429,6 +455,7 @@ export class ContentReadsService {
         headCreatedAt: iso(r.head_created_at),
         headCreatedBy: r.head_created_by,
         pendingChanges: r.pending_changes,
+        editorial: viewOf(reviewRows.get(r.id) ?? null, policy, r.head_version, openByItem.get(r.id) ?? 0),
       }));
       const last = slice[slice.length - 1];
       const page: Page = { cursor: hasMore && last ? encodeCursor([last.slug, last.locale, last.id]) : null, hasMore, limit: query.limit };
@@ -572,6 +599,11 @@ export class ContentReadsService {
 
       const lint = await this.lint(c, siteId, tenant.defaultLocale, row.collection_key, row.composition, selected.blocks, row.locale);
 
+      // M5-W2b: the review state of the item (control plane only; /v1 never sees it).
+      const reviewPolicy = await loadPolicy(c, siteId, row.collection_key);
+      const reviewRow = await c.query<EditorialRow>(`SELECT ${EDITORIAL_COLUMNS} FROM editorial_items ei WHERE ei.content_item_id = $1`, [row.id]);
+      const editorial = viewOf(reviewRow.rows[0] ?? null, reviewPolicy, row.head_version, await countOpenComments(c, row.id));
+
       return {
         item: {
           itemId: row.id,
@@ -602,6 +634,7 @@ export class ContentReadsService {
           publishState: g.publish_state,
         })),
         lint,
+        editorial,
       };
     });
   }
