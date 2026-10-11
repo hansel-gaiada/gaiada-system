@@ -1,11 +1,35 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { sanitizeReturnTo } from "@/lib/returnTo";
 import { peekSessionExpiry, needsRefresh } from "@/lib/session-expiry";
+import { readHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
+import { allowedOrigins, isOriginAllowed, requestOwnOrigin, ORIGIN_CHECK_EXEMPT_PATHS } from "@/lib/originCheck";
+
+/** CSRF gate (B0): refuse a state-changing request whose Origin / Sec-Fetch-Site says it came from a
+ *  page that is not the ERP. The rule and its reasons live in `lib/originCheck.ts`. Runs FIRST, before
+ *  the session gate, so a refused request has no side effect at all — not even a login redirect. */
+function refuseForeignOrigin(req: NextRequest): NextResponse | null {
+  if (ORIGIN_CHECK_EXEMPT_PATHS.has(req.nextUrl.pathname)) return null;
+  const allowed = allowedOrigins(
+    { ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS, PUBLIC_ORIGIN: process.env.PUBLIC_ORIGIN },
+    requestOwnOrigin(req.headers, req.url),
+  );
+  const ok = isOriginAllowed({
+    method: req.method,
+    origin: req.headers.get("origin"),
+    secFetchSite: req.headers.get("sec-fetch-site"),
+    allowed,
+  });
+  if (ok) return null;
+  return NextResponse.json({ error: "origin_not_allowed" }, { status: 403 });
+}
 
 // Next 16 renamed `middleware.ts` to `proxy.ts` and runs it on the Node runtime instead of Edge. The check stays
 // what it was on Edge, a cookie PRESENCE check only; every page verifies the HMAC server-side via
 // getSessionUserId() before using the id.
 export function proxy(req: NextRequest) {
+  const refused = refuseForeignOrigin(req);
+  if (refused) return refused;
+
   const { pathname } = req.nextUrl;
   // /step-up is reachable pre-full-session (WA/Telegram users land here for
   // sensitive actions), so it's public like /login.
@@ -22,7 +46,8 @@ export function proxy(req: NextRequest) {
   const isPublic =
     pathname.startsWith("/login") || pathname.startsWith("/step-up") || pathname.startsWith("/auth") ||
     pathname.startsWith("/print") || pathname.startsWith("/invite");
-  const hasSession = Boolean(req.cookies.get("gaiada_session")?.value);
+  // `__Host-gaiada_session` in production, `gaiada_session` under `next dev` (lib/cookieNames.ts).
+  const hasSession = Boolean(readHostCookie(req.cookies, HOST_COOKIES.session));
   if (!isPublic && !hasSession) {
     // UI-01: preserve the originally-requested deep link through the login/reauth round trip
     // (e.g. a mailed approval link with no session must not dead-end at "/" after sign-in). The
@@ -63,7 +88,7 @@ export function proxy(req: NextRequest) {
     const exempt =
       pathname.startsWith("/auth/") || pathname.startsWith("/api/") || pathname.startsWith("/print");
     if (req.method === "GET" && !exempt) {
-      const expiresAt = peekSessionExpiry(req.cookies.get("gaiada_session")?.value);
+      const expiresAt = peekSessionExpiry(readHostCookie(req.cookies, HOST_COOKIES.session));
       if (needsRefresh(expiresAt)) {
         const target = sanitizeReturnTo(`${pathname}${req.nextUrl.search}`);
         const refreshUrl = new URL("/auth/refresh", req.url);
@@ -91,4 +116,10 @@ export function proxy(req: NextRequest) {
 // rides along — so nothing looked broken; the cost was 135 files running the proxy (then the edge middleware) on
 // every request and a redirect standing in front of something that should simply be cacheable.
 // The comment above already said this. Adding assets means adding them here.
+//
+// THE ORIGIN CHECK (B0) RIDES ON THIS MATCHER, so its exclusions are also the places that check does
+// not run. They are all static-asset prefixes served by GET; no page, Server Action or route handler
+// lives under them. Server Actions POST to the page's own path and every `app/api/*` handler sits
+// under `/api/`, so both always match. `proxy.test.ts` pins this with Next's own matcher (and walks
+// `src/app` so a future route under an excluded prefix fails the test, not production).
 export const config = { matcher: ["/((?!_next|fonts|office-sprites|office-env|office-chars|favicon.ico).*)"] };

@@ -9,11 +9,13 @@
 // reconciler for PM scope: a stale/foreign id degrades to `@all` there, not here.
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { parsePmScope, encodePmScope, PM_SCOPE_COOKIE, type PmScope } from "./pmScope";
+import { parsePmScope, encodePmScope, type PmScope } from "./pmScope";
+import { readHostCookie, setHostCookie, HOST_COOKIES } from "./cookieNames";
+import { sanitizeReturnTo } from "./returnTo";
 
 export async function getPmScope(): Promise<PmScope> {
   const jar = await cookies();
-  return parsePmScope(jar.get(PM_SCOPE_COOKIE)?.value);
+  return parsePmScope(readHostCookie(jar, HOST_COOKIES.pmScope));
 }
 
 /** `scope`: the encoded `PmScope` the switcher just selected. `next`: the path to return to
@@ -21,13 +23,10 @@ export async function getPmScope(): Promise<PmScope> {
  *  only what it's scoped to) — `ScopeSwitcher` fills this from `usePathname()` + its own search. */
 export async function setPmScope(formData: FormData): Promise<void> {
   const raw = String(formData.get("scope") ?? "all");
-  const next = String(formData.get("next") ?? "/pm");
+  // Same-site path only: `next` is a form field, so without this a crafted post could bounce the
+  // user to `//evil.example`. The shared UI-01 validator, as at every other return-target site.
+  const next = sanitizeReturnTo(String(formData.get("next") ?? "/pm"));
   const jar = await cookies();
-  jar.set(PM_SCOPE_COOKIE, encodePmScope(parsePmScope(raw)), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: process.env.NODE_ENV === "production",
-  });
+  setHostCookie(jar, HOST_COOKIES.pmScope, encodePmScope(parsePmScope(raw)));
   redirect(next);
 }

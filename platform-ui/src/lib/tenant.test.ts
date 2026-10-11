@@ -29,6 +29,18 @@ describe("switchTenant return path", () => {
     expect(set).toHaveBeenCalledWith("gaiada_tenant", "co-agency", expect.objectContaining({ httpOnly: true }));
   });
 
+  it("in production writes __Host-gaiada_tenant, Secure, Path=/ (B0: a sibling subdomain cannot toss it)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      expect(await landing()).toBe("/");
+      expect(set).toHaveBeenCalledWith(
+        "__Host-gaiada_tenant", "co-agency", expect.objectContaining({ httpOnly: true, secure: true, path: "/" }),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("honours a same-site path", async () => {
     expect(await landing("/reports/company")).toBe("/reports/company");
   });

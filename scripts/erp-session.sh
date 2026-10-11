@@ -40,10 +40,12 @@ case "$CB" in
 esac
 
 # 4. Let the APP consume the code. This is the step sso-login.sh skips, and the
-#    one that mints `gaiada_session`.
+#    one that mints the session cookie: `__Host-gaiada_session` in production (B0, the
+#    `__Host-` prefix), plain `gaiada_session` on a `next dev` stack. Matched on the jar's
+#    NAME column (field 6) exactly, so either spelling counts and nothing else does.
 "${CURL[@]}" -o /dev/null -w '' -L "$CB" || true
-if grep -q "gaiada_session" "$JAR"; then
-  echo "4. /auth/callback -> gaiada_session    OK"
+if awk -F'\t' '$6 == "__Host-gaiada_session" || $6 == "gaiada_session" { found = 1 } END { exit !found }' "$JAR"; then
+  echo "4. /auth/callback -> session cookie    OK"
 else
   echo "FAIL: callback set no session cookie" >&2; exit 1
 fi

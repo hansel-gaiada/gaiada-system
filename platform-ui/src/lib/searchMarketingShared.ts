@@ -9,6 +9,8 @@
 //
 // Nothing in this file talks to the network — see lib/searchMarketing.ts for the BFF fetchers.
 
+import { sanitizeReturnTo } from "./returnTo";
+
 // ── Tier badges (design §08) ─────────────────────────────────────────────────
 // Every console capability is one of two cost tiers, and the console says which
 // so nobody is surprised by a bill: 🟢 FREE = our own crawlers + AI on our own
@@ -997,6 +999,29 @@ export const GOOGLE_PROVIDER_LABEL: Record<GoogleProvider, string> = {
 };
 export function isGoogleProvider(v: unknown): v is GoogleProvider {
   return typeof v === "string" && (GOOGLE_PROVIDER_VALUES as readonly string[]).includes(v);
+}
+
+/** The flow context `startGoogleAuthorization` stashes in a short-lived cookie for the OAuth callback
+ *  (`app/api/search/google/callback/route.ts`) to recover. */
+export interface GoogleOAuthPending {
+  provider: GoogleProvider;
+  returnPath: string;
+}
+
+/** Parses that cookie's value. A missing/malformed value or an unknown provider is `null`, never
+ *  guessed at. `returnPath` always comes back through the shared UI-01 return-path validator
+ *  (`lib/returnTo.ts`): the callback redirects to it, and a bare `startsWith("/")` check (what this
+ *  used to be) let `//evil.example` and `/\evil.example` through as an open redirect. An unsafe path
+ *  degrades to `/` rather than failing the flow — the connection itself is still valid. */
+export function parseGoogleOAuthPending(raw: string | undefined | null): GoogleOAuthPending | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { provider?: unknown; returnPath?: unknown };
+    if (!isGoogleProvider(parsed.provider) || typeof parsed.returnPath !== "string") return null;
+    return { provider: parsed.provider, returnPath: sanitizeReturnTo(parsed.returnPath) };
+  } catch {
+    return null;
+  }
 }
 
 /** The masked connection shape every Google-connection route returns (`google/oauth.ts`'s own

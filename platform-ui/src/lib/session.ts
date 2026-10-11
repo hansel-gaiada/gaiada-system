@@ -2,8 +2,6 @@
 // Pure crypto only — no next/headers here, so this stays testable in plain vitest/node.
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const COOKIE = "gaiada_session";
-
 function secret(): string {
   const s = process.env.SESSION_SECRET;
   if (!s) throw new Error("SESSION_SECRET not set");
@@ -34,7 +32,8 @@ export function openSession(sealed: string): string | null {
   return payload;
 }
 
-export const SESSION_COOKIE = COOKIE;
+// The cookie's NAME and attributes live in `lib/cookieNames.ts` (`HOST_COOKIES.session`), not here:
+// in production it is `__Host-gaiada_session`, and every read/write/clear goes through those helpers.
 
 // Absolute session lifetime (fault register finding 08, 2026-09-08): the cookie itself never
 // carried an expiry, so a copied cookie value was valid forever and there was no idle/absolute

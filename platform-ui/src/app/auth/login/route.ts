@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { randomBytes, createHash } from "node:crypto";
 import { sanitizeReturnTo } from "@/lib/returnTo";
+import { setHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 
 // OIDC Authorization-Code + PKCE initiation. Redirects the browser to Keycloak's auth endpoint
 // and stashes the PKCE verifier + state in a short-lived httpOnly cookie for the callback.
@@ -37,12 +38,6 @@ export function GET(req: NextRequest) {
 
   const res = NextResponse.redirect(url.toString());
   const returnB64 = Buffer.from(returnTo, "utf8").toString("base64url");
-  res.cookies.set("oidc_pkce", `${verifier}.${state}.${returnB64}`, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 600,
-    secure: process.env.NODE_ENV === "production",
-  });
+  setHostCookie(res.cookies, HOST_COOKIES.pkce, `${verifier}.${state}.${returnB64}`, { maxAge: 600 });
   return res;
 }
