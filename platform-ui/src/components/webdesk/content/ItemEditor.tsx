@@ -14,6 +14,7 @@ import {
 } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
 import { ConflictDialog } from "./ConflictDialog";
+import { placeholderSyntaxes } from "@/lib/markdownCodec";
 import { FieldEditor, type FormCtx } from "./FieldEditor";
 import { PublishBar } from "./PublishBar";
 import "./content.css";
@@ -155,8 +156,9 @@ export function ItemEditor({
   const readOnly = readOnlyWhy !== null;
   const canWrite = !readOnly && stale === null && unconfirmed === null;
 
+  const placeholders = useMemo(() => placeholderSyntaxes(collection.composition.lint?.placeholders), [collection.composition.lint]);
   const ctx: FormCtx = {
-    issues, readOnly, neutralLock: nonDefaultLocale, neutralLocale: tenant.defaultLocale,
+    issues, readOnly, neutralLock: nonDefaultLocale, neutralLocale: tenant.defaultLocale, placeholders,
   };
 
   // ── adopting a freshly read record (initial refresh, Load theirs, restore) ─────────────────────

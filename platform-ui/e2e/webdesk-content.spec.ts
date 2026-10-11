@@ -190,12 +190,13 @@ test("STATE dirty -> saving -> saved vN: the real composition renders and a save
   expect(it.publishedVersion).toBe(2); // saving never changes what is live
 });
 
-test("markdown fields have a source tab and a structural preview", async ({ page }) => {
+test("markdown fields have a visual editor, a source tab and a structural preview", async ({ page }) => {
   await open(page, SERVICE_SEO);
+  await expect(page.getByRole("tab", { name: "Visual" })).toHaveAttribute("aria-selected", "true"); // WSK-45: a text that round-trips opens visually
   await page.getByRole("tab", { name: "Preview" }).click();
   await expect(page.getByTestId("markdown-preview").getByRole("heading", { name: "SEO Agency in Bali" })).toBeVisible();
   await expect(page.getByTestId("markdown-preview").locator("li")).toHaveCount(3);
-  await page.getByRole("tab", { name: "Write" }).click();
+  await page.getByRole("tab", { name: "Source" }).click();
   await expect(page.locator(P("body"))).toBeVisible();
 });
 
@@ -647,6 +648,7 @@ test("create: a new item is filled in on the same form, then created as a draft"
   await page.locator(P("phase")).selectOption("L");
   await page.locator(P("visibility")).selectOption("shown");
   await page.locator(P("plan/action")).selectOption("SHOW");
+  await page.getByRole("tab", { name: "Source" }).click(); // the plain textarea: fill() sets the Markdown itself
   await page.locator(P("body")).fill("# New thing\n");
   await page.getByTestId("save").click();
   await expect(page).toHaveURL(/service\/service\.new-thing\?locale=en$/);

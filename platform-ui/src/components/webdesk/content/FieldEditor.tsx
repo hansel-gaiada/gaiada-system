@@ -4,6 +4,7 @@ import {
   defaultValueFor, fieldLabel, fieldPointer, hasNeutralDescendant, isNeutral, issuesAt, issuesUnder, moveItem,
   type FieldDef, type Issue,
 } from "@/lib/webdeskContentModel";
+import type { PlaceholderSyntax } from "@/lib/markdownCodec";
 import { MarkdownField } from "./MarkdownField";
 import "./content.css";
 
@@ -29,6 +30,8 @@ export interface FormCtx {
   neutralLock: boolean;
   /** Name of the authoritative locale, for the lock hint. */
   neutralLocale: string | null;
+  /** The collection's declared placeholder syntaxes (`lint.placeholders`): the visual markdown editor keeps them verbatim. */
+  placeholders?: PlaceholderSyntax[];
 }
 
 type Lock = null | "readonly" | "neutral";
@@ -137,7 +140,7 @@ function ScalarField({ def, value, onValue, ctx, segments, lock }: {
       {isCheckbox ? null : (
         <label className={`lux-field__label${def.required ? " lux-field__label--req" : ""}`} htmlFor={id}>{label}</label>
       )}
-      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={lock !== null} pointer={pointer} describedBy={describedBy} invalid={errs.length > 0} label={label} />
+      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={lock !== null} pointer={pointer} describedBy={describedBy} invalid={errs.length > 0} label={label} placeholders={ctx.placeholders} />
       {hint && <span id={hintId} className="lux-field__hint">{hint}</span>}
       <Errors id={errId} issues={errs} />
     </div>
@@ -145,9 +148,9 @@ function ScalarField({ def, value, onValue, ctx, segments, lock }: {
 }
 
 /** One value of one primitive. Used by scalar fields AND by the elements of a scalar list. */
-export function ScalarControl({ id, def, value, onValue, locked, pointer, describedBy, invalid, label }: {
+export function ScalarControl({ id, def, value, onValue, locked, pointer, describedBy, invalid, label, placeholders }: {
   id: string; def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string;
-  describedBy?: string; invalid: boolean; label: string;
+  describedBy?: string; invalid: boolean; label: string; placeholders?: PlaceholderSyntax[];
 }) {
   const common = {
     id, "data-pointer": pointer, "aria-invalid": invalid || undefined, "aria-describedby": describedBy,
@@ -157,7 +160,7 @@ export function ScalarControl({ id, def, value, onValue, locked, pointer, descri
 
   switch (def.primitive) {
     case "markdown":
-      return <MarkdownField value={str} onChange={(v) => onValue(v)} readOnly={locked} describedBy={describedBy} invalid={invalid} pointer={pointer} label={label} />;
+      return <MarkdownField value={str} onChange={(v) => onValue(v)} readOnly={locked} describedBy={describedBy} invalid={invalid} pointer={pointer} label={label} placeholders={placeholders} />;
 
     case "text": {
       const widget = def.ui?.widget;
@@ -458,7 +461,7 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
                     inheritedLock={lock ?? inheritedLock}
                   />
                 ) : (
-                  <ScalarItem def={def} value={row} onValue={(v) => { const n = items.slice(); n[i] = v; onValue(n); }} locked={lock !== null} pointer={fieldPointer(...segments, i)} label={`${label} ${i + 1}`} issues={ctx.issues} />
+                  <ScalarItem def={def} value={row} onValue={(v) => { const n = items.slice(); n[i] = v; onValue(n); }} locked={lock !== null} pointer={fieldPointer(...segments, i)} label={`${label} ${i + 1}`} issues={ctx.issues} placeholders={ctx.placeholders} />
                 )}
               </div>
             </li>
@@ -474,15 +477,15 @@ function ListField({ def, value, onValue, ctx, segments, lock, inheritedLock }: 
   );
 }
 
-function ScalarItem({ def, value, onValue, locked, pointer, label, issues }: {
-  def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string; label: string; issues: Issue[];
+function ScalarItem({ def, value, onValue, locked, pointer, label, issues, placeholders }: {
+  def: FieldDef; value: unknown; onValue: (v: unknown) => void; locked: boolean; pointer: string; label: string; issues: Issue[]; placeholders?: PlaceholderSyntax[];
 }): ReactNode {
   const id = useId();
   const errs = issuesAt(issues, pointer);
   const errId = `${id}-err`;
   return (
     <div className="wc-field">
-      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={locked} pointer={pointer} describedBy={errs.length ? errId : undefined} invalid={errs.length > 0} label={label} />
+      <ScalarControl id={id} def={def} value={value} onValue={onValue} locked={locked} pointer={pointer} describedBy={errs.length ? errId : undefined} invalid={errs.length > 0} label={label} placeholders={placeholders} />
       <Errors id={errId} issues={errs} />
     </div>
   );
