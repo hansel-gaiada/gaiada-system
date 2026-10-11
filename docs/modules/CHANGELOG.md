@@ -11,6 +11,24 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.61.0` - automation never publishes WebDesk content; a requester reads their own approval; a repeated key request says so (2026-10-11) - PROTOTYPED
+
+- **WebDesk M3 T7 (a):** Cerbos DENIES `publish`/`schedule` on `webdesk_content_item` to any principal with `users.kind` automation or bot (carried as `principal.attr.kind`). `request_publish` stays allowed, so the importer still files its batch for a human to approve.
+- **WebDesk M3 T7 (b):** a requester may read their OWN approval (detail, list, mail thread): one `read`-only ALLOW on `automation_approval` keyed on `creatorId == principal.id`, in-tenant, non-low, never a client. The list becomes two-tier: the inbox as before for elevated readers, only their own rows (or `[]`) for everyone else. `decide`/`retry` are unchanged. Cerbos needs a restart at deploy.
+- **key.mint filing:** a duplicate request answers `202 {approvalId, alreadyPending: true}`; a new one is unchanged.
+
+### platform-ui `0.82.0` - request a WebDesk API key from the Website workspace; an approved key is shown once; honest editor states (2026-10-11) - PROTOTYPED
+
+- **Request an API key** on the site overview (promote-capable roles only): files a `key.mint` approval and links to it.
+- **The approval shows the key ONCE** (`KeyMintDecide`): component state only, never stored, logged or re-rendered. Fixes a defect where approving a key mint in the UI minted a key and discarded it.
+- **Editor follow-ups:** an unavailable lint reads "couldn't check" (not "no unresolved tokens"); `502 webdesk_ambiguous` gets "couldn't confirm the save, reload"; a rebuild with no staging target says the staging rebuild is not set up.
+- **Interim mitigation** for the Next 15.5 action-queue race (navigation dropped after a server action): create, twin create and restore navigate via `redirect()` inside the action (measured 12/36 → 5/36 failures). The fix is Next 16.3 (vercel/next.js#95391), an owner decision.
+
+### infra `0.9.2` - re-tagging re-points the tag (crane) instead of copying; the GHCR prune is off (2026-10-11) - PROTOTYPED
+
+- **WSK-69 retag** uses `crane tag` (official image, pinned by digest): the tag is pointed at the existing manifest bytes, so the digest and its signature are unchanged by construction. `imagetools create` walked the image's referrers and failed 349's retag on an attestation the prune had deleted.
+- **The GHCR prune is disabled** (on main since `5cda7ea5`): `delete-only-untagged-versions` deleted an untagged attestation that a still-tagged image's referrers index lists. Re-enable only as a reference-aware prune.
+
 ### platform-ui `0.81.0` - staff can click the top bar's menus again; the portal's account menu is styled and drops down (2026-10-11) - PROTOTYPED
 
 Two live defects, both found by the new PV2-05/PV2-06 identity e2e.
