@@ -55,3 +55,4 @@ WSK-48b, migrations 0010/0011), 2026-10-11.
 | (WSK-56, 2026-10-10) | 0001–0009 (DB rebuilt) | first real deploy; RustFS; Payload gateway removed |
 | 344 | — | first signed image; editorial JWKS mount |
 | 348 | 0010, 0011 | M3 wave 2 + WSK-48b; payload service removed |
+| 351 | 0012, 0013, 0014 | M3 waves 3 + 4: scheduler ON (4 job schedulers; first tick 0 transitions), preview tokens, media library; storage-bootstrap re-run (changes=1, then 0); `WEBDESK_UPLOAD_CORS_ORIGINS=https://erp.gaiada.online` added |
