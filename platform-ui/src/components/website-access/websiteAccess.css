@@ -103,7 +103,7 @@
   transition: transform var(--dur-quick, 180ms) var(--erp-ease, ease);
 }
 .wa-switch input:checked + .wa-switch__track {
-  background: var(--accent-fill);
+  background: var(--accent);
 }
 .wa-switch input:checked + .wa-switch__track::after {
   transform: translateX(14px);
