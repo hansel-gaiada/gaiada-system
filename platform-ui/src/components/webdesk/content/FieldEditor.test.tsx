@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { useState } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import service from "../../../../e2e/webdesk-stub/compositions/service.json";
 import navigation from "../../../../e2e/webdesk-stub/compositions/navigation.json";
 import tokenRegistry from "../../../../e2e/webdesk-stub/compositions/token-registry.json";
@@ -42,7 +42,9 @@ describe("FieldEditor renders the real compositions", () => {
     expect(ptr("publish_ready").checked).toBe(true);
     expect(ptr("plan/why").value).toBe("w");
     expect(ptr("schema/1").value).toBe("FAQPage");
-    expect(ptr("body").value).toBe("# Hi");
+    // markdown opens in the visual editor when it round-trips (WSK-45): a labelled textbox, not a textarea
+    expect(ptr("body").textContent).toBe("Hi");
+    expect(ptr("body").getAttribute("role")).toBe("textbox");
     expect(ptr("schema_notes").className).toContain("wc-code"); // ui.widget = code
   });
 
@@ -194,5 +196,19 @@ describe("inline errors by JSON pointer (§2.2 ItemIssue.path)", () => {
     expect(document.querySelector('fieldset[data-pointer="/blocks/0/props/plan"] legend')?.textContent).toContain("1 problem");
     // an untouched sibling carries no error
     expect(ptr("h1").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("passes the collection's placeholder syntaxes to the visual markdown editor, and a locked form locks it", async () => {
+    let last: Record<string, unknown> = {};
+    const { unmount } = render(<Harness composition={service} initial={{ body: "Alpha {{tok_a}} beta." }} ctx={{ placeholders: [{ open: "{{", close: "}}" }] }} onValue={(v) => { last = v; }} />);
+    await waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    const editor = (document.querySelector(".ProseMirror") as HTMLElement & { editor: { chain: () => { focus: () => { insertContentAt: (p: number, c: unknown) => { run: () => void } } } } }).editor;
+    // typed text Markdown would act on (x*y* is emphasis): that block is written with escapes, the placeholder stays verbatim
+    act(() => { editor.chain().focus().insertContentAt(1, "x*y* ").run(); });
+    expect(last.body).toBe("x\\*y\\* Alpha {{tok_a}} beta.");
+    unmount();
+    render(<Harness composition={service} initial={{ body: "Alpha." }} ctx={{ readOnly: true }} />);
+    await waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    expect((document.querySelector(".ProseMirror") as HTMLElement).getAttribute("contenteditable")).toBe("false");
   });
 });
