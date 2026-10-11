@@ -9,6 +9,9 @@
 import type { PortalOverview } from "./portal";
 
 export interface PortalSubTab { href: string; label: string }
+
+/** The Website tab's path, so the nav, the tab filter and the guards name it once. */
+export const PORTAL_WEBSITE_HREF = "/portal/website";
 export interface PortalArea { key: string; label: string; tabs: PortalSubTab[] }
 
 export const PORTAL_AREAS: PortalArea[] = [
@@ -25,7 +28,16 @@ export const PORTAL_AREAS: PortalArea[] = [
       { href: "/portal/timeline", label: "Timeline" },
     ],
   },
-  { key: "business", label: "Business", tabs: [{ href: "/portal/company", label: "Business" }] },
+  {
+    key: "business",
+    label: "Business",
+    tabs: [
+      { href: "/portal/company", label: "Business" },
+      // WSK-49d: shown only to a viewer holding a `client_website_editor` grant for the active client
+      // (`PortalTabs` filters it; `lib/portalWebsiteAccess.ts`). The pages guard themselves as well.
+      { href: PORTAL_WEBSITE_HREF, label: "Website" },
+    ],
+  },
   {
     key: "billing",
     label: "Contracts & billing",

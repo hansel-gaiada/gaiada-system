@@ -52,6 +52,12 @@ describe("activePortalNav", () => {
     ["/portal/timeline", "projects", "/portal/timeline"],
     ["/portal/company", "business", "/portal/company"],
     ["/portal/company/mk/web", "business", "/portal/company"],
+    // WSK-49d: the Website area lives in Business, at every depth of its routes.
+    ["/portal/website", "business", "/portal/website"],
+    ["/portal/website/gaiada/site-1", "business", "/portal/website"],
+    ["/portal/website/gaiada/site-1/service", "business", "/portal/website"],
+    ["/portal/website/gaiada/site-1/service/service.seo/history", "business", "/portal/website"],
+    ["/portal/website/gaiada/site-1/~media", "business", "/portal/website"],
     ["/portal/contracts", "billing", "/portal/contracts"],
     ["/portal/contracts/k1", "billing", "/portal/contracts"],
     ["/portal/invoices", "billing", "/portal/invoices"],
@@ -79,11 +85,13 @@ describe("activePortalNav", () => {
     expect(activePortalNav("/portal/invoices/?a=1").tabHref).toBe("/portal/invoices");
   });
 
-  it("keeps the six existing client-facing paths and the area layout", () => {
+  it("keeps the existing client-facing paths and the area layout", () => {
     expect(PORTAL_AREAS.map((a) => a.key)).toEqual(["overview", "projects", "business", "billing", "people"]);
     const all = PORTAL_AREAS.flatMap((a) => a.tabs.map((t) => t.href));
-    expect(all).toHaveLength(11);
-    expect(new Set(all).size).toBe(11);
+    expect(all).toHaveLength(12);
+    expect(new Set(all).size).toBe(12);
+    // WSK-49d added exactly one: Website, second tab of Business (offered only to a website editor, see PortalTabs).
+    expect(PORTAL_AREAS.find((a) => a.key === "business")!.tabs.map((t) => t.href)).toEqual(["/portal/company", "/portal/website"]);
   });
 });
 
