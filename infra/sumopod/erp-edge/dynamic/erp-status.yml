@@ -1,0 +1,15 @@
+# erp-edge route for the WebDesk public status page (WSK-D64; mechanism WSK-D71).
+# The page is the erp-status compose project (webdesk/ops/status-page/), published ONLY on 172.17.0.1:18480.
+http:
+  routers:
+    erp-status:
+      rule: 'Host(`status.erp.gaiada.com`)'
+      entryPoints: [websecure]
+      service: erp-status
+      tls:
+        certResolver: erp-le
+  services:
+    erp-status:
+      loadBalancer:
+        servers:
+          - url: 'http://172.17.0.1:18480'

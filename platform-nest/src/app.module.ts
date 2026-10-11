@@ -125,6 +125,7 @@ import { SearchController } from "./modules/search/search.controller";
 import { SearchGoogleOauthCallbackController } from "./modules/search/search-google-oauth.controller";
 import { SearchGoogleAdsController } from "./modules/search/search-google-ads.controller";
 import { SearchReportsController } from "./modules/search/search-reports.controller";
+import { SearchAnalyticsController } from "./modules/search/search-analytics.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
 // PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
@@ -217,6 +218,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // wave; SM-10 already added its own reports GET/POST section there). Shares SearchController's
     // exact route prefix; no individual route path collides (search-reports.controller.ts's own header).
     SearchReportsController,
+    // M5-A4: Umami website-analytics reads for a property (own controller class; same prefix).
+    SearchAnalyticsController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
     ZoneBEventsController,

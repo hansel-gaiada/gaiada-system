@@ -66,6 +66,11 @@ import { TenantReadsController } from "./tenants/tenant-reads.controller";
 // M5-L1/L2 — forms.submission.get.
 import { FormsReadsService } from "./forms/forms-reads.service";
 import { FormsReadsController } from "./forms/forms-reads.controller";
+// M5-W2b — the writers' room review commands and reads.
+import { EditorialCommandsService } from "./editorial/editorial-commands.service";
+import { EditorialCommandsController } from "./editorial/editorial-commands.controller";
+import { EditorialReadsService } from "./editorial/editorial-reads.service";
+import { EditorialReadsController } from "./editorial/editorial-reads.controller";
 
 /**
  * ============================================================================================
@@ -129,6 +134,8 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     ContentReadsController,
     TenantReadsController,
     FormsReadsController,
+    EditorialCommandsController,
+    EditorialReadsController,
   ],
   providers: [
     CommandAuditService,
@@ -148,6 +155,8 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     ContentReadsService,
     TenantReadsService,
     FormsReadsService,
+    EditorialCommandsService,
+    EditorialReadsService,
     { provide: CONTROL_CHANNEL_AUTHENTICATOR, useClass: controlChannelAuthenticatorClass },
     { provide: POLICY_DECISION_POINT, useClass: policyDecisionPointClass },
     { provide: RELEASE_TRANSPORT, useClass: NotYetAvailableReleaseTransport },

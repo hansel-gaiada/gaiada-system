@@ -4,7 +4,7 @@ import navigation from "../../e2e/webdesk-stub/compositions/navigation.json";
 import tokenRegistry from "../../e2e/webdesk-stub/compositions/token-registry.json";
 import company from "../../e2e/webdesk-stub/compositions/company.json";
 import {
-  authorLabel, defaultFields, deepEqual, describeReasonToken, diffContent, fieldLabel, fieldPointer, groupCollections,
+  authorLabel, defaultFields, deepEqual, describeReasonToken, reviewBlocks, diffContent, fieldLabel, fieldPointer, groupCollections,
   hasNeutralDescendant, hasPendingChanges, humanize, isLive, isNeutral, isOutcomeUnknown, unconfirmedCopy, issuesAt, issuesUnder, moveItem, overlayNeutrals,
   parseInline, parseMarkdown, parseWebdeskPublishArgs, phaseOf, pointerSegment, publishStateLabel, splitVersionContent,
   toWire, writeNeutralsThrough,
@@ -221,6 +221,11 @@ describe("approval phase (§10: pending · rejected/failed · published)", () =>
     expect(describeReasonToken("failed: version-conflict")).toMatch(/newer version/);
     expect(describeReasonToken("something-new")).toBe("Reason: something-new");
     expect(describeReasonToken(null)).toBe("No reason was recorded.");
+    // M5-W2c: the early refusal's slug, and the executor's record of WebDesk's refusal (`webdesk_refused: <status> <slug>`)
+    expect(describeReasonToken("review-not-approved")).toMatch(/needs editorial review/);
+    expect(describeReasonToken("webdesk_refused: 409 review-not-approved")).toMatch(/needs editorial review/);
+    expect(describeReasonToken("webdesk_refused: 409 version-conflict")).toMatch(/newer version/);
+    expect(describeReasonToken("webdesk_refused: 409 never-heard-of-it")).toBe("Reason: webdesk_refused: 409 never-heard-of-it");
   });
 });
 
@@ -297,5 +302,16 @@ describe("isOutcomeUnknown (502 webdesk_ambiguous) / unconfirmedCopy", () => {
   });
   it("the copy never says saved or failed", () => {
     expect(unconfirmedCopy("the save")).toBe("We couldn't confirm the save. Reload to see what happened.");
+  });
+});
+
+describe("reviewBlocks (M5-W2c: would WebDesk's publish gate refuse this version?)", () => {
+  it("only the exact approved version passes a review-required collection; review off never blocks; no data is 'cannot tell'", () => {
+    expect(reviewBlocks({ reviewRequired: true, state: "approved", approvedVersion: 3 }, 3)).toBe(false);
+    expect(reviewBlocks({ reviewRequired: true, state: "draft", approvedVersion: 3 }, 3)).toBe(false); // edited after approval: v3 still publishable
+    expect(reviewBlocks({ reviewRequired: true, state: "draft", approvedVersion: 3 }, 4)).toBe(true);
+    expect(reviewBlocks({ reviewRequired: true, state: "approved", approvedVersion: null }, 1)).toBe(true);
+    expect(reviewBlocks({ reviewRequired: false, state: "draft", approvedVersion: null }, 1)).toBe(false);
+    expect(reviewBlocks(undefined, 1)).toBeNull();
   });
 });

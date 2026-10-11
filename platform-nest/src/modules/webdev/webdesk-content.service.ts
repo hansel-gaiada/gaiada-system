@@ -609,6 +609,10 @@ interface ItemAttrs {
   contentHash: string | null;
   headVersion: number | null;
   publishedVersion: number | null;
+  /** M5-W2c: `item.get`'s `editorial` member, narrowed to what the publish request's early refusal reads.
+   *  null when WebDesk sent none (a WebDesk older than M5-W2b) or an unusable one: no early refusal is
+   *  possible then, and WebDesk's own gate still refuses at execution. */
+  review: { required: boolean; approvedVersion: number | null } | null;
 }
 
 /** `item.get`'s answer, narrowed to what reconciliation reads. */
@@ -788,7 +792,13 @@ export class WebdeskContentService {
       throw new BadGatewayException({ message: "webdesk_error", reason: "item_shape" });
     }
     const v = isPlainObject((body as Record<string, unknown>).version) ? ((body as Record<string, unknown>).version as Record<string, unknown>) : null;
+    const ed = isPlainObject((body as Record<string, unknown>).editorial) ? ((body as Record<string, unknown>).editorial as Record<string, unknown>) : null;
+    const approved = ed?.approvedVersion;
     return {
+      review:
+        ed && typeof ed.reviewRequired === "boolean" && (approved === null || (typeof approved === "number" && Number.isInteger(approved)))
+          ? { required: ed.reviewRequired, approvedVersion: approved as number | null }
+          : null,
       collectionKey: item.collectionKey,
       locale: item.locale,
       deletedAt: typeof item.deletedAt === "string" ? item.deletedAt : null,
@@ -1110,6 +1120,20 @@ export class WebdeskContentService {
     for (const p of pairs.values()) {
       await authorize(gate.principal, { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", collectionKey: p.collectionKey, locale: p.locale, ...gate.clientAttr() }, "request_publish");
     }
+    // M5-W2c — the EARLY refusal (writers' room design 4.5): on a review-required collection only the exact approved
+    // version can go live, and WebDesk refuses anything else inside the publish transaction. Saying so here, with
+    // WebDesk's own problem, spares the publisher an approval that could only fail. AFTER authorization (a caller
+    // who may not request a publish learns nothing about review state). A takedown-only schedule puts nothing live,
+    // so it is not gated. Advisory only: WebDesk's gate is the authority (the review state can still move between
+    // this read and the execution, and the M1 importer files approvals without passing here).
+    if (publishAt !== null || !scheduled) {
+      const refused = reads.flatMap((attrs, i) =>
+        attrs.review?.required === true && attrs.review.approvedVersion !== items[i].version
+          ? [{ itemIndex: i, itemId: items[i].itemId, version: items[i].version, approvedVersion: attrs.review.approvedVersion }]
+          : [],
+      );
+      if (refused.length > 0) throw reviewNotApproved(refused);
+    }
 
     const wireItems = items.map((it, i) => ({ itemId: it.itemId, version: it.version, ...(reads[i].contentHash ? { contentHash: reads[i].contentHash as string } : {}) }));
     const n = items.length;
@@ -1236,6 +1260,24 @@ export class WebdeskContentService {
     });
     return { status: 200, body: { approvalId, status: "cancelled" } };
   }
+}
+
+/** WebDesk's 409 `review-not-approved` (M5-W2c), restated by the BFF for the early refusal: the SAME problem type and
+ *  members WebDesk answers with (`items[{itemIndex,itemId,version,approvedVersion}]`, `total`), so the editor, the MCP
+ *  tool and a failed approval row all name one slug. */
+function reviewNotApproved(refused: Array<{ itemIndex: number; itemId: string; version: number; approvedVersion: number | null }>): WebdeskProblem {
+  const n = refused.length;
+  return new WebdeskProblem(409, {
+    type: "https://webdesk.gaiada.online/errors/review-not-approved",
+    title: "Review not approved",
+    status: 409,
+    detail:
+      `Editorial review is required for ${n === 1 ? "this item's collection" : "these items' collections"}, and ` +
+      `${n === 1 ? "the version asked for is not the approved version" : `${n} of the versions asked for are not the approved versions`}. ` +
+      "Only the exact approved version can be published. No approval was filed.",
+    items: refused.slice(0, 50),
+    total: n,
+  });
 }
 
 // ── small parsers ──────────────────────────────────────────────────────────────────────────────────

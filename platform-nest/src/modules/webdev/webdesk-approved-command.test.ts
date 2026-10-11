@@ -100,7 +100,7 @@ interface Seen {
   status: number | "dropped";
 }
 interface ItemState { publishedVersion: number | null; publishAt: string | null; unpublishAt: string | null }
-type Mode = "ok" | "refuse-409" | "commit-then-drop" | "drop-no-commit";
+type Mode = "ok" | "refuse-409" | "refuse-409-review" | "commit-then-drop" | "drop-no-commit";
 
 interface ZoneB {
   server: https.Server;
@@ -196,6 +196,8 @@ async function startZoneB(): Promise<ZoneB> {
           }
           z.usedApprovals.add(ws4.approvalId as string);
           if (z.mode === "refuse-409") return refuse(409, "version-conflict");
+          // M5-W2c: WebDesk's publish gate refuses inside its transaction (its WS4 claim rolls back with it).
+          if (z.mode === "refuse-409-review") return refuse(409, "review-not-approved");
           if (z.mode === "drop-no-commit") {
             rec.status = "dropped";
             req.socket.destroy();
@@ -618,6 +620,27 @@ describe.skipIf(!live)("WSK-66 — WebDesk HIGH commands executed in-band at dec
       expect(retry.statusCode).toBe(200);
       expect((await row(id)).execution_error).toMatch(/not_executable: origin 'webdesk' is not auto-executable/);
       expect(posts()).toHaveLength(1);
+    });
+
+    it("M5-W2c: WebDesk's review gate refuses (409 review-not-approved) → row failed `webdesk_refused: 409 review-not-approved`, one POST, no reconcile read, never resent", async () => {
+      for (const command of ["content.publish", "content.schedule"] as const) {
+        zoneB.mode = "refuse-409-review";
+        const before = zoneB.seen.length;
+        const args = command === "content.publish"
+          ? { items: [{ itemId: item(), version: 3 }] }
+          : { items: [{ itemId: item(), version: 3 }], publishAt: "2099-11-01T00:00:00.000Z" };
+        const id = await file(editor, command, args);
+        const r = await decide(id, adminB);
+        expect(r.statusCode).toBe(200);
+        expect(r.json()).toMatchObject({ status: "approved", webdesk: { executionStatus: "failed", error: "webdesk_refused: 409 review-not-approved" } });
+        expect(await row(id)).toMatchObject({ execution_status: "failed", execution_error: "webdesk_refused: 409 review-not-approved" });
+        const sent = zoneB.seen.slice(before);
+        expect(sent.filter((s) => s.method === "POST")).toHaveLength(1);
+        expect(sent.filter((s) => s.method === "GET")).toHaveLength(0); // a definitive refusal is not ambiguous: nothing is read back
+        zoneB.mode = "ok";
+        expect((await decide(id, adminB)).statusCode).toBe(404);
+        expect(zoneB.seen.slice(before).filter((s) => s.method === "POST")).toHaveLength(1);
+      }
     });
 
     it("transport failure before Zone B saw anything → `webdesk_unreachable`, zero requests reached Zone B", async () => {

@@ -31,8 +31,8 @@ export class ClientsCentreController {
   async list(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "client", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
-      const clients = await c.query<{ id: string; name: string; status: string | null }>(
-        `SELECT id, name, status FROM clients WHERE deleted_at IS NULL ORDER BY created_at DESC`,
+      const clients = await c.query<{ id: string; name: string; status: string | null; is_internal: boolean }>(
+        `SELECT id, name, status, is_internal FROM clients WHERE deleted_at IS NULL ORDER BY created_at DESC`,
       );
       const profiles = await c.query<{
         client_id: string; business_type: string; profile: Record<string, string>;
@@ -49,6 +49,8 @@ export class ClientsCentreController {
           clientId: cl.id,
           clientName: cl.name,
           clientStatus: cl.status,
+          // M5-G0b: the internal sentinel is SHOWN to staff (flagged); the portal hides it.
+          isInternal: cl.is_internal,
           businessType: state.businessType,
           city: state.profile.city ?? null,
           fieldsFilled: fieldsFilledSummary(state),

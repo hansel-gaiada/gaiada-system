@@ -31,6 +31,22 @@ export interface RoleGrant {
    *  column) and never from a request. The derived role compares it with `resource.attr.tenantId`, so a
    *  client scope is a (tenant, client) pair exactly as the ruling says. Absent on every other grant. */
   scopeTenantId?: string;
+  /** M5-W1a (docs/plans/2026-10-11-m5-writers-room-design.md §2.2). Only set on a writers' room grant
+   *  (`webdesk_writer` / `webdesk_translator` / `webdesk_seo_reviewer` / `webdesk_editor`, always at
+   *  scopeType `company`): the grant's scope rows, which the derived roles in derived_roles.yaml compare with
+   *  resource.attr.siteId / collectionKey / locale. Resolved by assemblePrincipal() from the grant's own scope
+   *  rows (W1b) -- never from a request. Absent on every other grant; a writers' room grant WITHOUT it
+   *  matches nothing in Cerbos (has() guard), so an unresolved scope fails closed. */
+  editorialScopes?: EditorialScope[];
+}
+
+/** M5-W1a -- one scope row of a writers' room grant. "All" is an explicit boolean, never an empty list. */
+export interface EditorialScope {
+  siteId: string;
+  allCollections: boolean;
+  collections: string[];
+  allLocales: boolean;
+  locales: string[];
 }
 
 /** IAM-03a: a single resolved (permission key, scope) a principal holds — the role→permission

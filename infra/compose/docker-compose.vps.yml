@@ -796,6 +796,15 @@ services:
       # staging cutover fails at startup rather than at the moment a client's approved ad change
       # silently does nothing after its one-shot approval has already been spent.
       SEARCH_ADS_WRITE_MODE: ${SEARCH_ADS_WRITE_MODE:-simulate}
+      # M5-A4 / WSK-D66 — Umami (web analytics) READ path: the GET-only read gate on sumopod over WireGuard
+      # (e.g. http://10.88.0.2:18743) and a team view-only API key. Empty = the Analytics tab says "not
+      # configured" (never an empty dashboard). UMAMI_TIMEOUT_MS is optional; empty or 0 falls back to 10000.
+      UMAMI_BASE_URL: ${UMAMI_BASE_URL:-}
+      UMAMI_API_KEY: ${UMAMI_API_KEY:-}
+      UMAMI_TIMEOUT_MS: ${UMAMI_TIMEOUT_MS:-}
+      # M5-L4 — a gaiada.com form submission becomes an agency lead ONLY when this is exactly "1". Leave it
+      # empty until counsel has reviewed the website-visitor addendum (WSK-D67).
+      AGENCY_WEB_LEADS_ENABLED: ${AGENCY_WEB_LEADS_ENABLED:-}
       N8N_BRIDGE_ENTITY_TYPES: ${N8N_BRIDGE_ENTITY_TYPES:-}
       # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
       # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.

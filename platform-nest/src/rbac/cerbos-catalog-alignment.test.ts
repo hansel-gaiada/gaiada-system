@@ -133,7 +133,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // WSK-49f (2026-10-11, WSK-D60): +2 pairs, NO new kind (client_contact.manage_website_editor and
     // client_contact.manage_admin on the EXISTING `client_contact` kind).
     // Merged: 416 base + 4 (webdesk_media_asset) + 2 (client_contact) = 422 pairs; 101 + 1 + 0 = 102 kinds.
-    expect(catalog.length).toBe(422);
+    // M5-W1a (2026-10-11, the writers' room): +7 pairs, NO new kind (webdesk_content_item: submit/comment/
+    // request_changes/seo_signoff/approve/assign; webdesk_collection: manage_editorial). 422/102 -> 429/102.
+    expect(catalog.length).toBe(429);
     expect(catalogKindSet.size).toBe(102);
   });
 

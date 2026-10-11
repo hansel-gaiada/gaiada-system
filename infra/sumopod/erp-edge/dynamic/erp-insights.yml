@@ -1,17 +1,17 @@
-# Traefik v3 dynamic file for the Umami collector. TEMPLATE: using mimi's Traefik (`mimi-tls-le`) is PENDING
-# the owner's OK (see "if not approved" in infra/runbooks/umami-sumopod.md).
+# erp-edge route for the Umami collector (WSK-D66; mechanism WSK-D71). Lives in erp-edge's ./dynamic (file
+# provider, watch=true, so no restart). All names carry the `erp-insights-` prefix because file-provider names
+# are global across the directory (erp-status.yml is the status page's, authored by another session).
 #
-# Install (after the OK): copy to /home/ubuntu/mimi/infrastructure/tls/dynamic/erp-insights.yml. The file
-# provider has watch=true, so no restart. All names carry the `erp-insights-` prefix because file-provider
-# names are global across that directory.
-#
-# The two paths below MUST equal TRACKER_SCRIPT_NAME and COLLECT_API_ENDPOINT in .env.
+# The two paths below MUST equal TRACKER_SCRIPT_NAME and COLLECT_API_ENDPOINT in infra/sumopod/umami/.env.
 #
 # SECURITY (GHSA-3xx8-742v-m4mq: the collector's cache token is replayable as a share token against the
-# read API): the router matches EXACTLY two paths. There is no catch-all router for this host, so every other
-# path (the UI, /api/*, /script.js, /api/send) gets Traefik's own 404. The nginx edge repeats the same
-# allow-list, so a mistake here still does not expose the UI.
+# read API): the router matches the host AND EXACTLY two paths. There is no catch-all router for this host, so
+# every other path (the UI, /api/*, /script.js, /api/send) gets Traefik's own 404. The nginx edge repeats the
+# same allow-list, so a mistake here still does not expose the UI.
 # Do NOT add Cloudflare/CDN country headers in front of this router: Umami ignores them (SKIP_LOCATION_HEADERS).
+#
+# Client address: this Traefik learns it from mimi's PROXY protocol header (static config trusts that header only
+# from mimi's source address) and writes it to X-Forwarded-For and X-Real-Ip, discarding anything the visitor sent.
 http:
   routers:
     erp-insights-collector:
@@ -28,11 +28,11 @@ http:
         - erp-insights-body
         - erp-insights-strip
       tls:
-        certResolver: letsencrypt
+        certResolver: erp-le
 
   middlewares:
-    # CORS for a tracker called from the site and the staging hosts. Umami itself answers
-    # `Access-Control-Allow-Origin: *`; the strip middleware removes that so only ONE value reaches the browser.
+    # CORS for a tracker called from the site. Umami itself answers `Access-Control-Allow-Origin: *`; the strip
+    # middleware removes that so only ONE value reaches the browser.
     erp-insights-cors:
       headers:
         accessControlAllowMethods:
@@ -71,7 +71,8 @@ http:
           Cross-Origin-Resource-Policy: "cross-origin"
           X-Robots-Tag: "noindex, nofollow"
 
-    # Per visitor address (Traefik sees the real client; if a CDN is ever put in front, set ipStrategy.depth).
+    # Per visitor address: the default IP strategy uses the connection's remote address, which on this entrypoint
+    # IS the PROXY-protocol client (mimi's hop is trusted only from the one configured source).
     erp-insights-ratelimit:
       rateLimit:
         average: 20
@@ -87,5 +88,5 @@ http:
       loadBalancer:
         passHostHeader: true
         servers:
-          # docker0's address on sumopod; reaches the published edge port through the host.
+          # docker0's address on sumopod; erp-edge reaches the published edge port through the host.
           - url: "http://172.17.0.1:18742"

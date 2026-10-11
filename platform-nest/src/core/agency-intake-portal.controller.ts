@@ -131,6 +131,18 @@ export class AgencyIntakePortalController {
       // on — the FIRST statement inside the transaction, same discipline lockPipelineRun documents.
       await c.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [AGENCY_INTAKE_LOCK_NS, intake.tokenId]);
 
+      // M5-P1: lock the LEAD row next, before the token row is read or touched. Decline locks the lead
+      // row and then revokes the lead's unused tokens; taking the two in the same order here means a
+      // submit and a decline racing on one lead serialize instead of deadlocking, and whichever commits
+      // second sees the first's result: a decline that won has already revoked this token (403 below),
+      // and a decline that lost finds the token used and leaves it alone. The status read here, under
+      // the lock, is what decides whether this submission may move the lead.
+      const leadLock = await c.query<{ status: string; owner_id: string | null }>(
+        `SELECT status, owner_id FROM agency_leads WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [intake.leadId, tenantId],
+      );
+      const leadStatus = leadLock.rows[0]?.status ?? null;
+
       // Re-read UNDER THE LOCK. The guard's own read happened before this transaction even began and
       // is a stale snapshot the moment two requests race — this query, not the lock above it, is what
       // makes the decision correct.
@@ -156,7 +168,9 @@ export class AgencyIntakePortalController {
           `SELECT id FROM agency_discovery_submissions WHERE token_id = $1`,
           [intake.tokenId],
         );
-        if (existing.rows[0]) return { submissionId: existing.rows[0].id, alreadySubmitted: true, ownerId: null as string | null };
+        if (existing.rows[0]) {
+          return { submissionId: existing.rows[0].id, alreadySubmitted: true, ownerId: null as string | null, lateAfter: null as string | null };
+        }
         // used_at set with no matching submission row is a state this schema should never produce
         // (the same transaction stamps both) — refuse rather than silently mint a second submission
         // for a token that has already been spent by SOMETHING.
@@ -188,19 +202,30 @@ export class AgencyIntakePortalController {
         ],
       );
       await c.query(`UPDATE agency_intake_tokens SET used_at = now() WHERE id = $1`, [intake.tokenId]);
-      // `status <> 'converted'` is a small defensive guard beyond §6.1's literal instruction: a
-      // converted lead is terminal, and a stray re-used/re-minted token must never flip a real client
-      // relationship back to 'submitted' out from under AD-6's conversion record.
+      // The guard is `status NOT IN ('converted','declined')` (M5-P1, lead-pipeline design §2). Both are
+      // terminal (AD-1 §4.1). A converted lead must never flip back to 'submitted' out from under AD-6's
+      // conversion record, and a declined one must not re-open: under lead_lost_iff_declined that flip
+      // (declined/lost -> submitted/lost) would also fail the CHECK and turn the prospect's submit into
+      // a 500. A late submission is still STORED above (evidence), the prospect still gets 200, the lead
+      // is left exactly as it is, and for a declined lead its owner is told (below). There is no reopen
+      // in v1: a returning prospect becomes a new lead. This never touches `stage`: no prospect action
+      // moves a stage (design D3).
       const leadUpd = await c.query<{ owner_id: string | null }>(
         `UPDATE agency_leads SET status = 'submitted', updated_at = now()
-          WHERE id = $1 AND tenant_id = $2 AND status <> 'converted'
+          WHERE id = $1 AND tenant_id = $2 AND status NOT IN ('converted', 'declined')
           RETURNING owner_id`,
         [intake.leadId, tenantId],
       );
       await emitEvent(c, tenantId, "agency_discovery_submission", submissionId, "agency.lead.submitted", {
         leadId: intake.leadId, tokenId: intake.tokenId, schemaVersion, ...counts, redactions,
       });
-      return { submissionId, alreadySubmitted: false, ownerId: leadUpd.rows[0]?.owner_id ?? null };
+      const lateAfter = leadStatus === "converted" || leadStatus === "declined" ? leadStatus : null;
+      return {
+        submissionId,
+        alreadySubmitted: false,
+        ownerId: lateAfter ? leadLock.rows[0]?.owner_id ?? null : leadUpd.rows[0]?.owner_id ?? null,
+        lateAfter,
+      };
     });
 
     if (!result.alreadySubmitted) {
@@ -209,8 +234,19 @@ export class AgencyIntakePortalController {
       // is the dependency named, not solved, here.
       await writeActivity(tenantId, null, "submitted", "agency_discovery_submission", result.submissionId, {
         leadId: intake.leadId, tokenId: intake.tokenId, actorKind: "prospect",
+        ...(result.lateAfter ? { leadUnchanged: result.lateAfter } : {}),
       });
-      if (result.ownerId) {
+      if (result.lateAfter === "declined") {
+        // The late-submission notice (lead-pipeline design §2): the lead stays declined/lost, so nothing
+        // in the queue would otherwise tell its owner that the prospect came back.
+        if (result.ownerId) {
+          await notifyBestEffort(tenantId, null, [result.ownerId], "agency.lead.submitted_after_decline", {
+            title: "A declined lead sent a discovery submission", href: `/agency/leads/${intake.leadId}`,
+            entityType: "agency_lead", entityId: intake.leadId, severity: "info",
+          });
+        }
+      } else if (!result.lateAfter && result.ownerId) {
+        // (A converted lead's late submission is stored and nobody is paged: unchanged from before M5-P1.)
         await notifyBestEffort(tenantId, null, [result.ownerId], "agency.lead.submitted", {
           title: "New discovery submission", href: `/agency/leads/${intake.leadId}`,
           entityType: "agency_lead", entityId: intake.leadId, severity: "info",

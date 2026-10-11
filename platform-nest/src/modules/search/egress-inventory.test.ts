@@ -88,6 +88,10 @@ const APPROVED_EGRESS: Record<string, string> = {
   // core/google-oauth, and it references its own config namespace and no other). If you are here because
   // you moved more network code out of search, do the same rather than deleting a row.
   "google/api-client.ts": "Google data surfaces: Search Console / GA4 Data / Ads READ (config.search.google) — §A12.1 third class, client-private, $0",
+  // M5-A4 · FOURTH class: the ERP's own Umami (web analytics), GET-only, over WireGuard through the read
+  // gate, with a view-only API key (UMAMI_BASE_URL / UMAMI_API_KEY, read from env inside the client).
+  // Client-private, $0, no vendor dispatch, no search_data_cache. One file, listed by exact filename.
+  "umami-client.ts": "Umami analytics READ (UMAMI_BASE_URL gate on WireGuard) — M5-A4, GET-only, view-only key",
 };
 
 /** Each approved egress file's OWN config namespace, and the namespaces it must NEVER reference —
@@ -101,6 +105,7 @@ const CONFIG_NAMESPACES = [
   "config.search.semrush",
   "config.search.ahrefs",
   "config.search.google",
+  "UMAMI_BASE_URL",
 ];
 // The two google/ files SHARE `config.search.google` — deliberate, and it does not weaken the guard:
 // the assertion is that each approved file references its own namespace and NONE of the others, so
@@ -117,6 +122,7 @@ const OWN_NAMESPACE: Record<string, string> = {
   // token-endpoint-client.ts: see the note in APPROVED_EGRESS — the file is now a shim and its config
   // reference moved to core as `config.google` (the same object; config.ts aliases both names).
   "google/api-client.ts": "config.search.google",
+  "umami-client.ts": "UMAMI_BASE_URL",
 };
 
 interface Finding {
