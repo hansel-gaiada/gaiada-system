@@ -276,3 +276,27 @@ describe("the form.received hook", () => {
     expect(store).toHaveLength(0);
   });
 });
+
+describe("M5-L5 staff alert wiring", () => {
+  const UID = "44444444-4444-4444-8444-444444444444";
+  beforeEach(() => { process.env.AGENCY_WEB_LEAD_ALERT_USER_IDS = UID; });
+  afterEach(() => { delete process.env.AGENCY_WEB_LEAD_ALERT_USER_IDS; });
+
+  it("alerts once for a new lead and NOT again on a replay; the alert carries no personal data", async () => {
+    const sent: Array<{ payload: Record<string, unknown> }> = [];
+    const d = { ...deps(), alertSender: async (_t: string, _r: string[], _ty: string, payload: Record<string, unknown>) => { sent.push({ payload }); } };
+    const input = { tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB };
+    expect((await createLeadFromWebSubmission(input, d)).outcome).toBe("created");
+    expect((await createLeadFromWebSubmission(input, d)).outcome).toBe("existing");
+    expect(sent).toHaveLength(1);
+    const all = JSON.stringify(sent[0].payload);
+    expect(all).toContain("Zebedee");
+    for (const s of [EMAIL, PHONE, MSG, BIZ, "Quuxington", "leaktest.example"]) expect(all).not.toContain(s);
+  });
+  it("a failing alert never fails the lead creation", async () => {
+    const d = { ...deps(), alertSender: async () => { throw new Error("chat down"); } };
+    const r = await createLeadFromWebSubmission({ tenantId: TENANT_A, siteSlug: "gaiada", submissionId: SUB }, d);
+    expect(r.outcome).toBe("created");
+    expect(store).toHaveLength(1);
+  });
+});
