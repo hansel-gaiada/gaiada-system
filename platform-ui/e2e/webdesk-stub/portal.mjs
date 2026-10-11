@@ -364,7 +364,7 @@ function requestPublish(S, userId, raw) {
 
 function approveBody(S, id, selfPublish) {
   const a = S.approvals.get(id);
-  return R(200, { approvalId: id, status: a.status, executionStatus: a.executionStatus === "executed" ? "executed" : "failed", ...(a.executionStatus === "executed" ? { selfPublish, reconciled: false, items: a.toolArgs.items.map((i) => ({ itemId: i.itemId, version: i.version })) } : { error: a.executionError ?? "failed" }) });
+  return R(200, { approvalId: id, status: a.status, executionStatus: a.executionStatus === "executed" ? "executed" : "failed", ...(a.executionStatus === "executed" ? { selfPublish, reconciled: S.cfg.reconciled !== false, items: a.toolArgs.items.map((i) => ({ itemId: i.itemId, version: i.version })) } : { error: a.executionError ?? "failed" }) });
 }
 
 function selfPublish(S, userId, it, raw) {

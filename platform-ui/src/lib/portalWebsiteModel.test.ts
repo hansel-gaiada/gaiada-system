@@ -95,8 +95,8 @@ describe("requests: Approve and Withdraw", () => {
 });
 
 describe("request states, in words", () => {
-  it("'Published' only when the server says it executed", () => {
-    expect(requestState({ status: "approved", executionStatus: "executed" }).label).toBe("Published");
+  it("an executed request reads 'Approved and sent', never 'Published' (the list cannot say it was confirmed live)", () => {
+    expect(requestState({ status: "approved", executionStatus: "executed" }).label).toBe("Approved and sent");
     expect(requestState({ status: "approved", executionStatus: null }).label).toBe("Approved, publishing");
     expect(requestState({ status: "approved", executionStatus: "pending" }).label).toBe("Approved, publishing");
     expect(requestState({ status: "approved", executionStatus: "failed" })).toEqual({ label: "Approved, but publishing failed", tone: "bad" });

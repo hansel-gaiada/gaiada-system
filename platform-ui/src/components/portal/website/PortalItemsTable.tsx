@@ -2,9 +2,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { portalPublishItemAction, portalRequestPublishAction } from "@/lib/portalWebsiteActions";
+import { portalGetItemHeadAction, portalPublishItemAction, portalRequestPublishAction } from "@/lib/portalWebsiteActions";
 import {
-  canOfferPublishNow, hasUnpublishedChanges, itemListState, PORTAL_COPY, PUBLISHED_COPY,
+  canOfferPublishNow, hasUnpublishedChanges, itemListState, PORTAL_COPY, PUBLISH_SENT_COPY, PUBLISHED_COPY,
 } from "@/lib/portalWebsiteModel";
 import { clientRefusal } from "@/lib/webdeskClientCopy";
 import { authorLabel, describeReasonToken, type FieldDef, type ItemSummary } from "@/lib/webdeskContentModel";
@@ -72,18 +72,27 @@ export function PortalItemsTable({
     setBusy(it.itemId); setNotice(null);
     const r = await portalPublishItemAction(clientId, scope, it.itemId, it.headVersion);
     if (!mounted.current) return;
-    setBusy(null);
     if (r.kind !== "ok") {
+      setBusy(null);
       const f = clientRefusal(r, "publish", { defs, itemLabels: [title(it)] });
       setNotice({ tone: f.tone, text: f.text });
       return;
     }
     if (r.data.executionStatus === "failed") {
+      setBusy(null);
       setNotice({ tone: "bad", text: `Publishing ${title(it)} didn't complete. ${describeReasonToken(r.data.error)} You can try again.` });
       router.refresh();
       return;
     }
-    setNotice({ tone: "ok", text: `${title(it)}: ${PUBLISHED_COPY}` });
+    // "Published" is said only when the answer says it was RECONCILED, or an item read shows this version live.
+    let confirmed = r.data.reconciled === true;
+    if (!confirmed) {
+      const head = await portalGetItemHeadAction(clientId, scope, it.itemId);
+      confirmed = head.kind === "ok" && head.data.item.publishedVersion === it.headVersion;
+    }
+    if (!mounted.current) return;
+    setBusy(null);
+    setNotice(confirmed ? { tone: "ok", text: `${title(it)}: ${PUBLISHED_COPY}` } : { tone: "warn", text: `${title(it)}: ${PUBLISH_SENT_COPY}` });
     router.refresh();
   };
 

@@ -325,7 +325,7 @@ test("files a 2-item request, sees Approve ABSENT on it, withdraws on demand; a 
 
   // Dana's list now reads the decided request honestly
   await page.reload();
-  await expect(page.getByTestId("request-state").first()).toHaveText("Published");
+  await expect(page.getByTestId("request-state").first()).toHaveText("Approved and sent");
 });
 
 test("a self-approved batch is refused by the SERVER, in the owner's words (the page never offered it)", async ({ page }) => {

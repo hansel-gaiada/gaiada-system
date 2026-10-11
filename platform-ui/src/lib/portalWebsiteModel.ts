@@ -82,6 +82,10 @@ export interface PortalRequestFiled { approvalId: string; command: string; itemC
  *  says only what is true: it is published, and the site catches up. */
 export const PUBLISHED_COPY = "Published. Your site updates in a few minutes.";
 
+/** The publish was accepted and ran, but nothing yet CONFIRMS it is live (the answer was not `reconciled` and no item read has shown the
+ *  version). Said instead of "Published" so a client is never told something that was only sent. */
+export const PUBLISH_SENT_COPY = "The publish went through, but we can't yet see it as live. It may still be on its way: reload in a minute to check.";
+
 export const PORTAL_COPY = {
   noSites: "No website is linked to your company yet. Ask your account manager at Gaiada to link it.",
   noCollections: "This site has no content sections yet.",
@@ -156,14 +160,15 @@ export function canOfferPublishNow(item: Pick<ItemSummary, "publishedVersion" | 
 
 export interface RequestState { label: string; tone: "ok" | "warn" | "bad" | "info" | "" }
 
-/** The words for a request's state. "Published" only when the server says it executed. */
+/** The words for a request's state. The list does not say whether the publish was RECONCILED (confirmed live), so an executed request
+ *  reads "Approved and sent", never "Published": that word is reserved for an answer or an item read that confirmed it. */
 export function requestState(r: Pick<PortalPublishRequest, "status" | "executionStatus">): RequestState {
   switch (r.status) {
     case "pending": return { label: "Waiting for approval", tone: "info" };
     case "rejected": return { label: "Not approved", tone: "bad" };
     case "cancelled": return { label: "Withdrawn", tone: "" };
     case "approved":
-      if (r.executionStatus === "executed") return { label: "Published", tone: "ok" };
+      if (r.executionStatus === "executed") return { label: "Approved and sent", tone: "ok" };
       if (r.executionStatus === "failed") return { label: "Approved, but publishing failed", tone: "bad" };
       return { label: "Approved, publishing", tone: "warn" };
   }

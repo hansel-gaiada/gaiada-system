@@ -17,7 +17,7 @@ const req = (id: string, over: Partial<RequestView> = {}): RequestView => ({
   requestedBy: { userId: "u-dewi", name: "Dewi" }, requestedByMe: false, canApprove: true, executionStatus: null, siteName: "gaiada.com",
   items: [{ itemId: "i1", title: "Home", headVersion: 4, available: true }, { itemId: "i2", title: "About", headVersion: 2, available: true }], ...over,
 });
-const executed = (): PortalApproveResult => ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: false, reconciled: null, error: null });
+const executed = (reconciled: boolean | null = true): PortalApproveResult => ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: false, reconciled, error: null });
 const mount = (rows: RequestView[] | null, problem: string | null = null) => render(<PortalRequestsPanel clientId="c1" requests={rows} loadProblem={problem} />);
 const card = (id: string) => screen.getByTestId(`request-${id}`);
 
@@ -47,7 +47,7 @@ describe("each request: who filed it, its pages and versions, its state", () => 
       req("d4", { status: "approved", executionStatus: "failed" }), req("d5", { status: "approved", executionStatus: null }),
     ]);
     const label = (id: string) => within(card(id)).getByTestId("request-state").textContent;
-    expect([label("d1"), label("d2"), label("d3"), label("d4"), label("d5")]).toEqual(["Published", "Not approved", "Withdrawn", "Approved, but publishing failed", "Approved, publishing"]);
+    expect([label("d1"), label("d2"), label("d3"), label("d4"), label("d5")]).toEqual(["Approved and sent", "Not approved", "Withdrawn", "Approved, but publishing failed", "Approved, publishing"]);
     // none of them can be acted on
     expect(screen.queryByRole("button", { name: /approve|withdraw/i })).toBeNull();
   });
@@ -96,6 +96,16 @@ describe("Approve appears only on ANOTHER editor's request (D58)", () => {
     expect(acts.portalApproveRequestAction).toHaveBeenCalledWith("c1", "a1");
     expect(within(card("a1")).getByTestId("request-notice").textContent).toBe("Published. Your site updates in a few minutes.");
     expect(refresh).toHaveBeenCalled();
+  });
+
+  it("executed but NOT reconciled: says it was sent and can't yet be seen as live, never 'Published'", async () => {
+    acts.portalApproveRequestAction.mockResolvedValue(ok(executed(null)));
+    mount([req("a1")]);
+    fireEvent.click(screen.getByTestId("approve-a1"));
+    await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
+    const t = within(card("a1")).getByTestId("request-notice").textContent!;
+    expect(t).toBe("The publish went through, but we can't yet see it as live. It may still be on its way: reload in a minute to check.");
+    expect(t).not.toContain("Published");
   });
 
   it("a self-approved batch is a 403 from the server, and the answer is the owner's sentence", async () => {

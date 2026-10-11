@@ -6,7 +6,7 @@ import type { PortalApproveResult } from "@/lib/portalWebsiteModel";
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
-vi.mock("@/lib/portalWebsiteActions", () => ({ portalPublishItemAction: vi.fn(), portalRequestPublishAction: vi.fn() }));
+vi.mock("@/lib/portalWebsiteActions", () => ({ portalPublishItemAction: vi.fn(), portalRequestPublishAction: vi.fn(), portalGetItemHeadAction: vi.fn() }));
 
 import * as A from "@/lib/portalWebsiteActions";
 import { PortalItemsTable } from "./PortalItemsTable";
@@ -65,7 +65,7 @@ describe("self-publish ONE item vs request publish for a batch (D58)", () => {
   });
 
   it("Publish now asks once, then publishes exactly ONE item at its head version, and files no request", async () => {
-    acts.portalPublishItemAction.mockResolvedValue(ok(approved()));
+    acts.portalPublishItemAction.mockResolvedValue(ok({ ...approved(), reconciled: true }));
     mount([row(1), row(2)]);
     fireEvent.click(screen.getByTestId("publish-now-page-1"));
     expect(acts.portalPublishItemAction).not.toHaveBeenCalled();
@@ -76,6 +76,24 @@ describe("self-publish ONE item vs request publish for a batch (D58)", () => {
     expect(acts.portalRequestPublishAction).not.toHaveBeenCalled();
     expect(screen.getByTestId("items-notice").textContent).toContain("Home: Published. Your site updates in a few minutes.");
     expect(refresh).toHaveBeenCalled();
+  });
+
+  it("executed but not reconciled: an item read that shows the version live says 'Published'; one that does not says it was sent", async () => {
+    acts.portalPublishItemAction.mockResolvedValue(ok(approved()));
+    acts.portalGetItemHeadAction.mockResolvedValue(ok({ item: { publishedVersion: 4 } } as never));
+    mount([row(1)]);
+    fireEvent.click(screen.getByTestId("publish-now-page-1"));
+    await act(async () => { fireEvent.click(screen.getByTestId("publish-now-page-1-confirm")); });
+    expect(acts.portalGetItemHeadAction).toHaveBeenCalledWith("c1", SCOPE, "i1");
+    expect(screen.getByTestId("items-notice").textContent).toContain("Home: Published. Your site updates in a few minutes.");
+    cleanup();
+    acts.portalGetItemHeadAction.mockResolvedValue(ok({ item: { publishedVersion: 3 } } as never));
+    mount([row(1)]);
+    fireEvent.click(screen.getByTestId("publish-now-page-1"));
+    await act(async () => { fireEvent.click(screen.getByTestId("publish-now-page-1-confirm")); });
+    const t = screen.getByTestId("items-notice").textContent!;
+    expect(t).toContain("The publish went through, but we can't yet see it as live.");
+    expect(t).not.toContain("Published.");
   });
 
   it("a batch: select several, ONE request lists every selected item at its head version, and nothing is published", async () => {

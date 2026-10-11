@@ -3,7 +3,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { portalApproveRequestAction, portalWithdrawRequestAction } from "@/lib/portalWebsiteActions";
 import {
-  PORTAL_COPY, PUBLISHED_COPY, requesterLabel, requestState, showApprove, showWithdraw, splitRequests, type RequestView,
+  PORTAL_COPY, PUBLISH_SENT_COPY, PUBLISHED_COPY, requesterLabel, requestState, showApprove, showWithdraw, splitRequests, type RequestView,
 } from "@/lib/portalWebsiteModel";
 import { clientRefusal } from "@/lib/webdeskClientCopy";
 import { describeReasonToken } from "@/lib/webdeskContentModel";
@@ -53,8 +53,11 @@ export function PortalRequestsPanel({ clientId, requests, loadProblem }: { clien
     }
     if (res.data.executionStatus === "failed") {
       setNotice({ id: r.approvalId, tone: "bad", text: `Approved, but publishing didn't complete. ${describeReasonToken(res.data.error)} The request is closed: make the change again or ask Gaiada.` });
-    } else {
+    } else if (res.data.reconciled === true) {
       setNotice({ id: r.approvalId, tone: "ok", text: PUBLISHED_COPY });
+    } else {
+      // Executed but not confirmed live (the versions a request named are not in the list, so no item read can confirm them).
+      setNotice({ id: r.approvalId, tone: "warn", text: PUBLISH_SENT_COPY });
     }
     router.refresh();
   };
