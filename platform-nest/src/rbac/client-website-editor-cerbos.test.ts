@@ -96,6 +96,9 @@ describe("WSK-49f — derived_roles.yaml: the attribute conditions are pinned st
     // A mirror OF THE ROLES would be `perm_client_website_editor` / `perm_client_contact_admin`: a flat key cannot say
     // "this one client". The action mirrors `perm_client_contact_manage_*` (WSK-D60 follow-up) are a different thing.
     expect(defs.some((d) => /^perm_(client_website_editor|client_contact_admin)/.test(d.name))).toBe(false);
+    // Any perm_* role built on a website-editor or contact-admin key must be one of exactly these two ACTION mirrors.
+    expect(defs.filter((d) => /^perm_.*(website_editor|contact_admin|manage_admin)/.test(d.name)).map((d) => d.name).sort())
+      .toEqual(["perm_client_contact_manage_admin", "perm_client_contact_manage_website_editor"]);
     for (const f of readdirSync(POLICIES)) {
       const code = readFileSync(join(POLICIES, f), "utf8").split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
       expect(code.includes("variables.local"), `${f} must not use variables.local (outside comments)`).toBe(false);
@@ -126,6 +129,17 @@ describe("WSK-49f — derived_roles.yaml: the attribute conditions are pinned st
       expect(cond).toContain("variables.inTenant");
       expect(cond).toContain("variables.notLow");
       expect(cond).toContain('request.resource.attr.clientId == ""');
+      expect(cond).toContain("variables.inRoot");
+    }
+  });
+  // Opus review, round 5: both keys are company-wide grant powers. `sensitive` routes a grant of them through an override
+  // approval, and the ceiling check bounds delegation; keep both, so the day custom roles ship nobody hands these out quietly.
+  it("both grant keys stay sensitive (an override approval) and grantable only within the ceiling", () => {
+    const cat = JSON.parse(readFileSync(join(__dirname, "permission-catalog.json"), "utf8")) as { permissions: Array<{ key: string; sensitive?: boolean }> };
+    for (const key of ["core.client_contact.manage_website_editor", "core.client_contact.manage_admin"]) {
+      const p = cat.permissions.find((x) => x.key === key);
+      expect(p, `${key} is in the catalog`).toBeTruthy();
+      expect(p!.sensitive, `${key} must stay sensitive`).toBe(true);
     }
   });
   it("the two perm_* derived roles are plain global-or-company mirrors of exactly their own key", () => {

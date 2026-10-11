@@ -101,11 +101,13 @@ resourcePolicy:
     # staff route, the effect is a DENY, never a widening. The portal handler's own scope re-check
     # (scope.clientIds.includes(clientId), and the target contact's row) is a second wall that does not depend on this.
     # `clientId` is always present on the resource (cerbos.ts defaults it to ""), so the comparison cannot error.
+    # `variables.inRoot` (MON-00c) as on every other perm rule of this kind: a GLOBAL-scope key holder must still sit in
+    # the resource company's root tree (Opus review, round 5), so a global key never reaches another group's company.
     - actions: ["manage_website_editor"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_client_contact_manage_website_editor"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.clientId == \"\"" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot && request.resource.attr.clientId == \"\"" } }
     - actions: ["manage_admin"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_client_contact_manage_admin"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow && request.resource.attr.clientId == \"\"" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot && request.resource.attr.clientId == \"\"" } }
