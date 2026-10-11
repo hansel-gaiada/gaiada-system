@@ -7,9 +7,8 @@ import { activeCompany, isRootCompany } from "@/lib/companyContext";
 
 // `/reports/company` reads the ACTIVE company (the tenant cookie), so opening another company's
 // Company Report means switching to it first. This reuses the top-bar switcher's own server action,
-// `switchTenant`, so there is one place that writes the cookie. That action always ends in a
-// redirect to "/", which is a thrown control-flow signal: the cookie is already set when it throws,
-// so it is caught here and the redirect that matters is issued instead.
+// `switchTenant`, so there is one place that writes the cookie, and passes its `return` field so the
+// switch lands on the report instead of the dashboard.
 //
 // The target must be a company of the ACTIVE root. Not a security boundary (the report route and the
 // BFF gate the read); it only refuses to switch somewhere this page never offered.
@@ -21,11 +20,6 @@ export async function openCompanyReport(formData: FormData): Promise<void> {
   const target = me.companies.find((c) => c.id === String(formData.get("tenantId") ?? ""));
   if (!active || !isRootCompany(active) || !target || target.rootCompanyId !== active.id) redirect("/group/reports");
 
-  try {
-    await switchTenant(formData);
-  } catch (e) {
-    const digest = (e as { digest?: unknown } | null)?.digest;
-    if (typeof digest !== "string" || !digest.startsWith("NEXT_REDIRECT")) throw e;
-  }
-  redirect("/reports/company");
+  formData.set("return", "/reports/company");
+  await switchTenant(formData);
 }
