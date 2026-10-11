@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████████░░░░░░░░░░░` **64%** · 138/214<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `████████████████████░░░░░░░░░░` **66%** · 142/215<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████████████░░░` **86%** · 80/92<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **88%** · 81/92<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -152,10 +152,10 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [ ] Build key (production read) minted through an approval; preview key (staging read)
 - [ ] Read quota sized for a full site build
 
-### Wave C · WSK-67 · Importer CLI <!-- bar -->🟡 `███████░░░` **66%** · 2/3<!-- /bar -->
+### Wave C · WSK-67 · Importer CLI <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
 - [x] Dry run prints the plan; `--apply` twice → second run writes 0 versions (real 326-item bundle; in-process Zone B fake)
 - [x] Refuses human principals; imports no publish/unpublish/delete function (static test; Cerbos probe)
-- [ ] One batch publish approval filed and approved; gaiada.com content live on `/v1` — FILED 2026-10-11: 326 items imported live as drafts (re-run wrote 0), approval `01a12715-c98e-70ae-81a6-7f5ab5ad0192` awaits the owner
+- [x] One batch publish approval filed and approved; gaiada.com content live on `/v1` — APPROVED by the owner 2026-10-11 (decided as hansel@gaiada.com; requested by the importer, so `selfPublish: false`): `content.publish` executed, 326/326 items live in WebDesk's live projection (what `/v1` serves). The staging rebuild recorded `failed: rebuild_not_configured` (honest: the site repo is not wired yet). An HTTP `/v1` read awaits a production read key
 
 ### Wave C · WSK-55 · The site builds from `/v1` (gaiada-web-revamp) <!-- bar -->🟡 `████████░░` **83%** · 5/6<!-- /bar -->
 - [x] Two git builds of one commit give an identical `dist/` (determinism first) — 303 files, 0 differ
@@ -201,7 +201,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `██████████████░░░░░░` **70%** · 42/60<!-- /bar -->
+<!-- bar -->🟡 `███████████████░░░░░` **73%** · 45/61<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -211,30 +211,30 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 - [x] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 
-### CMS features <!-- bar -->🟡 `███░░░░░░░` **33%** · 5/15<!-- /bar -->
+### CMS features <!-- bar -->🟡 `████░░░░░░` **40%** · 6/15<!-- /bar -->
 - [x] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52, recorded in webdesk-design-v2.md §14 on main `26862851`)
 - [x] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
-- [ ] WSK-46 · site repo (gaiada-web-revamp): `/preview/` page renders the draft with the site's own components (coordinate with the site owner; needs `api.gaiada.com` public)
+- [ ] WSK-46 · site repo (gaiada-web-revamp): `/preview/` page reads the token from the URL fragment (`#t=`, never a query string), sets `Referrer-Policy: no-referrer`, and renders the draft with the site's own components (coordinate with the site owner; needs `api.gaiada.com` public)
 - [x] WSK-61 · scheduled publish worker (+ the forms retention purge schedule, + the idempotency expiry sweep: `sweepExpired()` exists and nothing calls it) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [ ] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live)
 - [ ] WSK-61 producer · the content tick emits a Zone B `schedule.fired` wake-up hint (grouped per approval and transition, eventId includes each item's effective time); agreed with a6, who builds the ERP consumer
 - [x] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, recorded in webdesk-design-v2.md §14 on main)
 - [ ] WSK-45 · WYSIWYG editor (TipTap) on the `markdown` primitive; an unchanged body saves byte-identical
 - [x] WSK-43 ruled by the owner 2026-10-11: library images reach a static site through its build (WSK-D53); an image in use cannot be deleted (WSK-D54) (WSK-D53/D54 recorded in webdesk-design-v2.md §14 on main `4d28cd8d`)
-- [ ] WSK-43a · WebDesk: asset metadata, token uploads that never pass through the ERP, soft delete refused while in use, purge job, quota in bytes held
+- [x] WSK-43a · WebDesk: asset metadata, token uploads that never pass through the ERP, soft delete refused while in use, purge job, quota in bytes held (main `232b7665`; sumopod gate m3w4: api 1015/0/2, 0 unhandled, migrations 435)
 - [ ] WSK-43b · ERP: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools
 - [ ] WSK-43c · Website workspace: Media tab + a picker for media fields (after the M2 editor follow-ups)
 - [ ] WSK-43d · site repo: the pull step downloads library images into the static build (with the site owner)
 - [ ] WSK-49 · client editors through the client portal
 
-### Defects found on the way <!-- bar -->🟡 `████████░░` **80%** · 33/41<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `████████░░` **83%** · 35/42<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Undecodable `%` in a path gets Fastify's 400, not a problem+json body (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A non-integer `limit` (`limit=2.5`) reached `LIMIT $n` and 500ed — now truncated (found and fixed in M3 T1) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
-- [ ] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes) — lands with WSK-43a's purge job and byte quota
+- [x] Locked object versions are never freed (no lifecycle rule; quota counts rows, not bytes) — lands with WSK-43a's purge job and byte quota (main `232b7665`; sumopod gate m3w4: api 1015/0/2, 0 unhandled, migrations 435)
 - [x] The privacy residency statement still names MinIO to customers (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] `check-artifact-url-expiry.mjs` still starts a MinIO container (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] In-memory read quota and idempotency under-enforce with more than one api replica (idempotency: the WSK-21 commands moved to the durable store in T5a; promotion + privacy follow in T5b; the read quota moves to Redis in T6) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
@@ -269,6 +269,7 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] `content-commands.service.ts` keeps a private copy of the command envelope; adopt `CommandEnvelope` (T5a follow-up) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [x] `webdesk/api/src/main.ts` has no `enableShutdownHooks()`: a SIGTERM kills a running scheduler tick mid-item (safe: one transaction per item) instead of draining it (WSK-61 follow-up) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [x] Preview and upload tokens travel in the URL path: redact `/v1/t/*/preview/*` and `/v1/t/*/media/upload/*` in Caddy's (and any edge's) access log before those endpoints go live (the api already redacts its own logs; the WebDesk orchestrator owns this) — DONE 2026-10-11: Caddy writes no access log; the public nginx host logs via a redacting format (token → `[redacted]`, Referer query dropped). Proven in a throwaway nginx (0 secrets logged); `infra/nginx/api.gaiada.com.conf` (`634675ab`), staged on gda-aicenter, live when the vhost is enabled
+- [x] WebDesk emits `form.received` with the internal `tenants.id` where the Zone B envelope documents the ERP company id (`company_ref`); check the ERP intake's mapping and fix one side (found by the WSK-61 producer, 2026-10-11) (main `232b7665`; sumopod gate m3w4: api 1015/0/2, 0 unhandled, migrations 435; contract fixture `contracts/zoneb/form-received.envelope.json` binds the WebDesk emit to the ERP validator)
 - [ ] Not ours, flagged: `agency-lead-convert-race.db.test.ts` is flaky (failed 1 of 3 identical runs) and `monitoring.controller.test.ts` is a date time bomb (red since ~09-17) — both red on main, owners elsewhere
 
 ---
