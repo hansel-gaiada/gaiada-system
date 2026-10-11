@@ -53,4 +53,4 @@ networks:
   edge:
     ipam:
       config:
-        - subnet: ${ERP_EDGE_SUBNET:-172.28.92.0/28}
+        - subnet: ${ERP_EDGE_SUBNET:-10.211.92.0/28}
