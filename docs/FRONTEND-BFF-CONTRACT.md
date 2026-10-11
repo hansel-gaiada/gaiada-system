@@ -1854,7 +1854,7 @@ unconditional idle poll instead of inventing a topic string nothing emits.
 
 ---
 
-### 16i. Client website access (WSK-49f, WSK-D60 amended 2026-10-11) — `src/core/client-website-access.controller.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (tested on local Linux containers, no server gate yet; platform-nest only; no UI yet — the portal Website area and the Contacts/People grant controls come later)**
+### 16i. Client website access (WSK-49f, WSK-D60 amended 2026-10-11) — `src/core/client-website-access.controller.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (tested on local Linux containers, no server gate yet); UI BUILT, PROTOTYPED (WSK-49f UI: the staff Contacts-page and portal People-page grant controls, vitest + DEMO_MODE Playwright on a Windows laptop, not DEV-VERIFIED against a live backend; the portal Website area is a separate ticket)**
 
 Who may edit a client's website through WebDesk, and who may say so. `client_website_editor` is a **role stored as data** scoped to
 ONE client record (`user_roles.scope_type = 'client'`, `scope_id = clients.id`; the serving company is that client's tenant), the
