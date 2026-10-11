@@ -105,6 +105,7 @@ import {
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
 import { WorkflowDispatchError, authorizeDeploy } from "../../core/github/workflow-dispatch";
 import { rebuildTargetFor, startSiteRebuild } from "./site-builds.service";
+import { ClientPublishAuthority } from "../../core/github/workflow-dispatch";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // The closed allow-list
@@ -1063,14 +1064,17 @@ export async function executeApprovedWebdeskCommand(
   // throws, and a rebuild that could not start does not touch the publish: the row above is already
   // `executed`. (A schedule publishes nothing yet, so it rebuilds nothing.)
   if (outcome.executionStatus === "executed" && outcome.command === "content.publish" && a.command === "content.publish") {
-    outcome = { ...outcome, build: await startRebuildAfterPublish(tenantId, approvalId, a, outcome.items, decider) };
+    outcome = { ...outcome, build: await startRebuildAfterPublish(tenantId, approvalId, a, outcome.items, decider, clientDecider) };
   }
 
   // The requester is the one waiting (design §6: "requester notified").
   // WSK-49c: NOT for a client decision. The notification's href is the staff inbox (`/approvals/<id>`), which a client
   // contact cannot open, and the portal page that would carry it (`/portal/website`) is WSK-49d's: a link to it now would
   // dangle (portal-links.guard.test.ts). The client's own request list is the read for "did it go live" until then.
-  if (requestedBy && requestedBy !== deciderId && !clientDecider) {
+  // A STAFF decision on a client-filed request is the same case: the row carries `clientId` (set only by the portal BFF), so the
+  // requester is a client contact and the staff inbox href would dangle for them.
+  const clientFiled = isPlainObject(row.tool_args) && typeof row.tool_args.clientId === "string";
+  if (requestedBy && requestedBy !== deciderId && !clientDecider && !clientFiled) {
     const ok = outcome.executionStatus === "executed";
     await notifyBestEffort(tenantId, deciderId, [requestedBy], ok ? "automation_approval.executed" : "automation_approval.execution_failed", {
       title: ok ? `WebDesk ${a.command} executed` : `WebDesk ${a.command} FAILED to execute`,
@@ -1109,8 +1113,14 @@ async function startRebuildAfterPublish(
   a: PublishArgs,
   items: Array<{ publishedAt?: string | null }>,
   decider: Principal,
+  clientDecider?: ClientDecider,
 ): Promise<{ buildId: string | null; state: "rebuilding" | "live" | "unverified" | "failed"; failureReason: string | null }> {
   const r = await startSiteRebuild({
+    // WSK-D63: the ONLY place a client-publish authority is issued: this executor, after the publish a CLIENT editor decided has
+    // executed. The dispatch re-verifies it against the approval row and the site link before any GitHub call.
+    ...(clientDecider && decider.userId
+      ? { authority: ClientPublishAuthority.issue({ tenantId, approvalId, tenantSlug: a.tenantSlug, siteId: a.siteId, deciderId: decider.userId }) }
+      : {}),
     tenantId,
     tenantSlug: a.tenantSlug,
     siteId: a.siteId,

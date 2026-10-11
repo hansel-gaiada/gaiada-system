@@ -786,6 +786,23 @@ describe.skipIf(!live)("WSK-49c · the client-mode website BFF", () => {
       expect(zb.writes).toEqual([]);
     });
 
+    it("a STAFF decision on a client-filed request does not notify the client requester (the staff inbox href would dangle); control: it still notifies a staff requester", async () => {
+      const notified = async (user: string) =>
+        Number((await adminPool().query(`SELECT count(*)::int AS n FROM notifications WHERE user_id = $1 AND type LIKE 'automation_approval.%'`, [user])).rows[0].n);
+      const before = await notified(edA1);
+      const id = await file(edA1, [draft("svc.n1"), draft("svc.n2")]);
+      const decided = await call("POST", `/api/${A}/automation-approvals/${id}/decide`, staffAdmin, { decision: "approved" });
+      expect(decided.statusCode, decided.body).toBe(200);
+      expect(decided.json()).toMatchObject({ webdesk: { executionStatus: "executed" } });
+      expect(await notified(edA1)).toBe(before);
+      // control: the same decision on a STAFF-filed request notifies its (staff) requester
+      const staffBefore = await notified(staffManager);
+      const it = draft("svc.n3");
+      const filed = await call("POST", `${STAFF()}/publish-requests`, staffManager, { items: [{ itemId: it.itemId, version: 2 }] });
+      expect((await call("POST", `/api/${A}/automation-approvals/${filed.json().approvalId}/decide`, staffAdmin, { decision: "approved" })).statusCode).toBe(200);
+      expect(await notified(staffManager)).toBe(staffBefore + 1);
+    });
+
     it("no notification the BFF emits links into /portal (the pages are WSK-49d's)", () => {
       for (const f of ["webdesk-client-website.service.ts", "webdesk-client-website.controller.ts", "webdesk-site-clients.service.ts", "webdesk-client-guard.ts", "webdesk-approved-command.ts"]) {
         const src = readFileSync(join(__dirname, f), "utf8");
