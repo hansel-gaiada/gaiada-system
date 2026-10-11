@@ -724,6 +724,24 @@ describe.skipIf(!live)("WSK-49c · the client-mode website BFF", () => {
       expect((await call("GET", `${W(cA2)}/publish-requests`, edA2)).json().requests).toEqual([]);
     });
 
+    it("withdraw: the REQUESTER cancels their own pending request (200); another client editor is 403, a decided request 409, another client's route 403/404; nothing is sent to WebDesk", async () => {
+      const id = await file(edA1, [draft("svc.wd1"), draft("svc.wd2")]);
+      const withdraw = (who: string, approvalId: string, client = cA1, slug = GAIADA_SLUG, siteId = GAIADA_SITE) =>
+        call("POST", `${S(client, slug, siteId)}/publish-requests/${approvalId}/withdraw`, who, {});
+      zb.calls.length = 0;
+      expect((await withdraw(ed2A1, id)).statusCode).toBe(403); // another editor of the same client: not theirs to cancel
+      expect((await withdraw(edA2, id)).statusCode).toBe(403); // another client's editor, this client's route: Cerbos
+      expect((await withdraw(edA2, id, cA2, SLUG2, SITE2)).statusCode).toBe(404); // their own route and site: not their request
+      expect((await approvalRow(id)).status).toBe("pending");
+      const ok = await withdraw(edA1, id);
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect(ok.json()).toEqual({ approvalId: id, status: "cancelled" });
+      expect((await approvalRow(id)).status).toBe("cancelled");
+      expect((await withdraw(edA1, id)).statusCode).toBe(409);
+      expect((await approve(ed2A1, id)).statusCode).toBe(409); // a cancelled request is not decidable (approval_not_pending)
+      expect(zb.writes).toEqual([]);
+    });
+
     it("no notification the BFF emits links into /portal (the pages are WSK-49d's)", () => {
       for (const f of ["webdesk-client-website.service.ts", "webdesk-client-website.controller.ts", "webdesk-site-clients.service.ts", "webdesk-client-guard.ts", "webdesk-approved-command.ts"]) {
         const src = readFileSync(join(__dirname, f), "utf8");

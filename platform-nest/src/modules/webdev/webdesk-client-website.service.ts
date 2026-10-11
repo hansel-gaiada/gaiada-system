@@ -310,6 +310,16 @@ export class WebdeskClientWebsiteService {
     }
   }
 
+  /**
+   * `POST …/sites/:slug/:siteId/publish-requests/:approvalId/withdraw` -> `{approvalId, status:'cancelled'}`: the REQUESTER cancels
+   * their own PENDING request (the staff withdraw, in client mode: the site wall asks the link first). Another client editor's
+   * request is 403, a row that is not a publish request for THIS site is 404, a row no longer pending is 409. Nothing is sent to WebDesk.
+   */
+  async withdrawPublishRequest(gate: ContentGate, site: SiteRef, approvalId: string): Promise<ZoneBResult> {
+    gate.require("webdesk_content_item", "request_publish");
+    return this.content.withdrawPublishRequest(gate, site, approvalId);
+  }
+
   /** `GET …/publish-requests[?status=…]` (default `pending`): this CLIENT's publish requests, every client editor's, newest first (<= 100). */
   async listPublishRequests(gate: ContentGate, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");

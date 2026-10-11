@@ -155,6 +155,17 @@ export class WebdeskClientWebsiteController {
     return (await svc.publishItem(req.principal, tenantId, clientId, { tenantSlug, siteId }, itemId, body)).body;
   }
 
+  /** The REQUESTER cancels their own pending request (`{approvalId, status:'cancelled'}`). */
+  @Post(`${BASE}/sites/:tenantSlug/:siteId/publish-requests/:approvalId/withdraw`)
+  @HttpCode(200)
+  async withdraw(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Param("approvalId") approvalId: string,
+  ) {
+    const gate = await svc.gate(req.principal, tenantId, clientId, "webdesk_content_item", "request_publish");
+    return (await svc.withdrawPublishRequest(gate, { tenantSlug, siteId }, approvalId)).body;
+  }
+
   /** This client's publish requests (every client editor's), `?status=pending|approved|rejected|cancelled|all` (default pending). */
   @Get(`${BASE}/publish-requests`)
   async publishRequests(
