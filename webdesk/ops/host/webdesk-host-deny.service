@@ -8,6 +8,10 @@ After=docker.service
 Requires=docker.service
 
 [Service]
+# Optional (leading dash): /etc/webdesk/guard.env holds WEBDESK_OTLP_PORT=4319 once WebDesk's telemetry is
+# switched on (WSK-D63 (2), runbook infra/runbooks/webdesk-zoneb-otel.md). Absent or empty = the OTLP exception
+# is OFF and the guard is pure default-deny. It must survive a reboot, so it lives here and not in a shell.
+EnvironmentFile=-/etc/webdesk/guard.env
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/webdesk-egress-guard.sh apply
