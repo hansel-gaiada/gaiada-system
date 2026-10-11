@@ -86,6 +86,26 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox-exporter:9115
 
+  # --- WebDesk's content API (M4, 2026-10-11): /v1 with an unknown tenant must answer 401
+  # problem+json, which only the api itself produces. Feeds WebDeskApiDown and the public status page
+  # (status.erp.gaiada.com, WSK-D64). Same relabelling as blackbox-estate.
+  - job_name: blackbox-webdesk-api
+    metrics_path: /probe
+    params:
+      module: [http_401_problem]
+    scrape_interval: 60s
+    scrape_timeout: 15s
+    static_configs:
+      - targets: ["https://api.erp.gaiada.com/v1/t/status-probe/collections"]
+        labels: { host: gda-aicenter, env: production, plane: estate, service: webdesk-api }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
   # --- Plane B, client-property monitoring (MON-01). Same job definition as
   # proposed-client-properties-job.yml, applied here rather than left proposed. Target file is
   # GENERATED (infra/observability/scripts/gen-client-property-targets.mjs), never hand-written —

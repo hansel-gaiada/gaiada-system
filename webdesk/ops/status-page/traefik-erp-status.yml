@@ -1,0 +1,17 @@
+# Copied to sumopod as /home/ubuntu/mimi/infrastructure/tls/dynamic/erp-status.yml (WSK-D70: one file
+# per ERP name in the owner's mimi Traefik; deleting this file removes the route). It points at the
+# docker0 address because the status page never joins mimi's network.
+http:
+  routers:
+    erp-status:
+      rule: 'Host(`status.erp.gaiada.com`)'
+      entryPoints: [websecure]
+      service: erp-status
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    erp-status:
+      loadBalancer:
+        servers:
+          - url: 'http://172.17.0.1:18480'

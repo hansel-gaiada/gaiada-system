@@ -1,9 +1,36 @@
-# Runbook — WebDesk Zone B status page (WSK-28)
+# Runbook — WebDesk public status page
 
-**Status: PROTOTYPED.** The generator (`webdesk/ops/scripts/gen-status-page.mjs`) and the static
-page it emits were driven against a set of fabricated health responses on this dev machine (§4).
-Not yet driven against real Zone B services (no box), and the Caddy route has not been proven
-live (no running proxy container in this session — see §3 for what was and wasn't checked).
+## LIVE path (M4 T6b, 2026-10-11): `https://status.erp.gaiada.com`, served from sumopod
+
+**Status: DEV-VERIFIED 2026-10-11.** Served from **sumopod**, never from the box it reports on (WSK-D64). It is
+routed through the owner's `mimi` Traefik by one file (WSK-D70). The design below this section (an in-project
+`status-page` service on the WebDesk box, fed by its own health probes) is superseded and kept for its reasoning.
+
+| Piece | Where |
+|---|---|
+| DNS | `status.erp.gaiada.com` CNAME `sumopod.erp.gaiada.com` (owner, 2026-10-11) |
+| TLS + route | mimi's Traefik (`mimi-tls-le`), file `/home/ubuntu/mimi/infrastructure/tls/dynamic/erp-status.yml` = `webdesk/ops/status-page/traefik-erp-status.yml`; Let's Encrypt via mimi's resolver |
+| Page | compose project `erp-status` in `~/erp-status` (= `webdesk/ops/status-page/`): `web` (Caddy, read-only, cap_drop ALL + NET_BIND_SERVICE) published ONLY on `172.17.0.1:18480`; `renderer` (Node, read-only, cap_drop ALL) on the obs network only |
+| Data | sumopod's own Prometheus. `blackbox-webdesk-api` probes `/v1` for its 401 problem+json (the api itself answers); `blackbox-estate` probes `/healthz` (Caddy alone answers). Alerts: `WebDeskApiDown`, `EstateProbeDown` |
+
+The renderer writes `index.html` + `status.json` every 60 s. A probe silent for 5 min, or a Prometheus that does
+not answer, renders as **unknown**, never green. Nothing internal (hosts, addresses, error text) is published.
+
+**Deploy or update:**
+- Copy `webdesk/ops/status-page/` to `~/erp-status`, with LF only, then `docker compose up -d`.
+- The route file is copied once. Traefik's file provider watches the directory, so no restart is needed.
+- To remove the page: delete `erp-status.yml` from the mimi dynamic dir, then `docker compose down` in
+  `~/erp-status`.
+
+**Verify:**
+- `curl https://status.erp.gaiada.com/` from a Linux client gives 200, a verified certificate, and the banner.
+- `curl http://172.17.0.1:18480/status.json` on sumopod.
+- `docker logs erp-status-renderer-1` shows one line a minute.
+- A Windows curl may print `000` on a fresh certificate (a schannel revocation check); use `--ssl-no-revoke`
+  there, or check from Linux.
+
+First run 2026-10-11 14:45Z: both probes `1`; "All systems operational"; Let's Encrypt certificate valid to
+2027-01-09.
 
 ---
 

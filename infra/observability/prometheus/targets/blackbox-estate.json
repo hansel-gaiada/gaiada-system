@@ -4,8 +4,12 @@
     "labels": { "host": "helios", "env": "client-production", "plane": "estate" }
   },
   {
-    "targets": ["https://erp.gaiada.online/login"],
+    "targets": ["https://erp.gaiada.com/login"],
     "labels": { "host": "gda-aicenter", "env": "production", "plane": "estate" }
+  },
+  {
+    "targets": ["https://api.erp.gaiada.com/healthz"],
+    "labels": { "host": "gda-aicenter", "env": "production", "plane": "estate", "service": "webdesk-edge" }
   },
   {
     "targets": ["https://pilot-fullstack-cms.gaiada.online"],
