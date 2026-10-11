@@ -7,6 +7,56 @@ WSK-48b, migrations 0010/0011), 2026-10-11.
 
 **Never build the api on gda-aicenter** (it is the live ERP box; one build drove load to 16 on 4 cores).
 
+## Automated (M4 T4)
+
+`.github/workflows/deploy-webdesk.yml` + `webdesk/ops/deploy/deploy-webdesk.sh` automate the manual procedure below.
+It is `workflow_dispatch` only for now; `release.yml` does not call it yet. It shares `concurrency: deploy-vps` with
+`deploy.yml` (one box, never alongside an ERP deploy) and runs in `environment: production` with the same `VPS_*`
+secrets. It never touches the `gaiada` project.
+
+**Dispatch it** (Actions, deploy-webdesk, Run workflow; or `gh workflow run deploy-webdesk.yml -f tag=<tag> -f mode=plan`):
+
+1. **`mode=plan`, always first.** Changes nothing live. The runner cosign-verifies
+   `ghcr.io/<owner>/gaiada-webdesk-api:<tag>` (as `deploy.yml` does) and reads the signed digest; archives the tag's
+   `webdesk/{migrations,scripts,ops,proxy,postgres,compose files,package*.json,api/package*.json}` with
+   `core.autocrlf=false`; ships tar + script to a temp dir on the box. On the box the script untars into a staging dir
+   next to the project dir, refuses any file containing CR, checks the env file defines the keys the tools need (names
+   only), runs `compose config -q` with the three files and `WEBDESK_API_IMAGE=ghcr.io/<owner>/gaiada-webdesk-api@<digest>`
+   against `/etc/webdesk/.env`, compares the running api image id with the digest ("no swap needed" when equal), lists
+   the pending migrations (ledger read read-only), notes live-tree entries the release drops, and prints the plan.
+   Read the summary: it must end `RESULT: plan OK`.
+2. **`mode=apply`.** The runner also logs the box into GHCR with the job token. The script then: plan again; pull
+   `…@<digest>` and REFUSE unless the image id equals the digest; tag the running image `webdesk-api:pre-<tag>` (a local
+   tag, outside `deploy.yml`'s `ghcr.io/<owner>/gaiada-*` prune); back up (`pg_dump -Fc` as `webdesk_backup`, else the
+   container's superuser; compose files; `migrations/`; a `state.env`) into `~/webdesk-backups/pre-<tag>-<UTC>/`; swap the
+   staging tree in by RENAME, keeping the old tree as `<project>.old-<tag>-<UTC>` (so a file the release deleted, such
+   as the stale `payload/` dir, disappears; `.env*` symlinks are carried over); migrate as `webdesk_migrator` from a
+   throwaway `node:22-bookworm` container on `webdesk_default` (no host ports, limits, `--rm`, secrets via a 0600
+   `--env-file`) twice, the second run must apply 0; `check-rls-integrity.mjs` as the owner; `storage-bootstrap.mjs`;
+   then `up -d --no-deps --no-build api` with the release overlay. Health (120 s; tick 150 s): `listening on :3000`,
+   the editorial JWKS line, proxy `/healthz` 200, `/v1/t/<random>/collections` through nginx -> 401
+   `application/problem+json`, the next `content tick` line `errors=0`, `PROBE_ONLY=1 containment-probe.sh`. On success it
+   writes `WEBDESK_API_IMAGE=…@<digest>` into `/etc/webdesk/.env` (value never printed) and
+   `~/gaiada-webdesk/.deployed-tag`.
+3. **Failure.** Before the swap nothing live has changed. A tools-step (migration) failure restores the old tree and
+   leaves the api untouched. A health failure restores the old tree and re-pins `webdesk-api:pre-<tag>` (previous
+   arrangement: the two compose files plus `webdesk-api:latest`, or the release overlay if it ran that way). **Migrations
+   are never rolled back**; restore the dump only for data loss.
+
+**Roll back later** (after a green apply you want to undo): on the box,
+`bash <a copy of deploy-webdesk.sh> rollback` re-pins the most recent `pre-*` image and tree and restores the previous
+`WEBDESK_API_IMAGE` line / `.deployed-tag`. Or dispatch `apply` with the previous tag (a new pull-and-migrate cycle).
+
+**Not automated**: a changed `proxy/` or `postgres/` (apply recreates only `api`; the plan prints a NOTE), new env
+variables (add them to `/etc/webdesk/.env` first; `compose config -q` in the plan fails loudly on a missing required
+one), release-note-specific steps.
+
+**After the first automated apply, every compose call must use all three files.** The api then runs from the release
+overlay, with `WEBDESK_API_IMAGE` read from `/etc/webdesk/.env`. The two-file form (`docker-compose.yml` +
+`docker-compose.aicenter.yml`) would silently swap the api back to whatever `webdesk-api:latest` is.
+
+The manual procedure below stays as the fallback (with the three files once automation has run).
+
 ## Facts
 
 | What | Where |

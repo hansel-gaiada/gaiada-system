@@ -21,6 +21,7 @@ The bot exists for **project progress tracking, workflow efficiency, and making 
 | `privacy-notice.md` | Data-subject privacy notice | DRAFT | Lawyer review; add contact/DPO |
 | `retention-and-dsr-procedure.md` | Retention schedule + access/erasure procedure | DRAFT | Confirm retention periods |
 | `trial-consent-notice.md` | Opt-in **trial** consent + notice (enables the near-free trial NOW) | DRAFT | Confirm volunteer list; light review |
+| `website-visitor-addendum.md` | **Separate scope:** gaiada.com visitors and website leads (DPIA, LIA, RoPA rows, retention, rights, a `/privacy-policy/` draft). Not part of the bot's Gate 1 pack; WebDesk ruling WSK-D67 makes each tracking phase wait for counsel's review of it | DRAFT (2026-10-11) | Lawyer review; owner decisions in its §11; Indonesian notice |
 
 ## Shared assumptions used across the drafts (confirm / correct these)
 

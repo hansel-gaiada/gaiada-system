@@ -86,6 +86,18 @@ wait_for() {  # wait_for <seconds> <description> <command...>
 }
 kc_issuer_is() { [ "$(issuer_of http://127.0.0.1:8080/idp/realms/gaiada)" = "$1" ]; }
 http_ok()      { [ "$(code "$1")" = "200" ]; }
+redirects_to() { [ "$(where "$1")" = "$2" ]; }
+# After `systemctl reload nginx` the old workers keep accepting for a moment, so a request fired at once can get
+# the OLD config (the first cut-over attempt, 2026-10-11, failed exactly so and rolled back). Retry, then explain.
+expect_200() {  # expect_200 <url>
+  local u="$1"
+  for _ in $(seq 1 20); do http_ok "$u" && { ok "$u 200"; return 0; }; sleep 1; done
+  die "$u is not 200 after 20 s: $(curl -s -o /dev/null -w 'code=%{http_code} ssl_verify=%{ssl_verify_result} location=%{redirect_url}' --max-time 20 "$u")"
+}
+expect_redirect() {  # expect_redirect <url> <location>
+  for _ in $(seq 1 20); do redirects_to "$1" "$2" && { ok "GET $1 -> $2"; return 0; }; sleep 1; done
+  die "GET $1 redirects to '$(where "$1")', expected '$2'"
+}
 webdesk_up()   { docker logs --since "$1" webdesk-api-1 2>&1 | grep -q 'listening on :3000'; }
 
 nginx_install_and_reload() {  # nginx_install_and_reload <on|off>
@@ -145,8 +157,8 @@ backup() {
 stage_nginx() {
   say "nginx: one server, both names, legacy redirect OFF"
   nginx_install_and_reload off
-  [ "$(code "https://$NEW/login")" = "200" ] || die "https://$NEW/login is not 200"; ok "https://$NEW/login 200"
-  [ "$(code "https://$OLD/login")" = "200" ] || die "https://$OLD/login is not 200"; ok "https://$OLD/login 200"
+  expect_200 "https://$NEW/login"
+  expect_200 "https://$OLD/login"
   local c; c="$(code -X POST "https://$OLD/api/webhooks/github")"
   [[ "$c" =~ ^(400|401|403|415|422)$ ]] || die "the GitHub webhook path on $OLD answered $c (expected a refusal, not a redirect or 404)"; ok "webhook path on $OLD still served ($c without a signature)"
 }
@@ -183,9 +195,8 @@ stage_identity() {
 stage_redirect() {
   say "legacy redirect ON: browser GETs on $OLD -> https://$NEW"
   nginx_install_and_reload on
-  local loc; loc="$(where "https://$OLD/login?x=1")"
-  [ "$loc" = "https://$NEW/login?x=1" ] || die "GET $OLD/login redirects to '$loc'"; ok "GET $OLD/login?x=1 -> $loc"
-  [ "$(code "https://$NEW/login")" = "200" ] || die "$NEW/login is not 200"; ok "$NEW/login 200"
+  expect_redirect "https://$OLD/login?x=1" "https://$NEW/login?x=1"
+  expect_200 "https://$NEW/login"
   local c; c="$(code -X POST "https://$OLD/api/webhooks/github")"
   [[ "$c" =~ ^(400|401|403|415|422)$ ]] || die "the webhook path on $OLD answered $c"; ok "POST webhook on $OLD still served ($c)"
   [ "$(issuer_of "$ISS_OLD")" = "$ISS_NEW" ] || die "/idp on $OLD is not served"; ok "/idp still served on $OLD (issuer $ISS_NEW)"
@@ -225,7 +236,7 @@ rollback() {
   wait_for 180 "Keycloak issues for $ISS_OLD again" kc_issuer_is "$ISS_OLD"
   wait_for 120 "platform-ui /login 200" http_ok http://127.0.0.1:3005/login
   wait_for 120 "webdesk-api listening again" webdesk_up "$since"
-  [ "$(code "https://$OLD/login")" = "200" ] && ok "https://$OLD/login 200 again" || die "https://$OLD/login is not 200 after rollback"
+  expect_200 "https://$OLD/login"
   say "rollback complete"
 }
 

@@ -7,7 +7,9 @@ server, so moving a service between servers is one CNAME change. This supersedes
 WSK-D43 (never created) and completes the 2026-10-11 hosting decision (ERP + WebDesk stay on gda-aicenter, the
 observation stack on sumopod).
 
-Status: PLANNED. Nothing below is live yet.
+Status (2026-10-11): Phase A LIVE (`api.erp.gaiada.com`). Phase B B0–B3 LIVE: the ERP is `erp.gaiada.com` since 13:11Z
+(release 1.0.0-alpha.355 + `scripts/phaseb/run-erp-name-cutover.sh`, runbook `infra/runbooks/erp-name-cutover.md`). B4 (retire the
+legacy exceptions and the old issuer) is M4 work after two quiet weeks.
 
 ## 1. The names
 

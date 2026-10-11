@@ -9,8 +9,8 @@ set -euo pipefail
 EMAIL="${1:?email required}"
 PASSWORD="${2:?password required}"
 
-# ERP_BASE picks the public name (ERP names Phase B: erp.gaiada.com; erp.gaiada.online until the cut-over).
-BASE="${ERP_BASE:-https://erp.gaiada.online}"
+# ERP_BASE picks the public name (erp.gaiada.com since the Phase B cut-over, 2026-10-11).
+BASE="${ERP_BASE:-https://erp.gaiada.com}"
 REALM="$BASE/idp/realms/gaiada"
 CLIENT_ID="gaiada-ui"
 REDIRECT="$BASE/auth/callback"
