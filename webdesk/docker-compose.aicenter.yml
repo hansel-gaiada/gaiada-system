@@ -115,6 +115,8 @@ services:
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
       # WSK-43a: the bucket retention the media-purge job waits out (the SAME variable storage-bootstrap.mjs applies; empty = 1).
       WEBDESK_STORAGE_LOCK_DAYS: ${WEBDESK_STORAGE_LOCK_DAYS:-}
+      # WSK-43a: the browser origins (https://host[:port], comma separated) that may call the public media upload route; the ERP editor's origin. Empty = no CORS headers.
+      WEBDESK_UPLOAD_CORS_ORIGINS: ${WEBDESK_UPLOAD_CORS_ORIGINS:-}
       API_KEY_PEPPER: ${API_KEY_PEPPER}
       # Control-channel CA (WSK-22), fixed 2026-09-01 after a 337+-restart crash loop: `env_file`
       # on a quoted multi-line PEM is what broke, on THIS box specifically to an empty string (see

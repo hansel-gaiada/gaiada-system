@@ -43,6 +43,10 @@ import {
 } from "./media-library-kit";
 import { storageConfig } from "../src/storage/storage.config";
 import { QuotaService } from "../src/media/quota.service";
+import { allowedUploadOrigin, UploadCorsConfigError, uploadCorsOrigins } from "../src/media/upload-cors";
+import { Test } from "@nestjs/testing";
+import { AppModule } from "../src/app.module";
+import { createFastifyAdapter } from "../src/app";
 import { MediaService } from "../src/media/media.service";
 import { DbService } from "../src/db/db.service";
 
@@ -744,81 +748,200 @@ describe("WSK-43a media.uploadToken and POST /v1/t/:tenantSlug/media/upload/:tok
   });
 
   // ==============================================================================================
-  // Upload: CORS (the draft-preview rule: only the token's site's environment domains)
+  // Upload: CORS is configuration (WEBDESK_UPLOAD_CORS_ORIGINS): the ERP editor's origin, not the site's
   // ==============================================================================================
-  describe("upload: CORS is the draft-preview rule", () => {
-    const STAGING = "https://staging.up-a.example.test";
-    const PROD = "https://www.up-a.example.test";
+  describe("upload: CORS allows only the configured ERP origins", () => {
+    const ERP = "https://erp.up-a.example.test";
+    const ERP2 = "https://erp2.up-a.example.test:8443";
+    const SITE = "https://www.up-a.example.test";
     let c: ContentFixture;
+    let prev: string | undefined;
     beforeAll(async () => {
       c = await createContentFixture("cors");
+      // the site's own domains are set, and must NOT be allowed to call: that was the preview rule
       await setDomains(c, { staging: "staging.up-a.example.test", production: "www.up-a.example.test" });
     });
+    const withCors = async (value: string | undefined, fn: () => Promise<void>) => {
+      prev = process.env.WEBDESK_UPLOAD_CORS_ORIGINS;
+      if (value === undefined) delete process.env.WEBDESK_UPLOAD_CORS_ORIGINS;
+      else process.env.WEBDESK_UPLOAD_CORS_ORIGINS = value;
+      try {
+        await fn();
+      } finally {
+        if (prev === undefined) delete process.env.WEBDESK_UPLOAD_CORS_ORIGINS;
+        else process.env.WEBDESK_UPLOAD_CORS_ORIGINS = prev;
+      }
+    };
+    const configured = `${ERP}, ${ERP2}`;
 
-    it("the response echoes an Origin that is https://<domain> of an environment of the token's site (staging and production)", async () => {
-      for (const origin of [STAGING, PROD]) {
+    it("a configured ERP origin is echoed on the POST (201), exactly, with Vary: Origin, never Allow-Credentials", async () => {
+      await withCors(configured, async () => {
+        for (const origin of [ERP, ERP2]) {
+          const t = await mintOk(app, c);
+          const res = await uploadFile(app, c.slug, t.token, buildPng(), { origin });
+          expect(res.statusCode).toBe(201);
+          expect(res.headers["access-control-allow-origin"]).toBe(origin);
+          expect(res.headers.vary).toMatch(/Origin/i);
+          expect(res.headers["access-control-allow-credentials"]).toBeUndefined();
+          expect(res.headers["cache-control"]).toBe("no-store");
+        }
+      });
+    });
+
+    it("a configured origin is echoed on the PREFLIGHT (204): POST, OPTIONS; content-type and x-request-id; 600 s; it spends nothing", async () => {
+      await withCors(configured, async () => {
         const t = await mintOk(app, c);
-        const res = await uploadFile(app, c.slug, t.token, buildPng(), { origin });
-        expect(res.statusCode).toBe(201);
-        expect(res.headers["access-control-allow-origin"]).toBe(origin);
-        expect(res.headers.vary).toMatch(/Origin/i);
+        const ok = await preflight(app, c.slug, t.token, ERP);
+        expect(ok.statusCode).toBe(204);
+        expect(ok.headers["access-control-allow-origin"]).toBe(ERP);
+        expect(ok.headers["access-control-allow-methods"]).toBe("POST, OPTIONS");
+        expect(ok.headers["access-control-allow-headers"]).toBe("content-type, x-request-id");
+        expect(ok.headers["access-control-max-age"]).toBe("600");
+        expect(ok.headers["access-control-allow-credentials"]).toBeUndefined();
+        expect(ok.headers.vary).toMatch(/Origin/i);
+        expect(ok.headers["cache-control"]).toBe("no-store");
+        expect((await preflight(app, c.slug, t.token, ERP)).statusCode).toBe(204); // still redeemable
+        expect((await uploadFile(app, c.slug, t.token, buildPng(), { origin: ERP })).statusCode).toBe(201);
+      });
+    });
+
+    it("an origin that is not exactly a configured one gets NO CORS header (POST and preflight), still with Vary: Origin: the site's own domain, another site, a different port, http, a suffix, a sibling, null, none", async () => {
+      await withCors(configured, async () => {
+        for (const origin of [SITE, "https://staging.up-a.example.test", "https://evil.example", `${ERP}:8443`, "https://erp2.up-a.example.test", "http://erp.up-a.example.test", `${ERP}.evil.example`, `https://x.erp.up-a.example.test`, `${ERP}/`, "*", "null", ""]) {
+          const t = await mintOk(app, c);
+          const pf = await preflight(app, c.slug, t.token, origin || undefined);
+          expect(pf.statusCode, origin).toBe(204);
+          for (const h of ["access-control-allow-origin", "access-control-allow-methods", "access-control-allow-headers", "access-control-max-age"]) expect(pf.headers[h], `${origin} ${h}`).toBeUndefined();
+          expect(pf.headers.vary, origin).toMatch(/Origin/i);
+          const res = await uploadFile(app, c.slug, t.token, buildPng(), { origin: origin || undefined });
+          expect(res.statusCode, origin).toBe(201); // CORS governs who may READ the answer, not who may call
+          expect(res.headers["access-control-allow-origin"], origin).toBeUndefined();
+          expect(res.headers.vary, origin).toMatch(/Origin/i);
+        }
+      });
+    });
+
+    it("the host of a request Origin is compared lower-cased and the CONFIGURED spelling is echoed", async () => {
+      await withCors(configured, async () => {
+        const t = await mintOk(app, c);
+        const res = await uploadFile(app, c.slug, t.token, buildPng(), { origin: "https://ERP.up-a.example.test" });
+        expect(res.headers["access-control-allow-origin"]).toBe(ERP);
+      });
+      await withCors("https://ERP.Up-A.Example.Test", async () => {
+        const t = await mintOk(app, c);
+        expect((await uploadFile(app, c.slug, t.token, buildPng(), { origin: ERP })).headers["access-control-allow-origin"]).toBe(ERP); // the entry was normalised
+      });
+    });
+
+    it("an EMPTY or unset config gives no CORS headers at all, for any origin, the ERP's included (a server-side caller is unaffected)", async () => {
+      for (const value of [undefined, "", "   "]) {
+        await withCors(value, async () => {
+          const t = await mintOk(app, c);
+          const pf = await preflight(app, c.slug, t.token, ERP);
+          expect(pf.statusCode, String(value)).toBe(204);
+          expect(pf.headers["access-control-allow-origin"]).toBeUndefined();
+          expect(pf.headers["access-control-allow-methods"]).toBeUndefined();
+          const res = await uploadFile(app, c.slug, t.token, buildPng(), { origin: ERP });
+          expect(res.statusCode).toBe(201);
+          expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+          const server = await uploadFile(app, c.slug, (await mintOk(app, c)).token, buildPng()); // no Origin header at all
+          expect(server.statusCode).toBe(201);
+        });
       }
     });
 
-    it("no CORS header for any other Origin: another site, a port, http, a suffix, a sibling subdomain, null; and none without an Origin", async () => {
-      for (const origin of ["https://evil.example", `${PROD}:8443`, "http://www.up-a.example.test", "https://www.up-a.example.test.evil.example", "https://x.www.up-a.example.test", "null", ""]) {
-        const t = await mintOk(app, c);
-        const res = await uploadFile(app, c.slug, t.token, buildPng(), { origin: origin || undefined });
-        expect(res.statusCode, origin).toBe(201); // CORS governs who may READ the answer, not who may call
-        expect(res.headers["access-control-allow-origin"], origin).toBeUndefined();
-      }
-    });
-
-    it("an error AFTER the token is proven carries the CORS header too (the site's script can read why it failed); a 404 carries none", async () => {
-      const t = await mintOk(app, c, { bucket: "media", mime: ["image/png"] });
-      const refused = await uploadFile(app, c.slug, t.token, Buffer.from("%PDF-1.4 x"), { contentType: "application/pdf", origin: PROD });
-      expect(refused.statusCode).toBe(415);
-      expect(refused.headers["access-control-allow-origin"]).toBe(PROD);
-      const nf = await uploadFile(app, c.slug, randomBytes(32).toString("base64url"), buildPng(), { origin: PROD });
-      expect(nf.statusCode).toBe(404);
-      expect(nf.headers["access-control-allow-origin"]).toBeUndefined();
-    });
-
-    it("the PREFLIGHT: a redeemable token + an allowed Origin -> 204 with the allow headers; a disallowed Origin -> 204 with none; and it spends nothing", async () => {
-      const t = await mintOk(app, c);
-      const ok = await preflight(app, c.slug, t.token, PROD);
-      expect(ok.statusCode).toBe(204);
-      expect(ok.headers["access-control-allow-origin"]).toBe(PROD);
-      expect(ok.headers["access-control-allow-methods"]).toBe("POST, OPTIONS");
-      expect(ok.headers["access-control-allow-headers"]).toBe("content-type");
-      expect(ok.headers["access-control-max-age"]).toBe("600");
-      expect(ok.headers["cache-control"]).toBe("no-store");
-      const bad = await preflight(app, c.slug, t.token, "https://evil.example");
-      expect(bad.statusCode).toBe(204);
-      expect(bad.headers["access-control-allow-origin"]).toBeUndefined();
-      expect(bad.headers["access-control-allow-methods"]).toBeUndefined();
-      const none = await preflight(app, c.slug, t.token);
-      expect(none.statusCode).toBe(204);
-      expect(none.headers["access-control-allow-origin"]).toBeUndefined();
-      // still unspent after three preflights: the upload works
-      expect((await uploadFile(app, c.slug, t.token, buildPng(), { origin: PROD })).statusCode).toBe(201);
+    it("errors carry the CORS header too, whatever the cause, since it depends on the Origin alone: 415 after the token is proven, the identical 404s, 503 when full", async () => {
+      await withCors(configured, async () => {
+        const t = await mintOk(app, c, { bucket: "media", mime: ["image/png"] });
+        const refused = await uploadFile(app, c.slug, t.token, Buffer.from("%PDF-1.4 x"), { contentType: "application/pdf", origin: ERP });
+        expect(refused.statusCode).toBe(415);
+        expect(refused.headers["access-control-allow-origin"]).toBe(ERP);
+        const unknown = await uploadFile(app, c.slug, randomBytes(32).toString("base64url"), buildPng(), { origin: ERP });
+        const spentToken = await mintOk(app, c);
+        expect((await uploadFile(app, c.slug, spentToken.token, buildPng())).statusCode).toBe(201);
+        const spent = await uploadFile(app, c.slug, spentToken.token, buildPng(), { origin: ERP });
+        const noTenant = await uploadFile(app, "no-such-tenant-slug", randomBytes(32).toString("base64url"), buildPng(), { origin: ERP });
+        for (const r of [unknown, spent, noTenant]) {
+          expect(r.statusCode).toBe(404);
+          expect(r.headers["access-control-allow-origin"]).toBe(ERP);
+          expect(r.headers.vary).toMatch(/Origin/i);
+          expect(r.body).toBe(unknown.body); // still one identical 404
+        }
+      });
     });
 
     it("the preflight of an unknown, expired, spent or another tenant's token is the same 404 as the upload's (no oracle through OPTIONS)", async () => {
-      const spent = await mintOk(app, c);
-      expect((await uploadFile(app, c.slug, spent.token, buildPng())).statusCode).toBe(201);
-      const expired = await mintOk(app, c);
-      await expireUploadToken(c, expired.tokenId);
-      const foreign = await mintOk(app, fx);
-      const reference = await uploadFile(app, c.slug, randomBytes(32).toString("base64url"), buildPng());
-      for (const token of [randomBytes(32).toString("base64url"), "short", spent.token, expired.token, foreign.token]) {
-        const r = await preflight(app, c.slug, token, PROD);
-        expect(r.statusCode).toBe(404);
-        expect(r.body).toBe(reference.body);
-        expect(r.headers["access-control-allow-origin"]).toBeUndefined();
-      }
-      expect((await preflight(app, "no-such-tenant-slug", spent.token, PROD)).statusCode).toBe(404);
+      await withCors(configured, async () => {
+        const spent = await mintOk(app, c);
+        expect((await uploadFile(app, c.slug, spent.token, buildPng())).statusCode).toBe(201);
+        const expired = await mintOk(app, c);
+        await expireUploadToken(c, expired.tokenId);
+        const foreign = await mintOk(app, fx);
+        const reference = await uploadFile(app, c.slug, randomBytes(32).toString("base64url"), buildPng());
+        for (const token of [randomBytes(32).toString("base64url"), "short", spent.token, expired.token, foreign.token]) {
+          const r = await preflight(app, c.slug, token, ERP);
+          expect(r.statusCode).toBe(404);
+          expect(r.body).toBe(reference.body);
+          expect(r.headers["access-control-allow-methods"]).toBeUndefined(); // no allow-list for a token that cannot upload
+        }
+        expect((await preflight(app, "no-such-tenant-slug", spent.token, ERP)).statusCode).toBe(404);
+      });
     });
+
+    it("the config is validated: every malformed entry is refused naming the variable; good lists are normalised and de-duplicated", () => {
+      expect(uploadCorsOrigins({} as NodeJS.ProcessEnv)).toEqual([]);
+      expect(uploadCorsOrigins({ WEBDESK_UPLOAD_CORS_ORIGINS: "  " } as NodeJS.ProcessEnv)).toEqual([]);
+      expect(uploadCorsOrigins({ WEBDESK_UPLOAD_CORS_ORIGINS: "https://ERP.Gaiada.Online, https://erp.gaiada.com:8443,https://erp.gaiada.online" } as NodeJS.ProcessEnv)).toEqual(["https://erp.gaiada.online", "https://erp.gaiada.com:8443"]);
+      for (const bad of [
+        "http://erp.gaiada.online",
+        "erp.gaiada.online",
+        "https://erp.gaiada.online/",
+        "https://erp.gaiada.online/path",
+        "https://erp.gaiada.online?x=1",
+        "https://erp.gaiada.online#f",
+        "https://*.gaiada.online",
+        "*",
+        "null",
+        "https://",
+        "https://erp gaiada.online",
+        "https://user@erp.gaiada.online",
+        "https://erp.gaiada.online:0",
+        "https://erp.gaiada.online:65536",
+        "https://erp.gaiada.online:080",
+        "https://erp.gaiada.online:",
+        "https://-bad.example",
+        "https://erp..gaiada.online",
+        "https://erp.gaiada.online,,https://erp.gaiada.com",
+        "https://erp.gaiada.online,",
+        "https://erp.gaiada.online;https://erp.gaiada.com",
+      ]) {
+        let err: unknown;
+        try {
+          uploadCorsOrigins({ WEBDESK_UPLOAD_CORS_ORIGINS: bad } as NodeJS.ProcessEnv);
+        } catch (e) {
+          err = e;
+        }
+        expect(err, bad).toBeInstanceOf(UploadCorsConfigError);
+        expect((err as Error).message, bad).toContain("WEBDESK_UPLOAD_CORS_ORIGINS");
+        expect((err as Error).message, bad).toContain("Refusing to boot");
+      }
+      expect(allowedUploadOrigin("https://erp.gaiada.online", { WEBDESK_UPLOAD_CORS_ORIGINS: "https://erp.gaiada.online" } as NodeJS.ProcessEnv)).toBe("https://erp.gaiada.online");
+      expect(allowedUploadOrigin(undefined, { WEBDESK_UPLOAD_CORS_ORIGINS: "https://erp.gaiada.online" } as NodeJS.ProcessEnv)).toBeNull();
+    });
+
+    it("a malformed config REFUSES TO BOOT the app, naming the variable, and leaves nothing behind", async () => {
+      const prevValue = process.env.WEBDESK_UPLOAD_CORS_ORIGINS;
+      process.env.WEBDESK_UPLOAD_CORS_ORIGINS = "https://erp.gaiada.online/upload";
+      try {
+        const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+        const booting = moduleRef.createNestApplication<NestFastifyApplication>(createFastifyAdapter(), { logger: false });
+        await expect(booting.init()).rejects.toThrow(/WEBDESK_UPLOAD_CORS_ORIGINS.*not allowed.*Refusing to boot/);
+        await booting.close();
+      } finally {
+        if (prevValue === undefined) delete process.env.WEBDESK_UPLOAD_CORS_ORIGINS;
+        else process.env.WEBDESK_UPLOAD_CORS_ORIGINS = prevValue;
+      }
+    }, 30_000);
   });
 
   // ==============================================================================================
