@@ -35,6 +35,7 @@ import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { validateZoneBEvent, type ScheduleFiredData } from "./zoneb-event-schema";
 import { recordZoneBEvent } from "./zoneb-events.service";
 import { requestScheduleSettle } from "./scheduled-rebuilds.service";
+import { maybeFileLeadFromFormReceived } from "./form-received-lead";
 
 @Controller("api/:tenantId/modules/webdev")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
@@ -65,6 +66,11 @@ export class ZoneBEventsController {
         const d = checked.value.data as unknown as ScheduleFiredData;
         requestScheduleSettle(tenantId, { siteId: d.siteId, reopenApprovalIds: d.approvalId ? [d.approvalId] : [] });
       }
+    }
+    // M5-L4: a form.received fact may become a lead (flag-gated, idempotent, fire-and-forget; see the file).
+    // Also on a replay: the insert is idempotent and a replay is the retry path.
+    if (checked.value.kind === "form.received") {
+      void maybeFileLeadFromFormReceived(tenantId, checked.value);
     }
     // 200 on an idempotent replay — same status-split doctrine `WebdevController.provision()`
     // already uses for its own "existing" outcome: the loser of a race (or a genuine retry) gets
