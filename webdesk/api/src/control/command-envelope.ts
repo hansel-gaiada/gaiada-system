@@ -1,6 +1,6 @@
 // M3 T5a — the WSK-41 command envelope, shared by the older WSK-21 commands (keys, lifecycle,
-// schema.apply, releases). content-commands.service.ts keeps its own private copy of this logic
-// (T5a does not touch it); the duplication is a follow-up.
+// schema.apply, releases). M3 T8: the content commands (content-commands.service.ts) run in it too; they
+// used to carry a private copy of this logic, now they pass `mapError` for their own constraint names.
 //
 //   1. idempotency.begin()  — claims the scope key in its own short committed transaction. A replay
 //      returns the stored response (`replayed: true`) and writes a `control.<cmd>.replay` audit row,
@@ -24,7 +24,8 @@
 // connection out of the pool while it holds this transaction's one: ten blocked approvals would
 // hold ten connections, and an effect waiting for an eleventh would never get it.
 //
-// T5b (promotion, privacy) uses this envelope too, with two small generic extensions:
+// T5b (promotion, privacy) uses this envelope too, with two small generic extensions (T8 adds a third,
+// `mapError`, for the content commands):
 //   - `impactClass`: a command that is not in COMMAND_REGISTRY (the privacy commands live in their own
 //     shadow registry) names its own impact class. Without it the class comes from COMMAND_REGISTRY, and
 //     a command in neither is refused loudly rather than treated as unguarded.
@@ -87,6 +88,13 @@ export interface EnvelopeInput<R extends object> {
    * record is the body. Runs BEFORE the replay audit row, so a refusal writes no row.
    */
   resolveReplay?: (stored: unknown) => R | Promise<R>;
+  /**
+   * Translates an error the transaction threw into the problem to answer with (a command's own database
+   * constraint names, content-commands.service.ts's mapDbError). Runs after the idempotency claim was
+   * released; what it returns still goes through the envelope's own ws4 mapping, so a mapper may leave
+   * an error it does not know untouched.
+   */
+  mapError?: (err: unknown) => unknown;
 }
 
 /** The single-use refusal. Also what a concurrent reuse of one approval gets when it loses the race. */
@@ -199,7 +207,7 @@ export class CommandEnvelope {
       });
     } catch (err) {
       await this.idempotency.release(begin.claim);
-      throw mapEnvelopeError(err);
+      throw mapEnvelopeError(input.mapError ? input.mapError(err) : err);
     }
 
     if (after) {

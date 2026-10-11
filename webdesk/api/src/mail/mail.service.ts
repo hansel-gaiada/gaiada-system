@@ -3,7 +3,7 @@
 // no lower-level "send arbitrary mail" method exposed, and NEITHER wrapper accepts a `from` or
 // domain override (THE IDENTITY RULE — identity.ts). replyTo is derived internally by
 // sendNotification, never accepted as an open parameter from a caller for sendAutoresponder.
-import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { DbService } from "../db/db.service";
 import { MailTemplatesService } from "./mail-templates.service";
@@ -13,6 +13,7 @@ import { renderTemplate, stripTags } from "./template-renderer";
 import { assertNotZoneADomain, resolveFromIdentity } from "./identity";
 import { mailConfig } from "./mail.config";
 import { redisConnectionOptions } from "../queue/redis-connection";
+import { closeBullmq } from "../queue/bullmq-shutdown";
 import type { MailJobData } from "./mail-job";
 
 export type SendTemplateInput = {
@@ -27,6 +28,7 @@ export type EnqueueResult = { mailLogId: string; status: "queued" | "suppressed"
 
 @Injectable()
 export class MailService implements OnModuleDestroy {
+  private readonly logger = new Logger(MailService.name);
   readonly queue: Queue<MailJobData>;
 
   constructor(
@@ -36,6 +38,10 @@ export class MailService implements OnModuleDestroy {
     private readonly mailLog: MailLogRepository,
   ) {
     this.queue = new Queue<MailJobData>(mailConfig.queueName, { connection: redisConnectionOptions() as never });
+    // BullMQ forwards its connection's errors (an unreachable or restarting Redis) to the Queue as an
+    // 'error' event, and an EventEmitter 'error' with no listener THROWS, inside a promise handler nobody
+    // awaits: an unhandled rejection. Same listener the scheduler's queue and worker carry.
+    this.queue.on("error", (err) => this.logger.warn(`mail queue error: ${String(err)}`));
   }
 
   private async enqueueRendered(
@@ -128,6 +134,6 @@ export class MailService implements OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    await this.queue.close();
+    await closeBullmq(this.queue, (err) => this.logger.warn(`mail queue close failed: ${String(err)}`));
   }
 }

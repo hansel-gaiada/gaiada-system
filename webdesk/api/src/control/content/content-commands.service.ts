@@ -11,7 +11,8 @@
 // honest. A pre-0009 row (head_version = 0) is ADOPTED on its first write: version N is written from
 // its current projection, and published_version follows its publish_state.
 //
-// ONE TRANSACTION PER COMMAND, AND THE AUDIT ROW GOES FIRST. The audit row is the FIRST statement of
+// ONE TRANSACTION PER COMMAND, AND THE AUDIT ROW GOES FIRST (the shared CommandEnvelope, ../command-envelope.ts,
+// runs it; M3 T8 replaced this file's private copy of that logic). The audit row is the FIRST statement of
 // the command's transaction, so on a HIGH command the WS4 approval id is CLAIMED (0009's
 // ux_audit_entries_ws4_once) BEFORE any side effect. A concurrent second use of the same approval
 // blocks on that index until the first commits, then fails with 23505 and rolls back having changed
@@ -31,11 +32,11 @@ import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { DbService } from "../../db/db.service";
-import { AuditService, type AuditArgs } from "../../audit/audit.service";
-import { COMMAND_REGISTRY, type CommandName } from "../command-types";
+import type { AuditArgs } from "../../audit/audit.service";
+import type { CommandName } from "../command-types";
+import { CommandEnvelope, type EffectOutcome } from "../command-envelope";
 import type { EditorialPrincipal } from "../auth/editorial-principal";
 import { computeCommandHash } from "../auth/ws4-assertion";
-import { PgIdempotencyStore } from "../idempotency/pg-idempotency-store";
 import { TenantWebhookDispatcherService } from "../../tenant-webhooks/tenant-webhook-dispatcher.service";
 import type {
   TenantWebhookContentEventKind,
@@ -230,20 +231,13 @@ export function mapDbError(err: unknown): unknown {
   }
 }
 
-interface EffectOutcome<R> {
-  result: R;
-  /** Post-commit, fail-soft side effects (webhooks, cache-tag log). */
-  after?: () => Promise<void>;
-}
-
 @Injectable()
 export class ContentCommandsService {
   private readonly logger = new Logger(ContentCommandsService.name);
 
   constructor(
     private readonly db: DbService,
-    private readonly audit: AuditService,
-    private readonly idempotency: PgIdempotencyStore,
+    private readonly envelope: CommandEnvelope,
     private readonly webhooks: TenantWebhookDispatcherService,
   ) {}
 
@@ -279,75 +273,27 @@ export class ContentCommandsService {
   }
 
   // ==============================================================================================
-  // The command envelope: idempotency -> one transaction (audit FIRST, effect, idempotency
-  // response) -> post-commit fail-soft side effects.
+  // The command envelope (../command-envelope.ts): idempotency -> one transaction (audit FIRST, effect,
+  // idempotency response) -> post-commit fail-soft side effects. This adapter only names the command's
+  // scope and keys; mapDbError turns the content constraint names into their problems.
   // ==============================================================================================
-  private async execute<R extends object>(
+  private execute<R extends object>(
     ctx: EditorialCommandContext,
     requestArgs: Record<string, unknown>,
     auditArgs: AuditArgs,
     effect: (client: PoolClient) => Promise<EffectOutcome<R>>,
   ): Promise<R & { replayed: boolean }> {
-    const meta = COMMAND_REGISTRY[ctx.command];
-    const ws4ApprovalId = meta.impactClass === "high" ? ctx.ws4ApprovalId : null;
-    if (meta.impactClass === "high" && !ws4ApprovalId) {
-      // Defence in depth: CommandAuthorizationGuard already refuses a HIGH command without a
-      // verified WS4 assertion; the service never runs one without an approval id to claim.
-      throw new ControlProblem(403, "ws4-approval-required", "WS4 approval required", `${ctx.command} is HIGH-impact and needs a WS4 approval.`);
-    }
-
-    const requestHash = computeCommandHash(ctx.command, requestArgs);
-    const scopeKey = `${ctx.tenant.slug}:${ctx.command}:${ctx.idempotencyKey}`;
-    const begin = await this.idempotency.begin<R>({ tenantId: ctx.tenant.id, scopeKey, command: ctx.command, requestHash });
-
-    if (begin.kind === "replay") {
-      // A replay changes nothing; it is recorded as such (`.replay` rows are outside the WS4
-      // single-use index).
-      await this.db
-        .withTenant(ctx.tenant.id, (db) =>
-          db.transaction((client) =>
-            this.audit.record(client, {
-              tenantId: ctx.tenant.id,
-              actor: ctx.principal.sub,
-              action: `control.${ctx.command}.replay`,
-              args: auditArgs,
-              ws4ApprovalId,
-            }),
-          ),
-        )
-        .catch((err) => this.logger.warn(`replay audit row failed for ${ctx.command}: ${String(err)}`));
-      return { ...(begin.response as R), replayed: true };
-    }
-
-    let after: (() => Promise<void>) | undefined;
-    let result: R;
-    try {
-      result = await this.db.withTenant(ctx.tenant.id, (db) =>
-        db.transaction(async (client) => {
-          // FIRST statement: claims the WS4 approval id (unique over non-replay rows) before any
-          // side effect. A concurrent reuse blocks here, then fails and rolls back untouched.
-          await this.audit.record(client, {
-            tenantId: ctx.tenant.id,
-            actor: ctx.principal.sub,
-            action: `control.${ctx.command}`,
-            args: auditArgs,
-            ws4ApprovalId,
-          });
-          const outcome = await effect(client);
-          after = outcome.after;
-          await this.idempotency.complete(client, begin.claim, outcome.result);
-          return outcome.result;
-        }),
-      );
-    } catch (err) {
-      await this.idempotency.release(begin.claim);
-      throw mapDbError(err);
-    }
-
-    if (after) {
-      await after().catch((err) => this.logger.warn(`post-commit side effect failed for ${ctx.command}: ${String(err)}`));
-    }
-    return { ...result, replayed: false };
+    return this.envelope.run<R>({
+      command: ctx.command,
+      scope: { kind: "tenant", tenantId: ctx.tenant.id },
+      scopeKey: `${ctx.tenant.slug}:${ctx.command}:${ctx.idempotencyKey}`,
+      requestHash: computeCommandHash(ctx.command, requestArgs),
+      actor: ctx.principal.sub,
+      auditArgs,
+      ws4ApprovalId: ctx.ws4ApprovalId,
+      effect,
+      mapError: mapDbError,
+    });
   }
 
   // ==============================================================================================
