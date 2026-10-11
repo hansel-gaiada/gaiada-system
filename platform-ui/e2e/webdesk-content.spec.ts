@@ -1,4 +1,5 @@
 import { test, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 
 // WSK-44 — the Website workspace, against the STUBBED WSK-59 BFF (e2e/webdesk-stub/, run by
 // playwright.webdesk.config.ts). Every row of write-plane design §10's states table is reached here;
@@ -41,7 +42,7 @@ async function loginAs(page: Page, context: BrowserContext, email: string) {
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL("**/");
   // Web Dev (dept-1) lives under co-agency — the cookie is the established workaround (webdev-change-requests.spec.ts).
-  await context.addCookies([{ name: "gaiada_tenant", value: "co-agency", url: page.url() }]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 const main = (page: Page) => page.locator(".dept-shell__main");

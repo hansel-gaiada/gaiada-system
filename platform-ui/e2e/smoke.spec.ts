@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 
 // P3-12: a minimal CI smoke check run against the REAL BUILT app (`next
 // build` + `next start` in CI — see playwright.config.ts), not `next dev`.
@@ -14,11 +15,7 @@ test("board view renders without a page error @smoke", async ({ page, context })
   await page.waitForURL("**/");
 
   await context.addCookies([
-    {
-      name: "gaiada_tenant",
-      value: "co-agency",
-      url: page.url(),
-    },
+    tenantCookie(page.url()),
   ]);
 
   const pageErrors: Error[] = [];

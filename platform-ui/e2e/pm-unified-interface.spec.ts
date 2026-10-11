@@ -1,4 +1,5 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 
 // Coverage for commit c89fed6 ("one project-management interface, on every surface that shows
 // it") — deliberately deferred and flagged in that commit's own message: "e2e specs don't yet
@@ -28,7 +29,7 @@ async function loginAs(page: Page, context: BrowserContext, email: string): Prom
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-  await context.addCookies([{ name: "gaiada_tenant", value: "co-agency", url: page.url() }]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 const HANSEL = "hansel@gaiada.com"; // demo-hansel: elevated (platform_admin + group_executive)

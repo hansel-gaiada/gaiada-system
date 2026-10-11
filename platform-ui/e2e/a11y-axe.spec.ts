@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { tenantCookie } from "./appCookies";
 
 // A11Y-AUTO-01 — automated axe-core sweeps of the surfaces that recently gained hand-written a11y
 // fixes (the two drawers' focus traps, the streaming `aria-live` containment on Message.tsx, the
@@ -55,7 +56,7 @@ async function pinTheme(page: Page, theme: Theme) {
       value: JSON.stringify({ density: "comfortable", width: "wide", theme, assistantRailCollapsed: false }),
       url: page.url(),
     },
-    { name: "gaiada_tenant", value: "co-agency", url: page.url() },
+    tenantCookie(page.url()),
   ]);
 }
 

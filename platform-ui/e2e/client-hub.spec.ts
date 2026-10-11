@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 
 // ⚠ EVERY test here pins `gaiada_tenant` to `co-agency` before navigating, and it is load-bearing.
 //
@@ -14,7 +15,7 @@ import { test, expect, type Page } from "@playwright/test";
 // making `CLIENTS` tenant-scoped would change the `/clients` list for every existing spec.)
 async function openAsAgency(page: Page, path: string) {
   await page.goto("/");
-  await page.context().addCookies([{ name: "gaiada_tenant", value: "co-agency", url: page.url() }]);
+  await page.context().addCookies([tenantCookie(page.url())]);
   await page.goto(path);
 }
 

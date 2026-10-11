@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 
 // LMS L3 — the HOD authoring surface, driven against the rendered app under DEMO_MODE.
 //
@@ -13,8 +14,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Learning authoring (LMS L3)", () => {
   test.beforeEach(async ({ page, context }) => {
     await context.addCookies([
-      { name: "gaiada_tenant", value: "co-agency",
-        url: new URL("/", test.info().project.use.baseURL ?? "http://localhost:3005").toString() },
+      tenantCookie(new URL("/", test.info().project.use.baseURL ?? "http://localhost:3005").toString()),
     ]);
     await page.goto("/");
   });

@@ -1,4 +1,5 @@
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import { tenantCookie } from "./appCookies";
 
 // MI-05 — Web Dev console Requests tab (Build group), over the demo fixture
 // (src/lib/demoWebdevChangeRequests.ts). Self-contained logins (no shared storageState) so this one
@@ -28,7 +29,7 @@ async function loginAs(page: Page, context: BrowserContext, email: string) {
   // for whom the switcher itself does not even render (`accessibleCompanies` narrows correctly to
   // just co-agency, so `canSwitchCompany` is false for exactly one option). Setting the cookie
   // directly is the established workaround for exactly this (smoke.spec.ts / a11y-axe.spec.ts).
-  await context.addCookies([{ name: "gaiada_tenant", value: "co-agency", url: page.url() }]);
+  await context.addCookies([tenantCookie(page.url())]);
 }
 
 const REQUESTS_URL = "/departments/dept-1/requests";
