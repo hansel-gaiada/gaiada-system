@@ -225,6 +225,7 @@ export interface PublishRequestRow {
   status: ApprovalStatus;
   createdAt: string;
   itemIds: string[];
+  items: { itemId: string; version: number }[];
   executionStatus: ExecState | null;
 }
 

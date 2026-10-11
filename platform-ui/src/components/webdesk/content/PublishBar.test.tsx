@@ -34,7 +34,7 @@ const build = (state: BuildStatus["build"] extends infer B ? (B extends { state:
 
 function setup(over: Partial<React.ComponentProps<typeof PublishBar>> = {}) {
   const props = {
-    scope: SCOPE, item: item(), version: 3, dirty: false, blocked: null, initialPending: null as { approvalId: string }[] | null,
+    scope: SCOPE, item: item(), version: 3, dirty: false, blocked: null, initialPending: null as { approvalId: string; version?: number | null }[] | null,
     pendingProblem: null as string | null, initialBuild: null as BuildStatus | null, buildProblem: null as string | null, stagingUrl: null as string | null,
     onItemChanged: vi.fn(), onUnavailable: vi.fn(), ...over,
   };
@@ -187,6 +187,11 @@ describe("PublishBar: request -> approval -> published -> staging", () => {
     expect(a.withdrawPublishRequestAction).toHaveBeenCalledWith(SCOPE, "ap-9");
     expect(screen.queryByTestId("awaiting-approval")).toBeNull();
     expect(screen.getByTestId("publish-message").textContent).toMatch(/withdrawn/);
+  });
+
+  it("a pending request restored after a reload with a known version reads 'Publish of v3 was requested'", () => {
+    setup({ initialPending: [{ approvalId: "ap-9", version: 3 }] });
+    expect(screen.getByTestId("awaiting-approval").textContent).toContain("Publish of v3 was requested");
   });
 
   it("Withdraw on a backend without the route says so and leaves the request showing", async () => {

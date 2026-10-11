@@ -395,6 +395,7 @@ test("STATE pending approval -> Withdraw; the pending request survives a reload"
 
   await page.reload();
   await expect(page.getByTestId("awaiting-approval")).toContainText("Awaiting approval #ap-0001");
+  await expect(page.getByTestId("awaiting-approval")).toContainText("Publish of v3 was requested");
 
   await page.getByRole("button", { name: "Withdraw" }).click();
   await expect(page.getByTestId("awaiting-approval")).toHaveCount(0);
