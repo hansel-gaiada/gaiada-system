@@ -1995,6 +1995,67 @@ produces the tenant webhook.
 boot, shutdown, config) and `migrations/tests/0012_content_schedules.test.mjs` (also in `qa/linux-gate.sh`'s
 `migrations` suite and the CI `webdesk-api` job). They need Postgres and Redis like the rest of the suite.
 
+## Editorial review (M5-W2b, PROTOTYPED) — `src/control/editorial/*`
+
+The writers' room review flow (design: `docs/plans/2026-10-11-m5-writers-room-design.md` section 4). Tables are migration
+`0016` (W2a). **Review is OFF by default**: a collection with no `editorial_policies` row is exactly "off", and every item
+command then answers **409 `review-not-enabled`** and changes nothing. `editorial.policySet` is the way in.
+
+| Route (under `/control/v1/tenants/:tenantSlug/sites/:siteId`) | Command | Class / scope | Body |
+|---|---|---|---|
+| `POST content/items/:itemId/editorial/submit` | `editorial.submit` | medium / operate | `{ version }` (the head) |
+| `POST .../editorial/withdraw` | `editorial.withdraw` | medium / operate | `{}` |
+| `POST .../editorial/request-changes` | `editorial.requestChanges` | medium / operate | `{ version, note }` |
+| `POST .../editorial/seo-signoff` | `editorial.seoSignoff` | medium / operate | `{ version }` |
+| `POST .../editorial/approve` | `editorial.approve` | medium / operate | `{ version }` |
+| `POST .../editorial/assign` | `editorial.assign` | medium / operate | any of `{ authorSub, dueAt, plannedPublishAt, briefRef }`; `null` clears a date or the brief |
+| `POST .../editorial/comments` | `editorial.comment` | medium / operate | `{ version, anchor?, body }` (201) |
+| `POST .../editorial/comments/:commentId/resolve` | `editorial.commentResolve` | medium / operate | `{}` |
+| `PUT collections/:key/editorial-policy` | `editorial.policySet` | medium / operate | `{ reviewRequired, seoSignoffRequired? }` |
+| `GET editorial/board?state&collection&authorSub&dueBefore&cursor&limit` | `editorial.board` | read / read | items in the flow, per-state `counts`, the site's `policies` |
+| `GET content/items/:itemId/editorial` | `editorial.history` | read / read | state, `events` (oldest first), `comments`, `seoSnapshot` |
+
+`item.get` gains a top-level `editorial` member and every `item.list` row gains `editorial` (plus a `?reviewState=` filter);
+both are control-plane only. Every write needs an `Idempotency-Key` and an editorial assertion, writes its audit row first
+(`control.editorial.<cmd>`), and replays with `replayed: true`. None is on `CLIENT_EDITOR_COMMANDS`: a client editor gets
+`403 client-command-not-allowed`. No tenant webhook event is emitted.
+
+State machine (`editorial-model.ts`, walked pair by pair in `test/editorial-state-machine.spec.ts`): `draft` and
+`changes_requested` -> **submit** -> `in_review`; `in_review` -> **withdraw** -> `draft`, **requestChanges** ->
+`changes_requested`, **approve** -> `approved`; **seoSignoff** stamps a version and leaves the state. Any other pair is
+**409 `review-state-conflict`** `{ currentState }`. Review is per immutable version: acting on a version other than the head
+(submit) or the one in review (the rest) is **409 `review-version-mismatch`**; a collection that requires a sign-off refuses
+approval of a version that was not signed (**409 `seo-signoff-required`**). A new version written during review keeps the state
+and moves `submitted_version` to the new head (an older sign-off stops counting); one written after approval returns the item to
+`draft` and leaves `approved_version` as it was. `policySet` with review off clears both flags; sign-off on with review off is a 400.
+
+WebDesk enforces on its own, besides the ERP's Cerbos: approve and sign-off are **human** decisions (an `agent` or `automation`
+principal gets **403 `review-principal-not-allowed`**), and **maker != checker**: the approver may not be the creator of the
+version being approved (**403 `review-self-approval`**, against `content_versions.created_by`). The `editorial_events.kind`
+vocabulary is `review.*` (`EDITORIAL_EVENT_KINDS`); `/v1` never reads these tables (`test/editorial-delivery-isolation.spec.ts`).
+The publish gate that makes an unapproved version unpublishable is W2c (next section).
+
+### The publish gate (M5-W2c, PROTOTYPED) — `src/control/editorial/review-gate.ts`
+
+On a collection whose policy has review ON, the only version that may go in front of a production key is the one in
+`editorial_items.approved_version`, compared to the EXACT version being published: not the head (promotion import and
+rollback append versions without the review hooks, so the head can move under an approved item) and not the state alone
+(an edit after approval returns the item to `draft`, and `approved_version` stays publishable). No review row, or no approved
+version, is refused. Where it runs, always under the item locks and inside the command's own transaction:
+
+| Path | When | Refusal |
+|---|---|---|
+| `content.publish` | after the WS4 claim (the envelope's audit row) and D62's client-path check, before any effect | **409 `review-not-approved`** `{ items: [{ itemIndex, itemId, version, approvedVersion }], total }` for the WHOLE batch; the transaction (claim included) rolls back |
+| `content.schedule` with `publishAt` | the same | the same; a takedown-only schedule (`publishAt: null`) is not gated |
+| scheduler, due version swap (WSK-61 step 2) | at fire time, after the composition re-check | the swap row is marked failed, `fail_reason = "review-not-approved: version N is not the approved version (approved: M \| nothing is approved)"`, counted in `swapsFailed`; the live version keeps serving |
+
+It applies to every principal class, client editors included (a client cannot approve, so a client's self-publish on a
+review-required collection needs an agency approval first; D62 still runs first and independently). Review OFF (no
+policy row, the default) is one policy read and nothing else. Not gated: `content.unpublish`, `content.promote`,
+`content.rollback`. A non-live item's scheduled publish (step 1) cannot be re-checked at fire time: the frozen `/v1` read
+path shows it by time at `publish_at`, before any tick; it was gated when it was scheduled. Proof:
+`test/editorial-publish-gate.spec.ts`.
+
 ## Draft preview (WSK-46) — `src/control/content/preview-token-*`, `src/delivery/preview-*`
 
 Owner ruling WSK-D52: a draft preview is an instant page **on the site**. The site's page fetches the draft from

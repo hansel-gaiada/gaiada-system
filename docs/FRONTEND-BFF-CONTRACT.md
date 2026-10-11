@@ -4978,7 +4978,7 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | POST | `/sites/:ts/:site/collections/:collectionKey/items` | `…:create` | **201** `ItemWriteResult` |
 | PUT (and `PATCH`, the MCP hub's alias) | `/sites/:ts/:site/items/:itemId` | `…:update` | 200 `ItemWriteResult` |
 | POST | `/sites/:ts/:site/items/:itemId/restore` | `…:update` | 200 `ItemWriteResult` |
-| POST | `/sites/:ts/:site/publish-requests` | `…:request_publish` | **202** `{approvalId,command,itemCount}` |
+| POST | `/sites/:ts/:site/publish-requests` | `…:request_publish` | **202** `{approvalId,command,itemCount}`; **409 `review-not-approved`** (M5-W2c, BUILT) when an item's collection requires editorial review and the requested version is not the approved one: nothing is filed |
 | GET | `/sites/:ts/:site/publish-requests?status=pending` (WSK-44b) | `…:request_publish` (the right that filed it) | 200 `{requests:[{approvalId, status, createdAt, itemIds:[…], items:[{itemId,version}], executionStatus\|null}]}`: the CALLER'S OWN `origin='webdesk'` publish/schedule approvals for THIS site, newest first, at most 100. `status` = `pending` (default) · `approved` · `rejected` · `cancelled` · `all`; anything else is 400 `invalid_request`, as is any other query key. `items` carries the requested version per item (what the editor shows after a reload). `executionStatus` is the approval's `execution_status` (`not_applicable` while pending or withdrawn, then `pending`·`executing`·`executed`·`failed`). Behind the same cross-company wall (`resolveEditableSite`): a foreign site is the uniform 404 `site-not-found`. Only `requested_by = caller` rows are ever returned, so it reveals no other user's request |
 | POST | `/sites/:ts/:site/publish-requests/:approvalId/withdraw` | `…:request_publish` (the right that filed it) | 200 `{approvalId, status:"cancelled"}` |
 | POST | `/sites/:ts/:site/items/:itemId/unpublish` | `…:unpublish` | 200 `{item,replayed}` |
@@ -5046,6 +5046,18 @@ typed 404 `item-not-found`/`version-not-found`, 409 `item-deleted`), authorizes 
 `unpublishAt` is given) and returns **202 `{approvalId}`**. It **never calls WebDesk's publish**. Execution happens at
 `decide()` in the Approvals inbox, as the decider (maker ≠ checker; a publisher may approve their own single-item,
 non-scheduled publish, R4); see §9 row `automation-approvals` (WSK-66). The UI shows "Awaiting approval #…" and polls the approval.
+
+**The editorial review gate (M5-W2c, BUILT; writers' room design `docs/plans/2026-10-11-m5-writers-room-design.md` 4.5).**
+On a collection where review is ON, WebDesk publishes only the EXACT approved version (`editorial.approvedVersion` on
+`item.get`), checked inside `content.publish` / `content.schedule` after the WS4 claim and D62's client check, and again
+by the scheduler before a queued version swap; a refusal is **409 `review-not-approved`** for the whole batch, the claim
+rolls back, and the approval row ends `failed` with `webdesk_refused: 409 review-not-approved`. `publish-requests` refuses
+EARLY with the same problem, after authorization and before anything is filed:
+`{type:"…/errors/review-not-approved", title, status:409, detail, items:[{itemIndex,itemId,version,approvedVersion|null}], total}`.
+A takedown-only schedule (`unpublishAt` without `publishAt`) is not gated, and review OFF (the default) changes nothing.
+The early check is advisory (the review state can move before `decide()`, and the M1 importer files without it); WebDesk's
+gate is the authority. The approvals detail page (`WebdeskPublishSummary`) shows per item whether the requested version is the
+approved one and warns before the approver decides; an `item.get` without the `editorial` member reads as "unknown".
 
 ### Withdrawing a request, and the approvals façade
 

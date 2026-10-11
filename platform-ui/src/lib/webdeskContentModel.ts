@@ -153,11 +153,30 @@ export interface Lint {
   unavailable?: string;
 }
 
+/** M5-W2b `item.get`'s `editorial` member, narrowed to what the UI reads (M5-W2c: the approver's view). Review data is
+ *  control-plane only; `/v1` never carries it. */
+export interface ItemEditorial {
+  /** Review is ON for the item's collection: only `approvedVersion` can be published (WebDesk's publish gate). */
+  reviewRequired: boolean;
+  /** draft | in_review | changes_requested | approved (an item the flow never touched reads as draft). */
+  state: string;
+  /** The ONE version that may go live on a review-required collection; null = nothing is approved. */
+  approvedVersion: number | null;
+}
+
 export interface ItemDetail {
   item: ItemRef;
   version: VersionContent;
   group: GroupMember[];
   lint: Lint;
+  /** Absent when WebDesk sends no `editorial` member (a WebDesk older than M5-W2b): "unknown", never "not required". */
+  editorial?: ItemEditorial;
+}
+
+/** M5-W2c: would WebDesk's publish gate refuse publishing `version`? null = cannot tell (no review data). */
+export function reviewBlocks(editorial: ItemEditorial | undefined, version: number): boolean | null {
+  if (!editorial) return null;
+  return editorial.reviewRequired && editorial.approvedVersion !== version;
 }
 
 export interface VersionRow {
@@ -561,11 +580,16 @@ const REASON_COPY: Record<string, string> = {
   "editorial-keys-not-configured": "WebDesk's editorial signing is not configured.",
   "principal_unresolvable": "The approver's account could not be linked to an editorial identity.",
   "contract-major-change": "The change needs a major contract version, which is not allowed here.",
+  // M5-W2c: WebDesk's publish gate (and the BFF's early refusal) on a review-required collection.
+  "review-not-approved": "This collection needs editorial review, and that version is not the approved one. Get it approved, or publish the approved version.",
 };
 
 export function describeReasonToken(token: string | null | undefined): string {
   if (!token) return "No reason was recorded.";
-  // The executor may prefix its own words (`failed: version-conflict`); match on the typed token.
+  // The executor may prefix its own words (`failed: version-conflict`); match on the typed token. A Zone B refusal is
+  // recorded as `webdesk_refused: <status> <slug>` (WSK-66): the slug is the typed token.
+  const refused = /^webdesk_refused:\s*\d{3}\s+([a-z0-9][a-z0-9_-]*)$/i.exec(token.trim());
+  if (refused && REASON_COPY[refused[1]]) return REASON_COPY[refused[1]];
   const bare = token.replace(/^[a-z ]+:\s*/i, "").trim();
   return REASON_COPY[bare] ?? REASON_COPY[token] ?? `Reason: ${token}`;
 }

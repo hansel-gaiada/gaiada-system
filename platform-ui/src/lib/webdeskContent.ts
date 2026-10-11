@@ -51,7 +51,7 @@ import { listMembers } from "./entities";
 import {
   PRIMITIVE_NAMES,
   type ApprovalStatus, type BuildStatus, type CollectionComposition, type CollectionSummary,
-  type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail,
+  type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail, type ItemEditorial,
   type KeyMintOutcome, type KeyRequestFiled, type KeyScope, type PreviewLink,
   type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type Page,
   type PrimitiveName, type PublishRequestRow, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
@@ -289,13 +289,25 @@ function parseVersionContent(v: unknown, path: string): VersionContent {
   };
 }
 
+/** M5-W2b's `editorial` member: OPTIONAL (absent from a WebDesk older than M5-W2b), validated when present. */
+function parseEditorial(v: unknown, path: string): ItemEditorial {
+  const o = obj(v, path);
+  return {
+    reviewRequired: key(o, "reviewRequired", bool, path),
+    state: key(o, "state", str, path),
+    approvedVersion: key(o, "approvedVersion", nullable(int), path),
+  };
+}
+
 export function parseItemDetail(v: unknown): ItemDetail {
   const o = obj(v, "item.get");
+  const editorial = opt(o, "editorial", parseEditorial, "item.get");
   return {
     item: key(o, "item", parseItemRef, "item.get"),
     version: key(o, "version", parseVersionContent, "item.get"),
     group: key(o, "group", arr(parseGroupMember), "item.get"),
     lint: key(o, "lint", parseLint, "item.get"),
+    ...(editorial ? { editorial } : {}),
   };
 }
 

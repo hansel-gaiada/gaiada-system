@@ -23,6 +23,7 @@ import { ControlAuthGuard } from "../auth/control-auth.guard";
 import { CommandAuthorizationGuard } from "../policy/command-authorization.guard";
 import { Command } from "../command.decorator";
 import { ControlProblemFilter, problems } from "./content-problem";
+import { REVIEW_STATES, type ReviewState } from "../editorial/editorial-model";
 import { ContentReadsService, ITEM_STATES, type ItemListQuery, type ItemListState } from "./content-reads.service";
 
 export const DEFAULT_PAGE_LIMIT = 50;
@@ -90,9 +91,12 @@ export class ContentReadsController {
     @Param("key") key: string,
     @Query() raw: RawQuery,
   ) {
-    const q = query(raw, ["locale", "state", "q", "includeDeleted", "cursor", "limit"]);
+    const q = query(raw, ["locale", "state", "reviewState", "q", "includeDeleted", "cursor", "limit"]);
     if (q.state !== undefined && !(ITEM_STATES as readonly string[]).includes(q.state)) {
       throw problems.invalidRequest(`state must be one of ${ITEM_STATES.join(", ")}`);
+    }
+    if (q.reviewState !== undefined && !(REVIEW_STATES as readonly string[]).includes(q.reviewState)) {
+      throw problems.invalidRequest(`reviewState must be one of ${REVIEW_STATES.join(", ")}`);
     }
     if (q.locale !== undefined && (q.locale.length === 0 || q.locale.length > 35)) {
       throw problems.invalidRequest("locale must be a non-empty string of at most 35 characters");
@@ -106,6 +110,7 @@ export class ContentReadsController {
     const input: ItemListQuery = {
       locale: q.locale,
       state: q.state as ItemListState | undefined,
+      reviewState: q.reviewState as ReviewState | undefined,
       q: q.q,
       includeDeleted: q.includeDeleted === "true",
       cursor: cursorOf(q.cursor),

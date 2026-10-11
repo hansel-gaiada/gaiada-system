@@ -15,7 +15,7 @@
 //   (7, the agent + D14 re-drive, is webdesk-content-d14.test.ts; 6 is the BFF §27.)
 // Needs DATABASE_URL_TEST + CERBOS_URL (skips otherwise).
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as http from "node:http";
 import * as net from "node:net";
@@ -776,6 +776,78 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
       // positive control: the valid request files one
       expect((await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: item.itemId, version: 1 }] })).statusCode).toBe(202);
       expect(await approvals()).toHaveLength(1);
+    });
+
+    // ── M5-W2c: the EARLY refusal on a review-required collection (writers' room design 4.5) ─────────────────
+    const REVIEW_TYPE = "https://webdesk.gaiada.online/errors/review-not-approved";
+    /** A service item with two versions on a collection where review is ON; `approvedVersion` as given. */
+    function reviewedItem(slug: string, approvedVersion: number | null) {
+      const it = zb.seedItem({ siteId: GAIADA_SITE, slug, editorial: { reviewRequired: true, state: approvedVersion === 2 ? "approved" : "draft", approvedVersion } });
+      it.versions.push({ version: 2, fields: { h1: `${slug} v2` }, contentHash: createHash("sha256").update(`${slug} v2`).digest("hex"), createdBy: "seed", createdAt: new Date().toISOString(), note: null });
+      it.headVersion = 2;
+      return it;
+    }
+
+    it("🔴 M5-W2c: a version that is not the approved one is 409 review-not-approved (WebDesk's own problem), and NOTHING is filed; the approved version files one", async () => {
+      const none = reviewedItem("service.rev-none", null);
+      const r1 = await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: none.itemId, version: 2 }] });
+      expect(r1.statusCode).toBe(409);
+      expect(r1.headers["content-type"]).toContain("application/problem+json");
+      expect(r1.json()).toMatchObject({ type: REVIEW_TYPE, status: 409, total: 1, items: [{ itemIndex: 0, itemId: none.itemId, version: 2, approvedVersion: null }] });
+
+      // approved v1, then edited (head 2, state draft): v2 is refused, v1 (the approved bytes) files
+      const edited = reviewedItem("service.rev-edited", 1);
+      const r2 = await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: edited.itemId, version: 2 }] });
+      expect(r2.statusCode).toBe(409);
+      expect(r2.json().items).toEqual([{ itemIndex: 0, itemId: edited.itemId, version: 2, approvedVersion: 1 }]);
+      expect(await approvals()).toHaveLength(0);
+      expect(zb.writes).toHaveLength(0);
+
+      const ok = await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: edited.itemId, version: 1 }] });
+      expect(ok.statusCode).toBe(202);
+      expect(await approvals()).toHaveLength(1);
+    });
+
+    it("M5-W2c: a mixed batch is refused WHOLE, naming only the unapproved item by its index; nothing is filed", async () => {
+      const approved = reviewedItem("service.rev-mixed-ok", 2);
+      const unapproved = reviewedItem("service.rev-mixed-bad", 1);
+      const free = zb.seedItem({ siteId: GAIADA_SITE, slug: "service.rev-mixed-free", editorial: { reviewRequired: false, state: "draft", approvedVersion: null } });
+      const items = [{ itemId: approved.itemId, version: 2 }, { itemId: free.itemId, version: 1 }, { itemId: unapproved.itemId, version: 2 }];
+      const r = await call("POST", `${site()}/publish-requests`, editorA, { items });
+      expect(r.statusCode).toBe(409);
+      expect(r.json()).toMatchObject({ type: REVIEW_TYPE, total: 1, items: [{ itemIndex: 2, itemId: unapproved.itemId, version: 2, approvedVersion: 1 }] });
+      expect(await approvals()).toHaveLength(0);
+      // positive control: drop the unapproved one and the rest files
+      expect((await call("POST", `${site()}/publish-requests`, editorA, { items: items.slice(0, 2) })).statusCode).toBe(202);
+      expect(await approvals()).toHaveLength(1);
+    });
+
+    it("M5-W2c review OFF changes nothing: reviewRequired false, and a WebDesk that sends no `editorial` member at all, both file as before", async () => {
+      const off = zb.seedItem({ siteId: GAIADA_SITE, slug: "service.rev-off", editorial: { reviewRequired: false, state: "draft", approvedVersion: null } });
+      const legacy = zb.seedItem({ siteId: GAIADA_SITE, slug: "service.rev-legacy" }); // no editorial member
+      const r = await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: off.itemId, version: 1 }, { itemId: legacy.itemId, version: 1 }] });
+      expect(r.statusCode).toBe(202);
+      expect(await approvals()).toHaveLength(1);
+    });
+
+    it("M5-W2c a schedule that PUBLISHES is gated the same; a takedown-only schedule puts nothing live and is not", async () => {
+      const it1 = reviewedItem("service.rev-sched", 1);
+      const at = new Date(Date.now() + 86_400_000).toISOString();
+      const pub = await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: it1.itemId, version: 2 }], publishAt: at });
+      expect(pub.statusCode).toBe(409);
+      expect(pub.json().type).toBe(REVIEW_TYPE);
+      expect(await approvals()).toHaveLength(0);
+      const takedown = await call("POST", `${site()}/publish-requests`, editorA, { items: [{ itemId: it1.itemId, version: 2 }], unpublishAt: at });
+      expect(takedown.statusCode).toBe(202);
+      expect(takedown.json().command).toBe("content.schedule");
+    });
+
+    it("M5-W2c authorization comes FIRST: a caller who may not request a publish gets 403 on the same valid body, never the review answer", async () => {
+      const it1 = reviewedItem("service.rev-authz", null);
+      const body = { items: [{ itemId: it1.itemId, version: 2 }] };
+      expect((await call("POST", `${site()}/publish-requests`, memberA, body)).statusCode).toBe(403);
+      expect((await call("POST", `${site()}/publish-requests`, editorA, body)).statusCode).toBe(409);
+      expect(await approvals()).toHaveLength(0);
     });
   });
 
