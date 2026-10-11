@@ -246,6 +246,31 @@ export function readIntervalMs(raw: string | undefined, fallback: number, floor:
   return n;
 }
 
+/** WSK-61: the default grace window for a schedule that has not visibly taken effect (15 min). */
+export const SCHEDULE_SUPERSEDE_GRACE_DEFAULT_MS = 15 * 60_000;
+const SCHEDULE_SUPERSEDE_GRACE_MIN_MS = 60_000;
+const SCHEDULE_SUPERSEDE_GRACE_MAX_MS = 24 * 60 * 60_000;
+
+/**
+ * WSK-61: `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS`. How long after a schedule's effective instant the ERP
+ * keeps waiting for Zone B to show it before it settles the schedule as superseded. Unset or "" (the
+ * compose `${VAR:-}` case) => the default. Anything else must be an integer in [1 min, 24 h], or the
+ * process REFUSES TO BOOT: a typo here would otherwise settle schedules early (no staging rebuild) or
+ * never, and neither looks wrong until someone notices a stale staging site.
+ */
+export function readScheduleSupersedeGraceMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return SCHEDULE_SUPERSEDE_GRACE_DEFAULT_MS;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < SCHEDULE_SUPERSEDE_GRACE_MIN_MS || n > SCHEDULE_SUPERSEDE_GRACE_MAX_MS) {
+    throw new Error(
+      `WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS="${raw}" is not an integer number of milliseconds in ` +
+        `[${SCHEDULE_SUPERSEDE_GRACE_MIN_MS}, ${SCHEDULE_SUPERSEDE_GRACE_MAX_MS}]. Leave it unset to accept the ` +
+        `default (${SCHEDULE_SUPERSEDE_GRACE_DEFAULT_MS}).`,
+    );
+  }
+  return n;
+}
+
 const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
@@ -733,6 +758,11 @@ const configBase = {
     stampTimeoutMs: positiveIntFromEnv("WEBDESK_REBUILD_STAMP_TIMEOUT_MS", 10_000),
     /** The whole dispatch (token mint + ledger + GitHub call + the 404 probe) may not hold decide() longer than this. */
     dispatchDeadlineMs: positiveIntFromEnv("WEBDESK_REBUILD_DISPATCH_DEADLINE_MS", 30_000),
+  },
+  // WSK-61 — a scheduled publish going live rebuilds staging (scheduled-rebuilds.service.ts).
+  webdeskSchedule: {
+    /** Past a schedule's effective instant + this, a schedule Zone B does not show settles as superseded. */
+    supersedeGraceMs: readScheduleSupersedeGraceMs(process.env.WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS),
   },
   // ASST-06 — the assistant's send->stream engine. Reuses `services.gateway` above for the actual
   // ai-gateway-go URL/token (already the one place GATEWAY_URL/GATEWAY_TOKEN are wired from env,

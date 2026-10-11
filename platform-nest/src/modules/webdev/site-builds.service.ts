@@ -55,7 +55,10 @@ export type BuildFailureReason =
    *  have started a run; the ledger cannot tell, so it says so rather than guessing either way. */
   | "dispatch_unconfirmed"
   /** The ledger row itself could not be written. */
-  | "build_ledger_unavailable";
+  | "build_ledger_unavailable"
+  /** WSK-61: a scheduled publish went live, but the approval's decider is no longer an active user, so
+   *  nobody can authorise the dispatch. Nothing was sent; the editor files a `content.rebuild`. */
+  | "decider_inactive";
 
 /** EXACTLY the editor's wire shape (platform-ui `parseBuildStatus`, WSK-44). No extra key. */
 export interface BuildStatusBuild {
@@ -244,8 +247,12 @@ export interface StartRebuildInput {
   kind: BuildKind;
   /** The newest `publishedAt` Zone B reported (publish only); null when unknown. */
   publishedAt: string | null;
-  /** The human who decided the approval. Authorised against `github_repo · deploy`. */
-  decider: Principal;
+  /** The human who decided the approval. Authorised against `github_repo · deploy`. null (WSK-61's
+   *  scheduled publish only) = the decider can no longer be assembled: the row is recorded `failed`,
+   *  reason `decider_inactive`, and nothing is dispatched. */
+  decider: Principal | null;
+  /** Recorded as `decided_by` when `decider` is null. */
+  decidedBy?: string | null;
 }
 
 export interface StartRebuildResult {
@@ -280,6 +287,7 @@ async function markFailed(tenantId: string, buildId: string, reason: BuildFailur
  */
 export async function startSiteRebuild(input: StartRebuildInput): Promise<StartRebuildResult> {
   const target = rebuildTargetFor(input.tenantSlug, input.siteId);
+  const refusal: BuildFailureReason | null = !target ? "rebuild_not_configured" : input.decider === null ? "decider_inactive" : null;
   let buildId: string | null = null;
   try {
     const id = newId();
@@ -292,11 +300,11 @@ export async function startSiteRebuild(input: StartRebuildInput): Promise<StartR
          RETURNING id`,
         [
           id, input.tenantId, input.tenantSlug, input.siteId, input.approvalId, input.kind,
-          target ? "rebuilding" : "failed",
+          refusal ? "failed" : "rebuilding",
           parsedInstant(input.publishedAt),
           target?.repo ?? null, target?.ref ?? null, target?.stagingUrl ?? null,
-          input.decider.userId ?? null,
-          target ? null : "rebuild_not_configured",
+          input.decider ? (input.decider.userId ?? null) : (input.decidedBy ?? null),
+          refusal,
         ],
       );
       if (r.rows[0]) return { won: true as const };
@@ -316,16 +324,21 @@ export async function startSiteRebuild(input: StartRebuildInput): Promise<StartR
     return { buildId: null, state: "failed", failureReason: "build_ledger_unavailable", deduplicated: false };
   }
 
-  if (!target) {
-    logger.warn(`approval ${input.approvalId}: no rebuild target is configured for site ${input.siteId}`);
-    return { buildId, state: "failed", failureReason: "rebuild_not_configured", deduplicated: false };
+  if (!target || input.decider === null) {
+    logger.warn(
+      !target
+        ? `approval ${input.approvalId}: no rebuild target is configured for site ${input.siteId}`
+        : `approval ${input.approvalId}: the decider is no longer active; nothing dispatched`,
+    );
+    return { buildId, state: "failed", failureReason: refusal, deduplicated: false };
   }
+  const decider = input.decider;
 
   // The dispatch, bounded: decide() must not hang on a GitHub that is slow or rate-limiting us.
   let deadline: NodeJS.Timeout | undefined;
   const raced = await Promise.race([
     dispatchApprovedWorkflow({
-      decider: input.decider,
+      decider,
       requestTenantId: input.tenantId,
       approvalId: input.approvalId,
       repo: target.repo,
@@ -496,8 +509,10 @@ export async function sweepSiteBuilds(opts: PollOptions = {}): Promise<SweepResu
 }
 
 /** The poll loop. Chained setTimeout (a slow sweep cannot overlap itself), the monitoring runner's shape.
- *  Started by main.ts only when a rebuild target is configured: it polls nothing otherwise. */
-export function startSiteBuildsLoop(intervalMs: number): { stop: () => void } {
+ *  Started by main.ts only when a rebuild target is configured: it polls nothing otherwise.
+ *  `beforeSweep` (WSK-61: the scheduled-publish settle) runs first in each tick, so a build it starts is
+ *  polled from the next tick on; its failure is logged and never stops the poll. */
+export function startSiteBuildsLoop(intervalMs: number, opts: { beforeSweep?: () => Promise<unknown> } = {}): { stop: () => void } {
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
     logger.error(`refusing to start the site-builds poller: intervalMs=${intervalMs} is not positive`);
     return { stop: () => undefined };
@@ -506,6 +521,13 @@ export function startSiteBuildsLoop(intervalMs: number): { stop: () => void } {
   let timer: NodeJS.Timeout | null = null;
   const tick = async () => {
     if (stopped) return;
+    if (opts.beforeSweep) {
+      try {
+        await opts.beforeSweep();
+      } catch (err) {
+        logger.error(`pre-sweep step failed: ${(err as Error).message}`);
+      }
+    }
     try {
       const r = await sweepSiteBuilds();
       if (r.polled > 0 || r.orphansFailed > 0) logger.log(`sweep: ${JSON.stringify(r)}`);
