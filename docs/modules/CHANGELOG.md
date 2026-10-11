@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.7.0` - a new tenant declares its languages; upload refusals answer problem+json (2026-10-11) - DEV-VERIFIED
+
+WebDesk M3 follow-ups. No migration.
+
+- **`tenant.provision` takes `defaultLocale` and `locales`** (both or neither; `defaultLocale` must be in `locales`, no duplicates, non-empty; a locale is an opaque string of at most 35 characters, the content create rule). Without them a tenant still gets the old `id-ID` default, so existing callers are unchanged. The locales join the hashed body only when declared, so a replay with different locales is a key reuse (409). Before this, every tenant provisioned over the channel got `id-ID` only and every create in another language failed `422 composition-violation /locale` (the live `gaiada` tenant was fixed by hand, WSK-D48). The ERP has no provisioning call yet (WSK-57 provisioned over the channel by hand).
+- **The public media upload route answers every refusal as `application/problem+json`** with a stable `type` slug (`upload-not-found`, `upload-type-not-allowed`, `upload-type-mismatch`, `upload-too-large`, `upload-empty`, `upload-quota-exceeded`, `upload-infected`, `upload-scan-unavailable`, `upload-busy`, `upload-timeout`, `upload-interrupted`, `invalid-request`, `internal-error`), statuses unchanged, CORS kept on errors, the token never echoed. Refusals Fastify makes before the handler are rewritten on the upload path only. The api-key upload route is unchanged.
+- **Goes live through the WebDesk api swap** (`deploy-webdesk` apply with this tag, M4 T4), not the ERP deploy. That swap also installs the M4 WebDesk-side tree on the box: the hardened compose files, `ops/scripts` (WSK-68 nightly backups), `ops/probes` and `ops/deploy`. Afterwards every compose call on the box uses all three compose files plus `--no-build`.
+- Verified on the Linux gate (sumopod): WebDesk `m3r357` — api 1132/0/2, migrations 454, vocabulary 267, blocks 32, root 25, legacy 15/0/1 (the cross-machine determinism check needs the docker socket); ERP `m3u357` — ui 5514/5514, next build OK, repo checks PASS.
+
+### platform-ui `0.88.1` - media upload refusals are read by their slug (2026-10-11) - DEV-VERIFIED
+
+- `failureFromUploadResponse` maps an upload refusal by WebDesk's problem+json `type` slug first (webdesk 0.7.0), falling back to status plus message for an older WebDesk.
+- The media picker test waits for the dialog heading (a load-sensitive timing in the 356 gate).
+- Verified on the Linux gate (sumopod): WebDesk `m3r357` — api 1132/0/2, migrations 454, vocabulary 267, blocks 32, root 25, legacy 15/0/1 (the cross-machine determinism check needs the docker socket); ERP `m3u357` — ui 5514/5514, next build OK, repo checks PASS.
+
 ### platform-nest `0.67.0` - clients edit their own website: Cerbos rules, a client-mode portal BFF that checks every change, and a client publish that rebuilds staging (2026-10-11) - DEV-VERIFIED
 
 WebDesk M3, WSK-49c. Rulings WSK-D58, D59, D60 (amended twice), D62, D65 in `docs/blueprints/webdesk-design-v2.md` §14.
