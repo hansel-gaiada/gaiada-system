@@ -34,7 +34,9 @@ vi.mock("@/lib/clientWebsiteAccessActions", () => ({
 vi.mock("@/components/meetings/RecordControls", () => ({ RecordControls: () => null }));
 vi.mock("@/components/meetings/ScheduleMeetingPanel", () => ({ ScheduleMeetingPanel: () => null }));
 
+import { isValidElement, Children, type ReactElement, type ReactNode } from "react";
 import ClientContactsPage from "./page";
+import { ClientWebsiteAccessSection } from "@/components/clients/ClientWebsiteAccessSection";
 
 const staff = (role: string): Me =>
   ({
@@ -48,7 +50,30 @@ const ROWS = [
   { contactId: "c-vera", userId: "u-vera", name: "Vera Santoso", email: "vera@n.test", capability: "viewer", status: "active", isAdmin: false, websiteEditor: false },
 ];
 
-const mount = async () => render(await ClientContactsPage({ params: Promise.resolve({ clientId: "cl-1" }) }));
+// The Website access card is an ASYNC server component (it does its own read), which a client-side render
+// cannot await. So: the page is asked for its tree, the one <ClientWebsiteAccessSection> element is found in
+// it (that is what pins the page wiring), and that element is awaited and rendered the way the server would.
+function findSection(node: ReactNode): ReactElement | null {
+  let found: ReactElement | null = null;
+  const walk = (n: ReactNode) => {
+    Children.forEach(n, (c) => {
+      if (!isValidElement(c)) return;
+      const el = c as ReactElement<{ children?: ReactNode }>;
+      if (el.type === ClientWebsiteAccessSection) found = el;
+      else walk(el.props.children);
+    });
+  };
+  walk(node);
+  return found;
+}
+
+const mount = async () => {
+  const tree = await ClientContactsPage({ params: Promise.resolve({ clientId: "cl-1" }) });
+  const el = findSection(tree);
+  if (!el) throw new Error("the page does not render <ClientWebsiteAccessSection>");
+  expect(el.props).toMatchObject({ userId: "u-staff", tenant: "co-agency", clientId: "cl-1", clientName: "Northwind Traders" });
+  render(await ClientWebsiteAccessSection(el.props as React.ComponentProps<typeof ClientWebsiteAccessSection>));
+};
 
 beforeEach(() => {
   meMock.mockReset().mockResolvedValue(staff("company_admin"));
@@ -98,8 +123,10 @@ describe("staff Contacts page: Website access", () => {
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
   });
 
-  it("the rest of the page is intact", async () => {
-    await mount();
-    expect(screen.getByText(/^Client access/)).toBeInTheDocument();
+  it("sits right after the Client access card and before Scheduled", async () => {
+    const tree = (await ClientContactsPage({ params: Promise.resolve({ clientId: "cl-1" }) })) as ReactElement<{ children: ReactNode[] }>;
+    const kids = tree.props.children;
+    expect(kids).toHaveLength(5);
+    expect((kids[2] as ReactElement).type).toBe(ClientWebsiteAccessSection);
   });
 });

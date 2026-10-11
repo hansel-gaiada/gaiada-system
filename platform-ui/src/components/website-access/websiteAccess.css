@@ -82,6 +82,9 @@
 .wa-switch__track {
   flex: none;
   position: relative;
+  /* The drawn track sits OVER the transparent input; let pointer events fall through to the input, so a
+     click, and any automated click, lands on the real control. */
+  pointer-events: none;
   width: 34px;
   height: 20px;
   border-radius: var(--radius-lg);
