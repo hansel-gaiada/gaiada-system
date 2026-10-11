@@ -24,6 +24,7 @@
 import type { IconName } from "@/components/shell/icons";
 import type { ToolIconName } from "@/components/departments/toolIcons";
 import { PM_TERMS } from "@/lib/pmVocabulary";
+import { packFor } from "@/lib/packs";
 
 export interface DeptTab {
   key: string;
@@ -407,15 +408,24 @@ function genericToolkit(name: string): DeptToolkit {
   return { slug: deptSlug(name), label: name, mission: `${name} — team workspace.`, groups: [HOME_GROUP], launchers: [] };
 }
 
-/** Resolve a department's toolkit by name. Always returns a toolkit (generic fallback). */
-export function toolkitFor(deptName: string): DeptToolkit {
+/** The bespoke toolkit for a department, or undefined. Bespoke only when the company's VERTICAL pack
+ *  lists the department slug (PV-D15): the same department name in a hospitality company gets the
+ *  generic Home-only shell, because the build-out is the agency's and not the name's. */
+function bespokeFor(vertical: string | null | undefined, deptName: string): DeptToolkit | undefined {
   const slug = deptSlug(deptName);
-  return TOOLKITS.find((t) => t.slug === slug) ?? genericToolkit(deptName);
+  if (!packFor(vertical).toolkitDepartments.includes(slug)) return undefined;
+  return TOOLKITS.find((t) => t.slug === slug);
+}
+
+/** Resolve a department's toolkit by name, for a company of this vertical. Always returns a toolkit
+ *  (generic fallback). */
+export function toolkitFor(vertical: string | null | undefined, deptName: string): DeptToolkit {
+  return bespokeFor(vertical, deptName) ?? genericToolkit(deptName);
 }
 
 /** True when a department has a bespoke toolkit (vs. the generic Home-only shell). */
-export function hasBespokeToolkit(deptName: string): boolean {
-  return TOOLKITS.some((t) => t.slug === deptSlug(deptName));
+export function hasBespokeToolkit(vertical: string | null | undefined, deptName: string): boolean {
+  return bespokeFor(vertical, deptName) !== undefined;
 }
 
 /** Every tab across all of a toolkit's groups, flattened (order preserved). */

@@ -5,6 +5,7 @@ import { getMe, type Me } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
 import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 
 /**
  * What every Website-workspace page needs before it reads anything: the signed-in user, the active
@@ -33,6 +34,6 @@ export async function requireWebsiteCtx(deptId: string, tab: "content" | "media"
   if (!company) notFound();
   const dept = await getDepartment(userId, company, deptId);
   if (!dept) notFound();
-  if (!deptTabs(toolkitFor(dept.name)).some((t) => t.key === tab)) notFound();
+  if (!deptTabs(toolkitFor(activeCompany(me, company)?.vertical, dept.name)).some((t) => t.key === tab)) notFound();
   return { userId, me, company, deptId, contentBase: `/departments/${deptId}/website/content`, mediaBase: `/departments/${deptId}/website/media` };
 }

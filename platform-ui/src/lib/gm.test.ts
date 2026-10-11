@@ -29,8 +29,8 @@ describe("isGmDept", () => {
   });
 
   it("agrees with the toolkit registry", () => {
-    expect(toolkitFor("GM").slug).toBe(GM_SLUG);
-    expect(hasBespokeToolkit("GM")).toBe(true);
+    expect(toolkitFor("agency", "GM").slug).toBe(GM_SLUG);
+    expect(hasBespokeToolkit("agency", "GM")).toBe(true);
   });
 });
 
@@ -123,7 +123,7 @@ describe("parseGmPeriodKind", () => {
 
 describe("the GM toolkit", () => {
   it("is the Home · PM · Command · Oversight · Connections spine", () => {
-    expect(toolkitFor("GM").groups.map((g) => g.key)).toEqual([
+    expect(toolkitFor("agency", "GM").groups.map((g) => g.key)).toEqual([
       "home", "work", "command", "oversight", "connections",
     ]);
   });
@@ -132,14 +132,14 @@ describe("the GM toolkit", () => {
     // The registry's standing rule: do NOT register a toolkit until its tab routes exist, or the
     // console points at 404s. These five are the bespoke paths added under
     // app/(app)/departments/[deptId]/ by GM-01.
-    const paths = deptTabs(toolkitFor("GM")).map((t) => t.path);
+    const paths = deptTabs(toolkitFor("agency", "GM")).map((t) => t.path);
     for (const p of ["review", "decisions", "depts", "money", "people"]) {
       expect(paths, `${p} tab must be declared`).toContain(p);
     }
   });
 
   it("ships no producer launchers — the GM does not build", () => {
-    const keys = toolkitFor("GM").launchers.map((l) => l.key);
+    const keys = toolkitFor("agency", "GM").launchers.map((l) => l.key);
     expect(keys).not.toContain("github");
     expect(keys).not.toContain("figma");
     expect(keys).not.toContain("vscode");

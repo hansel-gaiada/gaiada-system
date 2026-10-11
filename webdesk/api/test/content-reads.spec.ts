@@ -200,7 +200,7 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       expect(body.collections.map((c: { key: string }) => c.key)).toEqual(["company", "navigation", "redirect", "service", "token-registry"]);
       const service = body.collections.find((c: { key: string }) => c.key === "service");
       expect(keysOf(service)).toEqual(["composition", "counts", "key", "updatedAt", "vocabularyVersion"]);
-      expect(service.vocabularyVersion).toBe("1.1.0");
+      expect(service.vocabularyVersion).toBe("1.2.0"); // WSK-49a (1.1.0 was WSK-64)
       expect(service.composition.ui).toEqual({ label: "Service pages", group: "Pages", titleField: "h1" });
       expect(Number.isNaN(Date.parse(service.updatedAt))).toBe(false);
       // non-deleted: seo(en) seo(id) draft-only sched unpub legacy = 6. live: seo(en) + legacy. pending: seo(en) seo(id) draft-only unpub.

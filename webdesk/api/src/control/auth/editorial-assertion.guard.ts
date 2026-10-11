@@ -15,6 +15,7 @@ import { Reflector } from "@nestjs/core";
 import { COMMAND_META_KEY } from "../command.decorator";
 import { EDITORIAL_COMMANDS, type CommandName } from "../command-types";
 import { EDITORIAL_PRINCIPAL_RESOLVER, type EditorialPrincipalResolver, type EditorialRequest } from "./editorial-principal";
+import { assertClientMayRun } from "./client-editor";
 
 @Injectable()
 export class EditorialAssertionGuard implements CanActivate {
@@ -37,6 +38,9 @@ export class EditorialAssertionGuard implements CanActivate {
       ...((request.body as Record<string, unknown> | null | undefined) ?? {}),
     };
     request.editorial = await this.resolver.resolve(request, command, args);
+    // WSK-49b: a client principal (`ce: true`) may run only the allow-listed commands; refused here, before
+    // any body validation or state is looked at. A no-op for every other principal.
+    assertClientMayRun(request.editorial, command);
     return true;
   }
 }

@@ -7,6 +7,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment } from "@/lib/departments";
 import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { listPipelineRunsWithGates, type PipelineRunWithGates } from "@/lib/pipeline";
 import { listRecordings, type MeetingRecording } from "@/lib/meetings";
 import { listClients, listProjects } from "@/lib/entities";
@@ -42,7 +43,7 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
 
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
-  if (!deptTabs(toolkitFor(dept.name)).some((t) => t.key === "prd")) notFound();
+  if (!deptTabs(toolkitFor(activeCompany(me, tenant)?.vertical, dept.name)).some((t) => t.key === "prd")) notFound();
 
   // AGN-3: the run list is this page's subject, so a refusal is stated rather than rendered as an
   // empty list — "nothing produced" and "you may not see it" are different claims.

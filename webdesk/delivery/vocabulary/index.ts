@@ -28,6 +28,7 @@ export {
   validateFieldValue,
   MULTIPLE_CAPABLE_PRIMITIVES,
   FIELD_DEF_KEYS,
+  FIELD_UI_KEYS,
   FIELD_NAME_PATTERN,
   MAX_GROUP_DEPTH,
   type PrimitiveName,
@@ -84,6 +85,7 @@ export {
   formatCompositionIssues,
   isVocabularyVersionSupported,
   COMPOSITION_KEYS,
+  COLLECTION_UI_KEYS,
   type CollectionComposition,
   type CollectionUi,
   type PlaceholderRule,
@@ -120,3 +122,13 @@ export {
   type ItemIssue,
   type ItemContentValidation,
 } from './item-fields.ts'
+
+// --- WSK-49a: client-editable fields (vocabulary 1.2.0, ruling WSK-D59) ---------------------
+export {
+  isClientEditable,
+  collectionAcceptsClientCreate,
+  changedContentPointers,
+  clientEditViolations,
+  clientCreateViolations,
+  type ItemContent,
+} from './client-editable.ts'

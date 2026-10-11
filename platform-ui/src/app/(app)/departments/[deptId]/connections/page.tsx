@@ -6,6 +6,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment } from "@/lib/departments";
 import { toolkitFor, deptTabs } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { listConnections, findConnection } from "@/lib/connections";
 import { listClaudeSeats, mySeat } from "@/lib/claudeSeats";
 import { listClients } from "@/lib/entities";
@@ -48,7 +49,7 @@ export default async function DepartmentConnectionsPage({ params, searchParams }
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
 
-  const toolkit = toolkitFor(dept.name);
+  const toolkit = toolkitFor(activeCompany(me, tenant)?.vertical, dept.name);
   const isAdmin = can(me, "company.manage", tenant);
   const isSeo = toolkit.slug === "seo";
   // Only departments that actually work in repositories get the org App card below. Keyed off the

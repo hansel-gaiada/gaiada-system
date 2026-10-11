@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, platformFetch, PlatformError } from "@/lib/platform";
-import { isElevated } from "@/lib/rbac";
+import { isPlatformOperator } from "@/lib/companyContext";
 import { getSystemStatus, getSystemConfig } from "@/lib/admin";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -38,7 +38,8 @@ export default async function BotSystemPage() {
   if (!userId) redirect("/login");
 
   const me = await getMe(userId);
-  const elevated = isElevated(me);
+  // PV-D18: the owner of the root gets the full controls too; the server gate decides for real.
+  const elevated = isPlatformOperator(me);
 
   const [status, config, groups] = await Promise.all([
     getSystemStatus(userId, "bot"),

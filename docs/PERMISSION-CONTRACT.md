@@ -25,6 +25,21 @@ build against.
 >   grant in each company. That is a real narrowing and it is the intended one.
 > * **`platform_admin` is untouched** and remains the highest role in the system.
 
+> **⚠ PV-D18 (2026-10-11): owners of the root get full platform/system controls.** D-8 / IAM-14
+> defined `owner` as "everything business + role authoring in owned companies; NO platform/system
+> controls". For the **system surfaces only** that is superseded: the bots console
+> (`/api/admin/bot/*`), the systems console (`/api/admin/:system/status|config`, `about`, gateway,
+> hub, github, automation) and observability (`/api/admin/observability`) are now gated by
+> `isPlatformOperator` (`platform-nest/src/admin/elevated.ts`): `platform_admin` at global scope,
+> **or** the `owner` role on a ROOT company (PV-D20: a company whose id equals its own
+> `root_company_id`; an owner of a child company does not qualify). The automation reads keep their
+> extra IT arm. **Unchanged:** owner's business scope, the owner permission bundle (this gate is code,
+> not Cerbos), and every other `isElevated` surface (company listing, IAM, view-all-companies,
+> intelligence transcripts, mail admin) — `isElevated` stays `platform_admin`-only. **Consequence for
+> D-9:** owner and `platform_admin` are no longer disjoint for system surfaces; owner grants still
+> need the two-person appointment (`owner` is in `ELEVATED_TIER`), so system power still has no
+> single-step path. Ruling: decision log of `docs/plans/2026-10-10-three-perspectives.md`.
+
 > **⚠ NEW AXIS (2026-08-13, P2-03): `ui_grantable`.** Every catalog entry now carries a REQUIRED
 > `uiGrantable: boolean` (and a DB-side `permissions.ui_grantable`, migration 0110). It answers a
 > DIFFERENT question than `sensitive` or `class`: **may this permission ever appear in a role bundle

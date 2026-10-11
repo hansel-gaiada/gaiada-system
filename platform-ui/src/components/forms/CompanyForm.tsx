@@ -3,6 +3,7 @@ import { useActionState } from "react";
 import { Field } from "./Field";
 import { Eyebrow, Button } from "@/components/ui";
 import type { Company } from "@/lib/entities";
+import { VERTICALS } from "@/lib/packs";
 import "./forms.css";
 
 export interface CompanyFormState { error?: string }
@@ -11,11 +12,13 @@ const TYPES = ["agency", "resort", "printing", "marine", "retail", "holding", "o
 const MODULES = ["agency"]; // known toggleable modules today
 
 export function CompanyForm({
-  action, companies, company,
+  action, companies, company, canSetVertical = false,
 }: {
   action: (prev: CompanyFormState | null, formData: FormData) => Promise<CompanyFormState>;
   companies: { id: string; name: string }[];
   company?: Company & { parent_company_id?: string | null };
+  /** Platform admins only (PV-D16). On edit the field also needs the company's current vertical. */
+  canSetVertical?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
   const parents = companies.filter((c) => c.id !== company?.id);
@@ -24,6 +27,10 @@ export function CompanyForm({
     <form action={formAction} className="lux-form-grid" style={{ maxWidth: 640 }}>
       <Field name="name" label="Company name" required defaultValue={company?.name} />
       <Field name="type" label="Type" type="select" options={TYPES} defaultValue={company?.type ?? "agency"} />
+      {canSetVertical && (!company || company.vertical) && (
+        <Field name="vertical" label="Vertical" type="select" options={[...VERTICALS]} defaultValue={company?.vertical ?? "general"}
+          hint={company ? "Changing the vertical does not change the company's enabled modules." : "A new company starts with this vertical's default modules."} />
+      )}
       <label className="lux-field">
         <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Parent (holding)</Eyebrow>
         <select name="parentCompanyId" className="lux-field__control" defaultValue={company?.parent_company_id ?? (companies[0]?.id ?? "")}>

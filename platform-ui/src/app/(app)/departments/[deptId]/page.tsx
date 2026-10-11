@@ -9,6 +9,7 @@ import { listPmTasks, listMilestones, listProjectStatuses } from "@/lib/pm";
 import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel } from "@/lib/activity";
 import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { gmAccessFor, canReadGmMoney, isGmDept, parseGmPeriodKind } from "@/lib/gm";
 import { GmCockpit } from "@/components/departments/gm/GmCockpit";
 import { GmAccessDenied } from "@/components/departments/gm/GmAccessDenied";
@@ -99,7 +100,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   const seat = mySeat(mySeats.rows, userId);
   const seatProps = launcherSeatProps(seat, mySeats.unavailable);
   const CLAUDE_LAUNCHER_KEYS = new Set(["claude-code", "claude", "claude-design"]);
-  const { launchers } = toolkitFor(dept.name);
+  const { launchers } = toolkitFor(activeCompany(me, tenant)?.vertical, dept.name);
   const launcherItems = launchers.map((l) => ({
     key: l.key, label: l.label, desc: l.desc, href: l.url, glyph: l.glyph, icon: l.icon,
     ...(CLAUDE_LAUNCHER_KEYS.has(l.key) ? seatProps : {}),

@@ -5,6 +5,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
 import { can } from "@/lib/rbac";
 import { toolkitFor, deptTabs } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { TeachState } from "@/components/departments/TeachState";
@@ -37,7 +38,7 @@ export default async function DepartmentSeoGscGa4Page({ params, searchParams }: 
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
 
-  const hasTab = deptTabs(toolkitFor(dept.name)).some((t) => t.path === "gsc-ga4");
+  const hasTab = deptTabs(toolkitFor(activeCompany(me, tenant)?.vertical, dept.name)).some((t) => t.path === "gsc-ga4");
   if (!hasTab) {
     return (
       <Card title="Search Console & GA4">

@@ -8,6 +8,7 @@ import { getDepartment, myDeptTasksToday, myDeptBallTasks, myBlockedTasks, toRai
 import { titleWithRecurrenceGlyph, isDoneStatus, taskUrgency, openDependencies } from "@/lib/pm";
 import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
 import { toolkitFor } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { PageHeader } from "@/components/PageHeader";
 import { DeptTabs } from "@/components/shell/DeptTabs";
 import { DeptShellFrame } from "@/components/departments/DeptShellFrame";
@@ -48,7 +49,7 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
 
-  const toolkit = toolkitFor(dept.name);
+  const toolkit = toolkitFor(activeCompany(me, tenant)?.vertical, dept.name);
   const canEditOrg = can(me, "org.edit", tenant);
 
   const queue = await getMyWorkQueue(me, userId, [{ id: tenant, name: tenant }]);

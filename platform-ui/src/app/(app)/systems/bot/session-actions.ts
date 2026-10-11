@@ -1,12 +1,12 @@
 "use server";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, platformFetch, PlatformError } from "@/lib/platform";
-import { isElevated } from "@/lib/rbac";
+import { isPlatformOperator } from "@/lib/companyContext";
 
 // Mutations for the Connect WhatsApp surface (A5, doc §2.5). Every call
 // proxies through platform-nest's `api/admin/bot/session/*` (doc §2.4), which
-// holds the bot admin token and re-enforces `isElevated` on every route — the
-// isElevated check here is cosmetic/defense-in-depth (UI gating is never the
+// holds the bot admin token and re-enforces `isPlatformOperator` on every route (PV-D18) — the
+// isPlatformOperator check here is cosmetic/defense-in-depth (UI gating is never the
 // security boundary), matching the ctx() pattern in lib/billingActions.ts.
 export interface BotSessionActionState {
   ok: boolean;
@@ -17,8 +17,8 @@ async function ctx() {
   const userId = await getSessionUserId();
   if (!userId) return { error: "Session expired — sign in again." } as const;
   const me = await getMe(userId).catch(() => null);
-  if (!me || !isElevated(me)) {
-    return { error: "WhatsApp connection controls are limited to superadmins/owners." } as const;
+  if (!me || !isPlatformOperator(me)) {
+    return { error: "WhatsApp connection controls are limited to platform admins and the owners of the group." } as const;
   }
   return { userId } as const;
 }

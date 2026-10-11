@@ -8,7 +8,8 @@ export type ZoneBEventKind =
   | "promote.done"
   | "rollback.done"
   | "contract.published"
-  | "alert.raised";
+  | "alert.raised"
+  | "schedule.fired";
 
 /** The wire envelope. `data` is a SLIM PROJECTION per kind (§04: "never the raw blob") — for
  *  `form.received`, no submitted field VALUES ever appear here, only correlators. */
@@ -30,4 +31,19 @@ export type FormReceivedData = {
   formId: string;
   submissionId: string;
   hasAttachments: boolean;
+};
+
+/** The `schedule.fired` projection (WSK-61 rebuild hint): scheduled content went live or came down. The
+ *  ERP validates this strictly and rejects unknown keys: keep it exactly these keys. 1 to 100 items. */
+export type ScheduleFiredItem = {
+  itemId: string; // uuid
+  version: number | null;
+  effectiveAt: string; // ISO 8601 UTC (publish_at, or unpublish_at for a takedown)
+};
+export type ScheduleFiredData = {
+  tenantSlug: string;
+  siteId: string; // uuid
+  transition: "publish" | "unpublish";
+  approvalId: string | null; // uuid, a swap's original approval
+  items: ScheduleFiredItem[];
 };

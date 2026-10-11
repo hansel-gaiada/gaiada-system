@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { PACKS } from "./packs";
 import { deptSlug, toolkitFor, hasBespokeToolkit, tabHref, deptTabs } from "./deptToolkits";
 
 describe("deptSlug", () => {
@@ -14,7 +15,7 @@ describe("deptSlug", () => {
 
 describe("toolkitFor", () => {
   it("returns the bespoke Web Dev toolkit grouped into the Home·Work·Build·Website·Connections spine", () => {
-    const tk = toolkitFor("Web Dev");
+    const tk = toolkitFor("agency", "Web Dev");
     expect(tk.slug).toBe("web-dev");
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "build", "website", "connections"]);
     // Flattened tabs preserve the full route set (paths unchanged from the flat model).
@@ -34,7 +35,7 @@ describe("toolkitFor", () => {
   // `permanentRedirect`s to the portfolio) so no deep link breaks — it is simply not advertised in
   // the strip, because one dataset does not get two entries.
   it("no longer advertises a second site tab — Operations was merged into Portfolio", () => {
-    const tabs = deptTabs(toolkitFor("Web Dev"));
+    const tabs = deptTabs(toolkitFor("agency", "Web Dev"));
     expect(tabs.some((t) => t.key === "sites")).toBe(false);
     expect(tabs.some((t) => t.label === "Operations")).toBe(false);
     // Exactly ONE tab points at the site surface, and it is the portfolio.
@@ -42,7 +43,7 @@ describe("toolkitFor", () => {
     expect(siteTabs.map((t) => t.path)).toEqual(["sites/portfolio"]);
   });
   it("returns the bespoke Creatives toolkit with a two-tab Studio group and the Work spine", () => {
-    const tk = toolkitFor("Creatives");
+    const tk = toolkitFor("agency", "Creatives");
     expect(tk.slug).toBe("creatives");
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "studio", "connections"]);
     const studio = tk.groups.find((g) => g.key === "studio");
@@ -57,7 +58,7 @@ describe("toolkitFor", () => {
   // Pointed at a genuinely unbuilt department rather than deleted — the generic shell is what
   // every department gets before its craft group exists, so it needs a guard.
   it("falls back to a generic Home-only toolkit for unbuilt departments", () => {
-    const tk = toolkitFor("Legal");
+    const tk = toolkitFor("agency", "Legal");
     expect(tk.slug).toBe("legal");
     expect(tk.groups.map((g) => g.key)).toEqual(["home"]);
     expect(deptTabs(tk).map((t) => t.key)).toEqual(["home"]);
@@ -68,7 +69,7 @@ describe("toolkitFor", () => {
   // Optimize / Campaigns as separate primary-strip divisions because SEM cannot
   // honestly fit inside four SEO sub-tabs.
   it("gives SEO the Home · Work · Accounts · Optimize · Campaigns · Connections spine", () => {
-    const tk = toolkitFor("SEO");
+    const tk = toolkitFor("agency", "SEO");
     expect(tk.slug).toBe("seo");
     expect(tk.groups.map((g) => g.key)).toEqual([
       "home", "work", "accounts", "optimize", "campaigns", "connections",
@@ -79,7 +80,7 @@ describe("toolkitFor", () => {
   // Every tab a toolkit advertises must have a real route, or the console links
   // people at a 404. These are the paths SM-11 created.
   it("advertises only SEO tab paths that exist as routes", () => {
-    const paths = deptTabs(toolkitFor("SEO")).map((t) => t.path);
+    const paths = deptTabs(toolkitFor("agency", "SEO")).map((t) => t.path);
     expect(paths).toEqual([
       "", // Home
       "projects", "board", "ball", "timeline", "charts", "activity", // Project Management (generic)
@@ -95,10 +96,10 @@ describe("toolkitFor", () => {
 // **Website** · Connections: the group sits AFTER Build and BEFORE Connections, holds two tabs (Content, and
 // since WSK-43c Media), and no other department inherits it.
 describe("Website group (WSK-44)", () => {
-  const website = () => toolkitFor("Web Dev").groups.find((g) => g.key === "website");
+  const website = () => toolkitFor("agency", "Web Dev").groups.find((g) => g.key === "website");
 
   it("sits between Build and Connections in the Web Dev primary strip", () => {
-    const keys = toolkitFor("Web Dev").groups.map((g) => g.key);
+    const keys = toolkitFor("agency", "Web Dev").groups.map((g) => g.key);
     expect(keys.indexOf("website")).toBe(keys.indexOf("build") + 1);
     expect(keys.indexOf("website")).toBe(keys.indexOf("connections") - 1);
   });
@@ -112,13 +113,13 @@ describe("Website group (WSK-44)", () => {
 
   it("is a Web Dev craft group only: no other department's toolkit advertises it", () => {
     for (const name of ["Creatives", "SEO", "Social Media", "Legal"]) {
-      expect(toolkitFor(name).groups.some((g) => g.key === "website")).toBe(false);
-      expect(deptTabs(toolkitFor(name)).some((t) => t.key === "content" || t.key === "media")).toBe(false);
+      expect(toolkitFor("agency", name).groups.some((g) => g.key === "website")).toBe(false);
+      expect(deptTabs(toolkitFor("agency", name)).some((t) => t.key === "content" || t.key === "media")).toBe(false);
     }
   });
 
   it("keeps the Website tabs' paths unique, and neither a prefix of the other (DeptTabs lights the deepest prefix)", () => {
-    const paths = deptTabs(toolkitFor("Web Dev")).map((t) => t.path);
+    const paths = deptTabs(toolkitFor("agency", "Web Dev")).map((t) => t.path);
     expect(new Set(paths).size).toBe(paths.length);
     const web = paths.filter((p) => p.startsWith("website"));
     expect(web.length).toBe(2);
@@ -146,10 +147,31 @@ describe("Website group (WSK-44)", () => {
 
 describe("hasBespokeToolkit", () => {
   it("is true only for departments with a built-out toolkit", () => {
-    expect(hasBespokeToolkit("Web Dev")).toBe(true);
-    expect(hasBespokeToolkit("SEO")).toBe(true);
-    expect(hasBespokeToolkit("Social Media")).toBe(true);
-    expect(hasBespokeToolkit("Legal")).toBe(false);
+    expect(hasBespokeToolkit("agency", "Web Dev")).toBe(true);
+    expect(hasBespokeToolkit("agency", "SEO")).toBe(true);
+    expect(hasBespokeToolkit("agency", "Social Media")).toBe(true);
+    expect(hasBespokeToolkit("agency", "Legal")).toBe(false);
+  });
+});
+
+// PV1-04 / PV-D15: a bespoke toolkit belongs to a VERTICAL's pack, not to a department name. The
+// same names in a hospitality company (or one with no known vertical) get the generic Home shell.
+describe("toolkits follow the vertical's pack", () => {
+  it("gives every department slug the agency pack lists a toolkit of that slug", () => {
+    for (const slug of PACKS.agency.toolkitDepartments) {
+      expect(toolkitFor("agency", slug).slug).toBe(slug);
+      expect(hasBespokeToolkit("agency", slug)).toBe(true);
+    }
+  });
+  it("falls back to the generic Home-only toolkit outside the agency vertical", () => {
+    for (const vertical of ["hospitality", "holding", "catering", "general", "no-such-vertical", null, undefined]) {
+      expect(hasBespokeToolkit(vertical, "Web Dev")).toBe(false);
+      expect(hasBespokeToolkit(vertical, "GM")).toBe(false);
+      const tk = toolkitFor(vertical, "Web Dev");
+      expect(tk.groups.map((g) => g.key)).toEqual(["home"]);
+      expect(tk.label).toBe("Web Dev");
+      expect(tk.launchers).toEqual([]);
+    }
   });
 });
 
@@ -157,7 +179,7 @@ describe("hasBespokeToolkit", () => {
 // inherits Home/Work/Connections unchanged, and adds exactly one new craft group: "Publish".
 describe("Social Media toolkit (SMM-11)", () => {
   it("gives Social Media the Home · Work · Publish · Connections spine, slug social-media", () => {
-    const tk = toolkitFor("Social Media");
+    const tk = toolkitFor("agency", "Social Media");
     expect(tk.slug).toBe("social-media");
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "publish", "connections"]);
     const publish = tk.groups.find((g) => g.key === "publish");
@@ -165,7 +187,7 @@ describe("Social Media toolkit (SMM-11)", () => {
   });
 
   it("advertises only tab paths that exist as routes", () => {
-    const paths = deptTabs(toolkitFor("Social Media")).map((t) => t.path);
+    const paths = deptTabs(toolkitFor("agency", "Social Media")).map((t) => t.path);
     expect(paths).toEqual([
       "", // Home
       "projects", "board", "ball", "timeline", "charts", "activity", // Project Management (generic)
@@ -177,7 +199,7 @@ describe("Social Media toolkit (SMM-11)", () => {
 
 describe("tabHref", () => {
   it("routes the home tab to the console root and others to sub-paths", () => {
-    const tk = toolkitFor("Web Dev");
+    const tk = toolkitFor("agency", "Web Dev");
     const [home, projects] = deptTabs(tk);
     expect(tabHref("dept-1", home)).toBe("/departments/dept-1");
     expect(tabHref("dept-1", projects)).toBe("/departments/dept-1/projects");

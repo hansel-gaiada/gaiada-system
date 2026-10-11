@@ -153,3 +153,15 @@ It also fixed the shared GitHub client, which treated every 403 as a rate limit 
 user are in `infra/runbooks/webdesk-staging-rebuild.md`. A self-approved `content.rebuild` is allowed
 (it reuses `github_repo:deploy`); a rebuild changes no content.
 
+**2026-10-11, the P2 proof ran on LIVE and passed (WSK-D41, against the proof site of WSK-D56).** The Anthony record
+(WSK-D55, request side only) saved a one-word FAQ edit on `service.seo` (en) as draft v2 and filed approval `01a129dc`;
+the owner approved it (as hansel@gaiada.com, `selfPublish: false`, executed in-band). The ERP dispatched exactly one
+`webdesk-rebuild` run through the `gaiada-erp` App (run 38121492350, 88 s; this proved `Actions: write`), the deploy went
+through the tunnel-only jump on sumopod (delphi admits SSH only from the WireGuard mesh), and the ledger read `live` 1 min
+42 s after the decision. `https://cms-proof.gaiada.com/services/seo/` showed the edit; the release diff was exactly that
+page plus the stamp. Refusals held: the Anthony record self-approving a 2-item batch (both items at their published
+versions, so nothing could change) got 403 `cerbos denied publish` and was withdrawn; the owner re-presenting the
+executed approval got 404 and no second run; `/control/*` is 404 on `api.erp.gaiada.com`. An owner-approved revert (v3,
+content hash equal to v1's) rebuilt to a site byte-identical to the pre-edit release in all 302 files (only the stamp's
+`pulledAt`/`maxUpdatedAt` differ). Net content change on WebDesk: none. Note: R4 (WSK-D46) lets a publisher approve
+their own SINGLE-item publish, so a self-approval test must use a batch; a single-item one would execute.

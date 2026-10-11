@@ -1876,6 +1876,25 @@ an approval). The args hash covers `{kind: 'publish'|'swap'|'takedown', itemId, 
 original approval id goes there. After the commit, fail-soft, the tenant webhook goes out through the same path the
 commands use (`content.published` for a publish or a swap, `content.unpublished` for a takedown, item refs only).
 
+### The `schedule.fired` Zone B event (rebuild hint)
+
+After a tenant's three steps finish, the tick tells the ERP what went live or came down, through
+`ZoneBEventEmitterService` (kind `schedule.fired`, HMAC-signed like every Zone B event; `WEBDESK_ZONEB_EVENTS_ENABLED`
+and an empty `WEBDESK_ZONEB_BRIDGE_URL` are honoured by the emitter). Only transitions whose transaction
+**committed** are reported (a rolled-back item, a failed or cancelled swap reports nothing). Fail-soft: an emit
+failure is logged and changes nothing about the tick, its counts or the tenant webhook.
+
+- `tenantId` (envelope) = the tenant's `company_ref`; `originSite` = `WEBDESK_ZONEB_ORIGIN_SITE`.
+- `data` is exactly `{tenantSlug, siteId, transition: 'publish'|'unpublish', approvalId: uuid|null, items: [{itemId, version, effectiveAt}]}`,
+  1 to 100 items. Mapping: a due publish is `publish`/`null` with `effectiveAt = publish_at`; a swap is `publish` with the
+  swap row's `ws4_approval_id` and its `publish_at`; a takedown is `unpublish`/`null` with `unpublish_at`. `effectiveAt` is
+  `toISOString()` (UTC). `ws4_approval_id` is free text in this database: a value that is not a uuid is sent as `null`.
+- One event per `(siteId, transition, approvalId-or-null)` group per tenant per tick; a larger group is chunked
+  into 100s in `itemId` order.
+- `eventId` = lowercase hex `sha256("schedule.fired|" + tenantSlug + "|" + siteId + "|" + transition + "|" + (approvalId ?? "-") + "|" + sorted(itemId:version:effectiveAt).join(","))`:
+  deterministic, so a redelivery dedups at the ERP (`UNIQUE (tenant_id, event_id)`, `event_id` is text) and a later firing differs.
+- Code: `src/scheduler/schedule-fired.ts` (pure grouping + id), `test/scheduler-schedule-fired.spec.ts`.
+
 ### `content.schedule` on a live item
 
 A future `publishAt` on a **live** item no longer returns 409 `schedule-live-item-requires-worker` (the slug is
@@ -2142,3 +2161,81 @@ in-use scan, usage, list filters and cursor, quota), `test/media-purge.spec.ts` 
 negative control under a live lock, two parallel runs, a storage error), `test/media-upload-unit.spec.ts` (dimensions
 from hostile bytes, the bounded reader, cleaners), `test/scheduler-wiring.spec.ts` (four job schedulers),
 `migrations/tests/0014_media_library.test.mjs` (in `qa/linux-gate.sh`'s `migrations` suite and the CI `webdesk-api` job).
+
+## Client editors (WSK-49)
+
+Rulings WSK-D58, WSK-D59, WSK-D60 (`docs/blueprints/webdesk-design-v2.md` §14). A client's own staff edit their company's site
+through the ERP's client portal. A client write is the **least-trusted write in the system**, so WebDesk checks it itself in
+addition to the ERP's portal BFF (D59: "enforced twice"). Vocabulary 1.2.0 (`../delivery/README.md`) adds the metadata; this is
+the write plane's half.
+
+### The marker: `ce` on the editorial assertion
+
+The signed editorial assertion (WSK-40, `src/control/auth/editorial-assertion.ts`) gains one **optional** claim, `ce`, a boolean
+("client editor"), written between `apr` and `iat`. The verifier accepts it; a present `ce` that is not a boolean is
+`401 editorial-assertion-claims` (never coerced, never ignored); it is covered by the signature, so it can neither be added nor
+stripped in transit; it is not part of `cmh`. The principal exposes `clientEditor: true` only for `ce: true`; for an absent or
+`false` claim the principal is exactly what it was before WSK-49 (the dev-mode header stub takes the same optional boolean).
+`test/editorial-assertion-vectors.spec.ts` pins a `ce` vector (v4) that the ERP signer (49c) must reproduce byte for byte.
+
+> **The ERP must set `ce: true` on every assertion it mints for a client principal (ticket 49c).** The marker only ever
+> restricts: an assertion without it is a full-power staff assertion, and WebDesk cannot tell that a client was left unmarked.
+
+### Enforcement, only when `principal.clientEditor` is true
+
+Without the marker none of this runs: the existing specs pass untouched (apart from five that pinned the vocabulary version).
+
+| Rule | Where | Refusal |
+|---|---|---|
+| **create**: allowed only in a collection where something is client-editable (at least one field, or the collection itself is client-editable and allows generic blocks); never in the `redirect` system collection (its values live under `seo`); every non-editable part of the content must be absent or `null` (its default) and `seo` must be empty | `ContentCommandsService.createItem` | `422 field-not-client-editable`, the offending JSON pointers in `issues[]` (`/collectionKey` for a collection-level refusal) |
+| **update / restoreVersion**: every path the new content changes against the item's HEAD version (`fields` props by pointer, generic blocks, `seo`) must be client-editable; **one** non-editable path refuses the **whole** write (nothing is written, not even the editable part) | `updateItem`, `restoreVersion` | `422 field-not-client-editable`, pointers listed |
+| **publish (WSK-D62)**: for EACH item, every path that differs between its currently PUBLISHED version (an empty baseline when never published: all its non-empty paths count) and the version being published must be client-editable; one bad item refuses the **whole** publish (a batch publishes none) | `ContentCommandsService.publish`, a pre-pass after the guards, inside the transaction, before any projection change | `422 publish-not-client-editable`, `issues[].path` = `/items/<index>` + the pointer, `total` |
+| a stale `baseVersion` is decided first | same | `409 version-conflict` (the head moved, so a diff against it would blame the client for someone else's change) |
+| a client **command** outside the allow-list `CLIENT_EDITOR_COMMANDS` (`src/control/command-types.ts`) | `EditorialAssertionGuard` (every editorial route) and the top of each service method | `403 client-command-not-allowed` |
+
+The rule that decides "client-editable" is the vocabulary's one function, `isClientEditable`
+(`../delivery/vocabulary/client-editable.ts`, vendored into `src/delivery/vocabulary/`): a field is client-editable iff
+`field.ui.clientEditable ?? <its parent group's effective value> ?? collection.ui.clientEditable ?? false`; a generic block iff
+the collection is; **`seo` is never client-editable** (a design default: the agency keeps SEO-critical fields; D59's reason is
+that agency-built sites keep structure and SEO-critical fields under the agency's control); an unknown field or malformed
+pointer is not editable. The pointers are RFC 6901 into the stored content (`/blocks/0/props/faq/2/a`, `/blocks/1/props/content`,
+`/seo/title`), the same coordinates `composition-violation` issues use. A new list item or object is checked leaf by leaf, so a
+non-editable member inside it cannot hide behind an editable parent. A write that **omits `seo`** from an item that has one
+removes it, which is a `seo` change: the portal must send the existing `seo` back unchanged.
+
+The check runs **before** content validation and inside the command's transaction: an unauthorised change is never answered as
+an ordinary 422 about something else, and a refusal writes nothing. A client's request never shares an idempotency record with a
+staff request of the same key and body, its audit row carries `clientEditor: true`, and `content_versions.attribution` carries
+`ce: "true"` for every version a client wrote.
+
+### Publish (WSK-D62: "a client may publish only what a client could have changed")
+
+A client's publish, single item or a batch the client approves, is diffed per item against what is currently published, with the same
+`changedContentPointers` the update check uses (there is no second diff), and every changed path must pass `isClientEditable`. So a
+draft that carries an agency's edit to a non-editable field, or any `seo` change, cannot be published by a client until the agency
+publishes it; re-publishing the version already live is a no-change publish and is allowed. Without the marker a publish is
+unchanged. D58's approval flow (who may approve) stays the ERP's; D62 is WebDesk's independent check of what goes live.
+
+### Commands a client may and may not run (design defaults the owner may widen)
+
+| Allowed | Refused (`403 client-command-not-allowed`) |
+|---|---|
+| `content.create`, `content.update`, `content.restoreVersion` (each held to the client-editable paths) | `content.delete` |
+| `content.publish` (WS4 + the editorial `apr` binding as for staff, then **WSK-D62** below; **D58's approval flow is the ERP's**) | `content.unpublish` |
+| `content.previewToken`, `content.previewTokenRevoke` | `content.schedule` |
+| `media.uploadToken`, `media.update` | `media.delete` |
+
+These are **defaults in the spirit of D59** ("schema, media deletion and other companies are never reachable"), not owner
+rulings; widening one is one line in `CLIENT_EDITOR_COMMANDS` and a ruling. The list is an **allow-list**: an editorial command
+added later is refused to a client until it is listed. `schema.apply`, `key.*`, lifecycle, releases and promotion carry **no
+editorial assertion at all**, so a client principal cannot be expressed on those routes and WebDesk cannot refuse it there:
+the ERP must never route a client to them (49c). "Other companies" is the ERP's too: WebDesk is tenant-scoped by the signed
+`ten`/`site` claims and the RLS tenant context, and the assertion's scope is already the route's.
+
+### Tests
+
+`test/client-editor-enforcement.spec.ts` (the real resolver verifying signed `ce` assertions, the real commands, valid bodies
+for every denial, every denial paired with the same call without `ce`), `test/client-editor-principal.spec.ts` (the claim, both
+resolvers, the command allow-list over the whole registry), `test/editorial-assertion-matrix.spec.ts` rows 27-31 (malformed
+`ce`, `ce: false`, `ce: true` exposed, an unknown claim still ignored, `ce` bound by the signature),
+`test/editorial-assertion-vectors.spec.ts` v4.

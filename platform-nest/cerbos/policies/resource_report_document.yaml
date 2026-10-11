@@ -75,6 +75,26 @@ resourcePolicy:
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
+    # PV1-06a (2026-10-11, PV-D19): the Company Report for an OWNER of that company. PV-D19 lets
+    # owners of the root read each owned company's Company Report, and an owner already holds
+    # `owner` on each company it owns, so the rule is simply "holds owner on THIS tenant".
+    # `read_company` ONLY: person/project/department grains stay with the tiers above — an owner
+    # reads the company's strategy numbers, not individual performance documents.
+    #
+    # Company-scope grant only (owner is never global — owner-role.db.test.ts). Written inline under
+    # `roles: ["user"]` for the reason resource_rollup.yaml's PV1-06a rule gives: `owner` has no
+    # derived role (permission-native, IAM-04c §3), and this kind must not gain a perm_* rule (the
+    # IAM-04-B5 note at the end of this file). No permission key moves; owner's bundle is unchanged.
+    - actions: ["read_company"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.principal.attr.grants.exists(g, g.role == "owner" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+
     # §8's "HR-appraisal role" column — the BASELINE HR read tier (hr_staff OR hr_manager; see
     # derived_roles.yaml's split note). Person/project/department (appraisal auto-inputs draw on all
     # three), but NOT company-grain: §8's exact wording for this column is "person data yes, company

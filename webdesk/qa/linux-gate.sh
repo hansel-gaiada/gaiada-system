@@ -7,7 +7,8 @@
 #   webdesk-blocks  webdesk/blocks: npm ci; npm run build
 #   webdesk-api     Postgres(init-roles.sh)+Redis+RustFS(digest-pinned)+ClamAV+Mailpit; npm ci;
 #                   storage-bootstrap; npm ci + migrate in webdesk/; typecheck; npm test (full CI env)
-#   vocabulary      webdesk/delivery/test: wsk64-classifier, wsk64-item-fields, vocabulary (WSK-48b: moved
+#   vocabulary      webdesk/delivery/test: wsk64-classifier, wsk64-item-fields, vocabulary, wsk49-client-editable
+#                   (WSK-49a; WSK-48b: moved
 #                   from payload/test, envelope-contract dropped with the old router; the api's own
 #                   envelope-contract.spec.ts covers the contract). Run from webdesk/api so `--import tsx`
 #                   resolves from webdesk/api/node_modules (they need no database, only that `npm ci`).
@@ -317,7 +318,7 @@ if selected vocabulary && [ "$DB_READY" = 1 ]; then
   RENV=()
   # cwd = webdesk/api so `--import tsx` resolves from its node_modules. No database or env needed.
   run_suite vocabulary webdesk/api 'rc=0
-for t in wsk64-classifier wsk64-item-fields vocabulary; do
+for t in wsk64-classifier wsk64-item-fields vocabulary wsk49-client-editable; do
   echo "##### $t"
   node --import tsx ../delivery/test/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
 done

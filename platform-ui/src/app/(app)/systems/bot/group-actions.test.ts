@@ -3,11 +3,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getSessionUserId = vi.fn();
 const getMe = vi.fn();
 const platformFetch = vi.fn();
-const isElevated = vi.fn();
+// PV1-04: the actions gate on isPlatformOperator (platform_admin or the root owner, PV-D18).
+const isPlatformOperator = vi.fn();
 const revalidatePath = vi.fn();
 
 vi.mock("@/lib/session-server", () => ({ getSessionUserId: () => getSessionUserId() }));
-vi.mock("@/lib/rbac", () => ({ isElevated: (me: unknown) => isElevated(me) }));
+vi.mock("@/lib/companyContext", () => ({ isPlatformOperator: (me: unknown) => isPlatformOperator(me) }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 vi.mock("@/lib/platform", async () => {
   const actual = await vi.importActual<typeof import("@/lib/platform")>("@/lib/platform");
@@ -31,7 +32,7 @@ describe("updateBotGroups", () => {
     vi.clearAllMocks();
     getSessionUserId.mockResolvedValue("u1");
     getMe.mockResolvedValue({ roles: [] });
-    isElevated.mockReturnValue(true);
+    isPlatformOperator.mockReturnValue(true);
   });
 
   it("PUTs the full replacement group list to api/admin/bot/groups", async () => {
@@ -48,7 +49,7 @@ describe("updateBotGroups", () => {
   });
 
   it("blocks non-elevated callers before ever calling platformFetch", async () => {
-    isElevated.mockReturnValue(false);
+    isPlatformOperator.mockReturnValue(false);
     const result = await updateBotGroups(GROUPS);
 
     expect(result.ok).toBe(false);

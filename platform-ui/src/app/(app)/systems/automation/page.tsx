@@ -5,7 +5,8 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getSystemStatus, getSystemConfig, getWorkflowExecutions, getBridgeHealth } from "@/lib/admin";
 import { listWorkflows } from "@/lib/it";
-import { isElevated, can } from "@/lib/rbac";
+import { can } from "@/lib/rbac";
+import { isPlatformOperator } from "@/lib/companyContext";
 import { listAutomationApprovals } from "@/lib/automationApprovals";
 import { getCompanyDetail } from "@/lib/entities";
 import { PageHeader } from "@/components/PageHeader";
@@ -61,7 +62,8 @@ export default async function AutomationSystemPage() {
   // Public-API key): the table still renders, just without the controls.
   const probeRows = Array.isArray(detail.workflows) ? (detail.workflows as WorkflowRow[]) : null;
   const n8nUrl = typeof detail.n8nUrl === "string" ? detail.n8nUrl : null;
-  const elevated = isElevated(me);
+  // PV-D18: the owner of the root gets the full controls too; the server gate decides for real.
+  const elevated = isPlatformOperator(me);
 
   // D14-08 — admin-gated by `company.manage` (the same capability the settings PATCH itself
   // requires), narrowed to the active tenant like every other company-scoped write on this page.

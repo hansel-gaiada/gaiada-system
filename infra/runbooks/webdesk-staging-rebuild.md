@@ -20,7 +20,7 @@ WebDesk publish approval (WSK-66)            ERP (platform-nest)                
                                                 POST …/actions/workflows/                                        astro build, gates
                                                   webdesk-rebuild.yml/dispatches                                 ssh gdeploy "deploy-tarball sha256=…" ──► forced command:
                                              4. every 30 s, up to 20 min:                                                                              validate, swap docroot
-                                                GET https://24-pyevq.gaiada.com/webdesk-build.json ◄───────────────────────────────────────────────── dist/webdesk-build.json
+                                                GET <stagingUrl>/webdesk-build.json ◄────────────────────────────────────────────────────────── dist/webdesk-build.json
                                                 live  <=> maxUpdatedAt >= publishedAt
                                                 else after 20 min: unverified (never live)
 ```
@@ -79,7 +79,7 @@ no other key. The *reason* a build failed is deliberately not on that wire (it i
 | `state` | Meaning | Reached by |
 |---|---|---|
 | `rebuilding` | GitHub accepted the dispatch; no stamp has proved the content yet | the dispatch returning 204 |
-| `live` | `https://24-pyevq.gaiada.com/webdesk-build.json` proved it | publish: `source = webdesk` and `maxUpdatedAt >= publishedAt`. A rebuild, or a publish whose publishedAt is unknown: `pulledAt >= dispatchedAt` (an unpublish moves no `maxUpdatedAt`) |
+| `live` | `<stagingUrl>/webdesk-build.json` proved it (today `https://cms-proof.gaiada.com`, WSK-D56) | publish: `source = webdesk` and `maxUpdatedAt >= publishedAt`. A rebuild, or a publish whose publishedAt is unknown: `pulledAt >= dispatchedAt` (an unpublish moves no `maxUpdatedAt`) |
 | `unverified` | 20 minutes passed without proof. **Not live.** Check the run and the site by hand. | the poll window closing |
 | `failed` | the dispatch did not happen | a typed `failure_reason` (below) |
 
@@ -131,7 +131,8 @@ Settings, Secrets and variables, Actions. **Names are exact.**
 | secret | `WEBDESK_READ_KEY` | a **production-environment READ** key for the `gaiada` tenant. A staging-environment key also returns drafts, which would make "publish" meaningless, and the pull refuses any item with `meta.draft` not false. Mint it through the ERP (a `key.mint` approval, `envId` = the production env, `scope` = `read`, WSK-66): the plaintext appears **once**, in the decide response. Paste it straight into the secret. |
 | secret | `DELPHI_DEPLOY_KEY` | the **private** key generated in step D.3 (the whole file, including the BEGIN/END lines) |
 | variable | `WEBDESK_API_URL` | the WebDesk api origin that serves `/v1`, no trailing `/v1` (the pull script's `WEBDESK_API_URL`). Not a secret. |
-| variable | `DELPHI_KNOWN_HOSTS` | delphi's pinned host key line(s), from step D.5. CI never trusts a host on first use. |
+| variable | `DELPHI_KNOWN_HOSTS` | delphi's pinned host key line(s), from step D.5, plus the jump host's (step D2). CI never trusts a host on first use. |
+| secret / variables | `DELPHI_JUMP_KEY` / `DELPHI_JUMP`, `DELPHI_HOST` | the path through the WireGuard mesh, step D2. Without them the runner dials delphi directly and times out. |
 | variable | `PUBLIC_WEB3FORMS_KEY`, `PUBLIC_WEB3FORMS_CAPTCHA`, `PUBLIC_ERP_URL` | the same public build values the local `scripts/deploy-staging.sh` build uses (from the working `.env`; see `.env.example`). Without them the staging contact form and the ERP link come out empty. |
 
 The workflow refuses to start the build (`Check that the secrets and variables are present`) and names what is missing.
@@ -143,6 +144,11 @@ If a dispatch answers `workflow_not_found` although the file is on `astro-site`,
 default branch (a `workflow_dispatch` workflow is listed from there).
 
 ### D. Create the restricted deploy user on delphi (root, server-d, 72.61.142.88)
+
+**As installed (WSK-D56, 2026-10-11) the site is the separate proof site `cms-proof.gaiada.com`, not 24-pyevq** (the site team's review
+staging). The steps below were written for 24-pyevq; the live install substitutes site user `ucmsproof`, config
+`/etc/gaiada-deploy/cms-proof.conf`, releases `/home/gdeploy/releases/cms-proof`, and binds the key with
+`command="/usr/local/bin/gaiada-deploy-forced cms-proof"` (the site is root's choice, never the client's).
 
 The unit of risk is one staging site: the key can run `deploy-tarball` and nothing else, as a user with no sudo and no shell access.
 Test the exact script first on any Linux host with Docker: `bash scripts/delphi/test/run.sh` in the site repo
@@ -206,6 +212,28 @@ ssh -i gaiada-ci-24-pyevq gdeploy@72.61.142.88                  # -> refused, no
 group-write on directories is lost and the swap fails with a permission error in the CI log. The fix is to exclude this docroot from that job, not
 to loosen the script. Watch the first two real deploys.
 
+### D2. The path in: delphi admits SSH only from fixed addresses and the WireGuard mesh
+
+delphi's ufw allows `22/tcp` from five fixed IPs and `10.88.0.0/24` (`wg-mesh-ssh`), default DROP. GitHub's hosted runners are
+none of those, so the first dispatched run (2026-10-11, run 38114734821) built and then timed out at "Deploy to staging". The deploy
+goes through a mesh member instead (owner choice 2026-10-11; delphi's firewall is unchanged):
+
+| Where | What |
+|---|---|
+| sumopod (`150.109.15.108`, WireGuard hub `10.88.0.2`) | system user `wdjump`, shell `nologin`, no password (`*`). `authorized_keys`: `restrict,port-forwarding,permitopen="10.88.0.4:22",command="/bin/false"`. `/etc/ssh/sshd_config.d/zz-wdjump.conf`: `Match User wdjump` with `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `PermitOpen 10.88.0.4:22`, `PermitListen none`, `PermitTTY no`, `ForceCommand /bin/false`. Global `sshd -T` was identical before and after the drop-in. |
+| site repo | secret `DELPHI_JUMP_KEY` (the jump key's private half); variables `DELPHI_JUMP=wdjump@150.109.15.108`, `DELPHI_HOST=10.88.0.4` (delphi's mesh address), and `DELPHI_KNOWN_HOSTS` with three pinned lines: sumopod, delphi as `10.88.0.4`, delphi as `72.61.142.88` (the same key, fingerprint `SHA256:0pyxAKDS…`). |
+| `scripts/deploy-staging-ci.sh` | `DELPHI_JUMP` set: an explicit `ProxyCommand` (not `-J`, which would drop the pinning options) opens `-W 10.88.0.4:22` through the jump. Unset: direct, as before. |
+
+Proved before first use (2026-10-11, from outside the mesh): `-W 10.88.0.4:22` returns delphi's SSH banner; a command gets
+"This account is currently not available", exit 1; `-W 10.88.0.1:22` is "administratively prohibited"; `-R` fails. delphi's own
+forced command still limits the deploy key to `deploy-tarball`.
+
+**Do not fail SSH logins through the jump to "test" it.** delphi's fail2ban does not ignore the mesh, and every jumped connection
+arrives from `10.88.0.2`: a ban there cuts all mesh SSH to delphi, not just CI. Test the tunnel with `-W` (banner only) as above.
+
+**Remove:** `userdel -r wdjump && rm /etc/ssh/sshd_config.d/zz-wdjump.conf && systemctl reload ssh` on sumopod, then delete the
+secret and the two variables; with `DELPHI_JUMP` unset the workflow dials `72.61.142.88` directly again.
+
 ### E. Tell the ERP which site this is (production `.env` on gda-aicenter)
 
 ```
@@ -222,7 +250,7 @@ guessed (`failed: rebuild_not_configured`). Restart the platform container; the 
 1. Website, Content, gaiada.com, edit an item, **Save draft**: staging unchanged.
 2. **Request publish**; a second person (company_admin) approves it in Approvals. The response carries `webdesk.build.state`.
 3. Actions tab: a `webdesk-rebuild` run named `webdesk rebuild (publish, approval <id>)` starts. Within about 10 minutes
-   `curl -s https://24-pyevq.gaiada.com/webdesk-build.json` shows `maxUpdatedAt` at or past the publish, and the editor says live on staging.
+   `curl -s https://cms-proof.gaiada.com/webdesk-build.json` shows `maxUpdatedAt` at or past the publish, and the editor says live on staging.
 4. Two quick publishes: the first run shows **Cancelled**, the second deploys, both builds read `live`.
 5. Negative control: break `DELPHI_DEPLOY_KEY` (or the workflow `ref`): the editor shows `failed` / `unverified`, never live.
 
@@ -261,7 +289,25 @@ SSH upload of 9.8 MB about 5 s, the post-deploy stamp check about 5 s. That is *
 
 At the design's $0.008 per Linux 2-core minute that is **about $0.024 per run if the repo is private, $0 if it is public**. At 20 to 60 publishes a month that is **$0.48 to $1.44 a month**,
 and 60 runs is 180 of a private repo's included 2,000 minutes (Free plan) or 3,000 (Team), so the out-of-pocket cost is $0 in practice. Cancelled runs (coalesced bursts) bill only the
-minutes they ran. **Re-measure on the first real run** (the Actions run page shows the billed time) and correct this section.
+minutes they ran.
+
+**Measured on the first real run (2026-10-11, run 38120681566, a manual `rebuild` dispatch through the jump of step D2): 82 s of job
+time, 86 s end to end, billed as 2 minutes** (the repo is private: **about $0.016 a run**, inside the included minutes). Steps: install 8 s
+(npm cache hit), pull from `api.erp.gaiada.com` + build 34 s (326 items, 82 pages), deploy 31 s (9.8 MB through sumopod to delphi,
+server-side validate and swap, stamp matched on the first read), the rest about 9 s. The estimate above was pessimistic by about 45 s.
+
+## P2 proof as executed on LIVE (2026-10-11)
+
+| Step | Evidence |
+|---|---|
+| 1. Edit saved as a draft (staging unchanged) | Anthony record (WSK-D55): `service.seo` en v2, published still v1 |
+| 2. Request publish; a second person approves | approval `01a129dc`, decided by the owner: `executed`, `selfPublish: false`, `build.state: rebuilding` |
+| 3. One run, then live on staging | run 38121492350 `webdesk rebuild (publish, approval 01a129dc-…)`, 88 s; ledger `live` at +1 min 42 s (4 polls); release diff = `services/seo/index.html` + stamp |
+| Re-presenting a decided approval | 404 `approval not found or already decided`; still one build, no new run |
+| Self-approving a batch | 403 `cerbos denied publish on webdesk_content_item` (2 items at their published versions; withdrawn after). A SINGLE-item self-approval is allowed by WSK-D46 R4 and would execute: never use one as a negative test |
+| Revert cycle | approval `01a129e0-8598…` (v3 hash = v1 hash), run 38121721999, ledger `live`; all 302 files byte-identical to the pre-edit release, only the stamp's `pulledAt`/`maxUpdatedAt` differ |
+
+Steps 4 (two quick publishes coalescing) and 5 (negative control with a broken key) were not run on live.
 
 ## As executed (sumopod gate, 2026-10-10; DEV-VERIFIED only where a real run is named in "Owner steps")
 

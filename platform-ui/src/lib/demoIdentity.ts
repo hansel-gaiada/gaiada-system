@@ -10,12 +10,16 @@
 // staff address containing "client").
 export type DemoIdentityId =
   | "seo-staff" | "demo-client" | "dept-manager" | "gede-ic" | "demo-hansel" | "demo-viceroy-marketing"
-  | "demo-two-company-client";
+  | "demo-two-company-client" | "demo-owner";
 
 export function demoIdentityFor(email: string): DemoIdentityId {
   const lower = email.toLowerCase();
   // Most specific first. `search_staff` drives negative-permission rendering in the SEO console.
   if (lower === "seo-staff@gaiada.com" || lower.includes("seo-staff")) return "seo-staff";
+  // PV1-01: an OWNER of the group (the IAM `owner` role on the holding and its companies), not a
+  // platform admin: the identity that sees the Group and Platform areas by ownership (PV-D18, PV-D20).
+  // "group-owner", not "owner": `owner@gaiada.com` is pinned below as an ordinary staff address.
+  if (lower === "group-owner@gaiada.com" || lower.includes("group-owner")) return "demo-owner";
   // PV2-05: a client contact of TWO of our companies, the only identity that sees the company switch.
   // BEFORE the generic client test, which would otherwise take any address containing "client".
   if (lower === "two-companies@deity-labs.example" || lower.includes("two-companies")) return "demo-two-company-client";

@@ -9,6 +9,7 @@ import { TopBar } from "./TopBar";
 import { SpecialAccessBanner } from "./SpecialAccessBanner";
 import { AssistantFab } from "./AssistantFab";
 import { CommandPalette } from "./CommandPalette";
+import { activeCompany } from "@/lib/companyContext";
 import { buildNavEntries, buildDeptEntries } from "@/lib/palette";
 import "./shell.css";
 
@@ -20,7 +21,7 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   // Command palette tiers 1+2 (§4.1/§4.2) — computed here, in the same request that renders the
   // sidebar, so typing in the palette costs zero network round-trips for anything but tier 3 (live
   // records, fetched client-side from CommandPalette itself). Both builders are pure/client-safe.
-  const paletteEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments)];
+  const paletteEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments, activeCompany(me, tenantId)?.vertical)];
 
   return (
     <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>

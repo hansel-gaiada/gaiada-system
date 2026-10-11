@@ -1,6 +1,6 @@
 # TASKS — WebDesk + the gaiada.com CMS
 
-**Overall** <!-- bar:overall -->🟡 `███████████████████░░░░░░░░░░░` **63%** · 144/226<!-- /bar -->
+**Overall** <!-- bar:overall -->🟡 `█████████████████████░░░░░░░░░` **69%** · 160/229<!-- /bar -->
 
 Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk properly, with gaiada.com as the first site run from it.
 
@@ -32,7 +32,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M1 · gaiada.com served from WebDesk
-<!-- bar -->🟡 `█████████████████░░░` **86%** · 81/94<!-- /bar -->
+<!-- bar -->🟡 `██████████████████░░` **88%** · 83/94<!-- /bar -->
 
 ### WSK-52 · RustFS replaces MinIO <!-- bar -->🟡 `█████████░` **87%** · 7/8<!-- /bar -->
 - [x] RustFS `1.0.0` pinned by digest in every compose file, `/health` check, no host ports (resolved config)
@@ -64,7 +64,7 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Design doc: contract, draft/live, authoring + read commands, editorial assertion, Cerbos, loader principal, rebuild path, control channel
 - [x] Reviewed (claims checked against `breaking-change.ts` and the contract test); rulings landed as D44–D48
 
-### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `████████░░` **76%** · 10/13<!-- /bar -->
+### WSK-56 · Deploy to gda-aicenter (`webdesk` project only) <!-- bar -->🟡 `█████████░` **92%** · 12/13<!-- /bar -->
 - [x] Backup of the WebDesk database, env and tree (`~/webdesk-backups/20261010T034039Z`)
 - [x] Verification tenants removed (250 `wsk<n>-*` fixtures; none other existed)
 - [x] RustFS up from the pinned digest and bootstrapped (16 changes, then 0); MinIO container removed
@@ -72,8 +72,8 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Defect fixed: compose gave the api `DATABASE_URL` but it reads `APP_DATABASE_URL` — the live api had never had a database
 - [x] Defect fixed: every table was owned by `postgres` and `webdesk_app` had 0 grants — DB rebuilt as the repo intends (migrator-owned, 74 app grants, revokes intact, RLS integrity 19/19)
 - [x] `/v1` answers on the loopback proxy (401 problem+json for an unknown tenant; lockdown 404s intact)
-- [ ] `api.erp.gaiada.com` vhost enabled with TLS (WSK-D61: the name moved under `erp.`; staged as `api.erp.gaiada.com.conf` with token redaction and public 404s; enable + certbot after DNS)
-- [ ] DNS at Hostinger (plan `docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §1): `aicenter.erp.gaiada.com` A 35.240.135.48, `sumopod.erp.gaiada.com` A 150.109.15.108, `api.erp.gaiada.com` CNAME aicenter, `erp.gaiada.com` CNAME aicenter, `cms-proof.gaiada.com` A 72.61.142.88; then TLS (CloudPanel site already created)
+- [x] `api.erp.gaiada.com` vhost enabled with TLS (WSK-D61: the name moved under `erp.`; staged as `api.erp.gaiada.com.conf` with token redaction and public 404s; enable + certbot after DNS) — LIVE 2026-10-11: certbot cert (to 2027-01-09); `/v1` unknown tenant 401 problem+json, `/control` and `/admin` 404 publicly
+- [x] DNS at Hostinger (plan `docs/plans/2026-10-11-erp-names-on-gaiada-com.md` §1): `aicenter.erp.gaiada.com` A 35.240.135.48, `sumopod.erp.gaiada.com` A 150.109.15.108, `api.erp.gaiada.com` CNAME aicenter, `erp.gaiada.com` CNAME aicenter, `cms-proof.gaiada.com` A 72.61.142.88; then TLS (CloudPanel site already created) — DONE by the owner 2026-10-11; all five resolve (checked via 1.1.1.1); cms-proof TLS installed
 - [ ] ERP cut-over to `erp.gaiada.com` (plan Phase B), after `__Host-` cookies + Origin checks
 - [x] The api image on the box built off the live box (sumopod `webdesk-api:1cbee520`, transferred in 30 s)
 - [x] The api image signed via a release (`v1.0.0-alpha.344`, cosign-verified digest `sha256:69abc934…`, live on gda-aicenter 2026-10-11)
@@ -173,10 +173,12 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 ---
 
 ## M2 · Editing gaiada.com from the ERP
-<!-- bar -->🟡 `████████░░░░░░░░░░░░` **42%** · 8/19<!-- /bar -->
+<!-- bar -->🟡 `████████████████░░░░` **81%** · 18/22<!-- /bar -->
 
-### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **57%** · 4/7<!-- /bar -->
-- [ ] Sites → collections → items for gaiada.com
+### WSK-44 · "Website" workspace in platform-ui <!-- bar -->🟡 `██████░░░░` **55%** · 5/9<!-- /bar -->
+- [x] Sites → collections → items for gaiada.com (driven LIVE on erp.gaiada.online, 1.0.0-alpha.351, as hansel@gaiada.com in a real browser, 2026-10-11: Web Dev → Website redirects straight into gaiada-com; 17 collections with the real counts (326 items, all live, 0 pending); Service pages lists 52 items; an item opens in the editor; its history shows v1 head+live; 0 console errors)
+- [ ] Editor form controls unstyled on live: no Website component loaded `forms.css`, so a direct load drew bare browser inputs. Fix: `content.css` imports it (branch `webdesk/m2-editor-forms-css` @ `d58e8e54`; e2e pins the control padding); Linux gate running
+- [ ] History shows the importer's author as a raw id (`user 01a12709`), not a name
 - [x] Editor generated from the composition: text, Markdown, groups, lists (drag and keyboard reorder) — on gaiada.com's real compositions
 - [ ] Publish with the approval state shown inline
 - [ ] Version history with restore as draft
@@ -184,26 +186,27 @@ Last updated <!-- updated -->2026-10-11<!-- /updated --> · Goal: finish WebDesk
 - [x] Every state reachable in Playwright; `next build` passes (34/34 against the built app; vitest 4456; tsc clean)
 - [x] Re-verified against the REAL BFF (26/26 real-contract test through the UI's own parsers + server actions; 12/26 fail on the old parsers; 0 drift)
 
-### WSK-60 · Publish → rebuild → staging <!-- bar -->🟡 `████░░░░░░` **44%** · 4/9<!-- /bar -->
+### WSK-60 · Publish → rebuild → staging <!-- bar -->✅ `██████████` **100%** · 10/10<!-- /bar -->
 - [x] Restricted deploy user on delphi — for the separate proof site `cms-proof.gaiada.com` (WSK-D56): `gdeploy` (group `ucmsproof` only, no sudo: a gdeploy-only `!ALL` overrides CloudPanel's all-users rule), forced command `gaiada-deploy-forced cms-proof` (site chosen by root; harness 96/0 on Linux), key proven locked (command → 126, no shell) 2026-10-11
 - [x] The existing `gaiada-erp` GitHub App (installation `157879245`) can see `gaiadabali/gaiada-web-revamp`: a live, private row in the ERP's `github_repos` sweep cache, which lists only what the installation sees (checked 2026-10-11)
-- [ ] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`)
+- [x] The App's `Actions: write` is proven by the first rebuild dispatch (a missing permission refuses as `github_app_permission_missing`) — PROVEN 2026-10-11: the ERP's dispatch for approval `01a129dc` was accepted (build `01a129dd` → `rebuilding`; site run 38121492350)
 - [x] Repo secrets `WEBDESK_READ_KEY` + `DELPHI_DEPLOY_KEY` and variables `WEBDESK_API_URL` + `DELPHI_KNOWN_HOSTS` set on the site repo (2026-10-11, as `web-gaiada`; the read key minted through an approval, the host key pinned from the verified session; the deploy key's local copy shredded)
-- [ ] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP — branch `webdesk-rebuild-proof-site` pushed (deploys to cms-proof); the default-branch registration is PR gaiadabali/gaiada-web-revamp#1 (workflow file only, `[skip ci]`), awaiting the owner's merge. ERP target set in the platform `.env` (live from the next deploy)
-- [ ] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly
-- [ ] Cost per run measured and recorded
+- [x] `webdesk-rebuild` workflow + CI deploy script in the site repo (on its default branch, so it can be dispatched); build ledger + `build-status` / `rebuild-requests` routes in the ERP — PR gaiadabali/gaiada-web-revamp#1 merged (`13470aa3`); the ERP dispatches ref `webdesk-rebuild-proof-site` (`9ebde12`, deploys to cms-proof; workflow test 12/12 on Linux); ERP target live since 352 (`webdesk staging-rebuild poller on: every 30000ms, 1 target(s)`); a manual dispatch (run 38120681566) pulled 326 items, built 82 pages, deployed, stamp matched on the first read
+- [x] Deploy path: delphi admits SSH only from 5 fixed IPs + the WireGuard mesh, so the first run timed out at deploy. Owner choice 2026-10-11: tunnel-only `wdjump` on sumopod (key only, `PermitOpen 10.88.0.4:22`, no shell, no `-R`; global sshd unchanged), repo vars `DELPHI_JUMP`/`DELPHI_HOST` + secret `DELPHI_JUMP_KEY`, both host keys pinned; delphi's firewall untouched. Proven: banner via `-W`, shell refused, other targets prohibited, `-R` fails; delphi logs the deploy `from=10.88.0.2` (runbook step D2)
+- [x] An approved publish dispatches exactly one run; the stamp poll marks "live on staging" honestly — 2026-10-11: one approval → one `webdev_site_builds` row → one run (38121492350, 88 s job); stamp `maxUpdatedAt` = the publish's `publishedAt` (07:28:37.222Z); ledger `live` at 07:30:19 after 4 polls, 1 min 42 s after the decision
+- [x] Cost per run measured and recorded — run 38120681566: 82 s job, billed 2 min (private repo, about $0.016 a run); runbook `## Cost`
 - [x] Unpublish/delete call `noteStagingStale()` so the editor's stale-staging banner can ever show (only when the item had a live version; best-effort; Linux: webdev 29 files/484, negative control fails exactly 6)
-- [ ] Scheduled takedowns (`content.schedule` with `unpublishAt`) also mark staging stale (they take effect inside Zone B later: needs a Zone B event or a check at build-status time)
+- [x] Scheduled takedowns (`content.schedule` with `unpublishAt`) also mark staging stale (they take effect inside Zone B later: needs a Zone B event or a check at build-status time) — DONE in WSK-61's ERP half: a `schedule.fired` unpublish (or the sweep) marks staging stale exactly once — 1.0.0-alpha.352 gate (sumopod 2026-10-11): nest 7768/0, ui 4679 + next build on Next 16.3.8
 
-### P2 proof gate <!-- bar -->⬜ `░░░░░░░░░░` **0%** · 0/3<!-- /bar -->
-- [ ] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change
-- [ ] Page-for-page parity holds after the edit cycle
-- [ ] The editor cannot approve a batch; the same approval re-presented is refused; `/control/*` is 404 publicly
+### P2 proof gate <!-- bar -->✅ `██████████` **100%** · 3/3<!-- /bar -->
+- [x] A staff member edits gaiada.com in the ERP, publishes, and the staging site shows the change — 2026-10-11: the Anthony record (WSK-D55, request side) saved a one-word FAQ edit on `service.seo` (en) as v2 and filed approval `01a129dc`; the owner approved it (as hansel@gaiada.com; `selfPublish: false`, executed in-band); the ERP dispatched the rebuild and `https://cms-proof.gaiada.com/services/seo/` shows "Technical fixes can show results within weeks" (WSK-D56: the proof site, not 24-pyevq)
+- [x] Page-for-page parity holds after the edit cycle — 2026-10-11 on cms-proof (delphi releases, `diff -rq`): the edit changed exactly `services/seo/index.html` (+ the stamp); the owner-approved revert (`01a129e0-8598`, v3 content hash = v1's) rebuilt to a site byte-identical to the pre-edit release in all 302 files, 82 pages (only the stamp's `pulledAt`/`maxUpdatedAt` differ; `sourceSha256` equal). WebDesk build = git build was the WSK-55/parity gate (0 differ)
+- [x] The editor cannot approve a batch; the same approval re-presented is refused; `/control/*` is 404 publicly — 2026-10-11 on LIVE: the Anthony record's 2-item batch (both items at their already-published versions, so a wrong yes changes nothing; approval `01a129e0`) self-decided through the real decide handler → 403 `cerbos denied publish`, then withdrawn (`cancelled`); the owner re-presenting the executed `01a129dc` → 404 `approval not found or already decided`, still 1 build, no new run; `https://api.erp.gaiada.com/control/*` and `/admin` → 404
 
 ---
 
 ## M3 · A complete CMS, Payload removed
-<!-- bar -->🟡 `█████████████░░░░░░░` **64%** · 45/70<!-- /bar -->
+<!-- bar -->🟡 `██████████████░░░░░░` **70%** · 49/70<!-- /bar -->
 
 Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-system/docs/plans/2026-10-11-webdesk-m3-plan.md). Rulings WSK-D49–D51.
 
@@ -213,13 +216,13 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [x] `webdesk/payload/` renamed `webdesk/delivery/` (WSK-D38); vendored vocabulary becomes the source (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 - [x] `v1-differential`'s 662-request edge corpus kept as a golden suite against the api before the old router is deleted (main `847c15b5`; sumopod gate m3w48: api 709/0/2, vocabulary 187, migrations 178; reviewed by the WebDesk orchestrator)
 
-### CMS features <!-- bar -->🟡 `███░░░░░░░` **28%** · 6/21<!-- /bar -->
+### CMS features <!-- bar -->🟡 `███░░░░░░░` **33%** · 7/21<!-- /bar -->
 - [x] WSK-46 ruled by the owner 2026-10-11: an instant preview page on the site, no preview build (WSK-D52, recorded in webdesk-design-v2.md §14 on main `26862851`)
 - [x] WSK-46 · WebDesk: hashed, expiring preview tokens per item version (migration 0013) + public `GET /v1/t/:tenant/preview/:token` (no-store, noindex, rate-limited, CORS); `preview` reserved (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [ ] WSK-46 · ERP: Preview action in the editor mints a token and opens the site's preview page
 - [ ] WSK-46 · site repo (gaiada-web-revamp): `/preview/` page reads the token from the URL fragment (`#t=`, never a query string), sets `Referrer-Policy: no-referrer`, and renders the draft with the site's own components (coordinate with the site owner; needs `api.erp.gaiada.com` public, WSK-D61)
 - [x] WSK-61 · scheduled publish worker (+ the forms retention purge schedule, + the idempotency expiry sweep: `sweepExpired()` exists and nothing calls it) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
-- [ ] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live)
+- [x] WSK-61 ERP half · a scheduled publish going live dispatches the staging rebuild under the schedule's approval (new Zone B event kind; after WSK-60 is live) — DONE (`e472c558`, merged for 352): event = wake-up, sweep primary, exactly one rebuild per approval as its decider; migration `202610110441` — 1.0.0-alpha.352 gate (sumopod 2026-10-11): nest 7768/0, ui 4679 + next build on Next 16.3.8
 - [ ] WSK-61 producer · the content tick emits a Zone B `schedule.fired` wake-up hint (grouped per approval and transition, eventId includes each item's effective time); agreed with a6, who builds the ERP consumer
 - [x] OQ-3.1 ruled by the owner 2026-10-11: Markdown, edited WYSIWYG, no vocabulary bump (WSK-D49, recorded in webdesk-design-v2.md §14 on main)
 - [ ] WSK-45 · WYSIWYG editor (TipTap) on the `markdown` primitive; an unchanged body saves byte-identical
@@ -228,15 +231,15 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] WSK-43b · ERP: Cerbos kind `webdesk_media_asset` (six artifacts), BFF routes, MCP tools
 - [ ] WSK-43c · Website workspace: Media tab + a picker for media fields (after the M2 editor follow-ups)
 - [ ] WSK-43d · site repo: the pull step downloads library images into the static build (with the site owner)
-- [ ] WSK-49 ruled by the owner 2026-10-11: build now; a client publisher self-publishes one item, batches need a second client person (WSK-D58); clients edit only client-editable fields (WSK-D59); a `client_website_editor` role granted by staff or the client admin (WSK-D60) (ticked when on main)
+- [ ] WSK-49 ruled by the owner 2026-10-11: build now; a client publisher self-publishes one item, batches need a second client person (WSK-D58); clients edit only client-editable fields (WSK-D59); a `client_website_editor` role granted by staff or a client `admin` contact, scoped to the client record (WSK-D60, amended); a client publishes only what a client could have changed (WSK-D62) (ticked when on main)
 - [ ] WSK-49a · vocabulary 1.2.0: `ui.clientEditable` on compositions and fields
-- [ ] WSK-49b · WebDesk write plane refuses a client's change to a non-editable path; publish obeys D58
+- [ ] WSK-49b · WebDesk write plane refuses a client's change to a non-editable path; a client's publish is refused unless every live change is client-editable (D62)
 - [ ] WSK-49c · ERP: Cerbos rules for client editors (own company only) + a portal BFF that diff-checks client writes
 - [ ] WSK-49d · client portal: a Website area in the portal's own shell, editor in client mode
 - [ ] WSK-49e · a seeded test client company with its own WebDesk tenant and site, proven end to end
 - [ ] WSK-49f · `client_website_editor` role as data (WSK-D60): Cerbos attribute check, grant/revoke by Gaiada staff and by the client's own admin (bounded: this role, own company, within ceiling, audited)
 
-### Defects found on the way <!-- bar -->🟡 `████████░░` **77%** · 35/45<!-- /bar -->
+### Defects found on the way <!-- bar -->🟡 `████████░░` **84%** · 38/45<!-- /bar -->
 - [x] Reserved collection keys (`media`, `forms` collide with api routes) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] Slugs are never percent-decoded (non-ASCII slugs unreachable) (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
 - [x] A bad cursor returns 500 with the raw database message (main `b4e5c70d`; sumopod gate m3w1 + m3w1b: api 681/0/2)
@@ -255,9 +258,9 @@ Plan and ticket split: [`docs/plans/2026-10-11-webdesk-m3-plan.md`](gaiada-syste
 - [ ] `tenant.provision` cannot declare locales: a new tenant gets `id-ID` only, so every create 422s `composition-violation /locale`. The live `gaiada` tenant was set by hand to default `en`, `{en,id}` (WSK-D48); provisioning must take them
 - [x] Approving a `key.mint` on `/approvals/[id]` discards the once-only plaintext (the UI's decide action ignores the response body): until the fix lands (`webdesk/key-request-ui`), approve key mints through the API and read `webdesk.plaintextOnce` — FIXED for 349 (`webdesk/key-request-ui` @ `81040b05`: `KeyMintDecide` shows it once, component state only; Linux: ui vitest 234/4661, build; e2e custody STATE passes on a quiet box)
 - [x] `editorial-assertion-matrix.spec.ts` can leak 2 unhandled `ioredis` "Connection is closed" rejections when an app instance closes mid-command: the api suite exits 1 with 0 failures (1 of 2 runs on sumopod, 2026-10-11). Root cause (T8): BullMQ closing a still-connecting Redis client in the mail and tenant-webhook workers re-emits the init failure with no listener; every BullMQ client now closes after it is ready (10 of 10 repeats clean) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
-- [ ] PRODUCT BUG, mechanism found (a6 probe, 2026-10-11): after a server action the App Router (Next 15.5.20) refetches the page the action started on, unprompted (the action itself revalidates nothing: `x-action-revalidated=[[],0,0]`), and races a navigation issued right after; when the refetch wins, the navigation is DISCARDED (URL never changes). Hits the editor's create / twin / restore pushes and a link click after Approve. Waiting does not fix it. Next: (b) find a Next release that fixes it, (a) `redirect()` inside the editor's own actions. UPSTREAM: fixed in next@16.3.0 (vercel/next.js#95391, issue #88343; regressed in 15.5.1 via #82674; NOT backported to 15.5.x)
-- [ ] Editor create / twin / restore navigate via `redirect()` inside the server action — MITIGATION merged for 350 (`163fba56`): measured ×12 on a quiet box, failures 12/36 → 5/36 (twin create 4 → 0; create 2 → 1; restore 6 → 4). Not a fix: the queue can still undo a redirect on 15.5
-- [ ] OWNER DECISION: upgrade platform-ui Next 15.5 → 16.3+ to fix dropped navigations after ANY server action ERP-wide (a major upgrade; its own ticket and full UI gate) — EVIDENCE (a6, 2026-10-11, throwaway): next@16.3.8 needs only the package bump (React 19.2.7 unchanged, no code changes; 2 deprecation renames: `middleware`→`proxy`, `middlewareClientMaxBodySize`→`proxyClientMaxBodySize`); platform-ui vitest 4679/4679; webdesk e2e ×3: navigation failures 7 → 0, key.mint link click 3/3 fail → 3/3 pass. Recommended: yes
+- [x] PRODUCT BUG, mechanism found (a6 probe, 2026-10-11): after a server action the App Router (Next 15.5.20) refetches the page the action started on, unprompted (the action itself revalidates nothing: `x-action-revalidated=[[],0,0]`), and races a navigation issued right after; when the refetch wins, the navigation is DISCARDED (URL never changes). Hits the editor's create / twin / restore pushes and a link click after Approve. Waiting does not fix it. Next: (b) find a Next release that fixes it, (a) `redirect()` inside the editor's own actions. UPSTREAM: fixed in next@16.3.0 (vercel/next.js#95391, issue #88343; regressed in 15.5.1 via #82674; NOT backported to 15.5.x) — FIXED by Next 16.3 (WSK-D57), shipped in 352; a6's base-vs-16.3 e2e: navigation failures 7 → 0, key-mint link click 3/3 → 0/3
+- [x] Editor create / twin / restore navigate via `redirect()` inside the server action — MITIGATION merged for 350 (`163fba56`): measured ×12 on a quiet box, failures 12/36 → 5/36 (twin create 4 → 0; create 2 → 1; restore 6 → 4). Not a fix: the queue can still undo a redirect on 15.5 — shipped in 350; kept after 16.3 (server-side navigation is still the better pattern)
+- [x] OWNER DECISION: upgrade platform-ui Next 15.5 → 16.3+ to fix dropped navigations after ANY server action ERP-wide (a major upgrade; its own ticket and full UI gate) — EVIDENCE (a6, 2026-10-11, throwaway): next@16.3.8 needs only the package bump (React 19.2.7 unchanged, no code changes; 2 deprecation renames: `middleware`→`proxy`, `middlewareClientMaxBodySize`→`proxyClientMaxBodySize`); platform-ui vitest 4679/4679; webdesk e2e ×3: navigation failures 7 → 0, key.mint link click 3/3 fail → 3/3 pass. Recommended: yes — DECIDED yes (WSK-D57) and shipped in 352 — 1.0.0-alpha.352 gate (sumopod 2026-10-11): nest 7768/0, ui 4679 + next build on Next 16.3.8
 - [x] WSK-21 HIGH commands (keys, lifecycle, releases) claim the WS4 approval in the same transaction as the effect, through a shared envelope; a reused approval is 403 before any effect (T5a; 10-racer tests) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)
 - [x] WSK-25 promotion and WSK-38 privacy commands still write the audit row after the side effect — move them onto the envelope (T5b) (main `4d28cd8d`; sumopod gate m3w3: api 893/0/2, 0 unhandled, migrations 328)
 - [x] Promotion bundle import can hit `ux_content_items_group_locale` (inserts before deletes; upserts on slug) (main `26862851`; sumopod gate m3w2: api 710/0/2, migrations 154)

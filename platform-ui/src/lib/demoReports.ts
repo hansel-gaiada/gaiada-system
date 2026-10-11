@@ -20,6 +20,7 @@ import type {
   ReportDocument, ReportGrain, ReportPeriodKind, ReportKpi, ReportSeries, ReportSeriesPoint,
 } from "./reports";
 import { dayCountOf, formatDateRange } from "./reports";
+import type { GroupCompanyCard, GroupFigure, GroupReport } from "./groupReport";
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -272,6 +273,8 @@ const LED_UNITS: Record<string, string[]> = {
   "dept-manager": ["dept-3"],
 };
 
+const GROUP_OWNER_ID = "demo-owner";
+
 function isAuthorized(userId: string, grain: ReportGrain, scopeRef: string): boolean {
   const elevated = userId === "demo-hansel";
   if (grain === "person") return elevated || scopeRef === userId;
@@ -284,7 +287,9 @@ function isAuthorized(userId: string, grain: ReportGrain, scopeRef: string): boo
     // lead is not denied wholesale, they are narrowed, so it must answer true for them.
     return scopeRef === "*" || led.includes(scopeRef);
   }
-  return elevated; // company — exec only, §8's tightest tier, no lead carve-out
+  // company — exec only, §8's tightest tier, no lead carve-out. PV1-06a adds the owner of the group
+  // (`demo-owner`, an `owner` grant on each company), so the Group pages' per-company links open.
+  return elevated || userId === GROUP_OWNER_ID;
 }
 
 // Mirrors `document-builder.ts`'s `resolveCalendarRange` exactly (§6.2: "for non-custom kinds,
@@ -325,11 +330,69 @@ function validateRange(periodKind: string, start: string | null, end: string | n
   return { periodKind: "custom", start, end };
 }
 
+// PV1-06b — `GET /api/:rootId/reports/group`, field-for-field the shape `group-report.ts` returns.
+// Mirrors the controller's ORDER: authz first (403: only the owner of the root, `demo-owner`, or the
+// platform admin, `demo-hansel`), then 404 unless `:rootId` is a root, then the range. The cards are
+// the company-grain KPIs scaled per company, so a card matches what that company's own report shows
+// in demo mode; `co-resort` has no `reports` module, so its card is `figures: null`, never zeros.
+// `additive` follows the real rule: ratios and distinct unions never add, point-in-time counts do.
+// Each root lists its whole tree, root first. `scale: null` is a company without the `reports` module.
+const GROUP_ROOTS: Record<string, { id: string; vertical: string; scale: number | null }[]> = {
+  "co-holding": [
+    { id: "co-holding", vertical: "holding", scale: 0.4 },
+    { id: "co-agency", vertical: "agency", scale: 1 },
+    { id: "co-resort", vertical: "hospitality", scale: null },
+  ],
+};
+
+function groupFigures(days: string[], scale: number): GroupFigure[] {
+  return buildKpis("company", days).map((k) => {
+    const isRatio = k.numerator !== undefined && k.denominator !== undefined;
+    const additive = !isRatio && !k.distinctOver;
+    const scaled = additive && !k.pointInTime ? Math.round(k.value * scale) : k.value;
+    const f: GroupFigure = { metricKey: k.metricKey, label: k.label, unit: k.unit, value: scaled, additive };
+    if (isRatio) { f.numerator = k.numerator; f.denominator = k.denominator; }
+    return f;
+  });
+}
+
+function groupReportDemo(rootId: string, params: URLSearchParams, userId: string): DemoResult {
+  if (userId !== GROUP_OWNER_ID && userId !== "demo-hansel") return err(403, "forbidden");
+  const members = GROUP_ROOTS[rootId];
+  if (!members) return err(404, "not a root company");
+  const range = validateRange(params.get("periodKind") ?? "month", params.get("start") ?? todayIso(), params.get("end"));
+  if ("status" in range) return range;
+  const days = allDaysInRange(range.start, range.end);
+  const companies: GroupCompanyCard[] = members.map((m) => {
+    const base = { companyId: m.id, name: COMPANY_NAMES[m.id] ?? m.id, vertical: m.vertical };
+    return m.scale === null
+      ? { ...base, figures: null, figuresUnavailable: "reports_module_not_enabled" as const }
+      : { ...base, figures: groupFigures(days, m.scale) };
+  });
+  // Sum of companies: additive figures only, first-seen order, per metric (the real `sumOfCompanies`).
+  const sums = new Map<string, GroupReport["sumOfCompanies"][number]>();
+  for (const c of companies) {
+    for (const f of c.figures ?? []) {
+      if (!f.additive) continue;
+      const cur = sums.get(f.metricKey);
+      if (cur) { cur.value += f.value; cur.companyCount += 1; }
+      else sums.set(f.metricKey, { metricKey: f.metricKey, label: f.label, unit: f.unit, value: f.value, companyCount: 1 });
+    }
+  }
+  return ok({
+    rootCompanyId: rootId, periodKind: range.periodKind, start: range.start, end: range.end,
+    companies, sumOfCompanies: [...sums.values()], consolidated: null, consolidatedReason: "needs F9 eliminations",
+  } satisfies GroupReport);
+}
+
 // `userId` is threaded in as a 5th param (the other demo dispatchers — pmDemo/meetingsDemo/
 // pipelineDemo — don't need per-caller identity, so they don't carry it; this one does, purely to
 // exercise the §8 access matrix's 403 branch under DEMO_MODE, per TR-17's acceptance bar "403
 // renders a limited-access state, not a crash").
 export function reportsDemo(method: string, p: string, params: URLSearchParams, _body: string | undefined, userId: string): DemoResult | null {
+  const groupMatch = p.match(/^\/api\/([^/]+)\/reports\/group$/);
+  if (groupMatch && method === "GET") return groupReportDemo(groupMatch[1], params, userId);
+
   const docMatch = p.match(/^\/api\/([^/]+)\/reports\/document$/);
   if (docMatch && method === "GET") {
     const tenantId = docMatch[1];

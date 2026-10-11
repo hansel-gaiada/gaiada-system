@@ -126,6 +126,7 @@ import { SearchGoogleOauthCallbackController } from "./modules/search/search-goo
 import { SearchGoogleAdsController } from "./modules/search/search-google-ads.controller";
 import { SearchReportsController } from "./modules/search/search-reports.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
+import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
 // PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
 // rows). Mounts at /api/:tenantId/modules/webdev/* behind ModuleEnabledGuard("webdev") — the FIRST
 // webdev surface to be module-scoped rather than core, because `webdev_provisioned_sites` (0090)
@@ -230,6 +231,9 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,
     // not /api/:t/modules/reports/*, so it is listed with the verticals but mounts top-level.
     ReportsController,
+    // PV1-06a: the group report, /api/:t/reports/group (root owner or platform_admin; no module guard
+    // on the root — see the controller header).
+    GroupReportController,
     // TR-09: check-in subsystem, /api/:t/checkins/* (own top-level prefix, own controller class).
     CheckinsController,
     // TR-24: appraisal engine, /api/:t/appraisals/* (own top-level prefix, own controller class —

@@ -197,3 +197,32 @@ export const EDITORIAL_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>
 export function commandMeta(command: CommandName): CommandMeta {
   return COMMAND_REGISTRY[command];
 }
+
+/**
+ * WSK-49b (ruling WSK-D59) — the editorial commands a CLIENT editor may run, an ALLOW-list: a command added
+ * to EDITORIAL_COMMANDS later is refused to a client until it is listed here on purpose. "A client editor" is
+ * a principal whose signed editorial assertion carries `ce: true` (auth/client-editor.ts).
+ *
+ *   allowed   content.create / update / restoreVersion  (each still held to the client-editable paths, D59,
+ *                                                         in content-commands.service.ts)
+ *             content.publish                            (WS4 + the editorial checks as for staff; WSK-D58's
+ *                                                         approval flow is the ERP's, WebDesk adds nothing)
+ *             content.previewToken / previewTokenRevoke  (a client previews its own draft; revoke only withdraws)
+ *             media.uploadToken / media.update           (put a file in, describe it)
+ *   refused   content.delete, content.unpublish, content.schedule, media.delete
+ *
+ * These are DESIGN DEFAULTS in the spirit of D59 ("schema, media deletion and other companies are never
+ * reachable"), not owner rulings: the owner may widen the list. Nothing else a client could name is an
+ * editorial command: schema.apply, key.*, lifecycle, releases and promotion carry no editorial assertion at
+ * all, so a client principal cannot be expressed there (see the README, "Client editors (WSK-49)").
+ */
+export const CLIENT_EDITOR_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>([
+  "content.create",
+  "content.update",
+  "content.restoreVersion",
+  "content.publish",
+  "content.previewToken",
+  "content.previewTokenRevoke",
+  "media.uploadToken",
+  "media.update",
+]);

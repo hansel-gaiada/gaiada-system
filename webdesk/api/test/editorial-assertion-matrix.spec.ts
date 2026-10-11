@@ -361,6 +361,35 @@ describe("WSK-40 editorial assertion — adversarial matrix (real verifier, real
     expectProblem(r, 401, "editorial-assertion-missing");
     expect(await rowsWithSlug(body.slug as string)).toBe(0);
   });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  // WSK-49b: the optional `ce` ("client editor") claim. Extends the matrix; loosens nothing above.
+  // ════════════════════════════════════════════════════════════════════════════════════════════
+  it("row 27 a malformed ce (a string, a number, null, an array, an object) → 401 editorial-assertion-claims; nothing written", async () => {
+    for (const bad of ["true", "false", 1, 0, null, [], [true], {}, { v: true }]) {
+      await refusedCreate((b) => mintRaw(wireHeader(keyA.kid), { ...wirePayload(claims("content.create", b)), ce: bad }, keyA.privateKey), 401, "editorial-assertion-claims");
+    }
+  });
+
+  it("row 28 ce: false is accepted and is NOT a client: the same create succeeds (201)", async () => {
+    await acceptedCreate((b) => good(b, { ce: false }));
+  });
+
+  it("row 29 ce: true is accepted by the verifier AND exposed to the handler: the create meets the client rules, and the `service` fixture has no client-editable field → 422 field-not-client-editable; nothing written", async () => {
+    await refusedCreate((b) => good(b, { ce: true }), 422, "field-not-client-editable");
+  });
+
+  it("row 30 an unknown extra claim is still ignored (the JWT convention is unchanged by adding ce) → 201", async () => {
+    await acceptedCreate((b) => mintRaw(wireHeader(keyA.kid), { ...wirePayload(claims("content.create", b)), zz_unknown_claim: "x" }, keyA.privateKey));
+  });
+
+  it("row 31 ce is bound by the signature: adding ce:true to a signed payload without re-signing → 401 invalid-signature (a client marker cannot be stripped or forged)", async () => {
+    await refusedCreate((b) => {
+      const [h, , s] = good(b).split(".");
+      const forged = Buffer.from(JSON.stringify(wirePayload(claims("content.create", b, { ce: true })))).toString("base64url");
+      return `${h}.${forged}.${s}`;
+    }, 401, "editorial-assertion-invalid-signature");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

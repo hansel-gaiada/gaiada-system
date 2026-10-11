@@ -44,7 +44,7 @@ const v100 = load(FIXTURE)
 const current = currentVocabularySnapshot()
 
 check('the fixture is the 1.0.0 snapshot', v100.vocabularyVersion === '1.0.0', v100.vocabularyVersion)
-check('VOCABULARY_VERSION is 1.1.0', VOCABULARY_VERSION === '1.1.0', VOCABULARY_VERSION)
+check('VOCABULARY_VERSION is 1.2.0 (WSK-49a: a MINOR on top of 1.1.0; see wsk49-client-editable.test.mjs)', VOCABULARY_VERSION === '1.2.0', VOCABULARY_VERSION)
 
 // Each expected reason, tagged with the §2.3 row it realises. Exact strings, exact order.
 const EXPECTED = [
@@ -95,7 +95,7 @@ check('vocabulary/envelope.ts is byte-identical to its pre-WSK-64 content (LF-no
 // The extended dimensions are behaviour, not declaration
 // =================================================================================================
 const probed = await probeVocabularySnapshot()
-for (const dim of ['primitives', 'blocks', 'envelopeShape', 'multipleCapable', 'fieldDefKeys', 'compositionKeys']) {
+for (const dim of ['primitives', 'blocks', 'envelopeShape', 'multipleCapable', 'fieldDefKeys', 'compositionKeys', 'fieldUiKeys', 'collectionUiKeys']) {
   check(
     `the probe (same method that captured the fixture) agrees with currentVocabularySnapshot().${dim}`,
     JSON.stringify(probed[dim]) === JSON.stringify(current[dim]),

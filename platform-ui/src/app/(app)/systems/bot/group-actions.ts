@@ -2,12 +2,12 @@
 import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, platformFetch, PlatformError } from "@/lib/platform";
-import { isElevated } from "@/lib/rbac";
+import { isPlatformOperator } from "@/lib/companyContext";
 import type { BotGroupConfig } from "@/components/systems/GroupRegistry";
 
 // Mutation for the Group registry surface (A6, doc §2.3/2.4/2.5). Full-replace
-// PUT to platform-nest's `api/admin/bot/groups`, which re-enforces isElevated
-// and forwards to the bot for validation — the isElevated check here is
+// PUT to platform-nest's `api/admin/bot/groups`, which re-enforces isPlatformOperator (PV-D18)
+// and forwards to the bot for validation — the isPlatformOperator check here is
 // cosmetic/defense-in-depth, same convention as session-actions.ts.
 export interface GroupsActionState {
   ok: boolean;
@@ -20,7 +20,7 @@ export async function updateBotGroups(groups: BotGroupConfig[]): Promise<GroupsA
   if (!userId) return { ok: false, error: "Session expired — sign in again." };
 
   const me = await getMe(userId).catch(() => null);
-  if (!me || !isElevated(me)) {
+  if (!me || !isPlatformOperator(me)) {
     return { ok: false, error: "Group registry edits are limited to superadmins/owners." };
   }
 
@@ -46,7 +46,7 @@ export async function updateBotGroups(groups: BotGroupConfig[]): Promise<GroupsA
 // Agent 4 addition: the ignore-list mutation for GroupRegistry's "Ignored groups" section
 // (`PUT /admin/groups/ignored` on the bot, proxied at platform-nest's
 // `api/admin/bot/groups/ignored`). Full-replace by id list — same convention as
-// `updateBotGroups` above (isElevated re-check is cosmetic/defense-in-depth; the bot/nest
+// `updateBotGroups` above (isPlatformOperator re-check is cosmetic/defense-in-depth; the bot/nest
 // enforce it for real), kept as a separate action because it's a separate payload/endpoint,
 // not a restructure of the existing one.
 export async function updateIgnoredGroups(ids: string[]): Promise<GroupsActionState> {
@@ -54,7 +54,7 @@ export async function updateIgnoredGroups(ids: string[]): Promise<GroupsActionSt
   if (!userId) return { ok: false, error: "Session expired — sign in again." };
 
   const me = await getMe(userId).catch(() => null);
-  if (!me || !isElevated(me)) {
+  if (!me || !isPlatformOperator(me)) {
     return { ok: false, error: "Group registry edits are limited to superadmins/owners." };
   }
 

@@ -7,6 +7,12 @@ import { isElevated, can } from "@/lib/rbac";
 import { createCompany, updateCompany } from "@/lib/entities";
 import type { CompanyFormState } from "@/components/forms/CompanyForm";
 
+// `vertical` is sent only when the form carried the field (platform admins); the server refuses anyone else.
+function readVertical(formData: FormData): { vertical: string } | Record<string, never> {
+  const v = String(formData.get("vertical") ?? "");
+  return v ? { vertical: v } : {};
+}
+
 function readModules(formData: FormData): string[] {
   const known = String(formData.get("knownModules") ?? "").split(",").filter(Boolean);
   return known.filter((m) => formData.get(`module_${m}`) === "on");
@@ -28,6 +34,7 @@ export async function createCompanyAction(_prev: CompanyFormState | null, formDa
       type: String(formData.get("type") ?? "") || null,
       parentCompanyId: String(formData.get("parentCompanyId") ?? "") || null,
       modules: readModules(formData),
+      ...(isElevated(me) ? readVertical(formData) : {}),
     });
     id = res.id;
   } catch (e) {
@@ -57,6 +64,7 @@ export async function updateCompanyAction(companyId: string, _prev: CompanyFormS
       type: String(formData.get("type") ?? "") || null,
       parentCompanyId: String(formData.get("parentCompanyId") ?? "") || null,
       status: String(formData.get("status") ?? "") || undefined,
+      ...(isElevated(me) ? readVertical(formData) : {}),
       // `modules` is deliberately NOT sent on update. This form only ever knew about `agency`,
       // so sending its derived set replaced enabled_modules and silently dropped hr/pm/reports/…
       // Omitting the key leaves the backend's COALESCE($5, enabled_modules) to keep the array;

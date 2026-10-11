@@ -41,7 +41,7 @@ unfalsifiable after.
 |---|---|---|
 | agency | `agency` | 9 |
 | assistant | `assistant` | 14 |
-| automation-console | `admin/automation` | 2 |
+| automation-console | `admin/automation` | 3 |
 | clients | `clients` | 9 |
 | core | `agency` · `positions` · `role-grants` | 13 |
 | finance | `finance` | 1 |
@@ -51,7 +51,7 @@ unfalsifiable after.
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
-| reports | `checkins` · `reports` | 15 |
+| reports | `checkins` · `reports` | 16 |
 | search | `search` | 16 |
 | social | `social` | 12 |
 | webdev | `webdev` | 16 |

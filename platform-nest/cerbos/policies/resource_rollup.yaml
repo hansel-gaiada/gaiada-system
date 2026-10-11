@@ -42,3 +42,38 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_rollup_read"]
       condition: { match: { expr: "variables.inRoot" } }
+
+    # ══════════ PV1-06a (2026-10-11, PV-D19 + PV-D20) — the owner of a ROOT reads its group rollups ══════════
+    # PV-D19: owners of the root may read group rollups. PV-D20: "owner of the root" = an `owner`
+    # grant scoped to the company whose id is its own `root_company_id`. `owner` is a PER-COMPANY
+    # grant (owner-grant.ts, owner-role.db.test.ts), so the grant must be `scopeType == "company"`
+    # on THIS resource's tenant — a global owner grant matches nothing here, on purpose.
+    #
+    # WHERE "IS A ROOT" IS ENFORCED. Cerbos has no database, so it cannot tell a root from a child.
+    # Both callers pass a tenant that is already a root, and that is the other half of this rule:
+    #   - `GET /api/rollups` (core.controller.ts) passes the caller's OWN root, resolved from
+    #     users.home_company_id -> companies.root_company_id. A child-only owner therefore asks for
+    #     the root and holds no owner grant there: denied.
+    #   - `GET /api/:t/reports/group` (group-report.controller.ts) authorizes first and then 404s any
+    #     :t that is not a root.
+    # A NEW caller of `rollup:read` must pass a root tenant too, or a child's owner gains reach here.
+    #
+    # SHAPE: `roles: ["user"]` with the grant match written inline, like resource_automation_approval
+    # .yaml's creator rule — NOT a new `owner` derived role. `owner` is permission-native (IAM-04c §3)
+    # and has no derived role; adding one would make the bundle generator and the parity suite throw
+    # on an unknown derived role, and its company-only scope would be a Pattern-C role that needs the
+    # admin write-path guard. Neither is needed: this rule adds no permission key to owner's bundle
+    # (it stays equal to company_admin's, and `core.rollup.read` stays out of it, so an owner cannot
+    # DELEGATE group rollups), and rollup's perm arm is untouched.
+    #
+    # `notLow` added although the platform_admin rule above has none: an owner is a human, and a
+    # low-assurance chat session gets no company data (D4). Narrower than the rule above, never wider.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            variables.inRoot && variables.notLow &&
+            request.principal.attr.grants.exists(g, g.role == "owner" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)

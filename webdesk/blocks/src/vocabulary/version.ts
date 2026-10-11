@@ -31,10 +31,14 @@
 //   1.1.0 — WSK-64 (ruling WSK-D44), MINOR: primitives group/boolean/markdown; `multiple` on every
 //           primitive; FieldDef fields/itemKey/localized/ui; composition singleton/localized/ui/lint;
 //           the composition-typed `fields` block. The envelope did not change by a byte.
+//   1.2.0 — WSK-49a (ruling WSK-D59), MINOR: `ui.clientEditable` on the composition and on FieldDef. Editor
+//           metadata only: no stored value changes, the envelope did not change by a byte. The classifier
+//           COMPUTES the bump from test/fixtures/vocabulary-1.1.0.snapshot.json (the two `ui` key sets
+//           are snapshot dimensions since 1.2.0).
 import { PRIMITIVE_NAMES } from './primitives.ts'
 import { BLOCK_TYPE_NAMES } from './blocks.ts'
 
-export const VOCABULARY_VERSION = '1.1.0'
+export const VOCABULARY_VERSION = '1.2.0'
 
 /** The frozen path segment (design §05 hard rule 1). Never mutated — evolution is a new /v2. */
 export const ENVELOPE_VERSION = 'v1'

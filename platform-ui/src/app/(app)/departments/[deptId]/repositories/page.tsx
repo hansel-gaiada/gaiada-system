@@ -5,6 +5,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment } from "@/lib/departments";
 import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
+import { activeCompany } from "@/lib/companyContext";
 import { listPipelineRuns } from "@/lib/pipeline";
 import { listClients, listProjects } from "@/lib/entities";
 import { listConnections } from "@/lib/connections";
@@ -48,7 +49,7 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
 
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
-  if (!deptTabs(toolkitFor(dept.name)).some((t) => t.key === "repositories")) notFound();
+  if (!deptTabs(toolkitFor(activeCompany(me, tenant)?.vertical, dept.name)).some((t) => t.key === "repositories")) notFound();
 
   const basePath = `/departments/${deptId}/repositories`;
   // `?preview=sample` — the layout with sample rows behind an unmistakable banner, for a platform

@@ -2,6 +2,8 @@ import type { Me } from "@/lib/platform";
 import { can, isElevated, isClientOnly, canManageIT } from "@/lib/rbac";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import { deptSlug } from "@/lib/deptToolkits";
+import { packFor, ROW_MODULE, type AgencyRowKey } from "@/lib/packs";
+import { activeCompany, isRootCompany, isRootOwner, isPlatformOperator, moduleOn } from "@/lib/companyContext";
 import type { IconName } from "./icons";
 
 // Access helpers live in lib/rbac (the RBAC source of truth); re-exported here
@@ -14,8 +16,8 @@ export interface NavItem { label: string; href: string; icon: IconName }
 export interface NavGroup { label: string; items: NavItem[]; icon?: IconName; pinned?: boolean }
 
 // Nav is capability-gated against the ACTIVE company (tenantId). Company-scoped
-// capabilities (people.directory, admin.access) resolve for that company;
-// cross-company ones (rollups.view) require a global grant.
+// capabilities (people.directory, admin.access) resolve for that company.
+// The cross-company Group area is root-owner / platform_admin only (PV-D11).
 //
 // `departments` (id+name for the active company) are threaded in so the
 // Organization → Departments item becomes an expandable disclosure, one child
@@ -37,26 +39,37 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   // 2026-08-10 owner directive: Business collapses Projects+Tasks into ONE entry
   // (PM_TERMS.projectManagement) — those two are the PM-domain items, now tabs on
   // `/project-management` alongside Overview/Ball/Timeline/Charts/Productivity (see that page's
-  // own header). Clients/Deliverables/Timesheets/Invoices/Agency/Meetings/Delivery Pipeline/Rollups
+  // own header). Clients/Deliverables/Timesheets/Invoices/Agency/Meetings/Delivery Pipeline
   // stay siblings — folding those in too would make one page mean everything, defeating the point.
+  //
+  // PV-D15/PV-D17: the agency rows follow the ACTIVE company's pack, not the viewer. A row shows when
+  // the company's vertical lists it AND, for the rows that have a module key, that module is on. A
+  // missing vertical resolves to the generic pack, so agency rows are hidden rather than guessed.
+  const company = activeCompany(me, tenantId);
+  const pack = packFor(company?.vertical);
+  const agencyRow = (key: AgencyRowKey): boolean => {
+    if (!pack.agencyRows.includes(key)) return false;
+    const mod = ROW_MODULE[key];
+    return !mod || moduleOn(company, mod);
+  };
+  const rowIf = (key: AgencyRowKey, item: NavItem, extra = true): NavItem[] => (extra && agencyRow(key) ? [item] : []);
   const business: NavItem[] = [
     { label: PM_TERMS.projectManagement, href: "/project-management", icon: "projects" },
-    { label: "Clients", href: "/clients", icon: "finance" },
     // CC-D8 — no separate "Client Centre" row: a client's profile is the Profile tab of the client
     // hub, so one client has one page (the old `/client-centre` routes redirect there).
-    { label: "Deliverables", href: "/deliverables", icon: "box" },
-    { label: "Timesheets", href: "/timesheets", icon: "clock" },
-    ...(can(me, "company.manage", tenantId) ? [{ label: "Invoices", href: "/invoices", icon: "wallet" } as NavItem] : []),
-    { label: "Agency", href: "/agency", icon: "sales" },
-    { label: "Meetings", href: "/meetings", icon: "clock" },
-    { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" },
+    ...rowIf("clients", { label: "Clients", href: "/clients", icon: "finance" }),
+    ...rowIf("deliverables", { label: "Deliverables", href: "/deliverables", icon: "box" }),
+    ...rowIf("timesheets", { label: "Timesheets", href: "/timesheets", icon: "clock" }),
+    ...rowIf("invoices", { label: "Invoices", href: "/invoices", icon: "wallet" }, can(me, "company.manage", tenantId)),
+    ...rowIf("agency", { label: "Agency", href: "/agency", icon: "sales" }),
+    ...rowIf("meetings", { label: "Meetings", href: "/meetings", icon: "clock" }),
+    ...rowIf("pipeline", { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" }),
     // Monitoring is Plane B — the CLIENT's properties and services, not our own containers
     // (that is Plane A and lives in Grafana, deliberately off the ERP surface). It sits in
-    // Business rather than Systems for exactly that reason: the subject is client work.
-    // Ungated for now, matching the Clients/Deliverables precedent — the backend's Cerbos
+    // Business rather than Platform for exactly that reason: the subject is client work.
+    // Ungated by capability, matching the Clients/Deliverables precedent — the backend's Cerbos
     // `monitoring.read` is the real boundary and this row is only a mirror.
-    { label: "Monitoring", href: "/monitoring", icon: "pulse" },
-    ...(can(me, "rollups.view") ? [{ label: "Rollups", href: "/rollups", icon: "pulse" } as NavItem] : []),
+    ...rowIf("monitoring", { label: "Monitoring", href: "/monitoring", icon: "pulse" }),
   ];
   // Departments is its own section (rendered exactly like Organization — a group
   // header with a flat list of rows): the business departments (from the org
@@ -161,13 +174,12 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "Business", icon: "briefcase", items: business },
     // TR-17: the tracker/reporting program's grain report pages. Person/project/department are
     // always listed (§8 lets everyone read at least their own person-grain document; the BFF is
-    // the real authority for project/department scoping) — Company is nav-gated by `rollups.view`
-    // the same way the existing Rollups link is, since §8 makes company-grain exec-only.
+    // the real authority for project/department scoping) — the cross-company
+    // Company reports moved to the Group area (PV-D11), since §8 makes company-grain exec-only.
     { label: "Reports", icon: "chart", items: [
       { label: "My Report", href: "/reports/person", icon: "pulse" },
       { label: "Project Reports", href: "/reports/project", icon: "pulse" },
       { label: "Department Reports", href: "/reports/department", icon: "pulse" },
-      ...(can(me, "rollups.view") ? [{ label: "Company Report", href: "/reports/company", icon: "pulse" } as NavItem] : []),
     ] },
     // TR-26: `/appraisals/mine` is self-service (every principal reads their own record, always —
     // same reasoning as check-ins, no capability gates it). The other two rows are capability-gated
@@ -206,20 +218,32 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       // not exist. Staff-only comes free from `(app)/layout.tsx`'s isClientOnly redirect.
       { label: "The Office", href: "/office", icon: "pulse" },
     ] },
-    { label: "Systems", icon: "server", items: [
-      { label: "WA/TG Bot", href: "/systems/bot", icon: "bot" },
-      { label: "AI Gateway", href: "/systems/gateway", icon: "gateway" },
-      { label: "MCP Hub", href: "/systems/hub", icon: "hub" },
-      { label: "Automation", href: "/systems/automation", icon: "automation" },
-      // MON-09i. Plane A (this box) belongs in Systems, which is where OUR infrastructure
-      // consoles live -- as opposed to Business > Monitoring, which is the CLIENT's sites.
-      // Until now Plane A had no ERP surface at all: server metrics were collected for weeks
-      // and readable only by SSH-tunnelling to Prometheus, which is how a completely broken
-      // datastore exporter stayed invisible. The backend gates on platform-admin; this row is
-      // ungated like its siblings, and a non-admin gets an explicit "restricted" page rather
-      // than a missing row -- a hidden row reads as "gone", a refusal reads as "not yours".
-      { label: "Observability", href: "/systems/observability", icon: "pulse" },
-    ] },
+    // PV-D11: Group is the root company's own area. It shows only to the owner of the root (or
+    // `platform_admin`) while the ACTIVE company is that root, so a child company's menu never
+    // carries a cross-company surface. Hiding is cosmetic: the Group pages and the rollup and report
+    // endpoints refuse everyone else on the server.
+    ...(((isRootOwner(me) || isElevated(me)) && isRootCompany(company))
+      ? [{ label: "Group", icon: "manufacturing", items: [
+          { label: "Group report", href: "/group", icon: "chart" },
+          { label: "Rollups", href: "/rollups", icon: "pulse" },
+          { label: "Company reports", href: "/group/reports", icon: "inventory" },
+        ] } as NavGroup]
+      : []),
+    // PV-D18: Platform replaces the old ungated Systems group. It is OUR infrastructure (bot,
+    // gateway, hub, automation, observability), so it shows to `platform_admin` and the root owner,
+    // in every company; the server already refuses everyone else. Business > Monitoring is the
+    // CLIENT's sites, a different thing.
+    ...(isPlatformOperator(me)
+      ? [{ label: "Platform", icon: "server", items: [
+          { label: "WA/TG Bot", href: "/systems/bot", icon: "bot" },
+          { label: "AI Gateway", href: "/systems/gateway", icon: "gateway" },
+          { label: "MCP Hub", href: "/systems/hub", icon: "hub" },
+          { label: "Automation", href: "/systems/automation", icon: "automation" },
+          // MON-09i. Plane A (this box): server metrics used to be readable only by SSH-tunnelling to
+          // Prometheus, which is how a broken datastore exporter stayed invisible.
+          { label: "Observability", href: "/systems/observability", icon: "pulse" },
+        ] } as NavGroup]
+      : []),
   ];
   // Settings (formerly "Admin") — a single sidebar entry; its sub-sections
   // (users/identity/modules/compliance/audit) are in-page tabs on the page itself.

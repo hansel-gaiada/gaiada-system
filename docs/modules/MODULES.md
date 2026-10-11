@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.63.0` | IN PROGRESS | WS1 | 2026-10-11 |
-| platform-ui | `0.84.0` | IN PROGRESS | WS5 | 2026-10-11 |
+| platform-nest | `0.64.0` | IN PROGRESS | WS1 | 2026-10-11 |
+| platform-ui | `0.85.0` | IN PROGRESS | WS5 | 2026-10-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -47,7 +47,7 @@ versions below; the running build reports it at `GET /health`.
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
-| webdesk | `0.4.0` | DEV-VERIFIED | Web Dev | 2026-10-11 |
+| webdesk | `0.5.0` | DEV-VERIFIED | Web Dev | 2026-10-11 |
 | search-marketing | `0.5.2` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
@@ -63,8 +63,9 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.62.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.64.0` · IN PROGRESS
 
+**0.64.0 (2026-10-11, PV-1 company context — PROTOTYPED):** `companies.vertical` (migration `202610110530`, lookup `company_verticals`, asserted backfill); `/api/me` carries `vertical`, `enabledModules`, `rootCompanyId`; the pack registry; `POST /api/companies` applies pack default modules and only `platform_admin` may change a vertical; `isPlatformOperator` (platform_admin or the owner of a root) gates every system surface (PV-D18; D21 open); owners read rollups and company reports, and `GET /api/:t/reports/group` sums additive metrics across the root. Cerbos restart on deploy. (0.63.0 is WebDesk's; see CHANGELOG.) Linux: nest 551 passed, teeth on every new rule.
 **0.62.0 (2026-10-11, PV2-09 — PROTOTYPED):** `projects.status` is a closed set: migration `202610110151` adds `projects_status_check` (planned, active, on_hold, completed, cancelled, archived) with no data mapping (live survey: all 41 rows `active`), and both project PATCH routes return a 400 naming the set, after `authorize()`. `PROJECT_STATUSES` is the one set; finished = completed/archived/cancelled, done = completed. Parity and DB tests teeth-proven. (0.59.0–0.61.0 are WebDesk's; see CHANGELOG.) Linux: nest 540 passed, 3 skipped.
 **0.58.0 (2026-10-11, PV-2 wave 2 — PROTOTYPED):** additive portal payload fields: `finished` (portal projects), `lead` (project detail), `clients[].accountManager` and `contacts[].side` (portal profile). Every query keeps its portal-scope predicate; scoping teeth-proven on Linux. Contract: BFF §16a, §16c.
 **0.57.0 (2026-10-10, PV-2 wave 1 — PROTOTYPED):** one `FINISHED_PROJECT_STATUSES` list (`src/core/project-status.ts`) fixes "completed counted as active" in the portal and staff client overviews; additive `/api/me` `clientOf` (companies where the caller is an active client contact, read under `principal_lookup`). Teeth-proven on Linux. Contract: BFF §1, §16a. Plan: `docs/plans/2026-10-10-three-perspectives.md`.
@@ -169,8 +170,9 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.83.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.85.0` · IN PROGRESS
 
+**0.85.0 (2026-10-11, PV-1 company context — PROTOTYPED):** the staff menu follows the active company: agency rows only for agency-vertical companies (Viceroy gets the generic menu), rows for disabled modules hidden, Systems became Platform (platform_admin and owners of the root), and a Group area on the root (group report, rollups, company reports). Org tree and toolkits key on the vertical (no hard-coded ids); `/group` pages; `switchTenant` gains a same-site `return`. (0.84.0 is WebDesk's; see CHANGELOG.) Linux: ui 242/242, `next build` ok.
 **0.83.0 (2026-10-11, PV2-09 project form — PROTOTYPED):** the project form offers exactly the `projects.status` CHECK set (planned, active, on_hold, completed, cancelled, archived; platform-nest's parity test reads it); planned and cancelled get the inactive status colour. (0.82.0 is WebDesk's; see CHANGELOG.) Linux: ui 237/237, `next build` ok.
 **0.81.0 (2026-10-11, top-bar menus + portal account menu — PROTOTYPED):** the staff top bar's account and New menus opened under the page (equal `z-index: 1` stacking contexts since gold-glass Phase 4), so "Sign out" and "Client view" did not respond over page content; top bar now 2, sidebar 3. The portal account menu borrowed staff-shell classes that a client's page never loads; it now has its own `.cp-usermenu*` styles and drops down from the header. Identity e2e for PV2-05 (new `demo-two-company-client`) and PV2-06, teeth-proven. Linux: ui 230/230, `next build` ok, portal e2e 17/17.
 **0.80.0 (2026-10-11, PV2-08 portal QA — PROTOTYPED):** an axe sweep of the 13 portal pages in both themes (`e2e/a11y-axe-portal.spec.ts`, `portal` project) found one contrast failure, the project page's opacity-dimmed "Back" label, now `--ink-subtle`; 0 violations after. axe leaves most portal text's contrast undecided (translucent backgrounds), so a manual contrast pass is still owed. `portal-links.guard.test.ts` pins every `/portal` link the backend sends a client to a real page inside an area (teeth-proven). Linux: ui 230/230, `next build` ok, portal axe 2/2.
@@ -606,7 +608,7 @@ Phase 1; Phase 3 (external wiring — GitHub App, Drive OAuth, Claude Admin usag
 decisions OQ-2/OQ-3; Phase 4 (webdesk + the one-rail contract-snapshot scaffolder) activates once
 webdesk's own P3 codegen lands.
 
-## webdesk — Website Platform · `0.4.0` · DEV-VERIFIED
+## webdesk — Website Platform · `0.5.0` · DEV-VERIFIED
 
 **Current state (2026-10-11):** M3 (a complete CMS, Payload removed) is in progress: waves 1-2 and the Payload removal are on main and LIVE on `gda-aicenter` since the 1.0.0-alpha.348 swap (migrations 0010 + 0011 applied; 0.4.0; plan `docs/plans/2026-10-11-webdesk-m3-plan.md`), not yet live. 0.3.0 is live on `gda-aicenter` (`/v1` in the api, RustFS, migration 0009, the control channel). The write plane, live reads, the editorial assertion and vocabulary 1.1.0 are Linux-verified; editing from the ERP and the gaiada.com import go live with the 2026-10-11 release. Tracker `docs/plans/2026-10-10-webdesk-gaiada-proof.md`; board `TASKS.md`. The paragraphs below are history.
 

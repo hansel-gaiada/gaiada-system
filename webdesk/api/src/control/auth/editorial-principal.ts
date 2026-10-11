@@ -32,6 +32,12 @@ export interface EditorialPrincipal {
   apr?: string;
   /** Single-use assertion id. */
   jti: string;
+  /**
+   * WSK-49b: true iff the signed assertion carried `ce: true` ("client editor"). Absent means false, and
+   * the principal is then exactly what it was before WSK-49. A client principal is held to the
+   * client-editable paths of a composition and to the client command allow-list (./client-editor.ts).
+   */
+  clientEditor?: boolean;
 }
 
 export const EDITORIAL_PRINCIPAL_RESOLVER: unique symbol = Symbol("EDITORIAL_PRINCIPAL_RESOLVER");
