@@ -1,0 +1,10 @@
+[Unit]
+Description=Umami geo database refresh (monthly)
+
+[Timer]
+# DB-IP publishes at the start of each month; the 5th leaves slack. Persistent catches a missed run.
+OnCalendar=*-*-05 04:20:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

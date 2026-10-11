@@ -1,0 +1,13 @@
+[Unit]
+Description=Umami: DOCKER-USER egress guard for the edge network
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/ubuntu/umami/egress-guard.sh apply
+ExecStop=/home/ubuntu/umami/egress-guard.sh remove
+
+[Install]
+WantedBy=multi-user.target

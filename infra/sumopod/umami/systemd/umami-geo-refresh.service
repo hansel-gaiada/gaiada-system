@@ -1,0 +1,10 @@
+[Unit]
+Description=Umami: refresh the DB-IP Lite City database (monthly)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/home/ubuntu/umami/geo-refresh.sh
+Nice=10
