@@ -16,101 +16,29 @@
 // WSK-D3's whole point, restated in code: this function refuses a HIGH-impact command with no
 // verifiable WS4 assertion regardless of what scopes the token carries or what Zone A's own gate
 // decided — "Zone B must refuse a call that skipped WS4 even if Zone A would have allowed it."
-//
-// M4 F1 — two assertion versions (auth/ws4-assertion.ts verifyWs4Assertion picks one by SHAPE):
-//   v1 HMAC   accepted only while WEBDESK_APPROVAL_ASSERTION_KEY holds a real key. In production an
-//             unset key, or one of the published placeholders, retires v1 (logged at boot); outside
-//             production the old dev default still applies, so the test suites are unchanged.
-//   v2 EdDSA  accepted only while the pinned WS4 key set (WEBDESK_WS4_JWKS_FILE, auth/ws4-jwks.ts) is
-//             installed. A present-but-malformed file, or one sharing a kid or a key with the editorial
-//             JWKS, REFUSES BOOT (thrown from this constructor). Absent → v2 unavailable, v1 unaffected.
-// With neither, the api still boots (/v1 delivery stays up) and every HIGH command is refused here,
-// fail closed, with the reason in the boot log and in every refusal. Single use is the same for both
-// versions (the approvalId dedup below). On ALLOW the verified version is noted for the audit row
-// (auth/ws4-verified-version.ts → audit_entries.ws4_assertion_version, migration 0018).
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { DbService } from "../../db/db.service";
 import { TenantLookupService } from "../../tenants/tenant-lookup.service";
 import type { PolicyDecisionPoint, PolicyDecisionInput, PolicyDecision } from "./policy-decision-point";
-import { computeCommandHash, verifyWs4Assertion, type Ws4VerifierKeys } from "../auth/ws4-assertion";
-import { assertWs4KeysDisjointFromEditorial, loadWs4Jwks, WS4_JWKS_FILE_ENV } from "../auth/ws4-jwks";
-import { EditorialJwksError, loadEditorialJwks, EDITORIAL_JWKS_FILE_ENV } from "../auth/editorial-jwks";
-import { noteVerifiedWs4Version } from "../auth/ws4-verified-version";
+import { verifyWs4Signature, computeCommandHash } from "../auth/ws4-assertion";
 
-export const WS4_HMAC_KEY_ENV = "WEBDESK_APPROVAL_ASSERTION_KEY";
-/** The non-production default (unchanged from WSK-22). Never accepted in production. */
-export const WS4_DEV_HMAC_KEY = "dev-only-insecure-ws4-key-do-not-use-in-prod";
-/** Values published in this repo (the dev default and webdesk/.env.example): never a production key. */
-const WS4_PLACEHOLDER_HMAC_KEYS: ReadonlySet<string> = new Set([WS4_DEV_HMAC_KEY, "changeme_approval_assertion_key"]);
-
-export interface Ws4GateConfig extends Ws4VerifierKeys {
-  /** One line per version, for the boot log: what is accepted and why. Never a key. */
-  summary: string[];
-}
-
-/**
- * Resolves what Layer 4 accepts from the environment. Pure apart from reading the JWKS files.
- * Throws (boot refused) only for a present-but-malformed WS4 JWKS, or one overlapping the editorial
- * key set.
- */
-export function resolveWs4GateConfig(env: NodeJS.ProcessEnv = process.env): Ws4GateConfig {
-  const production = env.NODE_ENV === "production";
-  const summary: string[] = [];
-
-  let hmacKey: string | null;
-  const raw = env[WS4_HMAC_KEY_ENV];
-  if (raw && raw.length > 0) {
-    if (production && WS4_PLACEHOLDER_HMAC_KEYS.has(raw)) {
-      hmacKey = null;
-      summary.push(`v1 (HMAC) REFUSED: ${WS4_HMAC_KEY_ENV} holds a published placeholder, never a production key`);
-    } else {
-      hmacKey = raw;
-      summary.push(`v1 (HMAC) accepted (${WS4_HMAC_KEY_ENV} set)`);
-    }
-  } else if (production) {
-    hmacKey = null;
-    summary.push(`v1 (HMAC) retired: ${WS4_HMAC_KEY_ENV} is not set`);
-  } else {
-    hmacKey = WS4_DEV_HMAC_KEY;
-    summary.push(`v1 (HMAC) accepted with the NON-PRODUCTION default key (${WS4_HMAC_KEY_ENV} unset, NODE_ENV=${env.NODE_ENV ?? ""})`);
+function requireEnv(name: string, devFallback: string): string {
+  const v = process.env[name];
+  if (v && v.length > 0) return v;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(`[webdesk:api] ${name} is not set — refusing to boot the real policy decision point in production.`);
   }
-
-  const v2 = loadWs4Jwks(env[WS4_JWKS_FILE_ENV]); // throws on a present-but-malformed file: boot refused
-  if (v2.state === "configured") {
-    let editorial: ReturnType<typeof loadEditorialJwks> | null = null;
-    try {
-      editorial = loadEditorialJwks(env[EDITORIAL_JWKS_FILE_ENV]);
-    } catch (err) {
-      // A malformed editorial file refuses boot in the editorial resolver, with its own message.
-      if (!(err instanceof EditorialJwksError)) throw err;
-    }
-    if (editorial?.state === "configured") assertWs4KeysDisjointFromEditorial(v2.keys, v2.source, editorial.keys);
-    summary.push(`v2 (EdDSA) accepted, WS4 JWKS from ${v2.source}: kid(s) ${[...v2.keys.keys()].join(", ")}`);
-  } else {
-    summary.push(`v2 (EdDSA) unavailable: ${v2.reason}`);
-  }
-
-  return { hmacKey, v2Keys: v2.state === "configured" ? v2.keys : null, summary };
+  return devFallback;
 }
 
 @Injectable()
 export class RealPolicyDecisionPoint implements PolicyDecisionPoint {
-  private readonly logger = new Logger(RealPolicyDecisionPoint.name);
-  private readonly ws4Keys: Ws4VerifierKeys;
+  private readonly assertionKey = requireEnv("WEBDESK_APPROVAL_ASSERTION_KEY", "dev-only-insecure-ws4-key-do-not-use-in-prod");
 
   constructor(
     private readonly db: DbService,
     private readonly tenants: TenantLookupService,
-  ) {
-    const gate = resolveWs4GateConfig();
-    this.ws4Keys = { hmacKey: gate.hmacKey, v2Keys: gate.v2Keys };
-    const line = `WS4 gate: ${gate.summary.join("; ")}`;
-    if (gate.hmacKey === null && gate.v2Keys === null) {
-      this.logger.error(`${line} — NO WS4 assertion can verify: every HIGH-impact command will be refused`);
-    } else {
-      this.logger.log(line);
-    }
-  }
+  ) {}
 
   async evaluate(input: PolicyDecisionInput): Promise<PolicyDecision> {
     const { principal, meta, tenantSlug, ws4AssertionHeader, args } = input;
@@ -134,7 +62,7 @@ export class RealPolicyDecisionPoint implements PolicyDecisionPoint {
       };
     }
 
-    const sig = verifyWs4Assertion(ws4AssertionHeader, this.ws4Keys);
+    const sig = verifyWs4Signature(ws4AssertionHeader, this.assertionKey);
     if (!sig.ok) {
       return { allow: false, reason: `WS4 assertion rejected: ${sig.reason}` };
     }
@@ -157,7 +85,6 @@ export class RealPolicyDecisionPoint implements PolicyDecisionPoint {
       };
     }
 
-    noteVerifiedWs4Version(sig.claims.approvalId, sig.version);
     return { allow: true };
   }
 

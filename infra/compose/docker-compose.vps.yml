@@ -619,14 +619,6 @@ services:
       WEBDESK_CONTROL_CLIENT_SECRET: ${WEBDESK_CONTROL_CLIENT_SECRET:-}
       WEBDESK_CONTROL_TOKEN_SCOPE: ${WEBDESK_CONTROL_TOKEN_SCOPE:-}
       WEBDESK_CONTROL_WS4_KEY: ${WEBDESK_CONTROL_WS4_KEY:-}
-      # M4 F1 — the WS4 v2 (Ed25519) SIGNING key. Same custody as the editorial signing key below, but its
-      # OWN key pair and its OWN read-only mount: a PKCS8 PEM FILE named ws4-signing.<kid>.pk8.pem
-      # (platform-nest/scripts/webdesk-editorial-keygen.mjs --channel ws4), so switching versions or kids is
-      # ONE variable: WEBDESK_CONTROL_WS4_SIGNING_KID. Unset kid -> v1 from WEBDESK_CONTROL_WS4_KEY above.
-      # Set kid but no usable file -> every WS4-bearing WebDesk call answers 503 unsent (never a silent v1).
-      # Never put the PEM itself in env/.env. infra/runbooks/webdesk-ws4-keys.md.
-      WEBDESK_CONTROL_WS4_SIGNING_KID: ${WEBDESK_CONTROL_WS4_SIGNING_KID:-}
-      WEBDESK_CONTROL_WS4_SIGNING_KEY_FILE: /run/webdesk-ws4/ws4-signing.${WEBDESK_CONTROL_WS4_SIGNING_KID:-unset}.pk8.pem
       # Tunables. An empty passthrough parses to the code default (config.ts positiveIntFromEnv),
       # never to 0, so these rows are safe to leave unset.
       WEBDESK_CONTROL_WS4_TTL_SEC: ${WEBDESK_CONTROL_WS4_TTL_SEC:-}
@@ -1046,12 +1038,6 @@ services:
       # two keys during a rotation; WEBDESK_EDITORIAL_SIGNING_KID picks one. Absent dir → empty mount →
       # signer not configured (fail closed). infra/runbooks/webdesk-editorial-keys.md.
       - ${WEBDESK_EDITORIAL_KEY_DIR:-/etc/gaiada/webdesk-editorial}:/run/webdesk-editorial:ro
-      # M4 F1 — the WS4 v2 SIGNING key(s), FILE-MOUNTED read-only, same custody as the editorial key above
-      # (host dir outside the deploy-synced tree, 0700 dir, 0400 root:root key files), a SEPARATE dir so
-      # neither channel's key can be picked up as the other's. Two keys during a rotation;
-      # WEBDESK_CONTROL_WS4_SIGNING_KID picks one. Absent dir -> empty mount -> v1 (kid unset) or 503 on WS4
-      # calls (kid set). infra/runbooks/webdesk-ws4-keys.md.
-      - ${WEBDESK_CONTROL_WS4_SIGNING_KEY_DIR:-/etc/gaiada/webdesk-ws4}:/run/webdesk-ws4:ro
     # §11: the internal control vhost is NOT in public DNS; it is host nginx, reached via the
     # docker0 gateway (the same host-gateway idiom hostdata.yml uses for host.docker.internal).
     extra_hosts:

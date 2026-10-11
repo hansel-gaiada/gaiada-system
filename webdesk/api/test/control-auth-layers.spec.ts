@@ -50,18 +50,6 @@ import { RealControlChannelAuthenticator } from "../src/control/auth/real-contro
 import { POLICY_DECISION_POINT } from "../src/control/policy/policy-decision-point";
 import { RealPolicyDecisionPoint } from "../src/control/policy/real-policy-decision-point";
 import { mintWs4Assertion, computeCommandHash } from "../src/control/auth/ws4-assertion";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { DbService } from "../src/db/db.service";
-import { WS4_JWKS_FILE_ENV } from "../src/control/auth/ws4-jwks";
-import { freshKey, jwksJson, mintHs256, mintRaw, mintWs4V2, ws4V2Payload } from "./ws4-assertion-kit";
-
-// M4 F1: the WS4 v2 (EdDSA) key pair for the v2 rows below. Its PUBLIC half is installed as the pinned
-// WS4 JWKS file before the app is built, exactly as production mounts it; the private half stays here.
-const WS4_V2_KEY = freshKey("ws4-test-1");
-const EDITORIAL_LIKE_KEY = freshKey("wde-test-1");
-let ws4JwksDir: string;
 
 // ------------------------------------------------------------------------------------------
 // Layer 1 fixture material — REAL synccert-issued certs (see header comment). Generated via:
@@ -197,11 +185,6 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
     jwksUrl = `http://127.0.0.1:${port}/certs`;
     process.env.WEBDESK_CONTROL_OIDC_JWKS_URI = jwksUrl;
 
-    ws4JwksDir = mkdtempSync(join(tmpdir(), "m4f1-ws4-layers-"));
-    const ws4JwksFile = join(ws4JwksDir, "ws4.jwks.json");
-    writeFileSync(ws4JwksFile, jwksJson([WS4_V2_KEY]));
-    process.env[WS4_JWKS_FILE_ENV] = ws4JwksFile;
-
     app = await buildRealControlApp();
     goodToken = await mintToken({ scope: "webdesk:read webdesk:operate webdesk:promote webdesk:keys" });
   });
@@ -209,8 +192,6 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
   afterAll(async () => {
     await app.close();
     await new Promise<void>((resolve) => jwksServer.close(() => resolve()));
-    delete process.env[WS4_JWKS_FILE_ENV];
-    rmSync(ws4JwksDir, { recursive: true, force: true });
   });
 
   // ==========================================================================================
@@ -487,106 +468,6 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
       });
       expect(res.statusCode).toBe(201);
       expect(res.json().tenant.status).toBe("archived");
-    });
-  });
-
-  // ==========================================================================================
-  // M4 F1 — Layer 4 with the v2 (EdDSA) assertion, end to end: real mTLS, real token, a real HIGH
-  // command and the real audit row. The pure matrix is ws4-assertion-v2-matrix.spec.ts.
-  // ==========================================================================================
-  describe("M4 F1 — WS4 v2 (EdDSA) on a real HIGH-impact command (tenant.archive)", () => {
-    async function provisionTenant(): Promise<string> {
-      const slug = freshSlug();
-      const res = await app.inject({
-        method: "POST",
-        url: "/control/v1/tenants",
-        headers: baseHeaders(goodToken, randomUUID()),
-        payload: { slug, companyRef: randomUUID() },
-      });
-      expect(res.statusCode).toBe(201);
-      return slug;
-    }
-    const archive = (slug: string, assertion: string) =>
-      app.inject({
-        method: "POST",
-        url: `/control/v1/tenants/${slug}/archive`,
-        headers: { ...baseHeaders(goodToken, randomUUID()), "x-ws4-assertion": assertion },
-      });
-    const v2For = (slug: string, approvalId = randomUUID(), key = WS4_V2_KEY) =>
-      mintWs4V2({ approvalId, commandHash: computeCommandHash("tenant.archive", { tenantSlug: slug }), exp: Math.floor(Date.now() / 1000) + 60 }, key);
-    /** tenant.archive audits at platform scope (tenant_id NULL). */
-    async function auditVersionsOf(approvalId: string): Promise<Array<number | null>> {
-      return app.get(DbService, { strict: false }).withPlatformCtx(async (c) => {
-        const { rows } = await c.query(
-          `SELECT ws4_assertion_version FROM audit_entries WHERE tenant_id IS NULL AND ws4_approval_id = $1 AND action = 'control.tenant.archive'`,
-          [approvalId],
-        );
-        return rows.map((r: { ws4_assertion_version: number | null }) => r.ws4_assertion_version);
-      });
-    }
-
-    it("ALLOWS a fresh, matching v2 assertion, and its audit row records ws4_assertion_version = 2", async () => {
-      const slug = await provisionTenant();
-      const approvalId = randomUUID();
-      const res = await archive(slug, v2For(slug, approvalId));
-      expect(res.statusCode).toBe(201);
-      expect(res.json().tenant.status).toBe("archived");
-      expect(await auditVersionsOf(approvalId)).toEqual([2]);
-    });
-
-    it("ALLOWS v1 alongside (phase 1/2 overlap), and its audit row records ws4_assertion_version = 1", async () => {
-      const slug = await provisionTenant();
-      const approvalId = randomUUID();
-      const v1 = mintWs4Assertion(
-        { approvalId, commandHash: computeCommandHash("tenant.archive", { tenantSlug: slug }), exp: Math.floor(Date.now() / 1000) + 60 },
-        ASSERTION_KEY,
-      );
-      expect((await archive(slug, v1)).statusCode).toBe(201);
-      expect(await auditVersionsOf(approvalId)).toEqual([1]);
-    });
-
-    it("REFUSES a v2 replay (same approvalId, new idempotency key)", async () => {
-      const slug = await provisionTenant();
-      const t = v2For(slug);
-      expect((await archive(slug, t)).statusCode).toBe(201);
-      const second = await archive(slug, t);
-      expect(second.statusCode).toBe(403);
-      expect(second.json().message).toBe("WS4 assertion has already been used for a prior command — single-use violated, replay refused");
-    });
-
-    it("REFUSES an approval used as v1 and re-presented as v2 (single use spans versions)", async () => {
-      const slug = await provisionTenant();
-      const approvalId = randomUUID();
-      const hash = computeCommandHash("tenant.archive", { tenantSlug: slug });
-      const exp = Math.floor(Date.now() / 1000) + 60;
-      expect((await archive(slug, mintWs4Assertion({ approvalId, commandHash: hash, exp }, ASSERTION_KEY))).statusCode).toBe(201);
-      const again = await archive(slug, v2For(slug, approvalId));
-      expect(again.statusCode).toBe(403);
-      expect(again.json().message).toMatch(/already been used/);
-    });
-
-    it("REFUSES HS256 keyed with the WS4 public key (alg confusion)", async () => {
-      const slug = await provisionTenant();
-      const payload = ws4V2Payload({ approvalId: randomUUID(), commandHash: computeCommandHash("tenant.archive", { tenantSlug: slug }), exp: Math.floor(Date.now() / 1000) + 60 });
-      const t = mintHs256({ alg: "HS256", kid: WS4_V2_KEY.kid, typ: "ws4+jwt" }, payload, Buffer.from(WS4_V2_KEY.x, "base64url"));
-      const res = await archive(slug, t);
-      expect(res.statusCode).toBe(403);
-      expect(res.json().message).toBe('WS4 assertion rejected: WS4 v2 algorithm "HS256" is not accepted (only EdDSA)');
-    });
-
-    it("REFUSES a v2 assertion signed by a key that is not in the WS4 JWKS (e.g. an editorial key)", async () => {
-      const slug = await provisionTenant();
-      const res = await archive(slug, v2For(slug, randomUUID(), EDITORIAL_LIKE_KEY));
-      expect(res.statusCode).toBe(403);
-      expect(res.json().message).toBe('WS4 assertion rejected: WS4 v2 kid "wde-test-1" is not in the pinned WS4 JWKS');
-    });
-
-    it("REFUSES a v2 assertion with the wrong aud", async () => {
-      const slug = await provisionTenant();
-      const p = { ...ws4V2Payload({ approvalId: randomUUID(), commandHash: computeCommandHash("tenant.archive", { tenantSlug: slug }), exp: Math.floor(Date.now() / 1000) + 60 }), aud: "urn:gaiada:webdesk:control" };
-      const res = await archive(slug, mintRaw({ alg: "EdDSA", kid: WS4_V2_KEY.kid, typ: "ws4+jwt" }, p, WS4_V2_KEY.privateKey));
-      expect(res.statusCode).toBe(403);
-      expect(res.json().message).toBe('WS4 assertion rejected: WS4 v2 aud must be "webdesk-control-plane"');
     });
   });
 

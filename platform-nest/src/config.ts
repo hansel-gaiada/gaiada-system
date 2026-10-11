@@ -718,16 +718,8 @@ const configBase = {
     clientSecret: process.env.WEBDESK_CONTROL_CLIENT_SECRET ?? "",
     /** Optional space-separated `scope` request parameter; empty = the client's default scopes. */
     tokenScope: process.env.WEBDESK_CONTROL_TOKEN_SCOPE ?? "",
-    /** Layer 4, v1: the WS4 HMAC key. MUST equal WebDesk's `WEBDESK_APPROVAL_ASSERTION_KEY`. Retired by
-     *  M4 F1 phase 3 (infra/runbooks/webdesk-ws4-keys.md); used only while no v2 signing kid is set. */
+    /** Layer 4: the WS4 HMAC key. MUST equal WebDesk's `WEBDESK_APPROVAL_ASSERTION_KEY`. */
     ws4Key: process.env.WEBDESK_CONTROL_WS4_KEY ?? "",
-    /** Layer 4, v2 (M4 F1): the Ed25519 WS4 signing key, a PKCS8 PEM FILE mount (never env text, the
-     *  multi-line-PEM-through-env trap), same custody as WEBDESK_EDITORIAL_SIGNING_KEY_FILE, but its OWN key
-     *  pair. The kid decides: unset → v1 from ws4Key; set → v2, and an unusable key file makes every
-     *  WS4-bearing call answer 503 (never a silent fall-back to v1). WebDesk holds the public half in its
-     *  WEBDESK_WS4_JWKS_FILE. Keys: platform-nest/scripts/webdesk-editorial-keygen.mjs --channel ws4. */
-    ws4SigningKeyFile: process.env.WEBDESK_CONTROL_WS4_SIGNING_KEY_FILE ?? "",
-    ws4SigningKid: process.env.WEBDESK_CONTROL_WS4_SIGNING_KID ?? "",
     ws4TtlSec: positiveIntFromEnv("WEBDESK_CONTROL_WS4_TTL_SEC", 60),
     // Transport tunables. Parsed with positiveIntFromEnv() because compose's `${X:-}` passthrough yields an
     // EMPTY STRING when unset, and `Number("")` is 0 (the MON-12c busy-loop class): 0 retries or a

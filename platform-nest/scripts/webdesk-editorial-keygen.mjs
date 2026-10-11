@@ -18,12 +18,6 @@
 //   inspect --jwks <file>
 //       Prints each kid and its RFC 7638 thumbprint. Public data only.
 //
-// M4 F1 — `--channel ws4` (any verb) makes the same key pair for the WS4 v2 approval assertion
-// (infra/runbooks/webdesk-ws4-keys.md): files ws4-signing.<kid>.pk8.pem and ws4.jwks.json, and the kid
-// must start with "ws4-" so a WS4 key can never be mistaken for an editorial one by name. Without
-// `--channel` (or with `--channel editorial`) every verb behaves exactly as before. The two channels
-// must use DIFFERENT key pairs: WebDesk refuses to boot if its WS4 and editorial JWKS share a kid or a key.
-//
 // NEVER prints, logs or echoes private key material: stdout carries file paths, kids and public
 // thumbprints only. The private key file is created with O_EXCL and mode 0400 in one step.
 import { createHash, generateKeyPairSync, createPublicKey } from "node:crypto";
@@ -101,17 +95,10 @@ function jwksText(keys) {
 
 const a = args(process.argv.slice(2));
 const verb = a._[0];
-const CHANNELS = {
-  editorial: { prefix: "editorial", kidHint: "wde-2026-10", kidPrefix: null },
-  ws4: { prefix: "ws4", kidHint: "ws4-2026-10", kidPrefix: "ws4-" },
-};
-const channel = CHANNELS[a.channel ?? "editorial"];
-if (!channel) fail(`--channel must be editorial or ws4, got ${JSON.stringify(a.channel)}`);
 
 if (verb === "generate") {
   const kid = a.kid;
-  if (!kid || !KID_RE.test(kid)) fail(`--kid must match ${KID_RE} (e.g. ${channel.kidHint})`);
-  if (channel.kidPrefix && !kid.startsWith(channel.kidPrefix)) fail(`--channel ${a.channel} kids start with "${channel.kidPrefix}" (e.g. ${channel.kidHint})`);
+  if (!kid || !KID_RE.test(kid)) fail(`--kid must match ${KID_RE} (e.g. wde-2026-10)`);
   if (!a.out) fail("--out <dir> is required");
   const dir = resolve(a.out);
   const keys = a.jwks ? readJwks(resolve(a.jwks)).keys : [];
@@ -119,8 +106,8 @@ if (verb === "generate") {
   if (keys.length + 1 > MAX_KEYS) fail(`the JWKS would hold ${keys.length + 1} keys; WebDesk accepts at most ${MAX_KEYS} (remove the retired kid first)`);
 
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const keyPath = join(dir, `${channel.prefix}-signing.${kid}.pk8.pem`);
-  const jwksPath = join(dir, `${channel.prefix}.jwks.json`);
+  const keyPath = join(dir, `editorial-signing.${kid}.pk8.pem`);
+  const jwksPath = join(dir, "editorial.jwks.json");
   const jwk = publicJwk(kid, publicKey);
   // Write the JWKS check first so a refusal never leaves an orphan private key behind.
   if (existsSync(jwksPath)) fail(`${jwksPath} already exists; refusing to overwrite (move it away first)`);

@@ -123,8 +123,7 @@ echo "env file: $(wc -l < "$TMP/proof.env") variables generated (values not show
 : > "$TMP/.env.control"
 printf '%s\n' '-----BEGIN CERTIFICATE-----' 'throwaway' '-----END CERTIFICATE-----' > "$TMP/ca-cert.pem"
 printf '%s\n' '{"keys":[]}' > "$TMP/editorial.jwks.json"
-printf '%s\n' '{"keys":[]}' > "$TMP/ws4.jwks.json"
-chmod 644 "$TMP/ca-cert.pem" "$TMP/editorial.jwks.json" "$TMP/ws4.jwks.json" "$TMP/.env.control"
+chmod 644 "$TMP/ca-cert.pem" "$TMP/editorial.jwks.json" "$TMP/.env.control"
 
 cat > "$TMP/override.yml" <<YAML
 services:
@@ -140,7 +139,6 @@ services:
     volumes: !override
       - $TMP/ca-cert.pem:/etc/webdesk/certs/ca-cert.pem:ro
       - $TMP/editorial.jwks.json:/etc/webdesk/editorial/editorial.jwks.json:ro
-      - $TMP/ws4.jwks.json:/etc/webdesk/ws4/ws4.jwks.json:ro
 networks:
   default:
     ipam:
