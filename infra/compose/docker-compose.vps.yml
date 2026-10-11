@@ -641,6 +641,9 @@ services:
       WEBDESK_REBUILD_TARGETS: ${WEBDESK_REBUILD_TARGETS:-}
       WEBDESK_REBUILD_POLL_INTERVAL_MS: ${WEBDESK_REBUILD_POLL_INTERVAL_MS:-}
       WEBDESK_REBUILD_POLL_WINDOW_MS: ${WEBDESK_REBUILD_POLL_WINDOW_MS:-}
+      # WSK-61 — how long past a schedule's effective time to wait for Zone B to show it (default 15 min when
+      # empty). A value outside [60000, 86400000] REFUSES BOOT (config.ts readScheduleSupersedeGraceMs).
+      WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS: ${WEBDESK_SCHEDULE_SUPERSEDE_GRACE_MS:-}
       # The SAME omission again, and this one had been silently disabling THREE shipped features on
       # this box: a 43-char value sat in .env while the container saw an empty string, because no row
       # forwarded it. It signs W0 client-invite tokens (`core/client-invites.ts`), signs SEO's Google

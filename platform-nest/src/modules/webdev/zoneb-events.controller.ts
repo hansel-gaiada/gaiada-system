@@ -32,8 +32,9 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { authorize, writeActivity } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
-import { validateZoneBEvent } from "./zoneb-event-schema";
+import { validateZoneBEvent, type ScheduleFiredData } from "./zoneb-event-schema";
 import { recordZoneBEvent } from "./zoneb-events.service";
+import { requestScheduleSettle } from "./scheduled-rebuilds.service";
 
 @Controller("api/:tenantId/modules/webdev")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
@@ -57,6 +58,13 @@ export class ZoneBEventsController {
       await writeActivity(tenantId, req.principal.userId, "recorded", "webdev_zoneb_event", outcome.id, {
         kind: checked.value.kind, eventId: checked.value.eventId,
       });
+      // WSK-61: a wake-up hint ONLY (§03 channel 1). It narrows which of this company's own executed
+      // schedules to re-check; what is dispatched is decided by those rows and a fresh Zone B read.
+      // Fire-and-forget: the answer to this request never depends on it. A replay (200) wakes nothing.
+      if (checked.value.kind === "schedule.fired") {
+        const d = checked.value.data as unknown as ScheduleFiredData;
+        requestScheduleSettle(tenantId, { siteId: d.siteId, reopenApprovalIds: d.approvalId ? [d.approvalId] : [] });
+      }
     }
     // 200 on an idempotent replay — same status-split doctrine `WebdevController.provision()`
     // already uses for its own "existing" outcome: the loser of a race (or a genuine retry) gets
