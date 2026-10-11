@@ -493,6 +493,13 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/portal/social-reviews`
 - `/portal/social-reviews/[reviewId]`
 - `/portal/timeline`
+- `/portal/website`
+- `/portal/website/[tenant]/[site]`
+- `/portal/website/[tenant]/[site]/[collection]`
+- `/portal/website/[tenant]/[site]/[collection]/[slug]`
+- `/portal/website/[tenant]/[site]/[collection]/[slug]/history`
+- `/portal/website/[tenant]/[site]/[collection]/~new`
+- `/portal/website/[tenant]/[site]/~media`
 - `/print/reports/[jobToken]`
 - `/project-management`
 - `/projects`
