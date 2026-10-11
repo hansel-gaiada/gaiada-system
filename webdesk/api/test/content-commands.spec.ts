@@ -486,7 +486,9 @@ describe("WSK-41 content commands (real DB + real PDP)", () => {
       fields: serviceFields({ h1: "{{PUBLISH_DATE}} and {{RESULT_1_METRIC}}", body: "[CONFIRM: author] [CONFIRM: role] [CLIENT: logo] {{RESULT_1_METRIC}}" }),
     });
     expect(c.statusCode).toBe(201);
-    expect(c.json().lint).toEqual({ placeholders: { unresolvedTokens: ["{{RESULT_1_METRIC}}"], markers: { CONFIRM: 2, CLIENT: 1 } } });
+    expect(c.json().lint.placeholders).toEqual({ unresolvedTokens: ["{{RESULT_1_METRIC}}"], markers: { CONFIRM: 2, CLIENT: 1 } });
+    // M5-W3: the content checks ride along additively and never change the placeholder members.
+    expect(c.json().lint.content).toEqual(expect.objectContaining({ findings: expect.any(Array), unavailable: expect.any(Array) }));
   });
 
   // ==============================================================================================
