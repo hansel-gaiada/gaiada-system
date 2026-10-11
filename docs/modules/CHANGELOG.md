@@ -11,6 +11,26 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.62.0` - `projects.status` is a closed set: a CHECK, and a 400 from both project PATCH routes (2026-10-11) - PROTOTYPED
+
+PV2-09. `projects.status` had been free text since `0001_core.sql`, so a hand-typed value nobody listed would count as an active project in every "finished" reader.
+
+- **Live survey (owner-approved production read, run by the owner as the `postgres` superuser):** active / live 30, active / deleted 11, nothing else.
+- **Migration `202610110151_projects_status_check.sql`:** adds `projects_status_check` for planned, active, on_hold, completed, cancelled, archived.
+  - There is no data mapping and no UPDATE, so the RLS zero-row trap does not apply.
+  - Adding the CHECK validates every existing row, deleted ones included. If a stray value arrived after the survey, the migration fails loudly instead of passing silently.
+- **One set:** `PROJECT_STATUSES` in `core/project-status.ts`. "Finished" narrows to completed / archived / cancelled and "done" to completed. `done` / `complete` were kept only for older rows, which the survey shows do not exist.
+- **Both project PATCH routes** (`/:t/projects/:id` and `/:t/pm/projects/:id`) refuse any other value with a 400 naming the set. Before, they wrote any string, and after the CHECK that would be a 500. The check runs after `authorize()`, so a denied caller still gets 403.
+- **Tests:**
+  - `project-status.test.ts` pins the constant, the migration's CHECK and the staff form's `STATUS_OPTIONS` together.
+  - `project-status-check.db.test.ts` covers the CHECK, both 400s, accepted values, a body without a status, and 403 before 400.
+  - Teeth on Linux: each route without its guard answers 500, so its test fails. An empty migration fails the CHECK test, and a drifting form fails the parity test.
+- **Verified on Linux** (350 + patch): nest 540 passed, 3 skipped. `capability-inventory` (`pm` 9 → 10, the new suite) and MAP (new migration head) were regenerated on Linux.
+
+### platform-ui `0.83.0` - the project form offers the full status set (2026-10-11) - PROTOTYPED
+
+PV2-09's UI half. The staff project form's `STATUS_OPTIONS` is exactly `projects.status`'s CHECK set: planned, active, on_hold, completed, cancelled, archived (planned and cancelled are new). platform-nest's parity test reads the form's options line. `planned` and `cancelled` get the inactive status colour in `ui.tsx`, not the in-flight fallback. Verified on Linux: ui 237/237 files (4,679 tests); `next build` ok.
+
 ### platform-nest `0.61.0` - automation never publishes WebDesk content; a requester reads their own approval; a repeated key request says so (2026-10-11) - PROTOTYPED
 
 - **WebDesk M3 T7 (a):** Cerbos DENIES `publish`/`schedule` on `webdesk_content_item` to any principal with `users.kind` automation or bot (carried as `principal.attr.kind`). `request_publish` stays allowed, so the importer still files its batch for a human to approve.
