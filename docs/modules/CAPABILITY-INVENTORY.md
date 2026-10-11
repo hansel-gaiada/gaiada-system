@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **162** capabilities across **16** owners
-- **87** writes · 75 reads
+- **169** capabilities across **16** owners
+- **87** writes · 82 reads
 - Writes by impact: **high 18** · medium 28 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -42,19 +42,19 @@ unfalsifiable after.
 | agency | `agency` | 11 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 9 |
+| clients | `clients` | 12 |
 | core | `agency` · `positions` · `role-grants` | 15 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
-| invoice | `invoices` | 3 |
+| invoice | `invoices` | 4 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
-| reports | `checkins` · `reports` | 16 |
-| search | `search` | 16 |
-| social | `social` | 12 |
-| webdev | `webdev` | 16 |
+| reports | `checkins` · `reports` | 17 |
+| search | `search` | 18 |
+| social | `social` | 13 |
+| webdev | `webdev` | 17 |
 
 ## Capabilities
 
@@ -125,6 +125,13 @@ unfalsifiable after.
 | reports | `reports.getDocument` | `GET` | `/api/:tenantId/reports/document?grain=:grain&scopeRef=:scopeRef&periodKind=:periodKind&start=:start&end=:end` | read | — |
 | reports | `reports.getMetrics` | `GET` | `/api/:tenantId/reports/metrics?metricKey=:metricKey&grain=:grain&from=:from&to=:to` | read | — |
 | reports | `reports.listPeriods` | `GET` | `/api/:tenantId/reports/periods?kind=:kind&from=:from&to=:to` | read | — |
+| search | `search.analyticsCtas` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/ctas/range/:from/:to` | read | — |
+| search | `search.analyticsForms` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/forms/range/:from/:to` | read | — |
+| search | `search.analyticsPages` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/pages/range/:from/:to` | read | — |
+| search | `search.analyticsSections` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/sections/range/:from/:to` | read | — |
+| search | `search.analyticsSources` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/sources/range/:from/:to` | read | — |
+| search | `search.analyticsSummary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/summary/range/:from/:to` | read | — |
+| search | `search.analyticsVitals` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/vitals/range/:from/:to` | read | — |
 | search | `search.applyNegatives` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.approveReport` | `POST` | `/api/:tenantId/modules/search/reports/:id/approve` | write | `low` |
 | search | `search.auditSummary` | — | — | read | — |

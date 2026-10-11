@@ -798,7 +798,7 @@ jobs:
       # `npm test` (vitest), which is why they were silently never run before. Run from
       # webdesk/api like the rest of this job; `pg` resolves from webdesk/node_modules.
       # WSK-48b: 0009_v1_bytes.test.mjs is retired (it drove the deleted Payload router) and
-      # 0011_drop_payload.test.mjs is added; WSK-61 adds 0012_content_schedules.test.mjs; WSK-46 adds 0013_preview_tokens.test.mjs; WSK-43a adds 0014_media_library.test.mjs; WSK-68 adds wsk68_backup_role.test.mjs (the read-only BYPASSRLS backup role); M5-L2 adds 0015_submission_attribution.test.mjs. The list is exactly the files in migrations/tests/.
+      # 0011_drop_payload.test.mjs is added; WSK-61 adds 0012_content_schedules.test.mjs; WSK-46 adds 0013_preview_tokens.test.mjs; WSK-43a adds 0014_media_library.test.mjs; WSK-68 adds wsk68_backup_role.test.mjs (the read-only BYPASSRLS backup role); M5-L2 adds 0015_submission_attribution.test.mjs; M5-W2a adds 0016_editorial_review.test.mjs. The list is exactly the files in migrations/tests/.
       - name: Migration tests — 0009 to 0014, against scratch databases
         if: ${{ !cancelled() }}
         env:
@@ -807,7 +807,7 @@ jobs:
           APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           API_KEY_PEPPER: ci-throwaway-pepper
         run: |
-          for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload 0012_content_schedules 0013_preview_tokens 0014_media_library 0015_submission_attribution wsk68_backup_role; do
+          for t in 0009_content_write_plane 0010_slug_release_and_ledger 0011_drop_payload 0012_content_schedules 0013_preview_tokens 0014_media_library 0015_submission_attribution 0016_editorial_review wsk68_backup_role; do
             echo "##### $t"
             node --import tsx ../migrations/tests/$t.test.mjs
           done
