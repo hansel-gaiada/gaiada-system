@@ -1056,13 +1056,13 @@ test("STATE uploads not enabled (WebDesk's public URL is not configured on the p
 });
 
 test("STATE refusals: too large and type not allowed are caught before any bytes leave; an infected file is refused by WebDesk's scan; a retry mints a fresh token", async ({ page }) => {
-  await stub.config({ mediaMaxBytes: 200 });
+  await stub.config({ mediaMaxBytes: 100 }); // a flat 64x64 PNG deflates to ~150 bytes
   await openMedia(page);
   await upload(page, pngFile("big.png", 64, 64), { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
   const rows = page.getByTestId("media-upload-failed");
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText("too large");
-  await expect(rows.nth(0)).toContainText("The limit is 200 B.");
+  await expect(rows.nth(0)).toContainText("The limit is 100 B.");
   await expect(rows.nth(1)).toContainText("That file type isn't allowed.");
   expect((await stub.state()).uploadLog).toHaveLength(0);
 
