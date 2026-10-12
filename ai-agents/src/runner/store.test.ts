@@ -3,7 +3,7 @@
 // read, atomic claim, cancel semantics, and the boot interrupted-sweep.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
-import { PgGoalStore } from "./store";
+import { PgGoalStore, DEDUPE_BLOCKING_STATUSES, type GoalInput } from "./store";
 import { TEST_DB_URL as url, testDbReachable } from "../knowledge/testdb";
 
 const dbUp = await testDbReachable();
@@ -115,6 +115,82 @@ describe.skipIf(!dbUp)("PgGoalStore (durable)", () => {
     expect((await store.getGoal(running, T_A))!.status).toBe("interrupted");
     // interrupted goals cannot be claimed → deterministically no autonomous re-run
     expect(await store.claimForRun(queued)).toBeNull();
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // M6-P4e3 — insertGoalOnce: at most one ACTIVE goal per (tenant, dedupe_key), enforced by a partial unique
+  // index, so concurrent creates cannot both win (no read-then-write).
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  describe("M6-P4e3: insertGoalOnce (idempotent on a key)", () => {
+    const base = (over: Partial<GoalInput> = {}): GoalInput => ({
+      tenantId: T_A, goal: "{}", agent: "code-scaffold-v2", envelopeProvider: "n8n", envelopeExternalId: "wf:delivery",
+      budget: { modelCalls: 0, toolCalls: 16 }, ...over,
+    });
+    const once = (dedupeKey: string, over: Partial<GoalInput> = {}) => store.insertGoalOnce({ ...base(over), dedupeKey });
+    let n = 0;
+    const key = () => `scaffold:site=test-${Date.now()}-${n++}:snapshot=s1`;
+
+    it("N concurrent creates with one key produce exactly ONE goal; every caller sees the same id", async () => {
+      const k = key();
+      const results = await Promise.all(Array.from({ length: 12 }, () => once(k)));
+      const created = results.filter((r) => !r.deduped);
+      expect(created).toHaveLength(1);
+      expect(new Set(results.map((r) => r.id)).size).toBe(1);
+      expect(created[0].status).toBe("queued");
+      const { rows } = await pool.query("SELECT count(*)::int AS n FROM agent_goals WHERE dedupe_key=$1", [k]);
+      expect(rows[0].n).toBe(1);
+    });
+
+    it("a queued, a running and a successfully finished (ok) goal each own the key and are returned with their status", async () => {
+      const k = key();
+      const first = await once(k);
+      expect(await once(k)).toEqual({ id: first.id, status: "queued", deduped: true });
+      await store.claimForRun(first.id);
+      expect(await once(k)).toEqual({ id: first.id, status: "running", deduped: true });
+      await store.finishGoal(first.id, { status: "ok", outcome: "committed" });
+      expect(await once(k)).toEqual({ id: first.id, status: "ok", deduped: true });
+    });
+
+    it("a failed, cancelled or interrupted goal frees the key: a new goal is created", async () => {
+      for (const end of ["failed", "cancelled", "interrupted"] as const) {
+        const k = key();
+        const a = await once(k);
+        if (end === "cancelled") await store.cancel(a.id, T_A);
+        else { await store.claimForRun(a.id); await store.finishGoal(a.id, { status: end, outcome: "x", errorKind: end }); }
+        const b = await once(k);
+        expect(b.deduped).toBe(false);
+        expect(b.id).not.toBe(a.id);
+        // and the new one now owns the key
+        expect(await once(k)).toMatchObject({ id: b.id, deduped: true });
+      }
+    });
+
+    it("the key is per company: the same key in another tenant is a separate goal", async () => {
+      const k = key();
+      const a = await once(k);
+      const b = await once(k, { tenantId: T_B });
+      expect(b.deduped).toBe(false);
+      expect(b.id).not.toBe(a.id);
+    });
+
+    it("a different key is a different goal; goals with no key are never deduplicated", async () => {
+      const a = await once(key());
+      const b = await once(key());
+      expect(b.deduped).toBe(false);
+      expect(b.id).not.toBe(a.id);
+      const [x, y] = await Promise.all([store.insertGoal(base()), store.insertGoal(base())]); // plain insertGoal: NULL key
+      expect(x).not.toBe(y);
+      const { rows } = await pool.query("SELECT dedupe_key FROM agent_goals WHERE id=ANY($1)", [[x, y]]);
+      expect(rows.every((r: { dedupe_key: string | null }) => r.dedupe_key === null)).toBe(true);
+    });
+
+    it("init() is repeatable (ADD COLUMN / CREATE INDEX are IF NOT EXISTS) and the index predicate is the active set", async () => {
+      await store.init();
+      const { rows } = await pool.query("SELECT indexdef FROM pg_indexes WHERE indexname='uq_agent_goals_dedupe_active'");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].indexdef).toMatch(/UNIQUE/);
+      for (const s of DEDUPE_BLOCKING_STATUSES) expect(rows[0].indexdef).toContain(`'${s}'`);
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -260,6 +336,12 @@ describe.skipIf(!dbUp)("PgGoalStore (durable)", () => {
       // The pre-existing row survived the upgrade with parent_run_id defaulting to NULL.
       const legacyRun = await upgraded.getRun("legacy-run", T_A);
       expect(legacyRun!.parentRunId).toBeNull();
+
+      // M6-P4e3: the same upgrade adds dedupe_key + its partial unique index; the pre-existing row has a NULL key.
+      const keyed = { tenantId: T_A, goal: "{}", agent: "code-scaffold-v2", envelopeProvider: "n8n", envelopeExternalId: "wf", budget: { modelCalls: 0, toolCalls: 1 }, dedupeKey: "legacy-upgrade-key" };
+      const k1 = await upgraded.insertGoalOnce(keyed);
+      expect(k1.deduped).toBe(false);
+      expect(await upgraded.insertGoalOnce(keyed)).toMatchObject({ id: k1.id, deduped: true });
 
       // The new table is now usable.
       await upgraded.insertEvent({ runId: "legacy-run", goalId: preexistingGoalId, tenantId: T_A, seq: 1, kind: "model", detail: "post-upgrade" });

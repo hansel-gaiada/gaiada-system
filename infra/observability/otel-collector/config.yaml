@@ -32,8 +32,8 @@ receivers:
   # WSK-D63 (2) / WebDesk M4 T6a: the ONE ingest point for WebDesk's telemetry (design v2 §03 channel 2).
   # WRITE-ONLY: a receiver has no query API and nothing else on this port answers a read. OTLP/HTTP
   # only (traces + logs; see the pipelines below). Reachable ONLY through the docker0 publish in
-  # docker-compose.observability.yml (172.17.0.1:4319), which the webdesk egress guard opens for the
-  # webdesk network alone (webdesk/ops/host/webdesk-egress-guard.sh). Bearer-authenticated; an
+  # docker-compose.observability.yml (172.17.0.1:4319), which the webdesk egress guard opens for
+  # WebDesk alone (since 2026-10-12: webdesk/ops/host/rootless/webdesk-rootless-guard.sh). Bearer-authenticated; an
   # unauthenticated or wrong-token request is a 401 before any body is read.
   # Verified by webdesk/ops/scripts/check-otlp-write-only.mjs (wired into CI), which also fails the
   # build if this receiver loses its auth or a read surface appears next to it.

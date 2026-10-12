@@ -8,7 +8,7 @@
 // webdesk/qa/p3-gate/generate-fixture-artifacts.mts and webdesk/wordpress/sdk-gate/generate-fixture-php.mts
 // (the .txt suffix keeps the static no-execute scan and tsc off them). The block-library tarball is a few fake
 // bytes: nothing in this process opens it.
-import { describe, it, expect, afterEach, beforeAll } from "vitest";
+import { describe, it, expect, afterEach, beforeAll, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,10 +18,11 @@ import type { FastifyInstance } from "fastify";
 import { buildRunnerApp } from "../runner/service";
 import type {
   GoalStore, GoalInput, GoalRunContext, FinishGoalPatch, GoalListItem, GoalDetail, RunInput, RunRow, CancelResult,
-  RunEventInput, RunEventRow,
+  RunEventInput, RunEventRow, GoalOnceResult,
 } from "../runner/store";
+import { DEDUPE_BLOCKING_STATUSES } from "../runner/store";
 import type { AgentDeps, Envelope } from "../agent";
-import { CODE_SCAFFOLD_AGENT, type ScaffoldJobResult } from "./runner-job";
+import { CODE_SCAFFOLD_AGENT, scaffoldDedupeKey, type ScaffoldJobResult } from "./runner-job";
 import { isNodeAllowedPath } from "./templates/node-site";
 import { resetExecLog, getExecLog } from "./no-execute-guard";
 import type { ScaffoldFileEntry } from "./envelope";
@@ -118,6 +119,14 @@ class MemGoalStore implements GoalStore {
     this.goals.set(id, { ...input, id, status: "queued", outcome: null, errorKind: null, blackboard: null });
     return id;
   }
+  async insertGoalOnce(input: GoalInput & { dedupeKey: string }): Promise<GoalOnceResult> {
+    for (const g of this.goals.values()) {
+      if (g.tenantId === input.tenantId && g.dedupeKey === input.dedupeKey && DEDUPE_BLOCKING_STATUSES.includes(g.status)) {
+        return { id: g.id, status: g.status, deduped: true };
+      }
+    }
+    return { id: await this.insertGoal(input), status: "queued", deduped: false };
+  }
   async claimForRun(id: string): Promise<GoalRunContext | null> {
     const g = this.goals.get(id);
     if (!g || g.status !== "queued") return null;
@@ -152,8 +161,12 @@ class MemGoalStore implements GoalStore {
   async getRun(): Promise<RunRow | null> {
     return null;
   }
-  async cancel(): Promise<CancelResult> {
-    return "not_found";
+  async cancel(id: string, tenantId: string): Promise<CancelResult> {
+    const g = this.goals.get(id);
+    if (!g || g.tenantId !== tenantId) return "not_found";
+    if (g.status !== "queued") return "conflict";
+    g.status = "cancelled";
+    return "cancelled";
   }
   async sweepInterrupted(): Promise<number> {
     return 0;
@@ -529,5 +542,187 @@ describe("the runner accepts the agent and caps its goal text", () => {
     apps.push(app);
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.json().jobAgents).toEqual([CODE_SCAFFOLD_AGENT]);
+  });
+});
+
+// M6-P4e3 — at most one scaffold goal per provisioned site and pinned snapshot. The idempotency lives in the goal
+// store's insertGoalOnce (atomic: a partial unique index in Postgres, proven in store.test.ts against a real database;
+// the single-threaded in-memory double here proves the SERVICE's use of it). The key is derived from the goal text.
+describe("M6-P4e3 — a scaffold goal is idempotent on its provisioned site and snapshot", () => {
+  const SITE = "dddddddd-0000-4000-8000-000000000004";
+  const SITE_2 = "dddddddd-0000-4000-8000-000000000044";
+  const RUN = "eeeeeeee-0000-4000-8000-000000000005";
+  const OTHER_TENANT = "aaaaaaaa-0000-4000-8000-000000000009";
+  const committing = (extra: Record<string, unknown> = {}) => scaffoldGoal("astro", { runId: RUN, commit: { provisionedSiteId: SITE }, ...extra });
+  const hubDown: AgentDeps["callTool"] = async () => { throw new Error("hub down"); };
+
+  function makeApp(callTool: AgentDeps["callTool"], store = new MemGoalStore()) {
+    const app = buildRunnerApp({
+      store,
+      agentDeps: { complete: async () => { throw new Error("no model"); }, callTool, lastProvider: () => undefined },
+      config: { token: TOKEN, maxConcurrent: 1, maxQueue: 10 },
+    });
+    apps.push(app);
+    return { app, store };
+  }
+  const post = (app: FastifyInstance, goal: string, over: { tenantId?: string; agent?: string } = {}) =>
+    app.inject({ method: "POST", url: "/goals", headers: AUTH, payload: { tenantId: over.tenantId ?? TENANT, goal, agent: over.agent ?? CODE_SCAFFOLD_AGENT, envelope: OBO } });
+  async function until(store: MemGoalStore, id: string, done: (s: string) => boolean) {
+    for (let i = 0; i < 400 && !done(store.goals.get(id)!.status); i++) await new Promise((r) => setTimeout(r, 25));
+    return store.goals.get(id)!;
+  }
+  const settled = (store: MemGoalStore, id: string) => until(store, id, (s) => s !== "queued" && s !== "running");
+
+  it("the key is the provisioned site plus the snapshot; the rest of the envelope does not matter", () => {
+    const k = scaffoldDedupeKey(committing());
+    expect(k).toBe(`scaffold:site=${SITE}:snapshot=${SNAPSHOT}`);
+    // a different run, repo, prd or prototype for the same site and snapshot is the same key
+    expect(scaffoldDedupeKey(committing({ runId: "run-other", repoUrl: "https://x/y", prdArtifact: "p2", prototypeArtifact: "q2" }))).toBe(k);
+    expect(scaffoldDedupeKey(scaffoldGoal("astro", { commit: { provisionedSiteId: SITE.toUpperCase() } }))).toBe(k); // site id is case-normalised
+    // a different snapshot, or a different site, is a different key
+    expect(scaffoldDedupeKey(committing({ contractSnapshotId: "bbbbbbbb-0000-4000-8000-0000000000ff" }))).not.toBe(k);
+    expect(scaffoldDedupeKey(committing({ commit: { provisionedSiteId: SITE_2 } }))).not.toBe(k);
+  });
+
+  it("with no provisionedSiteId the key is the envelope's identifying fields: identical requests share it, any difference does not", () => {
+    const k = scaffoldDedupeKey(scaffoldGoal("astro"))!;
+    expect(k).toMatch(/^scaffold:dryrun=[0-9a-f]{64}$/);
+    expect(scaffoldDedupeKey(scaffoldGoal("astro"))).toBe(k);
+    for (const diff of [{ runId: "run-2" }, { repoUrl: "r2" }, { prdArtifact: "p2" }, { prototypeArtifact: "q2" }, { contractSnapshotId: "s2" }, { constraints: { blockLibraryVersion: "9.9.9", maxRevise: 3 } }]) {
+      expect(scaffoldDedupeKey(scaffoldGoal("astro", diff))).not.toBe(k);
+    }
+    expect(scaffoldDedupeKey(scaffoldGoal("node"))).not.toBe(k);
+    // a commit-less key never collides with a site key
+    expect(scaffoldDedupeKey(committing())).not.toBe(k);
+  });
+
+  it("a goal that is not a valid envelope has no key (it is filed as before and fails as invalid_job)", () => {
+    expect(scaffoldDedupeKey("not json")).toBeNull();
+    expect(scaffoldDedupeKey(JSON.stringify({ siteKind: "astro" }))).toBeNull();
+    expect(scaffoldDedupeKey(committing({ commit: { provisionedSiteId: "not-a-uuid" } }))).toBeNull();
+  });
+
+  it("two concurrent creates with the same key produce ONE goal; the others get its id back, deduped", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const { app, store } = makeApp(async () => { await gate; throw new Error("hub down"); });
+    const responses = await Promise.all([post(app, committing()), post(app, committing({ runId: "run-b" })), post(app, committing({ runId: "run-c" }))]);
+    const created = responses.filter((r) => r.statusCode === 202);
+    const deduped = responses.filter((r) => r.statusCode === 200);
+    expect(created).toHaveLength(1);
+    expect(deduped).toHaveLength(2);
+    const id = created[0].json().id as string;
+    expect(created[0].json()).toEqual({ id, status: "queued" }); // the creating response is unchanged
+    for (const d of deduped) expect(d.json()).toMatchObject({ id, deduped: true });
+    expect(store.goals.size).toBe(1);
+    release();
+    await settled(store, id);
+  });
+
+  it("a running goal is returned with its status; a completed (ok) goal is returned, not re-run", async () => {
+    const hub = fakeHub({
+      commit: (args) =>
+        JSON.stringify({
+          outcome: "committed", siteId: args.siteId, repo: "acme-org/acme-site", branch: "main", baseSha: "b".repeat(40), treeSha: "a".repeat(40),
+          commitSha: "c".repeat(40), snapshotId: SNAPSHOT, manifestSha256: "f".repeat(64), fileCount: (args.files as unknown[]).length, totalBytes: 1,
+        }),
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let first = true;
+    const { app, store } = makeApp(async (name, args, e) => {
+      if (first) { first = false; await gate; }
+      return hub.callTool(name, args, e);
+    });
+    const a = await post(app, committing());
+    expect(a.statusCode).toBe(202);
+    const id = a.json().id as string;
+    await until(store, id, (s) => s === "running");
+    const whileRunning = await post(app, committing());
+    expect(whileRunning.statusCode).toBe(200);
+    expect(whileRunning.json()).toEqual({ id, status: "running", deduped: true });
+
+    release();
+    expect((await settled(store, id)).status).toBe("ok");
+    const callsAfterFirst = hub.calls.length;
+    expect(hub.calls.filter((c) => c.name === "webdev.provisionedSites.commitScaffold")).toHaveLength(1);
+
+    const afterOk = await post(app, committing({ runId: "run-redelivered" }));
+    expect(afterOk.statusCode).toBe(200);
+    expect(afterOk.json()).toEqual({ id, status: "ok", deduped: true });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(hub.calls.length).toBe(callsAfterFirst); // nothing ran again
+    expect(store.goals.size).toBe(1);
+  });
+
+  it("a FAILED goal does not block a retry: a new goal is created", async () => {
+    const { app, store } = makeApp(hubDown);
+    const a = await post(app, committing());
+    const idA = a.json().id as string;
+    expect((await settled(store, idA)).status).toBe("failed");
+    const b = await post(app, committing());
+    expect(b.statusCode).toBe(202);
+    const idB = b.json().id as string;
+    expect(idB).not.toBe(idA);
+    expect(b.json().deduped).toBeUndefined();
+    expect(store.goals.size).toBe(2);
+    await settled(store, idB);
+  });
+
+  it("a CANCELLED goal does not block a retry either", async () => {
+    // maxConcurrent 1: a first goal (another site) holds the only worker, so the second stays queued and can be cancelled
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const { app, store } = makeApp(async () => { await gate; throw new Error("hub down"); });
+    const blocker = await post(app, committing({ commit: { provisionedSiteId: SITE_2 } }));
+    await until(store, blocker.json().id, (s) => s === "running");
+    const queued = await post(app, committing());
+    const idQ = queued.json().id as string;
+    expect(store.goals.get(idQ)!.status).toBe("queued");
+    expect((await post(app, committing())).json()).toEqual({ id: idQ, status: "queued", deduped: true });
+    const cancel = await app.inject({ method: "POST", url: `/goals/${idQ}/cancel?tenant=${TENANT}`, headers: AUTH });
+    expect(cancel.statusCode).toBe(200);
+    const retry = await post(app, committing());
+    expect(retry.statusCode).toBe(202);
+    expect(retry.json().id).not.toBe(idQ);
+    release();
+    await settled(store, blocker.json().id);
+  });
+
+  it("a different snapshot, a different site, or a different company is a different key: each gets its own goal", async () => {
+    const { app, store } = makeApp(hubDown);
+    const res = await Promise.all([
+      post(app, committing()),
+      post(app, committing({ contractSnapshotId: "bbbbbbbb-0000-4000-8000-0000000000ff" })),
+      post(app, committing({ commit: { provisionedSiteId: SITE_2 } })),
+      post(app, committing(), { tenantId: OTHER_TENANT }),
+    ]);
+    expect(res.map((r) => r.statusCode)).toEqual([202, 202, 202, 202]);
+    expect(new Set(res.map((r) => r.json().id)).size).toBe(4);
+    expect(store.goals.size).toBe(4);
+    for (const r of res) await settled(store, r.json().id);
+  });
+
+  it("an unparseable scaffold goal is not deduplicated: it files as before (and fails as invalid_job)", async () => {
+    const { app, store } = makeApp(hubDown);
+    const a = await post(app, "not json");
+    const b = await post(app, "not json");
+    expect([a.statusCode, b.statusCode]).toEqual([202, 202]);
+    expect(store.goals.size).toBe(2);
+    await settled(store, a.json().id);
+    await settled(store, b.json().id);
+    expect(store.goals.get(a.json().id)!.errorKind).toBe("invalid_job");
+  });
+
+  it("goals of any other agent are unaffected: identical goals are all filed, and the keyed insert is never used", async () => {
+    const { app, store } = makeApp(hubDown);
+    const once = vi.spyOn(store, "insertGoalOnce");
+    const goal = committing(); // the same text a scaffold goal would dedupe on
+    const res = await Promise.all([post(app, goal, { agent: "supervisor" }), post(app, goal, { agent: "supervisor" })]);
+    expect(res.map((r) => r.statusCode)).toEqual([202, 202]);
+    expect(new Set(res.map((r) => r.json().id)).size).toBe(2);
+    expect(once).not.toHaveBeenCalled();
+    expect([...store.goals.values()].every((g) => !g.dedupeKey)).toBe(true);
+    for (const r of res) await settled(store, r.json().id);
   });
 });

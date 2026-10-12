@@ -186,7 +186,7 @@ Run as the provider's initial root/admin access, then immediately stop using it.
 
 See `webdesk/ops/secrets-layout.md` (this ticket) for the full inventory. Summary applied here:
 
-- `/etc/webdesk/.env` — root:root 0600, read by the deploy user's docker compose invocation via
+- `/etc/webdesk/.env` — root:root 0600, read by the deploy user's docker compose invocation (`sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose ...`, the rootless daemon since 2026-10-12) via
   `sudo`-scoped access only, never world-readable, never in the release image, never in git.
 - No secret is ever baked into an image layer — every credential arrives via the compose
   `environment:`/`.env` path at container start, consistent with the estate's existing pattern
@@ -255,7 +255,7 @@ box exists to issue a cert against.**
 |---|---|---|
 | SSH is key-only | `ssh -o PasswordAuthentication=no $ZONEB_DEPLOY_USER@$ZONEB_HOST -p $ZONEB_SSH_PORT` from a machine with no key installed | Connection refused/prompt-free failure, not a password prompt |
 | Only :443 (+ SSH port) reachable | `nmap -Pn -p- $ZONEB_HOST` from outside the box's network | Only the two ports open |
-| No 0.0.0.0 Docker publishes beyond the proxy | `docker ps --format '{{.Names}}\t{{.Ports}}'` on the box | Only the proxy service shows a `0.0.0.0:443->...` mapping |
+| No 0.0.0.0 Docker publishes beyond the proxy | `DOCKER_HOST=unix:///run/user/940/docker.sock docker ps --format '{{.Names}}\t{{.Ports}}'` on the box (WebDesk's rootless daemon) | Only the proxy service shows a `0.0.0.0:443->...` mapping |
 | Control vhost rejects a cert-less request | `curl -k https://control.$ZONEB_HOST/` (no client cert) | TLS handshake failure, not an HTTP response |
 | Control vhost accepts the pinned CN | `curl --cert platform-nest-webdesk.crt --key platform-nest-webdesk.key --cacert ca-cert.pem https://control.$ZONEB_HOST/healthz` | 200 (once WSK-21/22's api exists to answer it) |
 | fail2ban active | `fail2ban-client status sshd` | jail present, bans list empty on a clean box |
