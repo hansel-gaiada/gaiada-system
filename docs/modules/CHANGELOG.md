@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.77.0` - M5-W2d: the writers' room review flow over the ERP (routes, MCP tools, notifications) (2026-10-12) - DEV-VERIFIED
+
+- **Routes.** 11 routes under `…/content/sites/:tenantSlug/:siteId/`:
+  - item routes: `items/:itemId/editorial/{submit,withdraw,request-changes,seo-signoff,approve,assign}`, `…/editorial/comments` and `…/comments/:c/resolve`, `GET items/:itemId/editorial` (history);
+  - `PUT|PATCH collections/:key/editorial-policy`;
+  - `GET editorial/board`.
+- **Order of checks:** each route runs W1c's `authorizeSite`, then the real Cerbos action on attributes read from WebDesk, BEFORE the body is parsed. Writes forward with the signed editorial assertion and an Idempotency-Key, and WebDesk's typed 409s pass through.
+- **Approve:** `creatorId` is the creator of the submitted version, read from WebDesk and never taken from the body, so maker ≠ checker holds, even for `platform_admin`.
+- **MCP tools:** `webdesk.editorial.submit`, `.withdraw`, `.requestChanges`, `.assign`, `.comment` and `.resolveComment` (low); `.seoSignoff`, `.approve` and `.setPolicy` (medium; Cerbos refuses bots and automation for approve and SEO sign-off); `.board` and `.history` (read).
+- **Notifications** carry ids and titles only, never note text. A replay notifies nobody.
+  - A submit notifies the in-scope editors and the publisher tier.
+  - Changes requested and approved notify the author only.
+- **The board:** filtered per (collection, locale) for a scoped grant, with `countsWithheld`.
+- PERMISSION-CONTRACT §27.4; FRONTEND-BFF-CONTRACT §27 rows.
+- Verified on GitHub Actions 38201900188: the real-DB suite 24/24 (denials with valid bodies and no WebDesk write, bot and automation approve 403, self-approve 403, notification recipients incl. another tenant's editor), units 10/10, grants 17/17 + 31/31.
+
 ### platform-nest `0.75.0` - M5-W1c: the writers' room two-phase gate on every content route (2026-10-12) - DEV-VERIFIED
 
 The transport that makes the W1a writers' room rules live (built by the M5 session). Until now those rules read `""` for `siteId` and `reviewState` and denied.
