@@ -1,0 +1,9 @@
+# /etc/default/webdesk-rootless-@USER@ (M4 F6, WSK-D73), written by install-rootless.sh. Parsed (never
+# sourced) by webdesk-rootless-guard.sh, rootless-probe.sh and cutover.sh. Not secret.
+RL_ROLE=@ROLE@
+RL_UID=@UID@
+RL_PUBLISHED_PORTS="@PORT@"
+RL_RESOLVERS="@RESOLVERS@"
+RL_OTLP_ENV_FILE=@OTLP_ENV@
+RL_OPERATOR=@OPERATOR@
+RL_LOG=on

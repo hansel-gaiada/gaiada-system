@@ -1,0 +1,13 @@
+# /etc/systemd/system/user@@UID@.service.d/50-webdesk-rootless.conf (M4 F6, WSK-D73), rendered by
+# install-rootless.sh. An INSTANCE drop-in: it changes user@@UID@.service (@USER@) and no other user's manager.
+[Unit]
+# The egress guard first. The daemon's own unit also refuses to start without the guard's marker, so a guard
+# that fails at boot leaves WebDesk down rather than unguarded.
+Wants=webdesk-rootless-guard@@USER@.service
+After=webdesk-rootless-guard@@USER@.service
+
+[Service]
+# systemd 252's default is Delegate=pids memory cpu (measured on gda-aicenter, 2026-10-12): already enough for
+# compose's cpus / mem_limit / pids_limit. Pinned here so a changed default can never silently drop one, plus
+# cpuset and io so `docker info` reports no missing controller and io weights stay possible.
+Delegate=cpu cpuset io memory pids
