@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.17.0` - the site templates leave versions with critical advisories: Next 15.5 + React 19, vitest 4, Node 24 in site CI (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4d2 (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`). Found by the M6 session through Dependabot on the published template repos.
+
+- `templates/fullstack-next-nest/apps/web`: `next ^14.2.15` → `^15.5.27` (two critical advisories, unauthenticated RCE, fixed in 15.5.24; eight high), `react`/`react-dom` and their types `^18` → `^19.3.0`; `tsconfig.json` includes `.next/types`.
+- `templates/static-astro`: `vitest ^2.1.5` → `^4.1.11` (vitest 3.x still pulls a critical `tinypool`; 4.1.11 audits clean).
+- **Site CI, the local compose and the scaffolded QA workflow run Node 24** (npm 11): npm 10.9.8 (Node 22) crashes with `Cannot read properties of null (reading 'edgesOut')` installing vitest 4 beside the `file:` vendor tarballs, which vitest 2 did not trigger.
+- `templates/qa/build-templates.sh` (new): both templates and one scaffolded fullstack site, install → typecheck → build → vitest, in a `node:24-bookworm` container.
+- Still open (M6-P4d3, each a major bump): Nest 10 → 11 and Tailwind 3 → 4 in the fullstack template; Next's last moderate needs 16.4.
+- Verified on `sumopod`: `build-templates.sh` 10/10 PASS on Node 24 (static build; fullstack install, typecheck, `next build`; a scaffolded site's install, typecheck, `next build`, vitest), `npm audit` 0 vulnerabilities in the static template and the scaffolded site; the npm 10 crash reproduced and isolated (vitest 2 vs 4, npm 10 vs 11).
+
+### ai-agents `0.12.0` - code.scaffold emits Next 15 / React 19, vitest 4 and Node 24 (2026-10-12) - DEV-VERIFIED
+
+- M6-P4d2. `templates/node-site.ts` and `templates/common.ts` pin the same versions as the templates (the node-site drift test still compares them); the generated `[slug]` page awaits Next 15's async `params`; the React block renderer returns `ReactElement` (React 19 removed the global `JSX`); `qa-harness-workflow.ts` sets Node 24.
+- Verified on the Linux gate (sumopod): tsc clean, 45 files / 389 passed / 0 failed; a scaffolded fullstack site builds with `next build` (above).
+
 ### platform-nest `0.83.0` - the contract mirror checks the block-library tarball against WebDesk's sha256; a provisioned site claims its real domain once (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6 (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`), batch 4. Built by the M6 session.

@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
       - run: npm ci
       # The actual compile gate ("a repo that compiles" — §06's acceptance bar). The scaffolder itself
       # never runs this (WSK-D6) — repo CI is the first place it ever runs at all.
