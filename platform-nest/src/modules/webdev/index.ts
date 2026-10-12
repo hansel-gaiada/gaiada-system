@@ -31,6 +31,7 @@
 //    calling the hub tool (PRV-03), not an in-process handler — that indirection is what puts the WS4
 //    approval between the event and the write.
 import type { McpToolDef, ModuleContract } from "../contract";
+import { WEBDESK_WRITERS_DASHBOARD_TOOLS } from "./webdesk-writers-dashboard-mcp-tools";
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // M5-W2d — the writers' room review flow's MCP tools (docs/plans/2026-10-11-m5-writers-room-design.md §4.3, §8). Same BFF routes
@@ -1408,6 +1409,7 @@ export const webdevModule: ModuleContract = {
     },
     ...WEBDESK_EDITORIAL_REVIEW_TOOLS,
     ...WEBDESK_BRIEF_TOOLS,
+    ...WEBDESK_WRITERS_DASHBOARD_TOOLS,
   ],
   rollupProviders: [],
   uiManifest: [

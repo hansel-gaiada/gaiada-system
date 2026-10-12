@@ -133,6 +133,8 @@ export class FakeZoneB {
   private readonly mintKeys = new Set<string>();
   /** M5-L1d: the form definitions by `${siteId}:${key}`, as WebDesk's `forms.define` stores them (the id survives a redefinition). */
   readonly forms = new Map<string, { formId: string; key: string; siteId: string; schema: Record<string, unknown>; notify: unknown; retentionDays: number; consentNoticeVersion: string; createdAt: string; updatedAt: string }>();
+  /** M5-W8: `item.list` rows carry the `editorial` member (WebDesk >= M5-W2b does). Off by default so older suites see the rows they always saw. */
+  listRowsCarryEditorial = false;
   /** Throw this from the NEXT `send` (a breaker-open, a transport failure, ...). Persistent until cleared. */
   failWith: Error | null = null;
   /** Respond to the NEXT write with this instead of applying it. */
@@ -170,6 +172,7 @@ export class FakeZoneB {
     this.nextWriteResponse = null;
     this.dropAfterApply = false;
     this.dropBeforeApply = false;
+    this.listRowsCarryEditorial = false;
   }
 
   /** A PRE-0009 row: content lives only in the projection, `head_version` is 0 and there is no version row. */
@@ -333,7 +336,10 @@ export class FakeZoneB {
         const rows = [...this.items.values()].filter(
           (i) => i.siteId === p.siteId && i.collectionKey === p.key && !i.deletedAt && (!q.locale || i.locale === q.locale) && (!q.q || i.slug.includes(q.q)),
         );
-        return ok({ items: rows.map((i) => this.itemJson(i)), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
+        return ok({
+          items: rows.map((i) => (this.listRowsCarryEditorial && i.editorial ? { ...this.itemJson(i), editorial: i.editorial } : this.itemJson(i))),
+          page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) },
+        });
       }
       case "item.get": {
         const i = this.items.get(p.itemId);

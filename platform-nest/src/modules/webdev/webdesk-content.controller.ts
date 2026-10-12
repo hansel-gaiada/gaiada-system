@@ -32,6 +32,7 @@ import {
 import { webdeskMedia } from "./webdesk-media.service";
 import { webdeskEditorial } from "./webdesk-editorial.service";
 import { webdeskAssist } from "./webdesk-assist.service";
+import { webdeskWritersDashboard } from "./webdesk-writers-dashboard.service";
 import { defineFormDefinition, getFormDefinition, listFormDefinitions } from "./webdesk-forms.service";
 
 /** Writes a Zone B problem exactly as Zone B sent it. */
@@ -367,6 +368,17 @@ export class WebdeskContentController {
   ) {
     const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
     send(reply, await webdeskEditorial.history(gate, { tenantSlug, siteId }, itemId, query));
+  }
+
+  // ── M5-W8: the writer dashboard. Phase 1 here; the service asks the real question (Cerbos per collection and language, or one
+  // company-level read) before the query is looked at. A read of counts only: a lead is never a name, an address or an id.
+  @Get("sites/:tenantSlug/:siteId/writers/dashboard")
+  async writersDashboard(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Query() query: unknown,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
+    return webdeskWritersDashboard.read(gate, { tenantSlug, siteId }, query);
   }
 
   @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/submit")

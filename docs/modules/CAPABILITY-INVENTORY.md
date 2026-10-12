@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **215** capabilities across **16** owners
-- **116** writes · 99 reads
+- **216** capabilities across **16** owners
+- **116** writes · 100 reads
 - Writes by impact: **high 24** · medium 35 · low 57
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 20 |
 | social | `social` | 13 |
-| webdev | `webdev` | 26 |
+| webdev | `webdev` | 27 |
 
 ## Capabilities
 
@@ -267,6 +267,7 @@ unfalsifiable after.
 | webdev | `webdesk.site.rollback` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/rollback` | write | `high` |
 | webdev | `webdesk.site.setDomain` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/domain` | write | `high` |
 | webdev | `webdesk.siteStatus` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/status` | read | — |
+| webdev | `webdesk.writers.dashboard` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/writers/dashboard` | read | — |
 | webdev | `webdev.contracts.artifact` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact` | read | — |
 | webdev | `webdev.contracts.get` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId` | read | — |
 | webdev | `webdev.provisionedSites.commitScaffold` | `POST` | `/api/:tenantId/modules/webdev/provisioned-sites/:siteId/scaffold-commit` | write | `low` |
