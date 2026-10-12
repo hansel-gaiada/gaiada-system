@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.89.0` - M5-V4: content-decay alerts per page (off by default) (2026-10-12) - DEV-VERIFIED
+
+- **The detector** (`search/content-decay.ts`) is pure.
+  - It compares 28-day windows ending 3 days back: against the window before, and against the same window a year ago.
+  - Each metric has its own volume and absolute floors (clicks 30/30%/15; impressions 500/30%/250; views 100/30%/40; position worse by 4+ places).
+  - A seasonal dip is not flagged, and a slow year-on-year decay is.
+  - Missing data never alerts and is never read as zero.
+  - Each finding carries its reason in words.
+- **Migration `202610122200_search_decay_findings`:** FORCE RLS plus the `search` scope; idempotent per window; at most one live finding per page. States: open, acknowledged, resolved (on recovery), refresh brief filed.
+- **A daily sweep,** ON only when `SEARCH_DECAY_ENABLED` is exactly `1` (passed through compose with an empty default).
+  - With the flag off it starts no timer, makes no DB call and no fetch.
+  - It reads stored Search Console rows and our own Umami, so it spends no vendor money.
+  - It runs under one advisory lock.
+- **Routes:** list / acknowledge / file a refresh brief (as a `search_content_briefs` draft), with 3 MCP tools on the existing `resource_search_property` kind. Property owners get a bell (ids, path and reason only).
+- **Verified** on GitHub Actions 38236096298 (main + W4 + V4): DB 12/12, job 11/11, detector 17/17.
+
 ### platform-nest `0.88.0` - M5-W4: writers' room briefs from `search`, linked to a WebDesk draft (2026-10-12) - DEV-VERIFIED
 
 - **Migration `202610122300_search_content_briefs_webdesk_link`.**
