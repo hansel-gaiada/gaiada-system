@@ -31,21 +31,27 @@ export class ConsentRepository {
     const m = /^https?:\/\/([^/?#]+)\/*$/i.exec(origin.trim());
     if (!m) return null;
     const host = m[1].toLowerCase();
-    const { rows } = await this.db.query<{ site_id: string }>(
-      `SELECT site_id FROM environments
-        WHERE tenant_id = $1 AND domain IS NOT NULL AND lower(btrim(domain, ' /')) = $2
-        ORDER BY (name = 'production') DESC, site_id
-        LIMIT 1`,
-      [tenantId, host],
+    // Explicit tenant context (the forms submit path does the same with db.withTenant): the guard's
+    // enterTenantContext does not reliably survive into the handler, and RLS is FORCEd.
+    const { rows } = await this.db.withTenant(tenantId, (db) =>
+      db.query<{ site_id: string }>(
+        `SELECT site_id FROM environments
+          WHERE tenant_id = $1 AND domain IS NOT NULL AND lower(btrim(domain, ' /')) = $2
+          ORDER BY (name = 'production') DESC, site_id
+          LIMIT 1`,
+        [tenantId, host],
+      ),
     );
     return rows[0]?.site_id ?? null;
   }
 
   async insert(r: ConsentInsert): Promise<void> {
-    await this.db.query(
+    await this.db.withTenant(r.tenantId, (db) =>
+      db.query(
       `INSERT INTO consent_records (consent_id, tenant_id, site_id, analytics, marketing, notice_version, action, user_agent_class)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [r.consentId, r.tenantId, r.siteId, r.analytics, r.marketing, r.noticeVersion, r.action, r.userAgentClass],
+      ),
     );
   }
 }
