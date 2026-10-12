@@ -17,7 +17,7 @@ vi.mock("@/components/PageHeader", () => ({ PageHeader: ({ title }: { title: str
 vi.mock("@/components/BackendPending", () => ({ BackendPending: () => null }));
 vi.mock("./ClientsTable", () => ({
   ClientsTable: ({ rows }: { rows: Record<string, unknown>[] }) => (
-    <ul data-testid="rows">{rows.map((r) => <li key={String(r.id)}>{String(r.name)} | {String(r.businessType)} | {String(r.groupCompany)}</li>)}</ul>
+    <ul data-testid="rows">{rows.map((r) => <li key={String(r.id)}>{String(r.name)} | {String(r.businessType)} | {String(r.groupCompany)} | {String(r.badge)}</li>)}</ul>
   ),
 }));
 
@@ -25,8 +25,8 @@ import { listClients } from "@/lib/entities";
 import { listClientCentres } from "@/lib/clientCentre-data";
 import ClientsPage from "./page";
 
-const client = (id: string, name: string, groupCompany: { id: string; name: string } | null = null) =>
-  ({ id, name, contact: {}, status: "active", custom_fields: {}, owner_name: null, groupCompany });
+const client = (id: string, name: string, groupCompany: { id: string; name: string } | null = null, isInternal = false) =>
+  ({ id, name, contact: {}, status: "active", custom_fields: {}, owner_name: null, groupCompany, isInternal });
 const centre = (clientId: string, businessType: string) => ({
   clientId, clientName: clientId, clientStatus: "active", businessType, city: null,
   fieldsFilled: { filled: 1, total: 10 }, connectionsConnected: { connected: 0, total: 3 }, updatedAt: null,
@@ -85,5 +85,39 @@ describe("Clients list · business type review (PV3-04)", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/came back empty/);
     expect(screen.queryByRole("link", { name: /Other or not set/ })).toBeNull();
     expect(rowsText()).toHaveLength(4);
+  });
+});
+
+describe("Clients list · the internal sentinel client (WSK-D36)", () => {
+  const withInternal = () =>
+    vi.mocked(listClients).mockResolvedValue([
+      client("a", "Alpha Hotel"), client("b", "Beta Misc"), client("int", "Gaiada Internal", null, true),
+    ] as never);
+
+  it("🔴 shows the internal client with an 'Internal (our own sites)' badge, and no badge on any other row", async () => {
+    withInternal();
+    vi.mocked(listClientCentres).mockResolvedValue([centre("a", "hotel"), centre("b", "other")] as never);
+    await mount();
+    const rows = rowsText();
+    expect(rows).toHaveLength(3);
+    expect(rows.find((t) => t.startsWith("Gaiada Internal"))).toMatch(/\| Internal \(our own sites\)$/);
+    expect(rows.filter((t) => t.includes("Internal (our own sites)"))).toHaveLength(1);
+  });
+
+  it("🔴 the review filter leaves the internal client out, even when the profile list calls it Other", async () => {
+    withInternal();
+    // The backend's centre list normally omits the sentinel; this proves the UI does not rely on that.
+    vi.mocked(listClientCentres).mockResolvedValue([centre("a", "hotel"), centre("b", "other"), centre("int", "other")] as never);
+    await mount({ review: "business-type" });
+    expect(rowsText().map((t) => t.split(" | ")[0])).toEqual(["Beta Misc"]);
+  });
+
+  it("🔴 the review chip's count does not include the internal client", async () => {
+    withInternal();
+    vi.mocked(listClientCentres).mockResolvedValue([centre("a", "hotel"), centre("b", "other"), centre("int", "other")] as never);
+    await mount();
+    expect(screen.getByRole("link", { name: /Business type: Other or not set/ }).textContent).toContain("1");
+    // Still listed in the unfiltered list, so staff can reach it.
+    expect(rowsText().map((t) => t.split(" | ")[0])).toContain("Gaiada Internal");
   });
 });

@@ -8,6 +8,7 @@ import { formatDate, money } from "@/lib/format";
 import { StatusBadge } from "@/components/ui";
 import { ClientVisibilityMarker } from "../ClientVisibilityMarker";
 import { ContractForm } from "./ContractForm";
+import { FileLink } from "./FileLink";
 import "./billing.css";
 
 // PV3-08 — one contract and the buttons that apply to it.
@@ -71,10 +72,11 @@ export function ContractRow({
           contract.projectName ? `Project: ${contract.projectName}` : "Whole relationship",
           contract.value != null ? money(contract.value, contract.currency) : null,
           dates || null,
-          contract.fileId ? "PDF attached" : null,
           contract.sentAt ? `Sent ${formatDate(contract.sentAt)}` : null,
           contract.signedAt ? `Signed ${formatDate(contract.signedAt)}` : null,
         ].filter(Boolean).join(" · ")}
+        {/* The PDF is a download through the UI's staff file route, which keeps it an attachment. */}
+        {contract.fileId && <>{" · "}<FileLink fileId={contract.fileId} label="PDF attached" /></>}
       </p>
 
       {contract.declineReason && <p className="bl-contract__meta">Declined: {contract.declineReason}</p>}
