@@ -47,6 +47,10 @@ describe("activePortalNav", () => {
     ["/portal/approvals/r1", "projects", "/portal/approvals"],
     ["/portal/deliverables", "projects", "/portal/deliverables"],
     ["/portal/requests", "projects", "/portal/requests"],
+    // PV4-08: Conversation is a Projects sub-tab; meeting notes have no tab and light the area's first one.
+    ["/portal/conversation", "projects", "/portal/conversation"],
+    ["/portal/conversation/t1", "projects", "/portal/conversation"],
+    ["/portal/meetings/m1", "projects", "/portal/projects"],
     ["/portal/social-reviews", "projects", "/portal/social-reviews"],
     ["/portal/social-reviews/s1", "projects", "/portal/social-reviews"],
     ["/portal/timeline", "projects", "/portal/timeline"],
@@ -88,8 +92,13 @@ describe("activePortalNav", () => {
   it("keeps the existing client-facing paths and the area layout", () => {
     expect(PORTAL_AREAS.map((a) => a.key)).toEqual(["overview", "projects", "business", "billing", "people"]);
     const all = PORTAL_AREAS.flatMap((a) => a.tabs.map((t) => t.href));
-    expect(all).toHaveLength(12);
-    expect(new Set(all).size).toBe(12);
+    expect(all).toHaveLength(13);
+    expect(new Set(all).size).toBe(13);
+    // PV4-08 added exactly one: Conversation, in Projects, after Requests.
+    expect(PORTAL_AREAS.find((a) => a.key === "projects")!.tabs.map((t) => t.href)).toEqual([
+      "/portal/projects", "/portal/approvals", "/portal/deliverables", "/portal/requests",
+      "/portal/conversation", "/portal/social-reviews", "/portal/timeline",
+    ]);
     // WSK-49d added exactly one: Website, second tab of Business (offered only to a website editor, see PortalTabs).
     expect(PORTAL_AREAS.find((a) => a.key === "business")!.tabs.map((t) => t.href)).toEqual(["/portal/company", "/portal/website"]);
   });
@@ -104,6 +113,18 @@ describe("portalBadges", () => {
       finance: { byCurrency: [cur(2), cur(1)] },
     } as never;
     expect(portalBadges(o)).toEqual({ projectsBadge: 2, billingBadge: 4 });
+  });
+  it("adds the threads with unread messages (conversationUnread) to the Projects badge, and only that badge", () => {
+    const o = {
+      needsYou: [item("gate"), item("contract")],
+      finance: { byCurrency: [cur(1)] },
+      conversationUnread: 3,
+    } as never;
+    expect(portalBadges(o)).toEqual({ projectsBadge: 4, billingBadge: 2 });
+  });
+  it("an older server that sends no conversationUnread adds nothing", () => {
+    const o = { needsYou: [item("gate")], finance: { byCurrency: [] } } as never;
+    expect(portalBadges(o).projectsBadge).toBe(1);
   });
   it("is zero for a null or empty overview", () => {
     expect(portalBadges(null)).toEqual({ projectsBadge: 0, billingBadge: 0 });

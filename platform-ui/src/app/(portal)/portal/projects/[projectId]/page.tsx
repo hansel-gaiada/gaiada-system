@@ -3,12 +3,13 @@ import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
-import { getPortalProject } from "@/lib/portal-data";
+import { getPortalProject, listPortalConversations, listPortalMeetings } from "@/lib/portal-data";
 import { isPastDue, portalDate, relativeDays } from "@/lib/portal";
 import { Card, Eyebrow } from "@/components/ui";
 import { PortalCopyEmail } from "@/components/portal/PortalCopyEmail";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
+import { ThreadRow } from "@/components/portal/PortalThreadList";
 import { PortalBar, PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/components/portal/PortalBits";
 
 // CP-9 — one project, client-safe.
@@ -32,6 +33,14 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
   const project = await getPortalProject(userId, tenant, projectId);
   if (!project) notFound();
 
+  // PV4-08: this project's threads and the minutes our team shared. Both lists are scoped by the BFF; a failure to
+  // read them degrades to "nothing yet" (`safe`) and never takes the rest of the page down.
+  const [conversations, meetings] = await Promise.all([
+    listPortalConversations(userId, tenant, projectId),
+    listPortalMeetings(userId, tenant, projectId),
+  ]);
+  const threads = conversations.threads.filter((t) => t.projectId === projectId);
+
   const now = new Date();
   // `finished` is the server's one definition (FINISHED_PROJECT_STATUSES, PV2-01/03). The old local list
   // lacked "completed", so a completed project past its due date read "Was due". Undefined (an older
@@ -46,7 +55,7 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
       <PortalPageHead
         eyebrow={project.clientName ?? "Your project"}
         title={project.name}
-        actions={<PortalLive topics={["projects", "deliverables", "approvals"]} />}
+        actions={<PortalLive topics={["projects", "deliverables", "approvals", "conversation"]} />}
       />
 
       <div className="cp-stack">
@@ -179,6 +188,37 @@ export default async function PortalProjectPage({ params }: { params: Promise<{ 
                 );
               })}
             </div>
+          )}
+        </Card>
+
+        <Card title="Conversation" headerRight={<PortalLink href={`/portal/conversation?project=${encodeURIComponent(project.id)}`}>Start a conversation</PortalLink>}>
+          {threads.length === 0 ? (
+            <EmptyNote>No conversations on this project yet. Start one and our team will reply here.</EmptyNote>
+          ) : (
+            <ul className="cp-conv-list">
+              {threads.map((t) => <ThreadRow key={t.id} t={t} />)}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Meeting notes" hint="Notes from meetings our team has chosen to share with you.">
+          {meetings.length === 0 ? (
+            <EmptyNote>No meeting notes have been shared on this project yet.</EmptyNote>
+          ) : (
+            <ul className="cp-conv-list">
+              {meetings.map((m) => (
+                <li key={m.id}>
+                  <Link href={`/portal/meetings/${m.id}`} className="cp-conv-row">
+                    <span style={{ minWidth: 0, flex: "1 1 220px" }}>
+                      <span className="cp-conv-row__title" style={{ display: "block" }}>{m.title}</span>
+                      <span className="cp-conv-row__meta">
+                        {portalDate(m.meetingDate)} · Shared on {portalDate(m.sharedAt)}{m.sharedBy ? ` by ${m.sharedBy}` : ""}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
           )}
         </Card>
 

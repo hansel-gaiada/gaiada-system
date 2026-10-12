@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActivePortalCompany } from "./portal-company";
-import { describeSocialReviewError } from "./portal";
+import { attachmentProblem, CONVERSATION_BODY_MAX, describeSocialReviewError } from "./portal";
 
 // Client-portal WRITE actions: the client signs their gates and contracts, records a payment against
 // their own invoice, updates their own profile, and asks for a change to their company record.
@@ -61,7 +61,7 @@ function fail(e: unknown): PortalActionResult {
 function revalidatePortal(): void {
   for (const p of ["/portal", "/portal/projects", "/portal/timeline", "/portal/deliverables",
     "/portal/approvals", "/portal/invoices", "/portal/contracts", "/portal/profile", "/portal/requests",
-    "/portal/social-reviews"]) {
+    "/portal/social-reviews", "/portal/conversation"]) {
     revalidatePath(p);
   }
 }
@@ -336,3 +336,140 @@ export async function portalDecideSocialReview(_prev: PortalActionResult | null,
   }
 }
 
+
+// ── PV4-08: conversation (FRONTEND-BFF-CONTRACT §29a) ─────────────────────────────────────────────
+
+/** Read the composer's files from the form and check them BEFORE anything is sent (the same limits the server
+ *  enforces: 5 files, 10 MB in total). Bytes go as base64 in the JSON body, like a payment proof, so the message and
+ *  its files are ONE transaction on the server: no orphan file when the message is refused. */
+async function readAttachments(formData: FormData): Promise<
+  { ok: true; attachments: Array<{ filename: string; contentType: string; content: string }> | undefined } | { ok: false; error: string }
+> {
+  // `instanceof File` and size > 0: an empty file input yields a zero-byte File, which is "nothing attached".
+  const files = formData.getAll("attachments").filter((f): f is File => f instanceof File && f.size > 0);
+  if (files.length === 0) return { ok: true, attachments: undefined };
+  const problem = attachmentProblem(files);
+  if (problem) return { ok: false, error: problem };
+  const attachments = await Promise.all(files.map(async (f) => ({
+    filename: f.name || "attachment",
+    contentType: f.type || "application/octet-stream",
+    content: Buffer.from(await f.arrayBuffer()).toString("base64"),
+  })));
+  return { ok: true, attachments };
+}
+
+function bodyProblem(raw: string): string | null {
+  if (raw.trim().length === 0) return "Write a message first.";
+  if (raw.length > CONVERSATION_BODY_MAX) return `That message is ${raw.length.toLocaleString("en-US")} characters. The limit is ${CONVERSATION_BODY_MAX.toLocaleString("en-US")}.`;
+  return null;
+}
+
+function revalidateConversation(threadId?: string): void {
+  revalidatePortal();
+  revalidatePath("/portal/conversation");
+  if (threadId) revalidatePath(`/portal/conversation/${threadId}`);
+}
+
+/** Start a conversation. With `projectId`: a new thread on that project (a subject helps; the first message is
+ *  the body). Without it: the client's one General thread, created by the first message (a client-wide contact only;
+ *  `clientId` picks the client for a contact of several). Viewers may start one (PV-D24): no signing check here. */
+export async function portalStartConversation(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const subject = String(formData.get("subject") ?? "").trim();
+  const rawBody = String(formData.get("body") ?? "");
+  const bp = bodyProblem(rawBody);
+  if (bp) return { ok: false, error: bp, field: "body" };
+  if (subject.length > 200) return { ok: false, error: "Keep the subject under 200 characters.", field: "subject" };
+  const files = await readAttachments(formData);
+  if (!files.ok) return { ok: false, error: files.error, field: "attachments" };
+  try {
+    const r = await platformFetch<{ threadId: string; messageId: string }>(`/api/${c.tenant}/portal/conversation`, c.userId, {
+      method: "POST",
+      // Only these fields: authorId/side/status/tenant are the server's to derive (§29), never sent.
+      body: JSON.stringify({
+        projectId: projectId || undefined, clientId: !projectId && clientId ? clientId : undefined,
+        subject: subject || undefined, body: rawBody.trim(), attachments: files.attachments,
+      }),
+    });
+    revalidateConversation(r.threadId);
+    return { ok: true, id: r.threadId };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Reply in a thread. 409 = the thread was closed by our team while this page was open. */
+export async function portalPostMessage(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const threadId = String(formData.get("threadId") ?? "");
+  const rawBody = String(formData.get("body") ?? "");
+  if (!threadId) return { ok: false, error: "Missing conversation." };
+  const bp = bodyProblem(rawBody);
+  if (bp) return { ok: false, error: bp, field: "body" };
+  const files = await readAttachments(formData);
+  if (!files.ok) return { ok: false, error: files.error, field: "attachments" };
+  try {
+    const r = await platformFetch<{ id: string }>(`/api/${c.tenant}/portal/conversation/${encodeURIComponent(threadId)}/messages`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({ body: rawBody.trim(), attachments: files.attachments }),
+    });
+    revalidateConversation(threadId);
+    return { ok: true, id: r.id };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 409) {
+      revalidateConversation(threadId);
+      return { ok: false, error: "This conversation was closed by our team, so it can't take new messages." };
+    }
+    return fail(e);
+  }
+}
+
+/** Edit the caller's own message, inside its 15-minute window (PV4-Q2). */
+export async function portalEditMessage(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const messageId = String(formData.get("messageId") ?? "");
+  const threadId = String(formData.get("threadId") ?? "");
+  const rawBody = String(formData.get("body") ?? "");
+  if (!messageId) return { ok: false, error: "Missing message." };
+  const bp = bodyProblem(rawBody);
+  if (bp) return { ok: false, error: bp, field: "body" };
+  try {
+    await platformFetch(`/api/${c.tenant}/portal/conversation/messages/${encodeURIComponent(messageId)}`, c.userId, {
+      method: "PATCH",
+      body: JSON.stringify({ body: rawBody.trim() }),
+    });
+    revalidateConversation(threadId || undefined);
+    return { ok: true, id: messageId };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 409) {
+      revalidateConversation(threadId || undefined);
+      return { ok: false, error: "The 15 minutes for changing this message have passed, so it can't be edited now." };
+    }
+    return fail(e);
+  }
+}
+
+/** Retract the caller's own message, inside its window. The thread then shows "Message removed". */
+export async function portalRetractMessage(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const messageId = String(formData.get("messageId") ?? "");
+  const threadId = String(formData.get("threadId") ?? "");
+  if (!messageId) return { ok: false, error: "Missing message." };
+  try {
+    await platformFetch(`/api/${c.tenant}/portal/conversation/messages/${encodeURIComponent(messageId)}`, c.userId, { method: "DELETE" });
+    revalidateConversation(threadId || undefined);
+    return { ok: true, id: messageId };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 409) {
+      revalidateConversation(threadId || undefined);
+      return { ok: false, error: "The 15 minutes for removing this message have passed, so it can't be removed now." };
+    }
+    return fail(e);
+  }
+}

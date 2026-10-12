@@ -79,6 +79,9 @@ export interface PortalOverview {
   nextMilestone: { id: string; name: string; dueDate: string | null; status: string; projectId: string; projectName: string } | null;
   needsYou: PortalNeedsYouItem[];
   finance: { byCurrency: PortalCurrencyTotals[]; primary: PortalCurrencyTotals | null };
+  /** PV4-06 (§29d): threads in the caller's scope with at least one unread message from staff. Optional: an older
+   *  server does not send it, and the Projects badge then adds nothing. */
+  conversationUnread?: number;
 }
 
 export interface PortalProject {
@@ -260,6 +263,13 @@ export interface PortalContract {
   clientSigned: boolean;
   providerSigned: boolean;
   termEnded: boolean;
+  /** PV4-04 (§16b): `amendment` changes the terms of an earlier signed contract; it never voids or replaces it.
+   *  Optional for an older server (read as an ordinary agreement). `amendsReference` and `changeRequestId` are
+   *  already filtered through the caller's own scope, so out of reach reads `null`. */
+  kind?: "agreement" | "amendment";
+  amendsId?: string | null;
+  amendsReference?: string | null;
+  changeRequestId?: string | null;
 }
 
 export interface PortalContractDetail extends Omit<PortalContract, "hasDocument" | "clientSigned" | "providerSigned" | "projectName"> {
@@ -657,4 +667,160 @@ export function changeRequestFormProps(
   projects: PortalProjectOption[],
 ): { allowClientWide: boolean; projects: PortalProjectOption[] } {
   return { allowClientWide: profile.access.wholeClient, projects };
+}
+
+// ── PV4-08: Conversation and meeting notes (§29, §29c) ─────────────────────────────────────────────
+//
+// Mirrors `portal-conversation.controller.ts` and the portal meetings routes. A message body is PLAIN TEXT
+// (design decision 7): the UI renders it as text and only makes URLs clickable (`linkifyText`).
+
+export interface PortalThread {
+  id: string;
+  clientId: string;
+  clientName: string | null;
+  /** NULL for the client-wide ("general") thread. */
+  projectId: string | null;
+  projectName: string | null;
+  general: boolean;
+  subject: string | null;
+  status: "open" | "closed";
+  createdSide: "client" | "staff";
+  lastMessageAt: string | null;
+  createdAt: string;
+  /** Messages from the OTHER side newer than the caller's read marker. Absent on the detail route. */
+  unreadCount?: number;
+}
+
+export interface PortalMessageAttachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+}
+
+export interface PortalMessage {
+  id: string;
+  threadId: string;
+  authorId: string;
+  authorName: string | null;
+  authorSide: "client" | "staff";
+  /** NULL once retracted: the old text is never returned again. */
+  body: string | null;
+  retracted: boolean;
+  edited: boolean;
+  editedAt: string | null;
+  createdAt: string;
+  /** The end of the edit/retract window (PV4-Q2: 15 minutes). NULL when the caller can no longer change it. */
+  editableUntil: string | null;
+  mine: boolean;
+  attachments: PortalMessageAttachment[];
+}
+
+export interface PortalConversationList { threads: PortalThread[]; canUseGeneral: boolean }
+export interface PortalConversationDetail { thread: PortalThread; messages: PortalMessage[] }
+
+/** Shared meeting minutes (§29c). `bodyMd` is Markdown: render it with `ArtifactMarkdown`, never as HTML. */
+export interface PortalMeetingMinutes {
+  id: string;
+  title: string;
+  meetingDate: string | null;
+  bodyMd: string;
+  sharedAt: string | null;
+  sharedBy: string | null;
+}
+
+/** The composer's limits, from §29: 10,000 characters, at most 5 files and 10 MB in total per message. */
+export const CONVERSATION_BODY_MAX = 10_000;
+export const CONVERSATION_MAX_FILES = 5;
+export const CONVERSATION_MAX_BYTES = 10 * 1024 * 1024;
+/** The character counter appears once the body is this long. */
+export const CONVERSATION_COUNTER_FROM = 9_000;
+/** The sentence under every composer (plan §2.4), verbatim. */
+export const CONVERSATION_PRICE_HINT = "Prices and terms change only through a signed contract or amendment.";
+
+/** The client-side attachment check, run BEFORE anything is sent so the client gets a plain sentence rather than a
+ *  server refusal. The server enforces the same limits (§29); this is the fast path. Null = fine. */
+export function attachmentProblem(files: ReadonlyArray<{ name: string; size: number }>): string | null {
+  if (files.length > CONVERSATION_MAX_FILES) {
+    return `You can attach up to ${CONVERSATION_MAX_FILES} files to one message. Remove ${files.length - CONVERSATION_MAX_FILES} and try again.`;
+  }
+  const empty = files.find((f) => f.size === 0);
+  if (empty) return `${empty.name} is empty. Remove it and try again.`;
+  const total = files.reduce((n, f) => n + f.size, 0);
+  if (total > CONVERSATION_MAX_BYTES) {
+    return `Your files add up to ${(total / (1024 * 1024)).toFixed(1)} MB. One message can carry 10 MB in total, so remove some or send them in a second message.`;
+  }
+  return null;
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Can the caller still edit or retract this message? `editableUntil` is the server's DB-clock answer; the
+ *  comparison against `now` only hides the controls once the window has closed on this page (the server is
+ *  still the authority and answers 409). */
+export function messageEditable(m: Pick<PortalMessage, "mine" | "retracted" | "editableUntil">, now: Date): boolean {
+  if (!m.mine || m.retracted || !m.editableUntil) return false;
+  const until = new Date(m.editableUntil).getTime();
+  return Number.isFinite(until) && until > now.getTime();
+}
+
+export interface ThreadGroup { key: string; title: string; threads: PortalThread[] }
+
+/** The Conversation list's shape: General thread(s) pinned first, then one group per project (projects in the
+ *  order of their most recent activity). General is offered ONLY when the server says `canUseGeneral`
+ *  (PV4-Q1: a project-scoped contact never sees the client-wide thread); a stray general row is dropped rather
+ *  than shown. A contact of several clients gets one General per client, named by `clientName`. */
+export function groupThreads(threads: PortalThread[], canUseGeneral: boolean): { general: PortalThread[]; projects: ThreadGroup[] } {
+  const byRecent = (a: PortalThread, b: PortalThread) => String(b.lastMessageAt ?? b.createdAt).localeCompare(String(a.lastMessageAt ?? a.createdAt));
+  const isGeneral = (t: PortalThread) => t.general || t.projectId === null;
+  const general = canUseGeneral ? threads.filter(isGeneral).sort(byRecent) : [];
+  const map = new Map<string, ThreadGroup>();
+  for (const t of [...threads].sort(byRecent)) {
+    if (isGeneral(t)) continue;
+    const key = t.projectId as string;
+    const g = map.get(key) ?? { key, title: t.projectName ?? "Project", threads: [] };
+    g.threads.push(t);
+    map.set(key, g);
+  }
+  return { general, projects: [...map.values()] };
+}
+
+/** The name a thread goes by in a list: its subject, else "General" (with the client's name when the contact has
+ *  more than one client) or the project's name. */
+export function threadTitle(t: Pick<PortalThread, "subject" | "general" | "projectName" | "clientName">, multiClient = false): string {
+  if (t.subject && t.subject.trim()) return t.subject;
+  if (t.general) return multiClient && t.clientName ? `General: ${t.clientName}` : "General";
+  return t.projectName ?? "Conversation";
+}
+
+export type TextPart = { kind: "text"; text: string } | { kind: "link"; text: string; href: string };
+
+/** Split plain text into text and http(s) links. Nothing here builds markup: a caller renders each part as a
+ *  React text node or an `<a>`, so a body like `<img onerror=...>` stays literal text. Trailing punctuation
+ *  stays outside the link. Only `http:` and `https:` become links (never `javascript:`). */
+export function linkifyText(text: string): TextPart[] {
+  const parts: TextPart[] = [];
+  const re = /https?:\/\/[^\s<>"']+/gi;
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    let url = m[0];
+    const trail = url.match(/[.,;:!?)\]]+$/)?.[0] ?? "";
+    if (trail) url = url.slice(0, url.length - trail.length);
+    const start = m.index ?? 0;
+    if (start > last) parts.push({ kind: "text", text: text.slice(last, start) });
+    try {
+      const u = new URL(url);
+      if (u.protocol === "http:" || u.protocol === "https:") parts.push({ kind: "link", text: url, href: u.href });
+      else parts.push({ kind: "text", text: url });
+    } catch {
+      parts.push({ kind: "text", text: url });
+    }
+    last = start + url.length;
+  }
+  if (last < text.length) parts.push({ kind: "text", text: text.slice(last) });
+  return parts;
 }

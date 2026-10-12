@@ -17,7 +17,8 @@ import { PORTAL_AREAS, PORTAL_WEBSITE_HREF, activePortalNav } from "@/lib/portal
 // (finding 7). Regrouping happens here, in the nav only; nothing is renamed or redirected. Each area's
 // primary link goes to its FIRST sub-tab.
 //
-// BADGES: Projects carries the count of gates waiting on the client; Contracts & billing carries unsigned
+// BADGES: Projects carries the count of gates waiting on the client plus the threads with unread messages from our
+// team (`conversationUnread`, PV4-08; see `portalBadges`); Contracts & billing carries unsigned
 // contracts plus overdue invoices (both computed in the layout from the overview it already fetches).
 // The "Post reviews" sub-tab deliberately carries NO badge: SMM-31/32's backend never extended
 // `portal/overview`'s `needsYou`, so a badge would cost every portal page load a second always-on fetch

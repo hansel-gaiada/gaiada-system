@@ -46,10 +46,12 @@ export function portalMe(userId) {
 }
 
 /** `GET /api/:t/portal/overview` as far as the portal layout reads it (the client list, for the Website tab and the page guard). */
-export const portalOverview = () => ({
+export const portalOverview = (S) => ({
   clients: [{ id: CLIENT_ID, name: CLIENT_NAME, status: "active" }], client: { id: CLIENT_ID, name: CLIENT_NAME, status: "active" }, viewOnly: false,
   progress: { projects: 0, activeProjects: 0, completedProjects: 0, percent: 0 }, deliverables: { total: 0, delivered: 0, overdue: 0 },
   nextMilestone: null, needsYou: [], finance: { byCurrency: [], primary: null },
+  // PV4-06 (§29d): threads with unread messages from staff.
+  conversationUnread: S?.portal?.conv ? unreadThreads(S) : 0,
 });
 
 // ── Compositions with client flags (the shared fixtures carry none) ────────────────────────────────────
@@ -197,7 +199,7 @@ function publishViolations(S, itemId, version, index) {
 
 export function seedPortal(S) {
   S.cfg.previewMissing = false;
-  S.portal = {};
+  S.portal = { conv: seedConversation() };
   // A second client banner, so a batch has two items to choose.
   staff(S, "demo-hansel", "POST", "/collections/banner/items", { locale: "en", slug: "banner.autumn", fields: { title: "Autumn banner" } });
   return S;
@@ -449,3 +451,88 @@ function withdraw(S, userId, id) {
   a.decidedAt = new Date().toISOString();
   return R(200, { approvalId: id, status: "cancelled" });
 }
+
+// ── PV4-08: the client Conversation BFF (FRONTEND-BFF-CONTRACT §29a), for e2e/portal-conversation.spec.ts ──────────────
+// Only what that spec drives: the thread list, a thread read (which marks it read), and a post. A VIEWER-capability contact
+// may post (PV-D24: no signing check). The staff side is not served: a staff reply is injected with `/__stub/staff-reply`
+// (server.mjs), which is the only way a second party exists in this stub. Edit and retract (PATCH / DELETE .../messages/:id)
+// are NOT stubbed: the demo-mode spec (e2e/portal.spec.ts) drives them against the demo store, which enforces the 15-minute window.
+const CONV_RE = /^\/api\/([^/]+)\/portal\/conversation(?:\/([^/]+))?(?:\/(messages))?$/;
+export const isPortalConversationPath = (pathname) => CONV_RE.test(pathname);
+
+export const CONV_THREAD_ID = "5a1c0000-0000-4000-8000-0000000000a1";
+export const CONV_GENERAL_ID = "5a1c0000-0000-4000-8000-0000000000a2";
+
+function seedConversation() {
+  const t0 = Date.parse("2026-10-01T09:00:00Z");
+  return {
+    seq: 0,
+    threads: [
+      { id: CONV_GENERAL_ID, projectId: null, projectName: null, general: true, subject: null, status: "open", createdSide: "staff", createdAt: new Date(t0).toISOString(), unread: 0 },
+      { id: CONV_THREAD_ID, projectId: "5a1c0000-0000-4000-8000-0000000000b1", projectName: "Website relaunch", general: false, subject: "Homepage copy", status: "open", createdSide: "client", createdAt: new Date(t0 + 1000).toISOString(), unread: 0 },
+    ],
+    messages: [
+      { id: "m-seed-1", threadId: CONV_THREAD_ID, authorId: "wd-client-a", authorName: "Dana Editor", authorSide: "client", body: "Can we change the homepage headline before Friday?", createdAt: new Date(t0 + 2000).toISOString() },
+    ],
+  };
+}
+
+const unreadThreads = (S) => S.portal.conv.threads.filter((t) => t.unread > 0).length;
+
+function threadView(S, t, withUnread) {
+  const last = S.portal.conv.messages.filter((m) => m.threadId === t.id).map((m) => m.createdAt).sort().at(-1) ?? t.createdAt;
+  return {
+    id: t.id, clientId: CLIENT_ID, clientName: CLIENT_NAME, projectId: t.projectId, projectName: t.projectName, general: t.general,
+    subject: t.subject, status: t.status, createdSide: t.createdSide, lastMessageAt: last, createdAt: t.createdAt,
+    ...(withUnread ? { unreadCount: t.unread } : {}),
+  };
+}
+
+export function handlePortalConversation(S, { method, pathname, body, userId }) {
+  if (!PORTAL_USERS[userId]) return { status: 403, json: { error: "not a portal client" } };
+  const [, , id, messages] = pathname.match(CONV_RE);
+  const conv = S.portal.conv;
+  if (!id && method === "GET") {
+    return { status: 200, json: { threads: conv.threads.map((t) => threadView(S, t, true)), canUseGeneral: true } };
+  }
+  const thread = conv.threads.find((t) => t.id === id);
+  if (!thread) return { status: 404, json: { error: "conversation not found" } };
+  if (!messages && method === "GET") {
+    thread.unread = 0; // opening a thread marks it read
+    return {
+      status: 200,
+      json: {
+        thread: threadView(S, thread, false),
+        messages: conv.messages.filter((m) => m.threadId === thread.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((m) => ({
+          id: m.id, threadId: m.threadId, authorId: m.authorId, authorName: m.authorName, authorSide: m.authorSide, body: m.body, retracted: false,
+          edited: false, editedAt: null, createdAt: m.createdAt, mine: m.authorId === userId,
+          editableUntil: m.authorId === userId && Date.now() - Date.parse(m.createdAt) < 15 * 60_000 ? new Date(Date.parse(m.createdAt) + 15 * 60_000).toISOString() : null,
+          attachments: [],
+        })),
+      },
+    };
+  }
+  if (messages && method === "POST") {
+    if (thread.status === "closed") return { status: 409, json: { error: "thread is closed" } };
+    const text = typeof body?.body === "string" ? body.body.trim() : "";
+    if (!text || text.length > 10_000) return { status: 400, json: { error: "body must be 1 to 10,000 characters", field: "body" } };
+    const m = { id: `m-${++conv.seq}`, threadId: thread.id, authorId: userId, authorName: PORTAL_USERS[userId].name, authorSide: "client", body: text, createdAt: new Date().toISOString() };
+    conv.messages.push(m);
+    return { status: 201, json: { id: m.id, threadId: thread.id, createdAt: m.createdAt, attachmentIds: [] } };
+  }
+  return { status: 405, json: { error: "not stubbed" } };
+}
+
+/** `POST /__stub/staff-reply {threadId?, body, by?}`: a staff member answers. The thread's unread count rises, as the real BFF's would. */
+export function staffReply(S, { threadId = CONV_THREAD_ID, body, by = "Made Prabowo" }) {
+  const conv = S.portal.conv;
+  const thread = conv.threads.find((t) => t.id === threadId);
+  if (!thread) return { ok: false };
+  const m = { id: `m-${++conv.seq}`, threadId, authorId: "stub-staff-made", authorName: by, authorSide: "staff", body, createdAt: new Date().toISOString() };
+  conv.messages.push(m);
+  thread.unread += 1;
+  return { ok: true, id: m.id };
+}
+
+/** `POST /__stub/conversation-state`: what the spec asserts the server received. */
+export const conversationSnapshot = (S) => ({ messages: S.portal.conv.messages.map((m) => ({ ...m })), unreadThreads: unreadThreads(S) });
