@@ -691,6 +691,8 @@ interface ItemAttrs {
   ownerId: string;
   /** M5-W1c: `editorial.state`; "" when WebDesk sent no usable one (an older WebDesk): the review rules deny. */
   reviewState: string;
+  /** M5-W4: `editorial.briefRef` (opaque to WebDesk; the ERP sets it to a `search_content_briefs` id). null when none. */
+  briefRef: string | null;
   /** M5-W1c: `publishedVersion !== null`. */
   published: boolean;
   /** M5-W2d: the item's title as WebDesk reported it (a notification names the item by it; never a body). */
@@ -820,6 +822,7 @@ function parseItemAttrs(body: unknown): ItemAttrs {
     publishedVersion: typeof item.publishedVersion === "number" ? item.publishedVersion : null,
     ownerId: ed && typeof ed.authorSub === "string" ? ed.authorSub : "",
     reviewState: ed && typeof ed.state === "string" && REVIEW_STATES.includes(ed.state) ? ed.state : "",
+    briefRef: ed && typeof ed.briefRef === "string" && ed.briefRef !== "" ? ed.briefRef : null,
     published: typeof item.publishedVersion === "number",
     itemTitle: typeof item.title === "string" ? item.title.slice(0, 120) : null,
     submittedVersion: num(submitted),
@@ -1129,6 +1132,20 @@ export class WebdeskContentService {
 
   private async readItemAttrs(site: SiteRef, itemId: string, version?: string): Promise<ItemAttrs> {
     return (await this.readItemRaw(site, itemId, version)).attrs;
+  }
+
+  /**
+   * M5-W4: WebDesk's current facts about one item (owner, review state, collection, locale, brief reference) with NO
+   * authorization and NO audit row. The caller must authorise with them (`probeAllowed` / `ItemGate`); it exists so the
+   * brief list can filter many rows by Cerbos without writing a denial row per hidden brief.
+   */
+  itemFacts(site: SiteRef, itemId: string): Promise<ItemAttrs> {
+    return this.readItemAttrs(site, itemId);
+  }
+
+  /** M5-W4: `collection.get` for the ROUTE's/brief's key: a typed 404 `collection-not-found` passes through. */
+  async assertCollectionExists(site: SiteRef, collectionKey: string): Promise<void> {
+    await this.proveCollection(site, collectionKey);
   }
 
   private async rawItem(site: SiteRef, itemId: string, version?: string): Promise<RawItem> {

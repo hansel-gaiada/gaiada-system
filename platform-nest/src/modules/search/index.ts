@@ -158,6 +158,9 @@ export const searchModule: ModuleContract = {
     // own repeated bug).
     "202608221727_search_audit_v2_finding_states_checks_facts.sql",
     "202608221728_iam_search_finding_property_attest_permissions.sql",
+    // M5-W4 (additive): the WebDesk link on search_content_briefs (site, collection, locale, item, assignee, the search facts a writer
+    // needs) and a nullable property_id. Registered here AT WRITE TIME, same standing lesson as every comment above.
+    "202610122300_search_content_briefs_webdesk_link.sql",
   ],
   // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
   // module reconciliation, 14 declared keys):

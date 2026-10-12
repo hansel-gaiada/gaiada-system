@@ -48,6 +48,7 @@ import {
   type ZoneBResult,
 } from "./webdesk-content.service";
 import type { WebdeskBffEditorialCommand } from "./webdesk-approved-command";
+import { syncAssignee } from "./webdesk-brief-store";
 
 const logger = new Logger("WebdeskEditorial");
 
@@ -183,6 +184,19 @@ export async function submitRecipients(tenantId: string, siteId: string, collect
   });
 }
 
+/**
+ * M5-W4: after WebDesk confirmed an `assign` that named a new author, keep the linked brief's `assignee_id` equal to it (the
+ * column filters the writers' board and picks a notification recipient; it grants nothing). Fail-soft, and a no-op for an
+ * item with no brief or an author that is not an ERP user id.
+ */
+async function syncBriefAssignee(tenantId: string, siteId: string, itemId: string, authorSub: string): Promise<void> {
+  try {
+    await syncAssignee(tenantId, siteId, itemId, UUID_RE.test(authorSub) ? authorSub.toLowerCase() : null);
+  } catch (err) {
+    logger.warn(`brief assignee sync failed: ${(err as Error)?.message ?? "error"}`);
+  }
+}
+
 interface NotifyFacts {
   tenantId: string;
   actorId: string | null;
@@ -270,6 +284,7 @@ export class WebdeskEditorialService {
       // under the SAME Idempotency-Key, which WebDesk answers `replayed: true`.
     });
     const replayed = isPlainObject(result.body) && result.body.replayed === true;
+    if (cmd === "assign" && typeof body.authorSub === "string") await syncBriefAssignee(gate.tenantId, site.siteId, itemId, body.authorSub);
     if (!replayed) {
       await notifyAfter(cmd, {
         tenantId: gate.tenantId,

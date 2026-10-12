@@ -1642,6 +1642,30 @@ writers' room grant is also asked the attribute-free action (an earlier deny, ne
 `creatorId` is never taken from a body: a body key naming one is refused by the strict allow-list, after authorization. MCP: `webdesk.editorial.*` impacts are in FRONTEND-BFF-CONTRACT §27 "Writers' room review flow". Proof: `webdesk-editorial.unit.test.ts` (registry, order) and
 `webdesk-editorial.test.ts` (real Cerbos + Postgres: 403 before validation per route with a positive control and no WebDesk write, self-approve DENY as platform_admin, bot and automation approve 403, notification recipients incl. another company's editor; Linux gate).
 
+### 27.5 M5-W4 — writers' room briefs: no new kind; `assign` manages, `comment` on the linked item reads (2026-10-12, PROTOTYPED)
+
+Design [`plans/2026-10-11-m5-writers-room-design.md`](plans/2026-10-11-m5-writers-room-design.md) §5 (W4 row) proposed a new kind `webdesk_brief` (six artifacts, assignee via `variables.owns`). It assumed no brief record existed;
+`search_content_briefs` (migration 0046) already does, so the writers' room brief IS a row of it, and **W4 adds no kind, role, permission key, catalog row, group, bundle row, policy rule, derived role or pinned count**.
+Code: `platform-nest/src/modules/webdev/webdesk-briefs.{controller,service}.ts`, `webdesk-brief-store.ts`; migration `202610122300_search_content_briefs_webdesk_link.sql`. FRONTEND-BFF-CONTRACT §27 "Writers' room briefs".
+
+| What | Cerbos question (always `webdesk_content_item`, the existing W1a rules) | Who passes |
+|---|---|---|
+| **Manage** a brief: create, edit, link to an item, "create draft from brief", and READ any brief of a collection | `assign` on `{siteId, collectionKey, locale}` of the BRIEF (no `ownerId`) | scoped `webdesk_editor` (inside its site, collections and locales), `webdev_manager`, `company_admin` / `owner`, `platform_admin` |
+| **Read** a linked brief (`GET …/items/:id/brief`, `GET …/briefs/:id`, a row of the board) | `comment` on the linked ITEM, with `ownerId`, `reviewState`, `collectionKey`, `locale` from WebDesk's `item.get` NOW | the item's own author (writer, translator), an SEO reviewer and an editor in scope, every unscoped staff tier |
+| Create the draft item | `create` on `{siteId, collectionKey, locale}` of the BRIEF, through the ordinary `createItem` gate (W1c) | whoever also passes `create` there |
+| Set the item's `brief_ref` / author / dates | `assign` on the new item, through the ordinary `editorial.assign` gate | as for Manage |
+
+Why this meets the rules without a policy change:
+- **A scoped writer reads only the briefs assigned to them.** `comment` is the one action whose writer and translator rules are "own items" (`variables.owns`, `ownerId` = WebDesk's `editorial.authorSub`) and whose SEO-reviewer and editor rules are "in scope". A writer never holds `assign`, so an UNLINKED brief and a brief of an item that is someone else's are both **403** (valid body, positive control in the suite). `read` would not do: it is scope-wide, so a writer could read every brief of the collection.
+- **Editors in scope create and assign; staff are unchanged.** `assign` is exactly the editor/publisher/admin set of design §2.1. The unscoped `webdev_staff` tier has no `assign` (so it cannot manage briefs here) but has `comment` (so it reads every LINKED brief); staff keep the `search` routes for property briefs, which this change leaves as they were (`search.property.*` unchanged).
+- **Search access is never widened.** A `propertyId` or `fromBriefId` is accepted only from a caller who ALSO passes `resource_search_property:read` on that property (403 otherwise, no row written). A writers' room principal reaches no search row except through a brief an editor with search access copied; the writer's view omits the property, provenance and grounding.
+
+**Link integrity (an editor can set `brief_ref` to anything through the generic assign route).** The ERP half of the link (`webdesk_item_id`) is written ONLY by the brief routes, after the brief's collection and locale are shown to equal the item's, one brief per item (partial unique index). A non-manager reads a linked brief only when WebDesk's `editorial.briefRef` ALSO equals the brief id; a cleared or re-pointed `brief_ref` gives them 404, never the brief. `assignee_id` mirrors `author_sub` (kept by the BFF after the generic `assign`) and is only a list filter and a notification target: the board decides each non-manager row on WebDesk's current facts (one `item.get` per candidate, ceiling 8), so a stale mirror grants nothing.
+
+**Known limits.** (1) "May read a brief" borrows `comment`; a brief that must outlive its item, or a reader who may not comment, is the day to promote it to its own kind (the design's `webdesk_brief`, six artifacts). (2) A manager sees an unlinked brief only inside the collections and locales it manages, and a company with no `search` module enabled can still hold writers' room briefs (the table's third wall is a property of the table: every statement runs under `modules: ["search"]` and names tenant and site itself). (3) Inside a site a scoped caller sees 403 for an existing brief it may not read and 404 for an unknown id (as §27.2 limit 1). (4) The create-draft sequence (create, assign, link) is retried under the same `Idempotency-Key`; the dev WebDesk double does not replay, so the convergence is argued in the service header and not yet proven by a test.
+
+Proof: `webdesk-briefs.unit.test.ts` (parsers, views, the tool registry, the order of phase 2 against stubs) and `webdesk-briefs.test.ts` (real Cerbos + Postgres + RLS over `app.inject`: 403 per route with a valid body beside a positive control and no WebDesk write, the writer/other-writer/unlinked matrix, stale-assignee and forged-`brief_ref` cases, cross-company 403/404, the unset-GUC zero-row reads, the new CHECKs; Linux gate).
+
 ## 28. WSK-D60 follow-up — `owner` may grant a client's website access and the client `admin` capability (2026-10-12)
 
 **The gap.** WSK-49f catalogued `core.client_contact.manage_website_editor` / `manage_admin` and bundled them (company_admin, owner,

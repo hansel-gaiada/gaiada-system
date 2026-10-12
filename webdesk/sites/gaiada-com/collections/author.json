@@ -1,0 +1,76 @@
+{
+  "schema": {
+    "localized": true,
+    "ui": {
+      "label": "Authors",
+      "description": "Public author profiles shown on bylines and author pages (E-E-A-T). Public fields only: nothing here is an account, contact or ERP field.",
+      "group": "Editorial",
+      "order": 40,
+      "titleField": "displayName"
+    },
+    "lint": { "content": { "enabled": false } },
+    "fields": [
+      {
+        "name": "displayName",
+        "primitive": "text",
+        "required": true,
+        "localized": false,
+        "ui": { "label": "Display name", "help": "The name as it is printed on the byline. A real person's name, never a role such as 'Editorial team'." }
+      },
+      {
+        "name": "roleTitle",
+        "primitive": "text",
+        "required": true,
+        "ui": { "label": "Role / title", "help": "Public job title, for example 'Head of SEO'." }
+      },
+      {
+        "name": "bio",
+        "primitive": "markdown",
+        "required": true,
+        "ui": { "label": "Short bio", "help": "Two to four sentences in the third person. Only what the person agreed to publish.", "widget": "textarea" }
+      },
+      {
+        "name": "expertiseTopics",
+        "primitive": "text",
+        "multiple": true,
+        "ui": { "label": "Expertise topics", "help": "Short topic names, for example 'Technical SEO'. One per entry." }
+      },
+      {
+        "name": "credentials",
+        "primitive": "text",
+        "multiple": true,
+        "ui": { "label": "Credentials", "help": "Free text, one per entry: qualifications, certifications, years of experience. Only claims that can be verified." }
+      },
+      {
+        "name": "photo",
+        "primitive": "media",
+        "localized": false,
+        "ui": { "label": "Photo", "help": "A media item. Only with the person's consent." }
+      },
+      {
+        "name": "photoAlt",
+        "primitive": "text",
+        "ui": { "label": "Photo alt text", "help": "Describes the photo for screen readers. Required whenever a photo is set." }
+      },
+      {
+        "name": "profileLinks",
+        "primitive": "group",
+        "multiple": true,
+        "itemKey": "url",
+        "localized": false,
+        "ui": { "label": "Public profile links", "help": "Public pages about this person (LinkedIn, personal site, ORCID ...). https URLs only; the editor and the importer enforce it." },
+        "fields": [
+          { "name": "url", "primitive": "text", "required": true, "ui": { "label": "URL", "help": "Full https URL." } },
+          { "name": "network", "primitive": "select", "required": true, "options": ["linkedin", "x", "github", "orcid", "website", "other"], "ui": { "label": "Network" } },
+          { "name": "label", "primitive": "text", "ui": { "label": "Link text", "help": "Optional visible text; falls back to the network name." } }
+        ]
+      },
+      {
+        "name": "published",
+        "primitive": "boolean",
+        "required": true,
+        "ui": { "label": "Show on the site", "help": "false hides the profile and its byline link without deleting the record. Needs the person's profile consent." }
+      }
+    ]
+  }
+}

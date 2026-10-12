@@ -172,6 +172,124 @@ export const WEBDESK_EDITORIAL_REVIEW_TOOLS: McpToolDef[] = [
   },
 ];
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// M5-W4 — the writers' room BRIEFS tools (docs/plans/2026-10-11-m5-writers-room-design.md §5; FRONTEND-BFF-CONTRACT §27 "Briefs").
+// A brief is an ERP record drawn from `search` (a row of `search_content_briefs`), linked to a WebDesk site, collection and locale and,
+// once a draft exists, to that item (WebDesk's `brief_ref` = the brief id). The same BFF routes as the UI (`webdesk-briefs.controller.ts`).
+//
+// IMPACT CLASSES (the agentic-native bar): create, update, assign and createDraft are `low` writes (an ERP row or a WebDesk DRAFT:
+// nothing a production key sees changes); list, get and forItem are reads. None is `high`.
+//
+// AUTHORIZATION is the caller's Cerbos decision, never the tool. Managing a brief (create, update, assign, createDraft, and reading any
+// brief of a collection) is `webdesk_content_item:assign` on the brief's {site, collection, locale}: the scoped editor, the publisher
+// tier, company admins. Reading a LINKED brief is `webdesk_content_item:comment` on its item, so a scoped writer reads only the briefs of
+// items assigned to them. A caller holding no search access can never widen it through these tools: a `propertyId` or `fromBriefId` is
+// accepted only from a caller who ALSO holds `resource_search_property:read` on that property.
+//
+// The hub sends only PATH args for a GET, so `webdesk.briefs.list` returns the default first page with no filters (the hub limitation
+// recorded on the content tools above).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const BRIEF_PATH = `${CONTENT_BASE}/briefs`;
+const BRIEF_ID_PROP = { briefId: { type: "string" } } as const;
+
+export const WEBDESK_BRIEF_TOOLS: McpToolDef[] = [
+  {
+    name: "webdesk.briefs.create",
+    description:
+      "File a content brief for a site's collection and locale, from search data: `topic` (or `targetQuery`), `searchIntent` "
+      + "(informational | commercial | transactional | navigational), `aiQuestions`, `contentGaps`, an optional `outline`, `body` and `geoNotes`. "
+      + "`fromBriefId` copies an existing SEO department brief and `propertyId` records the search property; either needs search read access "
+      + "on that property (a brief never widens search access). LOW write: an ERP record; nothing is created in WebDesk. Needs `assign` on the collection and locale.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: BRIEF_PATH,
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...EDITORIAL_SITE_PROPS, collectionKey: { type: "string" }, locale: { type: "string" },
+        topic: { type: "string", maxLength: 300 }, targetQuery: { type: "string", maxLength: 300 },
+        searchIntent: { type: ["string", "null"], enum: ["informational", "commercial", "transactional", "navigational", null] },
+        aiQuestions: { type: "array", items: { type: "string", maxLength: 300 }, maxItems: 50 },
+        contentGaps: { type: "array", items: { type: "string", maxLength: 300 }, maxItems: 50 },
+        outline: { type: "array", items: { type: "string", maxLength: 200 }, maxItems: 50 },
+        body: { type: "string", maxLength: 20000 }, geoNotes: { type: "string", maxLength: 4000 },
+        propertyId: { type: "string" }, fromBriefId: { type: "string" },
+      },
+      required: ["tenantId", "tenantSlug", "siteId", "collectionKey", "locale"],
+    },
+  },
+  {
+    name: "webdesk.briefs.update",
+    description: "Edit a brief (topic, status draft|approved, outline, body, geoNotes, targetQuery, searchIntent, aiQuestions, contentGaps). LOW write. Needs `assign` on the brief's collection and locale.",
+    minAssurance: "low", write: true, impact: "low", method: "PATCH",
+    pathTemplate: `${BRIEF_PATH}/:briefId`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...EDITORIAL_SITE_PROPS, ...BRIEF_ID_PROP,
+        topic: { type: "string", maxLength: 300 }, status: { type: "string", enum: ["draft", "approved"] },
+        outline: { type: "array", items: { type: "string" } }, body: { type: "string" }, geoNotes: { type: ["string", "null"] },
+        targetQuery: { type: ["string", "null"] }, searchIntent: { type: ["string", "null"] },
+        aiQuestions: { type: "array", items: { type: "string" } }, contentGaps: { type: "array", items: { type: "string" } },
+      },
+      required: ["tenantId", "tenantSlug", "siteId", "briefId"],
+    },
+  },
+  {
+    name: "webdesk.briefs.assign",
+    description:
+      "Link a brief to an EXISTING WebDesk item of the same collection and locale (`itemId`), setting the item's `brief_ref`; optionally assign its author "
+      + "(`authorSub`, a user id; that person is notified: ids and the brief title only) and `dueAt` / `plannedPublishAt`. LOW write. Needs `assign` on the brief and on the item.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${BRIEF_PATH}/:briefId/assign`,
+    inputSchema: {
+      type: "object",
+      properties: { ...EDITORIAL_SITE_PROPS, ...BRIEF_ID_PROP, itemId: { type: "string" }, authorSub: { type: "string" }, dueAt: { type: ["string", "null"] }, plannedPublishAt: { type: ["string", "null"] } },
+      required: ["tenantId", "tenantSlug", "siteId", "briefId", "itemId"],
+    },
+  },
+  {
+    name: "webdesk.briefs.createDraft",
+    description:
+      "Create a WebDesk DRAFT item in the brief's collection and locale from the brief (`slug` required; `fields`, `blocks`, `seo`, `note` as for webdesk.content.create), "
+      + "link it (its `brief_ref` is the brief id and the brief records the item) and optionally assign its author and dates. LOW write: nothing a production key sees changes. "
+      + "Typed 409 (slug-taken, brief_already_linked) / 422 (composition-violation) come back unchanged. Needs `assign` on the brief and `create` on the collection.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${BRIEF_PATH}/:briefId/create-draft`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...EDITORIAL_SITE_PROPS, ...BRIEF_ID_PROP, slug: { type: "string" },
+        fields: { type: "object" }, blocks: { type: "array" }, seo: { type: "object" }, note: { type: "string", maxLength: 500 },
+        authorSub: { type: "string" }, dueAt: { type: ["string", "null"] }, plannedPublishAt: { type: ["string", "null"] },
+      },
+      required: ["tenantId", "tenantSlug", "siteId", "briefId", "slug"],
+    },
+  },
+  {
+    name: "webdesk.briefs.list",
+    description:
+      "The writers' board's briefs for a site: each row is one the caller may see (managers: every brief of their collections; others: briefs linked to items they may comment on, "
+      + "i.e. assigned to them). Summary rows (no body); `canManage` says which the caller manages.",
+    minAssurance: "low", method: "GET",
+    pathTemplate: BRIEF_PATH,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_SITE_PROPS }, required: ["tenantId", "tenantSlug", "siteId"] },
+  },
+  {
+    name: "webdesk.briefs.get",
+    description: "One brief: target query, intent, AI questions, content gaps, outline, body, GEO notes and its link. A manager reads any brief of its collections; anyone else only the brief of an item assigned to them (else 403).",
+    minAssurance: "low", method: "GET",
+    pathTemplate: `${BRIEF_PATH}/:briefId`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_SITE_PROPS, ...BRIEF_ID_PROP }, required: ["tenantId", "tenantSlug", "siteId", "briefId"] },
+  },
+  {
+    name: "webdesk.briefs.forItem",
+    description: "The brief of one WebDesk item (what to write and why). 404 when the item has none. A scoped writer reads it only for an item assigned to them.",
+    minAssurance: "low", method: "GET",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/brief`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_ITEM_PROPS }, required: [...EDITORIAL_ITEM_REQUIRED] },
+  },
+];
+
 export const webdevModule: ModuleContract = {
   key: "webdev",
   migrations: [
@@ -1289,6 +1407,7 @@ export const webdevModule: ModuleContract = {
       },
     },
     ...WEBDESK_EDITORIAL_REVIEW_TOOLS,
+    ...WEBDESK_BRIEF_TOOLS,
   ],
   rollupProviders: [],
   uiManifest: [
