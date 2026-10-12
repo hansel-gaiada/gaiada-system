@@ -330,10 +330,10 @@ restore_tree() {
 repin_previous() {
   docker image inspect "webdesk-api:pre-$PRE_TAG" >/dev/null 2>&1 || { say "!! webdesk-api:pre-$PRE_TAG not found"; return 1; }
   if [ "$PREV_MODE" = release ]; then
-    compose "$WD_DIR" 1 "webdesk-api:pre-$PRE_TAG" up -d --no-deps --no-build api
+    compose "$WD_DIR" 1 "webdesk-api:pre-$PRE_TAG" up -d --no-deps --no-build --force-recreate api
   else
     docker tag "webdesk-api:pre-$PRE_TAG" webdesk-api:latest
-    compose "$WD_DIR" 0 "" up -d --no-deps --no-build api
+    compose "$WD_DIR" 0 "" up -d --no-deps --no-build --force-recreate api
   fi
 }
 
@@ -507,10 +507,13 @@ do_apply() {
   hdr "migrate / RLS gate / storage bootstrap (throwaway $TOOLS_IMAGE on $NET)"
   run_tools || die "the tools step failed: tree restored, api untouched, migrations not rolled back"
 
-  hdr "up -d --no-deps --no-build api (release overlay)"
+  hdr "up -d --no-deps --no-build --force-recreate api (release overlay)"
   SINCE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   UP_STARTED=1
-  compose "$WD_DIR" 1 "$IMAGE_REF" up -d --no-deps --no-build api
+  # --force-recreate: the health gate reads the api's boot lines from logs since $SINCE. When the running image already
+  # equals the digest (a re-pin, "no swap needed"), compose answers "Running" and nothing boots, so those lines never
+  # come and a healthy api is rolled back. Found on the first rootless apply (M4 F6, 2026-10-12, run 38227212798).
+  compose "$WD_DIR" 1 "$IMAGE_REF" up -d --no-deps --no-build --force-recreate api
   health_check || die "health check failed"
 
   hdr "record"
