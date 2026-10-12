@@ -1001,6 +1001,305 @@ export function registerContractBillingCoreTools(): void {
   registerCoreTools(INVOICE_ISSUE_CORE_TOOLS);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// PV4-07 — `conversation.*` and `meetings.*Minutes`: the agent surface for client Conversation and meeting minutes
+// (agentic-native readiness bar; owner ruling PV-D23: AGENTS DRAFT, STAFF SEND).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-07; finding 11; design decisions 4 and 9). Routes:
+// core/conversation.controller.ts (BFF §29b) and core/meetings.controller.ts (§29c). BFF §29 "MCP tools" lists them.
+//
+// Every tool is a thin front over ONE existing endpoint, so it carries exactly that endpoint's Cerbos authorization
+// (`conversation` read/post/draft/manage, `meeting_recording` read/update/share_minutes) and nothing more. A tool def maps
+// to exactly one path, which is why "post" is two tools: `conversation.post` replies on a thread and
+// `conversation.open` starts one (a client's general thread, or a new thread on one of its projects).
+//
+// ── THE RULE: nothing an agent writes reaches a client until a staff member sends it ─────────────
+// What an agent MAY do: read threads and minutes, leave a DRAFT reply (`conversation.draftReply`, the agent's main
+// write) and save DRAFT minutes (`meetings.saveMinutes`). Neither reaches anybody: a draft lives in its own table that no
+// portal route reads (decision 3), and draft minutes are invisible to the portal until shared.
+// What an agent may NOT do, ever: post (`conversation.post`, `conversation.open`), send a draft (`conversation.sendDraft`),
+// share minutes (`meetings.shareMinutes`), or close/reopen a thread. Three independent walls:
+//   1. Cerbos: an EFFECT_DENY on `post`/`manage` (conversation) and `share_minutes` (meeting_recording) for
+//      `principal.attr.kind in ["automation","bot"]`, which beats every ALLOW. This is the authority.
+//   2. The D14 BAR: the four client-reaching writes are `registerBarredExecutable` entries (approval-executables.ts,
+//      `registerConversationBars`). They are `medium`, so an unattended caller's call SUSPENDS for approval, and approving
+//      it can never execute it: the executor fails closed with `not_executable` (no registry entry), and
+//      `registerExecutableApproval` throws for the name. Nobody can approve an agent's message into a client's inbox.
+//   3. Nothing is added to the n8n `AUTOMATION_ALLOWLIST` (mcp-hub/src/automation-policy.ts). No workflow writes to a
+//      conversation in v1.
+// A HUMAN who uses an MCP client under their OWN identity (an OBO call as a verified person) passes Cerbos as that
+// person, so all of these work for them; the sent message's author is that person.
+//
+// ── TYPED REFUSALS (criterion 5) ────────────────────────────────────────────────────────────────
+// An agent that reaches the endpoint is refused with `{error, reason}`, never a bare 403 (core/agent-refusal.ts):
+//   conversation.post / .open / .sendDraft, meetings.shareMinutes   reason `agents_draft_staff_send`; the message names
+//                                                                   `conversation.draftReply` or `meetings.saveMinutes`
+//   conversation.closeThread / .reopenThread                        reason `agents_cannot_manage_conversation`
+//
+// ── IMPACT ──────────────────────────────────────────────────────────────────────────────────────
+//   draftReply, saveMinutes        LOW     reach nobody; a draft is staff-only until a person sends or shares it.
+//   closeThread, reopenThread      LOW     reversible, and they only stop/restart replies. Agents are denied by Cerbos
+//                                          (`manage`), so these are for a person using an MCP client.
+//   post, open, sendDraft,         MEDIUM  they put words in front of a client / share minutes with a client. BARRED.
+//   shareMinutes
+//
+// ── IDEMPOTENCY (criterion 3) ──────────────────────────────────────────────────────────────────
+// `conversation.draftReply` REQUIRES `idempotencyKey`: the route inserts with `ON CONFLICT (tenant_id, idempotency_key)
+// DO NOTHING`, and a retry returns the SAME draft id with `replayed: true` (the same key on another thread is a 409). A
+// webhook or a model that fires twice makes one draft. `meetings.saveMinutes` replaces the draft in place (one row per
+// meeting), so a repeat is the same state. close/reopen are state sets, so a repeat is a no-op. `post`/`open`/`sendDraft`/
+// `shareMinutes` are human-only: a double click is refused (409 already sent / already shared) or is a person's choice.
+//
+// ── OBSERVABILITY (criterion 6) ────────────────────────────────────────────────────────────────
+// Every write records its actor, which may be non-human (`writeActivity` stamps `metadata.via`, the agent or workflow
+// that drove the call): `drafted_reply` (a draft, with the draft id), `posted` (open and reply), `sent_draft` (with
+// `draftedBy`), `closed` / `reopened` / `renamed` (a thread), `saved_minutes` (ids and size, never the text) and
+// `shared_minutes`. `drafted_reply`, `closed`/`reopened`/`renamed` and `saved_minutes` were ADDED by PV4-07; the rest
+// already existed. The data rows carry provenance too: `conversation_drafts.drafted_by`, `conversation_messages.drafted_by`
+// (the sent message's author is the SENDER, `drafted_by` is the agent: decision 4) and `meeting_minutes.drafted_by`.
+//
+// ── OPTIONAL FILTERS ON A LIST ─────────────────────────────────────────────────────────────────
+// mcp-hub fills EVERY `:token` of a path from the args and treats a missing one as an error; on a GET the leftover args
+// are dropped. So `conversation.listThreads` carries its four filters as query tokens, and each has the schema default
+// `all`, which the hub fills in and the route reads as "no filter".
+const CONVERSATION_CORE_TOOLS: McpToolDef[] = [
+  // ── reads ──────────────────────────────────────────────────────────────────────────────────────
+  {
+    name: "conversation.listThreads",
+    description:
+      "The client conversation threads of this company, newest activity first (max 200). Filters (each defaults to `all`, " +
+      "meaning no filter): `clientId` and `projectId` (uuids), `status` (open|closed) and `awaitingReply` (true = the last " +
+      "message is the client's and the thread is open: waiting for us). Each row has `id`, `clientName`, `projectName`, " +
+      "`general` (the client-wide thread), `subject`, `status`, `awaitingReply`, `pendingDrafts` and `unreadCount`. " +
+      "A 403 is a refusal, never an empty list.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate:
+      "/api/:tenantId/conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        clientId: { type: "string", default: "all", description: "a client uuid, or `all`" },
+        projectId: { type: "string", default: "all", description: "a project uuid, or `all`" },
+        status: { type: "string", enum: ["all", "open", "closed"], default: "all" },
+        awaitingReply: {
+          type: "string", enum: ["all", "true", "false"], default: "all",
+          description: "`true` = threads where the client spoke last and we have not answered",
+        },
+      },
+      required: ["tenantId", "clientId", "projectId", "status", "awaitingReply"],
+    },
+  },
+  {
+    name: "conversation.getThread",
+    description:
+      "One thread with its messages, oldest first, and its PENDING drafts. Each message has `authorSide` (client|staff), " +
+      "`authorName`, `body` (null once retracted) and `draftedBy` (the agent that drafted a staff message a person later " +
+      "sent). `drafts` are staff-only and never reach the client until a person sends one. Reading marks the thread read for " +
+      "the caller. 404 if it does not exist.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/conversation/:threadId",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, threadId: { type: "string" } },
+      required: ["tenantId", "threadId"],
+    },
+  },
+
+  // ── low: reach nobody ──────────────────────────────────────────────────────────────────────────
+  {
+    name: "conversation.draftReply",
+    description:
+      "Leave a DRAFT reply on a thread for a staff member to review and send. This is how an agent answers a client: the " +
+      "draft is staff-only and reaches nobody until a person sends it (an agent can never post or send: " +
+      "`agents_draft_staff_send`). Plain text, 1..10,000 characters. IDEMPOTENT on `idempotencyKey` (REQUIRED): a retry with " +
+      "the same key returns the same draft id with `replayed:true` instead of a second draft; the same key on another thread " +
+      "is a 409. 409 on a closed thread.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/conversation/:threadId/drafts",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        threadId: { type: "string" },
+        body: { type: "string", description: "the proposed reply, plain text (no HTML or Markdown)" },
+        idempotencyKey: { type: "string", description: "REQUIRED here: any stable string for this reply (at most 200 characters)" },
+      },
+      required: ["tenantId", "threadId", "body", "idempotencyKey"],
+    },
+  },
+  {
+    name: "conversation.closeThread",
+    description:
+      "Close a thread: neither side can post until it is reopened. A staff action: an agent is refused " +
+      "(`agents_cannot_manage_conversation`); this is for a person using an MCP client under their own identity. A repeat is a no-op.",
+    minAssurance: "verified",
+    method: "PATCH",
+    pathTemplate: "/api/:tenantId/conversation/:threadId",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        threadId: { type: "string" },
+        status: { type: "string", enum: ["closed"], default: "closed" },
+      },
+      required: ["tenantId", "threadId"],
+    },
+  },
+  {
+    name: "conversation.reopenThread",
+    description:
+      "Reopen a closed thread so both sides can post again. A staff action: an agent is refused " +
+      "(`agents_cannot_manage_conversation`). A repeat is a no-op.",
+    minAssurance: "verified",
+    method: "PATCH",
+    pathTemplate: "/api/:tenantId/conversation/:threadId",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        threadId: { type: "string" },
+        status: { type: "string", enum: ["open"], default: "open" },
+      },
+      required: ["tenantId", "threadId"],
+    },
+  },
+
+  // ── medium: BARRED (PV-D23). A person may call these; an approved agent request can never run them. ──
+  {
+    name: "conversation.post",
+    description:
+      "Reply on a thread AS THE CALLER: the message goes to the client at once. HUMAN ONLY (PV-D23: agents draft, staff send): " +
+      "an agent is refused with `agents_draft_staff_send` and told to use `conversation.draftReply`. impact:'medium' and BARRED " +
+      "from D14 auto-execution, so approving an agent's request never sends it. Plain text, 1..10,000 characters. " +
+      "409 on a closed thread. Not idempotent: a repeat posts again.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/conversation/:threadId/messages",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, threadId: { type: "string" }, body: { type: "string" } },
+      required: ["tenantId", "threadId", "body"],
+    },
+  },
+  {
+    name: "conversation.open",
+    description:
+      "Start a conversation with a client AS THE CALLER and send the first message. With `projectId` (a project of that " +
+      "client): a new thread on it. Without: the client's one general thread, created on first use (409 if it is closed). " +
+      "HUMAN ONLY (PV-D23): an agent is refused with `agents_draft_staff_send`; it may draft on an EXISTING thread with " +
+      "`conversation.draftReply`. impact:'medium' and BARRED from D14 auto-execution.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/conversation",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        clientId: { type: "string" },
+        projectId: { type: "string", description: "optional; must be a project of this client" },
+        subject: { type: "string", description: "optional, at most 200 characters" },
+        body: { type: "string" },
+      },
+      required: ["tenantId", "clientId", "body"],
+    },
+  },
+  {
+    name: "conversation.sendDraft",
+    description:
+      "Send a pending draft to the client. The message's author is the CALLER (the person accountable for the words) and the " +
+      "agent that drafted it is recorded as `draftedBy`. HUMAN ONLY (PV-D23): an agent is refused with " +
+      "`agents_draft_staff_send`. impact:'medium' and BARRED from D14 auto-execution. 409 when the draft was already sent or " +
+      "discarded, or the thread is closed.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/conversation/drafts/:draftId/send",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, draftId: { type: "string" } },
+      required: ["tenantId", "draftId"],
+    },
+  },
+];
+
+const MEETING_MINUTES_CORE_TOOLS: McpToolDef[] = [
+  {
+    name: "meetings.getMinutes",
+    description:
+      "A meeting's minutes and their sharing state: `{meetingId, clientId, projectId, title, shareable, minutes}`. `minutes` is " +
+      "null until some were saved, else `{id, bodyMd, status (draft|shared), draftedBy, updatedBy, sharedAt, clientVisible}`. " +
+      "404 for an unknown meeting.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/meetings/:meetingId/minutes",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, meetingId: { type: "string" } },
+      required: ["tenantId", "meetingId"],
+    },
+  },
+  {
+    name: "meetings.saveMinutes",
+    description:
+      "Save (replace) a meeting's DRAFT minutes. An agent may draft them from the transcript: a draft is invisible to the " +
+      "client until a staff member shares it, and `drafted_by` records the agent. Saving never shares. Idempotent: it replaces " +
+      "the draft in place. 409 once the minutes are shared (they are frozen). `bodyMd` is markdown, at most 100,000 characters.",
+    minAssurance: "verified",
+    method: "PUT",
+    pathTemplate: "/api/:tenantId/meetings/:meetingId/minutes",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, meetingId: { type: "string" }, bodyMd: { type: "string" } },
+      required: ["tenantId", "meetingId", "bodyMd"],
+    },
+  },
+  {
+    name: "meetings.shareMinutes",
+    description:
+      "Share the minutes with the meeting's client, once, with no undo; the client's contacts are notified. HUMAN ONLY (PV-D23): " +
+      "an agent is refused with `agents_draft_staff_send` and told to use `meetings.saveMinutes`. impact:'medium' and BARRED from " +
+      "D14 auto-execution. 409 when the meeting has no client, there are no minutes or they are blank, or they are already shared.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/meetings/:meetingId/minutes/share",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, meetingId: { type: "string" } },
+      required: ["tenantId", "meetingId"],
+    },
+  },
+];
+
+/** PV4-07: the eight `conversation.*` tools; exported so a suite can restore exactly this area. */
+export function registerConversationCoreTools(): void {
+  registerCoreTools(CONVERSATION_CORE_TOOLS);
+}
+
+/** PV4-07: the three `meetings.*Minutes` tools; exported so a suite can restore exactly this area. */
+export function registerMeetingMinutesCoreTools(): void {
+  registerCoreTools(MEETING_MINUTES_CORE_TOOLS);
+}
+
 /**
  * The ONE aggregate, mirroring `approval-executables.ts`'s `registerAllExecutableApprovals()` doctrine
  * — that file's own header names the exact failure mode a hand-maintained list of "call these to
@@ -1016,6 +1315,8 @@ export function registerAllCoreTools(): void {
   registerAgencyPipelineCoreTools();
   registerAgencyPrivacyCoreTools();
   registerContractBillingCoreTools();
+  registerConversationCoreTools();
+  registerMeetingMinutesCoreTools();
 }
 
 // =================================================================================================

@@ -69,6 +69,21 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "invoices.issue",
       "invoices.voidIssued",
       "billingProfile.read",
+      // PV4-07: client Conversation and meeting minutes for agents (PV-D23: agents draft, staff send). Two reads, the
+      // agent's drafting writes (`draftReply`, `saveMinutes`) and the thread-state pair are LOW; the four writes that
+      // reach a client (`post`, `open`, `sendDraft`, `shareMinutes`) are MEDIUM and BARRED from D14 auto-execution.
+      // Pinned in conversation-agent-tools.test.ts.
+      "conversation.listThreads",
+      "conversation.getThread",
+      "conversation.draftReply",
+      "conversation.closeThread",
+      "conversation.reopenThread",
+      "conversation.post",
+      "conversation.open",
+      "conversation.sendDraft",
+      "meetings.getMinutes",
+      "meetings.saveMinutes",
+      "meetings.shareMinutes",
     ]);
   });
 
