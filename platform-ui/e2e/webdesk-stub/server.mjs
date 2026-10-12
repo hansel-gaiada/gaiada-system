@@ -22,6 +22,12 @@ import { addAsset, COMPANY, concurrentSave, decideApproval, handleKeyRequest, ha
 import { reviewSnapshot } from "./editorial.mjs";
 import { handlePortalWebsite, isPortalWebsitePath, PORTAL_USERS, portalMe, portalOverview, portalUserIdFor, seedPortal } from "./portal.mjs";
 
+let heldGate = null;
+let heldOpen = null;
+const holdOn = () => { if (!heldGate) heldGate = new Promise((r) => { heldOpen = r; }); };
+const holdOff = () => { if (heldOpen) heldOpen(); heldGate = null; heldOpen = null; };
+const slow = async (S) => { if (heldGate) await heldGate; if (S.cfg.delayMs) await sleep(S.cfg.delayMs); };
+
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = Number(process.env.WD_STUB_PORT ?? 3991);
 
@@ -80,7 +86,11 @@ const server = http.createServer(async (req, res) => {
     // ── scenario controls ───────────────────────────────────────────────────────────────────────
     if (pathname.startsWith("/__stub/")) {
       const cmd = pathname.slice("/__stub/".length);
-      if (cmd === "reset") { S = seedPortal(seed()); return send(res, 200, { ok: true }); }
+      // `hold` latch: while held, every content-BFF read parks until `release` (a deterministic "slow API": the test
+      // asserts the loading state, THEN releases). Replaces racing a fixed delay against the router.
+      if (cmd === "hold") { holdOn(); return send(res, 200, { ok: true }); }
+      if (cmd === "release") { holdOff(); return send(res, 200, { ok: true }); }
+      if (cmd === "reset") { holdOff(); S = seedPortal(seed()); return send(res, 200, { ok: true }); }
       if (cmd === "config") { Object.assign(S.cfg, body ?? {}); return send(res, 200, S.cfg); }
       // Put an asset straight into the library (no upload): { title?, alt?, tags?, mime?, originalFilename?, width?, height?, createdBy?, createdAt? }
       if (cmd === "seed-media") return send(res, 200, { assetId: addAsset(S, body ?? {}) });
@@ -108,7 +118,7 @@ const server = http.createServer(async (req, res) => {
     if (PORTAL_USERS[userId] && pathname === "/api/me") return send(res, 200, portalMe(userId));
     if (PORTAL_USERS[userId] && /^\/api\/[^/]+\/portal\/overview$/.test(pathname)) return send(res, 200, portalOverview());
     if (isPortalWebsitePath(pathname)) {
-      if (S.cfg.delayMs) await sleep(S.cfg.delayMs);
+      await slow(S);
       const pm = pathname.match(/^\/api\/([^/]+)\//);
       const r = handlePortalWebsite(S, { method, pathname, query: url.searchParams, body, userId, company: decodeURIComponent(pm[1]) });
       return send(res, r.status, r.json);
@@ -117,7 +127,7 @@ const server = http.createServer(async (req, res) => {
     // ── WebDesk content BFF ─────────────────────────────────────────────────────────────────────
     const wd = pathname.match(/^\/api\/([^/]+)\/modules\/webdev\/content(\/.*)?$/);
     if (wd) {
-      if (S.cfg.delayMs) await sleep(S.cfg.delayMs);
+      await slow(S);
       const r = handleWebdesk(S, { method, pathname, query: url.searchParams, body, userId, company: decodeURIComponent(wd[1]) });
       return send(res, r.status, r.json);
     }
@@ -125,7 +135,7 @@ const server = http.createServer(async (req, res) => {
     // ── control plane: "Request an API key" files a key.mint approval ───────────────────────────
     const ck = pathname.match(/^\/api\/([^/]+)\/modules\/webdev\/control\/sites\/([^/]+)\/keys$/);
     if (ck) {
-      if (S.cfg.delayMs) await sleep(S.cfg.delayMs);
+      await slow(S);
       const r = handleKeyRequest(S, { method, siteId: decodeURIComponent(ck[2]), body, userId, company: decodeURIComponent(ck[1]) });
       return send(res, r.status, r.json);
     }

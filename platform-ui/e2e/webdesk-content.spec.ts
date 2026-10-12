@@ -28,6 +28,8 @@ const stub = {
     return (await r.json()) as unknown;
   },
   reset: () => stub.post("reset"),
+  hold: () => stub.post("hold"), // park every content-BFF read until release() (a deterministic slow API)
+  release: () => stub.post("release"),
   config: (c: Record<string, unknown>) => stub.post("config", c),
   state: async () => (await (await fetch(`${STUB}/__stub/state`, { method: "POST" })).json()) as {
     items: { itemId: string; slug: string; locale: string; headVersion: number; publishedVersion: number | null; publishState: string; deletedAt: string | null; versions: { n: number; createdBy: string; note: string | null; props?: Record<string, any>; seo: Record<string, unknown> }[] }[];
@@ -87,13 +89,23 @@ test("the Website group sits in the Web Dev strip; one site redirects straight i
 });
 
 test("STATE loading: a skeleton shows while the content API is slow, then the page replaces it", async ({ page }) => {
+  // The production router knows the route's loading boundary only from the link's PREFETCH (which fires after hydration,
+  // when the link is in view). A click before that prefetch has landed navigates with no shell to show, so the old page
+  // stays up with no skeleton: that was the flake. Wait for the prefetch response first. (`next dev` does not prefetch.)
+  const prefetched = page.waitForResponse((r) => /\/website\/content\?_rsc=/.test(r.url()) && !!r.request().headers()["next-router-prefetch"], { timeout: 20_000 }).catch(() => null);
   await page.goto(DEPT);
   const link = page.getByRole("navigation", { name: "Department sections" }).getByRole("link", { name: "Website" });
   await hydrated(link); // a click before hydration is a full page load, not the soft navigation under test
-  await stub.config({ delayMs: 2000 });
-  await link.click();
-  await expect(page.getByTestId("wd-skeleton")).toBeVisible();
-  // three sequential BFF calls at 2 s each, on a shared and sometimes loaded host: generous on purpose
+  if (process.env.WD_E2E_BUILT === "1") expect(await prefetched, "the Website link was prefetched").not.toBeNull();
+  await page.waitForLoadState("networkidle"); // the router has finished filing every prefetch it started
+  await stub.hold(); // the API is "slow" for exactly as long as this test says, not for a fixed 2 s
+  try {
+    await link.click();
+    await expect(page.getByTestId("wd-skeleton")).toBeVisible();
+    await expect(page.getByTestId("collections")).toHaveCount(0); // still the placeholder, not data
+  } finally {
+    await stub.release();
+  }
   await expect(page.getByTestId("collections")).toBeVisible({ timeout: 90_000 });
   await expect(page.getByTestId("wd-skeleton")).toHaveCount(0);
 });
@@ -890,7 +902,19 @@ test("STATE key.mint approved: labelled an API-key request (not a publish), and 
 
   // Record EVERY response body from here on.
   const reads: Promise<{ url: string; method: string; action: boolean; body: string }>[] = [];
+  // The server action's response is read through `route.fetch()`, not `response.text()`: the browser may drop a streamed
+  // action body before the listener reads it (the recorder then saw "" and the claim below failed under load).
+  // Fetching it in the route hands the test the complete body deterministically, then forwards it unchanged.
+  await page.route("**/*", async (route) => {
+    const req = route.request();
+    if (!req.headers()["next-action"]) return route.continue();
+    const resp = await route.fetch();
+    const body = await resp.text();
+    reads.push(Promise.resolve({ url: req.url(), method: req.method(), action: true, body }));
+    await route.fulfill({ response: resp, body });
+  });
   page.on("response", (r) => {
+    if (r.request().headers()["next-action"]) return; // recorded by the route above
     reads.push(r.text().then(
       (body) => ({ url: r.url(), method: r.request().method(), action: !!r.request().headers()["next-action"], body }),
       () => ({ url: r.url(), method: r.request().method(), action: false, body: "" }),
