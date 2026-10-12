@@ -240,6 +240,42 @@ same file set and byte-for-byte content (CRLF-normalised), except `sdk.php`. The
 `scaffold-template/wp-site.ts` is deleted. (Before M6-P5a the template omitted `inc/` entirely, so a scaffolded
 site had no renderer, and its `page.php` read the key from WordPress options.)
 
+## The P5 gate: a real WordPress renders entirely from `/v1`
+
+`webdesk/qa/p5-wp-gate.sh` (helpers in `webdesk/qa/p5-wp-gate/`) is the harness that proves it. **Status: written,
+not yet run** (it needs a Linux Docker host; it was authored without one). Run it on the Linux gate host, never on
+production and never on a loaded box (it builds the api image):
+
+```
+git -c core.autocrlf=false archive --format=tar <ref> > /tmp/src.tar     # never a Windows-checkout tar (CRLF)
+bash webdesk/qa/p5-wp-gate.sh <run-id> /tmp/src.tar                      # last line: ### done <run-id> PASS|FAIL
+```
+
+One docker network per run, no host ports, everything removed by an EXIT trap (containers, anonymous volumes,
+network, source volume, the built api image, the scratch build context). Logs: `~/wg-p5-<run-id>/`. What it does:
+
+1. Starts Postgres (`init-roles.sh`), Redis and RustFS exactly as `linux-gate.sh`, plus `mysql:8.4`; builds the api
+   with `docker build -f webdesk/api/Dockerfile webdesk`; runs storage-bootstrap and the migrations; starts the api.
+2. Seeds a tenant (`seed.mjs`, run in the api image as the DB superuser): a `pages` collection listing the eight
+   vocabulary blocks; items `home`, `about` (en + id) and `contact` (en) published; every item holds an unknown
+   `pricingTable` block and a `javascript:` CTA href. Items go in as SQL fixtures, not through the control plane
+   (publish there needs a WS4 approval assertion; the gate proves the READ side). One production read key is minted
+   the way `ApiKeysService` does (`sha256(key + pepper)` at rest) and never printed.
+3. Generates the contract live with the image's compiled generator (`generate.mjs` calls `generateTenantContract`)
+   and reads `contracts/<slug>/<version>/sdk.php` back out of RustFS; it must equal what the generator built.
+4. Starts `wordpress:php8.3-apache`, copies in the theme, replaces `vendor/gaiada-sdk/sdk.php` with the tenant's
+   generated file, sets `GAIADA_WEBDESK_BASE_URL/TENANT/API_KEY/LOCALES` via `WORDPRESS_CONFIG_EXTRA`, then
+   `wp core install`, `wp theme activate gaiada-webdesk` and pretty permalinks with `wordpress:cli`.
+5. Curls the site from inside the WordPress container and asserts: `/` (200, `lang="en"`, hero heading, all eight
+   known block classes), `/about/` (also beats a colliding WP page of the same slug), `/id/about/` (`lang="id"`,
+   id text), the third slug, a missing slug (404 with the theme's not-found page), the unknown block (renders
+   nothing, no leak, neighbours still render), the `javascript:` CTA (renders `#`), `/v1` without a key and with
+   another tenant's slug (401), WordPress's own posts never served (a native post's permalink, `/?p=<id>`,
+   `/hello-world/`), then the api stopped (502 with the static unavailable page) and restarted (200 again).
+
+Pinned images: `wordpress:php8.3-apache`, `mysql:8.4` and `wordpress:cli` by multi-arch index digest, RustFS as in
+`linux-gate.sh`. To bump one, read the new digest from the registry and edit the constant at the top of the script.
+
 ## Astro↔WP parity — what this ticket can and cannot claim
 
 WSK-36 (not this ticket) owns proving the two renderers agree. What this ticket CAN say: both
