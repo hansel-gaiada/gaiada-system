@@ -302,6 +302,86 @@ describe("WSK-63b control client — what goes on the wire", () => {
   });
 });
 
+// ── M6-P4j: raw bytes (the contract artifact route) ──────────────────────────────────────────────
+
+describe("M6-P4j control client: bodyBytes and the binary artifact read", () => {
+  /** Every byte value, a gzip magic prefix, and bytes that are not valid UTF-8: a utf8 round trip would corrupt it. */
+  const binary = (extra = 0): Buffer =>
+    Buffer.concat([Buffer.from([0x1f, 0x8b, 0x08]), Buffer.from(Array.from({ length: 256 }, (_, i) => i)), Buffer.from([0xc3, 0x28, 0xff]), Buffer.alloc(extra, 0xa5)]);
+
+  it("every response carries bodyBytes, the exact bytes behind bodyText and json (which are unchanged)", async () => {
+    const c = makeClient();
+    const res = await c.getContract("acme");
+    expect(res.json).toEqual({ ok: true });
+    expect(res.bodyText).toBe('{"ok":true}');
+    expect(res.bodyBytes!.equals(Buffer.from('{"ok":true}'))).toBe(true);
+  });
+
+  it("getContractArtifact: GET on the artifact route, accept */*, and the bytes come back byte-exact", async () => {
+    const payload = binary();
+    good.handler = (_req, res) => {
+      res.writeHead(200, { "content-type": "application/gzip", "content-length": String(payload.length) });
+      res.end(payload);
+    };
+    const c = makeClient();
+    const res = await c.getContractArtifact("acme", "1.0.0", "blockLibrary");
+    expect(res.status).toBe(200);
+    expect(res.bodyBytes!.equals(payload)).toBe(true);
+    expect(res.json).toBeNull();
+    expect(good.seen).toHaveLength(1);
+    const seen = good.seen[0];
+    expect(seen.method).toBe("GET");
+    expect(seen.url).toBe("/control/v1/tenants/acme/contract/1.0.0/artifacts/blockLibrary");
+    expect(seen.headers.accept).toBe("*/*");
+    expect(seen.authorized).toBe(true);
+    expect(seen.headers.authorization).toMatch(/^Bearer /);
+    expect(seen.headers["x-ws4-assertion"]).toBeUndefined();
+  });
+
+  it("an ordinary call still sends accept: application/json", async () => {
+    await makeClient().getContract("acme");
+    expect(good.seen[0].headers.accept).toBe("application/json");
+  });
+
+  it("a non-2xx artifact answer is returned as an answer (status + JSON problem), never thrown or retried", async () => {
+    good.handler = (_req, res) => {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ status: 404, title: "No such contract artifact" }));
+    };
+    const res = await makeClient().getContractArtifact("acme", "9.9.9", "sdkPhp");
+    expect(res.status).toBe(404);
+    expect((res.json as { title: string }).title).toBe("No such contract artifact");
+    expect(good.seen).toHaveLength(1);
+  });
+
+  it("a binary read may exceed the 8 MiB JSON cap (here 9 MiB); the same size on an ordinary call is refused", async () => {
+    const big = binary(9 * 1024 * 1024);
+    good.handler = (_req, res) => {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.end(big);
+    };
+    const c = makeClient({ retryAttempts: 1 });
+    const res = await c.getContractArtifact("acme", "1.0.0", "blockLibrary");
+    expect(res.bodyBytes!.equals(big)).toBe(true);
+    await expect(c.getContract("acme")).rejects.toBeInstanceOf(WebdeskControlTransportError);
+  });
+
+  it("a binary read is still capped, at 25 MiB", async () => {
+    const tooBig = Buffer.alloc(25 * 1024 * 1024 + 1024, 1);
+    good.handler = (_req, res) => {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.end(tooBig);
+    };
+    await expect(makeClient({ retryAttempts: 1 }).getContractArtifact("acme", "1.0.0", "blockLibrary")).rejects.toBeInstanceOf(WebdeskControlTransportError);
+  });
+
+  it("a binary response is for reads only", async () => {
+    await expect(
+      makeClient().send({ command: "contract.regenerate", method: "POST", path: "/control/v1/contract/regenerate", binaryResponse: true }),
+    ).rejects.toThrow(/binary response belongs on a read/);
+  });
+});
+
 // ── WS4 (Layer 4) on the wire ────────────────────────────────────────────────────────────────────
 
 describe("WSK-63b control client — WS4 on a HIGH command", () => {

@@ -32,7 +32,7 @@ import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { emitEvent } from "../../events/outbox.service";
 import type { Principal } from "../../rbac/principal";
-import { createWebdevControlHttpDriver } from "../webdev-contracts/contract-fetch-http";
+import { resolveContractControlProvider } from "../webdev-contracts/contract-control-provider";
 import { ContractControlNotConfiguredError, WebdevControlEgressError, type WebdevControlProvider } from "../webdev-contracts/contract-fetch-provider";
 import { refreshContractSnapshot } from "../webdev-contracts/contract-snapshot.service";
 import { createErpRepoControlProvider } from "./erp-repo-control-provider";
@@ -328,7 +328,7 @@ async function provisionTenantOverControl(
 async function pinContractSnapshot(tenantId: string, fetchedBy: string | null, slug: string): Promise<ContractPinResult> {
   let provider: WebdevControlProvider;
   try {
-    provider = contractProviderOverride ?? createWebdevControlHttpDriver();
+    provider = contractProviderOverride ?? resolveContractControlProvider();
   } catch (err) {
     if (err instanceof ContractControlNotConfiguredError) return { outcome: "not_yet", reason: "contract_channel_not_configured" };
     throw err;
