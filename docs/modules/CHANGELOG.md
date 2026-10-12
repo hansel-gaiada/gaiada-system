@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.105.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
+
+- **Migration `202610131800_search_experiments`** adds `search_experiments` (the pre-registration and lifecycle) and the append-only `search_experiment_results`. Both are FORCE RLS in the `search` scope.
+  - A trigger locks the pre-registration fields once a test has started.
+  - A trigger under a per-property advisory lock refuses an 11th running test.
+- **Routes** under `/api/:t/modules/search/properties/:propertyId/experiments`: list, register, get, patch (draft only), sync, results, stop, abort and decide.
+  - Reads need `resource_search_property:read`; writes need `update`.
+  - 9 MCP tools: 3 reads, and 6 writes at impact `low`.
+  - BFF §28e. The capability inventory is regenerated.
+- **Lifecycle:** draft → `sync` (running once the item's LIVE version carries the registered block; any drift from the plan is `plan_mismatch`) → `stop` (refused before the horizon) → `decide` (needs the block gone from live).
+  - `abort` is allowed from draft, running or stopped.
+  - The ERP never writes to WebDesk: the human publishes the block through the normal content flow.
+- **Before the horizon** the results carry progress and SRM only. They have no rate, difference, interval or p, and conversions are not even fetched.
+- **Refusals:**
+  - A projection over 56 days → 422 `underpowered`.
+  - An 11th test → 409 `too_many_running`.
+  - A Umami outage → `unavailable` with a reason, never zeros.
+  - Cells under 5 show as `"<5"`.
+- `started_at` is approximate, because WebDesk's `item.get` has no publish time. It errs late. Follow-up: expose `lastPublishedAt`.
+- Unit tests 69/69. The DB and HTTP suite runs on the Linux gate (CI).
+
 ### infra `0.13.9` - M5-V2-c: the insights-collector in the Umami compose project on sumopod (files only, not deployed) (2026-10-13) - PROTOTYPED
 
 - **`infra/sumopod/umami/docker-compose.yml`** gains two services, both on the `internal` network only (no egress):
