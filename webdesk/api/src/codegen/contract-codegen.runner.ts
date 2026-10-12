@@ -29,6 +29,8 @@ interface GeneratorBundle {
     storage: unknown,
     tenantSlug: string,
   ): Promise<{ built: { contractVersion: string; contentHash: string } } | null>;
+  /** M6-P4b0: the tarball the image baked (verified), or null when none; read from the image directory on every call. */
+  readBakedBlockLibrary(): { sha256: string } | null;
   toContractSnapshot(composition: unknown): unknown;
   stableStringify(value: unknown): string;
   VOCABULARY_VERSION: string;
@@ -40,19 +42,28 @@ export interface StoredPointer {
   contentHash: string;
   vocabularyVersion: string;
   compositionSnapshot: unknown;
+  /** M6-P4b0: absent in a pointer written before the block library became an artifact. */
+  blockLibrarySha256?: string;
 }
 
 /**
  * Is the stored contract still the right one? True when the tenant's composition (as the generator snapshots it)
  * and the vocabulary version both equal what the pointer recorded. Locales are not compared: a tenant's locale set
  * is fixed when it is provisioned (no command changes it afterwards).
+ *
+ * M6-P4b0: when the image bakes a block-library tarball (`bakedBlockLibrarySha256`), the pointer must also have
+ * recorded exactly that tarball, otherwise it is NOT current. That is how a tenant published before the library
+ * became an artifact (or under an older library version) is brought along by the next apply or by
+ * `contract.regenerate`. With no baked tarball (null) the library takes no part in the answer.
  */
 export function isContractCurrent(
   pointer: StoredPointer,
   currentSnapshot: unknown,
   vocabularyVersion: string,
   stableStringify: (v: unknown) => string,
+  bakedBlockLibrarySha256: string | null = null,
 ): boolean {
+  if (bakedBlockLibrarySha256 !== null && pointer.blockLibrarySha256 !== bakedBlockLibrarySha256) return false;
   return pointer.vocabularyVersion === vocabularyVersion && stableStringify(pointer.compositionSnapshot) === stableStringify(currentSnapshot);
 }
 
@@ -120,7 +131,11 @@ export class CompiledContractCodegenRunner implements ContractCodegenRunner {
     const fetched = await bundle.fetchTenantComposition(this.db.pool, tenantSlug);
     if (!fetched) return { outcome: "tenant-not-found" };
     const pointer = await bundle.readLatestPointer(this.storage, tenantSlug);
-    if (pointer && isContractCurrent(pointer, bundle.toContractSnapshot(fetched.composition), bundle.VOCABULARY_VERSION, bundle.stableStringify)) {
+    const bakedSha256 = bundle.readBakedBlockLibrary()?.sha256 ?? null;
+    if (
+      pointer &&
+      isContractCurrent(pointer, bundle.toContractSnapshot(fetched.composition), bundle.VOCABULARY_VERSION, bundle.stableStringify, bakedSha256)
+    ) {
       return { outcome: "unchanged", contractVersion: pointer.contractVersion, contentHash: pointer.contentHash };
     }
     const result = await bundle.generateTenantContract(this.db.pool, this.storage, tenantSlug);

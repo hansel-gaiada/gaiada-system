@@ -47,6 +47,12 @@ export interface ArtifactObjectKeys {
   /** WSK-34 — the PHP SDK's object key, alongside the TS one. */
   sdkPhp: string;
   contractMd: string;
+  /** M6-P4b0 — the block-renderer library tarball. Unlike the four above this key is SHARED across
+   *  tenants and contract versions (`blocks/<version>/gaiada-webdesk-blocks-<version>.tgz`: one object
+   *  per library version, see generator/block-library.mts). Absent in a pointer written before
+   *  M6-P4b0, or by a run whose image baked no tarball: ContractReadService then answers
+   *  `blockLibraryUrl: null`, never a fabricated URL. */
+  blockLibrary?: string;
 }
 
 /**
@@ -71,6 +77,11 @@ export interface LatestContractPointer {
    *  determinism-checked surface. */
   generatedAt: string;
   artifactKeys: ArtifactObjectKeys;
+  /** M6-P4b0 — hex sha256 of the block-library tarball `artifactKeys.blockLibrary` names. Deliberately
+   *  NOT in `hashes` (and so not in `contentHash`): an extra key there would change the contentHash of
+   *  every already-recorded version. The runner's "unchanged" guard compares it to the baked tarball's
+   *  hash, so a tenant whose pointer predates the tarball is regenerated once. Absent when no tarball. */
+  blockLibrarySha256?: string;
   hashes: ArtifactHashManifest;
   /** Opaque to this file — see `generator/types.mts`'s `TenantContractSnapshot` for the real
    *  shape (WSK-14's `breaking-change.ts`). Declared `unknown` here (not imported) to keep this
@@ -91,6 +102,10 @@ export interface ContractReadResponse {
     sdkPhpUrl: string | null;
     openapiUrl: string;
     contractMdUrl: string;
+    /** M6-P4b0 — the fifth artifact, presigned like `sdkPhpUrl`. `null` for any tenant whose
+     *  `latest.json` has no `artifactKeys.blockLibrary` (an older pointer, or an image without a baked
+     *  tarball). Additive: a reader that ignores it is unaffected (the WSK-34 `sdkPhpUrl` precedent). */
+    blockLibraryUrl: string | null;
   };
   contentHash: string;
   generatedAt: string;

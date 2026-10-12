@@ -213,6 +213,19 @@ describe("compiled runner: currency check", () => {
   it("is NOT current after a vocabulary release (the contract must be regenerated)", () => {
     expect(isContractCurrent(pointer, snap, "1.2.0", stable)).toBe(false);
   });
+  // M6-P4b0 -- the block library is part of "current" only when the image bakes one.
+  it("is NOT current when the image bakes a block library the pointer never recorded (a pre-M6-P4b0 tenant)", () => {
+    expect(isContractCurrent(pointer, snap, "1.1.0", stable, "a".repeat(64))).toBe(false);
+  });
+  it("is NOT current when the pointer recorded a different (older) library tarball", () => {
+    expect(isContractCurrent({ ...pointer, blockLibrarySha256: "b".repeat(64) }, snap, "1.1.0", stable, "a".repeat(64))).toBe(false);
+  });
+  it("is current when the pointer recorded exactly the baked tarball", () => {
+    expect(isContractCurrent({ ...pointer, blockLibrarySha256: "a".repeat(64) }, snap, "1.1.0", stable, "a".repeat(64))).toBe(true);
+  });
+  it("ignores the library when no tarball is baked, even if the pointer carries one", () => {
+    expect(isContractCurrent({ ...pointer, blockLibrarySha256: "b".repeat(64) }, snap, "1.1.0", stable, null)).toBe(true);
+  });
 });
 
 describe("compiled runner: bundle resolution", () => {

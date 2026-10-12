@@ -20,6 +20,7 @@ import * as artifactKeysModule from "../artifact-keys";
 import { namedExport } from "./cjs-interop.mts";
 import type { LatestContractPointer } from "../contract-manifest.types";
 import type { BuiltArtifacts } from "./build-artifacts.mts";
+import { ensureBlockLibraryUploaded, type BakedBlockLibrary, type PublishedBlockLibrary } from "./block-library.mts";
 
 const S3StorageAdapter = namedExport<typeof S3StorageAdapterNs.S3StorageAdapter>(s3StorageAdapterModule, "S3StorageAdapter");
 const storageConfig = namedExport<typeof StorageConfigNs.storageConfig>(storageConfigModule, "storageConfig");
@@ -49,7 +50,15 @@ export async function readLatestPointer(storage: S3StorageAdapter, tenantSlug: s
   return JSON.parse(obj.body.toString("utf8")) as LatestContractPointer;
 }
 
-/** Uploads the three artifact bodies under an IMMUTABLE `<contractVersion>/` prefix, then
+/** M6-P4b0 -- puts the baked block-library tarball in the bucket under its SHARED key, per the upload rule
+ *  in block-library.mts (absent: upload; same sha256: no-op; different sha256: throws, never overwrites). */
+export async function publishBlockLibrary(storage: S3StorageAdapter, baked: BakedBlockLibrary): Promise<PublishedBlockLibrary> {
+  const bucket = storageConfig.bucketName("artifacts");
+  await storage.ensureBucket(bucket, { versioning: true, objectLock: true });
+  return ensureBlockLibraryUploaded(storage, bucket, baked);
+}
+
+/** Uploads the artifact bodies under an IMMUTABLE `<contractVersion>/` prefix, then
  *  overwrites the mutable `latest.json` pointer LAST — so a reader (ContractReadService, or a
  *  concurrent generator run) never observes a pointer referencing artifacts that have not
  *  finished uploading yet. */
@@ -57,6 +66,8 @@ export async function publishArtifacts(
   storage: S3StorageAdapter,
   tenantSlug: string,
   built: BuiltArtifacts,
+  /** M6-P4b0 -- the already-uploaded block library, or omitted when none is available. */
+  blockLibrary?: PublishedBlockLibrary | null,
 ): Promise<LatestContractPointer> {
   const bucket = storageConfig.bucketName("artifacts");
   await storage.ensureBucket(bucket, { versioning: true, objectLock: true });
@@ -83,7 +94,8 @@ export async function publishArtifacts(
     blockLibrary: built.blockLibrary,
     contentHash: built.contentHash,
     generatedAt: new Date().toISOString(),
-    artifactKeys: keys,
+    artifactKeys: blockLibrary ? { ...keys, blockLibrary: blockLibrary.key } : keys,
+    ...(blockLibrary ? { blockLibrarySha256: blockLibrary.sha256 } : {}),
     hashes: JSON.parse(built.hashManifestJson),
     compositionSnapshot: built.compositionSnapshot,
   };

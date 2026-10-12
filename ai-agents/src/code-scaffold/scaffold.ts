@@ -14,7 +14,7 @@ import { gitignore, envExample, readme, tsconfig, packageJson } from "./template
 import { astroConfig as astroConfigAstro } from "./templates/astro-site";
 import { astroConfig as astroConfigNode } from "./templates/node-site";
 import { wpSiteFiles } from "./templates/wp-site";
-import { writeAndPush, vendorFiles, type PushTarget } from "./git-writer";
+import { writeAndPush, vendorFiles, sdkPackageJson, type PushTarget } from "./git-writer";
 
 export interface ScaffoldDeps {
   tenantId: string;
@@ -105,6 +105,17 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
     };
   }
 
+  // M6-P4b0: an astro or node site cannot build without the block library (every page imports it). A snapshot
+  // with none is refused here, before anything is composed, never vendored empty.
+  if (!snapshot.blockLibraryTarball || snapshot.blockLibraryTarball.byteLength === 0) {
+    return rejectedResult(
+      `siteKind "${envelope.siteKind}" requires the @gaiada/webdesk-blocks library pinned on contract snapshot ` +
+        `${snapshot.meta.id}, and none is recorded (artifacts.blockLibraryFile is empty). Refused before any file was ` +
+        `composed: refresh the contract once WebDesk's codegen has published the library for this tenant ` +
+        `(a snapshot mirrored before M6-P4b0 never has one).`,
+    );
+  }
+
   const index = parseOpenApiCollections(snapshot.openApiDocument);
   const { spec } = parsePrototypeSpec(prototypeText);
   const { files: pageFiles, gaps, referencedCollections } = composePages(spec, index);
@@ -121,9 +132,9 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
     { path: "docs/PRD.md", content: prdText },
     { path: "docs/PROTOTYPE.md", content: prototypeText },
     ...vendorFiles({
-      sdkTsTarball: snapshot.sdkTsTarball,
-      sdkTsPackageJson: JSON.stringify({ name: "@gaiada/webdesk-sdk", version: snapshot.meta.contractVersion }, null, 2) + "\n",
-      blockLibraryTarballPlaceholder: snapshot.blockLibraryTarball,
+      sdkTsSource: snapshot.sdkTsSource,
+      sdkTsPackageJson: sdkPackageJson(snapshot.meta.contractVersion),
+      blockLibraryTarball: snapshot.blockLibraryTarball,
     }),
   ];
 

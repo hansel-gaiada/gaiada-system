@@ -23,6 +23,9 @@ describe("shared template fragments", () => {
     const pkg = JSON.parse(String(packageJson({ name: "site", siteKind: "astro", blockLibraryVersion: "1.3.2" }).content));
     expect(pkg.dependencies["@gaiada/webdesk-blocks"]).toMatch(/^file:/);
     expect(pkg.dependencies["@gaiada/webdesk-sdk"]).toMatch(/^file:/);
+    // The blocks are a tarball; the SDK is plain text vendored as a local package DIRECTORY (M6-P4b0).
+    expect(pkg.dependencies["@gaiada/webdesk-blocks"]).toBe("file:./vendor/webdesk-blocks.tgz");
+    expect(pkg.dependencies["@gaiada/webdesk-sdk"]).toBe("file:./vendor/webdesk-sdk");
     expect(pkg.dependencies["@astrojs/node"]).toBeUndefined();
   });
 

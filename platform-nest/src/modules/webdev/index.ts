@@ -214,7 +214,7 @@ export const webdevModule: ModuleContract = {
         "Read the bytes of ONE stored artifact of a mirrored contract snapshot, base64-encoded with "
         + "its sha256, content type and size. The file is resolved from the snapshot's own pointer "
         + "(never a caller-supplied file id) and re-hashed against the mirror-time hash; a mismatch is "
-        + "refused as `artifact_hash_mismatch`, a null pointer (e.g. sdkPhp before P6) as `artifact_absent`.",
+        + "refused as `artifact_hash_mismatch`, a null pointer (e.g. sdkPhp before P6, or blockLibrary on an older snapshot) as `artifact_absent`.",
       minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact",
@@ -223,7 +223,7 @@ export const webdevModule: ModuleContract = {
         properties: {
           tenantId: { type: "string", description: "Company id (route scope)." },
           snapshotId: { type: "string", description: "webdev_contract_snapshots.id." },
-          artifact: { type: "string", enum: ["openapi", "sdkTs", "sdkPhp", "contractMd"], description: "Which stored artifact to read." },
+          artifact: { type: "string", enum: ["openapi", "sdkTs", "sdkPhp", "contractMd", "blockLibrary"], description: "Which stored artifact to read. blockLibrary is the @gaiada/webdesk-blocks tarball (gzip), absent on snapshots mirrored before it existed." },
         },
         required: ["tenantId", "snapshotId", "artifact"],
       },

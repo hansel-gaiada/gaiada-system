@@ -128,6 +128,8 @@ describe("codegen — live DB + RustFS integration", () => {
     expect(response!.contentHash).toBe(built.contentHash);
     // WSK-34 — sdkPhpUrl now fills in for a freshly-generated tenant (was `null` pre-WSK-34).
     expect(response!.artifacts.sdkPhpUrl).toContain("X-Amz-Signature");
+    // M6-P4b0 — no block library was published in this spec: null, never a fabricated URL.
+    expect(response!.artifacts.blockLibraryUrl).toBeNull();
     expect(response!.artifacts.openapiUrl).toContain("X-Amz-Signature");
 
     // The presigned URL is a REAL, fetchable link to the REAL bytes just published.

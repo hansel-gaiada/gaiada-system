@@ -100,7 +100,7 @@ describe("WSK-D6 — dynamic proof: a real scaffold run never installs or execut
         },
       },
       openApiDocument: { paths: { "/v1/t/acme/case-study": {}, "/v1/t/acme/case-study/{slug}": {} } },
-      sdkTsTarball: Buffer.from("PK\x03\x04-fake-sdk-tarball-bytes"),
+      sdkTsSource: "export interface paths {}\n",
       contractMd: "# Content contract\n",
       blockLibraryTarball: Buffer.from("PK\x03\x04-fake-blocks-tarball-bytes"),
     });
@@ -121,7 +121,8 @@ describe("WSK-D6 — dynamic proof: a real scaffold run never installs or execut
 
     expect(result.outcome).toBe("dry_run");
     expect(result.files).toContain("package.json");
-    expect(result.files).toContain("vendor/webdesk-sdk.tgz");
+    expect(result.files).toContain("vendor/webdesk-sdk/index.d.ts");
+    expect(result.files).toContain("vendor/webdesk-blocks.tgz");
     expect(result.files).toContain("CONTRACT.lock");
 
     const log = getExecLog();

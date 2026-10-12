@@ -14,6 +14,9 @@ export interface ContractSnapshotArtifactRefs {
   openapi: string; // files.id
   contractMd: string; // files.id
   blockLibrary: { package: string; version: string; range: string };
+  /** M6-P4b0 - files.id of the block-library tarball. Absent or null on a snapshot mirrored before the
+   *  library became the fifth artifact (the mirror writes `null` explicitly from then on). */
+  blockLibraryFile?: string | null;
 }
 
 export interface ContractSnapshotMeta {
@@ -30,18 +33,17 @@ export interface ContractSnapshotArtifacts {
   meta: ContractSnapshotMeta;
   /** Parsed openapi.v1.json — a plain JSON document, never executed (only ever `JSON.parse`d). */
   openApiDocument: Record<string, unknown>;
-  /** The SDK tarball's raw bytes, as downloaded — installed by the git-writer as a vendored `.tgz`
-   *  file, NEVER unpacked/required/imported by this process (WSK-D6). */
-  sdkTsTarball: Buffer;
+  /** The generated TypeScript SDK, UTF-8 text: WebDesk's `sdk.d.ts`, the `openapi-typescript` output
+   *  (`paths` / `components`, types only). It was named `sdkTsTarball` and vendored as a `.tgz` until
+   *  M6-P4b0, but it never was a tarball. `scaffold.ts` vendors it as a tiny local package
+   *  (`vendor/webdesk-sdk/{index.d.ts,package.json}`); nothing here ever executes or imports it (WSK-D6). */
+  sdkTsSource: string;
   contractMd: string;
-  /** The pinned `@gaiada/webdesk-blocks@{constraints.blockLibraryVersion}` tarball's raw bytes.
-   *  NOT stored on `webdev_contract_snapshots` (its `artifacts.blockLibrary` is only
-   *  `{package, version, range}` metadata, per §06's Zone B contract response) — where the ACTUAL
-   *  tarball bytes for a pinned block-library version live is undefined anywhere in this rail as of
-   *  this ticket (WSK-16 built it as a hand-`npm pack`ed file with no publish/store step). This
-   *  field is this ticket's own seam for that missing plumbing, same status as the two hub tools
-   *  documented in hub-client.ts's header — reported as a third gap. */
-  blockLibraryTarball: Buffer;
+  /** The `@gaiada/webdesk-blocks` tarball's raw bytes (gzip), read from the snapshot's own fifth artifact
+   *  (`webdev.contracts.artifact` `{artifact: "blockLibrary"}`, M6-P4b0). `null` when the snapshot has none
+   *  (mirrored before M6-P4b0, or WebDesk had no baked library): `scaffold.ts` then refuses an astro or node
+   *  site loudly rather than vendoring an empty library. */
+  blockLibraryTarball: Buffer | null;
   /** WSK-34's generated PHP SDK source (`sdk.php`, plain UTF-8 text — never a tarball, it is vendored
    *  as a single file per `templates/wp-site.ts`'s `vendoredSdkPhp`).
    *  `null` when `meta.artifacts.sdkPhp` itself is null (a tenant/contract generated before WSK-34,
@@ -66,8 +68,7 @@ export interface ContractSnapshotProvider {
 /** Real adapter. The snapshot read tools are `webdev.contracts.get` and `webdev.contracts.artifact`
  *  (M6-P4a, registered by the webdev module manifest; read-only; the file is resolved server-side from
  *  the snapshot's own pointer and integrity-checked there — this side never supplies a file id).
- *  `webdev.artifacts.downloadBlockLibrary` below is STILL an unregistered placeholder: where the
- *  block-library tarball lives is a separate ticket (M6-P4b), so a live run cannot finish until it lands. */
+ *  M6-P4b0: the block-library tarball is the snapshot's fifth artifact, read through the same tool. */
 export class HubContractSnapshotProvider implements ContractSnapshotProvider {
   constructor(
     private readonly callTool: ToolCaller,
@@ -78,7 +79,7 @@ export class HubContractSnapshotProvider implements ContractSnapshotProvider {
   private async artifactBytes(
     tenantId: string,
     snapshotId: string,
-    artifact: "openapi" | "sdkTs" | "sdkPhp" | "contractMd",
+    artifact: "openapi" | "sdkTs" | "sdkPhp" | "contractMd" | "blockLibrary",
   ): Promise<Buffer> {
     const raw = await this.callTool("webdev.contracts.artifact", { tenantId, snapshotId, artifact }, this.envelope);
     const body = parseToolJson<{ base64?: unknown }>(raw);
@@ -88,21 +89,29 @@ export class HubContractSnapshotProvider implements ContractSnapshotProvider {
     return Buffer.from(body.base64, "base64");
   }
 
+  /** The block library, or `null` when the snapshot has none: a null pointer (the mirror records
+   *  `blockLibraryFile: null`, or an older row has no such key) skips the call, and a `404 artifact_absent`
+   *  from the tool (a pointer whose file or object is gone) is the same `null`. Any other failure
+   *  (hash mismatch, hub down) propagates: a corrupt tarball must never read as "absent". */
+  private async blockLibraryBytes(tenantId: string, snapshotId: string, meta: ContractSnapshotMeta): Promise<Buffer | null> {
+    if (!meta.artifacts.blockLibraryFile) return null;
+    try {
+      return await this.artifactBytes(tenantId, snapshotId, "blockLibrary");
+    } catch (err) {
+      if (/artifact_absent/.test((err as Error).message)) return null;
+      throw err;
+    }
+  }
+
   async getSnapshotArtifacts(tenantId: string, snapshotId: string): Promise<ContractSnapshotArtifacts> {
     const rawMeta = await this.callTool("webdev.contracts.get", { tenantId, snapshotId }, this.envelope);
     const meta = parseToolJson<ContractSnapshotMeta>(rawMeta);
 
-    const [openapi, sdkTs, contractMd, blocksB64, sdkPhp] = await Promise.all([
+    const [openapi, sdkTs, contractMd, blockLibrary, sdkPhp] = await Promise.all([
       this.artifactBytes(tenantId, snapshotId, "openapi"),
       this.artifactBytes(tenantId, snapshotId, "sdkTs"),
       this.artifactBytes(tenantId, snapshotId, "contractMd"),
-      // M6-P4b (separate ticket): the block-library tarball source is not defined yet; this tool name
-      // is still the old placeholder and is NOT registered on the hub.
-      this.callTool(
-        "webdev.artifacts.downloadBlockLibrary",
-        { tenantId, package: meta.artifacts.blockLibrary.package, version: meta.artifacts.blockLibrary.version },
-        this.envelope,
-      ),
+      this.blockLibraryBytes(tenantId, snapshotId, meta),
       // WSK-D28 / §08: fetched only when the pointer actually has a `sdkPhp` key (WSK-34; `null` for
       // any pointer written before that ticket) — never fabricated, never re-derived. `siteKind: "wp"`
       // is refused loudly by `scaffold.ts` when this comes back null, rather than composing a theme
@@ -113,9 +122,9 @@ export class HubContractSnapshotProvider implements ContractSnapshotProvider {
     return {
       meta,
       openApiDocument: JSON.parse(openapi.toString("utf8")) as Record<string, unknown>,
-      sdkTsTarball: sdkTs,
+      sdkTsSource: sdkTs.toString("utf8"),
       contractMd: contractMd.toString("utf8"),
-      blockLibraryTarball: Buffer.from(blocksB64, "base64"),
+      blockLibraryTarball: blockLibrary,
       sdkPhpSource: sdkPhp ? sdkPhp.toString("utf8") : null,
     };
   }

@@ -11,6 +11,7 @@
 //   4. The table is immutable BY CONSTRUCTION: a direct UPDATE or DELETE — even as the migrating/
 //      owning role — is refused by the trigger, not merely "the app never does it".
 //   5. Third-wall RLS: a read declaring no module scope sees ZERO rows, silently (WD-23A-1).
+import { createHash } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../../testing/setup";
 import { withTenants } from "../../db";
@@ -44,8 +45,13 @@ function fakeProvider(opts: {
   version: string;
   artifacts: ReturnType<typeof artifactSet>;
   claimedHashOverride?: string;
+  /** M6-P4b0 - the block-library tarball WebDesk would serve; omitted = an older pointer (blockLibraryUrl null). */
+  blockLibrary?: Buffer;
+  /** Serve the PHP SDK too. */
+  sdkPhp?: Buffer;
 }): WebdevControlProvider {
-  const { manifest, contentHash } = computeContentHash(opts.artifacts);
+  const withPhp = { ...opts.artifacts, sdkPhp: opts.sdkPhp ?? opts.artifacts.sdkPhp };
+  const { manifest, contentHash } = computeContentHash(withPhp);
   void manifest;
   const meta: ContractBundleMeta = {
     version: opts.version,
@@ -53,9 +59,10 @@ function fakeProvider(opts: {
     blockLibrary: { package: "@gaiada/webdesk-blocks", version: "1.3.2", range: "^1.3" },
     artifacts: {
       sdkTsUrl: "https://fixture.invalid/sdk.ts.tgz",
-      sdkPhpUrl: null,
+      sdkPhpUrl: withPhp.sdkPhp ? "https://fixture.invalid/sdk.php" : null,
       openapiUrl: "https://fixture.invalid/openapi.v1.json",
       contractMdUrl: "https://fixture.invalid/CONTENT-CONTRACT.md",
+      blockLibraryUrl: opts.blockLibrary ? "https://fixture.invalid/gaiada-webdesk-blocks-1.3.2.tgz" : null,
     },
     contentHash: opts.claimedHashOverride ?? contentHash,
     generatedAt: new Date().toISOString(),
@@ -65,6 +72,8 @@ function fakeProvider(opts: {
     "https://fixture.invalid/openapi.v1.json": opts.artifacts.openapi,
     "https://fixture.invalid/CONTENT-CONTRACT.md": opts.artifacts.contractMd,
   };
+  if (withPhp.sdkPhp) byUrl["https://fixture.invalid/sdk.php"] = withPhp.sdkPhp;
+  if (opts.blockLibrary) byUrl["https://fixture.invalid/gaiada-webdesk-blocks-1.3.2.tgz"] = opts.blockLibrary;
   return {
     key: "fixture",
     getContractBundle: async () => meta,
@@ -250,6 +259,61 @@ describe.skipIf(!TEST_URL)("WSK-19 — contract-snapshot mirror: the two tripwir
     const stillThere = rows.find((r) => r.id === outcome.snapshot.id);
     expect(stillThere).toBeDefined();
     expect(stillThere!.content_hash).toBe(outcome.snapshot.contentHash); // unchanged by the failed UPDATE
+  });
+
+  it("M6-P4b0: the block library is mirrored as the fifth artifact, hashed beside the manifest, and contentHash is the same with or without it", async () => {
+    const artifacts = artifactSet("gen-blocks");
+    const php = Buffer.from("<?php // sdk");
+    const tarball = Buffer.from("fake gzip bytes of the block library");
+    const withBlocks = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "4.0.0", artifacts, blockLibrary: tarball, sdkPhp: php }),
+    });
+    expect(withBlocks.outcome).toBe("created");
+    if (withBlocks.outcome !== "created") throw new Error("unreachable");
+
+    // The hashed manifest is unchanged: the same four artifacts hash to the same contentHash whether or not a library rides along.
+    expect(withBlocks.snapshot.contentHash).toBe(computeContentHash({ ...artifacts, sdkPhp: php }).contentHash);
+
+    const row = (await storedSnapshots(tenant, SLUG)).find((r) => r.contract_version === "4.0.0")!;
+    const a = row.artifacts as Record<string, unknown> & { hashes: Record<string, string | null> };
+    expect(typeof a.blockLibraryFile).toBe("string");
+    expect(a.blockLibrary).toEqual({ package: "@gaiada/webdesk-blocks", version: "1.3.2", range: "^1.3" }); // the ref keeps its key
+    expect(a.hashes.blockLibrary).toBe(createHash("sha256").update(tarball).digest("hex"));
+    expect(Object.keys(a.hashes).sort()).toEqual(["blockLibrary", "contractMd", "openapi", "sdkPhp", "sdkTs"]);
+
+    const files = await adminPool().query<{ filename: string; content_type: string }>(
+      `SELECT filename, content_type FROM files WHERE tenant_id = $1 AND target_entity_type = 'webdev_contract_snapshot' AND target_entity_id = $2 ORDER BY filename`,
+      [tenant, row.id],
+    );
+    // The SDK files carry their real labels; the tarball is gzip.
+    expect(files.rows).toEqual([
+      { filename: "CONTENT-CONTRACT.md", content_type: "text/markdown" },
+      { filename: "gaiada-webdesk-blocks-1.3.2.tgz", content_type: "application/gzip" },
+      { filename: "openapi.v1.json", content_type: "application/json" },
+      { filename: "sdk.d.ts", content_type: "text/plain" },
+      { filename: "sdk.php", content_type: "text/x-php" },
+    ]);
+
+    // Without a library (an older WebDesk pointer): no file, no hash key, a null file pointer, and the SAME contentHash.
+    const without = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "4.0.1", artifacts, sdkPhp: php }),
+    });
+    expect(without.outcome).toBe("created");
+    if (without.outcome !== "created") throw new Error("unreachable");
+    expect(without.snapshot.contentHash).toBe(withBlocks.snapshot.contentHash);
+    const noLib = (await storedSnapshots(tenant, SLUG)).find((r) => r.contract_version === "4.0.1")!.artifacts as Record<string, unknown> & { hashes: Record<string, unknown> };
+    expect(noLib.blockLibraryFile).toBeNull();
+    expect(noLib.hashes).not.toHaveProperty("blockLibrary");
+  });
+
+  it("M6-P4b0: re-fetching an already-recorded version that now arrives with a block library stays idempotent (no determinism alarm)", async () => {
+    const artifacts = artifactSet("gen-blocks-replay");
+    const first = await refreshContractSnapshot({ tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "4.1.0", artifacts }) });
+    expect(first.outcome).toBe("created");
+    const again = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "4.1.0", artifacts, blockLibrary: Buffer.from("tarball") }),
+    });
+    expect(again.outcome).toBe("idempotent");
   });
 
   it("THIRD WALL: another tenant's snapshot list is empty — RLS, not application filtering", async () => {

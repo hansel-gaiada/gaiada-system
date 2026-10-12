@@ -59,11 +59,14 @@ export class ContractReadService {
       // Presigning is skipped in that case rather than presigning a key that was never uploaded —
       // the honest "no PHP SDK for this generation" state stays `null`, never a broken URL.
       const sdkPhpKey = pointer.artifactKeys.sdkPhp as string | undefined;
-      const [openapiUrl, sdkTsUrl, sdkPhpUrl, contractMdUrl] = await Promise.all([
+      // M6-P4b0 — same rule for the block library: an absent key is `null`, never a guessed URL.
+      const blockLibraryKey = pointer.artifactKeys.blockLibrary as string | undefined;
+      const [openapiUrl, sdkTsUrl, sdkPhpUrl, contractMdUrl, blockLibraryUrl] = await Promise.all([
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "openapiJson"), ttl),
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "sdkTs"), ttl),
         sdkPhpKey ? this.storage.presignGetObject(bucket, sdkPhpKey, ttl) : Promise.resolve(null),
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "contractMd"), ttl),
+        blockLibraryKey ? this.storage.presignGetObject(bucket, blockLibraryKey, ttl) : Promise.resolve(null),
       ]);
 
       return {
@@ -75,6 +78,7 @@ export class ContractReadService {
           sdkPhpUrl,
           openapiUrl,
           contractMdUrl,
+          blockLibraryUrl,
         },
         contentHash: pointer.contentHash,
         generatedAt: pointer.generatedAt,
