@@ -1737,7 +1737,7 @@ Topics: `approvals · projects · deliverables · invoices · contracts · profi
 `portal-live.service.ts` is an **allowlist** — an unmapped event type produces no frame, so adding an
 internal event cannot wake a client's browser by default.
 
-### 16e. Staff counterpart — `src/core/contracts.controller.ts` (**no UI yet — see deferrals**)
+### 16e. Staff counterpart — `src/core/contracts.controller.ts` (**UI built: `/clients/[id]/billing`, PV3-08, PROTOTYPED**)
 
 Shipped in the same change because without it the portal's contracts section is permanently empty and
 a client-recorded payment can never leave `pending`.
@@ -1746,23 +1746,39 @@ a client-recorded payment can never leave `pending`.
 |---|---|---|---|
 | ✅ | GET | `/api/:t/contracts` | `?clientId`, `?status`. Authz: `contract` read (company_admin/manager). **PV3-01 (PROTOTYPED):** `?clientId` is the strict CC-1 facet (`parseClientFilter(raw, true)`): a uuid, or `internal` (`client_id IS NULL`, always empty here since a contract always has a client); anything else is a **400** (it used to 500 on a uuid cast). Parsed after the read check, so an unauthorized caller still gets 403. Every row carries `canCountersign` (below). |
 | ✅ | GET | `/api/:t/contracts/:contractId` | Adds `signatures[]`, and `canCountersign` (PV3-01). |
-| ✅ | POST | `/api/:t/contracts` | Always created `draft`. Validates the project belongs to the named client; `supersedesId` bumps `version`. |
+| ✅ | POST | `/api/:t/contracts` | Always created `draft`. Validates the project belongs to the named client; `supersedesId` bumps `version`. **PV3-06 (PROTOTYPED):** authorizes before it validates (a caller who may not draft gets 403 for any body). **Idempotent on `reference`** (readiness-bar criterion 3): the insert is `ON CONFLICT (tenant_id, reference, version) … DO NOTHING` against `ix_contracts_reference_uniq`; a repeat returns `{id, status, deduped:true}` for the existing contract (still 201, status is its real status), the same reference under another client is a **409**. A draft with no `reference` has no natural key and is not deduped. |
 | ✅ | PATCH | `/api/:t/contracts/:contractId` | Draft-only, except `status:'void'`. A sent/signed contract is re-issued via `supersedesId`, never edited. |
 | ✅ | POST | `/api/:t/contracts/:contractId/send` | `draft → sent` + notifies signer contacts. Refuses with no document or `bodyMd`. Action `send`. |
-| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign`. **Corrected 2026-10-11 (PV3-01, PROTOTYPED):** allowed for an **`owner` of the contract's company** (company-scope `owner` grant on this tenant) and for `platform_admin` (its wildcard). `group_executive` no longer exists. company_admin, manager, an owner of another company, and any custom role (even one holding every `core.contract.*` key, `core.contract.countersign` included) get 403: no permission-arm rule reads that key, which is catalogued `uiGrantable: false` only because the policy names the action. Validates `signerName` before it authorizes. |
+| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign`. **Corrected 2026-10-11 (PV3-01, PROTOTYPED):** allowed for an **`owner` of the contract's company** (company-scope `owner` grant on this tenant) and for `platform_admin` (its wildcard). `group_executive` no longer exists. company_admin, manager, an owner of another company, and any custom role (even one holding every `core.contract.*` key, `core.contract.countersign` included) get 403: no permission-arm rule reads that key, which is catalogued `uiGrantable: false` only because the policy names the action. **PV3-06 (PROTOTYPED):** authorizes BEFORE it validates `signerName`, so a company_admin with an empty body gets 403, not 400 (it used to read the body first). A repeat returns `{alreadySigned:true}` and writes no second activity. |
 | ✅ | GET | `/api/:t/invoice-payments` | `?status`, `?clientId=<uuid>\|internal` — finance's confirmation queue. `clientId` is the strict §22a facet (PV3-03, PROTOTYPED): a uuid lists only that client's payments (filters `invoice_payments.client_id`), `internal` lists payments whose invoice names no client (the column is nullable), a non-uuid is **400**. Authz: `invoice` read, checked before `clientId` is validated. |
-| ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update. |
+| ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update, checked before the body is validated (PV3-06). |
 
 **`canCountersign` (PV3-01, PROTOTYPED).** On every row of both GETs. True only when all three hold: Cerbos allows `countersign` on `{kind:"contract", tenantId}` for this caller (ONE soft check per request, never per row; for an `actFor` call the acting user must be allowed too), the status is `sent`, and there is no `provider` signature. It is a hint for showing the Countersign control; the POST stays the authority. A probe failure reads as `false`, never a 500.
 
-**⚠ STILL NO STAFF UI FOR §16e's WRITES.** Contracts must be created/sent and payments confirmed via
-API. Whoever owns finance needs to know the decide endpoint exists, or client payments accumulate as
-`pending` with nobody looking.
+**Staff UI — PV3-08 (PROTOTYPED, 2026-10-12): `/clients/[clientId]/billing`**, the hub's "Contracts & billing" tab (between Business and People). Three sections:
 
-**Partly addressed 2026-08-24 (CC-2, §22b):** the pending payment and the unsent draft contract are now
-SURFACED — the client hub's `needsUs` list names them per client, with an age, so they stop
-accumulating invisibly. That is visibility, not the write UI: the Commercial tab that actually calls
-`send`/`countersign`/`decide` is slice 2 of the CC-* program and is **not built**.
+- **Contracts**, grouped Draft · Sent · Signed · Void (plus "Declined or expired" when a row has that status, so none is dropped). Draft form (title, reference, a project of this client, value and currency, term dates, terms in markdown, optional PDF), Edit (draft only), Send (disabled with its reason when there are neither terms nor a file), Void (any state, with a confirm), and Countersign **only on a row whose `canCountersign` is `true`**. A sent contract shows who has signed (party, name, title, date; from `GET …/contracts/:id`, one read per sent contract). The PDF goes up through `POST /files` with `entityType:"contract"` once the draft exists, then `PATCH {fileId}`; if the draft saves and the file does not, the message says the draft WAS saved.
+- **Payments to confirm**: `GET /invoice-payments?clientId=&status=pending`. Confirm, or Reject with a required reason. The maker-checker 403 is shown in words ("You recorded this payment…").
+- **Invoices**: a list only (`GET /invoices?clientId=`), linking to `/invoices/[id]`. D7 is open, so nothing deeper.
+
+Every read goes through `readResult()` and refuses explicitly (`<ReadRefusal>`); there is no `.catch(() => [])`, and the invoices read deliberately does not use `listInvoices` (which folds 403 into `[]`). **Tab badge** = pending payments (from the overview's `needsUs`) + contracts the caller may countersign (one `GET /contracts?clientId=` in the layout, fail-soft to "no figure", never `0`). The Overview's payment and contract items link to this page. No "who sees this" markers yet (PV3-09). **Known gap:** no staff route serves a contract's or a payment's file bytes to the browser (`GET /files/:id/content` has no UI proxy), so the page says "PDF attached" / "Proof of payment attached" without a link.
+
+**MCP tools — PV3-06 (PROTOTYPED, 2026-10-12)**, in `core/core-tools.ts`, each a thin front over the endpoint above with that endpoint's authorization. The hub fills `:param` tokens and sends the rest as the body; a GET's remaining args are dropped, so the two list tools carry `clientId` as a query token and require it.
+
+| Tool | Method + path | Impact | D14 |
+|---|---|---|---|
+| `contracts.list` | GET `/api/:t/contracts?clientId=` | read | no |
+| `contracts.get` | GET `/api/:t/contracts/:contractId` | read | no |
+| `invoicePayments.list` | GET `/api/:t/invoice-payments?clientId=` | read | no |
+| `contracts.createDraft` | POST `/api/:t/contracts` (`reference` required: the idempotency key) | low | no |
+| `contracts.updateDraft` | PATCH `/api/:t/contracts/:contractId` (no `status`: voiding is not a tool) | low | no |
+| `contracts.send` | POST `…/send` | medium | yes: `contracts.send` entry, precondition `contract_not_draft` / `contract_has_no_document` |
+| `contracts.countersign` | POST `…/countersign` | high | yes: precondition `contract_not_sent` / `contract_already_countersigned` |
+| `invoicePayments.decide` | POST `…/decide` | high | yes: precondition `payment_not_pending` / `payment_decision_invalid` / `payment_reject_reason_required` |
+
+Approving a medium/high call executes it as the ORIGINAL filing principal (D14 invariant 1), so a company_admin's approved `contracts.countersign` is refused at execution (403) and the recorder's approved `invoicePayments.decide` is refused (maker-checker). `send`, `countersign` and `decide` write an `activities` row with the actor, `metadata.via` (the agent or workflow) and the approval, so the actor may be non-human.
+
+**History (2026-08-24, CC-2, §22b).** Before PV3-08 the pending payment and the unsent draft were only SURFACED, in the client hub's `needsUs` list with an age; the write UI (the "Commercial" tab, slice 2 of the CC-* program) was never built. PV3-08 is that slice, under its new name.
 
 ### 16f. Change Requests (maintenance intake) — `src/core/webdev-change-requests{,-portal}.controller.ts` — **STATUS: DEV-VERIFIED (MI-01..05)**
 

@@ -25,7 +25,7 @@ async function openAsAgency(page: Page, path: string) {
 
 const CLIENT = "/clients/cl-3/billing";
 const row = (page: Page, text: string) => page.getByRole("listitem").filter({ hasText: text });
-const group = (page: Page, name: string) => page.getByRole("heading", { level: 3, name });
+const group = (page: Page, name: string | RegExp) => page.getByRole("heading", { level: 3, name });
 
 test.describe("client billing", () => {
   test.beforeEach(({ page }) => {
