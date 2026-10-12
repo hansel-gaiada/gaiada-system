@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610111443_iam_writers_room_roles.sql`
+- Head: `202610111816_iam_editorial_grant_scopes.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 248 (121 legacy `NNNN_`, 127 timestamped)
+- Applied files on disk: 249 (121 legacy `NNNN_`, 128 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -265,6 +265,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/webdev.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
 | `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-content.controller.ts` |
+| `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-editorial-grants.controller.ts` |
 | `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-site-clients.controller.ts` |
 | `/api/:tenantId/modules/webdev/control` | `platform-nest/src/modules/webdev/webdesk-control.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
