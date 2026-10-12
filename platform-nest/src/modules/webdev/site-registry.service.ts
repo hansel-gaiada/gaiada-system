@@ -30,6 +30,7 @@ import { BadRequestException, ConflictException, NotFoundException } from "@nest
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { emitEvent } from "../../events/outbox.service";
+import { PROVISIONED_PLACEHOLDER_DOMAIN_SUFFIX } from "./provision-completion";
 
 export const SITE_ENVIRONMENTS = new Set(["production", "staging", "preview", "development"]);
 export const SITE_HOST_KINDS = new Set(["our-box", "client-cpanel", "shared-hosting", "external", "unknown"]);
@@ -151,15 +152,23 @@ function pgCode(err: unknown): string | undefined {
   return typeof err === "object" && err !== null && "code" in err ? (err as { code?: string }).code : undefined;
 }
 
+/** THE one place a registry domain is normalised and shape-checked (trim, lowercase, no whitespace,
+ *  3-253 chars). `createWebdevSite` and `claimProvisionedSiteDomain` both call it, so the two write
+ *  paths that can put a domain into `webdev_sites` can never disagree about what a valid one is. */
+export function normalizeSiteDomain(raw: string | null | undefined): string {
+  const domain = raw?.trim().toLowerCase();
+  if (!domain || /\s/.test(domain) || domain.length < 3 || domain.length > 253) {
+    throw new BadRequestException("domain is required, lowercase, no whitespace, 3-253 chars");
+  }
+  return domain;
+}
+
 /** Create a `webdev_sites` row — the registry's first write path (VLT-2). `vaultRef` is deliberately
  *  NOT accepted here: attaching a hosting credential's pointer goes through
  *  `patchWebdevSiteVaultRef`'s own, narrower, more heavily validated path, so there is exactly one
  *  place in the codebase that resolves a vault pointer against `integration_connections`. */
 export async function createWebdevSite(tenantId: string, input: CreateSiteInput, actorId: string | null): Promise<WebdevSiteDto> {
-  const domain = input.domain?.trim().toLowerCase();
-  if (!domain || /\s/.test(domain) || domain.length < 3 || domain.length > 253) {
-    throw new BadRequestException("domain is required, lowercase, no whitespace, 3-253 chars");
-  }
+  const domain = normalizeSiteDomain(input.domain);
   const environment = validateEnum(input.environment, SITE_ENVIRONMENTS, "environment", "production");
   const hostKind = validateEnum(input.hostKind, SITE_HOST_KINDS, "hostKind", "unknown");
   const access = validateEnum(input.access, SITE_ACCESS_LEVELS, "access", "none");
@@ -247,4 +256,66 @@ export async function patchWebdevSiteVaultRef(
   );
   if (!res) throw new NotFoundException("webdev site not found");
   return toDto(res);
+}
+
+/** M6-P4c2 — the ONE narrow domain write: a site that provisioning registered under its placeholder
+ *  domain (`<slug>.provisioned.invalid`, provision-completion.ts) gets its real domain, once.
+ *
+ *  NOT a general domain editor: changing the domain of a tracked or already-claimed site is out of scope
+ *  (it would re-key the WSK-D35 join to `search_properties` and the MON-01 probe targets, which a claim of
+ *  a never-measured placeholder does not touch). A row is claimable only when it is `origin = 'provisioned'`
+ *  AND its current domain still ends in `.` + the placeholder suffix; anything else is 409
+ *  `domain_already_set`.
+ *
+ *  Race safety: the row is locked (`FOR UPDATE`) and then claimed by an UPDATE that repeats the claimable
+ *  predicate in its WHERE, so two concurrent claims cannot both win — the loser blocks on the lock, re-reads
+ *  the winner's real domain and answers 409. The `ux_webdev_sites_tenant_domain` unique index is the backstop
+ *  for the real domain already belonging to another live row (409). Both RLS walls are set (`modules`). */
+export async function claimProvisionedSiteDomain(
+  tenantId: string,
+  siteId: string,
+  rawDomain: string,
+  actorId: string | null,
+): Promise<WebdevSiteDto> {
+  const domain = normalizeSiteDomain(rawDomain);
+  if (domain === "invalid" || domain.endsWith(".invalid")) {
+    // RFC 2606: `.invalid` never resolves. It is the placeholder's own namespace, so accepting it would
+    // swap one placeholder for another and spend the one-time claim on nothing.
+    throw new BadRequestException("domain must be a real domain, not a .invalid placeholder");
+  }
+  // A malformed id would die at the uuid cast as a 500; it can match no row, so it is a 404.
+  if (!looksLikeUuid(siteId)) throw new NotFoundException("webdev site not found");
+  const placeholderSuffix = `.${PROVISIONED_PLACEHOLDER_DOMAIN_SUFFIX}`;
+  try {
+    const row = await withTenants(
+      [tenantId],
+      async (c) => {
+        const cur = await c.query<{ domain: string }>(
+          `SELECT domain FROM webdev_sites WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [siteId],
+        );
+        if (!cur.rows[0]) throw new NotFoundException("webdev site not found");
+        const upd = await c.query<SiteRow>(
+          `UPDATE webdev_sites SET domain = $2, updated_at = now()
+            WHERE id = $1 AND deleted_at IS NULL AND origin = 'provisioned'
+              AND right(domain, length($3::text)) = $3::text
+           RETURNING ${SELECT_COLS}`,
+          [siteId, domain, placeholderSuffix],
+        );
+        const claimed = upd.rows[0];
+        if (!claimed) throw new ConflictException("domain_already_set");
+        await emitEvent(c, tenantId, "webdev_site", claimed.id, "webdev.site.domain_claimed", {
+          domain: claimed.domain, previousDomain: cur.rows[0].domain, actorId,
+        });
+        return claimed;
+      },
+      { modules: ["webdev"] },
+    );
+    return toDto(row);
+  } catch (err) {
+    // ux_webdev_sites_tenant_domain: another live row in this tenant already holds this domain.
+    if (pgCode(err) === "23505") throw new ConflictException("a site with this domain already exists");
+    if (pgCode(err) === "23514" || pgCode(err) === "23502") throw new BadRequestException("site payload failed a database constraint");
+    throw err;
+  }
 }
