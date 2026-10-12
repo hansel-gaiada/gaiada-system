@@ -1086,6 +1086,17 @@ async function fetchTask(c: PoolClient, id: string): Promise<TaskRow | undefined
   return rows.rows[0];
 }
 
+// PV3-07 follow-up: the single-task read's row, with the same `clientVisible` the list carries (the
+// NEVER_CLIENT_VISIBLE constant, in SQL). Wrapped rather than added to TASK_SELECT so the write paths
+// and the other task readers that share fetchTask() keep their payloads unchanged.
+async function fetchTaskDetail(c: PoolClient, id: string): Promise<(TaskRow & { clientVisible: boolean }) | undefined> {
+  const rows = await c.query<TaskRow & { clientVisible: boolean }>(
+    `SELECT q.*, ${staffNeverClientVisible("task")} AS "clientVisible" FROM (${TASK_SELECT} AND t.id = $1) q`,
+    [id],
+  );
+  return rows.rows[0];
+}
+
 async function projectExists(c: PoolClient, projectId: string): Promise<boolean> {
   const r = await c.query(`SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL`, [projectId]);
   return !!r.rows[0];
@@ -1866,7 +1877,7 @@ export class PmController {
   async getTask(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("taskId") taskId: string) {
     await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "read");
     const { task, blockedBy } = await withTenants([tenantId], async (c) => {
-      const t = await fetchTask(c, taskId);
+      const t = await fetchTaskDetail(c, taskId);
       if (!t) return { task: undefined, blockedBy: [] as { id: string; title: string }[] };
       // P4-I decision 17 — "name the blocker": computed live off `openDependencies()` on every
       // read, never a stored string (a stored list would drift the moment a blocker closes and

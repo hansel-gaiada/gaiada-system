@@ -319,8 +319,10 @@ export class CoreController {
     await authorize(req.principal, { kind: "project", tenantId, id: projectId }, "read");
     const rows = await withTenants([tenantId], (c) =>
       c.query(
+        // PV3-07 follow-up: the detail read carries the same `clientVisible` as the list, from the same builder.
         `SELECT p.id, p.name, p.status, p.client_id, cl.name AS client_name, p.is_internal,
-                p.owner_id, u.name AS owner_name, p.start_date, p.due_date, p.custom_fields, p.department_id
+                p.owner_id, u.name AS owner_name, p.start_date, p.due_date, p.custom_fields, p.department_id,
+                ${staffClientVisible("p", projectClientVisible("p"))} AS "clientVisible"
          FROM projects p LEFT JOIN clients cl ON cl.id = p.client_id LEFT JOIN users u ON u.id = p.owner_id
          WHERE p.id = $1 AND p.deleted_at IS NULL`,
         [projectId],

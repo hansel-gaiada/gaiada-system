@@ -48,7 +48,14 @@ export class ClientWorkController {
   async getDeliverable(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("deliverableId") deliverableId: string) {
     await authorize(req.principal, { kind: "deliverable", id: deliverableId, tenantId }, "read");
     const rows = await withTenants([tenantId], (c) =>
-      c.query(`SELECT id, project_id, client_id, name, status, due_date, custom_fields FROM deliverables WHERE id = $1 AND deleted_at IS NULL`, [deliverableId]),
+      // PV3-07 follow-up: `clientVisible` through the deliverable's PROJECT, exactly as the list computes it.
+      c.query(
+        `SELECT d.id, d.project_id, d.client_id, d.name, d.status, d.due_date, d.custom_fields,
+                ${staffDeliverableClientVisible("d", "dp")} AS "clientVisible"
+           FROM deliverables d LEFT JOIN projects dp ON dp.id = d.project_id
+          WHERE d.id = $1 AND d.deleted_at IS NULL`,
+        [deliverableId],
+      ),
     );
     if (!rows.rows[0]) throw new NotFoundException("deliverable not found");
     return rows.rows[0];
