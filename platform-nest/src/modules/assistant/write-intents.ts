@@ -35,8 +35,27 @@ import type { PoolClient } from "pg";
 import { newId } from "../../db";
 import { config } from "../../config";
 import { insertAutomationApprovalRow, type FileApprovalInput } from "../../core/approval-filing";
+import { minimiseToolArgs } from "../../core/approval-arg-minimisers";
 
 export type { FileApprovalInput };
+
+/**
+ * M5-G5d — the args a DRAFT intent may hold in `assistant_write_intents.tool_args` (and in memory between the
+ * runner's reply and that INSERT). For a tool with an approval-args policy (core/approval-arg-minimisers.ts:
+ * `agency_privacy.*`) that is the policy's minimised shape (hashes + hints, never the identifier), so the row the
+ * confirm later claims `RETURNING`s is already what the filing chokepoint would store. A tool with no policy:
+ * the SAME object back, so every other draft is byte-identical to before.
+ *
+ * It is applied here, on the ERP side, whatever the runner sent: a runner older than M5-G5d (a rolling deploy)
+ * still hands over raw args, and this is the line that keeps them out of the database. The policy is IDEMPOTENT, so
+ * a runner that already minimised pays nothing. THROWS the policy's own 400 `subject_invalid` for args the tool
+ * would refuse anyway (nothing about the value is in the error); callers turn that into a typed refusal and write
+ * no draft.
+ */
+export function storableIntentArgs(toolName: string, args: unknown): Record<string, unknown> {
+  const bag = args !== null && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
+  return minimiseToolArgs(toolName, bag);
+}
 
 export type WriteIntentStatus = "draft" | "filed" | "dismissed" | "expired";
 
@@ -196,8 +215,9 @@ export async function confirmWriteIntent(
     tenantId: params.tenantId,
     workflowId: row.agent,
     toolName: row.toolName,
-    // The REAL args, straight from THIS claim's own RETURNING — never re-derived, never re-composed
-    // (invariant #2 above). `{}` only if the row genuinely never carried an object (defensive; every
+    // The args as DRAFTED, straight from THIS claim's own RETURNING — never re-derived, never re-composed
+    // (invariant #2 above). M5-G5d: for a tool with an approval-args policy these are already the minimised
+    // shape (`storableIntentArgs`), so a confirm files hashes and hints and never held the identifier. `{}` only if the row genuinely never carried an object (defensive; every
     // draft is written with a real args object by the broker's harvest).
     toolArgs: (row.toolArgs && typeof row.toolArgs === "object" ? row.toolArgs : {}) as Record<string, unknown>,
     impact: row.impact,

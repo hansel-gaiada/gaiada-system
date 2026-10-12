@@ -64,12 +64,16 @@ docker rm -f wd-restore
 
 (For an offsite copy, decrypt first: `age -d -i <private key> webdesk-<STAMP>.sql.gz.age | gunzip | ...`.)
 
-**Where this path is still thin.** `infra/scripts/backup.sh` also dumps WebDesk as the cluster
-superuser (`dump_container webdesk-postgres-1 postgres webdesk`) into the same directory under the same
-`webdesk-<stamp>.sql.gz` name shape, so until that line is retired the offsite set holds two WebDesk dumps
-a night (03:05 from this script, 03:15 from `backup.sh`); they differ only in the time part of the name.
-No alarm yet fires if this script's cron stops (the §4 sentinel belongs to the retired MinIO design);
-`backup-cron.sh`'s per-stack name check will still be satisfied by either dump.
+**This script is WebDesk's only backup since 2026-10-12** (owner ruling, M4). `infra/scripts/backup.sh` no longer
+dumps WebDesk. It used to dump both data and globals as the cluster superuser; it now cannot even see WebDesk, which
+runs on its own rootless daemon (F6).
+- To keep the roles offsite, this script also writes `globals-webdesk-<stamp>.sql.gz`. It is
+  `pg_dumpall --globals-only --no-role-passwords` as `webdesk_backup`: every role and its attributes, with **no**
+  password hash. A restore takes the passwords from `/etc/webdesk/.env`.
+- Its cron stopping is caught offsite: `OffsiteBackupOneSourceStale` fires when the `webdesk` or `globals-webdesk`
+  source has nothing newer than 30 h.
+- Restore drills: 26 s on 2026-10-11, and 21.6 s on 2026-10-12, from the offsite copy of the first dump taken
+  through the rootless daemon.
 
 The rest of this document is the original design. Read it with the above in mind: §1's security property
 is delivered by the existing sumopod puller; §2 (object lock) and §4 (sentinel) were never deployed.

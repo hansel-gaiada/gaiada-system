@@ -3097,6 +3097,10 @@ bypass" below.)
   `confirm_required` frame and every GET carry redacted args + `intentId` only, exactly like
   `approval_required`'s existing rule). (Original note, since SUPERSEDED 2026-08-07 — the handoff
   endpoint no longer "still files directly": see "Closing the handoff confirm-chip bypass" below.)
+- **M5-G5d (additive, no shape change).** For a tool with an approval-args policy (`agency_privacy.*`) the draft behind a chip holds the minimised
+  shape (hashes + hints) instead of the model's args, so the chip, `confirm_required` frame and GET thread are exactly as above and the confirm
+  request still carries no args. One new terminal `errorKind` on the stream's `error` event: `intent_invalid` (a privacy request whose identifier
+  the tool would refuse; no draft, no chip, no value in the text) renders as an ordinary error paragraph.
 
 ### T4 — platform-ui: event grammar + proposal card + tools-mode composer (ASST-23, §7.4, 2026-08-06)
 

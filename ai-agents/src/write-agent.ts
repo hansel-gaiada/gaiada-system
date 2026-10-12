@@ -40,6 +40,7 @@ import {
   type Impact,
   type EmitStep,
 } from "./agent";
+import { intentArgsFor } from "./sensitive-tools";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // T1 — the agent-side impact label is NOT the wire impact label. Translate at the filing boundary.
@@ -153,15 +154,19 @@ export interface FiledApproval {
  *  rather than duplicated), because this crosses a process boundary too: `runner/service.ts` hands it
  *  back on `GET /goals/:id` as `suspendedIntent`, and a future confirm-time filer must receive the
  *  exact same wire-legal value `fileApproval` would have sent — never the raw agent-side `"high_write"`
- *  label. `args` are the model-composed tool args VERBATIM — this is the one place `ai-agents` returns
+ *  label. `args` are the model-composed tool args VERBATIM for a tool with no sensitive policy (see M5-G5d
+ *  below for one with a policy) — this is the one place `ai-agents` returns
  *  them to a caller instead of filing them; the caller (the runner service, then platform-nest) is
  *  responsible for their custody from here (see the design's §7.2.4 custody chain) — `ai-agents` itself
  *  never persists them (no agents-DB migration in this ticket; the runner keeps them in-memory only).
  *
- *  M5-G5c: for a sensitive-policy tool (`agency_privacy.*`, see sensitive-tools.ts) these args are STILL the
- *  real ones, on purpose. They are the live material the confirm flow files with the hub later, and the ERP's
- *  own minimiser accepts only ITS shape, not ours. Like `fileApproval`'s hub call below, this is a boundary
- *  crossing, not a stored copy: nothing in this service persists, logs or emits it. */
+ *  M5-G5d: for a sensitive-policy tool (`agency_privacy.*`, see sensitive-tools.ts) these args are NOT the
+ *  model's. They are `intentArgsFor(tool, args)`: the hashes and hints in the shape the ERP's own approval-args
+ *  policy accepts as already minimised, so the assistant can store the intent, stream a chip, and later file the
+ *  approval from it without this service ever handing over the real identifier (the hub's execution path
+ *  re-derives the subject from the ledger's hashes). A tool with no policy is passed through untouched. The real
+ *  args still reach the hub in `fileApproval` below (a live call, never stored here), and the tool itself in
+ *  `deps.callTool`. */
 export interface SuspendedIntent {
   tool: string;
   impact: WireImpact;
@@ -317,7 +322,9 @@ export async function runWriteAgent(
         // T2b: capture, don't file. Same wire-impact mapping `fileApproval` uses — ONE helper, reused,
         // not duplicated — so a later filer (outside this repo) receives the exact value `fileApproval`
         // would have sent for the identical error.
-        return { status: "suspended", filed: null, intent: { tool: err.tool, impact: toWireImpact(err.impact), args: err.args } };
+        // M5-G5d: the minimised shape for a policy tool, so the intent the runner parks in memory and returns on
+        // `GET /goals/:id` never holds a data subject's identifier. Every other tool: the args, as before.
+        return { status: "suspended", filed: null, intent: { tool: err.tool, impact: toWireImpact(err.impact), args: intentArgsFor(err.tool, err.args) } };
       }
       const filed = await fileApproval(deps, envelope, tenantId, def.name, err);
       return { status: "suspended", filed };

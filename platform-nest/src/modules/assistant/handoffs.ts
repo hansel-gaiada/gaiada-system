@@ -54,7 +54,7 @@ import { config } from "../../config";
 import { newId } from "../../db";
 import { BadRequestException } from "@nestjs/common";
 import { ensurePlatformSelfLink, oboEnvelopeFor, redactToolArgs, type ChattingUser } from "./broker";
-import { intentTtlMs } from "./write-intents";
+import { intentTtlMs, storableIntentArgs } from "./write-intents";
 import { lockAssistantThread } from "./thread-lock";
 
 const MAX_GOAL_LENGTH = 4000;
@@ -244,6 +244,17 @@ interface RunnerGoalDetail {
 async function harvestSuspendedIntent(c: PoolClient, row: HandoffRow, intent: RunnerSuspendedIntent): Promise<void> {
   await lockAssistantThread(c, row.threadId);
 
+  // M5-G5d — the args this draft may HOLD: the approval-args policy's minimised shape for `agency_privacy.*`
+  // (whatever the runner sent), the args themselves for every other tool. Computed FIRST: args the tool would
+  // refuse (a malformed identifier) write no draft, no message and no chip, and the poll that reads the handoff
+  // goes on working (a throw here would fail every later refresh of this handoff). The refusal carries no value.
+  let storableArgs: Record<string, unknown>;
+  try {
+    storableArgs = storableIntentArgs(intent.tool, intent.args);
+  } catch {
+    return;
+  }
+
   const already = await c.query(`SELECT 1 FROM assistant_tool_calls WHERE id = $1`, [row.id]);
   if ((already.rowCount ?? 0) > 0) return; // already harvested on an earlier poll — no-op
 
@@ -252,7 +263,7 @@ async function harvestSuspendedIntent(c: PoolClient, row: HandoffRow, intent: Ru
     [row.threadId],
   );
   const messageId = newId();
-  const redactedArgs = redactToolArgs(intent.args);
+  const redactedArgs = redactToolArgs(storableArgs);
   const content =
     `I've drafted a ${intent.tool} write via the ${row.agent} handoff. Confirm it in this thread to send it ` +
     "for approval, or dismiss it — nothing has been changed or sent yet.";
@@ -302,9 +313,9 @@ async function harvestSuspendedIntent(c: PoolClient, row: HandoffRow, intent: Ru
       row.ownerUserId,
       row.agent,
       intent.tool,
-      // The REAL (unredacted) args — the ONLY durable pre-filing home, exactly as broker.ts's own
-      // harvest does it for the chat path.
-      JSON.stringify(intent.args ?? {}),
+      // The args the draft may hold — the ONLY durable pre-filing home, exactly as broker.ts's own harvest
+      // does it for the chat path. M5-G5d: minimised for a tool with an approval-args policy; otherwise the real args.
+      JSON.stringify(storableArgs),
       intent.impact,
       new Date(Date.now() + intentTtlMs()).toISOString(),
       config.originSite,

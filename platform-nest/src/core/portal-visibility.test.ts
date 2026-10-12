@@ -390,11 +390,7 @@ function hits(abs: string): string[] {
  *  exemption: the test below fails if an entry stops importing portal-scope or stops containing a literal,
  *  so an entry cannot outlive its refactor. Never add a file here to make the guard pass — switch it to
  *  portal-visibility.ts instead. */
-const NOT_YET_SWITCHED: Record<string, string> = {
-  "src/core/client-website-access.controller.ts":
-    "WSK-49f website-editor contact list (staff + portal surfaces): `cc.status <> 'revoked'` inline, plus " +
-    "`cc.project_id IS NULL`, which the People predicate does not have. Outside PV3-02's owned paths.",
-};
+const NOT_YET_SWITCHED: Record<string, string> = {};
 
 /** The portal controllers PV3-02 switched. The scan must find every one, or it is broken. */
 const SWITCHED = [

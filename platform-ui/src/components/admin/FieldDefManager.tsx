@@ -1,5 +1,5 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { FieldDef } from "@/lib/entities";
 import { Button, Eyebrow, StatusBadge, Toast } from "@/components/ui";
 import { Field } from "@/components/forms/Field";
@@ -18,11 +18,23 @@ const DATA_TYPES = ["text", "number", "boolean", "date", "select"];
 function FieldDefRow({
   def,
   deleteAction,
+  onDeleted,
 }: {
   def: FieldDef;
   deleteAction: (prev: AdminActionState | null, formData?: FormData) => Promise<AdminActionState>;
+  onDeleted: () => void;
 }) {
-  const [state, formAction, pending] = useActionState(deleteAction, null);
+  // A successful delete revalidates /admin/modules and, since Next 16.3, the refreshed defs (this row
+  // gone) are applied right after the action — this row unmounts, so "Field deleted." is reported to
+  // the manager (which survives) instead of rendered here. A refusal leaves the row, so it stays local.
+  const [state, formAction, pending] = useActionState(
+    async (prev: AdminActionState | null, formData?: FormData): Promise<AdminActionState> => {
+      const result = await deleteAction(prev, formData);
+      if (result.ok) onDeleted();
+      return result;
+    },
+    null,
+  );
 
   return (
     <div
@@ -53,7 +65,6 @@ function FieldDefRow({
         </form>
       </div>
       {state?.error && <Toast message={state.error} />}
-      {state?.ok && <Toast message="Field deleted." />}
     </div>
   );
 }
@@ -75,6 +86,7 @@ export function FieldDefManager({
   deleteAction: (key: string, prev: AdminActionState | null, formData?: FormData) => Promise<AdminActionState>;
 }) {
   const [createState, createFormAction, createPending] = useActionState(createAction, null);
+  const [deleted, setDeleted] = useState(false);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -84,7 +96,12 @@ export function FieldDefManager({
         </p>
       ) : (
         defs.map((def) => (
-          <FieldDefRow key={def.key} def={def} deleteAction={deleteAction.bind(null, def.key)} />
+          <FieldDefRow
+            key={def.key}
+            def={def}
+            deleteAction={deleteAction.bind(null, def.key)}
+            onDeleted={() => setDeleted(true)}
+          />
         ))
       )}
 
@@ -111,6 +128,7 @@ export function FieldDefManager({
 
       {createState?.error && <Toast message={createState.error} />}
       {createState?.ok && <Toast message="Field added." />}
+      {deleted && <Toast message="Field deleted." />}
     </div>
   );
 }

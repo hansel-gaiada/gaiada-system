@@ -107,13 +107,30 @@ done
 TENANTS="$(printf '%s\n' "$COUNTS" | awk -v t="$ROWS_TABLE" '$1 == t { print $2 }')"
 [ "${TENANTS:-0}" -gt 0 ] || fail "dump has ZERO rows in public.$ROWS_TABLE -- the backup role is not bypassing RLS (is $BACKUP_ROLE BYPASSRLS? run ensure-backup-role.sh)"
 
-# 4. Publish: atomic rename within one filesystem.
-chmod 600 "$WORK/out.gz"
+# 3b. The cluster's ROLES, without password hashes (owner ruling 2026-10-12, M4: the ERP's backup.sh no longer dumps
+#     WebDesk at all, neither data nor globals, so this script is WebDesk's only backup). `pg_dumpall --globals-only
+#     --no-role-passwords` reads pg_roles, which a non-superuser may read. It carries every role and its attributes
+#     (BYPASSRLS on webdesk_backup, the read-only default), so a restore rebuilds the policies' roles. The passwords
+#     come from /etc/webdesk/.env at restore time. The file name keeps the offsite per-source metric
+#     (source "globals-webdesk") fresh.
+GLOBALS_FINAL="$BACKUP_DIR/globals-webdesk-$STAMP.sql.gz"
+if ! docker exec "$CONTAINER" pg_dumpall -U "$BACKUP_ROLE" --globals-only --no-role-passwords > "$WORK/globals.sql" 2> "$WORK/globals.err"; then
+  fail "pg_dumpall --globals-only as $BACKUP_ROLE failed: $(tr '\n' ' ' < "$WORK/globals.err" | cut -c1-300)"
+fi
+for R in webdesk_owner webdesk_migrator webdesk_app webdesk_backup; do
+  grep -q "^CREATE ROLE $R;" "$WORK/globals.sql" || fail "the globals dump lacks role $R"
+done
+! grep -qi 'SCRAM-SHA-256\$' "$WORK/globals.sql" || fail "the globals dump carries a password hash (it must not)"
+gzip -c "$WORK/globals.sql" > "$WORK/globals.gz" && gzip -t "$WORK/globals.gz" || fail "gzip of the globals dump failed"
+
+# 4. Publish: atomic renames within one filesystem (both verified above).
+chmod 600 "$WORK/out.gz" "$WORK/globals.gz"
 mv "$WORK/out.gz" "$FINAL"
+mv "$WORK/globals.gz" "$GLOBALS_FINAL"
 BYTES="$(wc -c < "$FINAL" | tr -d ' ')"
 
-# 5. Prune this script's own old dumps. The ERP's backup.sh also writes webdesk-*.sql.gz (as the
-#    superuser) and prunes the same glob at the same age, so retention is identical by construction.
+# 5. Prune this script's own old dumps (data and globals). Since 2026-10-12 nothing else writes these globs.
 find "$BACKUP_DIR" -maxdepth 1 -type f -name 'webdesk-*.sql.gz' -mtime "+$KEEP_DAYS" -delete
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'globals-webdesk-*.sql.gz' -mtime "+$KEEP_DAYS" -delete
 
-log "ok file=$FINAL bytes=$BYTES tables=$TABLES tenants=$TENANTS"
+log "ok file=$FINAL bytes=$BYTES tables=$TABLES tenants=$TENANTS globals=${GLOBALS_FINAL##*/}"

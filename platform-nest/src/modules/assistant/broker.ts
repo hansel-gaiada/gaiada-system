@@ -98,7 +98,7 @@ import type { PoolClient } from "pg";
 import { config } from "../../config";
 import { newId, withGlobal } from "../../db";
 import { getExecutable } from "../../core/approval-executables";
-import { intentTtlMs } from "./write-intents";
+import { intentTtlMs, storableIntentArgs } from "./write-intents";
 
 // ─────────────────────────────────────── the chatting user ───────────────────────────────────────
 
@@ -386,7 +386,8 @@ interface RunnerRunSummary {
  *  suspended with `fileOnSuspend:false` (`ai-agents/src/write-agent.ts`'s `SuspendedIntent`,
  *  `runner/service.ts`'s in-memory TTL map). `impact` is ALREADY the wire label (T1's `toWireImpact`,
  *  reused — never re-derived here); `args` are the model-composed args VERBATIM — the runner's one
- *  and only hand-off of real args to this process. Absent (undefined) once the runner's own TTL map
+ *  and only hand-off of real args to this process. (M5-G5d: for `agency_privacy.*` the runner now hands
+ *  over the minimised shape instead, and this side minimises again whatever it receives.) Absent (undefined) once the runner's own TTL map
  *  evicts the entry — see the suspended-branch handling below for what that degrades to. */
 interface RunnerSuspendedIntent {
   tool: string;
@@ -575,9 +576,11 @@ export interface SuspendedIntentResult {
   toolCallId: string;
   toolName: string;
   impact: string;
-  /** REAL args, verbatim from the runner — never redacted here. The caller redacts only when
-   *  persisting the `assistant_tool_calls` ledger row; this field is what it persists, unredacted,
-   *  into `assistant_write_intents.tool_args`. */
+  /** The args the draft may HOLD, verbatim from the runner for a tool with no args policy (never
+   *  redacted here: the caller redacts only when persisting the `assistant_tool_calls` ledger row, and
+   *  persists this into `assistant_write_intents.tool_args`). M5-G5d: for a tool WITH an approval-args
+   *  policy (`agency_privacy.*`) these are the policy's minimised shape (hashes + hints), never the
+   *  identifier — see `write-intents.ts`'s `storableIntentArgs`. */
   args: Record<string, unknown>;
   agent: string;
   expiresAt: string; // ISO — config.assistantIntentTtlMs (write-intents.ts's intentTtlMs()) from now
@@ -949,7 +952,24 @@ export async function runToolTurn(input: ToolTurnInput): Promise<ToolTurnResult>
       const intent = goal.suspendedIntent;
       const intentId = newId();
       const toolCallId = newId();
-      const redactedArgs = redactToolArgs(intent.args);
+      // M5-G5d — the args this draft may HOLD. A tool with an approval-args policy (`agency_privacy.*`) is reduced
+      // to its minimised shape HERE, before anything below stores, streams or returns it, whatever the runner
+      // sent (an older runner still hands over the raw email/phone). No policy: `intent.args`, untouched.
+      let storableArgs: Record<string, unknown>;
+      try {
+        storableArgs = storableIntentArgs(intent.tool, intent.args);
+      } catch {
+        // The tool would refuse these args at filing anyway (a malformed identifier). Nothing about the value is
+        // in the refusal, no draft is written and no chip is shown.
+        return {
+          outcome: "error",
+          text: "That request could not be drafted: it needs a valid email address or phone number for the person. Nothing was changed or sent.",
+          toolCalls,
+          errorKind: "intent_invalid",
+          provider,
+        };
+      }
+      const redactedArgs = redactToolArgs(storableArgs);
       const expiresAt = new Date(Date.now() + intentTtlMs()).toISOString();
       const record: BrokerToolCallRecord = {
         id: toolCallId,
@@ -971,7 +991,7 @@ export async function runToolTurn(input: ToolTurnInput): Promise<ToolTurnResult>
         toolCalls,
         errorKind: "confirm_required",
         provider,
-        intent: { id: intentId, toolCallId, toolName: intent.tool, impact: intent.impact, args: intent.args, agent, expiresAt },
+        intent: { id: intentId, toolCallId, toolName: intent.tool, impact: intent.impact, args: storableArgs, agent, expiresAt },
       };
     }
 

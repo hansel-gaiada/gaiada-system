@@ -23,11 +23,16 @@ export function RunDepreciationForm({ periods }: { periods: Array<{ id: string; 
   const [periodId, setPeriodId] = useState(periods[0]?.id ?? "");
 
   if (periods.length === 0) {
+    // Charging the last open period lands here once the refresh arrives (Next 16.3 applies it right
+    // after the action), so the confirmation has to be rendered from this branch too.
     return (
-      <p className="fin-muted" style={{ marginBlockStart: 16 }}>
-        Every open period has already been charged. A closed period cannot be charged at all — the
-        ledger refuses a posting into it, which is what closing a period means.
-      </p>
+      <>
+        {done ? <p role="status" className="fin-muted" style={{ marginBlockStart: 16 }}>{done}</p> : null}
+        <p className="fin-muted" style={{ marginBlockStart: 16 }}>
+          Every open period has already been charged. A closed period cannot be charged at all — the
+          ledger refuses a posting into it, which is what closing a period means.
+        </p>
+      </>
     );
   }
 
@@ -52,7 +57,7 @@ export function RunDepreciationForm({ periods }: { periods: Array<{ id: string; 
       </div>
 
       {error ? <p className="fin-form__error fin-form__field--wide">{error}</p> : null}
-      {done ? <p className="fin-muted fin-form__field--wide">{done}</p> : null}
+      {done ? <p role="status" className="fin-muted fin-form__field--wide">{done}</p> : null}
 
       <div className="fin-form__actions">
         <Button type="submit" disabled={pending}>

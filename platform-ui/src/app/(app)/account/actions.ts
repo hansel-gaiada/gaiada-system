@@ -3,13 +3,20 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { clearHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
+import { endIdpSession } from "@/lib/idpLogout";
 import { getPrefs, writePrefs, type Density, type Theme, type Width } from "@/lib/prefs";
+import { getSession } from "@/lib/session-server";
 
 export async function logout(): Promise<void> {
+  // Read before the clear: the refresh token is what ends the Keycloak session.
+  const session = await getSession();
   const jar = await cookies();
   // Through the helper, not a bare `maxAge: 0`: in production the cookie is `__Host-gaiada_session`,
   // and a clear without `Secure` + `Path=/` is ignored by the browser — logout would silently fail.
   clearHostCookie(jar, HOST_COOKIES.session);
+  // Also end the SSO session, or /auth/login signs straight back in (B0 sweep). Fail-soft: the ERP cookie is
+  // already cleared whatever Keycloak answers.
+  if (session?.mode === "oidc" && session.refreshToken) await endIdpSession(session.refreshToken);
   redirect("/login");
 }
 

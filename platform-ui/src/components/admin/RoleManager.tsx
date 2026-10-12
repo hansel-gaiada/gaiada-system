@@ -48,11 +48,23 @@ const ORG_UNIT_SCOPE_NOTE =
 function RoleGrantChip({
   grant,
   revoke,
+  onRevoked,
 }: {
   grant: { grantId: string; role: string };
   revoke: (grantId: string, prev: AdminActionState | null, formData?: FormData) => Promise<AdminActionState>;
+  onRevoked: () => void;
 }) {
-  const [state, formAction, pending] = useActionState(revoke.bind(null, grant.grantId), null);
+  // A successful revoke revalidates /admin/users and, since Next 16.3, the refreshed grants (this chip
+  // gone) are applied right after the action, so the chip unmounts — "Role revoked." is reported to
+  // RoleManager (which survives) instead of rendered here. A refusal keeps the chip, so it stays local.
+  const [state, formAction, pending] = useActionState(
+    async (prev: AdminActionState | null, formData?: FormData): Promise<AdminActionState> => {
+      const result = await revoke(grant.grantId, prev, formData);
+      if (result.ok) onRevoked();
+      return result;
+    },
+    null,
+  );
 
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -75,7 +87,6 @@ function RoleGrantChip({
         </button>
       </form>
       {state?.error && <Toast message={state.error} />}
-      {state?.ok && <Toast message="Role revoked." />}
     </span>
   );
 }
@@ -108,6 +119,7 @@ export function RoleManager({
   // Tracked (not left to the uncontrolled <select> default) so the scope-id control beneath it can
   // switch shape: free-text for company/project, none for global, an org-chart picker for org_unit.
   const [scopeType, setScopeType] = useState("");
+  const [revoked, setRevoked] = useState(false);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -115,7 +127,9 @@ export function RoleManager({
         {currentRoles.length === 0 ? (
           <span style={{ font: "400 13px var(--font-body)", color: "var(--ink-subtle)" }}>No roles</span>
         ) : (
-          currentRoles.map((grant) => <RoleGrantChip key={grant.grantId} grant={grant} revoke={revoke} />)
+          currentRoles.map((grant) => (
+            <RoleGrantChip key={grant.grantId} grant={grant} revoke={revoke} onRevoked={() => setRevoked(true)} />
+          ))
         )}
       </div>
 
@@ -201,6 +215,7 @@ export function RoleManager({
 
       {assignState?.error && <Toast message={assignState.error} />}
       {assignState?.ok && <Toast message="Role assigned." />}
+      {revoked && <Toast message="Role revoked." />}
       {sessionState?.error && <Toast message={sessionState.error} />}
       {sessionState?.ok && <Toast message="Sessions revoked." />}
     </div>

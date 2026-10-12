@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PersonAccess } from "@/components/iam/PersonAccess";
 import { IamAction } from "@/components/iam/IamAction";
+import { OutcomeScope } from "@/components/OutcomeScope";
 import "@/components/iam/iam.css";
 
 // P2-11 — the department-head access page. Design §5 (the boundary), §6.2 (who may grant), §6.5
@@ -257,6 +258,8 @@ export default async function AccessPage() {
         </span>
       </div>
 
+      {/* The scope sits ABOVE the conditional: removing the last holder removes this card. */}
+      <OutcomeScope>
       {canGrant && holders.length > 0 ? (
         <Card title="Remove someone from a seat" style={{ marginTop: 16 }}>
           <p style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)", marginTop: 0 }}>
@@ -287,6 +290,7 @@ export default async function AccessPage() {
           />
         </Card>
       ) : null}
+      </OutcomeScope>
     </>
   );
 }

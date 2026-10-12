@@ -1713,6 +1713,19 @@ result counts, ids and status only. The live hub call still carries the real ide
 goal row, run rows, `agent_run_events` (append-only, and pushed to the SSE bus), outcome, blackboard, eval trace and episodic memory; it is seeded
 from the goal text for an agent that holds a policy tool, because the planner names the person before any tool call. No permission or policy
 changes. Residuals, stated plainly: (a) the live model call and the AI gateway still see the human's goal text and the model's own args (the
-model needs them to act); (b) a `fileOnSuspend:false` suspended intent returns the real args to its caller from memory (15-minute TTL) and the
-assistant stores them to file the approval later, because the ERP's minimiser accepts only its own shape; (c) the hash is unsalted, as the ERP's.
+model needs them to act); (b) [closed by M5-G5d, next paragraph] a `fileOnSuspend:false` suspended intent used to return the real args; (c) the hash is unsalted, as the ERP's.
 Proof: `ai-agents/src/sensitive-tools.test.ts`, `ai-agents/src/sensitive-run.test.ts` (no services).
+
+**The suspended-intent half (M5-G5d, PROTOTYPED).** The assistant's confirm chip files an approval later from the intent the runner parked when
+it suspended a call with `fileOnSuspend:false`; that intent used to carry the model's raw email and phone (runner memory for 15 minutes,
+`GET /goals/:id`, then `assistant_write_intents.tool_args` until a confirm, dismiss or lazy reap). Now `ai-agents` hands over, for a policy tool, only
+`intentArgsFor(tool, args)`: the ERP's own already-minimised shape `{minimised, kind, identifiers, subject:{emailHash,emailHint,phoneHash,phoneHint}, tenantId?,
+approvalId?}`, and platform-nest reduces whatever it receives with the same approval-args policy (`storableIntentArgs` in `modules/assistant/write-intents.ts`,
+idempotent, applied in the broker, the handoff harvest and the draft INSERT) so a runner older than G5d cannot put a raw value in the database. The confirm
+claims that row and files it through the unchanged `insertAutomationApprovalRow` chokepoint, so the privacy ledger's `filed` row binds the hashes and, once a
+second person approves, the requester's `POST /agency/privacy/erase {approvalId}` rebuilds the subject from them: no schema change and no new route. A
+malformed identifier is not narrowed away (a bad phone next to a good email would quietly shrink an erase); it drafts nothing and the turn ends with
+`errorKind: intent_invalid`. A tool with no args policy is unchanged byte for byte. Residuals: the human's own typed text (the chat message, a handoff's
+goal text) is the user's and stays in `assistant_messages` / `assistant_handoffs.goal_text`; the live `fileApproval` call to the hub still carries the real
+args in transit. Proof: `ai-agents/src/sensitive-tools.test.ts`, `ai-agents/src/sensitive-run.test.ts`, `platform-nest/src/modules/assistant/assistant-privacy-intent.test.ts`
+(no services) and `assistant-privacy-intent.db.test.ts` (Linux gate).

@@ -38,6 +38,10 @@ export function SiteRepoCard({
   mayProvision: boolean;
   actions: SiteRepoCardActions;
 }) {
+  // The "Started" confirmation lives here, not in ProvisionForm: provisioning revalidates the page and
+  // (Next 16.3) the refreshed read has an active site, so canStartNewProvision flips false and the form
+  // unmounts together with any message it held.
+  const [started, setStarted] = useState<string | null>(null);
   if (list.kind === "not_enabled") {
     return (
       <Card title="Site & repo">
@@ -72,7 +76,15 @@ export function SiteRepoCard({
           ))}
         </div>
       )}
-      {showForm && <ProvisionForm runId={runId} retry={sites.length > 0} onProvision={actions.provision} />}
+      {showForm && (
+        <ProvisionForm
+          runId={runId}
+          retry={sites.length > 0}
+          onProvision={actions.provision}
+          onStarted={(status) => setStarted(`Started — ${STATUS_LABEL[status].toLowerCase()}.`)}
+        />
+      )}
+      {started && <p role="status" className="pl-site-form__ok">{started}</p>}
       {!mayProvision && sites.length === 0 && (
         <p className="pl-site__hint">Provisioning a site requires manager-tier access.</p>
       )}
@@ -156,10 +168,11 @@ function SiteRow({ site, runId, mayReconcile, onReconcile }: {
   );
 }
 
-function ProvisionForm({ runId, retry, onProvision }: {
+function ProvisionForm({ runId, retry, onProvision, onStarted }: {
   runId: string;
   retry: boolean;
   onProvision: (formData: FormData) => Promise<SiteActionResult>;
+  onStarted: (status: ProvisionedSite["status"]) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [framework, setFramework] = useState<SiteFramework>(DEFAULT_FRAMEWORK);
@@ -175,7 +188,7 @@ function ProvisionForm({ runId, retry, onProvision }: {
       if (slug.trim()) fd.set("slug", slug.trim());
       const r = await onProvision(fd);
       setResult(r);
-      if (r.ok) setSlug("");
+      if (r.ok) { setSlug(""); onStarted(r.site.status); }
     });
   };
 
@@ -217,11 +230,6 @@ function ProvisionForm({ runId, retry, onProvision }: {
         {pending ? "Provisioning…" : "Provision"}
       </button>
       {result && !result.ok && <p role="alert" className="pl-site-form__error">{result.error}</p>}
-      {result && result.ok && (
-        <p role="status" className="pl-site-form__ok">
-          Started — {STATUS_LABEL[result.site.status].toLowerCase()}.
-        </p>
-      )}
     </div>
   );
 }

@@ -46,6 +46,7 @@ import { grantClientWebsiteEditor, revokeClientWebsiteEditor, CLIENT_WEBSITE_EDI
 import { authorize } from "./http";
 import { currentApproval, currentVia } from "./request-context";
 import { resolvePortalScope } from "./portal-scope";
+import { clientContactInPortalScope } from "./portal-visibility";
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -149,6 +150,9 @@ async function listAccess(tenantId: string, clientId: string, surface: Surface, 
     }
     const client = await c.query(`SELECT 1 FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]);
     if (!client.rowCount) throw new NotFoundException("client not found");
+    // The contact rule is the portal People one (portal-visibility.ts: not soft-deleted, not `revoked`), so an
+    // `invited` contact is listed and staff can grant ahead of acceptance. This list is narrower than People in
+    // one way only: client-wide contacts (`project_id IS NULL`, WSK-D60), because website access is per client.
     const { rows } = await c.query(
       `SELECT cc.id AS "contactId", cc.user_id AS "userId", u.name, u.email, cc.capability, cc.status,
               (cc.capability = 'admin') AS "isAdmin",
@@ -156,10 +160,10 @@ async function listAccess(tenantId: string, clientId: string, surface: Surface, 
                        WHERE ur.user_id = cc.user_id AND r.company_id IS NULL AND r.name = $3
                          AND ur.scope_type = 'client' AND ur.scope_id = cc.client_id::text) AS "websiteEditor"
          FROM client_contacts cc JOIN users u ON u.id = cc.user_id
-        WHERE cc.client_id = $1 AND cc.tenant_id = $2 AND cc.deleted_at IS NULL
-          AND cc.project_id IS NULL AND cc.status <> 'revoked'
+        WHERE ${clientContactInPortalScope("cc", { clients: 1 })} AND cc.tenant_id = $2
+          AND cc.project_id IS NULL
         ORDER BY u.name, u.email`,
-      [clientId, tenantId, CLIENT_WEBSITE_EDITOR_ROLE],
+      [[clientId], tenantId, CLIENT_WEBSITE_EDITOR_ROLE],
     );
     return { clientId, role: CLIENT_WEBSITE_EDITOR_ROLE, contacts: rows };
   });

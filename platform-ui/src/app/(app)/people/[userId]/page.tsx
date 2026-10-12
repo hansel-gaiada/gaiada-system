@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, KpiTile, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { OutcomeScope } from "@/components/OutcomeScope";
 
 type Params = Promise<{ userId: string }>;
 
@@ -162,14 +163,16 @@ export default async function EmployeePage({ params }: { params: Params }) {
           the seat before the chart. */}
       <div style={{ marginTop: 20 }}>
         <Card title="Employment" hint="The HR record, their current seat, and the JML actions.">
-          <EmployeeRecord
-            employee={iamEmployee}
-            positionOptions={positionOptions}
-            canManage={canManageEmployment}
-            transferEmployee={transferEmployee}
-            terminateEmployee={terminateEmployee}
-            updateEmployee={updateEmployee}
-          />
+          <OutcomeScope>
+            <EmployeeRecord
+              employee={iamEmployee}
+              positionOptions={positionOptions}
+              canManage={canManageEmployment}
+              transferEmployee={transferEmployee}
+              terminateEmployee={terminateEmployee}
+              updateEmployee={updateEmployee}
+            />
+          </OutcomeScope>
         </Card>
       </div>
 
