@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.92.0` - M5-W5: the writers' room calendar read (2026-10-12) - DEV-VERIFIED
+
+- **The read:** `GET …/content/sites/:tenantSlug/:siteId/editorial/calendar?from&to&collection&locale&authorSub`. It joins four sources:
+  - WebDesk's board (every page);
+  - scheduled items (the only source of `publish_at`);
+  - the site's pending WS4 publish/schedule requests;
+  - the W4 briefs.
+- **Authorization,** like W2d's board: W1c's `authorizeSite`, the wall, then Cerbos per (collection, locale), one resource per ask with at most 8 in flight, so never near the 50 limit. A scoped grant gets `countsWithheld`.
+- **Joins are limited to readable rows.** A request shows `requestedByMe`, never the filer. An unreadable brief shows `briefHidden`.
+- **Failures:** any failed part is a 503 `{error:"calendar_unavailable", reason:"<part>_unreadable"}`, never a partial list presented as complete. `truncated` is set past the caps.
+- MCP read `webdesk.editorial.calendar`.
+- **Verified** on GitHub Actions 38246080605: the DB/Cerbos/HTTP suite 7/7 and unit 33/33. The run's one red job was a 504 downloading promtool, green on re-run.
+
+### platform-ui `0.99.0` - M5-W5: the editorial calendar and the workflow board (2026-10-12) - DEV-VERIFIED
+
+- **`writers/calendar`:** month and week views. Items sit on one UTC day by publish time, a requested publish time, the planned date or the due date, with a legend that says which. Undated drafts go to an "Unscheduled" list.
+- **The board as a workflow:** columns by review state; cards show author, due date, the linked brief and a pending-request badge.
+- A read-only brief page.
+- Filters: collection, language, "assigned to me".
+- Every error, empty and withheld state is in words.
+- **Verified** on GitHub Actions 38246080605: the WebDesk Playwright suite against the built app passed 126, incl. 12 calendar specs with axe.
+- Not shown yet: the published version and pending swaps, which WebDesk's board doesn't send.
+
 ### platform-ui `0.97.1` - the assistant FAB always opens the drawer, never the full page (2026-10-12) - DEV-VERIFIED
 
 WebDesk M3 follow-up (the last flaky e2e from the full-suite sweep).
