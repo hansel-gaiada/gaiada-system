@@ -74,6 +74,9 @@ import { FormsReadsController } from "./forms/forms-reads.controller";
 // M5-L1d — forms.define / forms.def.list / forms.def.get.
 import { FormDefsService } from "./forms/form-defs.service";
 import { FormDefsController } from "./forms/form-defs.controller";
+// M5-V3-a -- consent.status.
+import { ConsentStatusService } from "./consent/consent-status.service";
+import { ConsentStatusController } from "./consent/consent-status.controller";
 // M5-W2b — the writers' room review commands and reads.
 import { EditorialCommandsService } from "./editorial/editorial-commands.service";
 import { EditorialCommandsController } from "./editorial/editorial-commands.controller";
@@ -143,6 +146,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     ContentReadsController,
     TenantReadsController,
     FormsReadsController,
+    ConsentStatusController,
     FormDefsController,
     EditorialCommandsController,
     EditorialReadsController,
@@ -166,6 +170,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     ContentReadsService,
     TenantReadsService,
     FormsReadsService,
+    ConsentStatusService,
     FormDefsService,
     EditorialCommandsService,
     EditorialReadsService,
