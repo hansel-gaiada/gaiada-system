@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 # install-rootless.sh - install, verify or remove a rootless Docker daemon for WebDesk on gda-aicenter
-# (M4 F6, WSK-D73). Plan: docs/plans/2026-10-12-webdesk-rootless-plan.md §2.1-§2.4, phases P2 and P3.
+# (M4 F6, WSK-D73). Design and phases: docs/plans/2026-10-12-webdesk-rootless-plan.md (§3, P2/P3).
 #
-#   sudo bash install-rootless.sh plan   [--profile live|proof] [overrides]   print every action, change nothing
-#   sudo bash install-rootless.sh apply  [--profile live|proof] [overrides]   converge (idempotent; re-run is safe)
-#   sudo bash install-rootless.sh check  [--profile live|proof] [overrides]   exit 0 only if the end state holds
-#   sudo bash install-rootless.sh remove  --profile proof                     undo a PROOF install (refuses live)
+#   sudo bash install-rootless.sh plan   [--profile live|proof] [options]   print every action, change nothing
+#   sudo bash install-rootless.sh apply  [--profile live|proof] [options]   converge (idempotent; re-run is safe)
+#   sudo bash install-rootless.sh check  [--profile live|proof] [options]   exit 0 only if the end state holds
+#   sudo bash install-rootless.sh remove  --profile proof [options]         undo a PROOF install (refuses live)
 #
-# Profiles. Overrides: --user --uid --subid-start --port --operator --cpu-quota --memory-max --tasks-max
-# --otlp-env, and --allow-restart.
+# Options (override the profile): --user --uid --subid-start --port --operator --cpu-quota --memory-max
+#   --tasks-max --otlp-env --tree DIR, the flag --etc-access (give the daemon user search access to the
+#   /etc/webdesk bind sources; on in live, the proof uses it to rehearse), and --allow-restart.
+#
+# Profiles:
 #   live   webdesk-rootless, uid/gid 940, subuid/subgid 700000000:65536, publishes 127.0.0.1:8380,
-#          slice CPUQuota=100% MemoryMax=5G TasksMax=4096, OTLP switch /etc/webdesk/guard.env (absent = off)
+#          slice CPUQuota=100% MemoryMax=5G TasksMax=4096, OTLP switch /etc/webdesk/guard.env (absent = off),
+#          /etc/webdesk search access on, project tree /home/Hansel/gaiada-webdesk/webdesk
 #   proof  wdproof-rootless, uid/gid 941, subuid/subgid 700065536:65536, publishes 127.0.0.1:18380,
-#          slice CPUQuota=50% MemoryMax=4G TasksMax=2048, OTLP switch /etc/default/wdproof-rootless-otlp
-# Why 940/941: free on the box, and no process there runs as them (a rootful container image's default uid
-# would collide: uid 999 is redis inside every rootful redis:alpine container, which is why webdesk-svc is
-# not used). Why 700000000+: above useradd's SUB_UID_MAX (600100000), so no future human account is ever
-# given an overlapping range; the box already has five 65536-ranges between 100000 and 558751.
+#          slice CPUQuota=50% MemoryMax=4G TasksMax=2048, OTLP switch /etc/default/wdproof-rootless-otlp,
+#          no /etc/webdesk access and no project tree unless given
+# Why 940/941: free on the box, no process runs as them, and away from the uids container images use (999 is
+# redis inside redis:alpine; under the rootful daemon three such processes run as host uid 999 =
+# webdesk-svc, which is why webdesk-svc is not the daemon user). Why 700000000+: above useradd's
+# SUB_UID_MAX (600100000), so no future account is ever given an overlapping range; /etc/subuid and
+# /etc/subgid already hold five 65536-ranges between 100000 and 558751 (measured 2026-10-12).
 #
 # What apply does, in order (each step is skipped when it already holds):
 #   1 preflight: Debian 12, kernel >= 5.11, cgroup v2, systemd >= 247, rootless extras = docker-ce version, the
@@ -26,8 +32,9 @@
 #   4 the egress guard (script, unit instance, config): enabled and ACTIVE before anything of the user runs
 #   5 systemd drop-ins: user@<uid>.service (guard first; Delegate) and the user-<uid>.slice envelope
 #   6 the user's docker.service and daemon.json, rendered from files/, enabled for default.target
-#   7 linger: the user manager, and with it the daemon, starts now and at every boot
-#   8 verify (also what `check` runs)
+#   7 bind sources: search-only (x) ACL for the daemon user on /etc/webdesk and its three public subdirectories
+#   8 linger: the user manager, and with it the daemon, starts now and at every boot
+#   9 verify (also what `check` runs)
 # It NEVER restarts a running LIVE daemon (that restarts WebDesk) unless --allow-restart is given.
 set -euo pipefail
 
@@ -39,7 +46,15 @@ GUARD_UNIT=/etc/systemd/system/webdesk-rootless-guard@.service
 GRANT_BIN=/usr/local/lib/webdesk-rootless/grant-socket.sh
 SUBUID_FILE="${WEBDESK_RL_SUBUID_FILE:-/etc/subuid}"
 SUBGID_FILE="${WEBDESK_RL_SUBGID_FILE:-/etc/subgid}"
+CGROUP_ROOT="${WEBDESK_RL_CGROUP_ROOT:-/sys/fs/cgroup}"
 SUB_UID_MAX_AUTO=600100000
+# The api's bind sources (docker-compose.aicenter.yml). The directories get a search-only ACL; the files must
+# then be readable, the secrets beside them must NOT be, and the directory must not be listable.
+ETC_DIRS="/etc/webdesk /etc/webdesk/certs /etc/webdesk/editorial /etc/webdesk/ws4"
+ETC_READ_OK="/etc/webdesk/certs/ca-cert.pem /etc/webdesk/editorial/editorial.jwks.json /etc/webdesk/ws4/ws4.jwks.json"
+ETC_READ_NO="/etc/webdesk/.env /etc/webdesk/.env.control"
+# Bind sources inside the project tree (the base compose file).
+TREE_READ_OK="proxy/Caddyfile postgres/init-roles.sh"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install-rootless: %s\n' "$*" >&2; exit 1; }
@@ -47,7 +62,9 @@ die() { printf 'install-rootless: %s\n' "$*" >&2; exit 1; }
 # --- pure helpers (test-rootless.sh drives these) -------------------------------------------------------------
 
 is_uint() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; esac; [ "${#1}" -le 10 ]; }
-is_user() { [[ "${1:-}" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]]; }
+is_user() { [[ "${1:-}" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]]; }              # an account THIS script creates
+is_account() { [[ "${1:-}" =~ ^[A-Za-z_][A-Za-z0-9_.-]{0,31}$ ]]; }    # an existing one (the operator is "Hansel")
+is_abs_path() { [[ "${1:-}" =~ ^/[A-Za-z0-9._/-]*$ ]] && case "$1" in *..*) return 1 ;; esac; }
 
 # subid_overlaps <file> <start> <count> <self-user> <self-uid>: prints every entry whose range intersects
 # [start, start+count) other than this user's own EXACT entry; returns 1 if it printed any.
@@ -94,25 +111,31 @@ version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ];
 
 # --- options --------------------------------------------------------------------------------------------------
 
+usage() { die "usage: $0 plan|apply|check|remove [--profile live|proof] [--user N] [--uid N] [--subid-start N] [--port N] [--operator N] [--cpu-quota P%] [--memory-max NG] [--tasks-max N] [--otlp-env PATH] [--tree DIR] [--etc-access] [--allow-restart]"; }
+
 parse_args() {
   MODE="${1:-}"
-  case "$MODE" in plan | apply | check | remove) shift ;; *) die "usage: $0 plan|apply|check|remove [--profile live|proof] [overrides]" ;; esac
+  case "$MODE" in plan | apply | check | remove) shift ;; *) usage ;; esac
   PROFILE=live
   ALLOW_RESTART=0
+  local etc_flag=""
   declare -gA OVR=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --profile) PROFILE="${2:-}"; shift 2 ;;
+      --profile) [ $# -ge 2 ] || die "--profile needs a value"; PROFILE="$2"; shift 2 ;;
       --allow-restart) ALLOW_RESTART=1; shift ;;
-      --user | --uid | --subid-start | --port | --operator | --cpu-quota | --memory-max | --tasks-max | --otlp-env)
+      --etc-access) etc_flag=1; shift ;;
+      --user | --uid | --subid-start | --port | --operator | --cpu-quota | --memory-max | --tasks-max | --otlp-env | --tree)
         [ $# -ge 2 ] || die "$1 needs a value"
         OVR["$1"]="$2"; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
   case "$PROFILE" in
-    live) RL_USER=webdesk-rootless RL_UID=940 SUB_START=700000000 PORT=8380 CPU_QUOTA=100% MEMORY_MAX=5G TASKS_MAX=4096 OTLP_ENV=/etc/webdesk/guard.env ROLE=live ;;
-    proof) RL_USER=wdproof-rootless RL_UID=941 SUB_START=700065536 PORT=18380 CPU_QUOTA=50% MEMORY_MAX=4G TASKS_MAX=2048 OTLP_ENV=/etc/default/wdproof-rootless-otlp ROLE=proof ;;
+    live) RL_USER=webdesk-rootless RL_UID=940 SUB_START=700000000 PORT=8380 CPU_QUOTA=100% MEMORY_MAX=5G TASKS_MAX=4096
+      OTLP_ENV=/etc/webdesk/guard.env ROLE=live ETC_ACCESS=1 TREE=/home/Hansel/gaiada-webdesk/webdesk ;;
+    proof) RL_USER=wdproof-rootless RL_UID=941 SUB_START=700065536 PORT=18380 CPU_QUOTA=50% MEMORY_MAX=4G TASKS_MAX=2048
+      OTLP_ENV=/etc/default/wdproof-rootless-otlp ROLE=proof ETC_ACCESS=0 TREE="" ;;
     *) die "--profile must be live or proof" ;;
   esac
   OPERATOR=Hansel
@@ -126,13 +149,20 @@ parse_args() {
   MEMORY_MAX="${OVR[--memory-max]:-$MEMORY_MAX}"
   TASKS_MAX="${OVR[--tasks-max]:-$TASKS_MAX}"
   OTLP_ENV="${OVR[--otlp-env]:-$OTLP_ENV}"
-  is_user "$RL_USER" && is_user "$OPERATOR" || die "bad user/operator name"
+  TREE="${OVR[--tree]:-$TREE}"
+  [ -z "$etc_flag" ] || ETC_ACCESS=1
+  is_user "$RL_USER" || die "bad daemon user name (lower case, [a-z_][a-z0-9_-]*)"
+  is_account "$OPERATOR" || die "bad operator name"
+  [ "$RL_USER" != "$OPERATOR" ] || die "the daemon user and the operator must differ"
   is_uint "$RL_UID" && is_uint "$SUB_START" && is_uint "$PORT" && is_uint "$TASKS_MAX" || die "uid, subid start, port and tasks-max must be numbers"
   [ "$RL_UID" -ge 100 ] && [ "$RL_UID" -lt 60000 ] || die "uid $RL_UID outside 100-59999"
+  [ "$SUB_START" -ge 100000 ] || die "subid start $SUB_START is below 100000"
   [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "port must be 1024-65535 (unprivileged)"
-  [[ "$CPU_QUOTA" =~ ^[0-9]{1,3}%$ ]] && [[ "$MEMORY_MAX" =~ ^[0-9]+[KMG]$ ]] || die "bad --cpu-quota or --memory-max"
-  case "$OTLP_ENV" in /*) ;; *) die "--otlp-env must be an absolute path" ;; esac
+  [[ "$CPU_QUOTA" =~ ^[1-9][0-9]{0,2}%$ ]] && [[ "$MEMORY_MAX" =~ ^[1-9][0-9]*[KMG]$ ]] || die "bad --cpu-quota or --memory-max"
+  is_abs_path "$OTLP_ENV" || die "--otlp-env must be an absolute path"
+  [ -z "$TREE" ] || is_abs_path "$TREE" || die "--tree must be an absolute path"
   SUB_END=$((SUB_START + SUB_COUNT - 1))
+  [ "$RL_UID" -lt "$SUB_START" ] || [ "$RL_UID" -gt "$SUB_END" ] || die "uid $RL_UID lies inside its own subordinate range"
   HOME_DIR="/var/lib/$RL_USER"
   DATA_ROOT="$HOME_DIR/docker"
   CONF_FILE="/etc/default/webdesk-rootless-$RL_USER"
@@ -145,6 +175,7 @@ parse_args() {
   GUARD_UNIT_INSTANCE="webdesk-rootless-guard@$RL_USER.service"
   RESOLVERS=""
   CHANGED_DAEMON=0
+  STARTED_NOW=0
   FAILS=0
 }
 
@@ -197,6 +228,7 @@ preflight() {
   version_ge "$(uname -r | cut -d- -f1)" 5.11 || die "kernel $(uname -r) < 5.11: no rootless overlayfs"
   [ "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs ] || die "cgroup v2 is required (resource limits in rootless mode)"
   version_ge "$(systemctl --version | awk 'NR == 1 { print $2 }')" 247 || die "systemd >= 247 required"
+  [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 1)" = 1 ] || die "kernel.unprivileged_userns_clone is 0"
   command -v dockerd-rootless.sh >/dev/null && command -v rootlesskit >/dev/null || die "docker-ce-rootless-extras is not installed"
   local v1 v2
   v1="$(dpkg-query -W -f='${Version}' docker-ce 2>/dev/null || true)"
@@ -218,12 +250,19 @@ preflight() {
       die "a process already runs as uid $RL_UID (a rootful container?): choose another --uid"
     fi
   fi
-  local hits
+  local f hits
   for f in "$SUBUID_FILE" "$SUBGID_FILE"; do
     hits="$(subid_overlaps "$f" "$SUB_START" "$SUB_COUNT" "$RL_USER" "$RL_UID" || true)"
     [ -z "$hits" ] || die "range $SUB_START-$SUB_END overlaps $f: $(printf '%s' "$hits" | tr '\n' ' ')"
   done
   [ "$SUB_START" -gt "$SUB_UID_MAX_AUTO" ] || say "  NOTE  $SUB_START is inside useradd's automatic range; a future account could be offered it"
+  if [ "$ETC_ACCESS" = 1 ]; then
+    for f in $ETC_DIRS; do [ -d "$f" ] || die "--etc-access: $f is not a directory"; done
+    for f in $ETC_READ_OK; do [ -f "$f" ] || die "--etc-access: $f is not a regular file (a leftover directory from a missing bind source?)"; done
+  fi
+  if [ -n "$TREE" ]; then
+    for f in $TREE_READ_OK; do [ -f "$TREE/$f" ] || die "--tree: $TREE/$f is missing"; done
+  fi
   local freekb
   freekb="$(df -Pk /var/lib | awk 'NR == 2 { print $4 }')"
   [ "${freekb:-0}" -ge 5242880 ] || die "less than 5 GiB free under /var/lib"
@@ -232,7 +271,7 @@ preflight() {
   say "  OK    host checks; resolvers: $RESOLVERS"
 }
 
-# --- 2..7 apply -----------------------------------------------------------------------------------------------
+# --- 2..8 apply -----------------------------------------------------------------------------------------------
 
 do_packages() {
   say "== 2 packages"
@@ -241,6 +280,7 @@ do_packages() {
     dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || missing="$missing $p"
   done
   if [ -z "$missing" ]; then say "  OK    uidmap slirp4netns dbus-user-session acl installed"; return 0; fi
+  step "apt-get update" env DEBIAN_FRONTEND=noninteractive apt-get update -q
   # shellcheck disable=SC2086
   step "apt-get install$missing" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $missing
 }
@@ -317,13 +357,27 @@ do_home() {
   fi
   # install -D created the parent directories as root: the whole ~/.config belongs to the daemon user.
   step "own ~/.config" chown -R "$RL_USER:$RL_USER" "$HOME_DIR/.config"
-  step "data root $DATA_ROOT" install -d -m 0710 -o "$RL_USER" -g "$RL_USER" "$DATA_ROOT"
+  step "data root $DATA_ROOT" install -d -m 0700 -o "$RL_USER" -g "$RL_USER" "$DATA_ROOT"
+}
+
+acl_has_x() { getfacl -cp "$1" 2>/dev/null | grep -qx "user:$2:--x"; } # exact entry, not masked
+
+do_bind_access() {
+  say "== 7 bind sources"
+  if [ "$ETC_ACCESS" != 1 ]; then say "  SKIP  no /etc/webdesk access for this profile (--etc-access gives it)"; return 0; fi
+  local d
+  for d in $ETC_DIRS; do
+    if acl_has_x "$d" "$RL_USER"; then say "  OK    $d: $RL_USER may search (x), nothing else"; else
+      step "search-only ACL for $RL_USER on $d" setfacl -m "u:$RL_USER:--x" "$d"
+    fi
+  done
 }
 
 do_linger_and_daemon() {
-  say "== 7 linger + the daemon"
+  say "== 8 linger + the daemon"
   if [ -e "/var/lib/systemd/linger/$RL_USER" ]; then say "  OK    linger on"; else
     step "loginctl enable-linger $RL_USER (user manager now and at every boot)" loginctl enable-linger "$RL_USER"
+    STARTED_NOW=1 # the manager starts the daemon with the files written above
   fi
   [ "$MODE" = apply ] || return 0
   local i
@@ -332,7 +386,7 @@ do_linger_and_daemon() {
   user_systemctl daemon-reload
   if ! user_systemctl is-active --quiet docker.service; then
     step "start the rootless daemon" user_systemctl start docker.service
-  elif [ "$CHANGED_DAEMON" = 1 ]; then
+  elif [ "$CHANGED_DAEMON" = 1 ] && [ "$STARTED_NOW" != 1 ]; then
     if [ "$ROLE" = live ] && [ "$ALLOW_RESTART" != 1 ]; then
       say "  WARN  the daemon's config changed but the LIVE daemon was NOT restarted (that restarts WebDesk):"
       say "        re-run with --allow-restart inside a window"
@@ -340,13 +394,13 @@ do_linger_and_daemon() {
       step "restart the rootless daemon (config changed)" user_systemctl restart docker.service
     fi
   else
-    say "  OK    rootless daemon active, config unchanged"
+    say "  OK    rootless daemon active with the current config"
   fi
   for i in $(seq 1 60); do [ -S "$SOCK" ] && break; sleep 1; done
   [ -S "$SOCK" ] || die "no $SOCK after 60 s: journalctl _UID=$RL_UID -n 50"
 }
 
-# --- 8 verify (= check) ---------------------------------------------------------------------------------------
+# --- 9 verify (= check) ---------------------------------------------------------------------------------------
 
 proc_cmdline() { # proc_cmdline <uid> <exact-name>: the first such process's argv, space-joined
   local pid
@@ -368,24 +422,40 @@ user_ok() {
 subids_ok() { grep -qx "$RL_USER:$SUB_START:$SUB_COUNT" "$SUBUID_FILE" && grep -qx "$RL_USER:$SUB_START:$SUB_COUNT" "$SUBGID_FILE"; }
 delegated() { # cpu memory pids are delegated to user@<uid>.service
   local ctl c
-  ctl=" $(cat "/sys/fs/cgroup/user.slice/user-$RL_UID.slice/user@$RL_UID.service/cgroup.controllers" 2>/dev/null) "
+  ctl=" $(cat "$CGROUP_ROOT/user.slice/user-$RL_UID.slice/user@$RL_UID.service/cgroup.controllers" 2>/dev/null) "
   for c in cpu memory pids; do case "$ctl" in *" $c "*) ;; *) return 1 ;; esac; done
 }
 envelope_ok() { # the slice's own cgroup files carry the envelope
-  local d="/sys/fs/cgroup/user.slice/user-$RL_UID.slice" want_cpu want_mem
-  want_cpu="$(( ${CPU_QUOTA%\%} * 1000 )) 100000"
+  local d="$CGROUP_ROOT/user.slice/user-$RL_UID.slice" want_cpu want_mem
+  want_cpu="$((${CPU_QUOTA%\%} * 1000)) 100000"
   want_mem="$(numfmt --from=iec "$MEMORY_MAX")"
   [ "$(cat "$d/cpu.max")" = "$want_cpu" ] && [ "$(cat "$d/memory.max")" = "$want_mem" ] && [ "$(cat "$d/pids.max")" = "$TASKS_MAX" ]
 }
 # A missing cgroup controller shows as a `docker info` WARNING naming it; other warnings are not this check's.
 no_warnings() { ! rl_docker info 2>&1 >/dev/null | grep -Eiq 'WARNING:.*(cgroup|cpu|memory|pids|io\.|cpuset|swap)'; }
 only_operator() { # nobody but the owner and the operator can reach the socket
-  [ $(( 8#$(stat -c %a "$SOCK") & 7 )) = 0 ] && [ $(( 8#$(stat -c %a "$RUNTIME") & 7 )) = 0 ] &&
+  [ $((8#$(stat -c %a "$SOCK") & 7)) = 0 ] && [ $((8#$(stat -c %a "$RUNTIME") & 7)) = 0 ] &&
     [ "$(getfacl -cp "$SOCK" 2>/dev/null | grep -E '^user:[^:]+:' | cut -d: -f2 | tr '\n' ' ')" = "$OPERATOR " ]
+}
+bridge_not_docker0() { # the rootless default bridge must not shadow the host's docker0 (172.17.0.1: the OTLP address)
+  local s
+  s="$(rl_docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null)"
+  [ -n "$s" ] && case " $s" in *" 172.17."*) return 1 ;; *) return 0 ;; esac
+}
+as_user() { runuser -u "$RL_USER" -- "$@"; }
+etc_access_ok() {
+  local f
+  for f in $ETC_READ_OK; do as_user test -r "$f" || return 1; done
+  for f in $ETC_READ_NO; do ! as_user test -r "$f" || return 1; done
+  ! as_user ls /etc/webdesk
+}
+tree_ok() {
+  local f
+  for f in $TREE_READ_OK; do as_user test -r "$TREE/$f" || return 1; done
 }
 
 verify() {
-  say "== 8 verify ($PROFILE: $RL_USER)"
+  say "== 9 verify ($PROFILE: $RL_USER)"
   local info rk sl
   chk "user $RL_USER: uid $RL_UID, nologin, password locked, no supplementary group" user_ok
   chk "subuid + subgid $RL_USER:$SUB_START:$SUB_COUNT" subids_ok
@@ -402,6 +472,7 @@ verify() {
       *) fail "not the containerd image store: deploy-webdesk.sh's digest check would break" ;; esac
   fi
   chk "docker info prints no WARNING (no missing cgroup controller)" no_warnings
+  chk "the rootless default bridge is not on 172.17.0.0/16 (it would shadow the host's docker0 OTLP address)" bridge_not_docker0
   rk="$(proc_cmdline "$RL_UID" rootlesskit || true)"
   sl="$(proc_cmdline "$RL_UID" slirp4netns || true)"
   chk "rootlesskit: slirp4netns, builtin port driver, host loopback disabled, sandbox + seccomp forced" \
@@ -410,6 +481,10 @@ verify() {
   chk "slirp4netns: --enable-sandbox --enable-seccomp --disable-host-loopback" has_all "$sl" --enable-sandbox --enable-seccomp --disable-host-loopback
   chk "operator $OPERATOR reaches the socket as itself" runuser -u "$OPERATOR" -- docker -H "unix://$SOCK" version --format '{{.Server.Version}}'
   chk "no account but the owner and $OPERATOR can reach the socket" only_operator
+  if [ "$ETC_ACCESS" = 1 ]; then
+    chk "$RL_USER reads the three public bind sources, cannot read .env/.env.control, cannot list /etc/webdesk" etc_access_ok
+  fi
+  if [ -n "$TREE" ]; then chk "$RL_USER reads the project tree's bind sources under $TREE" tree_ok; fi
   if [ "$FAILS" = 0 ]; then say "VERIFY OK ($PROFILE: $RL_USER)"; else say "VERIFY FAILED: $FAILS check(s)"; fi
   [ "$FAILS" = 0 ]
 }
@@ -424,12 +499,15 @@ do_remove() {
   say "== remove the proof install of $RL_USER"
   step "disable linger" loginctl disable-linger "$RL_USER"
   step "stop user@$RL_UID.service (daemon and containers)" systemctl stop "user@$RL_UID.service"
-  local i
+  local i d
   for i in $(seq 1 30); do
     ps -e -o uid= | awk -v u="$RL_UID" -v s="$SUB_START" -v e="$SUB_END" '$1 == u || ($1 >= s && $1 <= e) { f = 1 } END { exit f ? 0 : 1 }' || break
     sleep 1
   done
   step "stop + disable the guard (remove refuses while any process of the range runs)" systemctl disable --now "$GUARD_UNIT_INSTANCE"
+  for d in $ETC_DIRS; do
+    if getfacl -cp "$d" 2>/dev/null | grep -q "^user:$RL_USER:"; then step "drop $RL_USER's ACL entry on $d" setfacl -x "u:$RL_USER" "$d"; fi
+  done
   step "drop-ins and config" rm -rf "$(dirname "$USER_AT_DROPIN")" "$(dirname "$SLICE_DROPIN")" "$CONF_FILE" "$OTLP_ENV"
   step "systemd daemon-reload" systemctl daemon-reload
   step "subuid/subgid $SUB_START-$SUB_END" usermod --del-subuids "$SUB_START-$SUB_END" --del-subgids "$SUB_START-$SUB_END" "$RL_USER"
@@ -450,6 +528,7 @@ main() {
       do_guard
       do_systemd
       do_home
+      do_bind_access
       do_linger_and_daemon
       if [ "$MODE" = apply ]; then verify; else say "plan only: nothing was changed"; fi
       ;;

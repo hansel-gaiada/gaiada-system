@@ -21,11 +21,34 @@
 #   WEBDESK_DB            default: the container's POSTGRES_DB (else "webdesk")
 #   WEBDESK_BACKUP_DIR    default $HOME/gaiada-backups
 #   KEEP_DAYS             default 14 (this script's own webdesk-*.sql.gz only)
+#   WEBDESK_DOCKER_HOST   M4 F6: the daemon that runs WebDesk; unset = /etc/default/webdesk-docker (written by the
+#                         rootless cut-over), else the rootful daemon. The cron line needs no change.
 #
 # Exit 0 = a verified dump was written. Non-zero = nothing was published; the reason is on stderr.
 # One summary line on success:  ... webdesk-backup ok file=<path> bytes=<n> tables=<n> tenants=<n>
 set -euo pipefail
 umask 077
+
+# M4 F6 (WSK-D73): the Docker daemon that runs WebDesk. Empty = the rootful daemon, exactly as before.
+# WEBDESK_DOCKER_HOST, when SET (even to ""), wins; else the host switch /etc/default/webdesk-docker, which
+# the rootless cut-over writes and its rollback deletes; else empty. Only a rootless socket path is accepted.
+# POSIX sh, and byte-identical in every script that resolves the daemon (test-rootless.sh compares them).
+wd_docker_host() {
+  _wdh_f="${WEBDESK_DOCKER_SWITCH:-/etc/default/webdesk-docker}"
+  if [ -n "${WEBDESK_DOCKER_HOST+set}" ]; then _wdh_v="$WEBDESK_DOCKER_HOST"
+  elif [ -r "$_wdh_f" ]; then _wdh_v="$(sed -n 's/^WEBDESK_DOCKER_HOST=//p' "$_wdh_f" | tail -n 1)"
+  else _wdh_v=""
+  fi
+  _wdh_v="${_wdh_v%\"}"; _wdh_v="${_wdh_v#\"}"
+  case "$_wdh_v" in
+    "") return 0 ;;
+    unix:///run/user/*/docker.sock)
+      _wdh_u="${_wdh_v#unix:///run/user/}"; _wdh_u="${_wdh_u%/docker.sock}"
+      case "$_wdh_u" in "" | 0* | *[!0-9]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$_wdh_v"
+}
 
 CONTAINER="${WEBDESK_PG_CONTAINER:-webdesk-postgres-1}"
 BACKUP_ROLE=webdesk_backup
@@ -39,7 +62,9 @@ log() { printf '%s webdesk-backup %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*";
 fail() { printf '%s webdesk-backup FAILED: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >&2; exit 1; }
 
 case "$KEEP_DAYS" in '' | *[!0-9]*) fail "KEEP_DAYS '$KEEP_DAYS' is not a whole number" ;; esac
-docker ps --format '{{.Names}}' | grep -qx "$CONTAINER" || fail "container $CONTAINER is not running"
+WD_DOCKER_HOST="$(wd_docker_host)" || fail "WEBDESK_DOCKER_HOST (or /etc/default/webdesk-docker) must be unix:///run/user/<uid>/docker.sock"
+[ -z "$WD_DOCKER_HOST" ] || export DOCKER_HOST="$WD_DOCKER_HOST"
+docker ps --format '{{.Names}}' | grep -qx "$CONTAINER" || fail "container $CONTAINER is not running${WD_DOCKER_HOST:+ on $WD_DOCKER_HOST}"
 
 DB="${WEBDESK_DB:-$(docker exec "$CONTAINER" printenv POSTGRES_DB 2>/dev/null || true)}"
 DB="${DB:-webdesk}"

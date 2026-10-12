@@ -3,11 +3,12 @@
 # user@<uid>.service of that user Wants= and is ordered After= its instance (instance drop-in), so at boot the
 # guard is in place before the user manager, and so the rootless dockerd, can start. The daemon's unit also
 # refuses to start without the marker this writes: a guard that fails fails WebDesk CLOSED.
+# Not ordered after the rootful docker.service on purpose: the rootful daemon writes no filter OUTPUT rule,
+# every iptables call here waits on the xtables lock (-w), and WebDesk's boot must not wait on the ERP's daemon.
 [Unit]
 Description=Egress guard for the rootless WebDesk Docker daemon of %i (WSK-D73; design §03 AC 6/7)
 ConditionPathExists=/etc/default/webdesk-rootless-%i
-# After the rootful daemon only so its own iptables setup never races this one; it does not need it.
-After=network-pre.target docker.service
+After=network-pre.target
 
 [Service]
 Type=oneshot

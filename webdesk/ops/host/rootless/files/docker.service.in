@@ -1,11 +1,13 @@
 # ~@USER@/.config/systemd/user/docker.service (M4 F6, WSK-D73), rendered by install-rootless.sh from
 # webdesk/ops/host/rootless/files/docker.service.in. It is the unit dockerd-rootless-setuptool.sh writes
 # (docker-ce-rootless-extras 29.7.0, RootlessKit 3.0.2), with every WebDesk choice made explicit instead of
-# defaulted (plan §2.2/§2.3):
-#   NET=slirp4netns, PORT_DRIVER=builtin  Debian-supported (bookworm main), sandboxed + seccomp'd, no SUID helper
-#   DETACH_NETNS=false                    dockerd and every container stay inside RootlessKit's netns. With the
-#                                         default (true) dockerd runs in the HOST netns and, since Docker 29.5,
-#                                         `docker run --net=host` shares the host's netns.
+# defaulted (plan §3.2):
+#   NET=slirp4netns, PORT_DRIVER=builtin  Debian-supported (bookworm main), sandboxed + seccomp'd, no SUID helper.
+#                                         Pinned so a missing slirp4netns FAILS the start instead of falling back
+#                                         to the script's next choice (pasta, vpnkit, gvisor-tap-vsock).
+#   DETACH_NETNS=false                    dockerd and every container stay inside RootlessKit's netns. The 29.7.0
+#                                         script defaults to true, which runs dockerd in the HOST netns and, in
+#                                         its own words, "enables docker run --net=host".
 #   DISABLE_HOST_LOOPBACK=true            10.0.2.2 never reaches the host's 127.0.0.1
 #   SLIRP4NETNS_SANDBOX/SECCOMP=true      fail to start rather than silently run slirp4netns unhardened ("auto")
 # This file lives in the daemon user's home, so it is CONFIGURATION, not a boundary: a process running as that
@@ -30,7 +32,9 @@ Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_DETACH_NETNS=false
 ExecStartPre=/usr/bin/test -e /run/webdesk-rootless-guard/@USER@.active
 ExecStart=/usr/bin/dockerd-rootless.sh
 # The deploy user reaches this daemon as itself, as it reached the rootful one through the docker group.
-ExecStartPost=/usr/local/lib/webdesk-rootless/grant-socket.sh @OPERATOR@ %t
+# Leading "-": a failed grant breaks deploys loudly (permission denied on the socket); it must not take
+# WebDesk down. install-rootless.sh check verifies the grant.
+ExecStartPost=-/usr/local/lib/webdesk-rootless/grant-socket.sh @OPERATOR@ %t
 ExecReload=/bin/kill -s HUP $MAINPID
 TimeoutSec=0
 RestartSec=2
