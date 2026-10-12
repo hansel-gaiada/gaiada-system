@@ -1700,6 +1700,8 @@ becomes an existence oracle for another client's ids.
 | ✅ | GET | `/api/:t/portal/milestones` | Commitment calendar across visible projects. |
 | ✅ | GET | `/api/:t/portal/timeline` | `?limit` (clamped 1–400, default 120). `PortalTimelineEvent[]` = `{kind, id, label, status, at, tense:'due'\|'happened', context, projectId}`. Composed as a UNION over client-visible OBJECTS — **never** from `activities`, so a new internal event type cannot leak into a client's feed by default. |
 | ✅ | GET | `/api/:t/portal/deliverables` | `?projectId`. Attachment metadata batched in one query (`files[]` per deliverable). |
+| PROTOTYPED | GET | `/api/:t/portal/meetings[?projectId]` | **Meeting minutes (PV4-05, §29c).** The minutes a staff member SHARED with the client, newest first (max 200): `{id, title, meetingDate, bodyMd, sharedAt, sharedBy}[]`. A draft never appears; a project-less meeting's minutes reach client-wide contacts only. 400 on a malformed `projectId`. |
+| PROTOTYPED | GET | `/api/:t/portal/meetings/:minutesId` | One set of shared minutes (same shape). **404** for a draft, another client's, a project the contact is not scoped to, a project-less meeting for a project-scoped contact, a soft-deleted meeting, a non-uuid or unknown id: one answer for all of them. Never returns the transcript, recording, audio, Drive link, participants or pipeline run. |
 
 **Conversation (PV4-03)** is its own portal area under `/api/:t/portal/conversation*`: see **§29** (a thread per project plus one client-wide thread, unread counts, live topic `conversation`).
 
@@ -1736,7 +1738,7 @@ costs a wasted refetch, not a disclosure — that inversion is the whole securit
 realtime to external parties. `mode:'poll'` when `REDIS_URL` is unset; the client polls unconditionally
 anyway (120s when live, 30s when not), because SSE fails in ways invisible from the client.
 
-Topics (8): `approvals · projects · deliverables · invoices · contracts · profile · requests · conversation`. `requests` = a webdev change request submitted/triaged/converted (§16f); `conversation` = a conversation thread opened/updated or a message posted/edited/retracted (PV4-03, §29), narrowed to the thread's client. The browser copy of this list is `PortalTopic` in `platform-ui/src/lib/portal.ts` and must match `portal-live.service.ts`. The event→topic map in
+Topics (8): `approvals · projects · deliverables · invoices · contracts · profile · requests · conversation`. `requests` = a webdev change request submitted/triaged/converted (§16f); `conversation` = a conversation thread opened/updated or a message posted/edited/retracted (PV4-03, §29), narrowed to the thread's client; `projects` also carries `meeting.minutes.shared` (PV4-05, §29c: a staff member shared a meeting's minutes, narrowed to the meeting's client). The browser copy of this list is `PortalTopic` in `platform-ui/src/lib/portal.ts` and must match `portal-live.service.ts`. The event→topic map in
 `portal-live.service.ts` is an **allowlist** — an unmapped event type produces no frame, so adding an
 internal event cannot wake a client's browser by default.
 
@@ -5861,3 +5863,41 @@ Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-03). Rulings PV-D
 | PROTOTYPED | PATCH | `/api/:t/conversation/drafts/:draftId` | `conversation` · `draft` | `{body}` -> `{id, status: 'pending', clientVisible: false}`. 409 unless pending. |
 | PROTOTYPED | POST | `/api/:t/conversation/drafts/:draftId/send` | `conversation` · `post` | -> **201** `{id (the message), threadId, draftId, draftedBy, createdAt, clientVisible: true}`. ONE transaction: the message is authored by the SENDER (`author_id` = the caller, `author_side = 'staff'`) with `drafted_by` = the draft's author; the draft becomes `sent` with `sent_message_id`, `decided_by`, `decided_at`. Already sent or discarded: 409. Refused to agents by Cerbos. |
 | PROTOTYPED | POST | `/api/:t/conversation/drafts/:draftId/discard` | `conversation` · `draft` | -> `{id, status: 'discarded', clientVisible: false}`. 409 unless pending. |
+
+## 29c. Meeting minutes shared with the client (PV4-05, 2026-10-12) — `platform-nest/src/core/meetings.controller.ts` (staff), `portal-workspace.controller.ts` (portal); predicates in `portal-visibility.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (HTTP suite `meeting-minutes.controller.test.ts` and the Cerbos matrix run against real Postgres + Cerbos on the Linux CI gate; no UI yet — PV4-08 portal, PV4-09 staff)**
+
+Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-05; finding 8; design decisions 8 and 9). Cross-referenced from §16a. Rulings PV-D23 (nothing an agent writes reaches a client until a staff member approves it), PV4-Q1 (default: minutes of a meeting with NO project are visible only to client-wide contacts).
+
+**What a client can read of a meeting: the minutes, and nothing else.** `meeting` STAYS in `NEVER_CLIENT_VISIBLE`: the recording, `transcript`, `transcript_ref`, `audio_ref`, `local_hint`, `drive_*`, the participants and the pipeline run are internal and no portal read names them. Minutes are a separate object (`meeting_minutes`, PV4-01): one row per meeting, written as a **draft**, then deliberately **shared** by a person. Once shared they are **frozen** (a save is 409) and there is **no unshare route** (once a client has read something, taking it back is a conversation, not a button).
+
+**Visibility rule (one predicate, shared by the portal and the staff marker).** `meetingMinutesInPortalScope(minutesAlias, meetingAlias, params)` in `portal-visibility.ts`: the **meeting's** `client_id` is one of the caller's clients, `meeting_minutes.status = 'shared'`, the meeting is not soft-deleted, and for a project-scoped contact the **meeting's** `project_id` is one of theirs. **No NULL-project admission** (same shape as runs and conversation threads, `allowNullProject = false`). Minutes carry **no `client_id`/`project_id` of their own** (design decision 8): both come from the meeting, so re-linking a meeting moves its minutes with it and removing its client takes them out of every portal.
+
+### Staff — `src/core/meetings.controller.ts` (Cerbos kind `meeting_recording`)
+
+| Status | Method | Path | Cerbos | Payload / notes |
+|---|---|---|---|---|
+| PROTOTYPED | GET | `/api/:t/meetings/:id/minutes` | `meeting_recording` · `read` | `{meetingId, clientId, projectId, title, shareable, minutes: null \| {id, bodyMd, status:'draft'\|'shared', draftedBy, updatedBy, createdAt, updatedAt, sharedAt, sharedBy, sharedByName, clientVisible}}`. `minutes` is `null` until one was ever saved. `shareable` = a non-blank draft on a meeting that has a client (state only; the action decides who). `clientVisible` is computed in SQL from `staffMeetingMinutesClientVisible` (the meeting has a client AND the minutes are shared on a live meeting), never retyped (plan trap 9). 404 for an unknown, deleted or non-uuid meeting id. |
+| PROTOTYPED | PUT | `/api/:t/meetings/:id/minutes` | `meeting_recording` · `update` | `{bodyMd: string}` (0..100,000 chars) -> the same view as GET. **Saving keeps `draft`.** `updated_by` = the caller always; `drafted_by` is set **only** when the caller's `principal.kind` is `bot` or `automation`, and is kept when a person later edits the text. **409** once shared. Authorization runs before validation (a denied caller never sees a 400). **Allowed to agents** (an agent may draft minutes). Emits `meeting.minutes.saved` (ids and size, never the text). |
+| PROTOTYPED | POST | `/api/:t/meetings/:id/minutes/share` | `meeting_recording` · **`share_minutes`** (new) | no body -> **200** `{id (the minutes), meetingId, status:'shared', sharedAt, sharedBy, notified}`. **Refused to `bot`/`automation` principals by Cerbos** (403 `cerbos denied share_minutes on meeting_recording`; PV-D23). **409** when the meeting has no `client_id`, when there are no minutes or they are blank, and when they are already shared (including the loser of a concurrent double share). ONE UPDATE stamps `status='shared'`, `shared_at`, `shared_by` guarded `WHERE status = 'draft'`. See "On share". |
+
+There is no `DELETE`, `PATCH` or `unshare` route on minutes.
+
+### Portal — `src/core/portal-workspace.controller.ts` (`portal` · `read`, then `resolvePortalScope`)
+
+`GET /api/:t/portal/meetings[?projectId]` and `GET /api/:t/portal/meetings/:minutesId` are listed in §16a. **Payload (pinned by a key-set test, never widened by a new column):**
+
+```
+{ id, title, meetingDate, bodyMd, sharedAt, sharedBy }
+```
+
+`title` falls back to `"Meeting"`; `meetingDate` = `started_at`, else `scheduled_at`, else `created_at`; `bodyMd` is Markdown (render it sanitised, or as text); `sharedBy` is the sharer's display name only (never an email or an id). **Not in the payload, on purpose:** `transcript`, `transcript_ref`, `audio_ref`, `local_hint`, `drive_*`, participants, the pipeline run, `clientId`, `projectId`.
+
+### On share
+
+- **Outbox event** `meeting.minutes.shared` (entity type `meeting_minutes`, entity id = the minutes id), payload `{clientId, projectId, meetingId, minutesId, actorId}` (ids only, never text). Mapped in `portal-live.service.ts` to the **existing portal topic `projects`**; `meeting_minutes` is added to `TAILED_ENTITY_TYPES`. `clientId` narrows the frame to that client's connections (§16d). No new topic, so `PortalTopic` in `platform-ui/src/lib/portal.ts` is unchanged.
+- **Notification** (in-app, best-effort, after the commit) to the client's contacts **in scope**: `resolveClientRecipients(kind: "general")` for the meeting's client and project (client-wide contacts, plus contacts of that project; a project-less meeting reaches client-wide contacts only; viewers included), type `meeting.minutes.shared`, title `Meeting minutes shared: <title>`, **href `/portal/meetings/<minutesId>`**. This is a NEW portal path used in a notification: `platform-ui/src/lib/portal-links.guard.test.ts` lists it in its `AWAITING_PAGE` ledger until **PV4-08** builds the page and gives it a portal area (PV4-08 must delete that ledger entry; a test fails the moment the page exists). The notice carries no minutes text.
+- Mail: not sent (the mail allow-list is two types; PV4-06 owns client mail).
+
+### Authorization summary
+
+`share_minutes` reaches exactly the roles that hold `update` on `meeting_recording` (`company_admin`, `manager`, `member`; perm mirror `perm_meeting_recording_share_minutes`), and is **denied to `kind` `bot`/`automation`** (PV-D23). See `PERMISSION-CONTRACT.md` §34.

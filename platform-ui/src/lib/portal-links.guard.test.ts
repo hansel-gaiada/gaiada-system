@@ -61,14 +61,31 @@ function routeExists(link: string): boolean {
   return resolve(PORTAL_APP, segments);
 }
 
+// Links the backend ALREADY sends whose portal page is built by a later ticket. Each entry names both tickets, and a test below
+// fails the moment the page exists (delete the entry then, so the two real checks cover the link) or the backend stops sending
+// the link (the entry is stale). It is a ledger of a known gap, not a way to skip the guard: nothing is exempt silently.
+//   PV4-05 sends `/portal/meetings/<minutesId>` in the "minutes shared" notification (a client's notice that staff shared a
+//   meeting's minutes); the page that renders it, and its place in a portal area, is PV4-08.
+const AWAITING_PAGE: Record<string, string> = {
+  "/portal/meetings/:id": "PV4-05 (sends the link) / PV4-08 (builds the page and gives it a portal area)",
+};
+
 describe("links the backend sends clients open a portal page in an area", () => {
-  const links = backendPortalLinks();
+  const all = backendPortalLinks();
+  const links = new Map([...all].filter(([link]) => !(link in AWAITING_PAGE)));
 
   it("finds the backend's portal links (the guard is not vacuous)", () => {
     // 2026-10-11: /portal, /portal/approvals/:id, /portal/contracts/:id, /portal/invoices/:id,
     // /portal/requests, /portal/social-reviews.
     expect(links.size).toBeGreaterThanOrEqual(6);
     expect([...links.keys()]).toContain("/portal/approvals/:id");
+  });
+
+  it("the awaiting-page ledger is exact: every entry is still sent by the backend and still has no page", () => {
+    for (const link of Object.keys(AWAITING_PAGE)) {
+      expect([...all.keys()], `${link} is no longer sent by the backend: delete its AWAITING_PAGE entry`).toContain(link);
+      expect(routeExists(link), `${link} now has a page: delete its AWAITING_PAGE entry so the real checks cover it`).toBe(false);
+    }
   });
 
   it("every link resolves to a page in the (portal) route group", () => {

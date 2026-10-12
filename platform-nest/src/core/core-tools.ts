@@ -678,6 +678,14 @@ export function registerAgencyIntakeCoreTools(): void {
 // design: the staff page is per client, and an unscoped 300-row dump is not something an agent should
 // ask for.
 //
+// ── READ ASSURANCE (PV-D28, 2026-10-13) ────────────────────────────────────────────────────────
+// `contracts.list` and `invoicePayments.list` are `minAssurance: "low"`, unlike every other tool here. An n8n
+// principal is ALWAYS "low" (mcp-hub never elevates one: assurance.test.ts), so at "verified" the daily
+// `wf:billing-chaser` the owner ruled in (PV-D28) would be refused on assurance before its allow-list scope was
+// ever consulted. The two are plain per-client reads; the data is still gated per caller by Cerbos at the
+// endpoint (`contract`/`invoice` `read`, which a service account holds only as manager or above). Every WRITE
+// here, and `contracts.get`, stay "verified"; the workflow's allow-list names exactly the two reads.
+//
 // ── IMPACT ──────────────────────────────────────────────────────────────────────────────────────
 //   createDraft / updateDraft  LOW     a draft reaches nobody: it is created `draft`, and `send` is a
 //                                       separate, separately authorized act. Editing is refused by the
@@ -717,7 +725,7 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
       "who has signed (`clientSigned`, `providerSigned`) and `canCountersign` (true only when the caller may " +
       "countersign this company's contracts AND the row is `sent` and awaiting our signature). `clientId` is a " +
       "client uuid; a malformed id is a 400. A 403 is a refusal, never an empty list (criterion 5).",
-    minAssurance: "verified",
+    minAssurance: "low", // PV-D28: see "READ ASSURANCE" in the section header
     method: "GET",
     pathTemplate: "/api/:tenantId/contracts?clientId=:clientId",
     inputSchema: {
@@ -746,7 +754,7 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
       "One client's payment claims (max 300), pending first: amount, method, reference, status, `recordedBy`, " +
       "`proofFileId` and the invoice's total and status. Deciding one is `invoicePayments.decide`. A 403 is a " +
       "refusal, never an empty list.",
-    minAssurance: "verified",
+    minAssurance: "low", // PV-D28: see "READ ASSURANCE" in the section header
     method: "GET",
     pathTemplate: "/api/:tenantId/invoice-payments?clientId=:clientId",
     inputSchema: {

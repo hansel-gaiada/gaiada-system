@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610131730_iam_m5_v3f_visitor_actions.sql`
+- Head: `202610131840_pv5_intercompany_ar_posting.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 270 (121 legacy `NNNN_`, 149 timestamped)
+- Applied files on disk: 272 (121 legacy `NNNN_`, 151 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -588,6 +588,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 | File | Declared id | Name |
 |---|---|---|
+| `billing-chaser.json` | `wspv3billchase01` | billing-chaser (CRON) |
 | `compliance-gate-nag.json` | — | compliance-gate-nag (CRON) |
 | `digest-fanout.json` | — | digest-fanout (CRON) |
 | `mtg-dispatcher.json` | `ws11mtgdispatch0` | WS11 meeting dispatcher (transcript -> MOM -> 3 extractions -> pipeline run) |
