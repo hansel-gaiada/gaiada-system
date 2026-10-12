@@ -53,7 +53,7 @@ const names = (a) => [...a].sort();
 
 // ------------------------------------------------------------------ release plan
 
-test("release: a webdesk-only diff builds only webdesk-api and re-tags the other 10", () => {
+test("release: a webdesk-only diff builds only webdesk-api and re-tags the other 11", () => {
   const r = makeRepo();
   try {
     r.commit("base", T0, { "x": "1" });
@@ -63,7 +63,7 @@ test("release: a webdesk-only diff builds only webdesk-api and re-tags the other
     r.commit("a markdown note", T0 + DAY, { "docs/note.md": "n" }); // docs never reach an image
     const plan = planRelease({ head: r.head(), currentTag: "v1.0.0-alpha.2", now: (T0 + 2 * DAY) * 1000, git: gitAdapter(r.dir), registry: registry() });
     assert.deepEqual(names(plan.build), ["webdesk-api"]);
-    assert.equal(plan.retag.length, 10);
+    assert.equal(plan.retag.length, 11);
     assert.ok(plan.retag.every((x) => x.fromTag === "v1.0.0-alpha.1" && x.digest.startsWith("sha256:")));
     assert.deepEqual(plan.removed, []);
   } finally { r.cleanup(); }

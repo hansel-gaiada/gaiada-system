@@ -1,0 +1,42 @@
+# Datacenter / compute-cloud autonomous systems. A visit whose network is listed here is treated as
+# automated traffic: not forwarded to Umami, counted in bot_counts (reason "asn").
+#
+# One ASN per line: `<number>  # <operator>`. Blank lines and `#` lines are ignored. A malformed line
+# stops the collector at start.
+#
+# RULES (design 2026-10-12-m5-phase5-design.md section 9 trap 1):
+#   * COMPUTE CLOUDS ONLY. Do not add consumer ISPs, mobile carriers, VPN/relay services (Cloudflare
+#     WARP, Apple Private Relay) or corporate secure web gateways (Zscaler, Netskope): they carry real
+#     visitors. Those egress from datacenter ASNs too, which is why this list is kept short and is
+#     reviewed against the bot counts after go-live.
+#   * Status: PROPOSED by V2-a, NOT yet reviewed by the owner or the orchestrator.
+#
+# AWS
+16509   # Amazon.com, Inc. (AWS)
+14618   # Amazon.com, Inc. (AWS, us-east-1)
+# Google Cloud
+396982  # Google LLC (Google Cloud)
+# Microsoft Azure
+8075    # Microsoft Corporation (Azure; also some Microsoft corporate egress, review first)
+# DigitalOcean
+14061   # DigitalOcean, LLC
+# OVHcloud
+16276   # OVH SAS
+# Hetzner
+24940   # Hetzner Online GmbH
+# Akamai Connected Cloud (Linode)
+63949   # Akamai Connected Cloud (Linode)
+# Vultr
+20473   # The Constant Company (Vultr)
+# Oracle Cloud
+31898   # Oracle Corporation (OCI)
+# Alibaba Cloud
+45102   # Alibaba (US) Technology Co., Ltd.
+# Tencent Cloud
+132203  # Tencent Building, Kejizhongyi Avenue (Tencent Cloud)
+# Scaleway
+12876   # Scaleway S.A.S.
+# Contabo
+51167   # Contabo GmbH
+# Leaseweb
+60781   # Leaseweb Netherlands B.V.
