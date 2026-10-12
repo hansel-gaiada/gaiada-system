@@ -21,7 +21,6 @@ import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setu
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../testing/fixtures";
 import { createLeadFromWebSubmission, type WebLeadsDeps } from "./agency-web-leads.service";
 import { isContactSuppressed } from "./agency-privacy.service";
-import { insertAutomationApprovalRow } from "./approval-filing";
 import { ERASED_MARKER, subjectHash } from "./agency-privacy.subject";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -178,7 +177,14 @@ describe.skipIf(!TEST_URL)("M5-G5 — agency privacy commands: WS4 flow, erase k
     const { approvalId, requestId } = filed.json() as { approvalId: string; requestId: string };
     const appr = (await adminPool().query(`SELECT impact, status, origin, tool_name, tool_args, requested_by FROM automation_approvals WHERE id = $1`, [approvalId])).rows[0];
     expect(appr).toMatchObject({ impact: "high", status: "pending", origin: "automation", tool_name: "agency_privacy.erase", requested_by: admin });
-    expect(appr.tool_args).toEqual({ kind: "erase", requestId, identifiers: ["email", "phone"] });
+    // M5-G5b: kind, request id, which keys, the subject hashes and the approver's display hint. Never the values.
+    expect(appr.tool_args).toEqual({
+      minimised: "agency-privacy.v1", kind: "erase", requestId, identifiers: ["email", "phone"],
+      subject: {
+        emailHash: subjectHash(p.email), emailHint: "***@dsr-subject.test",
+        phoneHash: subjectHash(p.phoneDigits), phoneHint: `***${p.phoneDigits.slice(-2)}`,
+      },
+    });
     const ledger1 = (await adminPool().query(`SELECT phase, kind, email_hash, phone_hash FROM agency_dsr_requests WHERE approval_id = $1`, [approvalId])).rows;
     expect(ledger1).toEqual([{ phase: "filed", kind: "erase", email_hash: subjectHash(p.email), phone_hash: subjectHash(p.phoneDigits) }]);
     expect((await lead(declined))!.contact_email).toBe(p.email);
@@ -354,14 +360,15 @@ describe.skipIf(!TEST_URL)("M5-G5 — agency privacy commands: WS4 flow, erase k
     const r = await call(co, admin, "erase", { email: p.email, approvalId: f.approvalId });
     expect(r.statusCode).toBe(400);
     expect(r.json()).toMatchObject({ reason: "privacy_request_mismatch" });
-    // A hand-filed approval row with matching-looking args (what any member can file through
-    // POST /automation-approvals) is NOT a privacy request: the binding is the ledger's filed row, never tool_args.
+    // A hand-filed approval row with matching-looking args (a raw INSERT that bypasses the filing path, as a
+    // forged tool_args would) is NOT a privacy request: the binding is the ledger's filed row, never tool_args.
     const forgedId = newId();
     await withTenants([co], (c) =>
-      insertAutomationApprovalRow(c, forgedId, {
-        tenantId: co, workflowId: "agency-privacy:forged", toolName: "agency_privacy.erase",
-        toolArgs: { kind: "erase", requestId: newId(), identifiers: ["email"] }, impact: "high", origin: "automation", requestedBy: admin,
-      }),
+      c.query(
+        `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, requested_by, origin, origin_site)
+         VALUES ($1, $2, 'agency-privacy:forged', 'agency_privacy.erase', $3::jsonb, 'high', $4, 'automation', 'test')`,
+        [forgedId, co, JSON.stringify({ kind: "erase", requestId: newId(), identifiers: ["email"] }), admin],
+      ),
     );
     expect((await decide(co, decider, forgedId, "approved")).statusCode).toBe(200);
     const r2 = await call(co, admin, "erase", { email: p.email, approvalId: forgedId });
