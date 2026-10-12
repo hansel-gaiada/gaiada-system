@@ -114,8 +114,8 @@
 .checkin-card__form .lux-field__control--textarea { min-height: 46px; }
 .checkin-card__actions { display: flex; gap: 10px; margin-top: 14px; }
 /* #B5622F was --primitive-rust spelled out by hand, i.e. the GRAPHIC tier of the critical
-   ramp used as body text. --status-critical-fg is the text tier of that same ramp (#A0511F,
-   5.1:1 vs 4.4:1) and, unlike the literal, it carries a dark-mode value — matches how
+   ramp used as body text. --status-critical-fg is the text tier of that same ramp (#984D1D
+   since 2026-10-12) and, unlike the literal, it carries a dark-mode value — matches how
    org.css / services.css already colour an inline error. */
 .checkin-card__error { margin: 10px 0 0; font: 400 13px var(--font-body); color: var(--status-critical-fg); }
 .checkin-card__submitted-summary { margin: 0 0 8px; font: 400 14px/1.5 var(--font-body); color: var(--text-primary); }
