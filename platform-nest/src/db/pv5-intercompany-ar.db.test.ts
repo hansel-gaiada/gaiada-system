@@ -238,15 +238,18 @@ describe.skipIf(!TEST_URL)("PV5-05 — intercompany AR posting for group clients
   it("★ a group client's invoice debits the counterparty's tagged 1290-* receivable, and the control account does not move", async () => {
     const inv = await draftInvoice(GRP, "2026-02-10", "2026-03-12", 222_000_000);
     const entry = await issue(inv);
+    // Learned from the resolver, not from the posting, so later tests know the account even when the
+    // posting is wrong (the PV5-05 teeth commit).
+    tagged = await scalar<string>("SELECT finance_ar_receivable_account($1) AS v", [GRP]);
+    expect(tagged).toMatch(/^1290-[0-9A-F]{6}$/);
     // The reconciliation first: this is what the PV5-05 teeth commit turns red.
     expect(await reconcile()).toEqual([]);
 
     const ls = await lines(entry);
-    expect(ls).toHaveLength(2);
-    expect(ls[0].code).toMatch(/^1290-[0-9A-F]{6}$/);
-    expect(ls[0]).toMatchObject({ cp: V, side: "debit", amount: 222_000_000 });
-    expect(ls[1]).toEqual({ code: "4100", cp: null, side: "credit", amount: 222_000_000 });
-    tagged = ls[0].code;
+    expect(ls).toEqual([
+      { code: tagged, cp: V, side: "debit", amount: 222_000_000 },
+      { code: "4100", cp: null, side: "credit", amount: 222_000_000 },
+    ]);
 
     expect(await controlBalance()).toBe(111_000_000);
     expect(await taggedBalance()).toBe(222_000_000);
