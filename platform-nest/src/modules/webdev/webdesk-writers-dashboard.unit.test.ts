@@ -70,8 +70,12 @@ describe("resolvePagePath", () => {
     expect(resolvePagePath({ ...base, locale: "id", pattern: "/blog/{slug}/" })).toEqual({ reason: "locale_not_routable" });
     expect(resolvePagePath({ ...base, locale: "id", localized: false, pattern: "/blog/{slug}/" })).toEqual({ path: "/blog/best-villas/" });
   });
-  it("a singleton page may have a fixed address with no {slug}", () => {
-    expect(resolvePagePath({ ...base, slug: "Home Page!", pattern: "/about/" })).toEqual({ path: "/about/" });
+  it("follows the vocabulary 1.4.0 grammar: {slug} exactly once, literal [a-z0-9-] segments, no embedded tokens", () => {
+    expect(resolvePagePath({ ...base, pattern: "/about/" })).toEqual({ reason: "bad_route_pattern" }); // no {slug}
+    expect(resolvePagePath({ ...base, pattern: "/{slug}/{slug}/" })).toEqual({ reason: "bad_route_pattern" });
+    expect(resolvePagePath({ ...base, pattern: "/blog-{slug}/" })).toEqual({ reason: "bad_route_pattern" }); // embedded token
+    expect(resolvePagePath({ ...base, pattern: "/Blog/{slug}/" })).toEqual({ reason: "bad_route_pattern" }); // uppercase literal
+    expect(resolvePagePath({ ...base, pattern: "/blog/{slug}" })).toEqual({ path: "/blog/best-villas" }); // no trailing slash
   });
   it("reads the pattern defensively from a composition that may not carry it (the vocabulary has no such key yet)", () => {
     expect(routePatternOf({ ui: { label: "Posts" } })).toBeUndefined();

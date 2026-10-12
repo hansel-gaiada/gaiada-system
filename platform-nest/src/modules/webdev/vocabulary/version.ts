@@ -32,10 +32,14 @@
 //           checks: `enabled`, per-rule `enabled` + thresholds). Advisory only, no stored item value changes, the
 //           envelope did not change by a byte. The classifier COMPUTES the bump from
 //           test/fixtures/vocabulary-1.2.0.snapshot.json (the `lint` key set is a snapshot dimension since 1.3.0).
+//   1.4.0 — M5-W8b, MINOR: `ui.routePattern` on the composition (the public page path pattern of a collection's items,
+//           tokens {slug} and {locale}; the writers dashboard maps an item to its page with it). Editor/ops metadata
+//           only: no stored value changes, the envelope did not change by a byte. The classifier COMPUTES the bump
+//           from test/fixtures/vocabulary-1.3.0.snapshot.json (the collection `ui` key set is a snapshot dimension).
 import { PRIMITIVE_NAMES } from './primitives'
 import { BLOCK_TYPE_NAMES } from './blocks'
 
-export const VOCABULARY_VERSION = '1.3.0'
+export const VOCABULARY_VERSION = '1.4.0'
 
 /** The frozen path segment (design §05 hard rule 1). Never mutated — evolution is a new /v2. */
 export const ENVELOPE_VERSION = 'v1'

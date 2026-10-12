@@ -33,6 +33,11 @@
 // advisory editorial content checks (the rules live in webdesk/api/src/control/content/lint-rules). The
 // validator CLOSES it: unknown rule ids, unknown knobs and out-of-range values are refused at the composition
 // write, never ignored. A MINOR vocabulary release; advisory only, so it can never make a save fail.
+//
+// M5-W8b (vocabulary 1.4.0) adds one optional key to the collection `ui` object: `routePattern`, the public
+// page path pattern of the collection's items ("/blog/{slug}/", "/{locale}/insights/{slug}/"). Editor/ops
+// metadata only (the dashboard maps an item to its page with it): no stored value changes, so it is PATCH inside
+// a tenant contract and a MINOR vocabulary release. `validateRoutePattern` is its grammar, `pagePathFor` applies it.
 import {
   FIELD_DEF_KEYS,
   FIELD_NAME_PATTERN,
@@ -91,6 +96,12 @@ export interface CollectionUi {
    * Editor metadata only: no stored value changes. Resolved by `isClientEditable` (./client-editable.ts).
    */
   clientEditable?: boolean
+  /**
+   * 1.4.0 (M5-W8b): the public page path pattern of this collection's items. Starts with `/`; segments are literal
+   * (`[a-z0-9-]`), `{slug}` (required, once) or `{locale}` (optional, once), each a whole segment; a trailing slash is
+   * allowed; no query, fragment or `..`; at most 200 characters. Resolved by `pagePathFor`.
+   */
+  routePattern?: string
 }
 
 /**
@@ -142,8 +153,8 @@ export const COMPOSITION_KEYS = ['fields', 'blocks', 'singleton', 'localized', '
 const KNOWN_COLLECTION_KEYS = new Set<string>(COMPOSITION_KEYS)
 const KNOWN_FIELD_KEYS = new Set<string>(FIELD_DEF_KEYS)
 const KNOWN_FIELD_UI_KEYS = new Set<string>(FIELD_UI_KEYS)
-/** 1.1.0: the keys a composition's `ui` object may carry (1.2.0 added `clientEditable`). */
-export const COLLECTION_UI_KEYS = ['label', 'description', 'group', 'order', 'titleField', 'clientEditable'] as const
+/** 1.1.0: the keys a composition's `ui` object may carry (1.2.0 added `clientEditable`, 1.4.0 `routePattern`). */
+export const COLLECTION_UI_KEYS = ['label', 'description', 'group', 'order', 'titleField', 'clientEditable', 'routePattern'] as const
 const KNOWN_COLLECTION_UI_KEYS = new Set<string>(COLLECTION_UI_KEYS)
 /** 1.1.0 `placeholders`; 1.3.0 added `content`. */
 export const LINT_KEYS = ['placeholders', 'content'] as const
@@ -290,9 +301,64 @@ function validateFieldDef(path: string, raw: unknown, depth: number): Compositio
   return issues
 }
 
+// -------------------------------------------------------------------------------------------------
+// 1.4.0 (M5-W8b): ui.routePattern
+// -------------------------------------------------------------------------------------------------
+export const ROUTE_PATTERN_MAX_LENGTH = 200
+const ROUTE_LITERAL_SEGMENT = /^[a-z0-9-]+$/
+const ROUTE_SLUG_VALUE = /^[a-z0-9][a-z0-9._~-]{0,199}$/i
+const ROUTE_LOCALE_VALUE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/
+
+/** The reason a route pattern is not acceptable, or null when it is. Pure; the grammar is documented on `CollectionUi.routePattern`. */
+export function routePatternProblem(p: unknown): string | null {
+  if (typeof p !== 'string') return 'routePattern must be a string'
+  if (p.length === 0 || p.length > ROUTE_PATTERN_MAX_LENGTH) return `routePattern must be 1 to ${ROUTE_PATTERN_MAX_LENGTH} characters`
+  if (!p.startsWith('/')) return 'routePattern must start with "/"'
+  const parts = p.slice(1).split('/')
+  if (parts[parts.length - 1] === '') parts.pop() // a trailing slash
+  if (parts.length === 0) return 'routePattern must contain {slug}'
+  let slugs = 0
+  let locales = 0
+  for (const seg of parts) {
+    if (seg === '{slug}') slugs++
+    else if (seg === '{locale}') locales++
+    else if (!ROUTE_LITERAL_SEGMENT.test(seg)) {
+      return `segment "${seg}" is not allowed: use lowercase letters, digits and "-" (no empty segments, query, fragment or ".."), or the tokens {slug} and {locale}`
+    }
+  }
+  if (slugs !== 1) return 'routePattern must contain {slug} exactly once'
+  if (locales > 1) return 'routePattern may contain {locale} at most once'
+  return null
+}
+
+/**
+ * The public page path of an item: the pattern with `{slug}` and `{locale}` filled in, or null when the pattern is not
+ * valid or a value cannot be put in a URL. For the tenant's DEFAULT language the `/{locale}` segment is left out (the
+ * site serves its default language at the root); a pattern with no `{locale}` serves every language at the same
+ * address, so it applies to each. Pure, no I/O.
+ */
+export function pagePathFor(routePattern: unknown, args: { slug: string; locale: string; defaultLocale: string }): string | null {
+  if (routePatternProblem(routePattern) !== null) return null
+  const { slug, locale, defaultLocale } = args
+  if (typeof slug !== 'string' || !ROUTE_SLUG_VALUE.test(slug)) return null
+  const segs = (routePattern as string).slice(1).split('/')
+  const trailing = segs[segs.length - 1] === ''
+  if (trailing) segs.pop()
+  const out: string[] = []
+  for (const seg of segs) {
+    if (seg === '{slug}') out.push(slug)
+    else if (seg === '{locale}') {
+      if (locale === defaultLocale) continue
+      if (typeof locale !== 'string' || !ROUTE_LOCALE_VALUE.test(locale)) return null
+      out.push(locale)
+    } else out.push(seg)
+  }
+  return '/' + out.join('/') + (trailing && out.length > 0 ? '/' : '')
+}
+
 function validateCollectionUi(path: string, raw: unknown, fields: unknown): CompositionIssue[] {
   if (raw === undefined) return []
-  if (!isPlainObject(raw)) return [issue(path, 'ui must be an object', '{ label: string, description?, group?, order?, titleField?, clientEditable? }')]
+  if (!isPlainObject(raw)) return [issue(path, 'ui must be an object', '{ label: string, description?, group?, order?, titleField?, clientEditable?, routePattern? }')]
   const out = closedKeys(path, raw, KNOWN_COLLECTION_UI_KEYS, 'collection ui')
   if (!isNonEmptyString(raw.label)) out.push(issue(`${path}.label`, 'ui.label is required and must be a non-empty string', 'string'))
   for (const k of ['description', 'group'] as const) {
@@ -302,6 +368,10 @@ function validateCollectionUi(path: string, raw: unknown, fields: unknown): Comp
     out.push(issue(`${path}.order`, 'ui.order must be a finite number when present', 'number'))
   }
   out.push(...validateBooleanKey(path, raw.clientEditable, 'clientEditable'))
+  if (raw.routePattern !== undefined) {
+    const why = routePatternProblem(raw.routePattern)
+    if (why) out.push(issue(`${path}.routePattern`, `ui.${why}`, '"/blog/{slug}/" or "/{locale}/insights/{slug}/"'))
+  }
   if (raw.titleField !== undefined) {
     const names = Array.isArray(fields) ? fields.filter(isPlainObject).map((f) => f.name) : []
     if (typeof raw.titleField !== 'string' || !names.includes(raw.titleField)) {

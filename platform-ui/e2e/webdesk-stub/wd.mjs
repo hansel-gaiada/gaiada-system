@@ -21,6 +21,7 @@ import path from "node:path";
 import { addAsset, handleMediaBff, mediaCfg, mediaState, seedMedia } from "./media.mjs";
 import { decorateItemDetail, decorateItemList, handleEditorial, seedReview } from "./editorial.mjs";
 import { handleDashboard } from "./dashboard.mjs";
+import { handleAssist, noteWrite } from "./assist.mjs";
 
 export { addAsset, handlePublicMedia, mediaState } from "./media.mjs";
 
@@ -228,7 +229,7 @@ export function seed() {
     build: null,
     stagingStale: false,
     seq: 0,
-    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, reviewAllowedAbsent: false, reviewCountsWithheld: false, reviewOff: false, reviewRefuse: null, drift: null, forceIssues: null, unavailableOnce: 0, ...mediaCfg() },
+    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, reviewAllowedAbsent: false, reviewCountsWithheld: false, reviewOff: false, reviewRefuse: null, assistRefuse: null, drift: null, forceIssues: null, unavailableOnce: 0, ...mediaCfg() },
     log: [],
   };
 }
@@ -349,6 +350,11 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
   // M5-W8: the writer dashboard (dashboard.mjs).
   const dashboard = handleDashboard(S, { method, rest, query, role });
   if (dashboard) return dashboard;
+
+  // M5-W6: the AI assist route (suggestions only). Every OTHER write is counted, so a spec can prove that Apply saved nothing.
+  const assist = handleAssist(S, { method, rest, body });
+  if (assist) return assist;
+  noteWrite(S, method, rest);
 
   if (rest === "/collections" && method === "GET") return R(200, collectionsBody(S));
 

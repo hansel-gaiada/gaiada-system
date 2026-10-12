@@ -7,11 +7,12 @@
 //    that did not answer (Umami down, no Search Console rows, a failed read) can never turn into a 0.
 //  * COUNTS ONLY. A lead is a number here, never an id, a name or an address (the SQL in the sources file selects none of
 //    them). Umami view counts under 5 are "<5" (visitor addendum R-V6), exactly as the A4 reads do.
-//  * A PAGE PATH COMES FROM THE COMPOSITION. `composition.ui.routePattern` (e.g. "/blog/{slug}/", "/{locale}/blog/{slug}/")
-//    turns an item into the page it is served at. No pattern, or one that cannot be applied, is said in words and the
+//  * A PAGE PATH COMES FROM THE COMPOSITION. `composition.ui.routePattern` (vocabulary 1.4.0: "/blog/{slug}/", "/{locale}/blog/{slug}/")
+//    turns an item into the page it is served at, through the vocabulary's own `pagePathFor`. No pattern, or one that cannot be applied, is said in words and the
 //    item's figures are all "unavailable" (a guessed path would attach another page's numbers to it).
 import { normalizePagePath, DECAY_DATA_LAG_DAYS, MIN_GSC_COVERAGE_DAYS } from "../search/content-decay";
 import { SUPPRESS_BELOW, suppress, type Count } from "../search/umami-reads";
+import { pagePathFor, routePatternProblem } from "./vocabulary/composition";
 
 // ── reasons ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -86,10 +87,6 @@ export function gscMinCoverageDays(days: number): number {
 
 // ── the page path of an item ─────────────────────────────────────────────────────────────────────
 
-const SLUG_RE = /^[a-z0-9][a-z0-9._~-]{0,199}$/i;
-const LOCALE_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
-const PATTERN_RE = /^\/[A-Za-z0-9/_.~{}-]*$/;
-
 export interface PathInput {
   /** `composition.ui.routePattern`, whatever the composition held (unknown on purpose). */
   pattern: unknown;
@@ -103,30 +100,21 @@ export interface PathInput {
 /**
  * item -> the public page path, or the reason there is none.
  *
- * Pattern grammar: an absolute path, at most 200 characters, with the tokens `{slug}` and `{locale}` only. A pattern may
- * have no `{slug}` (a singleton page at a fixed address). For the tenant's DEFAULT language the `/{locale}` segment is left
- * out (the site serves its default language at the root: "/{locale}/blog/{slug}/" is "/blog/x/" in English and "/id/blog/x/"
- * in Indonesian). A pattern with no `{locale}` for a localized collection has no address for a non-default language.
+ * The grammar and the filling-in are the vocabulary's own (1.4.0, M5-W8b: `routePatternProblem`, `pagePathFor`): an absolute path
+ * of literal `[a-z0-9-]` segments, `{slug}` exactly once and `{locale}` at most once, each a whole segment. For the tenant's DEFAULT
+ * language the `/{locale}` segment is left out. This adds one rule of the dashboard's own: a LOCALIZED collection whose pattern has no
+ * `{locale}` has no address for a non-default language (the same address would be claimed by every language), so that item has none.
  */
 export function resolvePagePath(a: PathInput): { path: string } | { reason: ReasonCode } {
   if (a.pattern === undefined || a.pattern === null || a.pattern === "") return { reason: "no_route_pattern" };
-  const p = a.pattern;
-  if (typeof p !== "string" || p.length > 200 || !PATTERN_RE.test(p)) return { reason: "bad_route_pattern" };
-  const tokens: string[] = p.match(/\{[^}]*\}/g) ?? [];
-  if (tokens.some((t) => t !== "{slug}" && t !== "{locale}") || /[{}]/.test(p.replace(/\{[^}]*\}/g, ""))) return { reason: "bad_route_pattern" };
-  if (tokens.includes("{slug}") && !SLUG_RE.test(a.slug)) return { reason: "slug_not_routable" };
-  const isDefault = a.locale === a.defaultLocale;
-  let out = p;
-  if (out.includes("{locale}")) {
-    if (isDefault) out = out.replace(/\/\{locale\}(?=\/|$)/g, "");
-    else if (!LOCALE_RE.test(a.locale)) return { reason: "locale_not_routable" };
-    else out = out.replace(/\{locale\}/g, a.locale);
-  } else if (a.localized && !isDefault) {
-    return { reason: "locale_not_routable" };
-  }
-  out = out.replace(/\{slug\}/g, a.slug).replace(/\/{2,}/g, "/");
-  if (out === "") out = "/";
-  return { path: out };
+  if (routePatternProblem(a.pattern) !== null) return { reason: "bad_route_pattern" };
+  const pattern = a.pattern as string;
+  const hasLocale = /(^|\/)\{locale\}(\/|$)/.test(pattern);
+  if (a.localized && a.locale !== a.defaultLocale && !hasLocale) return { reason: "locale_not_routable" };
+  const path = pagePathFor(pattern, { slug: a.slug, locale: a.locale, defaultLocale: a.defaultLocale });
+  if (path !== null) return { path };
+  // a valid pattern that did not resolve: the slug or the language cannot be put in a URL (a stand-in slug tells which)
+  return pagePathFor(pattern, { slug: "x", locale: a.locale, defaultLocale: a.defaultLocale }) === null ? { reason: "locale_not_routable" } : { reason: "slug_not_routable" };
 }
 
 /** The composition's pattern, defensively: the key may not exist (it is not in the vocabulary yet). */

@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610122300_search_content_briefs_webdesk_link.sql`
+- Head: `202610122330_pv4_conversation_data_model.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 257 (121 legacy `NNNN_`, 136 timestamped)
+- Applied files on disk: 258 (121 legacy `NNNN_`, 137 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -404,6 +404,11 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/media/[tenant]/[site]`
 - `/departments/[deptId]/website/writers`
 - `/departments/[deptId]/website/writers/[tenant]/[site]`
+- `/departments/[deptId]/website/writers/briefs/[tenant]/[site]/[briefId]`
+- `/departments/[deptId]/website/writers/calendar`
+- `/departments/[deptId]/website/writers/calendar/[tenant]/[site]`
+- `/departments/[deptId]/website/writers/dashboard`
+- `/departments/[deptId]/website/writers/dashboard/[tenant]/[site]`
 - `/departments/[deptId]/website/writers/people`
 - `/departments/[deptId]/website/writers/people/[tenant]/[site]`
 - `/finance`

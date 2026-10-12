@@ -11,7 +11,7 @@ const byName = (n: string) => webdevModule.mcpTools.find((t) => t.name === n);
 describe("M5-W2d MCP tools: the impact classes of design 4.3", () => {
   const low = ["submit", "withdraw", "requestChanges", "assign", "comment", "resolveComment"];
   const medium = ["seoSignoff", "approve", "setPolicy"];
-  const reads = ["board", "history"];
+  const reads = ["board", "calendar", "history"];
   it("low writes", () => {
     for (const n of low) expect(byName(`webdesk.editorial.${n}`), n).toMatchObject({ write: true, impact: "low" });
   });

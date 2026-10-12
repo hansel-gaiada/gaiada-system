@@ -42,7 +42,7 @@ The last two are not rolled back on failure: the legacy name keeps serving their
 
 `/api/webhooks/`, `/api/mail/`, `/n8n…`, `/idp/` and ACME are served on `erp.gaiada.online` too (the vhost maps
 `$erp_legacy_keep`), and a POST is never redirected. Every other browser GET/HEAD gets a 301. Removing these
-exceptions is Phase B4, after two quiet weeks (M4).
+exceptions is Phase B4, after two quiet weeks (M4). **B4 DONE 2026-10-12** (owner compressed the wait, WSK-D77; see below).
 
 ## Rollback by hand
 
@@ -64,3 +64,26 @@ Checked from outside afterwards: new name 200; certificate SAN covers both; `__H
 
 **Next issuer step (Phase B4, two quiet weeks, M4):** drop the old issuer from `OIDC_ISSUER` and
 `WEBDESK_CONTROL_OIDC_ISSUER` (they read `new,old` now), then retire the legacy-name exceptions.
+
+**B4 DONE 2026-10-12 10:36–10:39Z** (owner: wait compressed to a measured check, WSK-D77).
+- **The measurement.** For ~1.5 h, `conf.d/erp-legacy-name-log.conf` logged every request on the old name.
+  - It caught one real caller: CI's webdesk-api job, whose network-guarded real-issuer check fetched the old JWKS
+    (`jose/v5.10.0`). That was moved to the new name (main `0686274f`), along with the code and compose defaults.
+  - Afterwards the only old-name request was one browser `/`.
+- **Issuers.** `OIDC_ISSUER` (ERP `.env`) and `WEBDESK_CONTROL_OIDC_ISSUER` (`/etc/webdesk/.env.control`) list only
+  `https://erp.gaiada.com/idp/realms/gaiada`.
+  - Platform was recreated on 365: healthy, 0 issuer errors.
+  - The rootless WebDesk api was recreated; W1 through the control channel gives 404 at layer 4.
+- **Exceptions.** `$erp_legacy_keep` keeps only `/.well-known/` (ACME; the certificate still carries the old name).
+  - Old-name GETs to `/idp`, `/n8n`, `/login` and the webhook paths now 301 to erp.gaiada.com.
+  - POSTs are still served, because the map never redirects a POST.
+  - A redirect-following client (e.g. `jose`) still reaches the JWKS: 200 after 1 redirect.
+  - The temporary logging file is removed; its final log is in `/root/m4-backup/` on the box.
+- **Kept on purpose.**
+  - The 301 itself, and `server_name` with both names.
+  - The old origin in `ALLOWED_ORIGINS` (platform-ui) and in `WEBDESK_UPLOAD_CORS_ORIGINS`: harmless, and it lets
+    a stale browser tab finish.
+- **Rollback.** Backups are on the box:
+  - the ERP `.env.bak-b4-20261012T103614Z`;
+  - `/root/m4-backup/env.control.b4.*`;
+  - `/root/m4-backup/nginx-erp.gaiada.online.b4.*`.

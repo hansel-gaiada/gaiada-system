@@ -11,6 +11,71 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.22.0` - M5-W8b: a collection may declare its public route pattern (vocabulary 1.4.0) (2026-10-12) - DEV-VERIFIED
+
+- **The key:** an optional composition `ui.routePattern`, for example `/blog/{slug}/` or `/{locale}/insights/{slug}/`.
+- **The grammar:**
+  - a leading `/`, at most 200 characters, and a trailing slash allowed;
+  - each segment is a literal `[a-z0-9-]+`, exactly `{slug}` (required, once) or exactly `{locale}` (optional, at most once);
+  - no query, fragment, `..`, empty segment, uppercase or embedded token.
+- Anything else is refused at `schema.apply`.
+- `pagePathFor(pattern, {slug, locale, defaultLocale})` is exported from the vocabulary and its platform-nest copy. The default locale drops its `/{locale}` segment.
+- **Vocabulary 1.4.0 (MINOR):** the classifier rates 1.3.0 → 1.4.0 as MINOR with exactly that reason, and removing the key is MAJOR. Re-vendored into the api, blocks and platform-nest. The schema-draft prompt now mentions the key.
+- **Why:** the M5-W8 writer dashboard maps an item to its page path through this key. Until gaiada.com's collections set it (a schema apply), each article says "no route pattern" instead of showing numbers.
+- **Verified** on GitHub Actions 38250218990: the new `w8b-route-pattern` suite 48/48 plus every vocabulary suite.
+
+### platform-nest `0.92.0` - M5-W5: the writers' room calendar read (2026-10-12) - DEV-VERIFIED
+
+- **The read:** `GET …/content/sites/:tenantSlug/:siteId/editorial/calendar?from&to&collection&locale&authorSub`. It joins four sources:
+  - WebDesk's board (every page);
+  - scheduled items (the only source of `publish_at`);
+  - the site's pending WS4 publish/schedule requests;
+  - the W4 briefs.
+- **Authorization,** like W2d's board: W1c's `authorizeSite`, the wall, then Cerbos per (collection, locale), one resource per ask with at most 8 in flight, so never near the 50 limit. A scoped grant gets `countsWithheld`.
+- **Joins are limited to readable rows.** A request shows `requestedByMe`, never the filer. An unreadable brief shows `briefHidden`.
+- **Failures:** any failed part is a 503 `{error:"calendar_unavailable", reason:"<part>_unreadable"}`, never a partial list presented as complete. `truncated` is set past the caps.
+- MCP read `webdesk.editorial.calendar`.
+- **Verified** on GitHub Actions 38246080605: the DB/Cerbos/HTTP suite 7/7 and unit 33/33. The run's one red job was a 504 downloading promtool, green on re-run.
+
+### platform-ui `0.99.0` - M5-W5: the editorial calendar and the workflow board (2026-10-12) - DEV-VERIFIED
+
+- **`writers/calendar`:** month and week views. Items sit on one UTC day by publish time, a requested publish time, the planned date or the due date, with a legend that says which. Undated drafts go to an "Unscheduled" list.
+- **The board as a workflow:** columns by review state; cards show author, due date, the linked brief and a pending-request badge.
+- A read-only brief page.
+- Filters: collection, language, "assigned to me".
+- Every error, empty and withheld state is in words.
+- **Verified** on GitHub Actions 38246080605: the WebDesk Playwright suite against the built app passed 126, incl. 12 calendar specs with axe.
+- Not shown yet: the published version and pending swaps, which WebDesk's board doesn't send.
+
+### platform-ui `0.97.1` - the assistant FAB always opens the drawer, never the full page (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-up (the last flaky e2e from the full-suite sweep).
+
+- The FAB links to `/assistant`, which the `@drawer` intercepting route turns into a drawer. With the default prefetch the router could hold the FULL `/assistant` payload: on a hard-loaded `/tasks/t-4` the click opened the full page (1 in 6) or Escape's `back()` landed there (1 in 6), leaving no FAB to return focus to. The FAB now has `prefetch={false}`, so the click fetches the intercepted variant.
+- `assistant-drawer.spec.ts` clicks the FAB only once React has hydrated it (the `hydrated()` helper from `portal-website.spec.ts`).
+- Verified on sumopod (full Playwright, CI mode): the drawer spec repeated 8x, 33 passed, 0 failed (before: the Escape test failed 2 of 5). GitHub Actions run 38243752143 green (one unrelated wa-chat-bot timing flake re-run).
+
+### platform-ui `0.97.0` - M5-W6 UI: the AI assist drawer in the item editor (2026-10-12) - DEV-VERIFIED
+
+- **Where it shows:** an "Assist" card in the editor's side rail, only when the item read's `allowed.update` is true. It is hidden when `allowed` is absent, in client mode, for a deleted item and in create mode.
+- **Five kinds:** outline, meta description, FAQ, EN→ID first draft and alt text.
+- **Apply** puts a suggestion into the editor as an UNSAVED edit, and is disabled with the editor's own reason when the form is read-only or stale. The drawer never saves or publishes; the human saves through the normal save.
+- **Copy** always works.
+- The EN→ID draft is labelled "first draft — needs a human" and is Copy-only from an English item.
+- Every BFF refusal is in plain words: the budget says when it resets; unavailable, invalid output, a deleted item and permission errors each have their own words.
+- Cancel drops a late answer and says the call may still have counted.
+- No suggestion text goes to telemetry.
+- **Verified** on GitHub Actions 38236191276:
+  - the WebDesk Playwright suite against the built app, 114 passed, incl. 5 new assist specs (Apply changes the field and makes no write; the normal Save is the only write);
+  - vitest 1029 passed locally.
+  - The run's one red job was an unrelated wa-chat-bot time-window test; it went green on re-run.
+
+### webdesk `0.21.0` - codegen stops asking for bucket versioning it may not change (2026-10-12) - DEV-VERIFIED
+
+- `S3StorageAdapter.ensureBucket` sets versioning only on a bucket the call itself created, exactly like object lock. A pre-existing bucket's versioning and lock belong to `scripts/storage-bootstrap.mjs`, and the api key is refused `PutBucketVersioning` by design. Before this, codegen logged `versioning enable failed: AccessDenied` on every artifact write (4× in the 2026-10-12 `contract.regenerate` backfill, seen by M4).
+- M4 checked live, read-only, as the RustFS root: `artifacts` has versioning `Enabled` and object lock `Enabled` with a default `GOVERNANCE` 1-day rule. The no-overwrite guarantee was never at risk.
+- Verified on the Linux gate (sumopod, `m6vn`): webdesk-api 1796 passed / 0 failed / 3 skipped, incl. `storage-rustfs.spec.ts`.
+
 ### platform-nest `0.89.0` - M5-V4: content-decay alerts per page (off by default) (2026-10-12) - DEV-VERIFIED
 
 - **The detector** (`search/content-decay.ts`) is pure.

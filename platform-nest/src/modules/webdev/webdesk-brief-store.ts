@@ -140,6 +140,32 @@ export async function getBriefByItem(tenantId: string, siteId: string, itemId: s
   );
 }
 
+/**
+ * The calendar's join (M5-W5): the briefs of THIS site among `ids`, in one statement per 200 ids. Tenant and site are named in the
+ * statement (RLS behind it); an id of another site or company is simply absent. A database failure THROWS: the caller turns it into a
+ * 503 that names the briefs, never into "no briefs".
+ */
+export async function getBriefsByIds(tenantId: string, siteId: string, ids: readonly string[]): Promise<BriefRecord[]> {
+  const out: BriefRecord[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const part = ids.slice(i, i + 200);
+    const rows = await withTenants(
+      [tenantId],
+      async (c) => {
+        const r = await c.query(
+          `SELECT ${COLUMNS} FROM search_content_briefs
+            WHERE tenant_id = $1 AND webdesk_site_id = $2::uuid AND id = ANY($3::uuid[]) AND deleted_at IS NULL`,
+          [tenantId, siteId, part],
+        );
+        return r.rows;
+      },
+      MODULES,
+    );
+    for (const row of rows) out.push(asRecord(row));
+  }
+  return out;
+}
+
 export interface BriefListFilter {
   collectionKey?: string;
   locale?: string;

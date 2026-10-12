@@ -1,0 +1,244 @@
+{
+  "vocabularyVersion": "1.3.0",
+  "primitives": [
+    "text",
+    "richtext",
+    "media",
+    "relation",
+    "number",
+    "date",
+    "select",
+    "geo",
+    "group",
+    "boolean",
+    "markdown"
+  ],
+  "blocks": {
+    "hero": {
+      "fields": [
+        {
+          "name": "heading",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "subheading",
+          "primitive": "text"
+        },
+        {
+          "name": "media",
+          "primitive": "media"
+        },
+        {
+          "name": "ctaLabel",
+          "primitive": "text"
+        },
+        {
+          "name": "ctaHref",
+          "primitive": "text"
+        }
+      ]
+    },
+    "richText": {
+      "fields": [
+        {
+          "name": "content",
+          "primitive": "richtext",
+          "required": true
+        }
+      ]
+    },
+    "gallery": {
+      "fields": [
+        {
+          "name": "items",
+          "primitive": "media",
+          "multiple": true,
+          "required": true
+        },
+        {
+          "name": "caption",
+          "primitive": "text"
+        }
+      ]
+    },
+    "cta": {
+      "fields": [
+        {
+          "name": "heading",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "body",
+          "primitive": "text"
+        },
+        {
+          "name": "buttonLabel",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "buttonHref",
+          "primitive": "text",
+          "required": true
+        }
+      ]
+    },
+    "featureGrid": {
+      "fields": [
+        {
+          "name": "heading",
+          "primitive": "text"
+        },
+        {
+          "name": "items",
+          "primitive": "relation",
+          "relationTo": "feature",
+          "multiple": true,
+          "required": true
+        }
+      ]
+    },
+    "form": {
+      "fields": [
+        {
+          "name": "formKey",
+          "primitive": "relation",
+          "relationTo": "form_defs",
+          "required": true
+        }
+      ]
+    },
+    "testimonial": {
+      "fields": [
+        {
+          "name": "quote",
+          "primitive": "richtext",
+          "required": true
+        },
+        {
+          "name": "author",
+          "primitive": "text",
+          "required": true
+        },
+        {
+          "name": "role",
+          "primitive": "text"
+        },
+        {
+          "name": "avatar",
+          "primitive": "media"
+        }
+      ]
+    },
+    "faq": {
+      "fields": [
+        {
+          "name": "heading",
+          "primitive": "text"
+        },
+        {
+          "name": "items",
+          "primitive": "relation",
+          "relationTo": "faqItem",
+          "multiple": true,
+          "required": true
+        }
+      ]
+    },
+    "logoCloud": {
+      "fields": [
+        {
+          "name": "heading",
+          "primitive": "text"
+        },
+        {
+          "name": "logos",
+          "primitive": "media",
+          "multiple": true,
+          "required": true
+        }
+      ]
+    },
+    "fields": {
+      "fields": []
+    }
+  },
+  "envelopeShape": [
+    "error.detail",
+    "error.instance",
+    "error.requestId",
+    "error.status",
+    "error.title",
+    "error.type",
+    "item.blocks",
+    "item.collection",
+    "item.locale",
+    "item.localizations",
+    "item.meta.draft",
+    "item.meta.publishedAt",
+    "item.meta.updatedAt",
+    "item.meta.x",
+    "item.seo",
+    "item.slug",
+    "list.collection",
+    "list.items",
+    "list.locale",
+    "list.page.cursor",
+    "list.page.hasMore",
+    "list.page.limit"
+  ],
+  "multipleCapable": [
+    "boolean",
+    "date",
+    "geo",
+    "group",
+    "markdown",
+    "media",
+    "number",
+    "relation",
+    "richtext",
+    "select",
+    "text"
+  ],
+  "fieldDefKeys": [
+    "fields",
+    "itemKey",
+    "localized",
+    "multiple",
+    "name",
+    "options",
+    "primitive",
+    "relationTo",
+    "required",
+    "ui"
+  ],
+  "compositionKeys": [
+    "blocks",
+    "fields",
+    "lint",
+    "localized",
+    "singleton",
+    "ui"
+  ],
+  "fieldUiKeys": [
+    "clientEditable",
+    "help",
+    "label",
+    "readOnly",
+    "widget"
+  ],
+  "collectionUiKeys": [
+    "clientEditable",
+    "description",
+    "group",
+    "label",
+    "order",
+    "titleField"
+  ],
+  "lintKeys": [
+    "content",
+    "placeholders"
+  ]
+}

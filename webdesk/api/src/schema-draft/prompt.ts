@@ -78,7 +78,8 @@ export function buildSchemaDraftPrompt(input: { collectionKey: string; prd: stri
     `- "singleton": boolean. true means at most one item per locale (site settings, a footer).\n` +
     `- "localized": boolean, default true. false means items exist only in the default locale.\n` +
     `- "ui": editor presentation {"label": string (REQUIRED), "description"?: string, "group"?: string, "order"?: number, ` +
-    `"titleField"?: string naming a top-level field you declared, "clientEditable"?: boolean}. The "ui" keys are: ${COLLECTION_UI_KEYS.join(", ")}.\n` +
+    `"titleField"?: string naming a top-level field you declared, "clientEditable"?: boolean, "routePattern"?: string, e.g. "/blog/{slug}/" or "/{locale}/insights/{slug}/": the public page path of ` +
+    `the collection's items, lowercase literal segments plus {slug} (required) and optional {locale}; omit it when unsure}. The "ui" keys are: ${COLLECTION_UI_KEYS.join(", ")}.\n` +
     `- "clientEditable" (in a collection's "ui" and in a field's "ui"): true means the CLIENT's own staff may edit that content in the client ` +
     `portal. A field inherits its group's value, a top-level field inherits the collection's, and the default is false. Set it true ONLY for ` +
     `copy the PRD says the client maintains; leave structure, settings and anything SEO-critical false ("seo" is never client-editable). ` +

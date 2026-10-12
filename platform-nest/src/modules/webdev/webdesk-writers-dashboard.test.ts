@@ -153,7 +153,6 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
 
   beforeEach(async () => {
     zb.reset();
-    zb.listRowsCarryEditorial = true;
     umami = "ok";
     signer.calls.length = 0;
     webdeskZoneB.clearSiteCache();

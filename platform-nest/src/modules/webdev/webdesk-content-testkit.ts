@@ -53,7 +53,9 @@ export interface FakeItem {
   slug: string;
   headVersion: number;
   publishedVersion: number | null;
-  publishState: "draft" | "published" | "unpublished";
+  publishState: "draft" | "published" | "unpublished" | "scheduled";
+  /** M5-W5: the item's `publish_at` (item.list/item.get send it; the review board does not, as WebDesk's). */
+  publishAt?: string | null;
   deletedAt: string | null;
   /** WSK-49c: a version may carry `seo` and generic blocks (after the fields block); both default to empty, as before. */
   versions: Array<{ version: number; fields: unknown; contentHash: string; createdBy: string; createdAt: string; note: string | null; seo?: Record<string, unknown>; blocks?: unknown[] }>;
@@ -133,8 +135,6 @@ export class FakeZoneB {
   private readonly mintKeys = new Set<string>();
   /** M5-L1d: the form definitions by `${siteId}:${key}`, as WebDesk's `forms.define` stores them (the id survives a redefinition). */
   readonly forms = new Map<string, { formId: string; key: string; siteId: string; schema: Record<string, unknown>; notify: unknown; retentionDays: number; consentNoticeVersion: string; createdAt: string; updatedAt: string }>();
-  /** M5-W8: `item.list` rows carry the `editorial` member (WebDesk >= M5-W2b does). Off by default so older suites see the rows they always saw. */
-  listRowsCarryEditorial = false;
   /** Throw this from the NEXT `send` (a breaker-open, a transport failure, ...). Persistent until cleared. */
   failWith: Error | null = null;
   /** Respond to the NEXT write with this instead of applying it. */
@@ -172,7 +172,6 @@ export class FakeZoneB {
     this.nextWriteResponse = null;
     this.dropAfterApply = false;
     this.dropBeforeApply = false;
-    this.listRowsCarryEditorial = false;
   }
 
   /** A PRE-0009 row: content lives only in the projection, `head_version` is 0 and there is no version row. */
@@ -232,7 +231,7 @@ export class FakeZoneB {
       headVersion: i.headVersion,
       publishedVersion: i.publishedVersion,
       publishState: i.publishState,
-      publishAt: null,
+      publishAt: i.publishAt ?? null,
       unpublishAt: null,
       deletedAt: i.deletedAt,
       updatedAt: new Date().toISOString(),
@@ -334,12 +333,10 @@ export class FakeZoneB {
       case "item.list": {
         const q = req.query ?? {};
         const rows = [...this.items.values()].filter(
-          (i) => i.siteId === p.siteId && i.collectionKey === p.key && !i.deletedAt && (!q.locale || i.locale === q.locale) && (!q.q || i.slug.includes(q.q)),
+          (i) => i.siteId === p.siteId && i.collectionKey === p.key && !i.deletedAt && (!q.locale || i.locale === q.locale) && (!q.q || i.slug.includes(q.q)) && (!q.state || i.publishState === q.state),
         );
-        return ok({
-          items: rows.map((i) => (this.listRowsCarryEditorial && i.editorial ? { ...this.itemJson(i), editorial: i.editorial } : this.itemJson(i))),
-          page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) },
-        });
+        // M5-W5: `editorial` rides a row that has one, as WebDesk's item.list sends it.
+        return ok({ items: rows.map((i) => ({ ...this.itemJson(i), ...(i.editorial ? { editorial: i.editorial } : {}) })), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
       }
       case "item.get": {
         const i = this.items.get(p.itemId);
@@ -360,12 +357,17 @@ export class FakeZoneB {
       }
       case "editorial.board": {
         // M5-W2d: every item of the site that carries an editorial member, ALL collections (the BFF filters by Cerbos).
-        const rows = [...this.items.values()].filter((i) => i.siteId === p.siteId && i.editorial);
+        const all = [...this.items.values()].filter((i) => i.siteId === p.siteId && i.editorial);
+        // M5-W5: keyset paging as WebDesk's board does (here by position; the cursor is opaque to the BFF). `limit` defaults to everything.
+        const size = req.query?.limit ? Number(req.query.limit) : all.length;
+        const at = req.query?.cursor ? Number(req.query.cursor) : 0;
+        const rows = all.slice(at, at + size);
+        const more = at + size < all.length;
         return ok({
           items: rows.map((i) => ({ itemId: i.itemId, collectionKey: i.collectionKey, locale: i.locale, slug: i.slug, title: null, headVersion: i.headVersion, publishState: i.publishState, editorial: i.editorial })),
-          counts: { draft: rows.length, in_review: 0, changes_requested: 0, approved: 0 },
+          counts: { draft: all.length, in_review: 0, changes_requested: 0, approved: 0 },
           policies: [...new Set(rows.map((i) => i.collectionKey))].map((collectionKey) => ({ collectionKey, reviewRequired: true, seoSignoffRequired: false, updatedBy: null, updatedAt: new Date().toISOString() })),
-          page: { cursor: null, hasMore: false, limit: 50 },
+          page: { cursor: more ? String(at + size) : null, hasMore: more, limit: size },
         });
       }
       case "editorial.history": {
