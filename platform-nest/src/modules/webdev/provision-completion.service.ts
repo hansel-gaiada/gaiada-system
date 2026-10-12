@@ -335,7 +335,18 @@ async function pinContractSnapshot(tenantId: string, fetchedBy: string | null, s
     if (r.outcome === "created" || r.outcome === "idempotent") {
       return { outcome: "pinned", snapshotId: r.snapshot.id, contractVersion: r.snapshot.contractVersion };
     }
-    return { outcome: "not_yet", reason: r.outcome === "hash_mismatch" ? "contract_hash_mismatch" : "contract_determinism_breach" };
+    switch (r.outcome) {
+      case "hash_mismatch":
+        return { outcome: "not_yet", reason: "contract_hash_mismatch" };
+      case "block_library_hash_mismatch":
+        return { outcome: "not_yet", reason: "contract_block_library_hash_mismatch" };
+      case "determinism_breach":
+        return { outcome: "not_yet", reason: "contract_determinism_breach" };
+      default: {
+        const never: never = r;
+        throw new Error(`unhandled refresh outcome: ${JSON.stringify(never)}`);
+      }
+    }
   } catch (err) {
     if (err instanceof WebdevControlEgressError) {
       // Codegen is async (M6-P4r-b): until latest.json exists WebDesk answers 404. The message is

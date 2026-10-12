@@ -32,6 +32,10 @@ export interface ContractBundleMeta {
     /** M6-P4b0 — the block-renderer library tarball, the fifth artifact. `null` for a snapshot whose
      *  WebDesk pointer predates it (the far side omits the key, or sends null). */
     blockLibraryUrl: string | null;
+    /** M6-P4b0b — WebDesk's claim of the tarball's sha256 (64 lowercase hex, no `sha256:` prefix). `null` when the far
+     *  side sent none (an older WebDesk, or a pointer with no tarball). The mirror verifies the downloaded bytes
+     *  against it BEFORE any write; it is never part of `contentHash`. */
+    blockLibrarySha256: string | null;
   };
   contentHash: string; // Zone B's OWN claim — the mirror recomputes and verifies this, never trusts it
   generatedAt: string;

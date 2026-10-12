@@ -31,6 +31,8 @@ function redact(text: string, secrets: string[]): string {
   return out;
 }
 
+const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.length > 0;
 }
@@ -54,11 +56,20 @@ function toBundleMeta(raw: unknown): ContractBundleMeta | null {
   const sdkPhpUrl = isNonEmptyString(art.sdkPhpUrl) ? art.sdkPhpUrl : null; // null until P6 (D-10)
   // M6-P4b0 — additive: an older WebDesk (or an older pointer) has no such key, which is `null`, never a failure.
   const blockLibraryUrl = isNonEmptyString(art.blockLibraryUrl) ? art.blockLibraryUrl : null;
+  // M6-P4b0b — additive: absent or null is an older WebDesk (`null`, accepted as before). A value that IS present
+  // must be exactly 64 lowercase hex characters; anything else (wrong length, uppercase, a `sha256:` prefix, not a
+  // string) is a protocol error, refused like every other malformed field: the caller sees an unrecognized shape.
+  // Uppercase is rejected rather than normalized — WebDesk's contract is lowercase, and a departure is a defect.
+  let blockLibrarySha256: string | null = null;
+  if (art.blockLibrarySha256 !== undefined && art.blockLibrarySha256 !== null) {
+    if (typeof art.blockLibrarySha256 !== "string" || !SHA256_HEX_RE.test(art.blockLibrarySha256)) return null;
+    blockLibrarySha256 = art.blockLibrarySha256;
+  }
   return {
     version: r.version,
     vocabularyVersion: r.vocabularyVersion,
     blockLibrary: { package: bl.package, version: bl.version, range: bl.range },
-    artifacts: { sdkTsUrl: art.sdkTsUrl, sdkPhpUrl, openapiUrl: art.openapiUrl, contractMdUrl: art.contractMdUrl, blockLibraryUrl },
+    artifacts: { sdkTsUrl: art.sdkTsUrl, sdkPhpUrl, openapiUrl: art.openapiUrl, contractMdUrl: art.contractMdUrl, blockLibraryUrl, blockLibrarySha256 },
     contentHash: r.contentHash,
     generatedAt: r.generatedAt,
   };
