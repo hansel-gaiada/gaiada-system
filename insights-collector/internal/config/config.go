@@ -53,10 +53,11 @@ const TombstoneRetention = 14 // months
 // is a promise in the notice, so REPLAY_RETENTION_DAYS can shorten it but never lengthen it.
 const MaxReplayRetention = 30 * 24 * time.Hour
 
-// DefaultConsentEventNames are the event names the consented channel accepts when CONSENT_EVENT_NAMES is empty:
-// the site's goal events (design 5.1) plus the form steps and the language switch. ASSUMPTION: the site's own
-// list is gaiada-web-revamp/src/scripts/tracking/events.ts, which this repository does not hold; V3-j confirms it.
-const DefaultConsentEventNames = "generate_lead,lead_form_start,lead_form_step,lead_form_send,cta_click,click_whatsapp,click_phone,click_email,section_view,language_switch"
+// DefaultConsentEventNames are the event names the consented channel accepts when CONSENT_EVENT_NAMES is empty.
+// CONFIRMED by M5-V3-j (2026-10-13): exactly the site's `EventName` union (gaiada-web-revamp
+// src/scripts/tracking/events.ts) minus `web_vitals`, whose parameters are measurements, not allowed data keys. The
+// first guess here said `language_switch`; the site's name is `switch_language`, so language switches were dropped.
+const DefaultConsentEventNames = "section_view,cta_click,click_whatsapp,click_phone,click_email,click_directions,save_contact,switch_language,lead_form_start,lead_form_step,lead_form_send,generate_lead,page_not_found"
 
 // Config is the validated configuration.
 type Config struct {
