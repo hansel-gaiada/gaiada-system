@@ -470,13 +470,17 @@ export class AutomationApprovalsController {
     // before the decide UPDATE, so a refusal leaves the row `pending` and nothing executes. The executor
     // re-checks the stored `decided_by` as a second wall. Approve only: rejecting executes nothing.
     // Runs after authorize(), so a caller who may not decide at all still gets the plain 403.
+    // A principal with no user id cannot be told apart from the excluded human, so it is refused.
     if (executable?.approverCheck) {
-      const verdict = await withTenants([tenantId], (c) =>
-        runApproverCheck(c, executable, toolArgsOf(existing.rows[0].tool_args), {
-          userId: req.principal.userId,
-          ...(req.principal.actFor?.userId ? { actForUserId: req.principal.actFor.userId } : {}),
-        }),
-      );
+      const approverId = req.principal.userId;
+      const verdict = !approverId
+        ? { ok: false as const, reason: "approver_unknown" }
+        : await withTenants([tenantId], (c) =>
+          runApproverCheck(c, executable, toolArgsOf(existing.rows[0].tool_args), {
+            userId: approverId,
+            ...(req.principal.actFor?.userId ? { actForUserId: req.principal.actFor.userId } : {}),
+          }),
+        );
       if (!verdict.ok) {
         throw new ForbiddenException({
           message: `${verdict.reason}: you may not approve this request`,
