@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.21.0` - codegen stops asking for bucket versioning it may not change (2026-10-12) - DEV-VERIFIED
+
+- `S3StorageAdapter.ensureBucket` sets versioning only on a bucket the call itself created, exactly like object lock. A pre-existing bucket's versioning and lock belong to `scripts/storage-bootstrap.mjs`, and the api key is refused `PutBucketVersioning` by design. Before this, codegen logged `versioning enable failed: AccessDenied` on every artifact write (4× in the 2026-10-12 `contract.regenerate` backfill, seen by M4).
+- M4 checked live, read-only, as the RustFS root: `artifacts` has versioning `Enabled` and object lock `Enabled` with a default `GOVERNANCE` 1-day rule. The no-overwrite guarantee was never at risk.
+- Verified on the Linux gate (sumopod, `m6vn`): webdesk-api 1796 passed / 0 failed / 3 skipped, incl. `storage-rustfs.spec.ts`.
+
+### platform-nest `0.89.0` - M5-V4: content-decay alerts per page (off by default) (2026-10-12) - DEV-VERIFIED
+
+- **The detector** (`search/content-decay.ts`) is pure.
+  - It compares 28-day windows ending 3 days back: against the window before, and against the same window a year ago.
+  - Each metric has its own volume and absolute floors (clicks 30/30%/15; impressions 500/30%/250; views 100/30%/40; position worse by 4+ places).
+  - A seasonal dip is not flagged, and a slow year-on-year decay is.
+  - Missing data never alerts and is never read as zero.
+  - Each finding carries its reason in words.
+- **Migration `202610122200_search_decay_findings`:** FORCE RLS plus the `search` scope; idempotent per window; at most one live finding per page. States: open, acknowledged, resolved (on recovery), refresh brief filed.
+- **A daily sweep,** ON only when `SEARCH_DECAY_ENABLED` is exactly `1` (passed through compose with an empty default).
+  - With the flag off it starts no timer, makes no DB call and no fetch.
+  - It reads stored Search Console rows and our own Umami, so it spends no vendor money.
+  - It runs under one advisory lock.
+- **Routes:** list / acknowledge / file a refresh brief (as a `search_content_briefs` draft), with 3 MCP tools on the existing `resource_search_property` kind. Property owners get a bell (ids, path and reason only).
+- **Verified** on GitHub Actions 38236096298 (main + W4 + V4): DB 12/12, job 11/11, detector 17/17.
+
+### platform-ui `0.96.3` - the critical-status text passes contrast everywhere; the top-bar user menu is named by the user; the e2e suite is green again (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-up: the 57 pre-existing failures of the full Playwright suite (CI mode) are down to none.
+
+- **`--status-critical-fg` #A0511F → #984D1D** (same hue): axe failed 4 checks on #A0511F text over the #ede3d6 tint at 11px (4.48:1). Now 5.30:1 on `--n-11`, 4.85:1 on that tint, 4.57:1 even on `--n-10`.
+- **The compact (top-bar) user menu is named by the user.** Since 9562f2c2 the trigger showed initials only, so its accessible name was "CH"; it now carries `aria-label={name}`. Unit-tested.
+- **Stale e2e brought up to date**, each with the commit that changed the UI: the menu follows the company's pack (PV1-04: the agency tests switch to the agency company; "Systems" is "Platform"), the real repository card is "Provisioned by the pipeline", the demo GitHub org, the org-registry note, the M6-P4f frameworks (astro / node / wp), and two assertions that depended on test order in the shared demo store.
+- Verified: the three affected spec files on sumopod (CI mode, release 365 + this change): 57 passed, 0 failed. GitHub Actions run 38235278710 green. The assistant-drawer Escape test is FLAKY (failed in earlier runs, passed here; a FAB click before hydration does a full navigation), tracked on the board.
+
 ### platform-nest `0.88.0` - M5-W4: writers' room briefs from `search`, linked to a WebDesk draft (2026-10-12) - DEV-VERIFIED
 
 - **Migration `202610122300_search_content_briefs_webdesk_link`.**

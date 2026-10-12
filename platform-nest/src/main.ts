@@ -152,6 +152,7 @@ import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifi
 // principal is minted `assurance: "low"` by construction, so giving n8n a path to vendor spend would
 // have meant weakening two controls on the money path. Dark by default — see the config comment.
 import { startSearchPullSchedulerLoop } from "./modules/search/pull-scheduler";
+import { startContentDecayLoop } from "./modules/search/content-decay-job";
 // MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
 // master gate): starting it unconditionally would still send nothing today (resolveAdapter falls
 // back to dev-log when disabled, provider.ts), but not starting it at all is the honest "module is
@@ -777,6 +778,12 @@ async function bootstrap(): Promise<void> {
         "(cadence, tool toggles and budget caps all come from each engagement's tool_scope; " +
         "ledger attribution requested_by=NULL correlationId=sched:<tool>)",
     );
+  }
+  // M5-V4: the daily content-decay job. Dark by default: ON only when SEARCH_DECAY_ENABLED is exactly "1"
+  // (an empty compose default is OFF); startContentDecayLoop returns null without a timer or any call otherwise.
+  if (startContentDecayLoop()) {
+    // eslint-disable-next-line no-console
+    console.log("search content-decay job on (SEARCH_DECAY_ENABLED=1): detects falling pages daily; Umami reads only.");
   }
   // MAIL-04: dark by default (config.mail.enabled reads MAIL_ENABLED). When on, the loop still
   // resolves to the dev-log adapter per stream until real per-stream host/creds are configured
