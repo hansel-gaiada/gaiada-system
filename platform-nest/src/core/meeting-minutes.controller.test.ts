@@ -183,10 +183,12 @@ describe.skipIf(!TEST_URL)("PV4-05: meeting minutes shared with the client (staf
     const r = await put(member, mP1, "## Kickoff\n- agreed the launch date");
     expect(r.statusCode).toBe(200);
     const out = r.json() as { clientId: string; shareable: boolean; minutes: { id: string; status: string; bodyMd: string; clientVisible: boolean } };
+    // Recorded FIRST: later tests need the real id even if an assertion below fails, so one broken rule cannot make the
+    // isolation tests pass vacuously by probing `/portal/meetings/undefined`.
+    minutes.P1 = out.minutes.id;
     expect(out.clientId).toBe(clientA);
     expect(out.shareable).toBe(true);
     expect(out.minutes).toMatchObject({ status: "draft", bodyMd: "## Kickoff\n- agreed the launch date", clientVisible: false });
-    minutes.P1 = out.minutes.id;
     expect(await row(mP1)).toMatchObject({ status: "draft", drafted_by: null, updated_by: member, shared_at: null, shared_by: null });
   });
 
@@ -205,6 +207,7 @@ describe.skipIf(!TEST_URL)("PV4-05: meeting minutes shared with the client (staf
   });
 
   it("DRAFT => 404 on the portal: detail 404 and absent from the list, for an in-scope contact", async () => {
+    expect(minutes.P1, "the draft's id was recorded by the save test").toMatch(/^[0-9a-f-]{36}$/);
     expect((await portalGet(wideA, minutes.P1)).statusCode).toBe(404);
     expect(await portalIds(wideA)).not.toContain(minutes.P1);
   });
