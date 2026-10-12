@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.13.11` - the live AI gateway reaches OpenRouter (2026-10-13) - DEV-VERIFIED
+
+- **Found while running the M6 P4 gate:** every LLM call on the live ERP had been returning the echo fallback (`[echo — no provider key configured]`) since the Ollama Cloud key died on 2026-09-30. Gemini and Claude have no keys; the OpenAI-compatible slot pointed at Ollama Cloud. So meeting summaries, PRD/report/scope extraction and design prototypes were placeholders.
+- **The owner chose** the company OpenRouter key with GLM 5.3 Flash. The box `.env` now sets `OPENAI_BASE_URL=https://openrouter.ai/api/v1`, `OPENAI_MODEL=z-ai/glm-5.3-flash` and the key (backup kept).
+- `docker-compose.vps.yml` adds `openrouter.ai` to the gateway's `EGRESS_ALLOWLIST`; without it the gateway logged `egress blocked (not on allowlist): openrouter.ai` and fell back to the echo again. `ollama.com` stays listed for a switch back.
+- Verified live 2026-10-13 on gda-aicenter: the box compose received the same allow-list line (hotfix, backup kept) and only the gateway was recreated; `POST /complete` from the platform container answered HTTP 200 with a real reply ("the live gateway is working"), provider `openai` (OpenRouter), no echo fallback.
+
 ### platform-nest `0.105.0` / mcp-hub `0.15.0` / automation `0.6.0` - `wf:billing-chaser`: a daily read-and-remind job for contracts and payment claims (2026-10-13) - PROTOTYPED
 
 Owner ruling PV-D28 (the owner delegated the naming).

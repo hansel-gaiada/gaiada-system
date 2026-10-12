@@ -192,7 +192,8 @@ services:
       # empty disables the local provider and the chain goes straight to cloud/echo.
       OLLAMA_URL: ${OLLAMA_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
-      # OpenAI-compatible cloud brain (Ollama Cloud https://ollama.com/v1). When OPENAI_API_KEY is
+      # OpenAI-compatible cloud brain (live since 2026-10-13: OpenRouter https://openrouter.ai/api/v1 with
+      # z-ai/glm-5.3-flash, set in the box .env; previously Ollama Cloud, whose key died 2026-09-30). When OPENAI_API_KEY is
       # set, LLM_CHAIN below routes text to it first; media/embeds fail over to whisper/gemini/ollama.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -287,7 +288,10 @@ services:
       HERMES_TOKEN: ${HERMES_TOKEN:-}
       # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
       DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
-      EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,whisper,host.docker.internal
+      # openrouter.ai added 2026-10-13 (owner): the live OpenAI-compatible slot is the company OpenRouter key with
+      # GLM 5.3 Flash (OPENAI_BASE_URL/OPENAI_MODEL in the box .env), because the Ollama Cloud key has been dead since
+      # 2026-09-30 and every LLM call was falling back to the echo provider. ollama.com stays for a later switch back.
+      EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,openrouter.ai,whisper,host.docker.internal
       # WA-hardening D: telemetry is a BASE default (not only the observability.yml overlay) so it
       # survives a plain `up -d --build ai-gateway` with vps+local files only. Fail-soft (WS9): a
       # no-op unless OTEL_ENABLED is truthy; unreachable collector just drops spans, never crashes.
