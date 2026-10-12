@@ -1,6 +1,10 @@
 # PV-5 provider comparison: certified e-signature and hosted payment checkout
 
-> **Status:** `PROPOSED` (ticket PV5-03, docs only). The picks below wait for the owner's approval.
+> **Status:** `DECIDED` (ticket PV5-03, docs only). **Owner ruling PV-D25, 2026-10-12:** Midtrans is
+> approved for payments. VIDA is approved as the certified e-signature provider **for when it is first
+> needed**: certified signing (PV5-11) is parked until counsel sets a threshold or a client asks.
+> Building our own *certified* signature was rejected, because certified status is recognition as a
+> PSrE (Permenkominfo 11/2022), not software.
 > **Date read:** every fact below was read on **2026-10-12** from the linked public page, unless the
 > cell says otherwise. Pricing pages change; what is quoted is what was seen that day.
 > **Reads with:** [`2026-10-12-pv5-contracts-billing-tickets.md`](../plans/2026-10-12-pv5-contracts-billing-tickets.md)
