@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.85.0` - M5-G5d: the assistant stores, shows and streams no raw identifiers from a privacy tool's suspended intent (2026-10-12) - DEV-VERIFIED
+
+The last gap of G5b/G5c (built by the M5 session). No schema change.
+
+- **Before:** when the hub suspended an `agency_privacy.*` call for confirmation, the assistant held the subject's raw email and phone for about 15 minutes. They sat in `assistant_write_intents.tool_args`, the `confirm_required` frame and the broker's memory.
+- **Now:** `storableIntentArgs` applies G5b's idempotent `minimiseToolArgs` in three places: in the broker before the draft and the frame, in the handoff harvest, and at the `assistant_write_intents` INSERT. So even an older runner that sends raw values cannot store them.
+- **The confirm chip** still files the approval. A second admin approves, and the erase runs by `approvalId`, rebuilding the subject from the ledger hashes.
+- **A malformed identifier** drafts nothing: a typed `intent_invalid` stream error, no chip, no row.
+- **Not covered:** text a person types into the chat is kept as typed (an owner decision).
+- **Verified on GitHub Actions 38227924047:**
+  - `assistant-privacy-intent.db.test.ts` 4/4: handoff and chat paths, a raw-sending runner, the right lead erased, a bystander untouched, and every assistant/approval/outbox/notification/ledger table and the logs free of the identifiers.
+  - Unit 10/10. Reverting the fix fails 4 of them.
+
+### ai-agents `0.14.0` - M5-G5d: a suspended privacy intent hands over only the minimised args (2026-10-12) - DEV-VERIFIED
+
+- `SuspendedIntent.args` for an `agency_privacy.*` call is now the ERP's own minimised shape: `{minimised, kind, identifiers, subject:{hashes, hints}}`. That covers the 15-minute in-memory store and `GET /goals/:id`. A malformed identifier empties the shape, so the ERP refuses it.
+- G5c's KNOWN-GAP test now asserts the gap is closed. Tools without a policy are unchanged.
+- ai-agents 404 passed locally; GitHub Actions 38227924047 green.
+
 ### automation (n8n) `0.5.2` - the Zone B intake answers 502 when the ERP refuses a record, and reads the hub's answer at all (2026-10-12) - DEV-VERIFIED
 
 `automation/workflows/wd-zoneb-intake.json` (WebDesk M3).
