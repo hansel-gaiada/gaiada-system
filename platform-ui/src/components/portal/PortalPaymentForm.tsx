@@ -12,6 +12,12 @@ import { money } from "@/lib/portal";
 // unchanged, which reads as "the button is broken" on the single most consequential thing a client does
 // here. `useActionState` carries the server's own message back and puts it above the form.
 //
+// ── NO "CARD" (PV5-09, design decision 17) ────────────────────────────────────────────────────────
+// This form records a payment the client made elsewhere. "Card" on a manual claim was a label, not a payment method: a card
+// is paid through the provider's hosted checkout (PV5-10), which confirms itself, not through a claim finance verifies
+// against a bank statement. The choices here are the ones a person can actually report: bank transfer, cash, other. The
+// server's enum still accepts `card`, so rows recorded before this change keep reading.
+//
 // ── WHAT THIS FORM DOES NOT CLAIM ────────────────────────────────────────────────────────────────
 // It never says "paid". It records a CLAIM that finance verifies — the row lands `status='pending'`, the
 // balance does not move, and the invoice's status is untouched (rules 2-3 in the BFF's header). The copy
@@ -78,7 +84,6 @@ export function PortalPaymentForm({ invoiceId, balance, currency }: {
         <label className="cp-field__label" htmlFor="pay-method">How you paid</label>
         <select id="pay-method" className="cp-select" name="method" defaultValue="bank_transfer" disabled={pending}>
           <option value="bank_transfer">Bank transfer</option>
-          <option value="card">Card</option>
           <option value="cash">Cash</option>
           <option value="other">Other</option>
         </select>

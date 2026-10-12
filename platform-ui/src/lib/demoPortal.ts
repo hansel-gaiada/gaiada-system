@@ -119,7 +119,20 @@ interface DemoInvoice {
   id: string; status: string; currency: string; total: number;
   periodStart: string; periodEnd: string; issuedAt: string; clientName: string; clientId: string;
   lines: Array<{ description: string; hours: number; rate: number; amount: number }>;
+  // PV5-04/PV5-07: the invoice of record. An issued invoice carries its number, dates, the frozen issuer and, once rendered,
+  // its PDF (`null` = not rendered yet, which the page says as "being prepared").
+  invoiceNo: string; issueDate: string; dueDate: string; subtotal: number; taxTotal: number | null; taxCode: string | null;
+  taxRate: number | null; pdfFileId: string | null;
 }
+
+/** The issuer as frozen at issue. Invented placeholders: the repo is public, and nothing here is a real company or account. */
+const DEMO_ISSUER = {
+  legalName: "Example Agency Ltd",
+  address: "1 Example Street\nExample City 00000",
+  npwp: "00.000.000.0-000.000",
+  isPkp: true,
+  bank: { name: "Example Bank", accountName: "Example Agency Ltd", accountNo: "0000000000" },
+};
 
 const INVOICES: DemoInvoice[] = [
   {
@@ -130,18 +143,25 @@ const INVOICES: DemoInvoice[] = [
       { description: "Website relaunch — design", hours: 96, rate: 350_000, amount: 33_600_000 },
       { description: "Website relaunch — build", hours: 48, rate: 300_000, amount: 14_400_000 },
     ],
+    invoiceNo: "DEMO/2026/0014", issueDate: day(-28), dueDate: day(2), subtotal: 48_000_000, taxTotal: null, taxCode: null,
+    taxRate: null, pdfFileId: "file-inv-2026-014",
   },
   {
-    id: "inv-2026-021", status: "sent", currency: "IDR", total: 22_500_000,
+    // The taxed one (subtotal 22,500,000 + PPN 11% = 2,475,000), whose PDF has NOT been rendered yet: "being prepared".
+    id: "inv-2026-021", status: "sent", currency: "IDR", total: 24_975_000,
     periodStart: day(-30), periodEnd: day(-1), issuedAt: stamp(-2),
     clientName: "Northwind Traders", clientId: CLIENT_ID,
     lines: [{ description: "Brand refresh — discovery", hours: 75, rate: 300_000, amount: 22_500_000 }],
+    invoiceNo: "DEMO/2026/0021", issueDate: day(-2), dueDate: day(28), subtotal: 22_500_000, taxTotal: 2_475_000, taxCode: "PPN",
+    taxRate: 11, pdfFileId: null,
   },
   {
     id: "inv-2025-088", status: "paid", currency: "IDR", total: 15_000_000,
     periodStart: day(-150), periodEnd: day(-121), issuedAt: stamp(-118),
     clientName: "Northwind Traders", clientId: CLIENT_ID,
     lines: [{ description: "Campaign — Q4 2025", hours: 50, rate: 300_000, amount: 15_000_000 }],
+    invoiceNo: "DEMO/2025/0088", issueDate: day(-118), dueDate: day(-88), subtotal: 15_000_000, taxTotal: null, taxCode: null,
+    taxRate: null, pdfFileId: "file-inv-2025-088",
   },
 ];
 
@@ -166,6 +186,8 @@ interface DemoContract {
   sentAt: string | null; signedAt: string | null; projectId: string | null; projectName: string | null;
   bodyMd: string | null; fileId: string | null;
   signatures: Array<{ party: "provider" | "client"; signerName: string | null; signerTitle: string | null; signedAt: string }>;
+  // PV5-06/PV5-07: the SHA-256 fixed at send, the tier, and the sealed signed copy (null until rendered).
+  contentSha256: string; signatureTier: "attested" | "certified"; signedCopyFileId: string | null;
 }
 
 const CONTRACTS: DemoContract[] = [
@@ -178,6 +200,8 @@ const CONTRACTS: DemoContract[] = [
       { party: "provider", signerName: "D. Syrowatka", signerTitle: "Director", signedAt: stamp(-91) },
       { party: "client", signerName: "Dana Whitfield", signerTitle: "Marketing Lead", signedAt: stamp(-90) },
     ],
+    contentSha256: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90", signatureTier: "attested",
+    signedCopyFileId: "file-ctr-msa-signed",
   },
   {
     // The actionable one: sent, provider already countersigned, waiting on the client. This is the
@@ -202,6 +226,8 @@ const CONTRACTS: DemoContract[] = [
     ].join("\n"),
     fileId: null,
     signatures: [{ party: "provider", signerName: "D. Syrowatka", signerTitle: "Director", signedAt: stamp(-2) }],
+    contentSha256: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0", signatureTier: "attested",
+    signedCopyFileId: null,
   },
   {
     id: "ctr-sow-brand", title: "Statement of Work — Brand refresh", reference: "GDA-2026-019", version: 1,
@@ -210,6 +236,8 @@ const CONTRACTS: DemoContract[] = [
     bodyMd: "## Scope\n\nBrand audit, positioning and a refreshed visual identity system.",
     fileId: null,
     signatures: [],
+    contentSha256: "9e8d7c6b5a49382716059e8d7c6b5a49382716059e8d7c6b5a49382716059e8d", signatureTier: "attested",
+    signedCopyFileId: null,
   },
 ];
 
@@ -317,6 +345,17 @@ function pendingSum(invoiceId: string): number {
 function isOverdue(inv: DemoInvoice): boolean {
   return inv.status === "sent" && inv.periodEnd < day(0);
 }
+/** The invoice-of-record fields, exactly as the BFF adds them (PV5-04, PV5-07). `payable`: issued, `sent`, and something
+ *  still owed after the claims being verified. */
+function recordFields(inv: DemoInvoice) {
+  const paid = confirmedSum(inv.id);
+  const outstanding = Math.round((inv.total - paid) * 100) / 100;
+  return {
+    invoiceNo: inv.invoiceNo, issueDate: inv.issueDate, dueDate: inv.dueDate, subtotal: inv.subtotal,
+    taxTotal: inv.taxTotal, taxCode: inv.taxCode, issuer: DEMO_ISSUER, outstanding,
+    payable: inv.status === "sent" && outstanding - pendingSum(inv.id) > 0, pdfFileId: inv.pdfFileId,
+  };
+}
 function invoiceSummary(inv: DemoInvoice) {
   const paid = confirmedSum(inv.id);
   return {
@@ -324,6 +363,7 @@ function invoiceSummary(inv: DemoInvoice) {
     periodStart: inv.periodStart, periodEnd: inv.periodEnd, issuedAt: inv.issuedAt,
     clientName: inv.clientName, paid, pendingConfirmation: pendingSum(inv.id),
     balance: Math.round((inv.total - paid) * 100) / 100, overdue: isOverdue(inv),
+    ...recordFields(inv),
   };
 }
 function contractSummary(k: DemoContract) {
@@ -335,6 +375,7 @@ function contractSummary(k: DemoContract) {
     clientSigned: k.signatures.some((s) => s.party === "client"),
     providerSigned: k.signatures.some((s) => s.party === "provider"),
     termEnded: k.endsOn < day(0),
+    signedCopyFileId: k.signedCopyFileId,
   };
 }
 
@@ -500,8 +541,11 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
     const inv = INVOICES.find((x) => x.id === invM[1]);
     if (!inv) return notFound("invoice not found");
     const paid = confirmedSum(inv.id);
+    const { taxRate, ...rest } = inv;
     return ok({
-      ...inv, payments: paymentsOf(inv.id), paid, balance: Math.round((inv.total - paid) * 100) / 100,
+      ...rest, payments: paymentsOf(inv.id), paid, balance: Math.round((inv.total - paid) * 100) / 100,
+      ...recordFields(inv),
+      taxLines: inv.taxTotal != null && inv.taxCode ? [{ code: inv.taxCode, rate: taxRate, base: inv.subtotal, amount: inv.taxTotal }] : [],
     });
   }
   const payM = seg.match(/^invoices\/([^/]+)\/payments$/);
@@ -551,6 +595,9 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       canSign: k.status === "sent" && !s.clientSigned && !s.termEnded,
       viewOnly: false,
       signatures: k.signatures,
+      contentSha256: k.contentSha256,
+      signatureTier: k.signatureTier,
+      signedCopyFileId: k.signedCopyFileId,
       document: k.fileId
         ? { id: k.fileId, filename: `${k.reference}.pdf`, contentType: "application/pdf", byteSize: 214_882, url: null }
         : null,
@@ -570,6 +617,16 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       return ok({ id: k.id, party: "client", complete: k.status === "signed", alreadySigned: true });
     }
     if (k.status !== "sent") return bad(`this agreement is ${k.status} and cannot be signed`);
+    // PV5-06: the client signs what they saw. An echo that differs from the hash fixed at send is refused with a 409 and
+    // NOTHING is written, so the stale-page path is drivable in the browser. (The demo is lenient about a MISSING echo,
+    // unlike the real route, which answers 400 `content_hash_required`: the unit tests post without one.)
+    const echoed = String(parsed.contentSha256 ?? "").trim().toLowerCase();
+    if (echoed && echoed !== k.contentSha256.toLowerCase()) {
+      return {
+        status: 409,
+        json: { error: "this agreement changed since you opened it; reload it and read it again before signing", reason: "content_changed" },
+      };
+    }
     k.signatures.push({ party: "client", signerName, signerTitle: parsed.signerTitle ? String(parsed.signerTitle) : null, signedAt: new Date().toISOString() });
     const complete = k.signatures.some((s) => s.party === "provider");
     if (complete) {

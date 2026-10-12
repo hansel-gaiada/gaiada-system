@@ -783,6 +783,23 @@ const DELIVERABLES: Record<string, unknown>[] = [
 const INVOICES: Record<string, unknown>[] = [
   { id: "inv-1", clientId: "cl-1", clientName: "Northwind Traders", periodStart: "2026-06-01", periodEnd: "2026-06-30", status: "sent", currency: "USD", total: 6300, lines: [{ description: "Billable time 2026-06", hours: 42, rate: 150, amount: 6300 }], createdAt: "2026-07-01T09:00:00Z", createdBy: "u-other-demo", approvedBy: "u-other-demo-2", approvedAt: "2026-07-02T09:00:00Z", updatedBy: DEMO_USER_ID },
 ];
+// PV5-09: an ISSUED invoice, so the issued view, the frozen issuer and Void are drivable in the browser. It belongs to the
+// group client (cl-4), which no other spec reads invoices for. Invented placeholders only: the repo is public.
+INVOICES.push({
+  id: "inv-issued-1", clientId: "cl-4", clientName: "Viceroy", periodStart: "2026-06-01", periodEnd: "2026-06-30", status: "sent",
+  currency: "USD", total: 1110, lines: [{ description: "Billable time 2026-06", hours: 10, rate: 100, amount: 1000 }],
+  createdAt: "2026-07-01T09:00:00Z", createdBy: "u-other-demo", approvedBy: "u-other-demo-2", approvedAt: "2026-07-02T09:00:00Z", updatedBy: DEMO_USER_ID,
+  invoiceNo: "DEMO/2026/0001", issuedAt: "2026-07-03T09:00:00Z", issuedBy: "u-other-demo-2", issueDate: "2026-07-03", dueDate: "2026-08-02",
+  subtotal: 1000, taxTotal: 110, taxCode: "PPN", arInvoiceId: "ar-demo-1", legacyUnissued: false, pdfFileId: null,
+  issuer: { legalName: "Example Agency Ltd", address: "1 Example Street, Example City", npwp: "00.000.000.0-000.000", isPkp: true,
+    bank: { name: "Example Bank", accountName: "Example Agency Ltd", accountNo: "0000000000" } },
+});
+// PV5-09: the company billing profile (BFF §30). One per demo session; `bank` is changed only by a body that carries it.
+const DEMO_BILLING_PROFILE: Record<string, unknown> = {
+  legalName: "Example Agency Ltd", address: "1 Example Street, Example City", invoicePrefix: "DEMO", defaultPaymentTermsDays: 30,
+  currencyCode: "USD", bank: { bankName: "Example Bank", accountName: "Example Agency Ltd", accountNo: "0000000000" },
+  bankLedgerAccountCode: "1010", defaultRevenueAccountCode: "4000", signatureThreshold: null, updatedBy: DEMO_USER_ID, updatedAt: "2026-07-01T09:00:00Z",
+};
 const FILES: Record<string, unknown>[] = [
   { id: "f-1", entity_type: "project", entity_id: "p-web-1", filename: "Redesign SOW.pdf", content_type: "application/pdf", byte_size: 184320, scrubbed: true, uploader_id: "u-pm", created_at: "2026-06-20T09:00:00Z", url: null },
   { id: "f-2", entity_type: "task", entity_id: "t-4", filename: "hero-mock.fig", content_type: "application/octet-stream", byte_size: 51200, scrubbed: true, uploader_id: "u-dev", created_at: "2026-07-03T09:00:00Z", url: null },
@@ -2679,10 +2696,41 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       if (inv.invoiceNo) return ok({ id: invIssue[1], invoiceNo: inv.invoiceNo, alreadyIssued: true });
       if (blockers.length) return { status: 409, json: { error: `this invoice cannot be issued yet: ${blockers[0].message}`, reason: "issue_blocked", blockers } };
       const n = INVOICES.filter((x) => (x as { invoiceNo?: string | null }).invoiceNo).length + 1;
+      const profile = DEMO_BILLING_PROFILE as { legalName: string; address: string; bank: { bankName: string; accountName: string; accountNo: string } | null };
       Object.assign(inv, {
         status: "sent", invoiceNo: `DEMO/2026/${String(n).padStart(4, "0")}`, issueDate: "2026-07-16", dueDate: "2026-08-15", updatedBy: userId,
+        issuedAt: "2026-07-16T10:00:00Z", issuedBy: userId, subtotal: (inv as { total?: number }).total ?? 0, taxTotal: 0, taxCode: null,
+        legacyUnissued: false, pdfFileId: null,
+        issuer: {
+          legalName: profile.legalName, address: profile.address, npwp: "00.000.000.0-000.000", isPkp: true,
+          bank: profile.bank ? { name: profile.bank.bankName, accountName: profile.bank.accountName, accountNo: profile.bank.accountNo } : null,
+        },
       });
       return ok({ id: invIssue[1], invoiceNo: inv.invoiceNo, alreadyIssued: false });
+    }
+  }
+  // PV5-09 — void an ISSUED invoice, mirroring the 409 reasons of invoice.controller.ts / issue.ts.
+  const invVoid = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)\/void$/);
+  if (invVoid && m === "POST") {
+    const inv = INVOICES.find((x) => x.id === invVoid[1]) as { status: string; invoiceNo?: string | null } | undefined;
+    if (!inv) return { status: 404, json: { error: "invoice not found" } };
+    const b = JSON.parse(body || "{}") as { reason?: string };
+    if (String(b.reason ?? "").trim().length < 4) return { status: 400, json: { error: "a reason (at least 4 characters) is required to void an issued invoice" } };
+    if (!inv.invoiceNo) return { status: 409, json: { error: "this invoice was never issued; cancel it with PATCH status=void instead", reason: "not_issued" } };
+    if (inv.status === "void") return ok({ alreadyVoid: true });
+    if (inv.status !== "sent") return { status: 409, json: { error: `a ${inv.status} invoice cannot be voided; raise a credit note in Finance`, reason: "not_voidable" } };
+    inv.status = "void";
+    return ok({ creditNoteId: "cn-demo-1", alreadyVoid: false });
+  }
+  // PV5-09 — the billing profile. A body with a `bank` key is the separate set_bank_details action; the demo identities are all
+  // at high assurance, so the step-up redirect is unit-tested on the action and not reachable here.
+  if (/^\/api\/[^/]+\/billing-profile$/.test(p)) {
+    if (m === "GET") return ok(DEMO_BILLING_PROFILE);
+    if (m === "PUT") {
+      const b = JSON.parse(body || "{}") as Record<string, unknown>;
+      for (const k of Object.keys(b)) DEMO_BILLING_PROFILE[k] = b[k];
+      DEMO_BILLING_PROFILE.updatedBy = userId;
+      return ok(DEMO_BILLING_PROFILE);
     }
   }
   const invApprove = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)\/approve$/);

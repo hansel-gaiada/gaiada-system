@@ -123,6 +123,47 @@ test.describe("client portal", () => {
     await expect(page.getByText(/signed — thank you/i)).toBeVisible();
   });
 
+  // PV5-06/PV5-09 — the client signs WHAT THEY SAW. The page carries the agreement's hash in a hidden field; if the agreement
+  // changed after the page was opened, the server refuses (409), writes nothing, and the page says so and reloads. Driven here
+  // by making the hash on the page stale, which is exactly what an agreement edited under an open tab looks like.
+  test("signing a stale agreement is refused with a reload notice, and nothing is signed @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/contracts/ctr-sow-brand");
+    await expect(page.getByText(/Scope|Brand audit/i).first()).toBeVisible();
+    await page.locator('input[name="contentSha256"]').evaluate((el) => { (el as HTMLInputElement).value = "stale-hash-from-an-older-version"; });
+    await page.getByLabel(/your full name/i).fill("Dana Whitfield");
+    await page.getByRole("checkbox").check();
+    await page.getByRole("button", { name: /sign this agreement/i }).click();
+
+    // `.cp-form__error` (the form's own alert), not a bare role=alert: Next's route announcer is a role=alert too.
+    await expect(page.locator(".cp-form__error")).toContainText(/changed since you opened it/i);
+    await expect(page.locator(".cp-form__error")).toContainText(/reloaded/i);
+    // Nothing was signed: the form is still offered and there is no confirmation.
+    await expect(page.getByText(/signed — thank you/i)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /sign this agreement/i })).toBeVisible();
+  });
+
+  test("a signed agreement offers its sealed copy @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/contracts/ctr-msa-2026");
+    await expect(page.getByRole("link", { name: /download your signed copy/i })).toHaveAttribute("href", /\/portal\/files\/file-ctr-msa-signed$/);
+  });
+
+  test("an issued invoice is laid out as the invoice of record, with How to pay and no Card @portal", async ({ page }) => {
+    await signInAsClient(page);
+    // inv-2026-021: taxed, issued, and its PDF is not rendered yet.
+    await page.goto("/portal/invoices/inv-2026-021");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Invoice DEMO/2026/0021");
+    await expect(page.getByRole("heading", { name: /invoice of record/i })).toBeVisible();
+    await expect(page.getByText(/Being prepared/)).toBeVisible();
+    await expect(page.getByText("PPN 11%")).toBeVisible();
+    await expect(page.getByRole("heading", { name: /how to pay/i })).toBeVisible();
+    await expect(page.getByLabel(/how you paid/i).locator("option")).toHaveText(["Bank transfer", "Cash", "Other"]);
+    // inv-2026-014 has its PDF.
+    await page.goto("/portal/invoices/inv-2026-014");
+    await expect(page.getByRole("link", { name: /download invoice DEMO\/2026\/0014/i })).toBeVisible();
+  });
+
   test("a client records a payment and is told it is NOT yet settled @portal", async ({ page }) => {
     await signInAsClient(page);
     await page.goto("/portal/invoices");

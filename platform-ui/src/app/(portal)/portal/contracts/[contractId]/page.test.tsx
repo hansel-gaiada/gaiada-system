@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import type { PortalContractDetail } from "@/lib/portal";
 
 // CP-14 — the contract page's signing card, rendered as the server renders it BEFORE and AFTER the sign
@@ -42,7 +42,7 @@ const SIGNED_BY_CLIENT: PortalContractDetail = {
 
 const mount = async (k: PortalContractDetail) => {
   contractMock.mockResolvedValue(k);
-  render(await PortalContractPage({ params: Promise.resolve({ contractId: k.id }) }));
+  return render(await PortalContractPage({ params: Promise.resolve({ contractId: k.id }) }));
 };
 
 beforeEach(() => contractMock.mockReset());
@@ -81,5 +81,49 @@ describe("contract page: signing card", () => {
     await mount({ ...SENT, bodyMd: null, document: null });
     expect(screen.queryByRole("button", { name: /sign this agreement/i })).toBeNull();
     expect(screen.getByText(/document needs to be attached before this can be signed/i)).toBeInTheDocument();
+  });
+});
+
+// PV5-09 — the sealed signed copy. Once BOTH parties have signed, the client's copy is one sealed PDF (PV-D25), rendered after
+// the commit (PV5-07): a signed contract with no file yet says "being prepared", never a dead link, and a contract that is
+// not signed promises nothing. An older server omits the field, which reads the same as null.
+describe("contract page: the signed copy (PV5-09)", () => {
+  const FULLY_SIGNED: PortalContractDetail = {
+    ...SENT,
+    status: "signed", canSign: false, signedAt: "2026-10-11T03:00:00Z",
+    signatures: [
+      { party: "provider", signerName: "Olive Owner", signerTitle: "Owner", signedAt: "2026-10-10T03:00:00Z" },
+      { party: "client", signerName: "Dana Whitfield", signerTitle: null, signedAt: "2026-10-11T03:00:00Z" },
+    ],
+  };
+  const copyCard = () => screen.getByRole("heading", { name: /^Your signed copy/ }).closest("section") as HTMLElement;
+
+  it("🔴 links the sealed copy through the portal's own file route once it exists", async () => {
+    await mount({ ...FULLY_SIGNED, signedCopyFileId: "f-sealed" });
+    const link = within(copyCard()).getByRole("link", { name: /Download your signed copy \(PDF\)/ });
+    expect(link).toHaveAttribute("href", "/api/northwind/portal/files/f-sealed");
+  });
+
+  it("🔴 a signed contract with no copy yet says 'being prepared' and has no link: null and a missing field read alike", async () => {
+    const first = await mount({ ...FULLY_SIGNED, signedCopyFileId: null });
+    expect(within(copyCard()).getByText(/being prepared/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /signed copy/i })).toBeNull();
+    first.unmount();
+    const older: PortalContractDetail = { ...FULLY_SIGNED };
+    delete older.signedCopyFileId;
+    await mount(older);
+    expect(within(copyCard()).getByText(/being prepared/i)).toBeInTheDocument();
+  });
+
+  it("🔴 a contract that is not signed yet (even one the client has signed) shows no signed-copy card at all", async () => {
+    await mount(SIGNED_BY_CLIENT);
+    expect(screen.queryByRole("heading", { name: /^Your signed copy/ })).toBeNull();
+    expect(screen.queryByText(/being prepared/i)).toBeNull();
+  });
+
+  it("names the provider's signature row by role, never by a company name written into the page", async () => {
+    await mount(FULLY_SIGNED);
+    expect(screen.getByText("Our company")).toBeInTheDocument();
+    expect(screen.queryByText(/Gaia Digital Agency/)).toBeNull();
   });
 });

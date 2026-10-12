@@ -4,6 +4,7 @@ import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalContract } from "@/lib/portal-data";
 import { contractSigningState, money, portalDate } from "@/lib/portal";
+import { contractDocumentState } from "@/lib/billingView";
 import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
@@ -30,6 +31,12 @@ import "@/components/pipeline/pipeline.css";
 // Not only from the sign form's local action state: the sign action revalidates this page, and the
 // refreshed read (canSign false) unmounts the form together with that state — which is exactly what
 // Next 16.3 started doing correctly. `contractSigningState` (lib/portal.ts) has the full reasoning.
+//
+// ── THE SIGNED COPY (PV5-09) ──────────────────────────────────────────────────────────────────────
+// Once BOTH parties have signed, the client's copy is one sealed PDF: the contract, its evidence page and the company
+// seal (PV-D25). It is rendered after the commit (PV5-07), so for a while a signed contract has no file: the page says
+// "being prepared" then, never a dead link. An older server omits `signedCopyFileId`, which reads the same. A contract that
+// is not signed shows nothing here, because there is no copy to promise yet.
 export default async function PortalContractPage({ params }: { params: Promise<{ contractId: string }> }) {
   const { contractId } = await params;
   const userId = await getSessionUserId();
@@ -44,6 +51,7 @@ export default async function PortalContractPage({ params }: { params: Promise<{
   const clientSig = k.signatures.find((s) => s.party === "client");
   const providerSig = k.signatures.find((s) => s.party === "provider");
   const signing = contractSigningState(k);
+  const signedCopy = contractDocumentState(k);
 
   return (
     <>
@@ -100,10 +108,28 @@ export default async function PortalContractPage({ params }: { params: Promise<{
           )}
         </Card>
 
+        {k.status === "signed" && (
+          <Card title="Your signed copy" hint="One PDF: the agreement, the record of who signed it and when, and our company seal.">
+            {signedCopy.kind === "link" ? (
+              <a
+                href={`/api/${tenant}/portal/files/${signedCopy.fileId}`}
+                className="btn"
+                style={{ fontSize: 13, textDecoration: "none", justifySelf: "start" }}
+              >
+                Download your signed copy (PDF)
+              </a>
+            ) : (
+              <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>
+                Your signed copy is being prepared. It will appear here shortly.
+              </p>
+            )}
+          </Card>
+        )}
+
         <Card title="Signatures">
           <div style={{ display: "grid", gap: 12 }}>
             <SignatureRow who="Your organisation" sig={clientSig} />
-            <SignatureRow who="Gaia Digital Agency" sig={providerSig} />
+            <SignatureRow who="Our company" sig={providerSig} />
           </div>
           {!providerSig && clientSig && (
             <p style={{ margin: "12px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
@@ -142,7 +168,7 @@ function SignatureRow({ who, sig }: {
 }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-      <Eyebrow style={{ minWidth: 150, opacity: 0.6 }}>{who}</Eyebrow>
+      <Eyebrow style={{ minWidth: 150, color: "var(--ink-subtle)" }}>{who}</Eyebrow>
       {sig ? (
         <span style={{ font: "400 14px/1.4 var(--font-body)", color: "var(--ink-body)" }}>
           <span style={{ fontWeight: 500, color: "var(--ink-strong)" }}>{sig.signerName ?? "Signed"}</span>

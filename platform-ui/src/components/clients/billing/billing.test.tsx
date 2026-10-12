@@ -13,7 +13,9 @@ const countersign = vi.fn();
 const decide = vi.fn();
 const create = vi.fn();
 const update = vi.fn();
+const markCertified = vi.fn();
 vi.mock("@/lib/contractsActions", () => ({
+  markCertifiedAction: (...a: unknown[]) => markCertified(...a),
   sendContractAction: (...a: unknown[]) => send(...a),
   voidContractAction: (...a: unknown[]) => voidIt(...a),
   countersignContractAction: (...a: unknown[]) => countersign(...a),
@@ -49,7 +51,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const f of [send, voidIt, countersign, decide, create, update]) f.mockReset();
+  for (const f of [send, voidIt, countersign, decide, create, update, markCertified]) f.mockReset();
 });
 
 describe("ContractRow · the attached PDF", () => {
@@ -262,5 +264,85 @@ describe("billing rows · visibility markers", () => {
     render(<ul><PaymentRow payment={pay()} clientId="cl-1" /></ul>);
     expect(screen.queryByText("Client sees this")).toBeNull();
     expect(screen.queryByText("Internal")).toBeNull();
+  });
+});
+
+// ── PV5-09: what a contract IS (tier, fingerprint, sealed copy) and "Mark certified" ─────────────────────────────
+
+const HASH = "0123456789abcdef".repeat(4);
+
+describe("ContractRow · tier, content fingerprint and the sealed signed copy (PV5-09)", () => {
+  it("🔴 shows the fingerprint in short form with a Copy button that copies the FULL hash", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    row(k({ status: "sent", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", contentSha256: HASH, signatureTier: "attested" }));
+    expect(screen.getByText("01234567…89abcdef")).toBeInTheDocument();
+    expect(screen.queryByText(HASH)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /copy the full content fingerprint/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(HASH));
+    await waitFor(() => expect(screen.getAllByRole("status").some((el) => /Copied/.test(el.textContent ?? ""))).toBe(true));
+  });
+
+  it("when the clipboard is unavailable it says so and shows the full value to select, never pretending", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => { throw new Error("denied"); }) }, configurable: true });
+    row(k({ status: "sent", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", contentSha256: HASH }));
+    fireEvent.click(screen.getByRole("button", { name: /copy the full content fingerprint/i }));
+    await waitFor(() => expect(screen.getByText(/Could not copy/)).toBeInTheDocument());
+    expect(screen.getByText(HASH)).toBeInTheDocument();
+  });
+
+  it("names the tier in words; a draft says it is chosen when the contract is sent", () => {
+    const { unmount } = row(k({ status: "sent", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", contentSha256: HASH, signatureTier: "attested" }));
+    expect(screen.getByText(/Attested \(typed name/)).toBeInTheDocument();
+    unmount();
+    row(k({ status: "draft", bodyMd: "x", signatureTier: null }));
+    expect(screen.getByText(/Set when the contract is sent/)).toBeInTheDocument();
+    expect(screen.queryByText(/Content fingerprint/)).toBeNull();
+  });
+
+  it("a contract sent before the content was fixed says 'not recorded', never an invented hash", () => {
+    row(k({ status: "sent", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", contentSha256: null }));
+    expect(screen.getByText(/Not recorded/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy the full/i })).toBeNull();
+  });
+
+  it("🔴 a signed contract links the sealed copy through the staff file route", () => {
+    row(k({ status: "signed", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", signedAt: "2026-10-04T00:00:00Z", contentSha256: HASH, signedCopyFileId: "f-signed" }));
+    expect(screen.getByRole("link", { name: /Sealed signed copy/ })).toHaveAttribute("href", "/api/files/f-signed");
+  });
+
+  it("🔴 a signed contract with no copy yet says 'being prepared': null and an older server's missing field read alike", () => {
+    const { unmount } = row(k({ status: "signed", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", signedAt: "2026-10-04T00:00:00Z", signedCopyFileId: null }));
+    expect(screen.getByText(/Being prepared/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Sealed signed copy/ })).toBeNull();
+    unmount();
+    row(k({ status: "signed", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", signedAt: "2026-10-04T00:00:00Z" }));
+    expect(screen.getByText(/Being prepared/)).toBeInTheDocument();
+  });
+
+  it("a contract that is not signed shows no signed-copy line at all (nothing is promised)", () => {
+    row(k({ status: "sent", bodyMd: "x", sentAt: "2026-10-02T00:00:00Z", contentSha256: HASH, signedCopyFileId: null }));
+    expect(screen.queryByText(/Signed copy/)).toBeNull();
+    expect(screen.queryByText(/Being prepared/)).toBeNull();
+  });
+});
+
+describe("ContractRow · Mark certified (PV-D25: parked)", () => {
+  it("🔴 a draft shows Mark certified DISABLED, with the reason beside it, and pressing it calls nothing", () => {
+    row(k({ status: "draft", bodyMd: "Terms." }));
+    const btn = screen.getByRole("button", { name: "Mark certified" });
+    expect(btn).toBeDisabled();
+    expect(screen.getByText("Certified signing isn't set up yet. Every contract is signed by typed name and sealed by our company for now.")).toBeInTheDocument();
+    expect(btn.getAttribute("aria-describedby")).toBeTruthy();
+    fireEvent.click(btn);
+    expect(markCertified).not.toHaveBeenCalled();
+  });
+
+  it("only a draft is offered it: a sent or signed contract has no Mark certified at all", () => {
+    for (const status of ["sent", "signed", "void"] as const) {
+      const { unmount } = row(k({ status, bodyMd: "x" }));
+      expect(screen.queryByRole("button", { name: "Mark certified" })).toBeNull();
+      unmount();
+    }
   });
 });

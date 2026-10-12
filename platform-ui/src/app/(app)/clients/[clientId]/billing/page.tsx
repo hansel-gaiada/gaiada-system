@@ -16,6 +16,8 @@ import { ContractForm } from "@/components/clients/billing/ContractForm";
 import { ContractRow } from "@/components/clients/billing/ContractRow";
 import { PaymentRow } from "@/components/clients/billing/PaymentRow";
 import { formatDate, money } from "@/lib/format";
+import { DOCUMENT_PREPARING_TEXT, invoiceDocumentState } from "@/lib/billingView";
+import { FileLink } from "@/components/clients/billing/FileLink";
 import "@/components/clients/billing/billing.css";
 
 // PV3-08 — the hub's CONTRACTS & BILLING area (`/clients/[id]/billing`; BFF §16e).
@@ -139,17 +141,28 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
     return (
       <Card>
         <HairlineTable
-          columns={[{ label: "Period" }, { label: "Status" }, { label: "Total", align: "right" }]}
-          rows={invoices.map((i) => [
-            <span key="p">
-              <Link href={`/invoices/${i.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
-                {i.periodStart && i.periodEnd ? `${formatDate(i.periodStart)} to ${formatDate(i.periodEnd)}` : `Invoice ${i.id}`}
-              </Link>
-              <ClientVisibilityMarker clientVisible={i.clientVisible} />
-            </span>,
-            <StatusBadge key="s" label={i.status} />,
-            money(i.total, i.currency),
-          ])}
+          columns={[{ label: "Period" }, { label: "Status" }, { label: "PDF" }, { label: "Total", align: "right" }]}
+          rows={invoices.map((i) => {
+            // PV5-07 renders the PDF after the commit, and an older server omits the field: an ISSUED invoice with no file
+            // yet says "being prepared"; a draft or legacy invoice has none to promise and shows a dash.
+            const pdf = invoiceDocumentState(i);
+            return [
+              <span key="p">
+                <Link href={`/invoices/${i.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
+                  {i.periodStart && i.periodEnd ? `${formatDate(i.periodStart)} to ${formatDate(i.periodEnd)}` : `Invoice ${i.id}`}
+                </Link>
+                {i.invoiceNo ? <span className="bl-contract__meta"> · {i.invoiceNo}</span> : null}
+                <ClientVisibilityMarker clientVisible={i.clientVisible} />
+              </span>,
+              <StatusBadge key="s" label={i.status === "sent" && i.invoiceNo ? "Issued" : i.status} />,
+              pdf.kind === "link"
+                ? <FileLink key="f" fileId={pdf.fileId} label="Invoice PDF" />
+                : pdf.kind === "preparing"
+                  ? <span key="f" className="bl-contract__meta">{DOCUMENT_PREPARING_TEXT}</span>
+                  : <span key="f" aria-label="No PDF">—</span>,
+              money(i.total, i.currency),
+            ];
+          })}
         />
       </Card>
     );
@@ -177,7 +190,7 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
 
       <section aria-labelledby="bl-invoices">
         <h2 id="bl-invoices" className="bl-section__title">Invoices</h2>
-        <p className="bl-section__lede">The list only. Open an invoice to work on it.</p>
+        <p className="bl-section__lede">Open an invoice to issue it, see what it says, or void it.</p>
         {renderInvoices()}
       </section>
     </div>

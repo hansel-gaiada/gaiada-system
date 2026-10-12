@@ -4,6 +4,7 @@ import { getMe } from "@/lib/platform";
 import { getActivePortalCompany } from "@/lib/portal-company";
 import { getPortalInvoice } from "@/lib/portal-data";
 import { clientStatus, money, portalDate } from "@/lib/portal";
+import { DOCUMENT_PREPARING_TEXT, invoiceDocumentState } from "@/lib/billingView";
 import { Card, Eyebrow, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { PortalLive } from "@/components/portal/PortalLive";
@@ -15,6 +16,12 @@ import { PortalFacts, PortalLink, PortalPageHead, PortalStatus } from "@/compone
 // Line items are read from `invoices.lines`, which was computed and FROZEN at creation. Deliberately not
 // recomputed from time entries: an invoice is a statement made at a point in time, and a page that
 // re-derived it would quietly disagree with the PDF the client was sent.
+//
+// PV5-09 — and, once the invoice is ISSUED (PV-D7), the invoice of record: its number, issue and due dates, who issued it
+// (the issuer block frozen at issue, with the issuer's legal name and tax id), tax and totals, the PDF, and "How to pay"
+// with the bank account from that same frozen block. Every figure is the API's, formatted and never recomputed here. The
+// PDF is rendered after the commit (PV5-07), so an issued invoice with no file yet says "being prepared"; an older server
+// omits the field, which reads the same.
 export default async function PortalInvoicePage({ params }: { params: Promise<{ invoiceId: string }> }) {
   const { invoiceId } = await params;
   const userId = await getSessionUserId();
@@ -32,18 +39,25 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
   // verified). An older server without the field keeps the old rule.
   const canPay = invoice.payable ?? (invoice.balance > 0 && invoice.status !== "void");
   const bank = invoice.issuer?.bank ?? null;
+  const issuer = invoice.issuer ?? null;
   const pendingPayments = invoice.payments.filter((p) => p.status === "pending");
+  const pdf = invoiceDocumentState(invoice);
+  const taxLines = Array.isArray(invoice.taxLines) ? invoice.taxLines : [];
+  const hasTotalsBreakdown = invoice.subtotal != null || taxLines.length > 0 || invoice.taxTotal != null;
+  const labelInk = { display: "block", marginBottom: 3, color: "var(--ink-subtle)" } as const;
 
   return (
     <>
       <PortalPageHead
         eyebrow={invoice.clientName ?? "Your account"}
         title={
-          invoice.periodStart && invoice.periodEnd
-            ? `${portalDate(invoice.periodStart)} — ${portalDate(invoice.periodEnd)}`
-            : "Invoice"
+          invoice.invoiceNo
+            ? `Invoice ${invoice.invoiceNo}`
+            : invoice.periodStart && invoice.periodEnd
+              ? `${portalDate(invoice.periodStart)} — ${portalDate(invoice.periodEnd)}`
+              : "Invoice"
         }
-        lead={`Invoice issued ${portalDate(invoice.issuedAt)}.`}
+        lead={`Invoice issued ${portalDate(invoice.issueDate ?? invoice.issuedAt)}.`}
         actions={<PortalLive topics={["invoices"]} />}
       />
 
@@ -51,11 +65,11 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
         <Card title="Summary" headerRight={<PortalStatus status={invoice.status} />}>
           <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginBottom: 16 }}>
             <div>
-              <Eyebrow style={{ display: "block", marginBottom: 3, opacity: 0.6 }}>Invoice total</Eyebrow>
+              <Eyebrow style={labelInk}>Invoice total</Eyebrow>
               <span className="cp-money">{money(invoice.total, invoice.currency)}</span>
             </div>
             <div>
-              <Eyebrow style={{ display: "block", marginBottom: 3, opacity: 0.6 }}>
+              <Eyebrow style={labelInk}>
                 {invoice.balance > 0 ? "Still due" : "Settled"}
               </Eyebrow>
               <span className={`cp-money${invoice.balance > 0 ? " cp-money--danger" : ""}`}>
@@ -79,15 +93,38 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
                     ),
                   }]
                 : []),
-              ...(invoice.invoiceNo ? [{ k: "Invoice no.", v: invoice.invoiceNo }] : []),
-              ...(invoice.dueDate ? [{ k: "Due", v: portalDate(invoice.dueDate) }] : []),
-              ...(invoice.taxTotal ? [{ k: "Tax", v: money(invoice.taxTotal, invoice.currency) }] : []),
               ...(invoice.periodStart && invoice.periodEnd
                 ? [{ k: "Period", v: `${portalDate(invoice.periodStart)} — ${portalDate(invoice.periodEnd)}` }]
                 : []),
             ]}
           />
         </Card>
+
+        {invoice.invoiceNo && (
+          <Card title="Invoice of record" hint="The invoice as it was issued to you. It does not change after that.">
+            <PortalFacts
+              rows={[
+                { k: "Invoice no.", v: invoice.invoiceNo, strong: true },
+                { k: "Issued", v: portalDate(invoice.issueDate ?? invoice.issuedAt) },
+                ...(invoice.dueDate ? [{ k: "Due", v: portalDate(invoice.dueDate) }] : []),
+                ...(issuer?.legalName ? [{ k: "Issued by", v: issuer.legalName }] : []),
+                ...(issuer?.address ? [{ k: "Address", v: <span style={{ whiteSpace: "pre-line" }}>{issuer.address}</span> }] : []),
+                ...(issuer?.npwp ? [{ k: "Tax ID (NPWP)", v: issuer.npwp }] : []),
+                {
+                  k: "PDF",
+                  v: pdf.kind === "link"
+                    ? (
+                      <a href={`/api/${tenant}/portal/files/${pdf.fileId}`}
+                         style={{ font: "500 13px var(--font-body)", color: "var(--erp-accent)" }}>
+                        Download invoice {invoice.invoiceNo} (PDF)
+                      </a>
+                    )
+                    : <span style={{ color: "var(--ink-muted)" }}>{DOCUMENT_PREPARING_TEXT}</span>,
+                },
+              ]}
+            />
+          </Card>
+        )}
 
         <Card title="What this covers">
           {lines.length === 0 ? (
@@ -108,6 +145,24 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
                 money(l.amount, invoice.currency),
               ])}
             />
+          )}
+          {hasTotalsBreakdown && (
+            <div style={{ marginTop: 16 }}>
+              <PortalFacts
+                rows={[
+                  ...(invoice.subtotal != null ? [{ k: "Subtotal", v: money(invoice.subtotal, invoice.currency) }] : []),
+                  ...taxLines.map((t) => ({
+                    k: `${t.code}${t.rate != null ? ` ${t.rate}%` : ""}`,
+                    v: money(t.amount, invoice.currency),
+                  })),
+                  // A tax total with no per-line breakdown: say the total and never invent the lines.
+                  ...(taxLines.length === 0 && invoice.taxTotal != null
+                    ? [{ k: invoice.taxCode ? `Tax (${invoice.taxCode})` : "Tax", v: money(invoice.taxTotal, invoice.currency) }]
+                    : []),
+                  { k: "Total", v: money(invoice.total, invoice.currency), strong: true },
+                ]}
+              />
+            </div>
           )}
         </Card>
 
@@ -141,7 +196,7 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
             {/* Receipts the client themselves uploaded, linked back so they can retrieve their own proof. */}
             {invoice.payments.some((p) => p.proofFileId) && (
               <div style={{ marginTop: 14 }}>
-                <Eyebrow style={{ display: "block", marginBottom: 5, opacity: 0.6 }}>Your receipts</Eyebrow>
+                <Eyebrow style={{ display: "block", marginBottom: 5, color: "var(--ink-subtle)" }}>Your receipts</Eyebrow>
                 <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 4 }}>
                   {invoice.payments.filter((p) => p.proofFileId).map((p) => (
                     <li key={p.id}>
@@ -157,16 +212,17 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
           </Card>
         )}
 
-        {/* PV5-04: where to pay, from the issuer block frozen on the invoice when it was issued. The full "How to pay"
-            screen is PV5-09. */}
+        {/* PV5-04: where to pay, from the issuer block frozen on the invoice when it was issued. The reference is the invoice
+            number: it is what lets us match a transfer to this invoice quickly. */}
         {canPay && bank?.accountNo && (
-          <Card title="How to pay">
+          <Card title="How to pay" hint="Pay by bank transfer to this account, then tell us below so we can match it.">
             <PortalFacts
               rows={[
                 { k: "Bank", v: bank.name ?? "—" },
                 { k: "Account name", v: bank.accountName ?? "—" },
-                { k: "Account no.", v: bank.accountNo },
+                { k: "Account no.", v: bank.accountNo, strong: true },
                 ...(invoice.invoiceNo ? [{ k: "Reference", v: invoice.invoiceNo }] : []),
+                { k: "Amount due", v: money(invoice.outstanding ?? invoice.balance, invoice.currency), strong: true },
               ]}
             />
           </Card>
