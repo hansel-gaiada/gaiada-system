@@ -37,7 +37,7 @@ function settledWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
 interface ConvertOk { id: string; status: string; clientId: string; projectId: string; runId: string }
 interface ConvertConflict { message: string; existing?: { clientId: string | null; projectId: string | null; runId: string | null } }
 
-describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a real race", () => {
+describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a real race", { timeout: 90000 }, () => {
   let app: NestFastifyApplication;
   let co: string;
   let admin: string;
@@ -80,6 +80,16 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
         [id, co, orgName, `${id}@prospect.test`, status, admin, status === "declined" ? "no budget" : null, status === "declined" ? "lost" : "enquiry"],
       ),
     );
+    // FLAKE FIX (M5-P1-f): convert find-or-creates the contact's `users` row BEFORE it takes the lead lock, and
+    // `users.email` is UNIQUE. N concurrent converts of a lead whose contact has no row yet all miss the SELECT
+    // and race the INSERT; the losers die on the unique index (23505) BEFORE reaching the lock, so fewer than N
+    // handlers ever queue on it ("expected 4 advisory-lock waiters; saw 3"). That is a product race outside the
+    // lock (reported as a finding, pinned by the `it.fails` below), not what this file proves. Creating the
+    // contact up front makes every racer take the find path, so each one reaches the lock.
+    await adminPool().query(
+      `INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, 'Prospect Contact', 'test') ON CONFLICT DO NOTHING`,
+      [newId(), `${id}@prospect.test`],
+    );
     return { id, orgName };
   }
 
@@ -117,15 +127,44 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     return r.rows[0].n;
   }
 
-  async function waitForAdvisoryWaiters(n: number, timeoutMs = 10000): Promise<void> {
+  /** What each racer is doing, observed from the outside: a handler that RETURNS before the lock is released
+   *  never reached the lock (or was refused first), which is a different failure from "slow". */
+  interface FlightState { done: boolean; status?: number; body?: string }
+  function track(flights: Promise<{ statusCode: number; body: string }>[]): FlightState[] {
+    const state: FlightState[] = flights.map(() => ({ done: false }));
+    flights.forEach((p, i) => {
+      p.then(
+        (r) => { state[i] = { done: true, status: r.statusCode, body: r.body.slice(0, 300) }; },
+        (e) => { state[i] = { done: true, status: -1, body: String(e).slice(0, 300) }; },
+      );
+    });
+    return state;
+  }
+
+  /** Wait until `n` handlers are queued on the advisory lock. CONDITION-based, not timing-based:
+   *   - it polls until the count reaches `n` and returns the moment it does, so a fast machine pays nothing;
+   *   - the deadline (45s) is a backstop for a machine under heavy load, not the expected wait; a loaded CI
+   *     runner or the shared sumopod gate can take many seconds to get 4 requests through Cerbos and the pool;
+   *   - the lock holder is THIS TEST's own connection and is not released until `n` waiters are seen, so a
+   *     slow racer cannot "miss" the lock: it simply arrives later and queues behind it;
+   *   - if a racer RETURNS while we wait, it can never queue, so we fail at once with its status and body
+   *     instead of burning the deadline and reporting a bare count. */
+  async function waitForAdvisoryWaiters(n: number, flights: FlightState[] = [], timeoutMs = 45000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let last = -1;
     while (Date.now() < deadline) {
       last = await advisoryWaiters();
       if (last >= n) return;
+      const early = flights.map((f, i) => ({ f, i })).filter((x) => x.f.done);
+      if (early.length > 0) {
+        expect.fail(
+          `expected ${n} advisory-lock waiters; saw ${last}, and ${early.length} racer(s) already RETURNED without queuing on the lock: ` +
+            early.map((x) => `#${x.i} -> ${x.f.status} ${x.f.body}`).join(" | "),
+        );
+      }
       await new Promise((r) => setTimeout(r, 25));
     }
-    expect.fail(`expected ${n} advisory-lock waiters (the collision); saw ${last} — the racers never collided, so this test proves nothing`);
+    expect.fail(`expected ${n} advisory-lock waiters (the collision); saw ${last} after ${timeoutMs}ms; the racers never collided, so this test proves nothing`);
   }
 
   const countClientsNamed = async (orgName: string) =>
@@ -241,7 +280,7 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
 
       // COLLISION PROOF: both handlers are inside their transactions, queued on the SAME advisory
       // lock key, having read nothing race-sensitive yet.
-      await waitForAdvisoryWaiters(2);
+      await waitForAdvisoryWaiters(2, track(flights));
       expect(await settledWithin(Promise.all(flights), 300)).toBe(false);
       expect(await countClientsNamed(lead.orgName)).toBe(0); // neither spawned before blocking
 
@@ -308,7 +347,7 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     const release = await holdLeadLock(lead.id);
     try {
       const flights = Array.from({ length: 4 }, () => convert(lead.id));
-      await waitForAdvisoryWaiters(4);
+      await waitForAdvisoryWaiters(4, track(flights));
       expect(await settledWithin(Promise.all(flights), 300)).toBe(false);
       await release();
       const results = await Promise.all(flights);
@@ -326,6 +365,45 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
       expect(await countRunCreatedEvents(lead.orgName)).toBe(1);
     } finally {
       await release();
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // FINDING (M5-P1-f) — the real cause of the old "expected 4 advisory-lock waiters; saw 3" flake
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // convertAgencyLead() find-or-creates the contact's `users` row (plain INSERT, no ON CONFLICT) OUTSIDE the
+  // lead lock, and `users.email` is UNIQUE. Two converts of the same lead whose contact has no row yet can both
+  // miss the SELECT; the second INSERT then raises 23505 and the request fails before it ever reaches the lock.
+  // Reproduced here deterministically, with no timing: this test's own connection holds an UNCOMMITTED insert of
+  // the contact's email (standing in for "the other convert's INSERT, not yet visible"), a lone convert starts, its
+  // SELECT misses, its INSERT blocks on that key, the holder commits, and the convert's INSERT fails.
+  // A lone convert of an open lead must succeed (it would find the row). `.fails` pins today's behaviour; when the
+  // product fix lands (ON CONFLICT DO NOTHING + re-select, or move the find-or-create under the lock) this starts
+  // failing, which is the cue to delete `.fails` and the pre-created contact in `newLead`.
+  it.fails("FINDING: a convert whose contact row appears between its SELECT and its INSERT must still succeed (it 500s on users.email)", async () => {
+    const lead = await newLead();
+    const email = `${lead.id}@prospect.test`;
+    await adminPool().query(`DELETE FROM users WHERE email = $1`, [email]); // undo newLead's pre-created contact
+    const holder = await adminPool().connect();
+    let committed = false;
+    try {
+      await holder.query("BEGIN");
+      await holder.query(`INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, 'Prospect Contact', 'test')`, [newId(), email]);
+      const flight = convert(lead.id);
+      const deadline = Date.now() + 45000;
+      for (;;) {
+        const w = await adminPool().query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted`);
+        if (w.rows[0].n >= 1) break; // the convert's INSERT is parked on the uncommitted key
+        if (Date.now() > deadline) expect.fail("the convert never reached the contact INSERT");
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      await holder.query("COMMIT");
+      committed = true;
+      const r = await flight;
+      expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
+    } finally {
+      if (!committed) await holder.query("ROLLBACK").catch(() => {});
+      holder.release();
     }
   });
 
@@ -364,7 +442,7 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     const release = await holdLeadLock(leadA.id);
     try {
       const blockedA = convert(leadA.id);
-      await waitForAdvisoryWaiters(1);
+      await waitForAdvisoryWaiters(1, track([blockedA]));
       expect(await settledWithin(blockedA, 300)).toBe(false);
 
       // B's identical transition completes normally. Both leads share ONE tenant, so a tenant-keyed
