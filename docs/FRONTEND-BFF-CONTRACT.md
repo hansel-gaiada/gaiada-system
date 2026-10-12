@@ -5939,7 +5939,7 @@ There is no `DELETE`, `PATCH` or `unshare` route on minutes.
 
 `share_minutes` reaches exactly the roles that hold `update` on `meeting_recording` (`company_admin`, `manager`, `member`; perm mirror `perm_meeting_recording_share_minutes`), and is **denied to `kind` `bot`/`automation`** (PV-D23). See `PERMISSION-CONTRACT.md` §34.
 
-## 30. Billing profiles, issue readiness, issue and void (PV5-04, 2026-10-13) — `platform-nest/src/modules/invoice/{issue.ts,billing-profile.controller.ts,invoice.controller.ts}`, migrations `202610130400` (data model) and `202610131800` (the invoice CHECK) — **STATUS: PROTOTYPED (HTTP suite `src/modules/invoice/issue.test.ts` and DB suite `src/db/pv5-invoice-enforcement.db.test.ts` on the Linux CI gate; not driven live — PV5-13)**
+## 30. Billing profiles, issue readiness, issue and void (PV5-04, 2026-10-13) — `platform-nest/src/modules/invoice/{issue.ts,billing-profile.controller.ts,invoice.controller.ts}`, migrations `202610130400` (data model) and `202610131850` (the invoice CHECK; its guard trigger reuses 1820's `pv5_legacy_flag_guard()`) — **STATUS: PROTOTYPED (HTTP suite `src/modules/invoice/issue.test.ts` and DB suite `src/db/pv5-invoice-enforcement.db.test.ts` on the Linux CI gate; not driven live — PV5-13)**
 
 Ruling PV-D7: the finance ledger is the invoice of record. `invoices` stays the drafting stage (lines from logged hours,
 maker/checker approve); **issuing** numbers it and posts the matching ledger AR invoice in one transaction, after which

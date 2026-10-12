@@ -1,5 +1,5 @@
 // PV5-04 — the finance setup a company needs before it can ISSUE an invoice, and the seed/test helpers that produce
-// issued (and paid) invoices through the REAL issue path. Since PV5-01b (202610131800) an invoice can be `sent` or
+// issued (and paid) invoices through the REAL issue path. Since PV5-01b (202610131850) an invoice can be `sent` or
 // `paid` only if it was issued through the ledger, so the demo seeds and the test fixtures that used to INSERT a sent
 // invoice now set this up and issue for real. Nothing here sets the legacy flag (only the migration may) or bypasses a
 // CHECK.

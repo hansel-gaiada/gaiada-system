@@ -1,12 +1,15 @@
--- 202610131800_pv5_enforce_invoice_issued.sql — PV-5 / PV5-01b, INVOICE HALF: an invoice is `sent` or `paid` only if issued.
+-- 202610131850_pv5_enforce_invoice_issued.sql — PV-5 / PV5-01b, INVOICE HALF: an invoice is `sent` or `paid` only if issued.
 -- Plan: docs/plans/2026-10-12-pv5-contracts-billing-tickets.md (PV5-01 "As built", PV5-04; decision 2). Part (a): 202610130400.
 --
 -- WHERE THIS CAME FROM
 --   PV5-01b was written as ONE migration (branch pv5/01b-enforcement, 202610130430_pv5_enforce_issue_and_fixed_content.sql)
 --   enforcing two rules: the invoice rule below and the contract content-fixed rule. The lead split it: the INVOICE half
---   ships here with PV5-04 (the issue path that satisfies it); the CONTRACT half ships with PV5-06. Nothing of the contract
---   half is in this file. The guard function is therefore named for invoices alone (pv5_invoices_legacy_flag_guard), so
---   the contract half can create its own without a name collision or a shared function body to keep in step.
+--   ships here with PV5-04 (the issue path that satisfies it); the CONTRACT half shipped with PV5-06 as
+--   202610131820_pv5_enforce_contract_content_fixed.sql. Nothing of the contract half is in this file.
+--   ONE GUARD FUNCTION: 1820 defines `pv5_legacy_flag_guard()` (it names only the column both tables share, and
+--   TG_TABLE_NAME in its messages). This file does NOT redefine it; it attaches the invoices trigger to it, and refuses
+--   to run if it is missing. So this file must sort after 1820: it is 1850 (1800 is taken by search_experiments, and
+--   1860-1879 are not valid UTC minutes).
 --
 -- WHAT THIS ENFORCES
 --   invoices_sent_paid_issued: status IN ('sent','paid') requires issued_at, i.e. the invoice went through PV5-04's issue
@@ -39,8 +42,8 @@
 -- Ships in the same release as PV5-04's code and seed/fixture changes (the code on main before PV5-04 PATCHes invoices
 -- to sent/paid, which this refuses). The backfill UPDATE touches only legacy rows and fires no immutability trigger
 -- (those rows have issued_at NULL). Brief ACCESS EXCLUSIVE lock on invoices (a small table).
--- Reverse: DROP CONSTRAINT invoices_sent_paid_issued; DROP TRIGGER trg_invoices_pv5_legacy_guard; DROP FUNCTION
--- pv5_invoices_legacy_flag_guard(); ALTER TABLE invoices DROP COLUMN pre_pv5_legacy.
+-- Reverse: DROP CONSTRAINT invoices_sent_paid_issued; DROP TRIGGER trg_invoices_pv5_legacy_guard; ALTER TABLE invoices
+-- DROP COLUMN pre_pv5_legacy. (Keep pv5_legacy_flag_guard(): it belongs to 1820 and guards contracts too.)
 -- No secrets; no company names or ids.
 
 ALTER TABLE invoices ADD COLUMN pre_pv5_legacy boolean NOT NULL DEFAULT false;
@@ -66,27 +69,17 @@ BEGIN
 END $$;
 
 -- ── the guard: nothing but this file may ever set the flag ───────────────────────────────────────
--- Written for `invoices` only. OLD is touched only on UPDATE, in a nested IF: plpgsql does not promise AND
--- short-circuiting, and OLD is unassigned in an INSERT trigger.
-CREATE OR REPLACE FUNCTION pv5_invoices_legacy_flag_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+-- The function is 202610131820's `pv5_legacy_flag_guard()`, reused as is: on INSERT it refuses a row carrying true, on
+-- UPDATE it refuses any change to the flag, naming TG_TABLE_NAME and OLD.id (invoices has both). Not redefined here.
+DO $$
 BEGIN
-  IF TG_OP = 'INSERT' THEN
-    IF NEW.pre_pv5_legacy THEN
-      RAISE EXCEPTION 'PV5_LEGACY_FLAG: pre_pv5_legacy cannot be set on a new invoices row'
-        USING ERRCODE = 'check_violation';
-    END IF;
-  ELSE
-    IF NEW.pre_pv5_legacy IS DISTINCT FROM OLD.pre_pv5_legacy THEN
-      RAISE EXCEPTION 'PV5_LEGACY_FLAG: pre_pv5_legacy cannot be changed on invoices row %', OLD.id
-        USING ERRCODE = 'check_violation';
-    END IF;
+  IF to_regprocedure('pv5_legacy_flag_guard()') IS NULL THEN
+    RAISE EXCEPTION 'PV5-01b (invoices): pv5_legacy_flag_guard() is missing; 202610131820 must run before this file';
   END IF;
-  RETURN NEW;
-END
-$$;
+END $$;
 CREATE TRIGGER trg_invoices_pv5_legacy_guard
   BEFORE INSERT OR UPDATE ON invoices
-  FOR EACH ROW EXECUTE FUNCTION pv5_invoices_legacy_flag_guard();
+  FOR EACH ROW EXECUTE FUNCTION pv5_legacy_flag_guard();
 
 -- ── the enforcing CHECK (validated against every existing row) ───────────────────────────────────
 ALTER TABLE invoices
@@ -100,7 +93,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_sent_paid_issued' AND contype = 'c' AND convalidated) THEN
     RAISE EXCEPTION 'PV5-01b: CHECK invoices_sent_paid_issued is missing or not validated';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_invoices_pv5_legacy_guard' AND NOT tgisinternal) THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_invoices_pv5_legacy_guard' AND NOT tgisinternal
+                   AND tgfoid = 'pv5_legacy_flag_guard()'::regprocedure) THEN
     RAISE EXCEPTION 'PV5-01b: trigger trg_invoices_pv5_legacy_guard is missing';
   END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns

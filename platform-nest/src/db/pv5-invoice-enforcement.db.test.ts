@@ -1,4 +1,4 @@
-// PV5-01b, INVOICE HALF — migration 202610131800_pv5_enforce_invoice_issued.sql, against a REAL Postgres.
+// PV5-01b, INVOICE HALF — migration 202610131850_pv5_enforce_invoice_issued.sql, against a REAL Postgres.
 // (Taken from PV5-01b's pv5-enforcement.db.test.ts, invoice cases only; the contract half ships with PV5-06.)
 //
 // The enforcing CHECK (an invoice is sent/paid only if issued) and the LEGACY exemption: a flag only the migration may
@@ -13,7 +13,7 @@ import { withTenants, newId } from "../db";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, createClient } from "../testing/fixtures";
 
-const MIGRATION = path.resolve(__dirname, "../../migrations/202610131800_pv5_enforce_invoice_issued.sql");
+const MIGRATION = path.resolve(__dirname, "../../migrations/202610131850_pv5_enforce_invoice_issued.sql");
 
 describe.skipIf(!TEST_URL)("PV5-01b (invoices) — sent/paid require an issue, and the legacy exemption", () => {
   let A: string;
