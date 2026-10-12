@@ -943,6 +943,19 @@ const PRIVACY_IDENTIFIER_PROPS = {
       "The person's phone: 7-15 digits, an optional leading + or 00, spaces/dashes/dots/brackets allowed. A national " +
       "leading 0 is NOT rewritten to a country code, so try the number both ways if unsure.",
   },
+  // M5-V3-h: the consented website visitor's own ids. Same minimiser rules: only their SHA-256 is ever stored or emitted.
+  visitorId: {
+    type: "string",
+    description:
+      "The website visitor id the site's privacy page shows the person (a uuid). Optional; reaches the consented " +
+      "visitor profile and its events, never a lead's contact data. Only its hash is stored in the approval.",
+  },
+  consentId: {
+    type: "string",
+    description:
+      "The person's website consent id (a uuid), as their consent record shows it. Optional; reaches the consented " +
+      "visitor profile(s) recorded under it. Only its hash is stored in the approval.",
+  },
   approvalId: {
     type: "string",
     description:
@@ -957,7 +970,8 @@ const AGENCY_PRIVACY_CORE_TOOLS: McpToolDef[] = [
     name: "agency_privacy.find",
     description:
       "Find every agency lead (and its AD-1 submissions and intake tokens) belonging to a person, by email and/or " +
-      "phone. Returns ids, statuses and counts, no contact data. impact:'high', WS4-gated per call: the first call " +
+      "phone, and their consented website-visitor profiles (by visitorId / consentId, and through each lead's consent " +
+      "snapshot). Returns ids, statuses and counts, no contact data. impact:'high', WS4-gated per call: the first call " +
       "files an approval (202 suspended); the approved re-call returns the matches once (a re-use is 409 " +
       "`approval_already_used`). Converted leads are listed under `outOfScope`: their client record follows " +
       "client-record retention. Safe for an unattended agent to call: the approval stores only a hash of the " +
@@ -973,7 +987,8 @@ const AGENCY_PRIVACY_CORE_TOOLS: McpToolDef[] = [
     name: "agency_privacy.export",
     description:
       "Export a person's agency-intake data (lead contact fields, attribution, consent snapshot, AD-1 answers, " +
-      "intake-token history) by email and/or phone. impact:'high', WS4-gated per call like agency_privacy.find; the " +
+      "intake-token history) by email and/or phone, and their consented website-visitor profiles with every event " +
+      "(by visitorId / consentId, and through each lead's consent snapshot). impact:'high', WS4-gated per call like agency_privacy.find; the " +
       "response IS personal data and is never stored, so a re-use of the approval is refused. Safe for an " +
       "unattended agent to call: the approval stores only a hash of the identifiers, never the email or phone.",
     minAssurance: "verified",
@@ -989,7 +1004,9 @@ const AGENCY_PRIVACY_CORE_TOOLS: McpToolDef[] = [
       "ERASE a person's agency-intake data by email and/or phone: scrubs the lead's contact fields, attribution and " +
       "decline reason and the AD-1 person answers, revokes unused intake tokens, and adds the contact (hashed) to the " +
       "suppression list so the web intake never re-creates the lead and nothing is uploaded to an ad platform. Rows " +
-      "are kept (status, stage, client link). A converted lead's client record is NOT touched (`outOfScope`). " +
+      "are kept (status, stage, client link). Also deletes the person's consented website-visitor profiles (by " +
+      "visitorId / consentId, and through each lead's consent snapshot), tombstones both ids so nothing is re-created, " +
+      "and tells the visitor-event collector to forget them (`counts.collectorForget`: `queued` when it was unreachable). A converted lead's client record is NOT touched (`outOfScope`). " +
       "impact:'high', irreversible, WS4-gated per call; the requester cannot approve their own request. Calling again " +
       "with a used approval returns the stored counts (`replayed: true`). Safe for an unattended agent to call: the " +
       "approval stores only a hash of the identifiers, never the email or phone; the requester runs it after " +

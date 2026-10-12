@@ -22,8 +22,10 @@ import { assertGroupCompany } from "./group-company";
 import { emptyProfileState, loadProfileRow, saveProfileRow } from "./centre/store";
 import {
   changeRequestClientVisible, contractClientVisible, postReviewClientVisible, staffClientVisible,
-  staffGateClientVisible, staffInvoicePaymentClientVisible,
+  staffConversationThreadClientVisible, staffGateClientVisible, staffInvoicePaymentClientVisible,
 } from "../../core/portal-visibility";
+import { awaitingReplySql } from "../../core/conversation-core";
+import { staffThreadHref } from "../../core/conversation-notify";
 
 // CC-D10: every read of a client row carries its owner (account manager) and the owner's name. The
 // users join is LEFT so an ownerless client, or one whose owner was hard-deleted, still reads.
@@ -444,6 +446,8 @@ export class ClientsController {
         nextMilestone: milestone.rows[0] ?? null,
         money,
         needsUs,
+        // PV4-06: how many of `needsUs` are conversation threads waiting for our reply (the hub badge reads this).
+        conversationsAwaitingReply: needsUs.filter((i) => i.kind === "conversation").length,
         needsClient,
       };
     }, { modules: ["social"] });
@@ -507,7 +511,7 @@ export class ClientsController {
    *  the portal), computed in each SELECT from portal-visibility.ts. A payment's travels through its
    *  invoice, hence the LEFT JOIN below: a payment whose invoice is a draft reads `false`. */
   private async needsUs(c: PoolClient, clientId: string) {
-    const [payments, reviews, requests, drafts] = await Promise.all([
+    const [payments, reviews, requests, drafts, threads] = await Promise.all([
       c.query(
         `SELECT pp.id, pp.invoice_id AS "invoiceId", pp.amount::float8 AS amount, pp.currency,
                 pp.created_at AS "since", ${staffInvoicePaymentClientVisible("pp", "i")} AS "clientVisible"
@@ -543,6 +547,18 @@ export class ClientsController {
           ORDER BY k.created_at ASC`,
         [clientId],
       ),
+      // PV4-06: conversation threads waiting for our reply (open, last live message is the client's). The rule is
+      // conversation-core.ts `awaitingReplySql`, the same one the staff Conversation list filters on.
+      c.query(
+        `SELECT t.id, t.subject, p.name AS "projectName",
+                (SELECT max(um.created_at) FROM conversation_messages um
+                  WHERE um.thread_id = t.id AND um.author_side = 'client' AND um.retracted_at IS NULL) AS "since",
+                ${staffConversationThreadClientVisible("t")} AS "clientVisible"
+           FROM conversation_threads t LEFT JOIN projects p ON p.id = t.project_id
+          WHERE t.client_id = $1 AND t.deleted_at IS NULL AND ${awaitingReplySql("t")}
+          ORDER BY "since" ASC, t.id ASC`,
+        [clientId],
+      ),
     ]);
     return [
       ...payments.rows.map((r: Record<string, unknown>) => ({
@@ -569,6 +585,12 @@ export class ClientsController {
         label: "Send a drafted agreement",
         context: r.title as string,
         href: `/clients/${clientId}/billing`, since: r.since, clientVisible: r.clientVisible === true,
+      })),
+      ...threads.rows.map((r: Record<string, unknown>) => ({
+        kind: "conversation" as const, id: r.id as string,
+        label: "A client message is waiting for our reply",
+        context: (r.subject as string | null) ?? (r.projectName as string | null) ?? "General conversation",
+        href: staffThreadHref(clientId, r.id as string), since: r.since, clientVisible: r.clientVisible === true,
       })),
     ];
   }

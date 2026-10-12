@@ -11,15 +11,22 @@
 // template key surfacing as `UnknownMailTemplateError`) — swallowing errors HERE too would hide
 // exactly the kind of mistake the caller's single log line exists to surface.
 //
-// ALLOWLIST is EXACTLY {approval.requested, pipeline.gate.opened} (design §7.2) — nothing else in
-// the bell produces mail. `mention`, `comment`, `approval_decided`, and every other notification
-// type return immediately without a query, let alone a mail_log row (probed in tap.test.ts).
+// ALLOWLIST is {approval.requested, pipeline.gate.opened} (design §7.2) plus, since PV4-06,
+// `conversation.message.staff` — nothing else in the bell produces mail. `mention`, `comment`,
+// `approval_decided`, and every other notification type return immediately without a query, let alone
+// a mail_log row (probed in tap.test.ts). The conversation type is the one entry that mails people
+// OUTSIDE the company, so it sits behind its OWN flag (`config.mail.conversationClientMailEnabled`,
+// env `CONVERSATION_CLIENT_MAIL_ENABLED`, default OFF) on top of the master gate, and it is throttled:
+// at most one mail per contact per thread until that contact has read the thread.
 import { config } from "../config";
-import { withGlobal } from "../db";
+import { withGlobal, withMailContext, withTenants } from "../db";
 import { enqueueMail } from "./queue";
 import { MAIL_THREAD_ENTITY_KINDS } from "./thread-authz";
 
-const MAIL_NOTIFICATION_TYPES = new Set(["approval.requested", "pipeline.gate.opened"]);
+/** PV4-06 — staff wrote to a client contact in Conversation. */
+export const CONVERSATION_STAFF_MAIL_TYPE = "conversation.message.staff";
+
+const MAIL_NOTIFICATION_TYPES = new Set(["approval.requested", "pipeline.gate.opened", CONVERSATION_STAFF_MAIL_TYPE]);
 
 /** M12/§7.4 — origins whose DECIDE today re-drives NOTHING (the D14 gap) get the purely
  *  informational `approval.warning` template; everything else (pipeline/hr/agency — deciding
@@ -32,9 +39,10 @@ const MAIL_NOTIFICATION_TYPES = new Set(["approval.requested", "pipeline.gate.op
  *  KNOWN automation/agent origin, never a guess. */
 const WARNING_ORIGINS = new Set(["automation", "agent"]);
 
-export type MailTemplateKey = "approval.warning" | "approval.actionable";
+export type MailTemplateKey = "approval.warning" | "approval.actionable" | "conversation.message.staff";
 
 export function wordingClassFor(type: string, payload: Record<string, unknown>): MailTemplateKey {
+  if (type === CONVERSATION_STAFF_MAIL_TYPE) return "conversation.message.staff";
   if (type === "pipeline.gate.opened") return "approval.actionable";
   const origin = typeof payload.origin === "string" ? payload.origin : "";
   return WARNING_ORIGINS.has(origin) ? "approval.warning" : "approval.actionable";
@@ -65,6 +73,34 @@ async function resolveRecipientEmail(userId: string): Promise<string | null> {
   return rows[0]?.email ?? null;
 }
 
+/** PV4-06 throttle: has this contact ALREADY been mailed about this thread since they last read it?
+ *
+ *  "Since they last read it" is the contact's `conversation_reads.last_read_at` for the thread; with no read marker at all
+ *  (they have never opened it) ANY earlier conversation mail for the thread counts, so a thread they ignore mails them once,
+ *  not once per staff message. Every status counts (queued, sent, suppressed, failed): the question is whether we already
+ *  tried, and a suppressed or failing address would otherwise be retried on every message. The mail row records the thread in
+ *  its `payload.threadId` (the row's `entity_*` columns are reserved for the thread-authz kinds). Two reads, because the two
+ *  tables sit behind different RLS contexts: the read marker is tenant-scoped, `mail_log` is global (`mail_context`). */
+async function alreadyMailedSinceRead(tenantId: string, userId: string, threadId: string): Promise<boolean> {
+  const marker = await withTenants([tenantId], (c) =>
+    c.query<{ last_read_at: string | Date }>(
+      `SELECT last_read_at FROM conversation_reads WHERE thread_id = $1 AND user_id = $2`,
+      [threadId, userId],
+    ),
+  );
+  const lastReadAt = marker.rows[0]?.last_read_at ?? null;
+  const prior = await withMailContext((c) =>
+    c.query(
+      `SELECT 1 FROM mail_log
+        WHERE user_id = $1 AND tenant_id = $2 AND template_key = $3 AND payload->>'threadId' = $4
+          AND ($5::timestamptz IS NULL OR created_at > $5::timestamptz)
+        LIMIT 1`,
+      [userId, tenantId, CONVERSATION_STAFF_MAIL_TYPE, threadId, lastReadAt],
+    ),
+  );
+  return prior.rows.length > 0;
+}
+
 export interface MailIntakeInput {
   notificationId: string;
   tenantId: string;
@@ -79,6 +115,16 @@ export interface MailIntakeInput {
 export async function mailIntake(input: MailIntakeInput): Promise<void> {
   if (!config.mail.enabled) return;
   if (!MAIL_NOTIFICATION_TYPES.has(input.type)) return;
+
+  // PV4-06 — the conversation type: its own flag first (OFF = no query, no address lookup, no row), then the throttle.
+  const isConversation = input.type === CONVERSATION_STAFF_MAIL_TYPE;
+  const conversationThreadId = isConversation && typeof input.payload.entityId === "string" ? input.payload.entityId : null;
+  if (isConversation) {
+    if (!config.mail.conversationClientMailEnabled) return;
+    // No thread id means no way to throttle, so no mail: never an unthrottled path.
+    if (!conversationThreadId) return;
+    if (await alreadyMailedSinceRead(input.tenantId, input.userId, conversationThreadId)) return;
+  }
 
   const email = await resolveRecipientEmail(input.userId);
   // Defensive only — users.email is NOT NULL, so a live miss here would mean the row vanished
@@ -113,11 +159,12 @@ export async function mailIntake(input: MailIntakeInput): Promise<void> {
     notificationIds: [input.notificationId],
     entityType,
     entityId,
-    // §7.6 — every threads-eligible outbound mail mints a fresh VERP reply token. Both allowlisted
-    // types hang off a real ERP entity a reply should thread onto, so both always request one;
-    // there is no allowlisted case that should NOT get a reply_token.
-    withReplyToken: true,
+    // §7.6 — every threads-eligible outbound mail mints a fresh VERP reply token. The two approval
+    // types hang off a real ERP entity a reply should thread onto, so they always request one.
+    // PV4-06: a conversation mail is a pointer to the portal, not a thread to reply into by email.
+    withReplyToken: !isConversation,
     payload: {
+      ...(conversationThreadId ? { threadId: conversationThreadId } : {}),
       href,
       subjectTitle: typeof input.payload.title === "string" ? input.payload.title : undefined,
       companyName: typeof input.payload.companyName === "string" ? input.payload.companyName : undefined,

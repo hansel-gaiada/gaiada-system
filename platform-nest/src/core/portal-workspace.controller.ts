@@ -35,9 +35,9 @@ import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "./project-stat
 import {
   PROJECT_SCOPE, contractInPortalScope, deliverableClientVisible, gateClientVisible, inCallerClients,
   invoiceInPortalScope, invoicePaymentClientVisible, milestoneClientVisible,
-  meetingMinutesInPortalScope, runClientVisible, runInPortalScope,
+  meetingMinutesInPortalScope, runClientVisible, runInPortalScope, conversationThreadInPortalScope,
 } from "./portal-visibility";
-import { isUuid } from "./conversation-core";
+import { isUuid, unreadCountSql } from "./conversation-core";
 
 /** Scope params for queries that bind the caller's scope as $1 (clients) / $2 (projects). */
 const S12 = { clients: 1, projects: 2 } as const;
@@ -98,7 +98,7 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const { args } = scoped(scope);
 
-      const [clients, projects, milestone, needsYou, finance, deliverables] = await Promise.all([
+      const [clients, projects, milestone, needsYou, finance, deliverables, conversationUnread] = await Promise.all([
         c.query(
           `SELECT id, name, status FROM clients WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY name`,
           [scope.clientIds],
@@ -137,6 +137,17 @@ export class PortalWorkspaceController {
             WHERE ${PROJECT_SCOPE} AND ${deliverableClientVisible("d")}`,
           args,
         ),
+        // PV4-06: how many of the caller's conversation threads have a message from STAFF they have not read. The thread
+        // predicate and the unread rule are PV4-03's own (conversation-core.ts `unreadCountSql`, the same SQL the
+        // Conversation list's per-thread `unreadCount` uses), so this number can never disagree with that list.
+        c.query<{ n: number }>(
+          `SELECT count(*)::int AS n
+             FROM conversation_threads t
+             LEFT JOIN conversation_reads r ON r.thread_id = t.id AND r.user_id = $3
+            WHERE ${conversationThreadInPortalScope("t", S12)}
+              AND ${unreadCountSql("t", "r", "staff")} > 0`,
+          [...args, req.principal.userId],
+        ),
       ]);
 
       const p = projects.rows[0];
@@ -160,6 +171,8 @@ export class PortalWorkspaceController {
         nextMilestone: milestone.rows[0] ?? null,
         needsYou,
         finance,
+        // PV4-06: threads with unread messages from staff (§29). The portal nav's Projects badge adds this (PV4-08).
+        conversationUnread: conversationUnread.rows[0]?.n ?? 0,
       };
     });
   }

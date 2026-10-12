@@ -1697,7 +1697,7 @@ becomes an existence oracle for another client's ids.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/portal/overview` | The whole landing payload in ONE request: `{clients[], client, viewOnly, progress{projects,activeProjects,completedProjects,percent}, deliverables{total,delivered,overdue}, nextMilestone, needsYou[], finance{byCurrency[],primary}}`. `needsYou[]` = `{kind:'gate'\|'contract', id, requires:'signature'\|'feedback', label, context, href, since}`. Progress is the mean of PROJECT progress (not of pooled tasks), each project weighted by `pm_tasks.progress` with `done` counting 100. Finished projects = status completed, archived, cancelled (`core/project-status.ts`; PV2-09 closed `projects.status` to planned, active, on_hold, completed, cancelled, archived); `activeProjects` = not finished, `completedProjects` = completed. |
+| ✅ | GET | `/api/:t/portal/overview` | The whole landing payload in ONE request: `{clients[], client, viewOnly, progress{projects,activeProjects,completedProjects,percent}, deliverables{total,delivered,overdue}, nextMilestone, needsYou[], finance{byCurrency[],primary}}`. `needsYou[]` = `{kind:'gate'\|'contract', id, requires:'signature'\|'feedback', label, context, href, since}`. Progress is the mean of PROJECT progress (not of pooled tasks), each project weighted by `pm_tasks.progress` with `done` counting 100. Finished projects = status completed, archived, cancelled (`core/project-status.ts`; PV2-09 closed `projects.status` to planned, active, on_hold, completed, cancelled, archived); `activeProjects` = not finished, `completedProjects` = completed. **Additive (PV4-06):** `conversationUnread: number` = threads in the caller's scope with unread messages from staff (§29d). |
 | ✅ | GET | `/api/:t/portal/projects` | `PortalProject[]` — progress, milestone counts, deliverable count, next milestone due. **Additive (PV2-03):** `finished: boolean` — `status` is one of `FINISHED_PROJECT_STATUSES` (`core/project-status.ts`), the same constant the sort order uses; the UI must not re-derive it. |
 | ✅ | GET | `/api/:t/portal/projects/:projectId` | Adds `milestones[]`, `deliverables[]`, `runs[]`, `workload{todo,in_progress,blocked,done}`. **Additive (PV2-03):** `finished: boolean` (as on the list) and `lead: {name,email} \| null` — `projects.owner_id` → `users`; null when there is no owner or the owner is deleted/disabled. **Never returns individual tasks** — `workload` is aggregate counts only. 404 for another client's or another project-scope's project. |
 | ✅ | GET | `/api/:t/portal/milestones` | Commitment calendar across visible projects. |
@@ -4551,7 +4551,7 @@ exists).
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ NEW | GET | `/api/:t/clients/:clientId/overview` | The staff mirror of `/portal/overview` (§16b). Authz: `client` read. 404 for a client outside the tenant. Runs with `{ modules: ["social"] }` — the post-review join carries the `social` third wall, and without the scope that SELECT returns **zero rows and raises nothing**, so the hub would report "no post reviews outstanding" for a client with ten. `projects.active`/`done` use the same definition: finished = completed, archived, cancelled (PV2-09). |
+| ✅ NEW | GET | `/api/:t/clients/:clientId/overview` | The staff mirror of `/portal/overview` (§16b). Authz: `client` read. 404 for a client outside the tenant. Runs with `{ modules: ["social"] }` — the post-review join carries the `social` third wall, and without the scope that SELECT returns **zero rows and raises nothing**, so the hub would report "no post reviews outstanding" for a client with ten. `projects.active`/`done` use the same definition: finished = completed, archived, cancelled (PV2-09). **Additive (PV4-06):** `conversationsAwaitingReply: number`, and `needsUs[]` gains `kind: 'conversation'` items for threads waiting for our reply (§29d). |
 
 Response: `{ client, projects{total,active,done,percent}, tasks{total,open,overdue,blocked},
 deliverables{total,delivered,overdue}, nextMilestone, money{byCurrency[],primary}, needsUs[],
@@ -4946,6 +4946,42 @@ they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored 
   auto-execution (the route is its own WS4 gate). Since G5b an unattended agent may call them: the hub suspends it and
   the approval it files holds hashes, never the identifier (the bullet above). They are still two-person and never
   auto-run; `execution_status` stays `not_applicable` and the ledger is the record that a request ran.
+
+#### Consented website-visitor profiles (M5-V3-h) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
+
+Additive to the three routes above; nothing existing changes shape. Design `docs/plans/2026-10-12-m5-phase5-design.md`
+§4.7 and §8 V3-h; addendum §9.1. Code: `core/agency-privacy.*`, `modules/search/visitor-erase.ts`; migration
+`202610131900_agency_dsr_visitor_subjects.sql`.
+
+- **Body.** `{ email?, phone?, visitorId?, consentId?, approvalId? }`. `visitorId` is the consented visitor id the
+  site's privacy page shows the person; `consentId` is their consent log id. Each is a uuid (lower-cased); any one of
+  the four keys is enough; a present but malformed one is `400 subject_invalid`. Content binding covers them: an
+  approval filed for a visitor id does not run for another one, nor with a key added. Visitor keys never reach a
+  lead's contact data (leads are found by email or phone only).
+- **Who is in scope.** The profiles whose visitor id or consent id was given, the profiles under the consent id
+  snapshotted on every lead that matched the email/phone DIRECTLY (`visitor_consent.consentId`), and, closed over
+  shared ids, any profile sharing a visitor or consent id with one of those. Only this company's profiles.
+- **find.** Adds `visitorProfiles:[{ profileId, propertyId, matchedBy:["visitor_id"|"consent_id"|"lead"|"linked"],
+  firstSeenAt, lastSeenAt, visits, pageviews, eventCount }]` (no ids) and `counts.profileCount`,
+  `counts.profileEventCount`.
+- **export.** Adds `visitorProfiles:[{ …the find fields, propertyDomain, visitorId, consentId, device, country, city,
+  firstSource, network, company, interests, score, scoreParts, createdAt, updatedAt, events:[{ occurredAt, kind, path,
+  name, data }] }]`, every event, oldest first.
+- **erase.** Deletes the profiles (their events cascade) under the visitor jobs' per-property lock, tombstones BOTH the
+  visitor id and the consent id (`reason:'erase'`, SHA-256 only) on every property of the company, strips `consentId`
+  from every lead snapshot that holds an erased consent id (the rest of the snapshot is kept as evidence), and sends
+  the collector `forget mode:"erase"`. `counts` gains `profileCount, profileEventCount, tombstoneCount,
+  collectorForget, collectorForgetCalls, collectorDeletedEvents`, and the response gains `collector` (the outcome in
+  words). `collectorForget`: `delivered` | `queued` (the collector was unreachable or refused: the ERP side is erased
+  and committed, the forget is retried by the visitor jobs; NOT confirmed) | `not_configured` | `id_not_held` (an id
+  known only by its hash: blocked in the ERP, the collector is told when its buffered events next arrive) |
+  `not_needed`. A replay returns the same stored counts and words.
+- **New refusal.** `503 { reason:"visitor_store_busy" }`: a visitor job held a property lock for over a minute;
+  nothing was read or changed and the approval is still unused, so the same call can be repeated.
+- **Ledger.** `agency_dsr_requests` gains `visitor_id_hash`, `consent_id_hash` (hex SHA-256 of the lower-case uuid,
+  i.e. the tombstone hash), the profile and tombstone counts and `collector_forget` (required on an executed erase).
+- **Hub filing.** The minimiser also reduces `visitorId` / `consentId` to `subject.visitorIdHash` / `consentIdHash`
+  (no hint), and `identifiers` may list `"visitor_id"`, `"consent_id"`. The MCP tools gain both optional inputs.
 
 ### Convert — what it spawns, and the one thing it must never do
 
@@ -5929,6 +5965,30 @@ Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-03). Rulings PV-D
 | PROTOTYPED | PATCH | `/api/:t/conversation/drafts/:draftId` | `conversation` · `draft` | `{body}` -> `{id, status: 'pending', clientVisible: false}`. 409 unless pending. |
 | PROTOTYPED | POST | `/api/:t/conversation/drafts/:draftId/send` | `conversation` · `post` | -> **201** `{id (the message), threadId, draftId, draftedBy, createdAt, clientVisible: true}`. ONE transaction: the message is authored by the SENDER (`author_id` = the caller, `author_side = 'staff'`) with `drafted_by` = the draft's author; the draft becomes `sent` with `sent_message_id`, `decided_by`, `decided_at`. Already sent or discarded: 409. Refused to agents by Cerbos. |
 | PROTOTYPED | POST | `/api/:t/conversation/drafts/:draftId/discard` | `conversation` · `draft` | -> `{id, status: 'discarded', clientVisible: false}`. 409 unless pending. |
+
+### 29d. Notifications, both ways (PV4-06, 2026-10-13) — `src/core/conversation-notify.ts`, `src/mail/intake.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (HTTP suite `conversation-notify.test.ts` runs against real Postgres + Cerbos on the Linux CI gate; no UI yet — PV4-08 portal, PV4-09 staff)**
+
+No new route. Every write route in §29a/§29b calls into `conversation-notify.ts` **after its transaction commits**. The call is best-effort and never throws: a failure in the thread lookup, the recipient queries, or any one `notify()` is logged (`[conversation-notify]`, `[client-notify]`) and swallowed, so a notification problem can never fail or roll back the message. Edit, retract, close and reopen notify nobody.
+
+| Fires on | Recipients | Type | Title | `href` |
+|---|---|---|---|---|
+| a CLIENT posts (portal `POST /portal/conversation`, `.../:threadId/messages`) | staff recipients (below) | `conversation.message.client` | `New message from <client name>` | `/clients/<clientId>/work/conversation/<threadId>` |
+| STAFF post (`POST /conversation`, `.../:threadId/messages`) or a draft is SENT (`POST .../drafts/:id/send`) | every active contact in the thread's scope | `conversation.message.staff` | `You have a new message` | `/portal/conversation/<threadId>` |
+| a draft is CREATED (`POST .../:threadId/drafts`; a replay of the same `idempotencyKey` does not notify again) | staff recipients | `conversation.draft.created` | `A draft reply is waiting` | `/clients/<clientId>/work/conversation/<threadId>` |
+
+Payload (stored in `notifications.payload`, plus `actorId`): `{title, href, entityType: 'conversation', entityId: <threadId>}`. **It never contains the message text** (asserted on the stored row); the text stays in the thread. A staff href is a page PV4-09 builds; the portal href `/portal/conversation/<threadId>` is a page PV4-08 builds and is recorded in the UI's deep-link ledger (`portal-links.guard.test.ts` `AWAITING_PAGE`) until it exists.
+
+**Staff recipients** (design decision 5; there is no project-team table): the thread's staff participants (distinct `author_id` of its non-retracted `author_side = 'staff'` messages) ∪ the project's owner (`projects.owner_id`, project threads only) ∪ the client's account manager (`clients.owner_user_id`); deduplicated, the **actor excluded**, users that are not `active` (or soft-deleted) dropped. An **empty set notifies nobody and is not an error**: the thread still shows as awaiting reply (§16b `needsUs`), so a missed notice never hides it.
+
+**Contact recipients**: `resolveClientRecipients(kind: 'general')` with the thread's own `project_id`: active contacts that are client-wide or scoped to **that** project, never a contact scoped to another project. For a client-wide thread (`project_id` NULL) that is **client-wide contacts only** (PV4-Q1: a project-scoped contact cannot open that thread, so they are not told about it). Signers, admins and viewers alike (PV-D24); the actor is excluded.
+
+**Mail to client contacts** (`conversation.message.staff` is the third type on the mail allow-list, with its own template `conversation.message.staff`): the mail has no message text, a fixed subject `You have a new message`, no reply token, and its **only link is the plain deep link** (`<MAIL_LINK_BASE_URL>/portal/conversation/<threadId>`), never a token or a session.
+- **Throttle: at most one mail per contact per thread until that contact has read the thread.** A mail is skipped when `mail_log` already holds a `conversation.message.staff` row for this (contact, thread) newer than the contact's `conversation_reads.last_read_at`, or any such row at all when the contact has no read marker. Every status counts (queued, sent, suppressed, failed). The thread is recorded in the mail row's `payload.threadId`.
+- **Flag, default OFF: `CONVERSATION_CLIENT_MAIL_ENABLED=1`** (`config.mail.conversationClientMailEnabled`; only the exact string `1` enables it). It is separate from the master `MAIL_ENABLED` because this is the one mail type that reaches people outside the company. Off means `mailIntake` returns before any lookup: **no `mail_log` row and no enqueue**; the in-app notification above still lands. Turn it on only once a real client-delivery sender exists (the board's "Before real clients use the portal"). The compose file does not pass the variable through yet, so it cannot be turned on by accident.
+
+**Counts (additive)**
+- `GET /api/:t/portal/overview` (§16a) gains **`conversationUnread: number`**: the number of threads in the caller's scope with at least one unread message from STAFF. It is the same predicate (`conversationThreadInPortalScope`) and the same unread rule (`unreadCountSql`) as the per-thread `unreadCount` on `GET /portal/conversation`, so it equals the number of rows in that list with `unreadCount > 0`. A project-scoped contact does not count the client-wide thread. The portal nav's Projects badge adds it to the open gates (PV4-08).
+- `GET /api/:t/clients/:clientId/overview` (§16b) gains **`conversationsAwaitingReply: number`**, and `needsUs[]` gains items **`{kind: 'conversation', id: <threadId>, label: 'A client message is waiting for our reply', context: <subject | project name | 'General conversation'>, href: '/clients/<clientId>/work/conversation/<threadId>', since: <time of the last client message>, clientVisible}`**. A thread is awaiting when it is open and its last non-retracted message is the client's (`awaitingReplySql`, the same rule as the staff list's `awaitingReply`). The UI's `needsUs` item `kind` union grows by `'conversation'` (PV4-09).
 
 ## 29c. Meeting minutes shared with the client (PV4-05, 2026-10-12) — `platform-nest/src/core/meetings.controller.ts` (staff), `portal-workspace.controller.ts` (portal); predicates in `portal-visibility.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (HTTP suite `meeting-minutes.controller.test.ts` and the Cerbos matrix run against real Postgres + Cerbos on the Linux CI gate; no UI yet — PV4-08 portal, PV4-09 staff)**
 

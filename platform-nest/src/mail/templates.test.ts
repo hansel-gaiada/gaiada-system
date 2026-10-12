@@ -68,9 +68,22 @@ describe("mail/templates", () => {
       "approval.warning",
       "auth.magic_link",
       "auth.shell",
+      "conversation.message.staff",
       "monitoring.alert",
       "social.post_failed",
     ]);
+  });
+
+  it("PV4-06: conversation.message.staff carries no message text and only the plain deep link", () => {
+    const href = "https://erp.example.invalid/portal/conversation/abc";
+    const r = renderTemplate("conversation.message.staff", { href, body: "SECRET MESSAGE TEXT", subjectTitle: "SECRET" });
+    const all = [r.subject, r.text, r.html].join("\n");
+    expect(all).not.toContain("SECRET");
+    expect(r.text).toContain(href);
+    expect(r.html).toContain(`href="${href}"`);
+    // the only link in the mail is that one URL: no token / query string
+    expect([...all.matchAll(/https?:\/\/\S+?(?=["<\s]|$)/g)].map((m) => m[0])).toEqual([href, href, href]);
+    expect(all).not.toMatch(/[?&]token=/i);
   });
 
   // MAIL-18 gate follow-up (2026-08-08) — escaping is not scheme-safety.

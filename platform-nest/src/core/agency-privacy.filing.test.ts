@@ -7,11 +7,11 @@ import { HttpException } from "@nestjs/common";
 vi.mock("./http", () => ({ authorize: vi.fn(async () => undefined), writeActivity: vi.fn(async () => undefined) }));
 
 import {
-  AGENCY_PRIVACY_TOOL_NAMES, MINIMISED_MARKER, agencyPrivacyEventArgs, approvalReasonFor, emailHint, minimiseAgencyPrivacyArgs,
-  minimisedArgsForSubject, onAgencyPrivacyFiled, phoneHint,
+  AGENCY_PRIVACY_TOOL_NAMES, MINIMISED_MARKER, agencyPrivacyEventArgs, approvalReasonFor, emailHint, emptyPrivacyCounts,
+  insertLedgerRow, minimiseAgencyPrivacyArgs, minimisedArgsForSubject, onAgencyPrivacyFiled, phoneHint,
 } from "./agency-privacy.filing";
 import { PRIVACY_TOOL, approvalReason } from "./agency-privacy.service";
-import { parseSubject, subjectHash } from "./agency-privacy.subject";
+import { parseSubject, pseudonymHash, subjectHash } from "./agency-privacy.subject";
 import {
   getApprovalArgsPolicy, listApprovalArgsPolicyTools, minimiseFilingInput, minimiseToolArgs, registerApprovalArgsPolicy,
   unregisterApprovalArgsPolicy,
@@ -241,5 +241,73 @@ describe("onAgencyPrivacyFiled (the ledger's filed row, same transaction)", () =
       toolArgs: minimiseAgencyPrivacyArgs("agency_privacy.erase", { approvalId: APPROVAL }).toolArgs,
     });
     expect(calls).toHaveLength(0);
+  });
+});
+
+// M5-V3-h — the visitor keys under the same minimiser rules.
+describe("M5-V3-h: visitorId / consentId are minimised to their hashes", () => {
+  const V = "AAAAAAAA-1111-4111-8111-111111111111";
+  const K = "bbbbbbbb-2222-4222-8222-222222222222";
+  const VFORMS = [V, V.toLowerCase(), K, K.toUpperCase()];
+
+  it("stores only pseudonymHash() of each, says which keys were given, and no hint", () => {
+    const { toolArgs, reason } = minimiseAgencyPrivacyArgs("agency_privacy.erase", { tenantId: T, email: EMAIL, visitorId: V, consentId: K });
+    expect(toolArgs).toEqual({
+      minimised: MINIMISED_MARKER, kind: "erase", identifiers: ["email", "visitor_id", "consent_id"], tenantId: T,
+      subject: { emailHash: subjectHash(EMAIL_NORM), emailHint: "***@leak-check.example", visitorIdHash: pseudonymHash(V), consentIdHash: pseudonymHash(K) },
+    });
+    const text = JSON.stringify({ toolArgs, reason }).toLowerCase();
+    for (const f of VFORMS) expect(text).not.toContain(f.toLowerCase());
+    expect(reason).toContain("website visitor id");
+    expect(reason).toContain("website-visitor profiles");
+  });
+
+  it("a visitor key alone files; it is idempotent; a malformed one is 400 with nothing of the value", async () => {
+    const one = minimiseAgencyPrivacyArgs("agency_privacy.find", { consentId: K });
+    expect(one.toolArgs).toMatchObject({ identifiers: ["consent_id"], subject: { consentIdHash: pseudonymHash(K) } });
+    expect(minimiseAgencyPrivacyArgs("agency_privacy.find", one.toolArgs)).toEqual(one);
+    expect(await refusal(() => minimiseAgencyPrivacyArgs("agency_privacy.erase", { visitorId: "not-a-uuid" }))).toEqual({ status: 400, reason: "subject_invalid" });
+    try {
+      minimiseAgencyPrivacyArgs("agency_privacy.erase", { visitorId: `${V}-tail` });
+    } catch (e) {
+      expect(JSON.stringify((e as HttpException).getResponse()).toLowerCase()).not.toContain(V.toLowerCase());
+    }
+    // a forged minimised shape cannot smuggle a plaintext id in place of a hash
+    const forged = minimiseAgencyPrivacyArgs("agency_privacy.find", { minimised: MINIMISED_MARKER, subject: { visitorIdHash: V, consentIdHash: pseudonymHash(K) } });
+    expect(forged.toolArgs.subject).toEqual({ consentIdHash: pseudonymHash(K) });
+  });
+
+  it("the route's call 1 shape is a fixed point; event args keep the hashes", () => {
+    const parsed = parseSubject({ phone: PHONE, visitorId: V });
+    if (!parsed.ok) throw new Error("fixture");
+    const args = minimisedArgsForSubject("erase", APPROVAL, parsed.subject);
+    expect(minimiseAgencyPrivacyArgs("agency_privacy.erase", args).toolArgs).toEqual(args);
+    expect(agencyPrivacyEventArgs(args).subject).toEqual({ phoneHash: subjectHash(PHONE_DIGITS), visitorIdHash: pseudonymHash(V) });
+  });
+
+  it("onAgencyPrivacyFiled binds a visitor-only request in the ledger (hashes only, no collector status on a filed row)", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const c = { query: async (sql: string, params: unknown[]) => { calls.push({ sql, params }); return { rows: [], rowCount: 1 }; } };
+    const toolArgs = minimiseAgencyPrivacyArgs("agency_privacy.erase", { visitorId: V }).toolArgs;
+    await onAgencyPrivacyFiled(c as never, { approvalId: APPROVAL, tenantId: T, toolName: "agency_privacy.erase", requestedBy: "u-1", toolArgs });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].sql).toContain("visitor_id_hash");
+    const p = calls[0].params;
+    // email_hash, phone_hash null; visitor hash set; consent hash null; collector_forget (index 19) null on a filed row
+    expect([p[5], p[6], p[7], p[8]]).toEqual([null, null, pseudonymHash(V), null]);
+    expect(p[19]).toBeNull();
+    expect(JSON.stringify(p).toLowerCase()).not.toContain(V.toLowerCase());
+  });
+
+  it("insertLedgerRow writes the collector status on an executed erase only (the CHECK's rule), defaulting to not_needed", async () => {
+    const calls: unknown[][] = [];
+    const c = { query: async (_sql: string, params: unknown[]) => { calls.push(params); return { rows: [], rowCount: 1 }; } };
+    const base = { tenantId: T, requestId: APPROVAL, emailHash: null, phoneHash: null, visitorIdHash: pseudonymHash(V), approvalId: APPROVAL, actorId: "u-1" };
+    await insertLedgerRow(c as never, { ...base, kind: "erase", phase: "executed", counts: { ...emptyPrivacyCounts(), profileCount: 1, collectorForget: "queued" } });
+    await insertLedgerRow(c as never, { ...base, kind: "erase", phase: "executed", counts: emptyPrivacyCounts() });
+    await insertLedgerRow(c as never, { ...base, kind: "find", phase: "executed", counts: { ...emptyPrivacyCounts(), collectorForget: "delivered" } });
+    await insertLedgerRow(c as never, { ...base, kind: "erase", phase: "filed" });
+    expect(calls.map((p) => p[19])).toEqual(["queued", "not_needed", null, null]);
+    expect(calls[0][16]).toBe(1); // profile_count
   });
 });

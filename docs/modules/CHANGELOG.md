@@ -22,7 +22,28 @@ local stack). None of these mean "production-done".
 - **The tab 404s and is hidden** (tab strip and command palette) without the toolkit or `read_visitors`, so plain search staff never see an empty list.
 - **Analytics** gains "bot hits filtered": the 30-day total, the window and the reasons; non-ok states are words.
 - **Permission mirror:** `lib/rbac.ts` / `rbac-capability-map.ts` mirror `search.property.read_visitors` and `search.property.view_replay` (V3-f) as `search.visitors.read` and `search.replay.view`.
-- **Tests:** vitest (6544 full, 841 after the merge), tsc and `next build` green locally.
+- **Tests:** vitest (6544 full, 841 after the merge), tsc and `next build` green locally; GitHub Actions 38287617124 green.
+
+### platform-nest `0.109.0` - M5-V3-h: rights requests cover consented visitor profiles and the collector (2026-10-13) - DEV-VERIFIED
+
+- **Requests:** a rights request (G5) can now name `visitorId` and/or `consentId` as well as email and phone. Only `sha256(lower(uuid))` hashes are kept in the approval, the ledger, events and the hub minimiser, and the approval binding covers them, so an approval never widens.
+- **Find and export** cover profiles. Export returns the profile and all its events.
+- **Erase:**
+  - takes the visitor-property lock on every property of the company, in order, with a 60 s deadline (or 503 `visitor_store_busy`, approval unused);
+  - deletes the matching profiles (their events cascade), including those behind each matched lead's consent id;
+  - writes an `erase` tombstone for both ids on every property;
+  - strips `consentId` from kept lead snapshots;
+  - sends the collector `forget mode:"erase"`.
+- **Collector outage:** the ERP side still commits, and the ledger records `queued` (never "delivered"). The forget is retried by the visitor jobs; ingest re-sends it for any buffered event, and the collector's 72 h expiry bounds what is left.
+- **Migration `202610131900_agency_dsr_visitor_subjects`:**
+  - `agency_dsr_requests` gains the two subject hashes and the profile, event, tombstone and forget columns.
+  - `dsr_has_subject` is re-declared only after a catalog check of its old definition.
+  - "An executed erase records `collector_forget`" is NULL-safe and `NOT VALID`, because the ledger is append-only.
+- `core-tools.ts`: the privacy tools take the new ids.
+- **Verified** on GitHub Actions 38285798954, including:
+  - the DB suites: a later ingest of the erased visitor's buffered events creates nothing, even with WebDesk still saying "granted";
+  - the grep test: no identifier in approvals, outbox, activities, the ledger or logs;
+  - the migration test.
 
 ### platform-nest `0.108.0` - M5-V3-g: the visitors API and MCP tools (2026-10-13) - PROTOTYPED
 

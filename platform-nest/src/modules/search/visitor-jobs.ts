@@ -195,7 +195,7 @@ function pendingSize(): number {
 export function pendingForgetCount(): number { return pendingSize(); }
 export function clearPendingForgetsForTests(): void { pendingForgets.clear(); }
 
-function enqueueForget(propertyId: string, website: string, mode: ForgetMode, visitorIds: Iterable<string>, consentIds: Iterable<string>): void {
+export function enqueueForget(propertyId: string, website: string, mode: ForgetMode, visitorIds: Iterable<string>, consentIds: Iterable<string>): void {
   const key = `${propertyId}|${mode}`;
   const e = pendingForgets.get(key) ?? { website, mode, visitorIds: new Set<string>(), consentIds: new Set<string>() };
   let dropped = 0;
