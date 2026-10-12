@@ -35,7 +35,10 @@ import type { ApprovalOrigin } from "./approvals-urgency";
 // then refuse every attempt to decide it.
 // `webdesk` (WSK-59): publish/schedule approvals filed by WSK-66. Same branch as `search`: the row's REAL origin is
 // re-derived by automation-approvals.controller.ts decide(), which also runs WSK-66's in-band executor.
-const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search", "webdesk"];
+// `github` (GH-12): repo-creation requests. Same branch as `search`/`webdesk`: decide() re-derives the real origin, applies the
+// generic automation_approval·decide gate and runs the in-band executor,
+// whose own `github_repo · create_repo` Cerbos check is untouched.
+const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search", "webdesk", "github"];
 
 // None of the three origin controllers take constructor dependencies (their helpers — withTenants,
 // authorize, writeActivity, notify, emitEvent, config — are module-level imports, not injected), so
@@ -80,7 +83,8 @@ export class ApprovalsDecideController {
       case "agent":
       case "hr":
       case "search":
-      case "webdesk": {
+      case "webdesk":
+      case "github": {
         // automation-approvals.controller.ts's own decide() re-derives the row's REAL origin from
         // the DB before authorizing (WSD-4) — so whichever of these four the caller believes the
         // item is, the underlying handler still authorizes against the row's true origin. The
