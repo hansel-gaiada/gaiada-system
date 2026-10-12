@@ -865,7 +865,11 @@ export const webdevModule: ModuleContract = {
     },
     {
       name: "webdesk.site.archive",
-      description: "Archive a WebDesk site. HIGH write — ALWAYS WS4, every principal class (§07). STUB: 501 webdesk_control_plane_not_wired.",
+      description:
+        "Request archiving a WebDesk site: files ONE site.archive approval (HIGH, WS4) and returns {approvalId} (a pending request for the same "
+        + "site is returned, with alreadyPending:true, instead of a second one). Nothing is archived until a DIFFERENT authorised user approves it. "
+        + "IRREVERSIBLE: an archived site serves no content and accepts no writes or publishes, and WebDesk has no un-archive. "
+        + "HIGH write — ALWAYS WS4, every principal class (§07).",
       minAssurance: "low",
       write: true,
       impact: "high",
@@ -873,8 +877,8 @@ export const webdevModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/webdev/control/sites/:siteId/archive",
       inputSchema: {
         type: "object",
-        properties: { tenantId: { type: "string" }, siteId: { type: "string" } },
-        required: ["tenantId", "siteId"],
+        properties: { tenantId: { type: "string" }, siteId: { type: "string" }, tenantSlug: { type: "string" } },
+        required: ["tenantId", "siteId", "tenantSlug"],
       },
     },
     // ═══════════════════════════════════════════════════════════════════════════════════════════

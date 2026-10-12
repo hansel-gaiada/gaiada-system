@@ -19,6 +19,10 @@
 // itself is WSK-66's: executed at decide() by a DIFFERENT authorised user, the plaintext returned once in
 // that response and nowhere else.
 //
+// ── 2026-10-12: `POST sites/:siteId/archive` FILES A site.archive APPROVAL (owner ruling: archiving takes one) ──
+// Same shape as the key route: `promote` gate first, then the wall, then `controlRequestSiteArchive` files ONE
+// WSK-66 approval (202 `{approvalId}`); the archive itself is sent at decide() by a DIFFERENT authorised user.
+//
 // ── M6-P4c: `POST contract/regenerate` IS REAL ───────────────────────────────────────────────────────
 // WebDesk `contract.regenerate` (MEDIUM) for one of this company's tenants or all of them, through the same
 // channel and wall (`controlRegenerateContract`). Gate: `operate`, like the other MEDIUM control writes.
@@ -78,7 +82,7 @@ import { ModuleEnabledGuard } from "../module-enabled.guard";
 // control channel (the wall, typed errors and ledger rows live in the service). `POST sites/:siteId/keys` FILES a
 // key.mint approval (WSK-66 mints at decide()). Everything else stays 501.
 import { WebdeskProblemFilter } from "./webdesk-content.controller";
-import { controlApplySchema, controlListSites, controlProvisionSite, controlRegenerateContract, controlRequestKeyMint, idempotencyKeyOf } from "./webdesk-content.service";
+import { controlApplySchema, controlListSites, controlProvisionSite, controlRegenerateContract, controlRequestKeyMint, controlRequestSiteArchive, idempotencyKeyOf } from "./webdesk-content.service";
 
 /** The one honest answer every route below gives. A typed `error` token (this estate's error
  *  envelope, `http-error.filter.ts`), not prose alone, so a caller (the hub, a future console) can
@@ -222,11 +226,16 @@ export class WebdeskControlController {
     return NOT_WIRED;
   }
 
+  /** 2026-10-12 (owner ruling): FILES ONE site.archive approval and answers 202 `{approvalId}`. Nothing is
+   *  archived until a DIFFERENT authorised user approves it (WSK-66 sends the one WS4 command at decide()).
+   *  Replaces the always-501 stub. Body `{tenantSlug}`. */
   @Post("sites/:siteId/archive")
-  @HttpCode(501)
-  async archiveSite(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  @HttpCode(202)
+  async archiveSite(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("siteId") siteId: string, @Body() body: unknown,
+  ): Promise<{ approvalId: string; alreadyPending?: true }> {
     await authorize(req.principal, siteResource(tenantId), "promote");
-    return NOT_WIRED;
+    return controlRequestSiteArchive(req.principal, tenantId, siteId, body);
   }
 }
 

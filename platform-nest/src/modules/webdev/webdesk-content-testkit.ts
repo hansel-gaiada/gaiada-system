@@ -78,7 +78,7 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "site.archive", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 
 /** WSK-43b: one library asset as the fake holds it (the real row is `media_assets`, migration 0014). */
@@ -120,6 +120,8 @@ export class FakeZoneB {
   /** `env`: the site's two environment ids. Optional so a test can push a bare tenant; one is assigned (once,
    *  then stable) the first time the tenant is listed or a key is minted for it. */
   readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string; env?: { production: string; staging: string } }> = [];
+  /** site.archive: the site ids this fake has archived (tenant.list reports their `status`; a second archive is 409). Cleared by reset(). */
+  readonly archivedSites = new Set<string>();
   /** Every plaintext `key.mint` returned, in order (so a test can scan storage and logs for it). */
   readonly mintedKeys: string[] = [];
   /** Every preview token `content.previewToken` returned, in order (WSK-46: a test scans logs and the ledger for them). */
@@ -165,6 +167,7 @@ export class FakeZoneB {
     this.stagingDomain = "staging.gaiada.test";
     this.mintedUploadTokens.length = 0;
     this.mintKeys.clear();
+    this.archivedSites.clear();
     this.forms.clear();
     this.media.clear();
     this.items.clear();
@@ -292,7 +295,7 @@ export class FakeZoneB {
         tenants: rows.map((t) => ({
           slug: t.slug, status: t.status, defaultLocale: "en", locales: ["en", "id"],
           sites: [{
-            siteId: t.siteId, name: "Main", kind: "astro",
+            siteId: t.siteId, name: "Main", kind: "astro", status: this.archivedSites.has(t.siteId) ? "archived" : "active",
             // `environments.domain` is nullable in WebDesk (a site with no hostname yet): one of each.
             environments: [
               { envId: this.envOf(t).production, name: "production", domain: null, status: "pending" },
@@ -549,6 +552,12 @@ export class FakeZoneB {
         const key = `wdsk_${randomBytes(24).toString("base64url")}`;
         this.mintedKeys.push(key);
         return ok({ id: randomUUID(), key, scope: b.scope, envId: b.envId, tenantId: randomUUID(), createdAt: now, replayed: false }, 201);
+      }
+      case "site.archive": {
+        // WebDesk lifecycle.service#archiveSite: terminal; an already-archived site is a 409 (nothing is claimed).
+        if (this.archivedSites.has(String(p.siteId))) return problem(409, "conflict", { detail: "site is already archived" });
+        this.archivedSites.add(String(p.siteId));
+        return ok({ site: { id: p.siteId, name: "Main", status: "archived" }, replayed: false }, 201);
       }
       case "content.publish": {
         // WSK-66's in-band publish (WS4 + editorial `apr`); the fake only needs to flip the state.

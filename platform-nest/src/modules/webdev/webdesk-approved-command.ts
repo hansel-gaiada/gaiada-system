@@ -1,5 +1,13 @@
-// WSK-66 — WebDesk HIGH commands (content.publish, content.schedule, key.mint) filed as ONE WS4
+// WSK-66 — WebDesk HIGH commands (content.publish, content.schedule, key.mint, site.archive) filed as ONE WS4
 // approval and executed IN-BAND when a human approves it in the ERP's Approvals inbox.
+//
+// ── site.archive (owner ruling 2026-10-12: archiving a WebDesk site TAKES an approval) ───────────────
+// The fifth member of the union, modelled on key.mint: filed by a staff caller holding `promote` on
+// `webdev_provisioned_site`, decided by a DIFFERENT user (never self-approvable), executed at decide() with
+// ONE WS4-asserted POST to Zone B's `site.archive` (HIGH, `webdesk:promote`; no editorial assertion, it is
+// not an EDITORIAL_COMMAND). It replaces the WSK-31 always-501 stub. IRREVERSIBLE: WebDesk has no
+// un-archive. After an ambiguous failure it is NOT reconciled by reading (like key.mint, and unlike a
+// publish): the row fails `webdesk_ambiguous` and the operator checks the site's status in WebDesk.
 //
 // Design: docs/plans/2026-10-10-webdesk-write-plane-design.md §6 (impact class, the WS4 flow, why the
 // WSK-31 hub route cannot be reused), §8 (key.mint rides this executor; plaintext returned once), §9
@@ -113,7 +121,7 @@ import { ClientPublishAuthority } from "../../core/github/workflow-dispatch";
 
 /** The ONLY commands this executor runs. A closed union: a fourth command cannot ride it silently,
  *  because every table below is a `Record<WebdeskApprovedCommand, …>` and fails to compile without it. */
-export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint" | "content.rebuild";
+export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint" | "content.rebuild" | "site.archive";
 
 /** WSK-59: the editorial writes the BFF executes immediately (not through an approval). They sign through the
  *  SAME registered signer as the approved commands; only the command name differs (design §3.1).
@@ -149,6 +157,7 @@ const TOOL_NAME: Record<WebdeskApprovedCommand, string> = {
   "content.schedule": "webdesk.content.schedule",
   "key.mint": "webdesk.key.mint",
   "content.rebuild": "webdesk.content.rebuild",
+  "site.archive": "webdesk.site.archive",
 };
 
 function isApprovedCommand(value: unknown): value is WebdeskApprovedCommand {
@@ -171,7 +180,7 @@ export const WEBDESK_EXEC_ERROR = {
   denied: "webdesk_denied",
   /** The stored tool_args are malformed, outside the allow-list, or changed under the claim. Nothing sent. */
   argsInvalid: "webdesk_args_invalid",
-  /** key.mint only: the stored args no longer hash to the filed commandHash. Nothing sent. */
+  /** key.mint and site.archive only: the stored args no longer hash to the filed commandHash. Nothing sent. */
   argsTampered: "webdesk_args_tampered",
   /** The control channel or the editorial signer is not configured. Nothing sent. */
   notConfigured: "webdesk_not_configured",
@@ -222,7 +231,8 @@ type ParsedArgs =
       unpublishAt: string | null;
     }
   | { command: "key.mint"; tenantSlug: string; siteId: string; envId: string; scope: "read" | "write" }
-  | { command: "content.rebuild"; tenantSlug: string; siteId: string };
+  | { command: "content.rebuild"; tenantSlug: string; siteId: string }
+  | { command: "site.archive"; tenantSlug: string; siteId: string };
 
 interface ZoneBRequest {
   command: WebdeskApprovedCommand;
@@ -260,6 +270,13 @@ export type WebdeskApprovedCommandResult =
       scope: "read" | "write";
       /** The ONLY copy. Never persisted, never logged. null if Zone B's 2xx carried no key. */
       plaintextOnce: string | null;
+    }
+  | {
+      /** The site is archived in WebDesk (irreversible there). Nothing secret to carry. */
+      command: "site.archive";
+      executionStatus: "executed";
+      siteId: string;
+      status: "archived";
     }
   | { command: WebdeskApprovedCommand; executionStatus: "failed"; error: string };
 
@@ -367,6 +384,7 @@ const ARG_KEYS: Record<WebdeskApprovedCommand, ReadonlyArray<string>> = {
   "content.schedule": ["items", "publishAt", "unpublishAt"],
   "key.mint": ["envId", "scope"],
   "content.rebuild": [],
+  "site.archive": [],
 };
 
 class ArgsError extends Error {}
@@ -442,6 +460,11 @@ function parseCommandArgs(raw: unknown): ParsedArgs {
       if (extra.length) throw new ArgsError(`content.rebuild takes no ${extra.join(", ")}`);
       return { command, tenantSlug, siteId };
     }
+    case "site.archive": {
+      const extra = ["items", "note", "publishAt", "unpublishAt", "envId", "scope"].filter((k) => raw[k] !== undefined);
+      if (extra.length) throw new ArgsError(`site.archive takes no ${extra.join(", ")}`);
+      return { command, tenantSlug, siteId };
+    }
   }
 }
 
@@ -471,6 +494,14 @@ function zoneBRequestFor(a: Exclude<ParsedArgs, { command: "content.rebuild" }>)
         params: { tenantSlug: a.tenantSlug },
         body: { envId: a.envId, scope: a.scope },
       };
+    case "site.archive":
+      // WebDesk lifecycle.controller `POST :tenantSlug/sites/:siteId/archive`: no body; the WS4 hash is over the route params.
+      return {
+        command: a.command,
+        path: "/control/v1/tenants/:tenantSlug/sites/:siteId/archive",
+        params: { tenantSlug: a.tenantSlug, siteId: a.siteId },
+        body: {},
+      };
   }
 }
 
@@ -490,11 +521,18 @@ function commandHashOf(a: ParsedArgs): string {
 }
 
 function itemCountOf(a: ParsedArgs): number {
-  return a.command === "key.mint" || a.command === "content.rebuild" ? 0 : a.items.length;
+  return a.command === "key.mint" || a.command === "content.rebuild" || a.command === "site.archive" ? 0 : a.items.length;
+}
+
+/** The two commands gated on the SITE kind (`webdev_provisioned_site` · `promote`) and never self-approvable: they carry
+ *  no item, no editorial assertion and no staging rebuild. */
+function isSiteGated(command: WebdeskApprovedCommand): boolean {
+  return command === "key.mint" || command === "site.archive";
 }
 
 /** WSK-D46 R4: only a single-item, NON-scheduled publish may be approved by its own requester. A
- *  rebuild has no maker-checker arm (see the WSK-60 note in the header): its requester may decide it. */
+ *  rebuild has no maker-checker arm (see the WSK-60 note in the header): its requester may decide it.
+ *  A key mint and a site archive are NEVER self-approvable. */
 function isSelfApprovable(a: ParsedArgs): boolean {
   return a.command === "content.rebuild" || (a.command === "content.publish" && a.items.length === 1);
 }
@@ -518,7 +556,7 @@ function badRequest(token: string, message: string): BadRequestException {
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function filingGate(command: WebdeskApprovedCommand, tenantId: string): { resource: Resource; action: string } {
-  return command === "key.mint"
+  return isSiteGated(command)
     ? { resource: { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, action: "promote" }
     : { resource: { kind: "webdesk_content_item", tenantId, module: "webdev" }, action: "request_publish" };
 }
@@ -555,11 +593,16 @@ async function authorizeDecider(
     }
     return;
   }
-  if (a.command === "key.mint") {
+  if (a.command === "key.mint" || a.command === "site.archive") {
     // resource_webdev_provisioned_site.yaml's `promote` has no maker-checker arm and this ticket may
-    // not edit it, so the rule is enforced here. A key mint is never self-approvable (R4 is publish-only).
+    // not edit it, so the rule is enforced here. A key mint and a site archive are never self-approvable
+    // (R4 is publish-only).
     if (requestedBy && decider.userId === requestedBy) {
-      throw new ForbiddenException("not authorized: a key mint may not be approved by the principal who requested it");
+      throw new ForbiddenException(
+        a.command === "key.mint"
+          ? "not authorized: a key mint may not be approved by the principal who requested it"
+          : "not authorized: a site archive may not be approved by the principal who requested it",
+      );
     }
     await authorize(decider, { kind: "webdev_provisioned_site", tenantId, module: "webdev", approvalId }, "promote");
     return;
@@ -602,7 +645,7 @@ function ensureConfigured(a: ParsedArgs): WebdeskControlClient | null {
     }
     throw err;
   }
-  if (a.command !== "key.mint" && !editorialSigner.configured) {
+  if (!isSiteGated(a.command) && !editorialSigner.configured) {
     throw new ServiceUnavailableException({
       message: `${WEBDESK_EXEC_ERROR.notConfigured}: ${new EditorialSignerNotConfiguredError().message}`,
       reason: WEBDESK_EXEC_ERROR.notConfigured,
@@ -684,7 +727,7 @@ export async function fileWebdeskCommandApproval(
   const gate = filingGate(input.command, tenantId);
   const withClient = (r: Resource): Resource => (input.client ? { ...r, clientId: input.client.clientId } : r);
   const resources =
-    input.command !== "key.mint" && Array.isArray(input.itemResources) && input.itemResources.length > 0 ? input.itemResources : [gate.resource];
+    !isSiteGated(input.command) && Array.isArray(input.itemResources) && input.itemResources.length > 0 ? input.itemResources : [gate.resource];
   for (const r of resources) await authorize(principal, withClient(r), gate.action);
   if (!principal.userId) throw new BadRequestException("an authenticated user is required");
 
@@ -714,7 +757,7 @@ export async function fileWebdeskCommandApproval(
     // WSK-49c: server-set, never from a caller (RESERVED_ARG_KEYS): which client's editor filed this.
     ...(input.client ? { clientId: input.client.clientId } : {}),
     // WSK-D46 R3: one human decision covers the publish AND the staging rebuild. WSK-60 reads this.
-    ...(parsed.command === "key.mint" ? {} : { rebuild: { target: "staging", approvalId: id } }),
+    ...(isSiteGated(parsed.command) ? {} : { rebuild: { target: "staging", approvalId: id } }),
     summary: {
       title: summary.title,
       ...(isPlainObject(summary.counts) ? { counts: summary.counts } : {}),
@@ -948,8 +991,8 @@ export async function executeApprovedWebdeskCommand(
     return { command: a.command, executionStatus: "failed", error };
   }
   const req = zoneBRequestFor(a);
-  if (a.command === "key.mint" && webdeskCommandHashFor(row.tool_args) !== filedHash) {
-    // No editorial assertion travels with key.mint, so Zone B cannot see this; refuse here, unsent.
+  if (isSiteGated(a.command) && webdeskCommandHashFor(row.tool_args) !== filedHash) {
+    // No editorial assertion travels with key.mint or site.archive, so Zone B cannot see this; refuse here, unsent.
     const error = `${WEBDESK_EXEC_ERROR.argsTampered}: the stored args no longer match the filed command hash`;
     await finish(tenantId, approvalId, deciderId, { ok: false, error });
     return { command: a.command, executionStatus: "failed", error };
@@ -957,7 +1000,7 @@ export async function executeApprovedWebdeskCommand(
 
   // ── Phase 2: the editorial assertion (content commands; WSK-40's signer).
   let editorialAssertion: string | undefined;
-  if (a.command !== "key.mint") {
+  if (!isSiteGated(a.command)) {
     try {
       editorialAssertion = await editorialSigner.sign({
         sub: deciderId,
@@ -1027,6 +1070,12 @@ export async function executeApprovedWebdeskCommand(
         executionStatus: "failed",
         error: `${WEBDESK_EXEC_ERROR.ambiguous}: the mint may have committed and its answer was lost; revoke any key Zone B's audit shows under approval ${approvalId}`,
       };
+    } else if (a.command === "site.archive") {
+      outcome = {
+        command: a.command,
+        executionStatus: "failed",
+        error: `${WEBDESK_EXEC_ERROR.ambiguous}: the archive may have committed and its answer was lost; check the site's status in WebDesk (Zone B's audit shows approval ${approvalId}), never resend`,
+      };
     } else {
       const holds = await reconcileByReading(zoneB, a);
       outcome =
@@ -1065,11 +1114,13 @@ export async function executeApprovedWebdeskCommand(
     const stored =
       outcome.command === "key.mint"
         ? { command: outcome.command, apiKeyId: outcome.apiKeyId, envId: outcome.envId, scope: outcome.scope }
-        : { command: outcome.command, reconciled: outcome.reconciled, selfPublish: outcome.selfPublish, items: outcome.items, rebuild: outcome.rebuild };
+        : outcome.command === "site.archive"
+          ? { command: outcome.command, siteId: outcome.siteId, status: outcome.status }
+          : { command: outcome.command, reconciled: outcome.reconciled, selfPublish: outcome.selfPublish, items: outcome.items, rebuild: outcome.rebuild };
     await finish(tenantId, approvalId, deciderId, { ok: true, result: stored });
     await writeActivity(tenantId, deciderId, verb, "automation_approval", approvalId, {
       ...activityBase,
-      outcome: outcome.command !== "key.mint" && outcome.reconciled ? "reconciled" : "succeeded",
+      outcome: "reconciled" in outcome && outcome.reconciled ? "reconciled" : "succeeded",
       ...(outcome.command === "key.mint" ? { apiKeyId: outcome.apiKeyId } : {}),
     });
   } else {
@@ -1217,6 +1268,9 @@ function successOf(
   reconciled: boolean,
 ): Exclude<WebdeskApprovedCommandResult, { command: "content.rebuild" }> {
   const j = res && isPlainObject(res.json) ? res.json : {};
+  if (a.command === "site.archive") {
+    return { command: a.command, executionStatus: "executed", siteId: a.siteId, status: "archived" };
+  }
   if (a.command === "key.mint") {
     return {
       command: a.command,
