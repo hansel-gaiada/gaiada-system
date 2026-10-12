@@ -153,6 +153,24 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
     }
   });
 
+  // M6-P4b2 — the scaffold commit: the ONE webdev write wf:delivery runs unattended. What lets it run is impact "low"
+  // (first fill only, platform-nest-enforced); the same tool at "medium" would suspend. Scoped to wf:delivery only.
+  it("wf:delivery may call webdev.provisionedSites.commitScaffold unattended (a LOW write); no other workflow sees it", () => {
+    const name = "webdev.provisionedSites.commitScaffold";
+    expect(AUTOMATION_ALLOWLIST["wf:delivery"]).toContain(name);
+    for (const [id, tools] of Object.entries(AUTOMATION_ALLOWLIST)) {
+      if (id !== "wf:delivery") expect(tools, id).not.toContain(name);
+    }
+    registerTool({ name, description: "first fill", minAssurance: "low", write: true, impact: "low", inputSchema: { type: "object" }, handler: async () => "{}" });
+    expect(authorize(wf("wf:delivery"), name).allow).toBe(true);
+    expect(authorize(wf("wf:scope"), name).allow).toBe(false);
+    // the control: were it classified medium, the same unattended call would suspend for a human
+    registerTool({ name, description: "first fill", minAssurance: "low", write: true, impact: "medium", inputSchema: { type: "object" }, handler: async () => "{}" });
+    const d = authorize(wf("wf:delivery"), name);
+    expect(d.allow).toBe(false);
+    if (!d.allow) expect(d.reason).toMatch(/suspend/);
+  });
+
   it("does NOT grant humans automation scoping (a low human keeps normal visibility)", () => {
     const human: Principal = { provider: "whatsapp", externalId: "628110@c.us", assurance: "low" };
     const names = visibleTools(human).map((t) => t.name);
