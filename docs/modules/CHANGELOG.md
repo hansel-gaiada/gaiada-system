@@ -11,6 +11,24 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### automation `0.6.1` - M6-P4k: the delivery flow's repo check passes `tenantId` (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate.
+  - GH-12 made `github.repoStatus` require `tenantId`, but `pipeline-delivery.json`'s `MCP github.repoStatus` node still sent `{ repo }`.
+  - The hub refused the call, and `Repo ready?` read the refusal as "repo does not exist yet".
+  - So every run's `pm_approval` ended in a "repo needed" notice instead of `code.scaffold` (n8n execution 2697).
+- **The fix:** the node passes `tenantId` from `Load + decide`.
+- **Deploy:** the deploy does not ship `automation/workflows/`, so this needs a CLI re-import of `pipeline-delivery.json` (`ws11delivery0001`) and re-activation after the release.
+
+### mcp-hub `0.15.1` - M6-P4k: every workflow's MCP call is checked against its tool's required arguments (2026-10-13) - PROTOTYPED
+
+- **New test `src/workflow-tool-args.test.ts`:**
+  - It registers the hub's static tool sets and parses every `tools/call` in `automation/workflows/*.json`.
+  - It fails when a call omits an argument its tool's `inputSchema.required` names.
+  - Runtime-only module tools (`webdev.*` and the like), dynamic argument objects and spreads are skipped.
+  - A coverage floor (at least 40 checked calls, including the delivery flow's `github.repoStatus`) stops an empty scan from passing.
+- **Checked:** it fails on the pre-P4k `pipeline-delivery.json`, naming `github.repoStatus: missing tenantId`, and passes on the fixed file (3/3).
+
 ### platform-nest `0.111.0` - M6-P4j: the contract pin runs over the real control channel (WSK-D81) (2026-10-13) - PROTOTYPED
 
 - **Bug (live 2026-10-13):** provision completion could never pin a contract snapshot, so no provisioned site got a `CONTRACT.lock` and `code.scaffold` could not run.
