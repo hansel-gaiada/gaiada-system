@@ -97,9 +97,12 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 (P2-03) — permissions.ui_grantable + p
     // key held false on purpose: countersigning is owner-only by a Cerbos GRANT rule, and the key (catalogued
     // only because the policy names the action) must never ride a UI-built bundle. Deliberate pin update.
     // PV4-02 (2026-10-12): 24 -> 25. `portal.converse` is the 9th portal.* key (portal.* must be false).
-    it("exactly 25 rows are ui_grantable=false (15 relationship + 9 portal.* + core.contract.countersign)", async () => {
+    // PV5-02 (2026-10-12): 25 -> 26. `finance.config.set_bank_details` is held false on purpose for the same
+    // reason as countersign: it is reached only by an inline Cerbos GRANT rule (owner / finance_manager) and the
+    // platform_admin wildcard, and the key must never ride a UI-built bundle. Deliberate pin update.
+    it("exactly 26 rows are ui_grantable=false (15 relationship + 9 portal.* + core.contract.countersign + finance.config.set_bank_details)", async () => {
       const { rows } = await withGlobal((c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions WHERE ui_grantable = false`));
-      expect(Number(rows[0].n)).toBe(25);
+      expect(Number(rows[0].n)).toBe(26);
     });
   });
 

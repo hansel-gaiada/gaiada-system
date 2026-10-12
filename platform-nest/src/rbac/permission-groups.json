@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 158,
-      "grantablePermissionsInCatalog": 424,
-      "permissionsCoveredByGroups": 386,
-      "permissionsAdvancedOnly": 38,
+      "groups": 161,
+      "grantablePermissionsInCatalog": 428,
+      "permissionsCoveredByGroups": 389,
+      "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 108
+      "sensitiveGroups": 111
     }
   },
   "groups": [
@@ -190,6 +190,16 @@
       "sensitive": true
     },
     {
+      "key": "client_contracts_certify",
+      "name": "Mark Contracts for Certified Signing",
+      "domain": "core",
+      "description": "Mark a client contract to be signed through a certified e-signature provider instead of by typed name. Held by whoever may send contracts; kept as its own group so sending and choosing the signing tier can be granted separately.",
+      "permissions": [
+        "core.contract.mark_certified"
+      ],
+      "sensitive": true
+    },
+    {
       "key": "client_contracts_delete",
       "name": "Delete Client Contracts",
       "domain": "core",
@@ -241,6 +251,26 @@
       "description": "Approve an invoice for send/payment. Maker/checker: kept separate from Manage Invoices so an approver's authority can be granted without also granting them the ability to create/edit — and policy denies approving your own invoice regardless of this grant.",
       "permissions": [
         "invoice.approve"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "invoices_issue",
+      "name": "Issue Invoices",
+      "domain": "invoice",
+      "description": "Issue an approved invoice through the finance ledger: it takes the next invoice number and is posted to the books in one step. Kept separate from Manage Invoices and from Approve Invoices, so the right to issue can be granted without the right to draft or to approve.",
+      "permissions": [
+        "invoice.issue"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "invoices_void_issued",
+      "name": "Void Issued Invoices",
+      "domain": "invoice",
+      "description": "Void an invoice that has already been issued. The ledger entry is reversed with a credit note for the full amount. Kept apart from Issue Invoices: undoing a legal document in the books is a different call from creating it.",
+      "permissions": [
+        "invoice.void_issued"
       ],
       "sensitive": true
     },
@@ -1984,6 +2014,10 @@
     {
       "key": "core.contract.countersign",
       "reason": "PV3-01 (2026-10-11): countersigning binds the company to a contract and is owner-only by a Cerbos GRANT rule (an owner grant on the contract's company). The key is catalogued only because the policy names the action; it is uiGrantable:false, has no perm-arm rule, and must never sit in an authoring group."
+    },
+    {
+      "key": "finance.config.set_bank_details",
+      "reason": "PV5-02 (2026-10-12): changing the bank account clients pay into redirects real money. Reached only by a Cerbos GRANT rule (an owner or finance_manager grant on the company) or the platform_admin wildcard, and only at high assurance for everyone (PV-D26). The key is catalogued only because the policy names the action; it is uiGrantable:false, has no perm-arm rule, and must never sit in an authoring group."
     }
   ]
 }
