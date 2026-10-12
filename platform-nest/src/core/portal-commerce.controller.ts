@@ -46,8 +46,10 @@ import type { PoolClient } from "pg";
 const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
 /** Proof receipts are photos of a transfer slip or a small PDF. 10 MB is generous for both and well
  *  under the staff route's 25 MB — this is an unauthenticated-adjacent surface (an external party) and
- *  the smallest limit that does the job is the right one. */
-const MAX_PROOF_BYTES = 10 * 1024 * 1024;
+ *  the smallest limit that does the job is the right one.
+ *  The ONE definition: `core/upload-body-limits.ts` derives this route's Fastify `bodyLimit` from it
+ *  (PV4-03b) — change it here and the request-body limit follows. */
+export const MAX_PROOF_BYTES = 10 * 1024 * 1024;
 /** Overpayment tolerance: rounding and bank fees legitimately push a transfer a hair over. Anything
  *  beyond this is a typo, not a payment. */
 const OVERPAY_TOLERANCE = 1.01;

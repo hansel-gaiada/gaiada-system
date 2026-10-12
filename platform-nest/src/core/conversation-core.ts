@@ -31,8 +31,9 @@ export const MAX_BODY_CHARS = 10_000;
 export const MAX_SUBJECT_CHARS = 200;
 /** Lead decision (PV4-03 brief, deviation 1): up to 5 files per message, TOTAL <= 10 MB per message —
  *  the same budget as a payment proof (`MAX_PROOF_BYTES`). Not 5 x 10 MB: 50 MB of base64 JSON is
- *  an absurd request body. NOTE the app's Fastify body limit (main.ts never raises the 1 MiB default)
- *  is the tighter bound in practice; see the BFF §29 note. */
+ *  an absurd request body. The ONE definition of the total: `core/upload-body-limits.ts` derives the four
+ *  conversation routes' Fastify `bodyLimit` from it (PV4-03b), so the global 1 MiB default no longer
+ *  pre-empts it; see the BFF §29 note. */
 export const MAX_ATTACHMENTS = 5;
 export const MAX_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024;
 /** PV4-Q2 default: a message may be edited or retracted by its author for 15 minutes, then it is permanent. */

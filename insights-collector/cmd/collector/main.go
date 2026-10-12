@@ -20,6 +20,7 @@ import (
 	"gaiada/insights-collector/internal/bot"
 	"gaiada/insights-collector/internal/company"
 	"gaiada/insights-collector/internal/config"
+	"gaiada/insights-collector/internal/consent"
 	"gaiada/insights-collector/internal/geo"
 	"gaiada/insights-collector/internal/ingest"
 	"gaiada/insights-collector/internal/ops"
@@ -114,6 +115,9 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger, geodb *geo.
 	botCounter := store.NewBotCounter(st, log, counters)
 
 	pub := ingest.New(ingest.Options{Config: cfg, Geo: geodb, Bots: detector, Counter: botCounter, Stats: counters, Log: log})
+	consented := consent.New(consent.Options{
+		Config: cfg, Geo: geodb, Bots: detector, Resolver: resolver, Store: st, Stats: counters, Log: log,
+	})
 	opsH := ops.New(ops.Options{
 		Config: cfg, GeoStatus: geodb.Status, Store: st, Counter: botCounter, Stats: counters, Resolver: resolver.Name(),
 	})
@@ -141,11 +145,18 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger, geodb *geo.
 			ErrorLog:          quiet,
 		}
 	}
-	pubSrv, opsSrv := newServer(pub.Routes()), newServer(opsH.Routes())
+	// The public port serves exactly three paths: the aggregate channel and the consented channel's two routes.
+	root := http.NewServeMux()
+	root.Handle(cfg.CollectPath, pub.Routes())
+	consentRoutes := consented.Routes()
+	root.Handle(config.ConsentPath, consentRoutes)
+	root.Handle(config.ForgetPath, consentRoutes)
+	pubSrv, opsSrv := newServer(root), newServer(opsH.Routes())
 
 	log.Info("collector starting",
 		"version", cfg.Version, "geo", geodb.Status().String(), "resolver", resolver.Name(), "ip_mode", cfg.IPMode,
-		"datacenter_asns", detector.ASNCount(), "websites", len(cfg.Websites))
+		"datacenter_asns", detector.ASNCount(), "websites", len(cfg.Websites),
+		"buffer_retention_hours", int(cfg.BufferRetention.Hours()), "purge_interval_minutes", int(cfg.PurgeInterval.Minutes()))
 	if cfg.IPMode == config.IPModeReal {
 		log.Warn("FORWARD_IP_MODE=real: the visitor address is passed to Umami (documented fallback, not the default)")
 	}
@@ -156,6 +167,9 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger, geodb *geo.
 	bg, cancelBg := context.WithCancel(ctx)
 	flushed := make(chan struct{})
 	go func() { botCounter.Run(bg, cfg.BotFlushInterval); close(flushed) }()
+	purger := &store.Purger{St: st, Log: log, Stats: counters, Retention: cfg.BufferRetention, TombstoneMonths: config.TombstoneRetention}
+	purged := make(chan struct{})
+	go func() { purger.Run(bg, cfg.PurgeInterval); close(purged) }()
 	if ready != nil {
 		ready <- [2]string{pubLn.Addr().String(), opsLn.Addr().String()}
 	}
@@ -174,6 +188,7 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger, geodb *geo.
 	_ = pubSrv.Shutdown(sctx)
 	_ = opsSrv.Shutdown(sctx)
 	<-flushed
+	<-purged
 	log.Info("collector stopped")
 	return serveErr
 }

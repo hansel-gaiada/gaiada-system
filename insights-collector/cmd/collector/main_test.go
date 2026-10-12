@@ -25,10 +25,11 @@ import (
 )
 
 const (
-	site    = "11111111-2222-3333-4444-555555555555"
-	readKey = "main-test-read-key"
-	testIP  = geotest.IPBerlin
-	chrome  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+	site      = "11111111-2222-3333-4444-555555555555"
+	readKey   = "main-test-read-key"
+	forgetKey = "main-test-forget-key"
+	testIP    = geotest.IPBerlin
+	chrome    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
 type syncBuf struct {
@@ -51,9 +52,10 @@ func freeAddr(t *testing.T) string {
 
 func testEnv(extra map[string]string) func(string) string {
 	sum := sha256.Sum256([]byte(readKey))
+	fsum := sha256.Sum256([]byte(forgetKey))
 	m := map[string]string{
 		"COLLECT_API_ENDPOINT": "/lib/kestrel/e", "INSIGHTS_WEBSITES": site, "DATABASE_URL": "postgres://u:p@127.0.0.1:1/vdb",
-		"OPS_READ_KEY_SHA256": hex.EncodeToString(sum[:]),
+		"OPS_READ_KEY_SHA256": hex.EncodeToString(sum[:]), "OPS_FORGET_KEY_SHA256": hex.EncodeToString(fsum[:]),
 	}
 	for k, v := range extra {
 		m[k] = v
@@ -211,5 +213,114 @@ func TestServerErrorLogNeverCarriesAnAddress(t *testing.T) {
 	out := logs.String()
 	if strings.Contains(out, testIP) || !strings.Contains(out, "http_server_error") {
 		t.Errorf("typed handler output: %q", out)
+	}
+}
+
+func TestRunRefusesWithoutAForgetKeyAndWhenBufferRetentionIsZero(t *testing.T) {
+	err := run(context.Background(), func(k string) string {
+		if k == "OPS_FORGET_KEY_SHA256" {
+			return ""
+		}
+		return testEnv(nil)(k)
+	}, io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "OPS_FORGET_KEY_SHA256") {
+		t.Errorf("no forget key must refuse: %v", err)
+	}
+	err = run(context.Background(), testEnv(map[string]string{"BUFFER_RETENTION_HOURS": "0"}), io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "BUFFER_RETENTION_HOURS") {
+		t.Errorf("an explicit 0 must refuse: %v", err)
+	}
+}
+
+// The consented channel through real listeners: store, read lag, forget with the right key, 410 afterwards,
+// the purge loop running, and the address in no log line.
+func TestServeConsentedChannelEndToEnd(t *testing.T) {
+	pubAddr, opsAddr := freeAddr(t), freeAddr(t)
+	cfg, err := config.Load(testEnv(map[string]string{"LISTEN_ADDR": pubAddr, "OPS_ADDR": opsAddr, "PURGE_INTERVAL_MINUTES": "1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	geotest.WriteBoth(t, dir)
+	g := geo.Open(dir, cfg.CityFile, cfg.ASNFile)
+	defer g.Close()
+	det, _ := bot.New(data.IsbotPatterns, data.DatacenterASNs)
+	res, _ := company.NewRegistry().Select("", company.Options{})
+	logs := &syncBuf{}
+	lg := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mem := store.NewMemory()
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan [2]string, 1)
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, cfg, lg, g, det, res, mem, ready) }()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("serve returned early: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not become ready")
+	}
+	const vid, cid = "aaaaaaaa-0000-4000-8000-000000000001", "bbbbbbbb-0000-4000-8000-000000000001"
+	call := func(method, url, key, ua, body string) (int, string) {
+		req, _ := http.NewRequest(method, url, strings.NewReader(body))
+		req.Header.Set("X-Real-IP", testIP)
+		req.Header.Set("User-Agent", ua)
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	batch := `{"website":"` + site + `","visitorId":"` + vid + `","consentId":"` + cid + `","events":[{"kind":"pageview","path":"/services/"}]}`
+	if code, body := call("POST", "http://"+pubAddr+"/lib/kestrel/v", "", chrome, batch); code != 204 {
+		t.Fatalf("consented batch: %d %s", code, body)
+	}
+	if code, _ := call("POST", "http://"+pubAddr+"/lib/kestrel/v", "", chrome, `{"website":"`+site+`","visitorId":"`+vid+`","events":[]}`); code != 400 {
+		t.Errorf("no consentId: %d", code)
+	}
+	if n := len(mem.Events()); n != 1 {
+		t.Fatalf("stored %d", n)
+	}
+	// The 15 s read lag: the row just written is not served yet.
+	code, body := call("GET", "http://"+opsAddr+"/ops/v1/events?website="+site, readKey, "", "")
+	if code != 200 || !strings.Contains(body, `"events":[]`) {
+		t.Errorf("a row younger than 15 s must not be served: %d %s", code, body)
+	}
+	// The read key cannot forget; the forget key can.
+	fb := `{"website":"` + site + `","visitorIds":["` + vid + `"],"consentIds":[],"mode":"erase"}`
+	if code, _ := call("POST", "http://"+opsAddr+"/ops/v1/forget", readKey, "", fb); code != 403 {
+		t.Errorf("read key on forget: %d", code)
+	}
+	if len(mem.Events()) != 1 {
+		t.Error("a refused forget deleted something")
+	}
+	code, body = call("POST", "http://"+opsAddr+"/ops/v1/forget", forgetKey, "", fb)
+	if code != 200 || !strings.Contains(body, `"events":1`) {
+		t.Errorf("forget: %d %s", code, body)
+	}
+	if code, _ := call("POST", "http://"+pubAddr+"/lib/kestrel/v", "", chrome, batch); code != 410 {
+		t.Errorf("tombstoned visitor: %d", code)
+	}
+	if len(mem.Events()) != 0 {
+		t.Error("a 410 stored a row")
+	}
+	// /f is served on the public port; the ops paths are not.
+	if code, _ := call("POST", "http://"+pubAddr+"/lib/kestrel/f", "", chrome, `{"website":"`+site+`","visitorId":"`+vid+`","consentId":"`+cid+`"}`); code != 204 {
+		t.Errorf("/f: %d", code)
+	}
+	if code, _ := call("GET", "http://"+pubAddr+"/ops/v1/events?website="+site, readKey, "", ""); code != 404 {
+		t.Errorf("ops path on the public port: %d", code)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("serve: %v", err)
+	}
+	if out := logs.String(); strings.Contains(out, testIP) || strings.Contains(out, vid) || strings.Contains(out, cid) {
+		t.Errorf("address or id in the log output:\n%s", out)
 	}
 }

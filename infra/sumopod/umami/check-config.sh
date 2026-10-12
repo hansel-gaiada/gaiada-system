@@ -40,6 +40,7 @@ ERP_EDGE_SOURCE=10.211.91.1
 VDB_PASSWORD=dummy
 INSIGHTS_WEBSITES=00000000-0000-0000-0000-000000000000
 OPS_READ_KEY_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+OPS_FORGET_KEY_SHA256=1111111111111111111111111111111111111111111111111111111111111111
 EOF
 DC=(docker compose --env-file "$TMP/dummy.env")
 
@@ -92,7 +93,8 @@ for name in ("collector", "vdb"):
 # 5. the collector's environment lists every variable insights-collector reads (insights-collector/CLAUDE.md table)
 needed = ["COLLECT_API_ENDPOINT","INSIGHTS_WEBSITES","DATABASE_URL","OPS_READ_KEY_SHA256","LISTEN_ADDR","OPS_ADDR","UMAMI_URL",
           "UMAMI_TIMEOUT_MS","MAX_BODY_BYTES","BOT_FLUSH_SECONDS","GEO_DIR","GEO_CITY_FILE","GEO_ASN_FILE","GEO_REQUIRED",
-          "FORWARD_IP_MODE","COMPANY_RESOLVER","LOG_LEVEL"]
+          "FORWARD_IP_MODE","COMPANY_RESOLVER","LOG_LEVEL",
+          "OPS_FORGET_KEY_SHA256","CONSENT_EVENT_NAMES","CONSENT_RATE_PER_SECOND","BUFFER_RETENTION_HOURS","PURGE_INTERVAL_MINUTES"]
 env = svc["collector"].get("environment", {})
 missing = [k for k in needed if k not in env]
 say(not missing, "collector environment: lists every variable the binary reads" + (f" (MISSING {missing})" if missing else ""))

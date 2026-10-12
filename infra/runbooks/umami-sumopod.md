@@ -415,13 +415,16 @@ A failing `cosign verify` is a stop, not a warning. (Private package: `docker lo
 cd ~/umami
 # The ERP READ key: shown ONCE; the orchestrator puts it in platform-nest (INSIGHTS_READ_KEY). The collector keeps only the hash.
 K=$(openssl rand -hex 32); printf '%s' "$K" | sha256sum | cut -d' ' -f1      # hash -> OPS_READ_KEY_SHA256 in .env
-# The FORGET key (V3-b; the collector does not read it yet): same recipe, a DIFFERENT key; hash -> OPS_FORGET_KEY_SHA256 (commented in .env.example)
+# The FORGET key (M5-V3-b; REQUIRED, the collector refuses to start without it or with the read key's hash): same recipe,
+# a DIFFERENT key; the orchestrator puts it in platform-nest (the forget key variable V3-c names); hash -> OPS_FORGET_KEY_SHA256
+F=$(openssl rand -hex 32); printf '%s' "$F" | sha256sum | cut -d' ' -f1      # hash -> OPS_FORGET_KEY_SHA256 in .env
 openssl rand -hex 32                                                          # -> VDB_PASSWORD (hex, URL-safe)
 ```
 
-Fill `.env`: `VDB_PASSWORD`, `OPS_READ_KEY_SHA256`, `INSIGHTS_WEBSITES` (a well-formed placeholder UUID until the website exists, section 7),
+Fill `.env`: `VDB_PASSWORD`, `OPS_READ_KEY_SHA256`, `OPS_FORGET_KEY_SHA256`, `INSIGHTS_WEBSITES` (a well-formed placeholder UUID until the website exists, section 7),
 and `COLLECTOR_GEO_REQUIRED=1`. Leave `UMAMI_SKIP_LOCATION_HEADERS` and `COLLECTOR_FORWARD_IP_MODE` unset (defaults: Umami ignores
-location headers; the collector pseudonymises). Keys never go in git, a ticket, a log or chat; hand `$K` to the orchestrator only.
+location headers; the collector pseudonymises). Set `COLLECTOR_CONSENT_EVENT_NAMES` to the site's event list (V3-j) before the
+consented channel is routed (V3-c). Keys never go in git, a ticket, a log or chat; hand `$K` and `$F` to the orchestrator only.
 Rotate a key: new key, new hash in `.env`, `docker compose up -d collector`, then the new key in platform-nest.
 
 ### C3. Static gate (changes nothing)
