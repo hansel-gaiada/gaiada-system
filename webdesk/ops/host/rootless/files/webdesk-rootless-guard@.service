@@ -1,0 +1,23 @@
+# /etc/systemd/system/webdesk-rootless-guard@.service (M4 F6, WSK-D73). Instance = the rootless daemon user's
+# name (webdesk-rootless live, wdproof-rootless for the proof). Installed and enabled by install-rootless.sh.
+# user@<uid>.service of that user Wants= and is ordered After= its instance (instance drop-in), so at boot the
+# guard is in place before the user manager, and so the rootless dockerd, can start. The daemon's unit also
+# refuses to start without the marker this writes: a guard that fails fails WebDesk CLOSED.
+# Not ordered after the rootful docker.service on purpose: the rootful daemon writes no filter OUTPUT rule,
+# every iptables call here waits on the xtables lock (-w), and WebDesk's boot must not wait on the ERP's daemon.
+[Unit]
+Description=Egress guard for the rootless WebDesk Docker daemon of %i (WSK-D73; design §03 AC 6/7)
+ConditionPathExists=/etc/default/webdesk-rootless-%i
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/webdesk-rootless-guard.sh apply %i
+ExecReload=/usr/local/sbin/webdesk-rootless-guard.sh apply %i
+# `remove` REFUSES (and leaves the guard in place) while any process of the user's uid range runs. At
+# shutdown the order is right by itself: user@<uid>.service is After= this unit, so it stops first.
+ExecStop=/usr/local/sbin/webdesk-rootless-guard.sh remove %i
+
+[Install]
+WantedBy=multi-user.target

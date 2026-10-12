@@ -29,6 +29,7 @@ cat >"$T/bin/docker" <<'EOF'
 case "$*" in
   "inspect --format {{.Image}} webdesk-api-1") echo "${FAKE_IMAGE_ID:-}"; [ -n "${FAKE_IMAGE_ID:-}" ] || exit 1 ;;
   "inspect --format {{.Config.Image}} webdesk-api-1") echo "${FAKE_IMAGE_REF:-webdesk-api:latest}" ;;
+  compose\ *) echo "COMPOSE DOCKER_HOST=${DOCKER_HOST:-} IMG=${WEBDESK_API_IMAGE:-} $*" ;;
   *) echo "fake docker: unexpected call: $*" >&2; exit 99 ;;
 esac
 EOF
@@ -132,6 +133,45 @@ printf 'changed\n' >"$T/ac/stage/docker-compose.yml"
 refute "a changed release file -> not current" already_current "$D" "$D" "$REL" "$T/ac/pending" "$T/ac/stage" "$T/ac/live"
 printf 'c\n' >"$T/ac/stage/docker-compose.yml"; printf 'b\n' >"$T/ac/stage/migrations/0002.sql"
 refute "a file only the release has -> not current" already_current "$D" "$D" "$REL" "$T/ac/pending" "$T/ac/stage" "$T/ac/live"
+
+echo "== M4 F6: which daemon (WEBDESK_DOCKER_HOST, else the host switch file, else rootful)"
+SOCK=unix:///run/user/940/docker.sock
+SW="$T/webdesk-docker"
+wdh() { (unset WEBDESK_DOCKER_HOST; export WEBDESK_DOCKER_SWITCH="$SW"; wd_docker_host); }
+wdh_env() { (export WEBDESK_DOCKER_SWITCH="$SW" WEBDESK_DOCKER_HOST="$1"; wd_docker_host); }
+rm -f "$SW"
+assert "no variable, no switch file -> rootful (empty)" test "$(wdh)" = ""
+assert "  ... and that is a success, not an error" quiet wdh
+printf '# written at the cut-over\nWEBDESK_DOCKER_HOST=%s\n' "$SOCK" >"$SW"
+assert "switch file -> its socket" test "$(wdh)" = "$SOCK"
+printf 'WEBDESK_DOCKER_HOST=unix:///run/user/941/docker.sock\nWEBDESK_DOCKER_HOST="%s"\n' "$SOCK" >"$SW"
+assert "switch file: the last line wins, quotes stripped" test "$(wdh)" = "$SOCK"
+assert "an explicit empty variable beats the switch file (explicitly rootful)" test "$(wdh_env "")" = ""
+assert "an explicit variable beats the switch file" test "$(wdh_env unix:///run/user/941/docker.sock)" = "unix:///run/user/941/docker.sock"
+refute "tcp:// is refused" quiet wdh_env tcp://127.0.0.1:2375
+refute "the rootful socket path is refused" quiet wdh_env unix:///var/run/docker.sock
+refute "a non-numeric uid is refused" quiet wdh_env unix:///run/user/abc/docker.sock
+refute "uid 0 is refused" quiet wdh_env unix:///run/user/0/docker.sock
+refute "a path escape is refused" quiet wdh_env unix:///run/user/940/../0/docker.sock
+printf 'WEBDESK_DOCKER_HOST=unix:///tmp/evil.sock\n' >"$SW"
+refute "a malformed switch file is refused, never silently rootful" quiet wdh
+assert "project name webdesk accepted" valid_project webdesk
+assert "project name wdproof accepted" valid_project wdproof
+refute "project name with a slash refused" valid_project "web/desk"
+refute "upper-case project name refused" valid_project "WebDesk"
+assert "default project is webdesk, network webdesk_default, api webdesk-api-1" test "$PROJECT $NET $API_CT $PG_CT" = "webdesk webdesk_default webdesk-api-1 webdesk-postgres-1"
+assert "WEBDESK_PROJECT=wdproof derives every name from it" test "$(WEBDESK_PROJECT=wdproof bash -c '. "$1"; echo "$PROJECT $NET $API_CT $PG_CT"' _ "$HERE/deploy-webdesk.sh" 2>/dev/null)" = "wdproof wdproof_default wdproof-api-1 wdproof-postgres-1"
+unset DOCKER_HOST
+F3="-f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml"
+WD_DOCKER_HOST=""
+assert "compose, rootful: no DOCKER_HOST reaches docker (unchanged behaviour)" \
+  test "$(compose "$T/proj" 1 img@x config -q)" = "COMPOSE DOCKER_HOST= IMG=img@x compose --env-file $T/env -p webdesk $F3 config -q"
+WD_DOCKER_HOST="$SOCK"
+assert "compose, rootless: the socket is passed through (sudo) env explicitly" \
+  test "$(compose "$T/proj" 1 img@x config -q)" = "COMPOSE DOCKER_HOST=$SOCK IMG=img@x compose --env-file $T/env -p webdesk $F3 config -q"
+assert "compose, rootless, two-file form: the socket still reaches docker, no image pin" \
+  test "$(compose "$T/proj" 0 "" ps)" = "COMPOSE DOCKER_HOST=$SOCK IMG= compose --env-file $T/env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml ps"
+WD_DOCKER_HOST=""
 
 echo
 echo "passed=$PASS failed=$FAIL"

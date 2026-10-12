@@ -121,5 +121,6 @@ step deploy-typecheck-test deploy
 step ops-check-cdn-bypass-selftest node "$WD/ops/scripts/check-cdn-bypass.mjs" --selftest
 step ops-check-otlp-write-only-selftest node "$WD/ops/scripts/check-otlp-write-only.mjs" --selftest
 step ops-test-deploy-webdesk bash "$WD/ops/deploy/test-deploy-webdesk.sh"
+step ops-test-rootless bash "$WD/ops/host/rootless/test-rootless.sh"   # M4 F6: pure parts, no root/docker
 
 [ "$FAILS" -eq 0 ]
