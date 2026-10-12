@@ -23,12 +23,21 @@
 // provisioned a moment ago is not 404 for a minute). The caller's `tenantId` is the AuthGuard-validated
 // route param, authorised against Cerbos for this company BEFORE this runs.
 //
-// ── ATTRIBUTES COME FROM ZONE B, NEVER FROM THE REQUEST (design §7) ──────────────────────────────
-// An item-targeted write reads the item from Zone B (`item.get`) and authorises a SECOND time with
-// `collectionKey`/`locale` taken from that read, then sends. (The generic first check has no attributes;
-// no policy rule reads them yet, and the later writer/translator roles will.) `create` has no item to
-// read: its `collectionKey` is the validated route param (`collection.get` proves it exists) and its
-// `locale` is the body's, which Zone B itself validates against the tenant's locales.
+// ── THE TWO-PHASE GATE (M5-W1c; docs/plans/2026-10-11-m5-writers-room-design.md §2.3) ──────────────
+// ContentGate -> SiteGate -> ItemGate. Attributes come from the ROUTE or from a ZONE B READ, never from a
+// body or a query (PERMISSION-CONTRACT 27.2):
+//   PHASE 1 (`ContentGate.openSite`, the controller's first statement): `webdesk_collection:read` on
+//     {tenantId, module, siteId}. The site-level question every writers' room grant can answer.
+//   PHASE 2 (inside each method, BEFORE any body or query validation): the REAL action, with `siteId` (the
+//     route's, proven by the wall), `collectionKey`, `locale`, `ownerId` (= WebDesk's author), `reviewState` and
+//     `published` taken from WebDesk's `item.get` (or, for `create`, the route key proven by `collection.get`,
+//     the body's locale, and for a locale twin the SOURCE item's state). A method that writes sends through an
+//     `ItemGate`, whose constructor is private and which only the WebDesk-read path can build.
+// A principal that holds no writers' room grant (and is not delegating) is ALSO asked the old attribute-free
+// question inside phase 1: for them it is exactly the old first statement, so a denied staff caller still sees
+// no egress and no 404-before-403. It is never an allow path (it only ever denies earlier).
+// `create` has no item to read: its `collectionKey` is the validated route param (`collection.get` proves it
+// exists) and its `locale` is the body's, which Zone B itself validates against the tenant's locales.
 //
 // ── EVERY EGRESS WRITE WRITES TWO `activities` ROWS (GH-04's pattern) ────────────────────────────
 // One BEFORE the call (`outcome:"attempted"`) so a crash leaves evidence, one AFTER (`succeeded` |
@@ -64,7 +73,8 @@ import {
 } from "@nestjs/common";
 import { authorize, writeActivity } from "../../core/http";
 import { withTenants } from "../../db";
-import type { Principal } from "../../rbac/principal";
+import { check, checkActions, type Resource } from "../../rbac/cerbos";
+import { assemblePrincipal, type Principal } from "../../rbac/principal";
 import {
   EditorialUnavailableError,
   WebdeskControlNotConfiguredError,
@@ -174,8 +184,20 @@ export interface ClientGateContext {
   readonly notifyDeciders?: boolean;
 }
 
+/** The four writers' room roles (design D1): grants stored as data, each with scope rows. */
+const EDITORIAL_ROLES: readonly string[] = ["webdesk_writer", "webdesk_translator", "webdesk_seo_reviewer", "webdesk_editor"];
+
+/**
+ * M5-W1c: does this principal hold a writers' room grant? True on the role name OR on scope rows, so an unusual
+ * grant takes the slow, attribute-aware path rather than the attribute-free fast deny. Pure.
+ */
+export function holdsEditorialGrant(principal: Principal): boolean {
+  return principal.roles.some((g) => EDITORIAL_ROLES.includes(g.role) || (Array.isArray(g.editorialScopes) && g.editorialScopes.length > 0));
+}
+
 /** Proof that Cerbos allowed `principal` to run `action` on `kind` in company `tenantId`. Its constructor
- *  is private: `authorizeContent()` (staff) or `ContentGate.openClient()` (client editors) are the only ways to get one. */
+ *  is private: `authorizeContent()` (the importer, the legacy company-level entry), `ContentGate.openSite()` (the
+ *  HTTP content routes, phase 1) or `ContentGate.openClient()` (client editors) are the only ways to get one. */
 export class ContentGate {
   private constructor(
     readonly principal: Principal,
@@ -183,12 +205,51 @@ export class ContentGate {
     readonly kind: ContentKind,
     readonly action: ContentAction,
     readonly client?: ClientGateContext,
+    /** M5-W1c: set by `openSite` (phase 1 passed for THIS route site id). Absent on a legacy or client gate. */
+    readonly siteId?: string,
+    /** M5-W1c: set by `openSites` for a principal whose reach is per site (`GET sites` filters by Cerbos per site). */
+    readonly perSite?: boolean,
   ) {}
 
-  /** @internal use `authorizeContent`. */
+  /** @internal use `authorizeContent`. The attribute-free, company-level gate: the importer's and the legacy entry. */
   static async open(principal: Principal, tenantId: string, kind: ContentKind, action: ContentAction): Promise<ContentGate> {
     await authorize(principal, { kind, tenantId, module: "webdev" }, action);
     return new ContentGate(principal, tenantId, kind, action);
+  }
+
+  /**
+   * M5-W1c PHASE 1 (the controller's first statement): `webdesk_collection:read` on {tenantId, module, siteId}, with the
+   * site id from the ROUTE. Every writers' room grant that covers the site answers yes; every staff tier answers as it
+   * always did. The gate then names the action the handler INTENDS (`kind`, `action`), which phase 2 checks with the item's
+   * real attributes before anything is validated or sent.
+   *
+   * The route's site id is not yet proven to be this company's here (the wall runs next, and 404s a foreign pair); that
+   * is safe because a grant's scope rows are matched against `tenantId` too (`g.scopeId == resource.attr.tenantId`), so
+   * a site id can only ever match a row of THIS company's grant. Phase 2 uses the wall's own `site.siteId`.
+   */
+  static async openSite(principal: Principal, tenantId: string, siteId: string, kind: ContentKind, action: ContentAction): Promise<SiteGate> {
+    await authorize(principal, { kind: "webdesk_collection", tenantId, module: "webdev", siteId }, "read");
+    // The old first statement, kept for a principal no writers' room rule can match (see the header): denial before
+    // any egress, exactly as before. Skipped when the phase-1 question WAS that question, and for a delegated call (the
+    // acting human may hold a grant the caller does not).
+    if (!(kind === "webdesk_collection" && action === "read") && !principal.actFor && !holdsEditorialGrant(principal)) {
+      await authorize(principal, { kind, tenantId, module: "webdev" }, action);
+    }
+    return new ContentGate(principal, tenantId, kind, action, undefined, siteId) as SiteGate;
+  }
+
+  /**
+   * M5-W1c: the gate of `GET …/content/sites`, which names no site. A principal with no writers' room grant gets the old
+   * company-level `webdesk_collection:read` (403 on a denial, before any egress). A principal that holds one (or that is
+   * delegating) is filtered per site by `WebdeskContentService.listSites`, which asks Cerbos for each site and answers 403
+   * when none is readable; no company-level question is asked of it, so a scoped writer leaves no spurious denial row.
+   */
+  static async openSites(principal: Principal, tenantId: string): Promise<ContentGate> {
+    if (principal.actFor || holdsEditorialGrant(principal)) {
+      return new ContentGate(principal, tenantId, "webdesk_collection", "read", undefined, undefined, true);
+    }
+    await authorize(principal, { kind: "webdesk_collection", tenantId, module: "webdev" }, "read");
+    return new ContentGate(principal, tenantId, "webdesk_collection", "read");
   }
 
   /**
@@ -232,8 +293,15 @@ export class ContentGate {
   }
 }
 
-/** The FIRST statement of every handler (and of the importer's calls): Cerbos, as the caller, module `webdev`. */
+/** M5-W1c: a `ContentGate` that passed PHASE 1 for `siteId` (`ContentGate.openSite`). */
+export type SiteGate = ContentGate & { readonly siteId: string };
+
+/** The importer's and the legacy company-level gate: Cerbos, as the caller, module `webdev`, no site attributes. */
 export const authorizeContent = ContentGate.open;
+/** M5-W1c PHASE 1 of every HTTP content route (the controller's first statement). */
+export const authorizeSite = ContentGate.openSite;
+/** M5-W1c: the gate of `GET …/content/sites`. */
+export const authorizeSites = ContentGate.openSites;
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // Shapes
@@ -602,17 +670,145 @@ export function resolveEditableSite(companyId: string, tenantSlug: string, siteI
 
 const ITEM_PATH = "/control/v1/tenants/:tenantSlug/sites/:siteId/content/items/:itemId";
 
+/** Module-private brand: a value carrying it was built from a WebDesk read (`parseItemAttrs`), nowhere else. */
+const FROM_WEBDESK: unique symbol = Symbol("webdesk-read");
+
+/** WebDesk's review states (`editorial_items.state`); anything else reads as "" and fails every rule closed. */
+const REVIEW_STATES: readonly string[] = ["draft", "in_review", "changes_requested", "approved"];
+
+/** One item as WebDesk's `item.get` reported it. Only `parseItemAttrs` builds one (the brand is module-private). */
 interface ItemAttrs {
+  readonly [FROM_WEBDESK]: true;
   collectionKey: string;
   locale: string;
   deletedAt: string | null;
   contentHash: string | null;
   headVersion: number | null;
   publishedVersion: number | null;
+  /** M5-W1c: `editorial.authorSub`, the Cerbos `ownerId`. "" when WebDesk named none (a legacy item): nobody owns it. */
+  ownerId: string;
+  /** M5-W1c: `editorial.state`; "" when WebDesk sent no usable one (an older WebDesk): the review rules deny. */
+  reviewState: string;
+  /** M5-W1c: `publishedVersion !== null`. */
+  published: boolean;
+  /** M5-W1c: `editorial.submittedVersion` (the version an approval would be about), when WebDesk sent one. */
+  submittedVersion: number | null;
+  /** M5-W1c: the creator (`created_by`) of the version this read selected, and of the head: the Cerbos `creatorId` of `approve`. */
+  selectedCreatedBy: string | null;
+  selectedVersion: number | null;
+  headCreatedBy: string | null;
   /** M5-W2c: `item.get`'s `editorial` member, narrowed to what the publish request's early refusal reads.
    *  null when WebDesk sent none (a WebDesk older than M5-W2b) or an unusable one: no early refusal is
    *  possible then, and WebDesk's own gate still refuses at execution. */
   review: { required: boolean; approvedVersion: number | null } | null;
+}
+
+/** `collection.get` answered 200: the route's collection key exists on this site. Built only by `proveCollection`. */
+interface CollectionProof {
+  readonly [FROM_WEBDESK]: true;
+  readonly collectionKey: string;
+}
+
+/** The actions `allowed` reports on an item (one Cerbos batch). `publish`/`schedule` are decide()-only and are not listed. */
+export const ITEM_ALLOWED_ACTIONS = [
+  "read", "update", "submit", "comment", "request_changes", "seo_signoff", "approve", "assign", "request_publish", "unpublish", "delete",
+] as const;
+
+/**
+ * M5-W1c PHASE 2: proof that Cerbos allowed `gate`'s principal to run `action` on ONE item (or, for a `create`, on the
+ * item about to exist) with attributes that came from the route and from WebDesk, never from a body or a query. The
+ * constructor is private and its factories demand a value built from a WebDesk read (`ItemAttrs`, `CollectionProof`,
+ * brands this module does not export), so a method that sends a write cannot be reached without the read and the check.
+ */
+export class ItemGate {
+  private constructor(
+    readonly gate: ContentGate,
+    readonly site: SiteRef,
+    readonly action: ContentAction,
+    /** The item acted on; null for a `create`. */
+    readonly itemId: string | null,
+    readonly collectionKey: string,
+    readonly locale: string,
+    /** The WebDesk read behind the check (null for a `create`). */
+    readonly attrs: ItemAttrs | null,
+  ) {}
+
+  /** The Cerbos resource, shared by the check and by `allowed` so the two can never disagree about an attribute. */
+  static resourceOf(gate: ContentGate, siteId: string, itemId: string | null, a: { collectionKey: string; locale: string; ownerId?: string; reviewState?: string; published?: boolean; creatorId?: string }): Resource {
+    return {
+      kind: "webdesk_content_item",
+      tenantId: gate.tenantId,
+      module: "webdev",
+      ...(itemId !== null ? { id: itemId } : {}),
+      siteId,
+      collectionKey: a.collectionKey,
+      locale: a.locale,
+      ...(a.ownerId !== undefined ? { ownerId: a.ownerId } : {}),
+      ...(a.reviewState !== undefined ? { reviewState: a.reviewState } : {}),
+      ...(a.published !== undefined ? { published: a.published } : {}),
+      ...(a.creatorId !== undefined ? { creatorId: a.creatorId } : {}),
+      ...gate.clientAttr(),
+    };
+  }
+
+  /** @internal an existing item, from its `item.get`. `siteId` is the wall's own (`EditableSite.site.siteId`). */
+  static async forItem(gate: ContentGate, site: SiteRef, siteId: string, itemId: string, action: ContentAction, attrs: ItemAttrs): Promise<ItemGate> {
+    await authorize(gate.principal, ItemGate.resourceOf(gate, siteId, itemId, attrs), action);
+    return new ItemGate(gate, site, action, itemId, attrs.collectionKey, attrs.locale, attrs);
+  }
+
+  /**
+   * @internal an item about to be created. `proof` is `collection.get` for the ROUTE's key; `locale` is the body's
+   * (WebDesk validates it against the tenant's locales). For a locale twin `twin` is the SOURCE item's read, and the
+   * review state and `published` describe the source (design 2.3); a fresh item carries neither.
+   */
+  static async forCreate(gate: ContentGate, site: SiteRef, siteId: string, proof: CollectionProof, locale: string, twin: ItemAttrs | null): Promise<ItemGate> {
+    const twinOk = twin !== null && twin.collectionKey === proof.collectionKey;
+    await authorize(
+      gate.principal,
+      ItemGate.resourceOf(gate, siteId, null, {
+        collectionKey: proof.collectionKey,
+        locale,
+        ...(twinOk ? { reviewState: twin.reviewState, published: twin.published } : {}),
+      }),
+      "create",
+    );
+    return new ItemGate(gate, site, "create", null, proof.collectionKey, locale, null);
+  }
+}
+
+/** `item.get`'s answer as the Cerbos attributes and the review facts the BFF reads. The ONLY constructor of `ItemAttrs`. */
+function parseItemAttrs(body: unknown): ItemAttrs {
+  const root = isPlainObject(body) ? body : {};
+  const item = isPlainObject(root.item) ? root.item : null;
+  if (!item || typeof item.collectionKey !== "string" || typeof item.locale !== "string") {
+    throw new BadGatewayException({ message: "webdesk_error", reason: "item_shape" });
+  }
+  const v = isPlainObject(root.version) ? root.version : null;
+  const ed = isPlainObject(root.editorial) ? root.editorial : null;
+  const approved = ed?.approvedVersion;
+  const submitted = ed?.submittedVersion;
+  const num = (x: unknown): number | null => (typeof x === "number" && Number.isInteger(x) ? x : null);
+  return {
+    [FROM_WEBDESK]: true,
+    review:
+      ed && typeof ed.reviewRequired === "boolean" && (approved === null || (typeof approved === "number" && Number.isInteger(approved)))
+        ? { required: ed.reviewRequired, approvedVersion: approved as number | null }
+        : null,
+    collectionKey: item.collectionKey,
+    locale: item.locale,
+    deletedAt: typeof item.deletedAt === "string" ? item.deletedAt : null,
+    contentHash: v && typeof v.contentHash === "string" ? v.contentHash : null,
+    headVersion: typeof item.headVersion === "number" ? item.headVersion : null,
+    publishedVersion: typeof item.publishedVersion === "number" ? item.publishedVersion : null,
+    ownerId: ed && typeof ed.authorSub === "string" ? ed.authorSub : "",
+    reviewState: ed && typeof ed.state === "string" && REVIEW_STATES.includes(ed.state) ? ed.state : "",
+    published: typeof item.publishedVersion === "number",
+    submittedVersion: num(submitted),
+    selectedCreatedBy: v && typeof v.createdBy === "string" ? v.createdBy : null,
+    selectedVersion: v ? num(v.version) ?? num(v.n) : null,
+    headCreatedBy: typeof item.headCreatedBy === "string" ? item.headCreatedBy : null,
+  };
 }
 
 /** `item.get`'s answer, narrowed to what reconciliation reads. */
@@ -634,7 +830,40 @@ export class WebdeskContentService {
     // Refresh the wall's cache from the same answer, so the editor's first click is warm.
     const tenants = isPlainObject(r.body) && Array.isArray(r.body.tenants) ? (r.body.tenants as WebdeskTenantEntry[]) : null;
     if (tenants) this.zoneB.primeSiteCache(gate.tenantId, tenants);
-    return r;
+    if (!gate.perSite) return r;
+
+    // M5-W1c: a principal whose reach is per site (a writers' room grant, or a delegated call) sees only the sites Cerbos
+    // lets it read. The wall's cache above keeps the FULL answer (authorization is a separate question from "is this the
+    // company's site"). Probes use `check`, not `authorize`, so the sites it may NOT read leave no denial rows.
+    if (!tenants) throw new BadGatewayException({ message: "webdesk_error", reason: "tenant_list_shape" });
+    const principal = gate.principal;
+    if (await probeAllowed(principal, { kind: "webdesk_collection", tenantId: gate.tenantId, module: "webdev" }, "read")) {
+      await authorize(principal, { kind: "webdesk_collection", tenantId: gate.tenantId, module: "webdev" }, "read");
+      return r; // a company-level reader (a staff tier acting through a delegation): every site, as before
+    }
+    const siteIds = tenants.flatMap((t) => t.sites.map((s) => s.siteId));
+    const verdicts = await mapPool(siteIds, ITEM_READ_CONCURRENCY, async (siteId) => ({
+      siteId,
+      ok: await probeAllowed(principal, { kind: "webdesk_collection", tenantId: gate.tenantId, module: "webdev", siteId }, "read"),
+    }));
+    const readable = new Set(verdicts.filter((v) => v.ok).map((v) => v.siteId));
+    if (readable.size === 0) {
+      // Nothing readable: the ordinary denial (and its audit row), never an empty list (an empty list is a claim).
+      await authorize(principal, { kind: "webdesk_collection", tenantId: gate.tenantId, module: "webdev" }, "read");
+      return r;
+    }
+    // The real check for one readable site: the session (D11) and the delegation's second look, with the usual audit.
+    await authorize(principal, { kind: "webdesk_collection", tenantId: gate.tenantId, module: "webdev", siteId: [...readable][0] }, "read");
+    const body = r.body as Record<string, unknown>;
+    return {
+      status: r.status,
+      body: {
+        ...body,
+        tenants: tenants
+          .map((t) => ({ ...t, sites: t.sites.filter((s) => readable.has(s.siteId)) }))
+          .filter((t) => t.sites.length > 0),
+      },
+    };
   }
 
   async listCollections(gate: ContentGate, site: SiteRef): Promise<ZoneBResult> {
@@ -649,8 +878,11 @@ export class WebdeskContentService {
 
   async listItems(gate: ContentGate, site: SiteRef, collectionKey: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    // PHASE 2 (before the query is validated): reading a collection's items. `collectionKey` is the route's (WebDesk 404s
+    // `collection-not-found` for one that does not exist, so a forged key reads nothing); no locale: reading is any-locale.
+    await authorize(gate.principal, ItemGate.resourceOf(gate, editable.site.siteId, null, { collectionKey, locale: "" }), "read");
     const { slug, ...query } = strictQuery(rawQuery, ["locale", "state", "q", "includeDeleted", "cursor", "limit", "slug"]);
-    await gate.resolveSite(this.zoneB, site);
     const read = (q: Query) =>
       this.zoneB.read({
         command: "item.list",
@@ -682,20 +914,51 @@ export class WebdeskContentService {
 
   async getItem(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    // PHASE 2 (before the query is validated): the item's HEAD is read for the attributes. The `version` query selects
+    // which VERSION is returned, never an attribute, and is only forwarded after the check.
+    const head = await this.readItemRaw(site, itemId);
+    await ItemGate.forItem(gate, site, editable.site.siteId, itemId, "read", head.attrs);
     const query = strictQuery(rawQuery, ["version"]);
-    await gate.resolveSite(this.zoneB, site);
-    return this.zoneB.read({
-      command: "item.get",
-      path: ITEM_PATH,
-      params: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId },
-      query,
-    });
+    const res = query.version === undefined ? head.result : (await this.readItemRaw(site, itemId, query.version)).result;
+    // `allowed` is the staff editor's: a client editor's answer is its own portal contract and stays as it was.
+    return gate.client ? res : this.withAllowed(gate, site, editable.site.siteId, itemId, head.attrs, res);
+  }
+
+  /**
+   * M5-W1c: `allowed: { <action>: boolean }` on the item read, from ONE Cerbos batch (`checkActions`) on the SAME resource
+   * the real handlers authorise (`ItemGate.resourceOf`): the UI follows it instead of guessing from bundles
+   * (PERMISSION-CONTRACT 5). ADVISORY: each real action still runs its own check. Absent (never `false`) when Cerbos could
+   * not answer or the call is delegated (a batch cannot intersect the acting human's rights), so an unknown is not a denial.
+   * `approve`'s `creatorId` is the creator of the version an approval would be about (the SUBMITTED version): read from the
+   * answer in hand, or from one more `item.get` when the submitted version is neither the one selected nor the head.
+   */
+  private async withAllowed(gate: ContentGate, site: SiteRef, siteId: string, itemId: string, attrs: ItemAttrs, res: ZoneBResult): Promise<ZoneBResult> {
+    if (!isPlainObject(res.body) || gate.principal.actFor) return res;
+    try {
+      let creatorId = "";
+      if (attrs.reviewState === "in_review" && attrs.submittedVersion !== null) {
+        if (attrs.submittedVersion === attrs.selectedVersion && attrs.selectedCreatedBy) creatorId = attrs.selectedCreatedBy;
+        else if (attrs.submittedVersion === attrs.headVersion && attrs.headCreatedBy) creatorId = attrs.headCreatedBy;
+        else creatorId = (await this.readItemRaw(site, itemId, String(attrs.submittedVersion))).attrs.selectedCreatedBy ?? "";
+      }
+      const got = await checkActions(
+        gate.principal,
+        ItemGate.resourceOf(gate, siteId, itemId, { collectionKey: attrs.collectionKey, locale: attrs.locale, ownerId: attrs.ownerId, reviewState: attrs.reviewState, published: attrs.published, creatorId }),
+        ITEM_ALLOWED_ACTIONS,
+      );
+      return { status: res.status, body: { ...res.body, allowed: got } };
+    } catch (err) {
+      logger.warn(`item allowed unavailable: ${(err as Error).message}`);
+      return res;
+    }
   }
 
   async listVersions(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await ItemGate.forItem(gate, site, editable.site.siteId, itemId, "read", (await this.readItemRaw(site, itemId)).attrs); // PHASE 2
     const query = strictQuery(rawQuery, ["cursor", "limit"]);
-    await gate.resolveSite(this.zoneB, site);
     return this.zoneB.read({
       command: "item.versions",
       path: `${ITEM_PATH}/versions`,
@@ -706,8 +969,9 @@ export class WebdeskContentService {
 
   async getVersion(gate: ContentGate, site: SiteRef, itemId: string, n: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await ItemGate.forItem(gate, site, editable.site.siteId, itemId, "read", (await this.readItemRaw(site, itemId)).attrs); // PHASE 2
     strictQuery(rawQuery, []);
-    await gate.resolveSite(this.zoneB, site);
     return this.zoneB.read({
       command: "item.versionGet",
       path: `${ITEM_PATH}/versions/:n`,
@@ -728,21 +992,42 @@ export class WebdeskContentService {
     idempotencyKey: string,
   ): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "create");
-    await gate.resolveSite(this.zoneB, site);
+    const editable = await gate.resolveSite(this.zoneB, site);
+    // PHASE 2, before the body is validated. The collection must exist on THIS site (a typed 404 `collection-not-found`
+    // passes through): that proves the ROUTE's key. The locale is the body's, read leniently (WebDesk validates it
+    // against the tenant's locales, and a body that is not an object yields "" and is refused below). For a locale twin
+    // the SOURCE item is read from WebDesk and its review state and `published` are what the check sees (design 2.3); the
+    // body only names which source. Nothing else the body carries (siteId, collectionKey, ownerId, reviewState...) is read.
+    const proof = await this.proveCollection(site, collectionKey);
+    const raw = isPlainObject(rawBody) ? rawBody : {};
+    const twinId = typeof raw.twinOf === "string" && UUID_RE.test(raw.twinOf) ? raw.twinOf.toLowerCase() : null;
+    // (Only a principal a writers' room rule can match, or a delegated call, has any use for the source's state: the
+    // staff tiers read neither attribute, so for them the read would be an egress call that changes no decision.)
+    const twinMatters = twinId !== null && (holdsEditorialGrant(gate.principal) || gate.principal.actFor !== undefined);
+    const twin = twinMatters ? (await this.readItemRaw(site, twinId as string)).attrs : null;
+    const itemGate = await ItemGate.forCreate(gate, site, editable.site.siteId, proof, typeof raw.locale === "string" ? raw.locale : "", twin);
+
     const b = strictBody(rawBody, ["collectionKey", "locale", "slug", "twinOf", "fields", "blocks", "seo", "note"]);
     // The route's collection is the authority. A body that names a different one is a mistake, not a redirect.
     if (b.collectionKey !== undefined && b.collectionKey !== collectionKey) {
       throw invalidRequest("collectionKey in the body does not match the collection in the path");
     }
-    // The collection must exist on THIS site (a typed 404 `collection-not-found` passes through).
+    return this.sendCreate(itemGate, b, idempotencyKey);
+  }
+
+  /** `collection.get`: the route's collection key exists on this site. The only builder of a `CollectionProof`. */
+  private async proveCollection(site: SiteRef, collectionKey: string): Promise<CollectionProof> {
     await this.zoneB.read({
       command: "collection.get",
       path: "/control/v1/tenants/:tenantSlug/sites/:siteId/collections/:key",
       params: { tenantSlug: site.tenantSlug, siteId: site.siteId, key: collectionKey },
     });
-    const locale = typeof b.locale === "string" ? b.locale : "";
-    await authorize(gate.principal, { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", collectionKey, locale, ...gate.clientAttr() }, "create");
+    return { [FROM_WEBDESK]: true, collectionKey };
+  }
 
+  /** The create write. Needs an `ItemGate` (phase 2 passed for this collection and locale). */
+  private sendCreate(g: ItemGate, b: Record<string, unknown>, idempotencyKey: string): Promise<ZoneBResult> {
+    const { gate, site, collectionKey } = g;
     const { collectionKey: _drop, ...rest } = b;
     void _drop;
     return this.zoneB.write(gate.principal, gate.tenantId, {
@@ -756,56 +1041,32 @@ export class WebdeskContentService {
       editorial: { tenantSlug: site.tenantSlug, siteId: site.siteId },
       ...gate.egressClient(),
       entity: { type: "webdesk_content_item", id: null },
-      ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, collectionKey, locale: locale || null, slug: typeof b.slug === "string" ? b.slug : null },
+      ledger: { tenantSlug: site.tenantSlug, siteId: site.siteId, collectionKey, locale: g.locale || null, slug: typeof b.slug === "string" ? b.slug : null },
       reconcile: this.reconcileCreate(site, collectionKey, gate.principal.userId as string, b.locale, b.slug),
     });
   }
 
   // ── writes on an existing item ───────────────────────────────────────────────────────────────
 
-  /** Read the item from Zone B and authorise the ACTION with ITS collectionKey/locale (never the body's). */
-  private async authorizeOnItem(
-    gate: ContentGate,
-    site: SiteRef,
-    itemId: string,
-    action: ContentAction,
-    version?: string,
-  ): Promise<ItemAttrs> {
-    const attrs = await this.readItemAttrs(site, itemId, version);
-    await authorize(
-      gate.principal,
-      { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", id: itemId, collectionKey: attrs.collectionKey, locale: attrs.locale, ...gate.clientAttr() },
-      action,
-    );
-    return attrs;
+  /** PHASE 2 for an existing item: read it from Zone B, authorise the ACTION with ITS attributes (never the body's or the query's). */
+  private async openItemGate(gate: ContentGate, site: SiteRef, editable: EditableSite, itemId: string, action: ContentAction): Promise<ItemGate> {
+    const { attrs } = await this.readItemRaw(site, itemId);
+    return ItemGate.forItem(gate, site, editable.site.siteId, itemId, action, attrs);
   }
 
-  private async readItemAttrs(site: SiteRef, itemId: string, version?: string): Promise<ItemAttrs> {
-    const { body } = await this.zoneB.read({
+  /** `item.get` (the head, or `version`): the answer as it came, and the Cerbos attributes and review facts read from it. */
+  private async readItemRaw(site: SiteRef, itemId: string, version?: string): Promise<{ result: ZoneBResult; attrs: ItemAttrs }> {
+    const result = await this.zoneB.read({
       command: "item.get",
       path: ITEM_PATH,
       params: { tenantSlug: site.tenantSlug, siteId: site.siteId, itemId },
       ...(version !== undefined ? { query: { version } } : {}),
     });
-    const item = isPlainObject(body) && isPlainObject(body.item) ? body.item : null;
-    if (!item || typeof item.collectionKey !== "string" || typeof item.locale !== "string") {
-      throw new BadGatewayException({ message: "webdesk_error", reason: "item_shape" });
-    }
-    const v = isPlainObject((body as Record<string, unknown>).version) ? ((body as Record<string, unknown>).version as Record<string, unknown>) : null;
-    const ed = isPlainObject((body as Record<string, unknown>).editorial) ? ((body as Record<string, unknown>).editorial as Record<string, unknown>) : null;
-    const approved = ed?.approvedVersion;
-    return {
-      review:
-        ed && typeof ed.reviewRequired === "boolean" && (approved === null || (typeof approved === "number" && Number.isInteger(approved)))
-          ? { required: ed.reviewRequired, approvedVersion: approved as number | null }
-          : null,
-      collectionKey: item.collectionKey,
-      locale: item.locale,
-      deletedAt: typeof item.deletedAt === "string" ? item.deletedAt : null,
-      contentHash: v && typeof v.contentHash === "string" ? v.contentHash : null,
-      headVersion: typeof item.headVersion === "number" ? item.headVersion : null,
-      publishedVersion: typeof item.publishedVersion === "number" ? item.publishedVersion : null,
-    };
+    return { result, attrs: parseItemAttrs(result.body) };
+  }
+
+  private async readItemAttrs(site: SiteRef, itemId: string, version?: string): Promise<ItemAttrs> {
+    return (await this.readItemRaw(site, itemId, version)).attrs;
   }
 
   private async rawItem(site: SiteRef, itemId: string, version?: string): Promise<RawItem> {
@@ -901,9 +1162,22 @@ export class WebdeskContentService {
     },
   ): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", action);
-    await gate.resolveSite(this.zoneB, site);
+    const editable = await gate.resolveSite(this.zoneB, site);
+    // PHASE 2 first (the item read and the real action), THEN the body: a denied caller is 403 whatever it sent.
+    const itemGate = await this.openItemGate(gate, site, editable, itemId, action);
     const body = strictBody(spec.rawBody, spec.allowed);
-    const attrs = await this.authorizeOnItem(gate, site, itemId, action);
+    return this.sendItemWrite(itemGate, body, spec);
+  }
+
+  /** An existing item's write. Needs an `ItemGate`: the WebDesk read and the check cannot be skipped to reach it. */
+  private async sendItemWrite(
+    g: ItemGate,
+    body: Record<string, unknown>,
+    spec: { command: WebdeskBffEditorialCommand; method: "POST" | "PUT"; suffix: string; idempotencyKey: string; reconcile: (sub: string, body: Record<string, unknown>, before: ItemAttrs) => () => Promise<ZoneBResult | null> },
+  ): Promise<ZoneBResult> {
+    const { gate, site, action } = g;
+    const itemId = g.itemId as string;
+    const attrs = g.attrs as ItemAttrs;
     const result = await this.zoneB.write(gate.principal, gate.tenantId, {
       command: spec.command,
       verb: `webdesk.${spec.command}`,
@@ -1001,11 +1275,11 @@ export class WebdeskContentService {
   // Zone B's `content.previewToken` is MEDIUM and editorial, so it signs and ledgers like the other writes.
   //
   // ORDER (each step is a refusal that mints NOTHING):
-  //   gate (the controller's first statement) -> the cross-company wall (404) -> body -> the site's staging base
-  //   (409 `preview_not_configured`) -> the site's `/preview/` page exists (409 `preview_page_missing`; 502
-  //   `preview_site_unreachable` when that cannot be told) -> the item read from Zone B and authorised AGAIN with
-  //   its real collection/locale -> mint.
-  // The site checks come BEFORE the item read on purpose: a site that cannot show a preview costs no Zone B call.
+  //   gate (the controller's first statement, M5-W1c phase 1) -> the cross-company wall (404) -> the item read from
+  //   Zone B and `update` authorised with its real attributes (phase 2: a denied caller is 403 whatever it sent, and
+  //   triggers no probe of the site) -> body -> the site's staging base (409 `preview_not_configured`) -> the site's
+  //   `/preview/` page exists (409 `preview_page_missing`; 502 `preview_site_unreachable` when that cannot be told) ->
+  //   a requested version exists (404 `version-not-found`) -> mint.
   //
   // THE TOKEN IS A ONE-TIME SECRET. It is in Zone B's response and in the returned `previewUrl`'s FRAGMENT
   // (`<staging>/preview/#t=<token>`; a fragment is never sent to a server or in a Referer), and nowhere else:
@@ -1015,6 +1289,7 @@ export class WebdeskContentService {
   async previewItem(gate: ContentGate, site: SiteRef, itemId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "update");
     const editable = await gate.resolveSite(this.zoneB, site);
+    const itemGate = await this.openItemGate(gate, site, editable, itemId, "update"); // PHASE 2, before the body
     const b = strictBody(rawBody === undefined || rawBody === null ? {} : rawBody, ["version"]);
     let version: number | undefined;
     if (b.version !== undefined && b.version !== null) {
@@ -1036,7 +1311,8 @@ export class WebdeskContentService {
       throw new BadGatewayException({ message: "The site didn't answer, so a preview link can't be made right now", reason: "preview_site_unreachable" });
     }
 
-    const attrs = await this.authorizeOnItem(gate, site, itemId, "update", version === undefined ? undefined : String(version));
+    // A requested version must exist (404 `version-not-found` passes through). Attributes were settled by the head read above.
+    const attrs = version === undefined ? (itemGate.attrs as ItemAttrs) : await this.readItemAttrs(site, itemId, String(version));
     if (attrs.deletedAt !== null) {
       throw new WebdeskProblem(409, {
         type: "https://webdesk.gaiada.online/errors/item-deleted",
@@ -1080,6 +1356,13 @@ export class WebdeskContentService {
   async requestPublish(gate: ContentGate, site: SiteRef, rawBody: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "request_publish");
     const editable = await gate.resolveSite(this.zoneB, site);
+    // PHASE 2, before the body is validated: the items the body NAMES are read from WebDesk (the body only selects which
+    // items; every attribute comes from the read) and `request_publish` is checked for each distinct (collection, locale,
+    // author, review state, live) tuple. A body that names no readable item (malformed) is checked at site level, which a
+    // staff tier passes and a scoped editor (whose rules need a collection) does not: 403 before the 400.
+    const refs = lenientPublishRefs(rawBody);
+    const preReads = await mapPool(refs, ITEM_READ_CONCURRENCY, (it) => this.readItemAttrs(site, it.itemId, String(it.version)));
+    await this.authorizePublishTuples(gate, editable.site.siteId, preReads);
     const b = strictBody(rawBody, ["items", "publishAt", "unpublishAt", "note"]);
     const items = parsePublishItems(b.items);
     const publishAt = optInstant(b.publishAt, "publishAt");
@@ -1102,8 +1385,11 @@ export class WebdeskContentService {
 
     // Read every item at the requested version (bounded concurrency): proves it exists on THIS site and
     // is not deleted, and yields what Cerbos and the approver need. A typed 404/409 passes through.
-    const reads = await mapPool(items, ITEM_READ_CONCURRENCY, (it) => this.readItemAttrs(site, it.itemId, String(it.version)));
-    const pairs = new Map<string, { collectionKey: string; locale: string }>();
+    const preRead = new Map(refs.map((r, i) => [r.itemId.toLowerCase(), { version: r.version, attrs: preReads[i] }]));
+    const reads = await mapPool(items, ITEM_READ_CONCURRENCY, async (it) => {
+      const hit = preRead.get(it.itemId.toLowerCase());
+      return hit && hit.version === it.version ? hit.attrs : this.readItemAttrs(site, it.itemId, String(it.version));
+    });
     const counts: Record<string, number> = {};
     reads.forEach((attrs, i) => {
       if (attrs.deletedAt !== null) {
@@ -1114,12 +1400,8 @@ export class WebdeskContentService {
           detail: `Item ${items[i].itemId} is deleted and cannot be published.`,
         });
       }
-      pairs.set(`${attrs.collectionKey}\u0000${attrs.locale}`, { collectionKey: attrs.collectionKey, locale: attrs.locale });
       counts[attrs.collectionKey] = (counts[attrs.collectionKey] ?? 0) + 1;
     });
-    for (const p of pairs.values()) {
-      await authorize(gate.principal, { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", collectionKey: p.collectionKey, locale: p.locale, ...gate.clientAttr() }, "request_publish");
-    }
     // M5-W2c — the EARLY refusal (writers' room design 4.5): on a review-required collection only the exact approved
     // version can go live, and WebDesk refuses anything else inside the publish transaction. Saying so here, with
     // WebDesk's own problem, spares the publisher an approval that could only fail. AFTER authorization (a caller
@@ -1154,6 +1436,23 @@ export class WebdeskContentService {
       ...(gate.client ? { client: { clientId: gate.client.clientId, notifyDeciders: gate.client.notifyDeciders } } : {}),
     });
     return { status: 202, body: { approvalId, command, itemCount: n } };
+  }
+
+  /** `request_publish` for each distinct tuple of attributes among `reads` (bounded concurrency); with no reads, at site level. */
+  private async authorizePublishTuples(gate: ContentGate, siteId: string, reads: readonly ItemAttrs[]): Promise<void> {
+    if (reads.length === 0) {
+      await authorize(gate.principal, ItemGate.resourceOf(gate, siteId, null, { collectionKey: "", locale: "" }), "request_publish");
+      return;
+    }
+    const tuples = new Map<string, ItemAttrs>();
+    for (const a of reads) tuples.set(JSON.stringify([a.collectionKey, a.locale, a.ownerId, a.reviewState, a.published]), a);
+    await mapPool([...tuples.values()], ITEM_READ_CONCURRENCY, (a) =>
+      authorize(
+        gate.principal,
+        ItemGate.resourceOf(gate, siteId, null, { collectionKey: a.collectionKey, locale: a.locale, ownerId: a.ownerId, reviewState: a.reviewState, published: a.published }),
+        "request_publish",
+      ),
+    );
   }
 
   /**
@@ -1302,6 +1601,34 @@ function optInstant(v: unknown, field: string): string | null {
   if (v === undefined || v === null) return null;
   if (typeof v !== "string" || Number.isNaN(Date.parse(v))) throw invalidRequest(`${field} must be an ISO 8601 timestamp or null`);
   return v;
+}
+
+/** The `{itemId, version}` pairs a publish-request body names, read LENIENTLY (malformed entries skipped, duplicates dropped, at most 1000):
+ *  only used to know which items to read for phase 2. The strict parse (`parsePublishItems`) still decides whether the body is valid. */
+function lenientPublishRefs(raw: unknown): Array<{ itemId: string; version: number }> {
+  if (!isPlainObject(raw) || !Array.isArray(raw.items)) return [];
+  const seen = new Set<string>();
+  const out: Array<{ itemId: string; version: number }> = [];
+  for (const e of raw.items.slice(0, 1000)) {
+    if (!isPlainObject(e) || typeof e.itemId !== "string" || !UUID_RE.test(e.itemId)) continue;
+    if (typeof e.version !== "number" || !Number.isInteger(e.version) || e.version < 1) continue;
+    const key = e.itemId.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ itemId: e.itemId, version: e.version });
+  }
+  return out;
+}
+
+/** Does Cerbos allow `principal` (and, on a delegated call, the human it acts for) `action` on `resource`? Writes no audit row. */
+async function probeAllowed(principal: Principal, resource: Resource, action: string): Promise<boolean> {
+  if (!(await check(principal, resource, action)).allow) return false;
+  if (principal.actFor && principal.actFor.userId !== principal.userId) {
+    const human = await assemblePrincipal(principal.actFor.userId, principal.assurance);
+    if (!human) return false;
+    return (await check({ ...human, via: principal.via }, resource, action)).allow;
+  }
+  return true;
 }
 
 /** `Promise.all` with a ceiling; the first failure rejects and stops handing out work. */

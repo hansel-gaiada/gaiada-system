@@ -265,7 +265,7 @@ describe.skipIf(!live)("WSK-46 · the preview route and its MCP tool", () => {
       expect(allowed.statusCode, allowed.body).toBe(200);
     });
 
-    it("🔴 it asks Cerbos for `update` on `webdesk_content_item` (module webdev), first generically and then with the item's REAL collectionKey/locale from Zone B; never `read`, never a new action", async () => {
+    it("🔴 it asks Cerbos for `update` on `webdesk_content_item` (module webdev), after the phase-1 site read, first generically (a staff tier) and then with the item's REAL collectionKey/locale/author/state from Zone B; never `read` of the item, never a new action", async () => {
       const r = await preview(editorA, item.itemId);
       expect(r.statusCode, r.body).toBe(200);
       const asks = authCalls.filter((c) => c.resource.kind === "webdesk_content_item");
@@ -273,13 +273,16 @@ describe.skipIf(!live)("WSK-46 · the preview route and its MCP tool", () => {
       expect(asks[0].resource).toMatchObject({ kind: "webdesk_content_item", tenantId: A, module: "webdev" });
       expect(asks[0].resource).not.toHaveProperty("collectionKey"); // the generic first check carries no attributes
       expect(asks[1].resource).toMatchObject({ kind: "webdesk_content_item", tenantId: A, module: "webdev", id: item.itemId, collectionKey: "service", locale: "en" });
-      // and the gate is the FIRST thing that happens: it precedes every Zone B call
-      expect(authCalls[0].action).toBe("update");
+      // M5-W1c: the site-level read (phase 1) is the FIRST thing that happens, and it precedes every Zone B call
+      expect(authCalls[0]).toMatchObject({ action: "read", resource: { kind: "webdesk_collection", tenantId: A, module: "webdev", siteId: GAIADA_SITE } });
+      // and phase 2 carries the attributes WebDesk reported plus the wall's own site id
+      expect(asks[1].resource).toMatchObject({ siteId: GAIADA_SITE, ownerId: "", reviewState: "", published: false });
     });
 
-    it("a denied caller is refused at the FIRST gate: exactly one Cerbos question, and it is `update`", async () => {
+    it("a denied caller is refused at the FIRST gate: exactly one Cerbos question (M5-W1c: the phase-1 site read), and nothing else is asked or sent", async () => {
       expect((await preview(memberA, item.itemId)).statusCode).toBe(403);
-      expect(authCalls.map((c) => `${c.resource.kind}:${c.action}`)).toEqual(["webdesk_content_item:update"]);
+      expect(authCalls.map((c) => `${c.resource.kind}:${c.action}`)).toEqual(["webdesk_collection:read"]);
+      expect(zb.calls).toHaveLength(0);
     });
 
     it("authorize precedes validation: a denied caller with an INVALID body is still 403, an authorized one is 400", async () => {
@@ -340,14 +343,15 @@ describe.skipIf(!live)("WSK-46 · the preview route and its MCP tool", () => {
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════════
   describe("honest states: never a dead link. Each of these mints NOTHING", () => {
-    it("preview_not_configured: the site has no staging address -> 409, plain words, no HEAD, no mint, and no Zone B call beyond the wall", async () => {
+    it("preview_not_configured: the site has no staging address -> 409, plain words, no HEAD, no mint, and no Zone B call beyond the wall and the phase-2 item read", async () => {
       zb.stagingDomain = null;
       webdeskZoneB.clearSiteCache();
       const r = await preview(editorA, item.itemId);
       expect(r.statusCode).toBe(409);
       expect(r.json()).toEqual({ error: "Preview isn't set up for this site yet", reason: "preview_not_configured" });
       expect(heads).toHaveLength(0);
-      expect(zb.calls.map((c) => c.command)).toEqual(["tenant.list"]);
+      // M5-W1c: the wall's lookup and the phase-2 item read (authorization precedes the site checks); nothing else, and no write
+      expect(zb.calls.map((c) => c.command)).toEqual(["tenant.list", "item.get"]);
       expect(zb.writes).toHaveLength(0);
       expect(await ledger("webdesk.content.previewToken")).toHaveLength(0); // nothing was attempted
     });
@@ -364,7 +368,7 @@ describe.skipIf(!live)("WSK-46 · the preview route and its MCP tool", () => {
       expect(mints()).toHaveLength(0);
     });
 
-    it("🔴 preview_page_missing: the site's /preview/ answers 404 -> 409, plain words, and NO control call is made (not even the item read)", async () => {
+    it("🔴 preview_page_missing: the site's /preview/ answers 404 -> 409, plain words, and no control call beyond the wall and the phase-2 item read is made", async () => {
       // This is the honest live state today: gaiada.com's staging site has no /preview/ page until the site owner builds it.
       headAnswer = 404;
       const r = await preview(editorA, item.itemId);
@@ -373,7 +377,7 @@ describe.skipIf(!live)("WSK-46 · the preview route and its MCP tool", () => {
       expect(heads).toHaveLength(1);
       expect(mints()).toHaveLength(0);
       expect(zb.writes).toHaveLength(0);
-      expect(zb.calls.map((c) => c.command)).toEqual(["tenant.list"]); // only the wall's own lookup
+      expect(zb.calls.map((c) => c.command)).toEqual(["tenant.list", "item.get"]); // the wall's lookup, and the item read phase 2 needs first
       expect(signer.calls).toHaveLength(0); // nothing was signed
       expect(await ledger("webdesk.content.previewToken")).toHaveLength(0);
       expect(zb.mintedPreviewTokens).toHaveLength(0);
