@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **204** capabilities across **16** owners
-- **109** writes · 95 reads
-- Writes by impact: **high 24** · medium 35 · low 50
+- **207** capabilities across **16** owners
+- **111** writes · 96 reads
+- Writes by impact: **high 24** · medium 35 · low 52
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -52,7 +52,7 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 18 |
+| search | `search` | 19 |
 | social | `social` | 13 |
 | webdev | `webdev` | 24 |
 
@@ -137,6 +137,7 @@ unfalsifiable after.
 | reports | `reports.getDocument` | `GET` | `/api/:tenantId/reports/document?grain=:grain&scopeRef=:scopeRef&periodKind=:periodKind&start=:start&end=:end` | read | — |
 | reports | `reports.getMetrics` | `GET` | `/api/:tenantId/reports/metrics?metricKey=:metricKey&grain=:grain&from=:from&to=:to` | read | — |
 | reports | `reports.listPeriods` | `GET` | `/api/:tenantId/reports/periods?kind=:kind&from=:from&to=:to` | read | — |
+| search | `search.acknowledgeDecayFinding` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/decay/:findingId/acknowledge` | write | `low` |
 | search | `search.analyticsCtas` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/ctas/range/:from/:to` | read | — |
 | search | `search.analyticsForms` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/forms/range/:from/:to` | read | — |
 | search | `search.analyticsPages` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/pages/range/:from/:to` | read | — |
@@ -153,9 +154,11 @@ unfalsifiable after.
 | search | `search.draftReport` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/reports` | write | `low` |
 | search | `search.editReport` | `PATCH` | `/api/:tenantId/modules/search/reports/:id` | write | `low` |
 | search | `search.exportProposal` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/export` | write | `low` |
+| search | `search.fileRefreshBrief` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/decay/:findingId/refresh-brief` | write | `low` |
 | search | `search.keywordResearch` | — | — | write | `medium` |
 | search | `search.launchCampaign` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.ledgerSummary` | — | — | read | — |
+| search | `search.listDecayFindings` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/decay` | read | — |
 | search | `search.listEngagements` | `GET` | `/api/:tenantId/modules/search/engagements` | read | — |
 | search | `search.previewReport` | `GET` | `/api/:tenantId/modules/search/reports/:id/preview` | read | — |
 | search | `search.proposeNegatives` | `POST` | `/api/:tenantId/modules/search/campaigns/:campaignId/negatives/propose` | write | `low` |

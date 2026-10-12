@@ -128,6 +128,7 @@ import { SearchGoogleOauthCallbackController } from "./modules/search/search-goo
 import { SearchGoogleAdsController } from "./modules/search/search-google-ads.controller";
 import { SearchReportsController } from "./modules/search/search-reports.controller";
 import { SearchAnalyticsController } from "./modules/search/search-analytics.controller";
+import { SearchContentDecayController } from "./modules/search/content-decay.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
 // PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
@@ -223,6 +224,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SearchReportsController,
     // M5-A4: Umami website-analytics reads for a property (own controller class; same prefix).
     SearchAnalyticsController,
+    SearchContentDecayController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
     ZoneBEventsController,
