@@ -25,6 +25,8 @@ export const CI_GROUPS = {
   // platform-ui reads platform-nest's Cerbos derived_roles, rbac catalogs and the clients registry.
   ui: ["platform-ui/", "platform-nest/cerbos/", "platform-nest/src/rbac/", "platform-nest/src/modules/clients/centre/"],
   gateway: ["ai-gateway-go/"],
+  // M5-V2-b: the enrichment collector (Go). Self-contained; its Postgres test makes its own schema.
+  insights_collector: ["insights-collector/"],
   // sync-engine-go applies platform-nest/migrations/*.sql to its test databases.
   sync: ["sync-engine-go/", "platform-nest/migrations/"],
   wa_chat_bot: ["wa-chat-bot/"],
@@ -70,6 +72,8 @@ export const COMPONENTS = [
   { name: "report-renderer", path: "report-renderer/" },
   { name: "webdesk-api", path: "webdesk/api/", deps: ["webdesk/blocks/", "webdesk/delivery/vocabulary/"] },
   { name: "synthetic-prober", path: "infra/observability/synthetic-prober/" },
+  // M5-V2-b: runs on sumopod (compose project `umami`, V2-c); NOT in deploy.yml COMPONENTS on purpose.
+  { name: "insights-collector", path: "insights-collector/" },
 ];
 
 /**
