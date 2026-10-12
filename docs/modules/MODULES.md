@@ -36,13 +36,13 @@ versions below; the running build reports it at `GET /health`.
 |---|---|---|---|---|
 | platform-nest | `0.111.0` | IN PROGRESS | WS1 | 2026-10-13 |
 | platform-ui | `0.107.0` | IN PROGRESS | WS5 | 2026-10-13 |
-| ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
-| mcp-hub | `0.15.1` | PROTOTYPED | WS2 | 2026-10-13 |
+| ai-gateway-go | `0.13.3` | PROTOTYPED | WS3 | 2026-10-13 |
+| mcp-hub | `0.15.2` | PROTOTYPED | WS2 | 2026-10-13 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | insights-collector | `0.3.1` | PROTOTYPED | SEO | 2026-10-13 |
-| automation (n8n) | `0.6.1` | PROTOTYPED | WS4 | 2026-10-13 |
+| automation (n8n) | `0.6.2` | PROTOTYPED | WS4 | 2026-10-13 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
-| infra | `0.13.13` | PROTOTYPED | WS10 | 2026-10-13 |
+| infra | `0.13.14` | PROTOTYPED | WS10 | 2026-10-13 |
 | wa-chat-bot | `0.10.0` | PROTOTYPED | WS5 | 2026-10-12 |
 | ai-agents | `0.15.0` | PROTOTYPED | WS8 | 2026-10-12 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
@@ -325,7 +325,7 @@ run detail page showing step-chip transcript (text-only, never HTML or raw JSON)
 **Known gaps:** not deployed to production.
 **Future plans:** dept-console integrations program → prod hardening.
 
-## ai-gateway-go — AI Gateway · `0.13.2` · PROTOTYPED
+## ai-gateway-go — AI Gateway · `0.13.3` · PROTOTYPED
 
 **What exists (dev):** Go gateway (the `ai-gateway` service on `:3002`), HTTP-parity with the retired Node
 gateway; provider chain + failover + circuit breaker, DLP, daily cost cap, egress audit + allowlist,

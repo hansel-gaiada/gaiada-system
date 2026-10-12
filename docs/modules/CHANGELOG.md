@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### ai-gateway-go `0.13.3` - M6-P4n: an empty length-cut answer is an error, and a reasoning model's thinking can be capped (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate.
+  - The live provider is OpenRouter's `z-ai/glm-5.3-flash`, a reasoning model whose thinking tokens count against `max_tokens`.
+  - `design.prototype` came back HTTP 200 with empty content after 59.8 s (`OPENAI_MAX_TOKENS=4096`) and again after 110 s (16000).
+  - `openai.go` returned `""` as success, so the hub stored a blank design and the delivery flow opened the PM's review on it.
+- **The fix:**
+  - Empty content (after trim) with `finish_reason == "length"` is now an error: `openai returned no content: the token budget ran out (...)`. The chain fails over; the echo terminator still ends it.
+  - Empty content with `finish_reason == "stop"` stays a legitimate `""`. Partial content cut by length is still returned.
+- **New optional env `OPENAI_REASONING_MAX_TOKENS`** (int, default 0):
+  - Above 0 it adds OpenRouter's `"reasoning": {"max_tokens": N}` to the chat body. Unset, empty or 0 sends nothing, so the body is byte-identical to before (OpenAI's own API does not take the field).
+  - A direct probe of the same prompt: no cap took 99.5 s and 5938 reasoning tokens; a cap of 3000 took 30.5 s, `finish_reason: stop`, about 25x cheaper.
+- **Tests:** four new in `openai_test.go` (the field only when configured, empty+length errors, empty+stop stays `""`, partial content kept). `go vet` and `go test ./...` green locally.
+- **Deploy:** set `OPENAI_REASONING_MAX_TOKENS=3000` in the box `.env` (the compose passthrough is in infra 0.13.14) and recreate the gateway. Until then behaviour is only the new error.
+
+### mcp-hub `0.15.2` - M6-P4n: an empty or echoed generation fails the tool (2026-10-13) - PROTOTYPED
+
+- **What:** `gatewayComplete` (behind `design.prototype`, `llm.extract` and `llm.summarize`) throws when the answer is empty after trim ("the model returned no text") or is the gateway's echo fallback (`[echo — no provider key configured]` prefix: "no real provider produced this").
+- **Why:** a brief, PRD, report or scope is never legitimately empty or an echo. Storing one opened the next stage on a blank artifact.
+- **Effect:** the tool fails, the n8n node errors, the webhook answers 5xx and platform-nest's at-least-once bridge redelivers the event: a bounded natural retry.
+- **Not changed:** `gatewayMedia` (OCR, vision, transcribe) keeps its own contract.
+- **Tests:** new `gateway-client.test.ts`, plus cases in the delivery, pipeline and hub suites. `src/workflow-tool-args.test.ts` still passes. Full suite 411 passed, `tsc --noEmit` clean.
+
+### automation `0.6.2` - M6-P4n: a PM's design rejection at beat 1 revises the design (2026-10-13) - PROTOTYPED
+
+- **The bug:** in `pipeline-delivery.json` `Load + decide`, a design stage's `pm_review` decided `changes_requested` matched no branch, so the run went to noop and stopped. Only the client's `customer_feedback` `changes_requested` triggered `revise_design`.
+- **The fix:** that `pm_review` now yields `revise_design` while `designs.length < MAX_DESIGNS`, else `escalate_revise`, with the note taken from that gate. Every other branch is unchanged; the revise nodes read only `Load + decide`'s `note` and `prd`, never a `customer_feedback` gate.
+- **Tests:** five new cases in `platform-nest/src/modules/webdev/automation-prd-kind.test.ts` run the shipped node (two fail without the fix). They need no service.
+- **Deploy:** the deploy does not ship `automation/workflows/`, so this needs a CLI re-import of `pipeline-delivery.json` (`ws11delivery0001`) and re-activation after the release.
+
+### infra `0.13.14` - M6-P4n: the gateway receives OPENAI_REASONING_MAX_TOKENS (2026-10-13) - PROTOTYPED
+
+- **What:** `docker-compose.vps.yml` passes `OPENAI_REASONING_MAX_TOKENS: ${OPENAI_REASONING_MAX_TOKENS:-}` to ai-gateway, and `.env.example` documents it. Empty parses as the default 0 (`envInt` falls back on an empty value), which means "not sent".
+
 ### platform-ui `0.107.0` - M5-V6-c: the session-replay player and the recordings list (2026-10-13) - PROTOTYPED
 
 - **The visitor detail** shows recordings (date, length, pages) only to a holder of `search.replay.view`. Without it there is no card and no read.

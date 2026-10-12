@@ -92,6 +92,16 @@ describe("mcp-hub (WS2 skeleton)", () => {
     expect(audit.find((a) => a.tool === "llm.summarize")).toMatchObject({ decision: "allow", ok: false });
   });
 
+  it("llm.summarize refuses an empty or echoed generation as a tool error (M6-P4n)", async () => {
+    const client = await connect(lowUser);
+    for (const text of ["", "[echo — no provider key configured] Summarize the following"]) {
+      vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ text }) })));
+      const res = await client.callTool({ name: "llm.summarize", arguments: { text: "x" } });
+      expect(res.isError).toBe(true);
+    }
+    vi.unstubAllGlobals();
+  });
+
   it("platform tools forward the OBO envelope; the PLATFORM decides, the hub just fronts (Task 4.9)", async () => {
     const { registerPlatformTools } = await import("./platform-tools");
     registerPlatformTools();
