@@ -28,6 +28,20 @@ type Counters struct {
 	PurgedEvents       atomic.Int64 // buffer rows deleted by the 72 h purge
 	PurgedTombstones   atomic.Int64
 	PurgeFailures      atomic.Int64
+
+	// Session replay (V6-a).
+	ReplayStored       atomic.Int64 // chunks written
+	ReplayDuplicate    atomic.Int64 // chunks that were already there (a retry)
+	ReplayRefused      atomic.Int64 // chunks answered {record:false}: a cap or the budget
+	ReplayBudgetFull   atomic.Int64 // ...of which the budget (watch this one: it means the disk promise is biting)
+	ReplayInput        atomic.Int64 // chunks answered 422: typed input
+	ReplayTooLarge     atomic.Int64 // chunks answered 413: over the compressed or inflated limit
+	ReplayRejected     atomic.Int64 // chunks answered 400/403/409: malformed, unknown website, id mismatch
+	ReplayGone         atomic.Int64 // chunks answered 410
+	ReplayBot          atomic.Int64 // chunks from a bot, answered {record:false}
+	ReplayStoreDown    atomic.Int64 // chunks answered 503
+	PurgedRecordings   atomic.Int64 // recordings deleted by the 30-day purge
+	ForgottenRecording atomic.Int64 // recordings deleted by an ops forget
 }
 
 // Snapshot is the JSON form served on /healthz.
@@ -53,6 +67,19 @@ type Snapshot struct {
 	PurgedEvents       int64 `json:"purged_events"`
 	PurgedTombstones   int64 `json:"purged_tombstones"`
 	PurgeFailures      int64 `json:"purge_failures"`
+
+	ReplayStored       int64 `json:"replay_stored"`
+	ReplayDuplicate    int64 `json:"replay_duplicate"`
+	ReplayRefused      int64 `json:"replay_refused"`
+	ReplayBudgetFull   int64 `json:"replay_budget_full"`
+	ReplayInput        int64 `json:"replay_input"`
+	ReplayTooLarge     int64 `json:"replay_too_large"`
+	ReplayRejected     int64 `json:"replay_rejected"`
+	ReplayGone         int64 `json:"replay_gone"`
+	ReplayBot          int64 `json:"replay_bot"`
+	ReplayStoreDown    int64 `json:"replay_store_down"`
+	PurgedRecordings   int64 `json:"purged_recordings"`
+	ForgottenRecording int64 `json:"forgotten_recordings"`
 }
 
 // Snapshot reads all counters.
@@ -79,5 +106,18 @@ func (c *Counters) Snapshot() Snapshot {
 		PurgedEvents:       c.PurgedEvents.Load(),
 		PurgedTombstones:   c.PurgedTombstones.Load(),
 		PurgeFailures:      c.PurgeFailures.Load(),
+
+		ReplayStored:       c.ReplayStored.Load(),
+		ReplayDuplicate:    c.ReplayDuplicate.Load(),
+		ReplayRefused:      c.ReplayRefused.Load(),
+		ReplayBudgetFull:   c.ReplayBudgetFull.Load(),
+		ReplayInput:        c.ReplayInput.Load(),
+		ReplayTooLarge:     c.ReplayTooLarge.Load(),
+		ReplayRejected:     c.ReplayRejected.Load(),
+		ReplayGone:         c.ReplayGone.Load(),
+		ReplayBot:          c.ReplayBot.Load(),
+		ReplayStoreDown:    c.ReplayStoreDown.Load(),
+		PurgedRecordings:   c.PurgedRecordings.Load(),
+		ForgottenRecording: c.ForgottenRecording.Load(),
 	}
 }

@@ -233,6 +233,13 @@ services:
       CONSENT_RATE_PER_SECOND: ${COLLECTOR_CONSENT_RATE_PER_SECOND:-}
       BUFFER_RETENTION_HOURS: ${COLLECTOR_BUFFER_RETENTION_HOURS:-}
       PURGE_INTERVAL_MINUTES: ${COLLECTOR_PURGE_INTERVAL_MINUTES:-}
+      # M5-V6-a, our sampled session replay. OFF unless REPLAY_ENABLED is exactly 1 (/lib/kestrel/r is then a 404). Empty = the
+      # collector's default; an explicit 0 refuses to start; REPLAY_RETENTION_DAYS over 30 refuses (design 6.2).
+      REPLAY_ENABLED: ${COLLECTOR_REPLAY_ENABLED:-}
+      REPLAY_BUDGET_MB: ${COLLECTOR_REPLAY_BUDGET_MB:-}
+      REPLAY_RETENTION_DAYS: ${COLLECTOR_REPLAY_RETENTION_DAYS:-}
+      REPLAY_SITE_DAILY_RECORDINGS: ${COLLECTOR_REPLAY_SITE_DAILY_RECORDINGS:-}
+      REPLAY_VISITOR_DAILY_RECORDINGS: ${COLLECTOR_REPLAY_VISITOR_DAILY_RECORDINGS:-}
     volumes:
       # Same directory the app mounts: city + ASN files, refreshed by geo-refresh.sh (which restarts the collector).
       - ./geo:/geo:ro

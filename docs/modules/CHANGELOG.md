@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.105.0` - M5-V5-d: the Experiments tab in Website → Analytics (2026-10-13) - PROTOTYPED
+
+- **List:** in server order, with the status, the goal, the visitors needed per variant and the projected days, all in words.
+- **Register form:**
+  - a refusal for being underpowered shows the projected days against the 56-day cap in words;
+  - α and power are shown as the fixed 0.05 and 0.8;
+  - two variants;
+  - the page and section are typed in for now, because there is no item picker yet.
+- **Detail view:**
+  - before the horizon, progress and the sample-ratio check only (the parser drops any rate, difference, interval or p even if one were sent);
+  - at the horizon, the full result, with small cells shown as "fewer than 5".
+- **Actions:** sync, stop, abort and decide, shown only when the status allows them and the user can manage search.
+- Every refusal token and every `unavailable` reason is a sentence.
+- The tab 404s without the analytics toolkit or `search.view`.
+- **Tests:** vitest 114 scoped (5352 wider), tsc and `next build` green locally; GitHub Actions 38282541845 green.
+
+### insights-collector `0.3.0` + infra `0.13.13` - M5-V6-a: the session replay channel (OFF; not deployed) (2026-10-13) - PROTOTYPED
+
+- **`POST /lib/kestrel/r`** takes one rrweb chunk (base64 gzip, or a JSON array) for a consented visitor and consent id.
+  - It is a plain 404 unless `REPLAY_ENABLED` is exactly `1`.
+  - A tombstoned id gets 410.
+- **Input is refused:** any typed input, including a masked value, makes the WHOLE chunk a 422, and nothing is stored.
+- **Size limits:** a decompression bomb is refused (256 KB compressed, 4 MB inflated). Caps per site per day, per visitor per day and a storage budget answer `{record:false}`.
+- **A leaked recording id cannot be appended to** from another visitor or website (403).
+- **Retention:** recordings go after 30 days at most (`REPLAY_RETENTION_DAYS` is 1–30). `forget` and `/f` remove them too.
+- **Ops** (read key only):
+  - `GET /ops/v1/replay/sessions` returns metadata;
+  - `GET /ops/v1/replay/chunks` returns content. Per O7, the ERP's MCP tool may call only the sessions route.
+- **Migration `0003_replay`** adds `replay_sessions` and `replay_chunks`, with no IP or UA column. `backup.sh` already excludes both, and a static test checks the names.
+- **Sumopod compose:** the five `REPLAY_*` variables are listed under `environment:` (empty = default).
+- The edge `/lib/kestrel/r` location stays off.
+- `go test -race` green locally and on GitHub Actions 38283161570, including the Postgres replay test.
+- **For the site (V6-d):** chunks are sent as base64 gzip strings, and input elements must be blocked in rrweb, or chunks carrying them are refused.
+
 ### platform-nest `0.107.0` - M5-V3-e: consented visitor profiles, the ingest, withdrawal sweep and purge jobs (dark until `SEARCH_VISITORS_ENABLED=1`) (2026-10-13) - PROTOTYPED
 
 - **New files:**
