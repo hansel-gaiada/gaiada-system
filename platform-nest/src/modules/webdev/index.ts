@@ -371,6 +371,44 @@ export const webdevModule: ModuleContract = {
         required: ["tenantId", "snapshotId", "artifact"],
       },
     },
+    // M6-P4e (additive): the delivery flow's read of a run's provisioned site, so the code stage can wait
+    // for §08's completion (state `complete`, a pinned contract snapshot) before it calls code.scaffold.
+    // Plain reads (`write`/`impact` omitted): no D14 suspension. The platform enforces Cerbos
+    // `webdev_provisioned_site` `read`. The runId filter rides in the pathTemplate query string (TR-28).
+    {
+      name: "webdev.provisionedSites.list",
+      description:
+        "List the provisioned sites of ONE pipeline run (id, slug, framework, repo, status). Read-only; "
+        + "an empty array means nothing has been provisioned for that run yet.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/provisioned-sites?runId=:runId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          runId: { type: "string", description: "Pipeline run the site was provisioned for." },
+        },
+        required: ["tenantId", "runId"],
+      },
+    },
+    {
+      name: "webdev.provisionedSites.get",
+      description:
+        "Read ONE provisioned site plus its `completion` object (state, next step, WebDesk tenant slug, "
+        + "pinned contractSnapshotId, error). Read-only; unknown or other-company ids are 404.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/provisioned-sites/:siteId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          siteId: { type: "string", description: "webdev_provisioned_sites.id." },
+        },
+        required: ["tenantId", "siteId"],
+      },
+    },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
     // WSK-31 — the §07 WebDesk control-plane MCP tool set (design docs/blueprints/webdesk-design.md
     // §07/§09), aggregated here per §09's own instruction ("§07 tool table, aggregated via

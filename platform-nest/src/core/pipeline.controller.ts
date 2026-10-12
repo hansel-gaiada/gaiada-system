@@ -19,6 +19,7 @@ import { runClientVisible, staffClientVisible, staffGateClientVisible, staffRunS
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { storage } from "./storage";
+import { classifyArtifactValue, parseStageRef } from "./pipeline-artifact-ref";
 import { lockPipelineRun } from "./pipeline-lock";
 import { clientNotifyKindForGate, notifyBestEffort, notifyScopeSignedBothSides, resolveClientRecipients } from "./client-notify";
 
@@ -370,23 +371,39 @@ export class PipelineController {
     if (!artifactRef) throw new BadRequestException("ref is required");
 
     return withTenants([tenantId], async (c) => {
-      const stage = await c.query<{ run_id: string; track: string; name: string }>(
-        `SELECT run_id, track, name FROM pipeline_stages WHERE artifact_ref = $1 LIMIT 1`,
-        [artifactRef],
-      );
+      // M6-P4e: `stage:<uuid>` names a stage; its own artifact_ref is what gets resolved. By-value
+      // refs behave exactly as before. Either way the stage lookup is the authorization boundary.
+      const stageId = parseStageRef(artifactRef);
+      const stage = stageId
+        ? await c.query<{ run_id: string; track: string; name: string; artifact_ref: string | null }>(
+            `SELECT run_id, track, name, artifact_ref FROM pipeline_stages WHERE id = $1`,
+            [stageId],
+          )
+        : await c.query<{ run_id: string; track: string; name: string; artifact_ref: string | null }>(
+            `SELECT run_id, track, name, artifact_ref FROM pipeline_stages WHERE artifact_ref = $1 LIMIT 1`,
+            [artifactRef],
+          );
       if (!stage.rows[0]) {
         throw new NotFoundException("no pipeline stage in this tenant references that artifact");
       }
+      const head = { artifactRef, runId: stage.rows[0].run_id, stage: { track: stage.rows[0].track, name: stage.rows[0].name } };
+      const value = stageId ? stage.rows[0].artifact_ref : artifactRef;
+      const shape = classifyArtifactValue(value);
 
+      if (shape === "empty") {
+        return { ...head, resolvable: false, reason: "the stage has no artifact", content: null };
+      }
+      if (shape === "inline" && stageId) {
+        // Text the delivery flow stored in artifact_ref itself (the accepted design, the PRD).
+        return { ...head, resolvable: true, contentType: "text/markdown", content: value };
+      }
       // Only a UUID-shaped ref can be a `files` row. Anything else (a URL, a repo name, a prototype
-      // link) is a legitimate artifact_ref that simply is not stored text — say so precisely rather
-      // than letting Postgres raise "invalid input syntax for type uuid" from a bad cast.
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(artifactRef);
-      if (!isUuid) {
+      // link, or inline text asked for by value) is a legitimate artifact_ref that simply is not a
+      // stored file -- say so precisely rather than letting Postgres raise "invalid input syntax for
+      // type uuid" from a bad cast.
+      if (shape !== "file") {
         return {
-          artifactRef,
-          runId: stage.rows[0].run_id,
-          stage: { track: stage.rows[0].track, name: stage.rows[0].name },
+          ...head,
           resolvable: false,
           reason: "artifact_ref is not a stored file id (it may be a URL, repo or external reference)",
           content: null,
@@ -395,14 +412,12 @@ export class PipelineController {
 
       const f = await c.query<{ storage_key: string; content_type: string }>(
         `SELECT storage_key, content_type FROM files WHERE id = $1 AND deleted_at IS NULL`,
-        [artifactRef],
+        [value],
       );
       const row = f.rows[0];
       if (!row || !row.storage_key) {
         return {
-          artifactRef,
-          runId: stage.rows[0].run_id,
-          stage: { track: stage.rows[0].track, name: stage.rows[0].name },
+          ...head,
           resolvable: false,
           reason: row ? "file row has no stored content (reference attachment)" : "no file row for that id",
           content: null,
@@ -411,9 +426,7 @@ export class PipelineController {
 
       const bytes = await storage().get(row.storage_key);
       return {
-        artifactRef,
-        runId: stage.rows[0].run_id,
-        stage: { track: stage.rows[0].track, name: stage.rows[0].name },
+        ...head,
         resolvable: true,
         contentType: row.content_type || "text/plain",
         content: Buffer.from(bytes).toString("utf8"),

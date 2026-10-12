@@ -213,7 +213,7 @@ export const SUPPORTED_FRAMEWORKS = new Set(["vite", "nextjs", "astro", "node", 
  *  in `stack` instead of `framework`), mapped to the canonical `framework` value it now SELECTS.
  *  Deliberately NOT `Record<string, CanonicalFramework>` typed as exhaustive — this is a lookup
  *  table over untrusted input, not a closed enum. */
-const STACK_TO_FRAMEWORK: Readonly<Record<string, CanonicalFramework>> = {
+export const STACK_TO_FRAMEWORK: Readonly<Record<string, CanonicalFramework>> = {
   a: "astro", static: "astro", vite: "vite", astro: "astro",
   b: "wp", wp: "wp", wordpress: "wp",
   c: "node", fullstack: "node", "full-stack": "node", node: "node", next: "nextjs", nextjs: "nextjs",

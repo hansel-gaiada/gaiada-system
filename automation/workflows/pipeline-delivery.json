@@ -2,7 +2,7 @@
   "id": "ws11delivery0001",
   "name": "WS11 delivery track (hard gate -> design -> 3-beat -> revise loop -> Claude Code -> staging -> prod)",
   "meta": {
-    "description": "WS11 build item 8 (full) + tails. Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Path: hard gate (prd_sign+scope) -> design.prototype -> claude_design -> pm_review(b1) -> customer_feedback(b2) -> [changes_requested => BOUNDED REVISE LOOP: regenerate prototype from feedback -> new claude_design revision -> reopen b1, up to 3 designs then escalate to PM AND park the run 'blocked' (WD-05) so a later retrigger stops re-evaluating it] -> pm_approval(b3) -> release_code (repoStatus gate) -> web-dev review -> deploy.staging -> staging stage + notify -> client staging sign-off (customer_feedback on staging) -> pm_approval (prod) -> deploy.production -> production stage + notify. A run already 'blocked' short-circuits to noop on any retrigger (WD-05). github.repoStatus/deploy.staging/deploy.production fail SOFT. All actions OBO as wf:delivery. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID; hub creds GITHUB_TOKEN/GITHUB_ORG/DEPLOY_STAGING_URL/DEPLOY_PRODUCTION_URL."
+    "description": "WS11 build item 8 (full) + tails. Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Path: hard gate (prd_sign+scope) -> design.prototype -> claude_design -> pm_review(b1) -> customer_feedback(b2) -> [changes_requested => BOUNDED REVISE LOOP: regenerate prototype from feedback -> new claude_design revision -> reopen b1, up to 3 designs then escalate to PM AND park the run 'blocked' (WD-05) so a later retrigger stops re-evaluating it] -> pm_approval(b3) -> release_code (repoStatus gate -> the run's provisioned site must be COMPLETE with a pinned contract snapshot, else parked/retryable -> code.scaffold v2 with contractSnapshotId + siteKind + stage: artifact refs) -> web-dev review -> deploy.staging -> staging stage + notify -> client staging sign-off (customer_feedback on staging) -> pm_approval (prod) -> deploy.production -> production stage + notify. A run already 'blocked' short-circuits to noop on any retrigger (WD-05). github.repoStatus/deploy.staging/deploy.production fail SOFT. All actions OBO as wf:delivery. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID; hub creds GITHUB_TOKEN/GITHUB_ORG/DEPLOY_STAGING_URL/DEPLOY_PRODUCTION_URL."
   },
   "nodes": [
     {
@@ -109,7 +109,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst designs = stages.filter(s=>s.name==='claude_design'); const design = designs[designs.length-1];\nconst code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging'); const prodStage = stages.find(s=>s.name==='production');\nconst MAX_DESIGNS = 3;\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='',note='';\n// WD-05: a run already parked 'blocked' (revise-budget exhausted) short-circuits to noop on any\n// later retrigger (a second gate.decided/scope.signed on the same run must not re-escalate it).\nif(run.status==='blocked'){ /* noop */ }\nelse if(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else {\n    const cfd=gof('customer_feedback',design.id);\n    if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;note='Submission beat 2 — client feedback';}\n    else if(cfd&&cfd.status==='decided'&&cfd.decision==='changes_requested'){ if(designs.length<MAX_DESIGNS){action='revise_design';note=cfd.note||'';} else {action='escalate_revise';note=cfd.note||'';} }\n    else if(ok(cfd)&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;note='Submission beat 3 — PM approval';}\n    else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n    else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n    else if(staging&&ok(gof('customer_feedback',staging.id))&&!has('pm_approval',staging.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=staging.id;note='Production approval';}\n    else if(staging&&ok(gof('pm_approval',staging.id))&&!prodStage){action='deploy_prod';}\n  }\n}\nconst proto=(design||{}).artifact_ref||'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, note, prd, proto, slug } }];"
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst designs = stages.filter(s=>s.name==='claude_design'); const design = designs[designs.length-1];\nconst code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging'); const prodStage = stages.find(s=>s.name==='production');\nconst MAX_DESIGNS = 3;\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='',note='';\n// WD-05: a run already parked 'blocked' (revise-budget exhausted) short-circuits to noop on any\n// later retrigger (a second gate.decided/scope.signed on the same run must not re-escalate it).\nif(run.status==='blocked'){ /* noop */ }\nelse if(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else {\n    const cfd=gof('customer_feedback',design.id);\n    if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;note='Submission beat 2 — client feedback';}\n    else if(cfd&&cfd.status==='decided'&&cfd.decision==='changes_requested'){ if(designs.length<MAX_DESIGNS){action='revise_design';note=cfd.note||'';} else {action='escalate_revise';note=cfd.note||'';} }\n    else if(ok(cfd)&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;note='Submission beat 3 — PM approval';}\n    else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n    else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n    else if(staging&&ok(gof('customer_feedback',staging.id))&&!has('pm_approval',staging.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=staging.id;note='Production approval';}\n    else if(staging&&ok(gof('pm_approval',staging.id))&&!prodStage){action='deploy_prod';}\n  }\n}\nconst proto=(design||{}).artifact_ref||'';\n// M6-P4e: the artifact refs code.scaffold needs. artifact_ref holds the TEXT itself, which pipeline.artifacts.get cannot resolve by value\n// (resolvable:false), so hand it the STAGE (stage:<id>) and the platform resolves that stage's stored text.\nconst prdStage=stages.find(s=>s.name==='prd_extract');\nconst prdRef=prdStage&&prdStage.artifact_ref?('stage:'+prdStage.id):'';\nconst protoRef=design&&design.artifact_ref?('stage:'+design.id):'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, note, prd, proto, prdRef, protoRef, slug } }];"
       },
       "name": "Load + decide",
       "type": "n8n-nodes-base.code",
@@ -505,7 +505,7 @@
     },
     {
       "parameters": {
-        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nlet ready=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'repo check failed';} else { const r=JSON.parse(rpc.result?.content?.[0]?.text??'{}'); ready=!!r.exists; if(!ready) reason='repo does not exist yet'; } }catch(e){ reason='github not configured'; }\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, prd:d.prd, proto:d.proto, slug:d.slug, ready, reason } }];"
+        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nlet ready=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'repo check failed';} else { const r=JSON.parse(rpc.result?.content?.[0]?.text??'{}'); ready=!!r.exists; if(!ready) reason='repo does not exist yet'; } }catch(e){ reason='github not configured'; }\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, prd:d.prd, proto:d.proto, prdRef:d.prdRef, protoRef:d.protoRef, slug:d.slug, ready, reason } }];"
       },
       "name": "Repo ready?",
       "type": "n8n-nodes-base.code",
@@ -577,7 +577,252 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 7, method: \"tools/call\", params: { name: \"code.scaffold\", arguments: { tenantId: $json.tenantId, runId: $json.runId, prd: $json.prd, prototype: $json.proto, repo: $json.slug } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 22, method: \"tools/call\", params: { name: \"webdev.provisionedSites.list\", arguments: { tenantId: $json.tenantId, runId: $json.runId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP webdev.provisionedSites.list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1960,
+        60
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst d=$('Repo ready?').first().json;\nlet site=null, reason='';\ntry{ const rpc=JSON.parse(line.slice(5).trim()); if(rpc.result?.isError){reason='provisioned-site lookup failed: '+(rpc.result.content?.[0]?.text||'error');} else { const list=JSON.parse(rpc.result?.content?.[0]?.text??'[]'); site=(Array.isArray(list)?list:[]).find((s)=>s.status!=='failed')||null; if(!site) reason='no provisioned site for this run yet (provisioning has not run, is awaiting approval, or failed)'; } }catch(e){ reason='provisioned-site lookup unreadable'; }\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, prd:d.prd, proto:d.proto, prdRef:d.prdRef, protoRef:d.protoRef, slug:d.slug, siteId: site?site.id:'', framework: site?site.framework:'', hasSite: String(!!site), reason } }];"
+      },
+      "name": "Pick provisioned site",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Site provisioned?",
+              "leftValue": "={{ $json.hasSite }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Site provisioned?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 23, method: \"tools/call\", params: { name: \"webdev.provisionedSites.get\", arguments: { tenantId: $json.tenantId, siteId: $json.siteId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP webdev.provisionedSites.get",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst d=$('Pick provisioned site').first().json;\nlet ok=false, reason='', contractSnapshotId='', siteKind='';\ntry{ const rpc=JSON.parse(line.slice(5).trim()); if(rpc.result?.isError){reason='provisioned-site read failed: '+(rpc.result.content?.[0]?.text||'error');} else {\n  const site=JSON.parse(rpc.result?.content?.[0]?.text??'{}'); const c=site.completion||{};\n  // M6-P4e: code.scaffold pins a contract snapshot, which only exists once provisioning COMPLETED (design 08). Until then park; never call the scaffold.\n  const KIND={astro:'astro',vite:'astro',node:'node',nextjs:'node',wp:'wp'};\n  siteKind=KIND[String(site.framework||d.framework||'').toLowerCase()]||'';\n  contractSnapshotId=c.contractSnapshotId||'';\n  if(c.state!=='complete') reason='provisioning not complete yet (state: '+(c.state||'none')+(c.next?', next: '+c.next:'')+(c.error?', error: '+c.error:'')+') - retry after it finishes';\n  else if(!contractSnapshotId) reason='provisioning complete but no contract snapshot is pinned yet - retry shortly';\n  else if(!siteKind) reason='unsupported site framework for scaffolding: '+(site.framework||'unknown');\n  else if(!d.prdRef||!d.protoRef) reason='the signed PRD or accepted design stage has no artifact to scaffold from';\n  else ok=true;\n} }catch(e){ reason='provisioned-site read unreadable'; }\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, prdRef:d.prdRef, protoRef:d.protoRef, slug:d.slug, contractSnapshotId, siteKind, ready2:String(ok), reason } }];"
+      },
+      "name": "Provisioning complete?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Scaffold ready?",
+              "leftValue": "={{ $json.ready2 }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Scaffold ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3060,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 24, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"code_parked\", payload: { runId: $json.runId, reason: $json.reason } } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP notify code parked",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3280,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'code_parked', retryable:true, reason:$json.reason }) }}"
+      },
+      "name": "Respond (code parked)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3500,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 7, method: \"tools/call\", params: { name: \"code.scaffold\", arguments: { tenantId: $json.tenantId, runId: $json.runId, contractSnapshotId: $json.contractSnapshotId, siteKind: $json.siteKind, prdArtifact: $json.prdRef, prototypeArtifact: $json.protoRef, repo: $json.slug } } }) }}",
         "options": {
           "response": {
             "response": {
@@ -590,7 +835,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1960,
+        3060,
         60
       ]
     },
@@ -602,7 +847,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2180,
+        3280,
         60
       ]
     },
@@ -650,7 +895,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2400,
+        3500,
         60
       ]
     },
@@ -662,7 +907,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2620,
+        3720,
         60
       ]
     },
@@ -710,7 +955,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2840,
+        3940,
         60
       ]
     },
@@ -723,7 +968,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        3060,
+        4160,
         60
       ]
     },
@@ -2094,7 +2339,7 @@
       "main": [
         [
           {
-            "node": "MCP code.scaffold",
+            "node": "MCP webdev.provisionedSites.list",
             "type": "main",
             "index": 0
           }
@@ -2507,6 +2752,97 @@
         [
           {
             "node": "Respond (prod)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP webdev.provisionedSites.list": {
+      "main": [
+        [
+          {
+            "node": "Pick provisioned site",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick provisioned site": {
+      "main": [
+        [
+          {
+            "node": "Site provisioned?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Site provisioned?": {
+      "main": [
+        [
+          {
+            "node": "MCP webdev.provisionedSites.get",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MCP notify code parked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP webdev.provisionedSites.get": {
+      "main": [
+        [
+          {
+            "node": "Provisioning complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provisioning complete?": {
+      "main": [
+        [
+          {
+            "node": "Scaffold ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scaffold ready?": {
+      "main": [
+        [
+          {
+            "node": "MCP code.scaffold",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "MCP notify code parked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP notify code parked": {
+      "main": [
+        [
+          {
+            "node": "Respond (code parked)",
             "type": "main",
             "index": 0
           }

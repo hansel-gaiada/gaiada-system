@@ -2,7 +2,7 @@
   "id": "wswdprovision0001",
   "name": "Subworkflow: webdev.provisionSite (PRV-03 provision<->ERP seam)",
   "meta": {
-    "description": "PRV-03. Sub-workflow, called via Execute Workflow from pipeline-delivery.json's ADDITIVE 'prd_sign approved/signed?' branch (never triggered by its own webhook -- pipeline-delivery.json already owns POST ev/pipeline.gate.decided, and n8n allows exactly one active workflow per webhook path; a second trigger on the same path would silently steal or fail to claim it). Inputs (Define Below): tenantId (string), runId (string). Body: calls the hub tool webdev.provisionSite as wf:delivery (OBO). That call is write:true/impact:'medium', so the D14 gate SUSPENDS it for a human approval every time an automation principal calls it with no grant -- design section 04's stated contract is that 'suspended_for_approval' (detected via the hub's 'suspend: ...' isError text, the SAME shape pipeline-delivery.json's own deploy.production branch already parses) IS the success outcome here, not a failure. On suspend this sub-workflow files the WS4 approval itself via approvals.request (already allow-listed for wf:delivery) so a human sees it in the approvals inbox; D14's executor re-drives the ORIGINAL webdev.provisionSite call (as the wf:delivery principal) if/when a human approves, re-deriving the run + prd_sign-gate precondition at that time (platform-nest core/approval-executables.ts, PRV-03 entry) rather than trusting this moment's state. A non-suspend isError is a genuine failure (hub down, workflow de-scoped, tool bug) and is notified, not silently dropped. Output (Return node): { ok, action: 'provision_suspended'|'provision_failed'|'provisioned', approvalId?, error? }. Env: HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
+    "description": "PRV-03. Sub-workflow, called via Execute Workflow from pipeline-delivery.json's ADDITIVE 'prd_sign approved/signed?' branch (never triggered by its own webhook -- pipeline-delivery.json already owns POST ev/pipeline.gate.decided, and n8n allows exactly one active workflow per webhook path; a second trigger on the same path would silently steal or fail to claim it). Inputs (Define Below): tenantId (string), runId (string). Body (M6-P4e): reads the run (pipeline.getRun), takes the signed PRD stack hint (a `Stack:` line in the prd_extract stage text) and passes it as `stack` (NO hardcoded framework: the tool maps the hint to the site kind); a missing or unrecognized hint is refused loudly here (notify + Return provision_failed, never defaulted to static); then calls the hub tool webdev.provisionSite as wf:delivery (OBO). That call is write:true/impact:'medium', so the D14 gate SUSPENDS it for a human approval every time an automation principal calls it with no grant -- design section 04's stated contract is that 'suspended_for_approval' (detected via the hub's 'suspend: ...' isError text, the SAME shape pipeline-delivery.json's own deploy.production branch already parses) IS the success outcome here, not a failure. On suspend this sub-workflow files the WS4 approval itself via approvals.request (already allow-listed for wf:delivery) so a human sees it in the approvals inbox; D14's executor re-drives the ORIGINAL webdev.provisionSite call (as the wf:delivery principal) if/when a human approves, re-deriving the run + prd_sign-gate precondition at that time (platform-nest core/approval-executables.ts, PRV-03 entry) rather than trusting this moment's state. A non-suspend isError is a genuine failure (hub down, workflow de-scoped, tool bug) and is notified, not silently dropped. Output (Return node): { ok, action: 'provision_suspended'|'provision_failed'|'provisioned', approvalId?, error? }. Env: HUB_SERVICE_TOKEN, NOTIFY_USER_ID."
   },
   "nodes": [
     {
@@ -35,7 +35,103 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"webdev.provisionSite\", arguments: { tenantId: $json.tenantId, runId: $json.runId, framework: \"vite\" } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 4, method: \"tools/call\", params: { name: \"pipeline.getRun\", arguments: { tenantId: $json.tenantId, runId: $json.runId } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP pipeline.getRun (PRD stack hint)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, -300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nconst t = $('When Executed by Another Workflow').first().json;\n// M6-P4e: the signed PRD's stack hint SELECTS the site kind. This vocabulary is the runtime twin of\n// STACK_TO_FRAMEWORK (platform-nest provisioning.service.ts); a test pins the two together.\nconst KNOWN = [\"a\", \"b\", \"c\", \"static\", \"vite\", \"astro\", \"wp\", \"wordpress\", \"fullstack\", \"full-stack\", \"node\", \"next\", \"nextjs\"];\nlet stack = '', reason = '';\nif (rpc.result?.isError) {\n  reason = 'prd_unreadable: ' + (rpc.result.content?.[0]?.text || 'pipeline.getRun failed');\n} else {\n  let run = {}; try { run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}'); } catch { run = {}; }\n  const prd = (run.stages || []).find((s) => s.name === 'prd_extract');\n  const text = String(prd?.artifact_ref ?? '');\n  // A `Stack: <hint>` line in the PRD text (markdown tolerant: **Stack:** C, - Stack: full-stack).\n  const m = /^[ \\t>*_#-]*(?:tech(?:nical)?[ -])?stack\\b[^:=\\n]{0,20}[:=][ \\t*_`'\"(]*([^\\n]*)/im.exec(text);\n  if (!m) {\n    reason = 'prd_stack_missing: the signed PRD carries no \"Stack:\" line, so no site kind can be chosen (add one: static, wordpress or fullstack)';\n  } else {\n    const v = m[1].trim().toLowerCase();\n    const two = /^([a-z0-9]+)[ -]([a-z0-9]+)/.exec(v);\n    const one = /^[a-z0-9]+/.exec(v);\n    const hit = [two ? two[1] + '-' + two[2] : '', one ? one[0] : ''].find((c) => c && KNOWN.includes(c));\n    if (hit) stack = hit; else reason = 'unsupported_stack: the signed PRD stack hint \"' + v.slice(0, 40) + '\" is not one of ' + KNOWN.join('/');\n  }\n}\nreturn [{ json: { tenantId: t.tenantId, runId: t.runId, stack, ok: stack !== '', reason } }];"
+      },
+      "name": "Extract PRD stack hint",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, -300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "has-stack-hint",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "PRD stack hint present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, -300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:delivery" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 5, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $env.NOTIFY_USER_ID, type: \"provision_propose_failed\", payload: { runId: $json.runId, reason: $json.reason } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (no PRD stack hint)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, -300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "ok", "type": "boolean", "value": "={{ false }}" },
+            { "name": "action", "type": "string", "value": "provision_failed" },
+            { "name": "tenantId", "type": "string", "value": "={{ $('Extract PRD stack hint').first().json.tenantId }}" },
+            { "name": "runId", "type": "string", "value": "={{ $('Extract PRD stack hint').first().json.runId }}" },
+            { "name": "error", "type": "string", "value": "={{ $('Extract PRD stack hint').first().json.reason }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Return (no usable stack hint)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1100, -300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:delivery" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"webdev.provisionSite\", arguments: { tenantId: $json.tenantId, runId: $json.runId, stack: $json.stack } } }) }}",
         "options": { "response": { "response": { "responseFormat": "text" } } }
       },
       "name": "MCP webdev.provisionSite (wf:delivery)",
@@ -89,7 +185,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"approvals.request\", arguments: { tenantId: $json.tenantId, workflowId: \"wf:delivery\", toolName: \"webdev.provisionSite\", toolArgs: { tenantId: $json.tenantId, runId: $json.runId, framework: \"vite\" }, impact: \"medium\", reason: $json.reason } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"approvals.request\", arguments: { tenantId: $json.tenantId, workflowId: \"wf:delivery\", toolName: \"webdev.provisionSite\", toolArgs: { tenantId: $json.tenantId, runId: $json.runId, stack: $('Extract PRD stack hint').first().json.stack }, impact: \"medium\", reason: $json.reason } } }) }}",
         "options": { "response": { "response": { "responseFormat": "text" } } }
       },
       "name": "MCP approvals.request (webdev.provisionSite)",
@@ -189,7 +285,22 @@
   ],
   "connections": {
     "When Executed by Another Workflow": {
-      "main": [[{ "node": "MCP webdev.provisionSite (wf:delivery)", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "MCP pipeline.getRun (PRD stack hint)", "type": "main", "index": 0 }]]
+    },
+    "MCP pipeline.getRun (PRD stack hint)": {
+      "main": [[{ "node": "Extract PRD stack hint", "type": "main", "index": 0 }]]
+    },
+    "Extract PRD stack hint": {
+      "main": [[{ "node": "PRD stack hint present?", "type": "main", "index": 0 }]]
+    },
+    "PRD stack hint present?": {
+      "main": [
+        [{ "node": "MCP webdev.provisionSite (wf:delivery)", "type": "main", "index": 0 }],
+        [{ "node": "MCP notify (no PRD stack hint)", "type": "main", "index": 0 }]
+      ]
+    },
+    "MCP notify (no PRD stack hint)": {
+      "main": [[{ "node": "Return (no usable stack hint)", "type": "main", "index": 0 }]]
     },
     "MCP webdev.provisionSite (wf:delivery)": {
       "main": [[{ "node": "Parse provision result", "type": "main", "index": 0 }]]

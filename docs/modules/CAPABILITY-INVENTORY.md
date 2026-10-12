@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **201** capabilities across **16** owners
-- **108** writes · 93 reads
+- **203** capabilities across **16** owners
+- **108** writes · 95 reads
 - Writes by impact: **high 24** · medium 35 · low 49
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -258,6 +258,8 @@ unfalsifiable after.
 | webdev | `webdesk.siteStatus` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/status` | read | — |
 | webdev | `webdev.contracts.artifact` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact` | read | — |
 | webdev | `webdev.contracts.get` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId` | read | — |
+| webdev | `webdev.provisionedSites.get` | `GET` | `/api/:tenantId/modules/webdev/provisioned-sites/:siteId` | read | — |
+| webdev | `webdev.provisionedSites.list` | `GET` | `/api/:tenantId/modules/webdev/provisioned-sites?runId=:runId` | read | — |
 | webdev | `webdev.provisionSite` | `POST` | `/api/:tenantId/modules/webdev/provision` | write | `medium` |
 | webdev | `webdev.recordZoneBEvent` | `POST` | `/api/:tenantId/modules/webdev/zoneb-events` | write | `low` |
 | webdev | `webdev.refreshContract` | `POST` | `/api/:tenantId/modules/webdev/contracts/refresh` | write | `medium` |
