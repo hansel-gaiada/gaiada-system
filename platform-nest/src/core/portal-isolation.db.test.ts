@@ -222,7 +222,8 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
       expect(payments).not.toContain(draftPay);     // draft invoice (the invoices branch hides it too)
 
       const get = (fileId: string) => app.inject({ method: "GET", url: `/api/${co}/portal/files/${fileId}`, headers: asUser(signerA) });
-      expect((await get(liveReceipt)).statusCode).toBe(200);
+      const live = await get(liveReceipt);
+      expect({ status: live.statusCode, body: live.statusCode === 200 ? "" : live.body }).toEqual({ status: 200, body: "" });
       expect((await get(goneReceipt)).statusCode).toBe(404);
       expect((await get(draftReceipt)).statusCode).toBe(404);
     });

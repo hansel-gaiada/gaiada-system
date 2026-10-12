@@ -513,7 +513,10 @@ export class PortalCommerceController {
                          WHERE pp.id = $1 AND ${invoicePaymentClientVisible("pp", "detail")}
                            AND ${invoiceInPortalScope("i", { clients: 2 })}`,
     }[kind];
-    const r = await c.query(q, [id, scope.clientIds, scope.projectIds]);
+    // A receipt has no project reach, so its query binds only $1/$2. Passing an unreferenced $3 makes
+    // Postgres refuse the statement ("could not determine data type of parameter $3"), which 500s the
+    // download for EVERY caller: no test had exercised the receipt route before PV3-02c.
+    const r = await c.query(q, kind === "invoice_payment" ? [id, scope.clientIds] : [id, scope.clientIds, scope.projectIds]);
     return r.rows.length > 0;
   }
 
