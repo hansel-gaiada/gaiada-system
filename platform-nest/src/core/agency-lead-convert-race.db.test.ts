@@ -80,16 +80,6 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
         [id, co, orgName, `${id}@prospect.test`, status, admin, status === "declined" ? "no budget" : null, status === "declined" ? "lost" : "enquiry"],
       ),
     );
-    // FLAKE FIX (M5-P1-f): convert find-or-creates the contact's `users` row BEFORE it takes the lead lock, and
-    // `users.email` is UNIQUE. N concurrent converts of a lead whose contact has no row yet all miss the SELECT
-    // and race the INSERT; the losers die on the unique index (23505) BEFORE reaching the lock, so fewer than N
-    // handlers ever queue on it ("expected 4 advisory-lock waiters; saw 3"). That is a product race outside the
-    // lock (reported as a finding, pinned by the `it.fails` below), not what this file proves. Creating the
-    // contact up front makes every racer take the find path, so each one reaches the lock.
-    await adminPool().query(
-      `INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, 'Prospect Contact', 'test') ON CONFLICT DO NOTHING`,
-      [newId(), `${id}@prospect.test`],
-    );
     return { id, orgName };
   }
 
@@ -187,10 +177,13 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
         [orgName],
       )
     ).rows[0].n;
+  // M5-P1-g: the convert path's `pipeline.run.created` carries NO title (a person's name must not ride the bus),
+  // so the events are counted through the run they belong to rather than by a payload title.
   const countRunCreatedEvents = async (orgName: string) =>
     (
       await adminPool().query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM outbox_events WHERE event_type = 'pipeline.run.created' AND payload->>'title' = $1`,
+        `SELECT count(*)::int AS n FROM outbox_events e JOIN pipeline_runs r ON r.id = e.entity_id
+          WHERE e.event_type = 'pipeline.run.created' AND e.entity_type = 'pipeline_run' AND r.title = $1`,
         [orgName],
       )
     ).rows[0].n;
@@ -369,26 +362,26 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
   });
 
   // ══════════════════════════════════════════════════════════════════════════════════════════════
-  // FINDING (M5-P1-f) — the real cause of the old "expected 4 advisory-lock waiters; saw 3" flake
+  // THE CONTACT-ROW RACE (found by M5-P1-f, fixed by M5-P1-g) — the real cause of the old "expected 4 advisory-lock
+  // waiters; saw 3" flake
   // ══════════════════════════════════════════════════════════════════════════════════════════════
-  // convertAgencyLead() find-or-creates the contact's `users` row (plain INSERT, no ON CONFLICT) OUTSIDE the
-  // lead lock, and `users.email` is UNIQUE. Two converts of the same lead whose contact has no row yet can both
-  // miss the SELECT; the second INSERT then raises 23505 and the request fails before it ever reaches the lock.
-  // Reproduced here deterministically, with no timing: this test's own connection holds an UNCOMMITTED insert of
-  // the contact's email (standing in for "the other convert's INSERT, not yet visible"), a lone convert starts, its
-  // SELECT misses, its INSERT blocks on that key, the holder commits, and the convert's INSERT fails.
-  // A lone convert of an open lead must succeed (it would find the row). `.fails` pins today's behaviour; when the
-  // product fix lands (ON CONFLICT DO NOTHING + re-select, or move the find-or-create under the lock) this starts
-  // failing, which is the cue to delete `.fails` and the pre-created contact in `newLead`.
-  it.fails("FINDING: a convert whose contact row appears between its SELECT and its INSERT must still succeed (it 500s on users.email)", async () => {
+  // convertAgencyLead() find-or-creates the contact's `users` row OUTSIDE the lead lock (global, no-RLS table), and
+  // `users.email` is UNIQUE. It used to be a SELECT then a plain INSERT, so two converts of the same lead whose
+  // contact had no row yet could both miss the SELECT; the second INSERT raised 23505 and the request failed before
+  // it ever reached the lock. Fixed with `INSERT ... ON CONFLICT (email) DO NOTHING` + re-select
+  // (`findOrCreateContactUser`). Reproduced here deterministically, with no timing: this test's own connection holds
+  // an UNCOMMITTED insert of the contact's email (standing in for "the other convert's INSERT, not yet visible"), a
+  // lone convert starts, its SELECT misses, its INSERT blocks on that key, the holder commits, and the convert must
+  // find the committed row and carry on to a 200 (and link THAT row as the client contact).
+  it("a convert whose contact row appears between its SELECT and its INSERT still succeeds and links the row that won", async () => {
     const lead = await newLead();
     const email = `${lead.id}@prospect.test`;
-    await adminPool().query(`DELETE FROM users WHERE email = $1`, [email]); // undo newLead's pre-created contact
     const holder = await adminPool().connect();
     let committed = false;
+    const holderUserId = newId();
     try {
       await holder.query("BEGIN");
-      await holder.query(`INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, 'Prospect Contact', 'test')`, [newId(), email]);
+      await holder.query(`INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, 'Prospect Contact', 'test')`, [holderUserId, email]);
       const holderPid = (await holder.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)).rows[0].pid;
       const flight = convert(lead.id);
       const deadline = Date.now() + 45000;
@@ -405,6 +398,9 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
       committed = true;
       const r = await flight;
       expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
+      const contacts = await adminPool().query(`SELECT user_id FROM client_contacts WHERE client_id = $1`, [(r.json() as ConvertOk).clientId]);
+      expect(contacts.rows.map((x: { user_id: string }) => x.user_id)).toEqual([holderUserId]);
+      expect((await adminPool().query(`SELECT count(*)::int AS n FROM users WHERE lower(email) = $1`, [email])).rows[0].n).toBe(1);
     } finally {
       if (!committed) await holder.query("ROLLBACK").catch(() => {});
       holder.release();

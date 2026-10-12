@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.73.0` - M5-P1-g: a lead convert is race-safe on its contact, and convert puts no name on the bus (2026-10-12) - DEV-VERIFIED
+
+Two defects found by the M5-P1-f end-to-end QA (built by the M5 session).
+
+- **Contact race.** Convert find-or-creates the contact's `users` row before it takes the lead lock, and `users.email` is UNIQUE. Concurrent converts of a lead whose contact had no row could 500 on the unique index instead of the clean 409. Now `INSERT … ON CONFLICT (email) DO NOTHING` plus a re-select, so every racer reaches the lock. An email held by a deactivated account is now a typed 400 instead of an untyped 500. This was also the real cause of the old convert-race test flake.
+- **No personal data on the bus.** Convert's `pipeline.run.created` payload is now exactly `{sourceMeetingId, actorId}`. It used to carry `title = org_name`, which is the person's full name for /contact/ and /audit/ web leads. The work-activity consumer now looks the run title up from `pipeline_runs`. n8n's `pipeline-fanout` never read the payload. The knowledge-graph bridge labels such a run by its id.
+- Verified on GitHub Actions 38198059657 (main + P1-g): pipeline e2e 26/26 with both defects asserted fixed, convert race 8/8, convert unit 34/34, work-activity consumer 19/19, all shards green.
+
 ### platform-nest `0.72.0` - M5 wave 3: data-subject rights and retention for website leads, the web-leads read, a staff alert, writers' room grants (2026-10-12) - DEV-VERIFIED
 
 WebDesk M5 wave 3, built by the M5 session (main `2e032678`).
@@ -76,6 +84,38 @@ WebDesk M5 wave 3, built by the M5 session (main `2e032678`).
   - **Sending:** through the surface router, so the halt switch and the outbound ceiling apply. The alert is never written to chat history.
 - Off until `WEB_LEAD_ALERT_CHAT_ID` is set (503 `alert-destination-unset`). Live use needs the env set and the bot container recreated.
 - CI run 38197371511: wa-chat-bot 540 passed / 16 skipped (the Postgres-backed ones); the new route's suite is 45/45.
+
+### platform-nest `0.71.0` - PV-3 wave 1: company owners can countersign; one set of portal visibility predicates; strict client facets; a group-company link and a required business type (2026-10-12) - PROTOTYPED
+
+PV-3 wave 1 (tickets `docs/plans/2026-10-11-pv3-hub-symmetry-tickets.md`, PV3-01 to PV3-04; plan `docs/plans/2026-10-10-three-perspectives.md`).
+
+- **Migrations.**
+  - `202610111322_clients_group_company`: `clients.group_company_id` → `companies(id)`, a not-self CHECK and a partial index. No backfill (PV-D13: names are data). Same-root is enforced in the app, because `companies` has no RLS.
+  - `202610112330_iam_contract_countersign_permission`: catalogues `core.contract.countersign` (grantable, sensitive, `ui_grantable = false`), held by `platform_admin` only. It asserts that no other role holds it.
+- **Cerbos (PV3-01, plan trap 7):** company owners can countersign their company's contracts. Until now no countersign rule existed, so only `platform_admin` could countersign, and a contract a client signed first waited forever. The new rule is `roles: ["user"]` with an `owner` grant on the contract's tenant (PV-1's shape). No permission-arm rule reads the key, so `company_admin` and custom roles stay out. **Cerbos restart on deploy, then probe: owner ALLOW, company_admin DENY.**
+- `canCountersign` on the contract reads (one Cerbos check per request).
+- **PV3-02:** the portal's row-visibility SQL moves into `core/portal-visibility.ts`; 6 portal controllers and 32 call sites switched, each proven equivalent. A guard scans every portal-scope importer for re-inlined predicates. Mail threads and the client-website-access list sit on a ratchet. No portal response changes.
+- **PV3-01/PV3-03:** a strict `clientId` facet (uuid, `internal`, 400 on anything else; it used to 500 or return `[]`) on contracts, deliverables, pipeline runs, meeting recordings, change requests, social engagements and accounts; `invoice-payments` gains `clientId`.
+- **PV3-04:** `POST /clients` requires a registry `businessType` and writes the client-centre profile row in the same transaction. `PATCH` accepts it and records history. Only a platform operator may set or change `groupCompanyId`, with a 403 before any validation; this is PV3-Q1's default until the owner rules. Reads return `groupCompany`.
+- Verified on the Linux gate (sumopod) on the merged tree over 359: nest 573/573 files passed, repo checks PASS (MAP and capability inventory regenerated on Linux). Every new rule has teeth: a deliberate break fails a named test.
+
+### platform-ui `0.91.0` - PV-3 wave 1: the client hub mirrors the portal; the client form needs a business type (2026-10-12) - PROTOTYPED
+
+- **PV3-05 (PV-D4):**
+  - The hub tabs read Overview · Projects · Business · People · Internal; every path is kept.
+  - Internal is styled staff-only.
+  - Projects holds tasks, deliverables (filtered on the server), approvals (runs with their client gates), requests (change requests, plus post reviews from the overview) and meetings, moved from People.
+  - Each read refuses explicitly, never an empty list.
+  - Tab matching uses a segment boundary, so `/work` no longer lights up for `/workshop`.
+- **PV3-04:**
+  - A required business-type select on New and Edit; with no profile row the Edit form doesn't preselect.
+  - An operator-only Group company picker, and a Group company badge in the hub header.
+  - A Clients-list filter "Business type: Other or not set", which refuses rather than empties when the profile read fails.
+- Verified on the Linux gate on the merged tree: ui 292/292 files passed, next build ok. Hub e2e and portal e2e on the merged tree.
+
+### mcp-hub `0.13.0` - `clients.create` requires a business type; `clients.update` sets it and the group company (2026-10-12) - PROTOTYPED
+
+- **PV3-04:** `clients.create` requires `businessType` (the registry's enum) and accepts `groupCompanyId`. `clients.update` accepts both, and `null` clears the link. A platform 400 now surfaces its typed code. Verified in a Linux container (`npm ci`, typecheck, `npm test`: 376 passed).
 
 ### platform-nest `0.70.0` - M5 wave 2: a lead pipeline on agency_leads, the writers' room roles and review gate, the Umami read path (2026-10-12) - DEV-VERIFIED
 

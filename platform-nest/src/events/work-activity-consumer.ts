@@ -181,9 +181,18 @@ async function mapMeetingRecording(tenantId: string, event: OutboxEvent): Promis
 
 /** pipeline_run — only `pipeline.run.created` is emitted on this entityType (stage/gate advances
  *  emit under the separate pipeline_stage/pipeline_gate entityTypes, out of this ticket's scoped
- *  stream list), and its payload already carries `title`, so no extra lookup is needed. */
-async function mapPipelineRun(_tenantId: string, event: OutboxEvent): Promise<Mapped> {
-  const title = typeof event.payload.title === "string" ? event.payload.title : null;
+ *  stream list). createRun and MI-03's mini-run put the run's `title` in the payload; the lead-convert
+ *  path does NOT (M5-P1-g: a web lead's org_name can be a person's name, which must not ride the bus),
+ *  so when the payload has no title it is looked up from `pipeline_runs` (tenant-scoped, RLS). NULL-
+ *  tolerant: a run the lookup can't find still ingests with title=null. */
+async function mapPipelineRun(tenantId: string, event: OutboxEvent): Promise<Mapped> {
+  let title = typeof event.payload.title === "string" ? event.payload.title : null;
+  if (title === null) {
+    const row = await withTenants([tenantId], (c) =>
+      c.query<{ title: string | null }>(`SELECT title FROM pipeline_runs WHERE id = $1`, [event.entityId]),
+    );
+    title = row.rows[0]?.title ?? null;
+  }
   return { source: "pipeline", objectKind: "pipeline_run", title, payload: {} };
 }
 
