@@ -29,7 +29,8 @@ import {
   type TransitionOutcome,
 } from "./agency-leads.service";
 import { mintInviteToken, revokeIntakeToken } from "./agency-intake-tokens.service";
-import { createLeadFromWebSubmission } from "./agency-web-leads.service";
+import { createLeadFromWebSubmission, listWebLeads } from "./agency-web-leads.service";
+import { listStageHistory, moveLeadStage, readPipelineReference, setLeadDeal } from "./agency-lead-pipeline.service";
 
 /** Turns a `TransitionOutcome` into the HTTP response for a triage endpoint, or throws the typed
  *  refusal — shared by open/decline/nurture so the three endpoints cannot drift in how they report
@@ -64,6 +65,18 @@ export class AgencyLeadsController {
     return listLeadsQueue(tenantId);
   }
 
+  /** M5-L6 — the web leads of one WebDesk site (tenant) slug, newest first, for the Website → Leads tab. A path
+   *  segment, not a query filter, so the same route is reachable by the MCP tool (the hub fills path parameters
+   *  only on a GET). `agency_lead:read`, tenant-wide, like the queue: no new kind. `authorize()` runs BEFORE the slug
+   *  is looked at, so a denied caller never learns anything from a validation answer. Click-id VALUES and the
+   *  raw attribution never leave the service (see `summarizeAttribution`). */
+  @Get(":tenantId/agency/web-leads/:siteSlug")
+  async webLeads(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("siteSlug") siteSlug: string) {
+    await authorize(req.principal, { kind: "agency_lead", tenantId, module: "agency" }, "read");
+    if (!siteSlug || siteSlug.length > 200) throw new BadRequestException("siteSlug is required (at most 200 characters)");
+    return listWebLeads(tenantId, siteSlug);
+  }
+
   /** Detail, joined to the latest submission. `authorize()` runs WITH the lead's `id` and BEFORE
    *  the read (mirrors `webdev-change-requests.controller.ts`'s `get()`): a caller who may not read
    *  `agency_lead` at all learns exactly that (403), and only a caller who IS allowed to read leads
@@ -89,6 +102,74 @@ export class AgencyLeadsController {
     return rows;
   }
 
+  // ── Pipeline reads (M5-P1-c, design §6) ─────────────────────────────────────────────────────
+  /** Stage history, newest first. `read` WITH the lead id, then 404 when the lead is invisible (same
+   *  403-vs-404 split as `detail`). The history holds no personal data. */
+  @Get(":tenantId/agency/leads/:leadId/stage-history")
+  async stageHistory(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("leadId") leadId: string) {
+    await authorize(req.principal, { kind: "agency_lead", tenantId, id: leadId, module: "agency" }, "read");
+    const rows = await listStageHistory(tenantId, leadId);
+    if (rows === null) throw new NotFoundException("lead not found");
+    return rows;
+  }
+
+  /** The stage vocabulary (in order) and the active currencies with their minor units: what the UI and
+   *  agents need to render and validate a move or a value. Tenant-wide `read`, like the queue. */
+  @Get(":tenantId/agency/pipeline/reference")
+  async pipelineReference(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "agency_lead", tenantId, module: "agency" }, "read");
+    return readPipelineReference(tenantId);
+  }
+
+  // ── Pipeline writes (M5-P1-c, design §6) ────────────────────────────────────────────────────
+  /** Move a lead to an OPEN stage. `triage`, plus `update` when a `deal` rides along (the value is `update`'s
+   *  to set). BOTH checks run before the body is validated, so a denial can never be a validation 400.
+   *  `won` and `lost` are refused (400 `stage_terminal`): they are reached only through Convert and Decline. */
+  @Post(":tenantId/agency/leads/:leadId/stage")
+  @HttpCode(200)
+  async moveStage(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("leadId") leadId: string,
+    @Body() body: { stage?: unknown; deal?: unknown },
+  ) {
+    const res = { kind: "agency_lead", tenantId, id: leadId, module: "agency" } as const;
+    await authorize(req.principal, res, "triage");
+    if (body?.deal !== undefined && body?.deal !== null) await authorize(req.principal, res, "update");
+    const r = await moveLeadStage(tenantId, leadId, body ?? {}, req.principal.userId ?? null);
+    if (r.outcome === "not_found") throw new NotFoundException("lead not found");
+    if (r.changed) {
+      await writeActivity(tenantId, req.principal.userId, "stage_moved", "agency_lead", leadId, { stage: r.stage, stageEventId: r.stageEventId });
+    }
+    // Every deal change is audited, whichever route carries it: a changed value on a move, same stage or not.
+    if (r.dealChanged) {
+      await writeActivity(tenantId, req.principal.userId, "deal_set", "agency_lead", leadId, { dealValue: r.dealValue, dealCurrency: r.dealCurrency });
+    }
+    return { id: r.id, stage: r.stage, changed: r.changed, ...(r.stageEventId ? { stageEventId: r.stageEventId } : {}) };
+  }
+
+  /** Set or clear the deal value: `{value, currency}` or the explicit `{value:null, currency:null}`.
+   *  Cerbos `update`, authorized before validation. Allowed in any status; emits no stage event, so it is
+   *  audited here. */
+  @Post(":tenantId/agency/leads/:leadId/deal")
+  @HttpCode(200)
+  async setDeal(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("leadId") leadId: string,
+    @Body() body: { value?: unknown; currency?: unknown },
+  ) {
+    await authorize(req.principal, { kind: "agency_lead", tenantId, id: leadId, module: "agency" }, "update");
+    const r = await setLeadDeal(tenantId, leadId, body);
+    if (r.outcome === "not_found") throw new NotFoundException("lead not found");
+    if (r.changed) {
+      await writeActivity(tenantId, req.principal.userId, r.dealValue === null ? "deal_cleared" : "deal_set", "agency_lead", leadId, {
+        dealValue: r.dealValue, dealCurrency: r.dealCurrency,
+      });
+    }
+    return { id: r.id, changed: r.changed, dealValue: r.dealValue, dealCurrency: r.dealCurrency };
+  }
+
   // ── Staff-created lead (AD-4) ───────────────────────────────────────────────────────────────
   /** `source='staff'` — a prospect who came in by phone rather than through an invite link.
    *  `authorize()` runs BEFORE body validation: a caller who may not create a lead at all should
@@ -104,7 +185,7 @@ export class AgencyLeadsController {
     await authorize(req.principal, { kind: "agency_lead", tenantId, module: "agency" }, "create");
     const input = normalizeCreateLeadInput(body ?? {});
     const { id } = await createStaffLead(tenantId, req.principal.userId, input);
-    await writeActivity(tenantId, req.principal.userId, "created", "agency_lead", id, { source: "staff", orgName: input.orgName });
+    await writeActivity(tenantId, req.principal.userId, "created", "agency_lead", id, { source: "staff" });
     // `'new'`, NOT `'invited'` — this must match what createStaffLead actually inserts. It said
     // "invited" until QA pinned the row and caught the contradiction: a staff-entered lead has had
     // nothing sent to it, and telling the caller otherwise erases exactly the distinction design
@@ -139,6 +220,9 @@ export class AgencyLeadsController {
         throw new GoneException({ message: "the submission was purged or erased", reason: "submission-gone" });
       case "unmapped_form":
         throw new UnprocessableEntityException({ message: "this form has no lead mapping", reason: "unmapped_form" });
+      case "suppressed":
+        // M5-G5: the submitter asked to be erased; their contact is on the suppression list. Nothing stored.
+        throw new UnprocessableEntityException({ message: "the submitter's data was erased on request; no lead is created", reason: "subject_suppressed" });
       case "existing":
         reply.status(200);
         return { id: r.leadId, status: "new", created: false };

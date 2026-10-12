@@ -46,7 +46,10 @@ project tree, `/etc/webdesk` and every bind mount. 0 were found. Two values are 
 probe names them:
 - `WEBDESK_EVENT_SECRET`, the B→A event HMAC (§03 channel 1; a forged fact is noise, not authority).
 - `WEBDESK_CONTROL_WS4_KEY` (= WebDesk's `WEBDESK_APPROVAL_ASSERTION_KEY`), the WS4 approval HMAC: the ERP signs,
-  WebDesk verifies, and only WebDesk's own control plane accepts it. Follow-up F1 makes it asymmetric.
+  WebDesk verifies, and only WebDesk's own control plane accepts it. Follow-up F1 made it asymmetric and **retired
+  this key on both sides, 2026-10-12**. Since then, `WS4_HMAC_RETIRED=1` makes the probe FAIL if the key reappears.
+  The OTLP bearer (`WEBDESK_OTLP_BEARER_TOKEN`, WSK-D63 (2)) was added as the second shared-by-design value
+  instead: it is write-only telemetry.
 
 ## T1b · The egress guard (owner-approved 2026-10-11)
 
@@ -253,12 +256,24 @@ already has (WSK-D39).
    - Rotation runbook: two kids overlap, then the old one is removed.
 
 **Tier.** The signer and verifier cores are Opus work (alg confusion and replay are the failure modes). The key
-runbook and the probe change are Sonnet work. About 1–2 sessions. **Status: designed, not started.**
+runbook and the probe change are Sonnet work. About 1–2 sessions.
+
+**Status: all three phases LIVE on gda-aicenter, 2026-10-12** (owner: "Phase 2 now, and phase 3 right after if v2
+is proven").
+
+- **Code and gates.** The code is on main and shipped with release 359 (phase 1, migration 0018 applied by
+  `deploy-webdesk`). Gate run m4f1 on sumopod: webdesk-api 1527/0, migrations 696/0, and CI is green.
+- **Kid** `ws4-2026-10`, public thumbprint `rCTA_OpUekLvOvmpMomkWj4VhHJLOmyCkOSSbnFGbl0`.
+- **WebDesk now holds no WS4 signing secret.** Its env carries only the public JWKS. The private key lives at
+  `/etc/gaiada/webdesk-ws4/` (0400 root) on the ERP side.
+- **Still owed by the owner:** read the audit row of the first real HIGH command through the Approvals inbox. It must
+  say `ws4_assertion_version = 2` (the runbook gives the command). The evidence is in the log below.
 
 ## Follow-ups found (each a box on the board)
 
 - **F1** Make the WS4 approval assertion asymmetric (Ed25519, like the editorial assertion D39), so the surface holds
-  only a public key.
+  only a public key. **LIVE 2026-10-12 02:44Z**, all three phases, v1 retired. See the F1 section and the log. The
+  owner's one audit-row read is still owed.
 - **F2** Pin the `webdesk_default` subnet in compose. The guard reads the subnet at boot, so a network recreated
   later is uncovered until the unit restarts; probe 3 catches it. The live-swap runbook should re-apply the guard
   after any `down`. **LIVE 2026-10-11 14:14Z**: the aicenter overlay pins `172.19.0.0/16`; applied by `docker compose down`, then
@@ -338,3 +353,35 @@ runbook and the probe change are Sonnet work. About 1–2 sessions. **Status: de
   StartedAt unchanged.
 - **release.yml wired** (owner-approved 2026-10-12; main `4d104aa1`): every release runs deploy-webdesk (apply,
   skip_if_current) after a successful ERP deploy.
+- 2026-10-12 02:34–02:44Z: **F1 live, phases 2 and 3** (runbook `infra/runbooks/webdesk-ws4-keys.md`; M3 was told
+  before the ERP `.env` was touched).
+  - 02:34Z: generated the key pair on the box in root-only `/root/ws4-keygen` (`node:22-alpine`, `--network none`).
+  - 02:36Z: WebDesk JWKS installed (`0444`, regular file). The api was recreated and logged
+    `v2 (EdDSA) accepted ... kid(s) ws4-2026-10`, with v1 still accepted.
+  - 02:39Z: ERP private key installed (`0400 root`) and `WEBDESK_CONTROL_WS4_SIGNING_KID=ws4-2026-10` set (`.env`
+    backed up). The env tag matched the deployed 359. Platform was recreated with the full file set and went healthy
+    in 15 s.
+    - W1 (v2, kid `ws4-2026-10`) gave `404 tenant not found`; W2 (v1) gave `404`.
+  - 02:40Z: phase 3, ERP side. First checked that the platform was the only container holding a non-empty v1 key
+    (assertions live 60 s and are minted at send time). Then removed `WEBDESK_CONTROL_WS4_KEY` from the ERP `.env`
+    and recreated platform.
+    - W1 gave `404`; W2 was skipped (no v1 key).
+  - 02:41Z: phase 3, WebDesk side. Removed `WEBDESK_APPROVAL_ASSERTION_KEY` from `/etc/webdesk/.env`, backed up to
+    `/root/m4f1-backup/`, and recreated the api.
+    - It logged `WS4 gate: v1 (HMAC) retired ...; v2 (EdDSA) accepted ... kid(s) ws4-2026-10`.
+    - `healthz` gave 200; 0 restarts.
+  - 02:42Z: **live v1 refusal.** The retired key was fed in from the backup through stdin, never argv.
+    - W2 gave `403 WS4 assertion rejected: WS4 v1 (HMAC) assertions are no longer accepted`; W1 gave `404`.
+  - 02:44Z: `WS4_HMAC_RETIRED=1 WEBDESK_OTLP_PORT=4319` containment probe: **40/40**, using main's copy of the probe.
+    The 359 tree's copy gives 39/1, because it predates the OTLP bearer allow-list (`28e2580a`); stale probe, not a
+    leak.
+  - `/root/ws4-keygen` was shredded as root.
+  - **Three runbook defects found and fixed in the same change:**
+    - The `rmdir` test ran as the operator, who can't see into `/etc/webdesk` (0700), so it was silently false and
+      `install` wrote the file INSIDE the leftover directory.
+    - `up -d` without `--force-recreate` left the api running on the old key set.
+    - The runbook said the WebDesk v1 key lives in `.env.control`. It lives in `/etc/webdesk/.env`, because the
+      base compose names it under `environment:`.
+  - **Compose clean-up:** the base file now reads `${WEBDESK_APPROVAL_ASSERTION_KEY:-}`. On the box the resolved
+    config is byte-identical and the unset-variable warning is gone.
+  - **Dead-key backups** are kept as the 14-day rollback; shred them after 2026-10-26.

@@ -6,8 +6,8 @@ import type { WdResult } from "@/lib/webdeskContentModel";
 import type { MediaDriver } from "@/lib/webdeskEditorDriver";
 import { formatDateTime } from "@/lib/format";
 import {
-  assetLabel, dimensionsLabel, formatBytes, mediaValueFor, MEDIA_TYPE_FILTERS, mimeLabel, previewUrl,
-  type MediaAsset, type MediaListBody, type MediaValue,
+  assetLabel, capabilityReasons, dimensionsLabel, formatBytes, mediaValueFor, MEDIA_TYPE_FILTERS, mimeLabel, previewUrl,
+  type MediaAsset, type MediaCapabilities, type MediaListBody, type MediaValue,
 } from "@/lib/webdeskMediaModel";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { MediaDetail, type Cap } from "./MediaDetail";
@@ -27,8 +27,9 @@ import "./media.css";
 //   unavailable / forbidden / not enabled / drift / not found, with nothing loaded yet
 //                        the grid is NOT drawn: a notice says what happened (an empty list is a claim)
 //   stale                a refresh or "load more" failed AFTER a good load: banner, the assets and the user's work are kept
-//   read-only            a capability is off (a 403 on upload/update/delete, or a reason from the caller): that control is
-//                        disabled and the reason is on screen; the rest of the library still works
+//   read-only            a capability is off (the list's own `capabilities`, read up front; a reason from the caller; or, as the
+//                        fallback, a 403 on upload/update/delete): that control is disabled and the reason is on screen; the rest
+//                        of the library still works. Unknown capabilities (the BFF could not ask) leave every control on.
 //
 // KEYBOARD. The grid is one listbox with a roving tabindex: arrows move, Home/End jump, Enter or Space selects. The upload
 // control is a plain button (the drop zone is an extra, never the only way). Progress is a <progress> per file; only
@@ -101,6 +102,9 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [off, setOff] = useState<Partial<Record<Cap, string>>>(denied ?? {});
+  // WSK-359: what the list said the caller may do, up front. Refreshed with every list read; `off` (a 403 learned, or the caller's own
+  // reasons) is kept on top of it.
+  const [caps, setCaps] = useState<MediaCapabilities | null>(initial?.list.capabilities ?? null);
   const [base, setBase] = useState<string | null>(publicBase);
   const [notice, setNotice] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -134,6 +138,7 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
       return;
     }
     setProblem(null); setStale(null); setHasData(true); hasDataRef.current = true;
+    setCaps(r.data.capabilities ?? null);
     setLoadedAt(new Date().toISOString());
     setPage(r.data.page);
     setApplied(filters);
@@ -181,7 +186,9 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [uploadsActive]);
-  const uploadOff = off.upload ?? null;
+  // What is off right now: the list's capabilities first, a learned 403 / the caller's reason on top.
+  const offNow: Partial<Record<Cap, string>> = { ...capabilityReasons(caps, clientMode), ...off };
+  const uploadOff = offNow.upload ?? null;
   const pickFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
     if (uploadOff) { setNotice(uploadOff); return; }
@@ -388,7 +395,7 @@ export function MediaLibrary({ mode, scope, routeBase, locales, pickLocale, init
             <MediaDetail
               key={selected.assetId}
               asset={selected} scope={scope} routeBase={routeBase} locales={locales} authors={authors} previewBase={base} mode={mode} driver={driver}
-              caps={{ update: off.update ?? null, delete: off.delete ?? null }}
+              caps={{ update: offNow.update ?? null, delete: offNow.delete ?? null }}
               onSaved={onSaved} onDeleted={onDeleted} onDenied={deny} onDirty={onDirty} onNotice={setNotice}
               pickLocale={pickLocale}
               onUse={onPick ? (a) => onPick(mediaValueFor(a, pickLocale ?? locales[0] ?? ""), a) : undefined}

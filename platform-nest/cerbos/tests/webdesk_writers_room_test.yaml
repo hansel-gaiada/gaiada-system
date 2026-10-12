@@ -1,0 +1,1663 @@
+# M5-W1a — the writers' room Cerbos matrix (docs/plans/2026-10-11-m5-writers-room-design.md §2.1, §2.4, §9 W1a).
+# Every principal below is asked every action on every resource; an action NOT listed under `expected` is an
+# expected DENY (Cerbos' test semantics), so each block is the complete answer for that principal, negatives
+# included. Run (from platform-nest/, Git Bash needs MSYS_NO_PATHCONV=1):
+#   docker run --rm -v "$PWD/cerbos/policies:/policies:ro" -v "$PWD/cerbos/tests:/tests:ro" \
+#     ghcr.io/cerbos/cerbos:0.54.0 compile --tests=/tests /policies
+# Principals carry `grants[].editorialScopes` exactly as rbac/cerbos.ts::principalPayload() sends them; resources
+# carry every attribute resourcePayload() sends, with its fail-closed default. The live twin of this file, through
+# the real check() path, is src/rbac/webdesk-writers-room-cerbos.test.ts.
+#
+# Fixture key: site-1 is the granted site; w_* items are authored by u-writer; `creatorId` is the creator of
+# the version under review (approve's maker); twin_of_* carry the SOURCE item's reviewState/published, as the
+# BFF passes them for a translator's twin `create`.
+name: WebdeskWritersRoom
+description: M5-W1a writers' room roles x actions, with every negative case.
+principals:
+  writer:
+    id: "u-writer"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_writer","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post"],"allLocales":false,"locales":["en"]}]}]
+      clientAdminOf: []
+      perms: []
+  translator:
+    id: "u-trans"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_translator","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post"],"allLocales":false,"locales":["id"]}]}]
+      clientAdminOf: []
+      perms: []
+  seo_reviewer:
+    id: "u-seo"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_seo_reviewer","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":true,"collections":[],"allLocales":true,"locales":[]}]}]
+      clientAdminOf: []
+      perms: []
+  editor:
+    id: "u-editor"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_editor","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post","guide"],"allLocales":true,"locales":[]}]}]
+      clientAdminOf: []
+      perms: []
+  contributor_editor:
+    id: "u-ceditor"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "contributor"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_editor","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post","guide"],"allLocales":true,"locales":[]}]}]
+      clientAdminOf: []
+      perms: []
+  writer_global:
+    id: "u-wglobal"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_writer","scopeType":"global","scopeId":"","editorialScopes":[{"siteId":"site-1","allCollections":true,"collections":[],"allLocales":true,"locales":[]}]}]
+      clientAdminOf: []
+      perms: []
+  writer_other_tenant:
+    id: "u-wt2"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001","aaaaaaaa-1111-0000-0000-000000000002"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_writer","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000002","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post"],"allLocales":false,"locales":["en"]}]}]
+      clientAdminOf: []
+      perms: []
+  writer_no_scope_rows:
+    id: "u-wnoscope"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_writer","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  writer_low_assurance:
+    id: "u-writer"
+    roles: ["user"]
+    attr:
+      assurance: "low"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdesk_writer","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001","editorialScopes":[{"siteId":"site-1","allCollections":false,"collections":["post"],"allLocales":false,"locales":["en"]}]}]
+      clientAdminOf: []
+      perms: []
+  webdev_staff:
+    id: "u-staff"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdev_staff","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  webdev_manager:
+    id: "u-pub"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdev_manager","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  company_admin:
+    id: "u-cadmin"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"company_admin","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  manager:
+    id: "u-mgr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"manager","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  member:
+    id: "u-member"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"member","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  platform_admin:
+    id: "u-padmin"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: []
+      rootCompanies: []
+      grants: [{"role":"platform_admin","scopeType":"global","scopeId":""}]
+      clientAdminOf: []
+      perms: []
+  bot_publisher:
+    id: "u-bot"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "bot"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"webdev_manager","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  automation_admin:
+    id: "u-auto"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "automation"
+      companies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      rootCompanies: ["aaaaaaaa-1111-0000-0000-000000000001"]
+      grants: [{"role":"company_admin","scopeType":"company","scopeId":"aaaaaaaa-1111-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+resources:
+  w_draft:
+    kind: webdesk_content_item
+    id: "w_draft"
+    attr: {"id":"w_draft","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  w_changes:
+    kind: webdesk_content_item
+    id: "w_changes"
+    attr: {"id":"w_changes","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"changes_requested"}
+  w_review:
+    kind: webdesk_content_item
+    id: "w_review"
+    attr: {"id":"w_review","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"u-writer","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"in_review"}
+  w_review_by_editor:
+    kind: webdesk_content_item
+    id: "w_review_by_editor"
+    attr: {"id":"w_review_by_editor","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"u-editor","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"in_review"}
+  w_review_by_pub:
+    kind: webdesk_content_item
+    id: "w_review_by_pub"
+    attr: {"id":"w_review_by_pub","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"u-pub","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"in_review"}
+  w_review_by_cadmin:
+    kind: webdesk_content_item
+    id: "w_review_by_cadmin"
+    attr: {"id":"w_review_by_cadmin","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"u-cadmin","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"in_review"}
+  w_review_by_padmin:
+    kind: webdesk_content_item
+    id: "w_review_by_padmin"
+    attr: {"id":"w_review_by_padmin","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"u-padmin","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"in_review"}
+  w_review_creator_unknown:
+    kind: webdesk_content_item
+    id: "w_review_creator_unknown"
+    attr: {"id":"w_review_creator_unknown","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"in_review"}
+  w_approved:
+    kind: webdesk_content_item
+    id: "w_approved"
+    attr: {"id":"w_approved","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"u-writer","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"approved"}
+  other_author_draft:
+    kind: webdesk_content_item
+    id: "other_author_draft"
+    attr: {"id":"other_author_draft","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-other","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  w_other_collection:
+    kind: webdesk_content_item
+    id: "w_other_collection"
+    attr: {"id":"w_other_collection","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"guide","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  w_other_locale:
+    kind: webdesk_content_item
+    id: "w_other_locale"
+    attr: {"id":"w_other_locale","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"id","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  t_draft_id:
+    kind: webdesk_content_item
+    id: "t_draft_id"
+    attr: {"id":"t_draft_id","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-trans","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"id","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  twin_of_approved:
+    kind: webdesk_content_item
+    id: "twin_of_approved"
+    attr: {"id":"twin_of_approved","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"id","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"approved"}
+  twin_of_live:
+    kind: webdesk_content_item
+    id: "twin_of_live"
+    attr: {"id":"twin_of_live","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":true,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"id","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  twin_of_draft:
+    kind: webdesk_content_item
+    id: "twin_of_draft"
+    attr: {"id":"twin_of_draft","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"id","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  w_other_site:
+    kind: webdesk_content_item
+    id: "w_other_site"
+    attr: {"id":"w_other_site","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-2","reviewState":"draft"}
+  w_site_unfed:
+    kind: webdesk_content_item
+    id: "w_site_unfed"
+    attr: {"id":"w_site_unfed","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"","reviewState":"draft"}
+  w_other_tenant:
+    kind: webdesk_content_item
+    id: "w_other_tenant"
+    attr: {"id":"w_other_tenant","tenantId":"aaaaaaaa-1111-0000-0000-000000000002","ownerId":"u-writer","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1","reviewState":"draft"}
+  coll_site1:
+    kind: webdesk_collection
+    id: "coll_site1"
+    attr: {"id":"coll_site1","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-1"}
+  coll_site2:
+    kind: webdesk_collection
+    id: "coll_site2"
+    attr: {"id":"coll_site2","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":"site-2"}
+  coll_site_unfed:
+    kind: webdesk_collection
+    id: "coll_site_unfed"
+    attr: {"id":"coll_site_unfed","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"post","locale":"en","itemCount":0,"clientId":"","siteId":""}
+  media_site1:
+    kind: webdesk_media_asset
+    id: "media_site1"
+    attr: {"id":"media_site1","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"","locale":"","itemCount":0,"clientId":"","siteId":"site-1"}
+  media_site2:
+    kind: webdesk_media_asset
+    id: "media_site2"
+    attr: {"id":"media_site2","tenantId":"aaaaaaaa-1111-0000-0000-000000000001","ownerId":"","projectId":"","teamId":"","module":"webdev","subjectUserId":"","origin":"","unitAncestors":[],"creatorId":"","subKind":"","targetUserId":"","published":false,"panelistUserIds":[],"hiringManagerUserId":"","recruiterUserId":"","approvalId":"","collectionKey":"","locale":"","itemCount":0,"clientId":"","siteId":"site-2"}
+tests:
+  - name: writer on webdesk_content_item
+    input:
+      principals: [writer]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: writer
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: writer
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW}
+      - principal: writer
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW}
+      - principal: writer
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW}
+      - principal: writer
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW}
+      - principal: writer
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW}
+      - principal: writer
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW}
+  - name: writer on webdesk_collection
+    input:
+      principals: [writer]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: writer
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: writer on webdesk_media_asset
+    input:
+      principals: [writer]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: writer
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: translator on webdesk_content_item
+    input:
+      principals: [translator]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: translator
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_review
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW}
+      - principal: translator
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: translator
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW}
+      - principal: translator
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW}
+  - name: translator on webdesk_collection
+    input:
+      principals: [translator]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: translator
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: translator on webdesk_media_asset
+    input:
+      principals: [translator]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: translator
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: seo_reviewer on webdesk_content_item
+    input:
+      principals: [seo_reviewer]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: seo_reviewer
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, update: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+      - principal: seo_reviewer
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW}
+  - name: seo_reviewer on webdesk_collection
+    input:
+      principals: [seo_reviewer]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: seo_reviewer
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: seo_reviewer on webdesk_media_asset
+    input:
+      principals: [seo_reviewer]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: seo_reviewer
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: editor on webdesk_content_item
+    input:
+      principals: [editor]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: editor
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: editor
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+  - name: editor on webdesk_collection
+    input:
+      principals: [editor]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: editor
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: editor on webdesk_media_asset
+    input:
+      principals: [editor]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: editor
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: contributor_editor on webdesk_content_item
+    input:
+      principals: [contributor_editor]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: contributor_editor
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+      - principal: contributor_editor
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW}
+  - name: contributor_editor on webdesk_collection
+    input:
+      principals: [contributor_editor]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: contributor_editor
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: contributor_editor on webdesk_media_asset
+    input:
+      principals: [contributor_editor]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: contributor_editor
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW}
+  - name: writer_global on webdesk_content_item
+    input:
+      principals: [writer_global]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:   # DENY on every resource, every action
+      - principal: writer_global
+        resource: w_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_changes
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_review
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_review_by_editor
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_review_by_pub
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: other_author_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_other_collection
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_other_locale
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: t_draft_id
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: twin_of_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: twin_of_live
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: twin_of_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_other_site
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_site_unfed
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: w_other_tenant
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: writer_global on webdesk_collection
+    input:
+      principals: [writer_global]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:   # DENY on every resource, every action
+      - principal: writer_global
+        resource: coll_site1
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_global
+        resource: coll_site2
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_global
+        resource: coll_site_unfed
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+  - name: writer_global on webdesk_media_asset
+    input:
+      principals: [writer_global]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:   # DENY on every resource, every action
+      - principal: writer_global
+        resource: media_site1
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_global
+        resource: media_site2
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: writer_other_tenant on webdesk_content_item
+    input:
+      principals: [writer_other_tenant]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: writer_other_tenant
+        resource: w_other_tenant
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW}
+  - name: writer_other_tenant on webdesk_collection
+    input:
+      principals: [writer_other_tenant]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:   # DENY on every resource, every action
+      - principal: writer_other_tenant
+        resource: coll_site1
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_other_tenant
+        resource: coll_site2
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_other_tenant
+        resource: coll_site_unfed
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+  - name: writer_other_tenant on webdesk_media_asset
+    input:
+      principals: [writer_other_tenant]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:   # DENY on every resource, every action
+      - principal: writer_other_tenant
+        resource: media_site1
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_other_tenant
+        resource: media_site2
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: writer_no_scope_rows on webdesk_content_item
+    input:
+      principals: [writer_no_scope_rows]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:   # DENY on every resource, every action
+      - principal: writer_no_scope_rows
+        resource: w_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_changes
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_review
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_review_by_editor
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_review_by_pub
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: other_author_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_other_collection
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_other_locale
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: t_draft_id
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: twin_of_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: twin_of_live
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: twin_of_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_other_site
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_site_unfed
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: w_other_tenant
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: writer_no_scope_rows on webdesk_collection
+    input:
+      principals: [writer_no_scope_rows]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:   # DENY on every resource, every action
+      - principal: writer_no_scope_rows
+        resource: coll_site1
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: coll_site2
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: coll_site_unfed
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+  - name: writer_no_scope_rows on webdesk_media_asset
+    input:
+      principals: [writer_no_scope_rows]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:   # DENY on every resource, every action
+      - principal: writer_no_scope_rows
+        resource: media_site1
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_no_scope_rows
+        resource: media_site2
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: writer_low_assurance on webdesk_content_item
+    input:
+      principals: [writer_low_assurance]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:   # DENY on every resource, every action
+      - principal: writer_low_assurance
+        resource: w_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_changes
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_review
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_review_by_editor
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_review_by_pub
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: other_author_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_other_collection
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_other_locale
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: t_draft_id
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: twin_of_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: twin_of_live
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: twin_of_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_other_site
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_site_unfed
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: w_other_tenant
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: writer_low_assurance on webdesk_collection
+    input:
+      principals: [writer_low_assurance]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:   # DENY on every resource, every action
+      - principal: writer_low_assurance
+        resource: coll_site1
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: coll_site2
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: coll_site_unfed
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+  - name: writer_low_assurance on webdesk_media_asset
+    input:
+      principals: [writer_low_assurance]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:   # DENY on every resource, every action
+      - principal: writer_low_assurance
+        resource: media_site1
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: writer_low_assurance
+        resource: media_site2
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: webdev_staff on webdesk_content_item
+    input:
+      principals: [webdev_staff]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: webdev_staff
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW}
+  - name: webdev_staff on webdesk_collection
+    input:
+      principals: [webdev_staff]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: webdev_staff
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW}
+  - name: webdev_staff on webdesk_media_asset
+    input:
+      principals: [webdev_staff]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: webdev_staff
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW}
+      - principal: webdev_staff
+        resource: media_site2
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW}
+  - name: webdev_manager on webdesk_content_item
+    input:
+      principals: [webdev_manager]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: webdev_manager
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: webdev_manager on webdesk_collection
+    input:
+      principals: [webdev_manager]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: webdev_manager
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+  - name: webdev_manager on webdesk_media_asset
+    input:
+      principals: [webdev_manager]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: webdev_manager
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: webdev_manager
+        resource: media_site2
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: company_admin on webdesk_content_item
+    input:
+      principals: [company_admin]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: company_admin
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: company_admin on webdesk_collection
+    input:
+      principals: [company_admin]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: company_admin
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+  - name: company_admin on webdesk_media_asset
+    input:
+      principals: [company_admin]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: company_admin
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: media_site2
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: manager on webdesk_content_item
+    input:
+      principals: [manager]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: manager
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+      - principal: manager
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW}
+  - name: manager on webdesk_collection
+    input:
+      principals: [manager]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: manager
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW}
+      - principal: manager
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW}
+      - principal: manager
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW}
+  - name: manager on webdesk_media_asset
+    input:
+      principals: [manager]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: manager
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW}
+      - principal: manager
+        resource: media_site2
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW}
+  - name: member on webdesk_content_item
+    input:
+      principals: [member]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:   # DENY on every resource, every action
+      - principal: member
+        resource: w_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_changes
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_review
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_review_by_editor
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_review_by_pub
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: other_author_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_other_collection
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_other_locale
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: t_draft_id
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: twin_of_approved
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: twin_of_live
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: twin_of_draft
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_other_site
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_site_unfed
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: w_other_tenant
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, request_publish: EFFECT_DENY, submit: EFFECT_DENY, comment: EFFECT_DENY, request_changes: EFFECT_DENY, seo_signoff: EFFECT_DENY, approve: EFFECT_DENY, assign: EFFECT_DENY, publish: EFFECT_DENY, schedule: EFFECT_DENY, unpublish: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: member on webdesk_collection
+    input:
+      principals: [member]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:   # DENY on every resource, every action
+      - principal: member
+        resource: coll_site1
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: member
+        resource: coll_site2
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+      - principal: member
+        resource: coll_site_unfed
+        actions: {read: EFFECT_DENY, apply_schema: EFFECT_DENY, manage_editorial: EFFECT_DENY}
+  - name: member on webdesk_media_asset
+    input:
+      principals: [member]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:   # DENY on every resource, every action
+      - principal: member
+        resource: media_site1
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+      - principal: member
+        resource: media_site2
+        actions: {read: EFFECT_DENY, upload: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY}
+  - name: platform_admin on webdesk_content_item
+    input:
+      principals: [platform_admin]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: platform_admin
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, approve: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: w_other_tenant
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, seo_signoff: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: platform_admin on webdesk_collection
+    input:
+      principals: [platform_admin]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: platform_admin
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+  - name: platform_admin on webdesk_media_asset
+    input:
+      principals: [platform_admin]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: platform_admin
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: media_site2
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: bot_publisher on webdesk_content_item
+    input:
+      principals: [bot_publisher]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: bot_publisher
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: bot_publisher on webdesk_collection
+    input:
+      principals: [bot_publisher]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: bot_publisher
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+  - name: bot_publisher on webdesk_media_asset
+    input:
+      principals: [bot_publisher]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: bot_publisher
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: bot_publisher
+        resource: media_site2
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: automation_admin on webdesk_content_item
+    input:
+      principals: [automation_admin]
+      resources: [w_draft, w_changes, w_review, w_review_by_editor, w_review_by_pub, w_review_by_cadmin, w_review_by_padmin, w_review_creator_unknown, w_approved, other_author_draft, w_other_collection, w_other_locale, t_draft_id, twin_of_approved, twin_of_live, twin_of_draft, w_other_site, w_site_unfed, w_other_tenant]
+      actions: [read, create, update, request_publish, submit, comment, request_changes, seo_signoff, approve, assign, publish, schedule, unpublish, delete]
+    expected:
+      - principal: automation_admin
+        resource: w_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_changes
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_review
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_review_by_editor
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_review_by_pub
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_review_by_cadmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_review_by_padmin
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_review_creator_unknown
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: other_author_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_other_collection
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_other_locale
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: t_draft_id
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: twin_of_approved
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: twin_of_live
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: twin_of_draft
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_other_site
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: w_site_unfed
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, request_publish: EFFECT_ALLOW, submit: EFFECT_ALLOW, comment: EFFECT_ALLOW, request_changes: EFFECT_ALLOW, assign: EFFECT_ALLOW, unpublish: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+  - name: automation_admin on webdesk_collection
+    input:
+      principals: [automation_admin]
+      resources: [coll_site1, coll_site2, coll_site_unfed]
+      actions: [read, apply_schema, manage_editorial]
+    expected:
+      - principal: automation_admin
+        resource: coll_site1
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: coll_site2
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: coll_site_unfed
+        actions: {read: EFFECT_ALLOW, apply_schema: EFFECT_ALLOW, manage_editorial: EFFECT_ALLOW}
+  - name: automation_admin on webdesk_media_asset
+    input:
+      principals: [automation_admin]
+      resources: [media_site1, media_site2]
+      actions: [read, upload, update, delete]
+    expected:
+      - principal: automation_admin
+        resource: media_site1
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}
+      - principal: automation_admin
+        resource: media_site2
+        actions: {read: EFFECT_ALLOW, upload: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW}

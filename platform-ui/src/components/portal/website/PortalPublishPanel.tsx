@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { portalGetItemHeadAction, portalPublishItemAction } from "@/lib/portalWebsiteActions";
-import { PUBLISHED_COPY, requesterLabel, type PortalPublishRequest } from "@/lib/portalWebsiteModel";
+import { publishOutcomeCopy, requesterLabel, type PortalBuild, type PortalPublishRequest } from "@/lib/portalWebsiteModel";
 import { clientRefusal } from "@/lib/webdeskClientCopy";
 import { describeReasonToken, hasPendingChanges, isLive, publishStateLabel, type ItemRef } from "@/lib/webdeskContentModel";
 import type { SiteScope } from "@/lib/webdeskContentActions";
@@ -21,11 +21,11 @@ import "@/components/webdesk/content/content.css";
 //     the same rule the staff bar follows). If the read cannot confirm it, the panel says so and says what to do.
 //   • A write whose outcome is unknown (502 webdesk_ambiguous) is neither "done" nor "failed": the editor is told (`onUnconfirmed`) and
 //     blocks writes until a re-read.
-//   • No staging rebuild state is shown: §16j returns none to a client (WSK-D65 rebuilds staging on its own). The words say only
-//     what is true: it is published, and the site updates in a few minutes.
+//   • The staging rebuild state the answer carries (WSK-D65) is said in words (`publishOutcomeCopy`): "live on your site" ONLY for
+//     `state === "live"`. The panel's own second line says the VERSION is published, never that the site is live.
 //   • Nothing here can unpublish, delete or schedule: the client BFF has no route for any of them.
 type Outcome =
-  | { kind: "published"; version: number }
+  | { kind: "published"; version: number; build: PortalBuild | null }
   | { kind: "unconfirmed-live"; version: number }
   | { kind: "failed"; reason: string }
   | { kind: "refused"; tone: "bad" | "warn" | "info"; text: string };
@@ -100,7 +100,7 @@ export function PortalPublishPanel({
     setBusy(false);
     if (head.kind === "ok") {
       onItemChanged(head.data.item);
-      setOutcome(head.data.item.publishedVersion === version ? { kind: "published", version } : { kind: "unconfirmed-live", version });
+      setOutcome(head.data.item.publishedVersion === version ? { kind: "published", version, build: r.data.build } : { kind: "unconfirmed-live", version });
     } else {
       setOutcome({ kind: "unconfirmed-live", version });
     }
@@ -129,11 +129,14 @@ export function PortalPublishPanel({
       )}
 
       <div ref={flowRef} tabIndex={-1} aria-live="polite" data-testid="publish-flow">
-        {outcome?.kind === "published" && (
-          <div className="wc-banner wc-banner--ok" data-testid="published">
-            <span className="wc-banner__body"><strong>{PUBLISHED_COPY}</strong><br />Version {outcome.version} is now live.</span>
-          </div>
-        )}
+        {outcome?.kind === "published" && (() => {
+          const o = publishOutcomeCopy(outcome.build);
+          return (
+            <div className={`wc-banner wc-banner--${o.tone}`} data-testid="published" data-build={outcome.build?.state ?? "none"}>
+              <span className="wc-banner__body"><strong data-testid="published-copy">{o.text}</strong><br />Version {outcome.version} is published.</span>
+            </div>
+          );
+        })()}
         {outcome?.kind === "unconfirmed-live" && (
           <div className="wc-banner wc-banner--warn" data-testid="published-unconfirmed">
             <span className="wc-banner__body"><strong>The publish went through, but we can&apos;t yet see v{outcome.version} as live.</strong> It may still be on its way. Reload this page in a minute to check.</span>

@@ -4,7 +4,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { describeFailure, getItem } from "@/lib/webdeskContent";
 import { listDepartments } from "@/lib/departments";
 import { deptSlug } from "@/lib/deptToolkits";
-import { parseWebdeskPublishArgs, publishStateLabel, type Lint, type WebdeskPublishArgs } from "@/lib/webdeskContentModel";
+import { parseWebdeskPublishArgs, publishStateLabel, reviewBlocks, type ItemEditorial, type Lint, type WebdeskPublishArgs } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
 import "./content.css";
 
@@ -17,6 +17,10 @@ import "./content.css";
 //   • every item is READ from WebDesk (at the REQUESTED version) rather than described from the
 //     arguments alone; a row that cannot be read says so;
 //   • the read is capped (a bulk import names hundreds of items); the summary says how many it read.
+//   • M5-W2c, the editorial review: on a collection where review is on, WebDesk publishes ONLY the approved version and
+//     refuses anything else (409 review-not-approved, and the approval then fails). Each row says whether the requested
+//     version is the approved one, and a banner says so before the approver decides. "Unknown" (WebDesk sent no review
+//     data) is shown as unknown, never as "not required".
 
 export const SUMMARY_READ_CAP = 25;
 
@@ -27,6 +31,8 @@ export interface SummaryRow {
   resolved: {
     collectionKey: string; slug: string; locale: string;
     publishedVersion: number | null; headVersion: number; publishState: string; lint: Lint;
+    /** M5-W2c: the item's review state; undefined = WebDesk sent none (unknown). */
+    editorial?: ItemEditorial;
   } | null;
   /** Why `resolved` is null. */
   problem: string | null;
@@ -54,6 +60,7 @@ export async function WebdeskPublishSummary({
           collectionKey: r.data.item.collectionKey, slug: r.data.item.slug, locale: r.data.item.locale,
           publishedVersion: r.data.item.publishedVersion, headVersion: r.data.item.headVersion, publishState: r.data.item.publishState,
           lint: r.data.lint,
+          ...(r.data.editorial ? { editorial: r.data.editorial } : {}),
         },
       };
     })),
@@ -105,6 +112,9 @@ export function WebdeskPublishSummaryView({
   const total = args.items.length;
   const lint = sumLint(rows);
   const markerLine = Object.entries(lint.markers).filter(([, n]) => n > 0).map(([k, n]) => `${n} × [${k}: …]`).join(" · ");
+  // A takedown-only schedule puts nothing live, so the publish gate does not apply to it.
+  const gated = !isSchedule || !!args.publishAt;
+  const unapproved = gated ? rows.filter((r) => r.resolved && reviewBlocks(r.resolved.editorial, r.version) === true).length : 0;
   const siteBase = deptId ? `/departments/${deptId}/website/content/${encodeURIComponent(args.tenantSlug)}/${encodeURIComponent(args.siteId)}` : null;
 
   return (
@@ -140,12 +150,21 @@ export function WebdeskPublishSummaryView({
       </Card>
 
       <Card title="Items">
+        {unapproved > 0 && (
+          <div className="wc-banner wc-banner--warn" role="note" data-testid="summary-review-blocked">
+            <span className="wc-banner__body">
+              <strong>{unapproved === 1 ? "1 item is" : `${unapproved} items are`} not the approved version.</strong> Editorial review is on for{" "}
+              {unapproved === 1 ? "its collection" : "their collections"}, so WebDesk will refuse this {isSchedule ? "schedule" : "publish"} and the request
+              will fail. Reject it, and ask for the approved version to be requested (or for this version to be reviewed and approved first).
+            </span>
+          </div>
+        )}
         {rows.length === 0 ? (
           <EmptyNote>The request names no items.</EmptyNote>
         ) : (
           <div className="wc-scroll">
             <table className="wc-table" data-testid="summary-items">
-              <thead><tr><th scope="col">Item</th><th scope="col">Requested</th><th scope="col">Live now</th><th scope="col">Hash</th><th scope="col">Review</th></tr></thead>
+              <thead><tr><th scope="col">Item</th><th scope="col">Requested</th><th scope="col">Live now</th><th scope="col">Hash</th><th scope="col">Editorial review</th><th scope="col">Review</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.itemId}>
@@ -159,6 +178,7 @@ export function WebdeskPublishSummaryView({
                     <td>v{r.version}</td>
                     <td>{r.resolved ? (r.resolved.publishedVersion !== null ? `v${r.resolved.publishedVersion}` : "not live") : "—"}{r.resolved ? <> <span className="wc-muted">({publishStateLabel(r.resolved.publishState)})</span></> : null}</td>
                     <td className="wc-mono">{r.contentHash ? r.contentHash.slice(0, 10) : "—"}</td>
+                    <td data-testid="summary-review-cell"><ReviewCell row={r} gated={gated} /></td>
                     <td>
                       {r.resolved && siteBase ? (
                         <span className="wc-publish__actions">
@@ -179,6 +199,21 @@ export function WebdeskPublishSummaryView({
         {!siteBase && rows.length > 0 && <p className="wc-publish__sub">Open links need the Web Dev department, which could not be found for this company.</p>}
       </Card>
     </div>
+  );
+}
+
+/** M5-W2c: is the requested version the approved one? Plain words, and "unknown" when WebDesk said nothing. */
+function ReviewCell({ row, gated }: { row: SummaryRow; gated: boolean }) {
+  if (!row.resolved) return <span className="wc-muted">—</span>;
+  const ed = row.resolved.editorial;
+  if (!ed) return <span className="wc-muted">unknown</span>;
+  if (!ed.reviewRequired) return <span className="wc-muted">not required</span>;
+  if (ed.approvedVersion === row.version) return <span>approved (v{row.version})</span>;
+  if (!gated) return <span className="wc-muted">not checked (takedown)</span>;
+  return (
+    <span className="lux-field__error">
+      not approved{ed.approvedVersion !== null ? ` (v${ed.approvedVersion} is)` : " (no version is)"}
+    </span>
   );
 }
 

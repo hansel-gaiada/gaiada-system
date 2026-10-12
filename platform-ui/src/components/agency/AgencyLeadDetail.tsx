@@ -8,21 +8,40 @@ import {
   DELEGATION_SOURCE_LABEL,
   QUESTIONNAIRE_SECTIONS,
   SCHEMA_VERSION,
+  PIPELINE_REFUSAL_TEXT,
   STATUS_LABEL,
+  allowedMoves,
   buildInviteLink,
+  checkDealInput,
+  dealInputValue,
   formatAnswerValue,
+  formatDeal,
+  historyNewestFirst,
+  isClosedStage,
+  pipelineRefusalMessage,
+  precisionHint,
   sectionEntries,
+  sourceLabel,
+  stageLabel,
   type DelegationInput,
   type LeadDetail,
   type LeadStatus,
   type LeadSubmission,
+  type PipelineCurrency,
+  type PipelineReference,
+  type PipelineStage,
+  type StageEvent,
 } from "@/lib/agencyLeads";
 import type { ReadResult } from "@/lib/readResult";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
-import type { ConvertResult, InviteResult, RevokeResult, TriageResult } from "@/app/(app)/agency/leads/actions";
+import type {
+  ConvertResult, InviteResult, MoveStageResult, RevokeResult, SetDealResult, TriageResult,
+} from "@/app/(app)/agency/leads/actions";
 import "./agencyLeads.css";
 
-type Actions = {
+export type Actions = {
+  moveStage: (prev: MoveStageResult | null, formData: FormData) => Promise<MoveStageResult>;
+  setDeal: (prev: SetDealResult | null, formData: FormData) => Promise<SetDealResult>;
   invite: (prev: InviteResult | null, formData: FormData) => Promise<InviteResult>;
   revoke: (prev: RevokeResult | null, formData: FormData) => Promise<RevokeResult>;
   open: (prev: TriageResult | null, formData: FormData) => Promise<TriageResult>;
@@ -33,6 +52,9 @@ type Actions = {
 
 const CONVERT_ELIGIBLE: LeadStatus[] = ["submitted", "in_review", "nurturing"];
 const INVITE_ELIGIBLE: LeadStatus[] = ["new", "invited", "submitted", "in_review", "nurturing"];
+/** Every status a lead can still be declined from (AD-5 amendment, M5-P1): a web lead is often lost before
+ *  the discovery form is ever sent. */
+const DECLINE_ELIGIBLE: LeadStatus[] = INVITE_ELIGIBLE;
 
 export function AgencyLeadDetail({
   lead,
@@ -41,6 +63,9 @@ export function AgencyLeadDetail({
   canWrite,
   canTriage,
   canConvert,
+  reference,
+  history,
+  recentCurrency = null,
   actions,
 }: {
   lead: LeadDetail;
@@ -49,22 +74,49 @@ export function AgencyLeadDetail({
   canWrite: boolean;
   canTriage: boolean;
   canConvert: boolean;
+  /** M5-P1: the stage list and the active currencies, and this lead's stage history. Each carries its own
+   *  refusal, rendered inline by the Pipeline card. */
+  reference: ReadResult<PipelineReference>;
+  history: ReadResult<StageEvent[]>;
+  /** The currency most recently used on this tenant's leads (pre-select only; there is no default). */
+  recentCurrency?: string | null;
   actions: Actions;
 }) {
+  const stages = reference.kind === "ok" ? reference.data.stages : null;
+  const currencies = reference.kind === "ok" ? reference.data.currencies : null;
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <LeadSummaryCard lead={lead} />
+      <LeadSummaryCard lead={lead} stages={stages} />
+
+      <PipelineCard
+        lead={lead}
+        reference={reference}
+        history={history}
+        recentCurrency={recentCurrency}
+        canWrite={canWrite}
+        canTriage={canTriage}
+        moveAction={actions.moveStage}
+        dealAction={actions.setDeal}
+      />
 
       {canWrite && INVITE_ELIGIBLE.includes(lead.status) && (
         <InviteCard leadId={lead.id} status={lead.status} action={actions.invite} revokeAction={actions.revoke} />
       )}
 
       {canTriage && (lead.status === "submitted" || lead.status === "in_review") && (
-        <TriageCard leadId={lead.id} status={lead.status} openAction={actions.open} declineAction={actions.decline} nurtureAction={actions.nurture} />
+        <TriageCard leadId={lead.id} status={lead.status} openAction={actions.open} nurtureAction={actions.nurture} />
       )}
 
+      {canTriage && DECLINE_ELIGIBLE.includes(lead.status) && <DeclineCard leadId={lead.id} action={actions.decline} />}
+
       {canConvert && CONVERT_ELIGIBLE.includes(lead.status) && (
-        <ConvertCard leadId={lead.id} members={members} action={actions.convert} />
+        <ConvertCard
+          leadId={lead.id}
+          members={members}
+          action={actions.convert}
+          currencies={canWrite ? currencies : null}
+          recentCurrency={recentCurrency}
+        />
       )}
       {lead.status === "converted" && (
         <Card title="Converted">
@@ -72,6 +124,9 @@ export function AgencyLeadDetail({
             This lead is already converted.{" "}
             {lead.pipelineRunId && <Link href={`/pipeline/${lead.pipelineRunId}`}>Open the delivery run →</Link>}
           </p>
+          {lead.dealValue !== null && lead.dealCurrency !== null && (
+            <p className="adl-note">Won at {formatDeal(lead.dealValue, lead.dealCurrency, currencies)}.</p>
+          )}
         </Card>
       )}
 
@@ -81,18 +136,23 @@ export function AgencyLeadDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────── summary
-function LeadSummaryCard({ lead }: { lead: LeadDetail }) {
+function LeadSummaryCard({ lead, stages }: { lead: LeadDetail; stages: PipelineStage[] | null }) {
   return (
     <Card
       title={lead.orgName}
-      headerRight={<StatusBadge label={STATUS_LABEL[lead.status] ?? lead.status} />}
+      headerRight={
+        <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+          <StatusBadge label={STATUS_LABEL[lead.status] ?? lead.status} />
+          <StatusBadge label={stageLabel(stages, lead.stage)} />
+        </span>
+      }
     >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
         <Meta label="Contact" value={lead.contactName ?? "—"} />
         <Meta label="Email" value={lead.contactEmail ?? "—"} />
         <Meta label="Phone / WhatsApp" value={lead.contactPhone ?? "—"} />
         <Meta label="Owner" value={lead.ownerName ?? "Unassigned"} />
-        <Meta label="Source" value={lead.source} />
+        <Meta label="Source" value={sourceLabel(lead.source)} />
         <Meta label="Created" value={formatDateTime(lead.createdAt)} />
         <Meta label="Last updated" value={formatDateTime(lead.updatedAt)} />
         {lead.triagedAt && <Meta label="Triaged" value={`${formatDateTime(lead.triagedAt)} by ${lead.triagedByName ?? "—"}`} />}
@@ -190,20 +250,231 @@ function InviteCard({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────── pipeline (M5-P1)
+/** The Pipeline card (design §6). It is rendered for every lead and never unmounts on a server action, so
+ *  what it shows after a move or a value edit is the re-rendered server state (the stage, the saved value,
+ *  the new history row), not a message held in this component. Only a refusal, or the "already at that
+ *  stage" no-op, is component state. Won and Lost are not offered here: Convert and Decline own them. */
+export function PipelineCard({
+  lead, reference, history, recentCurrency, canWrite, canTriage, moveAction, dealAction,
+}: {
+  lead: LeadDetail;
+  reference: ReadResult<PipelineReference>;
+  history: ReadResult<StageEvent[]>;
+  recentCurrency: string | null;
+  canWrite: boolean;
+  canTriage: boolean;
+  moveAction: Actions["moveStage"];
+  dealAction: Actions["setDeal"];
+}) {
+  const ref = reference.kind === "ok" ? reference.data : null;
+  const stages = ref?.stages ?? null;
+  const closed = isClosedStage(stages, lead.stage);
+  const moves = ref ? allowedMoves(ref.stages, lead.stage, lead.status) : [];
+  const openStages = ref ? ref.stages.filter((s) => s.kind === "open").sort((a, b) => a.position - b.position) : [];
+  const [moveState, doMove, movePending] = useActionState<MoveStageResult | null, FormData>(moveAction, null);
+
+  return (
+    <Card title="Pipeline" headerRight={<StatusBadge label={stageLabel(stages, lead.stage)} />}>
+      <div style={{ display: "grid", gap: 14 }}>
+        {reference.kind === "forbidden" && <ReadRefusal subject="the pipeline stages and currencies" kind="forbidden" inline />}
+        {reference.kind === "unavailable" && <ReadRefusal subject="The pipeline stages and currencies" kind="unavailable" reason={reference.reason} inline />}
+
+        {ref && (
+          <ol className="adl-stepper" aria-label="Pipeline stage">
+            {openStages.map((s) => (
+              <li key={s.key} className={`adl-step${s.key === lead.stage ? " adl-step--current" : ""}`} aria-current={s.key === lead.stage ? "step" : undefined}>
+                {s.label}
+              </li>
+            ))}
+            {closed && <li className="adl-step adl-step--current" aria-current="step">{stageLabel(stages, lead.stage)}</li>}
+          </ol>
+        )}
+        <p className="adl-note">
+          In this stage since {formatDateTime(lead.stageEnteredAt)}. Won happens only through <strong>Convert</strong>, and Lost only through <strong>Decline</strong>.
+        </p>
+
+        {canTriage && moves.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span className="adl-note">Move to</span>
+            {moves.map((s) => (
+              <form key={s.key} action={doMove}>
+                <input type="hidden" name="leadId" value={lead.id} />
+                <input type="hidden" name="stage" value={s.key} />
+                <Button type="submit" variant="ghost" disabled={movePending}>{s.label}</Button>
+              </form>
+            ))}
+          </div>
+        )}
+        {moveState && !moveState.ok && (
+          <p className="adl-error" role="alert">{pipelineRefusalMessage(moveState.reason, moveState.httpStatus, moveState.error ?? "Could not move the lead.")}</p>
+        )}
+        {moveState?.ok && moveState.changed === false && (
+          <p className="adl-note" role="status">Already at {stageLabel(stages, moveState.stage ?? lead.stage)}. Nothing changed.</p>
+        )}
+
+        <DealValueForm
+          key={`${lead.dealValue ?? ""}|${lead.dealCurrency ?? ""}`}
+          lead={lead}
+          currencies={ref?.currencies ?? null}
+          recentCurrency={recentCurrency}
+          canWrite={canWrite}
+          action={dealAction}
+        />
+
+        <StageHistory result={history} stages={stages} currencies={ref?.currencies ?? null} />
+        {/* Slot for P2: "Ad platform uploads" (conversion-upload status) renders here. */}
+      </div>
+    </Card>
+  );
+}
+
+function DealValueForm({
+  lead, currencies, recentCurrency, canWrite, action,
+}: {
+  lead: LeadDetail;
+  currencies: PipelineCurrency[] | null;
+  recentCurrency: string | null;
+  canWrite: boolean;
+  action: Actions["setDeal"];
+}) {
+  const [state, doSet, pending] = useActionState<SetDealResult | null, FormData>(action, null);
+  const [value, setValue] = useState(dealInputValue(lead.dealValue));
+  const [currency, setCurrency] = useState(lead.dealCurrency ?? recentCurrency ?? "");
+  const picked = currencies?.find((c) => c.code === currency) ?? null;
+  const typed = value.trim();
+  const localProblem = typed ? checkDealInput(typed, picked ? picked.minorUnit : null) : null;
+  const hasValue = lead.dealValue !== null && lead.dealCurrency !== null;
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div className="adl-note">
+        <strong>Deal value:</strong> {hasValue ? formatDeal(lead.dealValue, lead.dealCurrency, currencies) : "not set"}
+      </div>
+      {canWrite && currencies && (
+        <>
+          <form action={doSet} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+            <input type="hidden" name="leadId" value={lead.id} />
+            <label className="lux-field" style={{ minWidth: 100 }}>
+              <span className="lux-field__label">Currency</span>
+              <select name="currency" className="lux-field__control" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                <option value="">Choose…</option>
+                {currencies.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
+                ))}
+              </select>
+            </label>
+            <label className="lux-field" style={{ minWidth: 160 }}>
+              <span className="lux-field__label">Value</span>
+              <input
+                name="value"
+                className="lux-field__control"
+                inputMode="decimal"
+                autoComplete="off"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                aria-invalid={localProblem ? true : undefined}
+              />
+            </label>
+            <Button type="submit" size="md" disabled={pending || !typed || !currency || localProblem !== null}>
+              {pending ? "Saving…" : hasValue ? "Update value" : "Set value"}
+            </Button>
+          </form>
+          <p className="adl-note">{precisionHint(picked)}</p>
+          {localProblem && <p className="adl-error" role="alert">{PIPELINE_REFUSAL_TEXT[localProblem]}</p>}
+          {hasValue && (
+            <form action={doSet}>
+              <input type="hidden" name="leadId" value={lead.id} />
+              <input type="hidden" name="intent" value="clear" />
+              <Button type="submit" variant="ghost" disabled={pending}>Clear value</Button>
+            </form>
+          )}
+        </>
+      )}
+      {state && !state.ok && (
+        <p className="adl-error" role="alert">{pipelineRefusalMessage(state.reason, state.httpStatus, state.error ?? "Could not save the value.")}</p>
+      )}
+    </div>
+  );
+}
+
+function StageHistory({
+  result, stages, currencies,
+}: {
+  result: ReadResult<StageEvent[]>;
+  stages: PipelineStage[] | null;
+  currencies: PipelineCurrency[] | null;
+}) {
+  if (result.kind === "forbidden") return <ReadRefusal subject="this lead's stage history" kind="forbidden" inline />;
+  if (result.kind === "unavailable") return <ReadRefusal subject="Stage history" kind="unavailable" reason={result.reason} inline />;
+  const events = historyNewestFirst(result.data);
+  return (
+    <div>
+      <p style={{ margin: "0 0 4px", font: "500 12px var(--font-body)", color: "var(--ink-muted)" }}>Stage history (newest first)</p>
+      {events.length === 0 ? (
+        <p className="adl-note">No stage changes yet. History starts at the first move.</p>
+      ) : (
+        <ul style={{ margin: 0, padding: 0, listStyle: "none" }} aria-label="Stage history">
+          {events.map((e) => (
+            <li key={e.id} className="adl-delegation-row">
+              <span>
+                {stageLabel(stages, e.fromStage)} → {stageLabel(stages, e.toStage)}
+                {e.dealValue !== null && e.dealCurrency !== null && <span className="adl-subtle"> · {formatDeal(e.dealValue, e.dealCurrency, currencies)}</span>}
+              </span>
+              <span className="adl-subtle">
+                {e.actorName ?? "System"}
+                {e.viaAgent ? ` via agent ${e.viaAgent}` : ""}
+                {" · "}
+                {formatDateTime(e.occurredAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────── decline (every open status)
+function DeclineCard({ leadId, action }: { leadId: string; action: Actions["decline"] }) {
+  const [state, doDecline, pending] = useActionState<TriageResult | null, FormData>(action, null);
+  const [reason, setReason] = useState("");
+  return (
+    <Card title="Decline">
+      <form action={doDecline} style={{ display: "grid", gap: 8 }}>
+        <input type="hidden" name="leadId" value={leadId} />
+        <p className="adl-note">Declining marks the lead Lost and revokes any unused invite link. It can be done from any open status.</p>
+        <label className="lux-field">
+          <span className="lux-field__label lux-field__label--req">Decline reason</span>
+          <textarea
+            name="reason"
+            required
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="lux-field__control lux-field__control--textarea"
+            placeholder="Why this lead is being declined."
+          />
+        </label>
+        <div>
+          <Button type="submit" variant="ghost" disabled={pending || !reason.trim()}>{pending ? "Declining…" : "Decline"}</Button>
+        </div>
+      </form>
+      {state && !state.ok && <p className="adl-error" role="alert">{pipelineRefusalMessage(state.reason, state.httpStatus, state.error ?? "Could not decline the lead.")}</p>}
+    </Card>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────── triage
 function TriageCard({
-  leadId, status, openAction, declineAction, nurtureAction,
+  leadId, status, openAction, nurtureAction,
 }: {
   leadId: string;
   status: LeadStatus;
   openAction: Actions["open"];
-  declineAction: Actions["decline"];
   nurtureAction: Actions["nurture"];
 }) {
   const [openState, doOpen, openPending] = useActionState<TriageResult | null, FormData>(openAction, null);
-  const [declineState, doDecline, declinePending] = useActionState<TriageResult | null, FormData>(declineAction, null);
   const [nurtureState, doNurture, nurturePending] = useActionState<TriageResult | null, FormData>(nurtureAction, null);
-  const [reason, setReason] = useState("");
 
   return (
     <Card title="Triage">
@@ -220,39 +491,13 @@ function TriageCard({
       )}
 
       {status === "in_review" && (
-        <div style={{ display: "grid", gap: 14 }}>
-          <form action={doNurture}>
-            <input type="hidden" name="leadId" value={leadId} />
-            <Button type="submit" size="md" disabled={nurturePending}>{nurturePending ? "…" : "Nurture (not ready — revisit later)"}</Button>
-          </form>
-
-          <form
-            action={doDecline}
-            style={{ display: "grid", gap: 8, padding: "10px 12px", border: "1px solid var(--line)", borderRadius: "var(--radius-md)" }}
-          >
-            <input type="hidden" name="leadId" value={leadId} />
-            <label className="lux-field">
-              <span className="lux-field__label lux-field__label--req">Decline reason</span>
-              <textarea
-                name="reason"
-                required
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                className="lux-field__control lux-field__control--textarea"
-                placeholder="Why this lead is being declined — the requester sees this."
-              />
-            </label>
-            <div>
-              <Button type="submit" variant="ghost" disabled={declinePending || !reason.trim()}>
-                {declinePending ? "Declining…" : "Decline"}
-              </Button>
-            </div>
-          </form>
-        </div>
+        <form action={doNurture}>
+          <input type="hidden" name="leadId" value={leadId} />
+          <Button type="submit" size="md" disabled={nurturePending}>{nurturePending ? "…" : "Nurture (not ready — revisit later)"}</Button>
+        </form>
       )}
 
       {openState && !openState.ok && <p className="adl-error">{openState.error}</p>}
-      {declineState && !declineState.ok && <p className="adl-error">{declineState.error}</p>}
       {nurtureState && !nurtureState.ok && <p className="adl-error">{nurtureState.error}</p>}
     </Card>
   );
@@ -260,14 +505,22 @@ function TriageCard({
 
 // ─────────────────────────────────────────────────────────────────── convert
 function ConvertCard({
-  leadId, members, action,
+  leadId, members, action, currencies, recentCurrency,
 }: {
   leadId: string;
   members: { id: string; name: string }[];
   action: Actions["convert"];
+  /** Non-null only when the viewer may set a value (`update`) and the reference loaded: the optional deal
+   *  input is then offered. A caller without `update` gets a 403 for the deal part, so it is not shown. */
+  currencies: PipelineCurrency[] | null;
+  recentCurrency: string | null;
 }) {
   const [state, doConvert, pending] = useActionState<ConvertResult | null, FormData>(action, null);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  const [dealValue, setDealValue] = useState("");
+  const [dealCurrency, setDealCurrency] = useState(recentCurrency ?? "");
+  const pickedCurrency = currencies?.find((c) => c.code === dealCurrency) ?? null;
+  const dealProblem = dealValue.trim() ? checkDealInput(dealValue, pickedCurrency ? pickedCurrency.minorUnit : null) : null;
 
   const delegationsPayload: DelegationInput[] = Object.entries(overrides)
     .filter(([, assigneeId]) => assigneeId)
@@ -303,6 +556,36 @@ function ConvertCard({
           ))}
         </div>
 
+        {currencies && (
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+              <label className="lux-field" style={{ minWidth: 100 }}>
+                <span className="lux-field__label">Deal currency</span>
+                <select className="lux-field__control" value={dealCurrency} onChange={(e) => setDealCurrency(e.target.value)} aria-label="Deal currency">
+                  <option value="">Choose…</option>
+                  {currencies.map((c) => (
+                    <option key={c.code} value={c.code}>{c.code} ({c.symbol})</option>
+                  ))}
+                </select>
+              </label>
+              <label className="lux-field" style={{ minWidth: 160 }}>
+                <span className="lux-field__label">Deal value (optional)</span>
+                <input
+                  className="lux-field__control"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={dealValue}
+                  onChange={(e) => setDealValue(e.target.value)}
+                  aria-label="Deal value"
+                  aria-invalid={dealProblem ? true : undefined}
+                />
+              </label>
+            </div>
+            <p className="adl-note">{precisionHint(pickedCurrency)} Leave the value empty to convert without one.</p>
+            {dealProblem && <p className="adl-error" role="alert">{PIPELINE_REFUSAL_TEXT[dealProblem]}</p>}
+          </div>
+        )}
+
         <form
           action={doConvert}
           onSubmit={(e) => {
@@ -313,12 +596,14 @@ function ConvertCard({
         >
           <input type="hidden" name="leadId" value={leadId} />
           <input type="hidden" name="delegations" value={JSON.stringify(delegationsPayload)} />
-          <Button type="submit" size="md" disabled={pending}>{pending ? "Converting…" : "Convert lead"}</Button>
+          {currencies && <input type="hidden" name="dealValue" value={dealValue.trim()} />}
+          {currencies && <input type="hidden" name="dealCurrency" value={dealCurrency} />}
+          <Button type="submit" size="md" disabled={pending || dealProblem !== null}>{pending ? "Converting…" : "Convert lead"}</Button>
         </form>
 
         {state && !state.ok && (
           <div>
-            <p className="adl-error">{state.error}</p>
+            <p className="adl-error" role="alert">{pipelineRefusalMessage(state.reason, state.httpStatus, state.error ?? "Could not convert the lead.")}</p>
             {state.existing && (
               <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--ink-muted)" }}>
                 {state.existing.runId && <>Open the existing <Link href={`/pipeline/${state.existing.runId}`}>delivery run →</Link></>}

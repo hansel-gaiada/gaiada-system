@@ -1,0 +1,56 @@
+# M5-A3b / WSK-D71 -- erp-edge: the ERP's own Traefik on `sumopod`, behind ONE TLS-passthrough rule in mimi's
+# Traefik. Status: PLANNED (artifacts written, nothing deployed). Runbook: infra/runbooks/erp-edge-sumopod.md
+#
+#   visitor -> mimi-tls-le :443 --(TCP passthrough + PROXY v2)--> 172.17.0.1:18443 -> [erp-edge Traefik]
+#                 -> 172.17.0.1:18480 (status page) | 172.17.0.1:18742 (Umami edge)
+#
+# * Published ONLY on docker0's 172.17.0.1 (Docker's DNAT runs before ufw; 0.0.0.0 would be public).
+# * Never joins mimi's network. Own pinned bridge so the source address the other hops see is stable.
+# * No Docker provider and no docker.sock: routes are files in ./dynamic (read-only, watched).
+# * Project name is pinned: container erp-edge-traefik-1, volume erp-edge_acme.
+#
+# Run:  cd infra/sumopod/erp-edge && cp .env.example .env (fill) && render traefik.yml (runbook step 3)
+#       && docker compose up -d
+name: erp-edge
+
+services:
+  traefik:
+    # PINNED: tag + digest (index digest, looked up 2026-10-11). Same major/minor as mimi's Traefik (v3.3).
+    image: traefik:v3.3.7@sha256:2cd5cc75530c8d07ae0587c743d23eb30cae2436d07017a5ff78498b1a43d09f
+    restart: unless-stopped
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+      # Certificates + ACME account. Named volume: survives recreate; lost = re-issue (rate limits apply).
+      - acme:/acme
+    ports:
+      # Never 0.0.0.0.
+      - "172.17.0.1:${ERP_EDGE_PORT:-18443}:8443"
+    networks:
+      - edge
+    cpus: 0.5
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  acme:
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${ERP_EDGE_SUBNET:-10.211.92.0/28}

@@ -184,6 +184,10 @@ const WEB_DEV: DeptToolkit = {
         { key: "content", label: "Content", path: "website/content", icon: "box", blurb: "Edit the content of the websites WebDesk serves: pages, globals and settings. Saved as drafts; publishing is requested and approved separately." },
         // WSK-43c — the site's media library: upload, describe (alt text per language, tags), find where an image is used, delete.
         { key: "media", label: "Media", path: "website/media", icon: "image", blurb: "The images and files WebDesk serves for a site: upload them, write their alt text, see where each is used. A media field in the content editor picks from here." },
+        // M5-A4 — the site's visitor analytics, read from Umami (a property bound to the site): visits, sources, section map, CTAs, form funnel, Web Vitals.
+        { key: "analytics", label: "Analytics", path: "website/analytics", icon: "pulse", blurb: "How visitors use the site: visits, where they came from (including AI search), which sections they reach, which buttons they press, how forms convert, and Core Web Vitals. Counts under 5 show as \"<5\"." },
+        // M5-L6 — the web leads WebDesk's forms produce for a site (agency_leads, source web), read-only: where each came from, its pipeline stage, marketing consent. Each row opens the existing lead page.
+        { key: "leads", label: "Leads", path: "website/leads", icon: "user", blurb: "The enquiries the website's forms have produced: which form, when, where the visitor came from (landing page, campaign, whether an ad click id was present), the pipeline stage, and whether they agreed to marketing. Open a row to work the lead." },
       ],
     },
     CONNECTIONS_GROUP,

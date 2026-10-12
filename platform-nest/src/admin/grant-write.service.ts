@@ -82,10 +82,15 @@
 // broke, the call would throw a TypeError and `global-only-role-scope.test.ts`'s 400-expectations
 // would go RED rather than quietly passing. Follow-up for the architect: give the map its own
 // module and repoint the scan's path pin, then this import straightens out.
-import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
 import type { PoolClient } from "pg";
+import { config } from "../config";
 import { newId } from "../db";
 import { assertRoleUiGrantable } from "../rbac/ui-grantable";
+import {
+  EDITORIAL_ROLE_DEDICATED_PATH, EditorialScopeError, isEditorialRole, normaliseEditorialScope,
+  type EditorialRole, type NormalisedEditorialScope,
+} from "../rbac/editorial-roles";
 import type { PermissionGrant } from "../rbac/principal";
 import { assertRoleScopeAllowed } from "./admin-identity.controller";
 
@@ -382,6 +387,18 @@ export async function assertGrantAllowed(c: PoolClient, spec: GrantSpec): Promis
         "website-editor endpoints (WSK-D60)",
     );
   }
+  if (isEditorialRole(roleName)) {
+    // M5-W1b (design §2.5): a writers' room grant is a role PLUS per-site scope rows. A generic surface can write
+    // only the role row, which would be inert (no scope rows => Cerbos matches nothing) and, worse, would read as a
+    // real grant in every list. So every generic origin (legacy admin, `ui`, the two-person appointment) is refused
+    // by name; `grantEditorialRole()` below is the one path. The DB trigger `user_roles_editorial_guard` and the
+    // scope-row guard are the layers behind this one.
+    throw new BadRequestException(
+      `${EDITORIAL_ROLE_DEDICATED_PATH}: ${roleName} can only be granted through the writers' room grant endpoints ` +
+        "(POST /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants), which write the " +
+        "role together with its site, collection and locale scope",
+    );
+  }
 
   // (1) scope validity — the EXISTING check, byte-unchanged, via the one shared helper both
   //     legacy writers already call. IAM-SEC-02/04/05's fix, untouched by this refactor.
@@ -557,6 +574,276 @@ export async function revokeClientWebsiteEditor(c: PoolClient, spec: ClientWebsi
     [CLIENT_WEBSITE_EDITOR_ROLE, spec.targetUserId, spec.clientId],
   );
   return rows[0]?.id ?? null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// M5-W1b — the writers' room grants: a `user_roles` row of one of the four editorial roles at `company` scope, PLUS
+// its scope rows in `user_role_editorial_scopes` (docs/plans/2026-10-11-m5-writers-room-design.md §2.2, §2.6).
+//
+// Like the client website editor above, a DEDICATED pair of functions in the choke point, so the writer guard keeps
+// finding every `user_roles` write in this one file and nothing about the grant is caller-choosable beyond what the
+// design allows: the role is one of FOUR literal names, the scope is THIS company, and the scope rows name one site
+// the caller proved is this company's.
+//
+// The caller MUST have passed Cerbos `webdesk_collection:manage_editorial` on {tenantId, module: webdev, siteId}
+// first. That decision is the CEILING (design §2.5): its holders (company_admin, owner, webdev_manager,
+// platform_admin) reach every editorial action by construction, so an editorial grant never meets the bundle-subset
+// ceiling (the four roles have no bundle at all). What is re-checked here is what Cerbos cannot see:
+//   * the site is this company's, and the requested collections and locales exist on it: the caller proves this
+//     from WebDesk (`resolveEditableSite` + `collection.list`) and hands the proven facts in as a
+//     `VerifiedEditorialSite`; this function refuses any requested key or locale outside them;
+//   * the target is an ACTIVE `employee` user with an ACTIVE membership of this company (read on the caller's
+//     `withTenants([tenantId])` connection, so another company's member is simply not found). Contributors
+//     (`users.kind = 'contributor'`, design §3, W1d) do not exist yet: every non-employee kind is refused, which is
+//     the fail-closed side of owner question O-4;
+//   * no self-grant (D-9's no-self-escalation, the same refusal as every other surface);
+//   * the grant row and its scope row are written in the caller's ONE transaction, together with the caller's
+//     audit row, so a grant without its scope (or without its audit) cannot be committed.
+// One grant row per (user, role, company) carries every site's scope row; a re-grant on the same site REPLACES that
+// site's scope (an upsert), and is a no-op (`changed: false`) when nothing differs. The grant's `expires_at` belongs
+// to the grant, so a request naming a different expiry for an existing, unexpired grant is a 409 rather than a
+// silent extension or cut of the OTHER sites' access.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** What the caller proved from WebDesk before opening the transaction. Produced ONLY by the writers' room BFF
+ *  (`modules/webdev/webdesk-editorial-grants.service.ts`) from `resolveEditableSite()` (the site is an active
+ *  site of an active tenant whose `company_ref` is this company) and `collection.list` on that site. */
+export interface VerifiedEditorialSite {
+  tenantSlug: string;
+  siteId: string;
+  /** Every collection key that exists on the site (WebDesk `collection.list`). */
+  collectionKeys: readonly string[];
+  /** The WebDesk tenant's declared locales (`tenant.list` → `locales`). */
+  locales: readonly string[];
+}
+
+export interface EditorialGrantSpec {
+  tenantId: string;
+  tenantSlug: string;
+  siteId: string;
+  targetUserId: string;
+  role: string;
+  /** The caller's scope; validated and normalised here (normaliseEditorialScope). */
+  scope: { allCollections?: unknown; collections?: unknown; allLocales?: unknown; locales?: unknown };
+  /** ISO-8601, in the future; null = permanent. */
+  expiresAt: string | null;
+  actorUserId: string | null;
+}
+
+export interface EditorialGrantResult {
+  grantId: string;
+  role: EditorialRole;
+  /** False when the grant and this site's scope were already exactly as requested (no audit row, no session bump). */
+  changed: boolean;
+  /** True when this call created the `user_roles` row (the first site of this role for this person). */
+  createdGrant: boolean;
+  scope: NormalisedEditorialScope;
+  expiresAt: string | null;
+}
+
+const UUID_RE_GRANT = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function assertEditorialIds(tenantId: string, siteId: string, targetUserId: string): void {
+  if (!UUID_RE_GRANT.test(tenantId) || !UUID_RE_GRANT.test(siteId) || !UUID_RE_GRANT.test(targetUserId)) {
+    throw new BadRequestException("tenantId, siteId and targetUserId must be uuids");
+  }
+}
+
+function assertEditorialRoleName(role: string): EditorialRole {
+  if (!isEditorialRole(role)) {
+    throw new BadRequestException(
+      "role must be one of webdesk_writer, webdesk_translator, webdesk_seo_reviewer, webdesk_editor (this path grants nothing else)",
+    );
+  }
+  return role;
+}
+
+async function editorialRoleId(c: PoolClient, role: EditorialRole): Promise<string> {
+  const { rows } = await c.query<{ id: string }>(
+    `SELECT id FROM roles WHERE company_id IS NULL AND name = $1 ORDER BY id LIMIT 1`,
+    [role],
+  );
+  if (!rows[0]) throw new Error(`${role} is not seeded (migration 202610111443)`);
+  return rows[0].id;
+}
+
+/** Grant one writers' room role on ONE site (design §2.6). Must run on a `withTenants([tenantId])` connection, inside
+ *  the caller's transaction (which also writes the audit row). See the block above for every check. */
+export async function grantEditorialRole(
+  c: PoolClient, spec: EditorialGrantSpec, site: VerifiedEditorialSite,
+): Promise<EditorialGrantResult> {
+  assertEditorialIds(spec.tenantId, spec.siteId, spec.targetUserId);
+  // Canonical (lower-case) ids: `user_roles.scope_id` is TEXT, and the scope-row guard compares it with the uuid
+  // `tenant_id`'s canonical text form, so a mixed-case route id must never reach a write.
+  spec = { ...spec, tenantId: spec.tenantId.toLowerCase(), siteId: spec.siteId.toLowerCase(), targetUserId: spec.targetUserId.toLowerCase() };
+  const role = assertEditorialRoleName(spec.role);
+  if (site.siteId.toLowerCase() !== spec.siteId || site.tenantSlug !== spec.tenantSlug) {
+    // A caller bug, never a user error: the proof is for another site.
+    throw new Error("grantEditorialRole: the verified site does not match the grant's site");
+  }
+  let scope: NormalisedEditorialScope;
+  try {
+    scope = normaliseEditorialScope(spec.scope);
+  } catch (err) {
+    if (err instanceof EditorialScopeError) throw new BadRequestException(`invalid_request: ${err.reason}`);
+    throw err;
+  }
+  const unknownCollections = scope.collections.filter((k) => !site.collectionKeys.includes(k));
+  if (unknownCollections.length > 0) {
+    throw new BadRequestException(
+      `unknown_collection: the site has no collection ${unknownCollections.map((k) => JSON.stringify(k)).join(", ")}`,
+    );
+  }
+  const unknownLocales = scope.locales.filter((l) => !site.locales.includes(l));
+  if (unknownLocales.length > 0) {
+    throw new BadRequestException(
+      `unknown_locale: the site's tenant does not declare ${unknownLocales.map((l) => JSON.stringify(l)).join(", ")}`,
+    );
+  }
+  let expiresAt: string | null = null;
+  if (spec.expiresAt !== null) {
+    const t = Date.parse(spec.expiresAt);
+    if (!Number.isFinite(t) || t <= Date.now()) {
+      throw new BadRequestException("invalid_request: expiresAt must be an ISO-8601 instant in the future (or null)");
+    }
+    expiresAt = new Date(t).toISOString();
+  }
+  assertNotSelfTarget(spec.actorUserId, spec.targetUserId);
+
+  // The target: an active employee, an active member of THIS company (RLS-bound read on the caller's connection).
+  const target = await c.query<{ kind: string; status: string }>(
+    `SELECT kind, status FROM users WHERE id = $1 AND deleted_at IS NULL`,
+    [spec.targetUserId],
+  );
+  if (!target.rows[0] || target.rows[0].status !== "active") {
+    throw new BadRequestException("editorial_target_not_eligible: the target is not an active user");
+  }
+  if (target.rows[0].kind !== "employee") {
+    throw new BadRequestException(
+      `editorial_target_not_eligible: a writers' room role can only be held by an employee today (the target is a ` +
+        `${target.rows[0].kind} principal; freelance contributors are a separate, not-yet-built principal class)`,
+    );
+  }
+  const member = await c.query(
+    `SELECT 1 FROM company_memberships
+      WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL`,
+    [spec.tenantId, spec.targetUserId],
+  );
+  if (!member.rowCount) {
+    throw new BadRequestException("editorial_target_not_eligible: the target is not an active member of this company");
+  }
+
+  const roleId = await editorialRoleId(c, role);
+  // The grant row: find (and lock) it, drop it if it has already expired (the sweep would; an expired grant must not
+  // be revived by a scope attached to it), else create it.
+  const existing = await c.query<{ id: string; expires_at: Date | null; expired: boolean }>(
+    `SELECT id, expires_at, (expires_at IS NOT NULL AND expires_at <= now()) AS expired
+       FROM user_roles
+      WHERE user_id = $1 AND role_id = $2 AND scope_type = 'company' AND scope_id = $3
+      FOR UPDATE`,
+    [spec.targetUserId, roleId, spec.tenantId],
+  );
+  let grantId: string | null = existing.rows[0]?.id ?? null;
+  let createdGrant = false;
+  if (existing.rows[0]?.expired) {
+    await c.query(`DELETE FROM user_roles WHERE id = $1`, [existing.rows[0].id]); // cascades its scope rows
+    grantId = null;
+  } else if (existing.rows[0]) {
+    const held = existing.rows[0].expires_at ? new Date(existing.rows[0].expires_at).toISOString() : null;
+    if (held !== expiresAt) {
+      throw new ConflictException({
+        message: "editorial_grant_expiry_mismatch",
+        reason:
+          `this person already holds ${role} in this company ${held ? `until ${held}` : "with no expiry"}; the expiry ` +
+          "belongs to the grant (every site it covers), so revoke it and grant again to change it",
+      });
+    }
+  }
+  if (!grantId) {
+    const ins = await c.query<{ id: string }>(
+      `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, expires_at)
+       VALUES ($1, $2, $3, 'company', $4, $5)
+       ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING RETURNING id`,
+      [newId(), spec.targetUserId, roleId, spec.tenantId, expiresAt],
+    );
+    if (!ins.rows[0]) throw new ConflictException("the grant changed concurrently; retry");
+    grantId = ins.rows[0].id;
+    createdGrant = true;
+  }
+
+  // This site's scope row: insert, or replace when anything differs (RETURNING is empty when nothing did).
+  const up = await c.query<{ id: string }>(
+    `INSERT INTO user_role_editorial_scopes
+       (id, user_role_id, tenant_id, webdesk_tenant_slug, site_id, all_collections, collections, all_locales, locales,
+        granted_by, origin_site)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (user_role_id, site_id) DO UPDATE
+        SET webdesk_tenant_slug = EXCLUDED.webdesk_tenant_slug,
+            all_collections = EXCLUDED.all_collections, collections = EXCLUDED.collections,
+            all_locales = EXCLUDED.all_locales, locales = EXCLUDED.locales,
+            granted_by = EXCLUDED.granted_by, updated_at = now()
+      WHERE (user_role_editorial_scopes.webdesk_tenant_slug, user_role_editorial_scopes.all_collections,
+             user_role_editorial_scopes.collections, user_role_editorial_scopes.all_locales, user_role_editorial_scopes.locales)
+            IS DISTINCT FROM
+            (EXCLUDED.webdesk_tenant_slug, EXCLUDED.all_collections, EXCLUDED.collections, EXCLUDED.all_locales, EXCLUDED.locales)
+     RETURNING id`,
+    [
+      newId(), grantId, spec.tenantId, spec.tenantSlug, spec.siteId, scope.allCollections, scope.collections,
+      scope.allLocales, scope.locales, spec.actorUserId, config.originSite,
+    ],
+  );
+  return { grantId, role, changed: createdGrant || up.rows.length > 0, createdGrant, scope, expiresAt };
+}
+
+export interface EditorialRevokeSpec {
+  tenantId: string;
+  siteId: string;
+  targetUserId: string;
+  role: string;
+}
+
+export interface EditorialRevokeResult {
+  grantId: string;
+  /** True when this site's scope row was removed. */
+  removedScope: boolean;
+  /** True when the grant itself was removed (it had no other site left). The caller bumps the session either way. */
+  removedGrant: boolean;
+}
+
+/** Revoke one writers' room role on ONE site. Removes that site's scope row, and the grant row itself when no other
+ *  site remains (so a revoke never leaves an inert, scope-less grant behind; an already scope-less one is cleaned up
+ *  here too). Returns null when there was nothing to revoke (idempotent). A revoke is a de-escalation: no self-target
+ *  refusal, and the target need not still be a member. Must run on a `withTenants([tenantId])` connection. */
+export async function revokeEditorialRole(c: PoolClient, spec: EditorialRevokeSpec): Promise<EditorialRevokeResult | null> {
+  assertEditorialIds(spec.tenantId, spec.siteId, spec.targetUserId);
+  spec = { ...spec, tenantId: spec.tenantId.toLowerCase(), siteId: spec.siteId.toLowerCase(), targetUserId: spec.targetUserId.toLowerCase() };
+  const role = assertEditorialRoleName(spec.role);
+  const grant = await c.query<{ id: string }>(
+    `SELECT ur.id FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      WHERE r.company_id IS NULL AND r.name = $1 AND ur.user_id = $2 AND ur.scope_type = 'company' AND ur.scope_id = $3
+        AND ur.managed_by IS NULL AND ur.managed_by_position IS NULL
+      FOR UPDATE OF ur`,
+    [role, spec.targetUserId, spec.tenantId],
+  );
+  const grantId = grant.rows[0]?.id;
+  if (!grantId) return null;
+  const scopeDel = await c.query(
+    `DELETE FROM user_role_editorial_scopes WHERE user_role_id = $1 AND tenant_id = $2 AND site_id = $3`,
+    [grantId, spec.tenantId, spec.siteId],
+  );
+  // The scope rows of one grant all carry the grant's company as tenant_id (the guard trigger), so this connection's
+  // tenant wall sees every one of them: "none left" is a true answer, not an RLS artefact.
+  const grantDel = await c.query<{ id: string }>(
+    `DELETE FROM user_roles ur
+      WHERE ur.id = $1 AND ur.managed_by IS NULL AND ur.managed_by_position IS NULL
+        AND NOT EXISTS (SELECT 1 FROM user_role_editorial_scopes s WHERE s.user_role_id = ur.id AND s.tenant_id = $2)
+      RETURNING ur.id`,
+    [grantId, spec.tenantId],
+  );
+  const removedScope = (scopeDel.rowCount ?? 0) > 0;
+  const removedGrant = grantDel.rows.length > 0;
+  if (!removedScope && !removedGrant) return null;
+  return { grantId, removedScope, removedGrant };
 }
 
 /** THE admin revoke — `revokeRole`'s statement, verbatim (`id` + `user_id` both pinned so a grant

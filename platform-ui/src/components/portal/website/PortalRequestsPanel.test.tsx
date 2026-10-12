@@ -15,27 +15,31 @@ const ok = <T,>(data: T): WdResult<T> => ({ kind: "ok", data });
 const req = (id: string, over: Partial<RequestView> = {}): RequestView => ({
   approvalId: id, status: "pending", createdAt: "2026-10-11T08:00:00Z", tenantSlug: "gaiada", siteId: "s1", itemCount: 2, itemIds: ["i1", "i2"],
   requestedBy: { userId: "u-dewi", name: "Dewi" }, requestedByMe: false, canApprove: true, executionStatus: null, siteName: "gaiada.com",
-  items: [{ itemId: "i1", title: "Home", headVersion: 4, available: true }, { itemId: "i2", title: "About", headVersion: 2, available: true }], ...over,
+  items: [{ itemId: "i1", title: "Home", version: 4, available: true }, { itemId: "i2", title: "About", version: 2, available: true }], ...over,
 });
-const executed = (reconciled: boolean | null = true): PortalApproveResult => ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: false, reconciled, error: null });
+const executed = (reconciled: boolean | null = true, build: PortalApproveResult["build"] = null): PortalApproveResult =>
+  ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: false, reconciled, build, error: null });
 const mount = (rows: RequestView[] | null, problem: string | null = null) => render(<PortalRequestsPanel clientId="c1" requests={rows} loadProblem={problem} />);
 const card = (id: string) => screen.getByTestId(`request-${id}`);
 
 beforeEach(() => { cleanup(); Object.values(acts).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset()); refresh.mockReset(); });
 
 describe("each request: who filed it, its pages and versions, its state", () => {
-  it("shows the requester, the time, the pages with their latest draft version, the site and the state", () => {
+  it("shows the requester, the time, the pages as 'v<N> of <title>' (the REQUESTED version), the site and the state", () => {
     mount([req("a1")]);
     const c = card("a1");
     expect(within(c).getByTestId("request-who").textContent).toContain("Filed by Dewi");
-    expect(within(c).getByText("Home")).toBeTruthy();
-    expect(within(c).getByText(/latest draft v4/)).toBeTruthy();
+    const lines = within(c).getAllByRole("listitem").map((li) => li.textContent);
+    expect(lines).toContain("v4 of Home");
+    expect(lines).toContain("v2 of About");
+    // WSK-359: the page's CURRENT draft is never shown as if it were the requested one.
+    expect(c.textContent).not.toMatch(/latest draft/i);
     expect(within(c).getByText(/on gaiada\.com/)).toBeTruthy();
     expect(within(c).getByTestId("request-state").textContent).toBe("Waiting for approval");
   });
 
   it("the viewer's own request reads 'Filed by You'; a page that cannot be read is named as unavailable, not dropped; more pages are counted", () => {
-    mount([req("a1", { requestedByMe: true, itemCount: 8, items: [{ itemId: "i1", title: "i1", headVersion: null, available: false }, { itemId: "i2", title: "About", headVersion: 2, available: true }] })]);
+    mount([req("a1", { requestedByMe: true, itemCount: 8, items: [{ itemId: "i1", title: "i1", version: 3, available: false }, { itemId: "i2", title: "About", version: 2, available: true }] })]);
     expect(within(card("a1")).getByTestId("request-who").textContent).toContain("Filed by You");
     expect(within(card("a1")).getByText("A page that is no longer available")).toBeTruthy();
     expect(within(card("a1")).getByText("and 6 more")).toBeTruthy();
@@ -182,5 +186,57 @@ describe("Withdraw (the requester's own pending request)", () => {
     mount([req("own", { requestedByMe: true, canApprove: false, itemCount: 3 }), req("theirs")]);
     expect(screen.getByTestId("withdraw-own").getAttribute("aria-label")).toBe("Withdraw your request for 3 pages");
     expect(screen.getByTestId("approve-theirs").getAttribute("aria-label")).toBe("Approve Dewi's request for 2 pages");
+  });
+});
+
+describe("WSK-359 · the requested version, and the staging rebuild after an Approve", () => {
+  it("a page whose request carries no version shows its title and NO version (never the current draft in its place)", () => {
+    mount([req("a1", { items: [{ itemId: "i1", title: "Home", version: null, available: true }, { itemId: "i2", title: "About", version: 2, available: true }] })]);
+    const lines = within(card("a1")).getAllByRole("listitem").map((li) => li.textContent);
+    expect(lines).toContain("Home");
+    expect(lines).toContain("v2 of About");
+    expect(within(card("a1")).getAllByTestId("request-item-version")).toHaveLength(1);
+  });
+
+  const approveWith = async (res: PortalApproveResult) => {
+    acts.portalApproveRequestAction.mockResolvedValue(ok(res));
+    mount([req("a1")]);
+    fireEvent.click(screen.getByTestId("approve-a1"));
+    await act(async () => { fireEvent.click(screen.getByTestId("approve-a1-confirm")); });
+    return screen.getByTestId("request-notice").textContent!;
+  };
+
+  it.each([
+    ["rebuilding", { state: "rebuilding", failureReason: null }, "Your site is rebuilding. This usually takes a few minutes."],
+    ["live", { state: "live", failureReason: null }, "Live on your site."],
+    ["failed: rebuild_not_configured", { state: "failed", failureReason: "rebuild_not_configured" }, "Published. Your site's automatic update isn't set up yet, so Gaiada will update it."],
+    ["failed: any other reason", { state: "failed", failureReason: "dispatch_unconfirmed" }, "Published, but the site update didn't start. Gaiada has been told."],
+    ["failed: no reason given", { state: "failed", failureReason: null }, "Published, but the site update didn't start. Gaiada has been told."],
+    ["unverified", { state: "unverified", failureReason: null }, "Published. We can't yet confirm that your site has updated. Check again in a few minutes."],
+  ] as const)("an executed Approve with build %s says exactly the owner's words", async (_name, build, text) => {
+    expect(await approveWith(executed(null, { ...build }))).toBe(text);
+  });
+
+  it("'live' is never said unless the state is live: every other state's notice omits it", async () => {
+    for (const build of [
+      { state: "rebuilding", failureReason: null }, { state: "unverified", failureReason: null },
+      { state: "failed", failureReason: "rebuild_not_configured" }, { state: "failed", failureReason: "client_publish_unverified" },
+    ] as const) {
+      cleanup(); Object.values(acts).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset());
+      const t = await approveWith(executed(true, { ...build })); // even a RECONCILED answer: the rebuild state decides the words
+      expect(t, build.state + "/" + build.failureReason).not.toMatch(/live on your site/i);
+    }
+  });
+
+  it("no build in the answer keeps the older words: reconciled says 'Published', otherwise 'sent, can't yet see it as live'", async () => {
+    expect(await approveWith(executed(true, null))).toBe("Published. Your site updates in a few minutes.");
+    cleanup(); Object.values(acts).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset());
+    expect(await approveWith(executed(null, null))).toContain("can't yet see it as live");
+  });
+
+  it("an approval that FAILED to execute never shows a rebuild line, whatever build the answer carries", async () => {
+    const t = await approveWith({ ...executed(null, { state: "live", failureReason: null }), executionStatus: "failed", error: "version-conflict" });
+    expect(t).toContain("didn't complete");
+    expect(t).not.toMatch(/live on your site/i);
   });
 });

@@ -85,6 +85,12 @@ describe("client mode: what renders", () => {
     expect(screen.getByText(/in search results\. Managed by Gaiada\./)).toBeTruthy();
   });
 
+  it("client mode shows no staff content-checks card, even when the lint carries content findings", () => {
+    mount(bundle(detail({ lint: { unresolvedTokens: [], markers: {}, content: { findings: [{ code: "meta.title.missing", severity: "warn", path: "/seo/title", message: "WebDesk: no title" }], aeo: { score: 40, factors: [] }, unavailable: [] } } })));
+    expect(screen.queryByTestId("content-checks-card")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Content checks|AEO/);
+  });
+
   it("no key / schema / staff jargon: no pointer, no 'vocabulary', no delete, no unpublish, no schedule, no staff publish bar", () => {
     mount(bundle());
     expect(screen.queryByText(/^Delete$/)).toBeNull();

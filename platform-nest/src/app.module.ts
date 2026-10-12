@@ -61,6 +61,8 @@ import { AgencyLeadsController } from "./core/agency-leads.controller";
 // ApprovalsController: it is a different Cerbos action (`convert`, not `triage`) guarding a write
 // that mints a client, a project and a delivery run.
 import { AgencyLeadConvertController } from "./core/agency-lead-convert.controller";
+// M5-G5: privacy find/export/erase over the agency intake data (WS4-gated per call; see its header).
+import { AgencyPrivacyController } from "./core/agency-privacy.controller";
 // GH-08: BFF for the GitHub repo registry (list/detail/link/unlink). Deliberately its own
 // controller file outside `core/github/` — see that file's own header for why.
 import { GithubReposController } from "./core/github-repos.controller";
@@ -125,6 +127,7 @@ import { SearchController } from "./modules/search/search.controller";
 import { SearchGoogleOauthCallbackController } from "./modules/search/search-google-oauth.controller";
 import { SearchGoogleAdsController } from "./modules/search/search-google-ads.controller";
 import { SearchReportsController } from "./modules/search/search-reports.controller";
+import { SearchAnalyticsController } from "./modules/search/search-analytics.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
 // PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
@@ -151,6 +154,7 @@ import { WebdeskControlController } from "./modules/webdev/webdesk-control.contr
 // WSK-59: /api/:t/modules/webdev/content/* — the content BFF (reads, drafts, publish-requests, unpublish/delete).
 import { WebdeskContentController } from "./modules/webdev/webdesk-content.controller";
 import { WebdeskSiteClientsController } from "./modules/webdev/webdesk-site-clients.controller";
+import { WebdeskEditorialGrantsController } from "./modules/webdev/webdesk-editorial-grants.controller";
 import { WebdeskClientWebsiteController } from "./modules/webdev/webdesk-client-website.controller";
 // WSK-60: /api/:t/modules/webdev/content/sites/:slug/:siteId/{build-status,rebuild-requests} — the
 // publish → rebuild → staging ledger's read and the editor's "request a rebuild".
@@ -180,7 +184,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, HrController, LoansController,
@@ -217,6 +221,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // wave; SM-10 already added its own reports GET/POST section there). Shares SearchController's
     // exact route prefix; no individual route path collides (search-reports.controller.ts's own header).
     SearchReportsController,
+    // M5-A4: Umami website-analytics reads for a property (own controller class; same prefix).
+    SearchAnalyticsController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
     ZoneBEventsController,
@@ -231,6 +237,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // WSK-49c: which client a WebDesk site serves (staff-managed link) and the CLIENT-MODE website BFF under the
     // portal's own prefix, /api/:t/portal/clients/:clientId/website/*.
     WebdeskSiteClientsController,
+    WebdeskEditorialGrantsController,
     WebdeskClientWebsiteController,
     // WSK-60: build-status + rebuild-requests (the staging rebuild ledger).
     SiteBuildsController,

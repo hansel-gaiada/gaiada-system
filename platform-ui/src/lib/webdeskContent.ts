@@ -51,9 +51,9 @@ import { listMembers } from "./entities";
 import {
   PRIMITIVE_NAMES,
   type ApprovalStatus, type BuildStatus, type CollectionComposition, type CollectionSummary,
-  type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail,
+  type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail, type ItemEditorial,
   type KeyMintOutcome, type KeyRequestFiled, type KeyScope, type PreviewLink,
-  type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type Page,
+  type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type ContentLint, type ContentFinding, type AeoScore, type AeoFactor, type ContentCheckUnavailable, type Page,
   type PrimitiveName, type PublishRequestRow, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
   type VersionContent, type VersionFull, type VersionListBody, type WdResult,
   type WebdeskApprovalRow, type Block, hasNeutralDescendant, splitVersionContent,
@@ -253,13 +253,51 @@ function parseBlock(v: unknown, path: string): Block {
   return b;
 }
 
+const finiteNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/** `lint.content` (M5-W3/W3b). Tolerant on purpose: it is advisory, so a malformed entry is skipped (never a
+ *  contract_drift that would block the editor), unknown finding codes are kept (consumers ignore what they do not know),
+ *  and an unknown severity reads as "info". Returns undefined when `content` is absent or not an object. */
+export function parseContentLint(v: unknown): ContentLint | undefined {
+  if (!isRec(v)) return undefined;
+  const findings: ContentFinding[] = [];
+  if (Array.isArray(v.findings)) {
+    for (const f of v.findings) {
+      if (!isRec(f) || typeof f.code !== "string" || typeof f.message !== "string") continue;
+      findings.push({ code: f.code, severity: f.severity === "warn" ? "warn" : "info", path: typeof f.path === "string" ? f.path : "/", message: f.message });
+    }
+  }
+  let aeo: AeoScore | null = null;
+  if (isRec(v.aeo) && finiteNum(v.aeo.score)) {
+    const factors: AeoFactor[] = [];
+    if (Array.isArray(v.aeo.factors)) {
+      for (const f of v.aeo.factors) {
+        if (!isRec(f) || typeof f.id !== "string" || !finiteNum(f.points) || !finiteNum(f.max)) continue;
+        factors.push({ id: f.id, label: typeof f.label === "string" ? f.label : f.id, points: f.points, max: f.max, detail: typeof f.detail === "string" ? f.detail : "" });
+      }
+    }
+    aeo = { score: Math.max(0, Math.min(100, v.aeo.score)), factors };
+  }
+  const unavailable: ContentCheckUnavailable[] = [];
+  if (Array.isArray(v.unavailable)) {
+    for (const u of v.unavailable) {
+      if (isRec(u) && typeof u.rule === "string") unavailable.push({ rule: u.rule, reason: typeof u.reason === "string" ? u.reason : "" });
+    }
+  }
+  return { findings, aeo, unavailable };
+}
+
 export function parseLint(v: unknown, path: string): Lint {
   const o = obj(v, path);
   // `unavailable` (a reason string) means the lint could not RUN. Kept only when present, so every existing result is
   // byte-identical. A non-string truthy value still means "could not run" — it must not be read as a clean lint.
   const flag = "unavailable" in o && o.unavailable !== undefined && o.unavailable !== null && o.unavailable !== false;
   const unavailable = flag ? (typeof o.unavailable === "string" && o.unavailable !== "" ? o.unavailable : "lint_unavailable") : undefined;
-  const withFlag = (l: Lint): Lint => (unavailable === undefined ? l : { ...l, unavailable });
+  const content = parseContentLint(o.content);
+  const withFlag = (l: Lint): Lint => {
+    const r = unavailable === undefined ? l : { ...l, unavailable };
+    return content === undefined ? r : { ...r, content };
+  };
   if (!("placeholders" in o) || o.placeholders === undefined || o.placeholders === null) {
     return withFlag({ unresolvedTokens: [], markers: {} }); // the collection declares no placeholder rules
   }
@@ -289,13 +327,25 @@ function parseVersionContent(v: unknown, path: string): VersionContent {
   };
 }
 
+/** M5-W2b's `editorial` member: OPTIONAL (absent from a WebDesk older than M5-W2b), validated when present. */
+function parseEditorial(v: unknown, path: string): ItemEditorial {
+  const o = obj(v, path);
+  return {
+    reviewRequired: key(o, "reviewRequired", bool, path),
+    state: key(o, "state", str, path),
+    approvedVersion: key(o, "approvedVersion", nullable(int), path),
+  };
+}
+
 export function parseItemDetail(v: unknown): ItemDetail {
   const o = obj(v, "item.get");
+  const editorial = opt(o, "editorial", parseEditorial, "item.get");
   return {
     item: key(o, "item", parseItemRef, "item.get"),
     version: key(o, "version", parseVersionContent, "item.get"),
     group: key(o, "group", arr(parseGroupMember), "item.get"),
     lint: key(o, "lint", parseLint, "item.get"),
+    ...(editorial ? { editorial } : {}),
   };
 }
 

@@ -51,6 +51,7 @@ import { declareSocialModuleScope } from "../modules/social/module-scope";
 // section for the full reasoning; `resolveXPricing` is the money guard the boot check verifies.
 import { config } from "../config";
 import { resolveXPricing } from "../modules/social/usage-ledger";
+import { EditorialScopeError, isEditorialRole, normaliseEditorialScope } from "../rbac/editorial-roles";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -835,6 +836,7 @@ export function registerWebdeskExecutableApprovals(): void {
   }
   registerWebdeskContentExecutableApprovals();
   registerWebdeskMediaExecutableApprovals();
+  registerWebdeskEditorialExecutableApprovals();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1005,6 +1007,82 @@ export function registerWebdeskMediaExecutableApprovals(): void {
     toolName: "webdesk.media.delete",
     lockKey: (a) => webdeskMediaLockKey(a, "webdesk.media.delete"),
     precondition: webdeskMediaDeletePrecondition,
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// M5-W1b — the writers' room grant tools: `webdesk.editorial.grantRole` (HIGH, like iam.grantRole: it widens somebody's
+// authority) and `webdesk.editorial.revokeRole` (MEDIUM: a de-escalation). Both are writes, so an unattended caller
+// suspends for a human decision; these entries are what make the approval, once given, actually complete. The same D14
+// pairing as the content and media tools: these entries AND the two names in `resource_mcp_tool.yaml`'s executable
+// list, in one change.
+//
+// WHAT STILL BOUNDS A RE-DRIVE, independently of the approval: it runs as the ORIGINAL filing principal, through the same
+// BFF route, so Cerbos decides `webdesk_collection:manage_editorial` on that principal's CURRENT standing; the choke point
+// (`grantEditorialRole`) re-checks the site against WebDesk, the collections and locales, the target's membership and
+// kind, and refuses a self-grant. An agent can therefore never grant more than the human behind it may.
+//
+// STRUCTURAL PRECONDITIONS ONLY, for the content tools' reason: the route's own checks are the atomic re-check, and they
+// need a WebDesk read that a precondition may not make. Both writes are idempotent at the route (a re-grant of the same
+// scope and a revoke of what is not held are `changed: false` no-ops with no audit row), so an auto-retry after a lost
+// response is safe without a landed-detection read.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+function editorialArgsOk(a: Record<string, unknown>): string | null {
+  if (!nonEmptyString(a.tenantSlug)) return "tenant_slug_invalid";
+  if (typeof a.siteId !== "string" || !UUID_RE_EXEC.test(a.siteId)) return "site_id_invalid";
+  if (typeof a.userId !== "string" || !UUID_RE_EXEC.test(a.userId)) return "user_id_invalid";
+  if (!isEditorialRole(a.role)) return "role_invalid";
+  return null;
+}
+
+async function webdeskEditorialGrantPrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const bad = editorialArgsOk(a);
+  if (bad) return { ok: false, reason: bad };
+  try {
+    normaliseEditorialScope(a);
+  } catch (err) {
+    if (err instanceof EditorialScopeError) return { ok: false, reason: "scope_invalid" };
+    throw err;
+  }
+  if (a.expiresAt !== undefined && a.expiresAt !== null) {
+    const t = typeof a.expiresAt === "string" ? Date.parse(a.expiresAt) : Number.NaN;
+    // An expiry that passed while the approval sat in the inbox is refused here rather than at the route, so the row
+    // records why ("the grant would already be over") instead of a generic 400.
+    if (!Number.isFinite(t)) return { ok: false, reason: "expires_at_invalid" };
+    if (t <= Date.now()) return { ok: false, reason: "expires_at_passed" };
+  }
+  return { ok: true };
+}
+
+async function webdeskEditorialRevokePrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const bad = editorialArgsOk(a);
+  return bad ? { ok: false, reason: bad } : { ok: true };
+}
+
+/** The two writers' room grant tools that can suspend. Mirrored in `resource_mcp_tool.yaml`'s executable list. */
+export const WEBDESK_EDITORIAL_REGISTRY_TOOLS: readonly string[] = ["webdesk.editorial.grantRole", "webdesk.editorial.revokeRole"];
+
+function webdeskEditorialLockKey(a: Record<string, unknown>, toolName: string): string {
+  // The unit of consistency is (person, site): a grant and a revoke of one person on one site contend; two sites do not.
+  const userId = a?.userId;
+  const siteId = a?.siteId;
+  if (typeof userId === "string" && userId.trim().length > 0 && typeof siteId === "string" && siteId.trim().length > 0) {
+    return `webdesk:editorial:${userId}:${siteId}`;
+  }
+  return `${toolName}:invalid-args:${JSON.stringify(a)}`;
+}
+
+export function registerWebdeskEditorialExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "webdesk.editorial.grantRole",
+    lockKey: (a) => webdeskEditorialLockKey(a, "webdesk.editorial.grantRole"),
+    precondition: webdeskEditorialGrantPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "webdesk.editorial.revokeRole",
+    lockKey: (a) => webdeskEditorialLockKey(a, "webdesk.editorial.revokeRole"),
+    precondition: webdeskEditorialRevokePrecondition,
   });
 }
 
@@ -1874,6 +1952,27 @@ export function registerAgencyIntakeExecutableApprovals(): void {
   });
 }
 
+// M5-G5 - `agency_privacy.find|export|erase`: BARRED, never auto-executed on approval.
+//
+// The route itself is the WS4 gate (core/agency-privacy.service.ts): its first call files the approval that
+// matters and its approved re-call, by the requester, runs the command once. A D14 re-drive of a hub-filed
+// row would reach that route WITHOUT an approvalId and only file a second approval, so registering an
+// executor would make an approved hub row look executed while nothing ran. The bar says so positively, and
+// keeps core-tools.test.ts's "no medium/high write without an executor or a bar" invariant honest.
+export const AGENCY_PRIVACY_BARRED_TOOLS = ["agency_privacy.find", "agency_privacy.export", "agency_privacy.erase"] as const;
+
+export function registerAgencyPrivacyBars(): void {
+  for (const toolName of AGENCY_PRIVACY_BARRED_TOOLS) {
+    registerBarredExecutable({
+      toolName,
+      reason: "route_ws4_gated",
+      note:
+        "M5-G5: the privacy route files and consumes its own WS4 approval per call (requester re-calls with the "
+        + "approvalId, maker != checker). A hub re-drive cannot carry that approval, so it never auto-executes.",
+    });
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // THE production bootstrap — one list, so it cannot go stale
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1909,6 +2008,7 @@ export function registerAllExecutableApprovals(): void {
   registerJmlExecutableApprovals();
   registerIamExecutableApprovals();
   registerAgencyIntakeExecutableApprovals();
+  registerAgencyPrivacyBars();
 }
 
 registerAllExecutableApprovals();

@@ -28,8 +28,9 @@ describe("describeIllegalTransition", () => {
     expect(describeIllegalTransition("open", "invited")).toBe(
       "cannot open a lead in status 'invited' — expected 'submitted'",
     );
-    expect(describeIllegalTransition("decline", "submitted")).toBe(
-      "cannot decline a lead in status 'submitted' — expected 'in_review'",
+    // M5-P1 (AD-5 amendment): decline works from every OPEN status, so its refusal names the whole set.
+    expect(describeIllegalTransition("decline", "converted")).toBe(
+      "cannot decline a lead in status 'converted' — expected one of 'new', 'invited', 'submitted', 'in_review', 'nurturing'",
     );
     expect(describeIllegalTransition("nurture", "declined")).toBe(
       "cannot nurture a lead in status 'declined' — expected 'in_review'",

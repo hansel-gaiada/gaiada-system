@@ -162,6 +162,120 @@ derivedRoles:
             request.principal.attr.clientAdminOf.exists(a,
               a.clientId == request.resource.attr.clientId && a.tenantId == request.resource.attr.tenantId)
 
+    # ═══════ M5-W1a -- the writers' room: four editorial roles as SCOPED grants ═══════════════════════════════
+    # docs/plans/2026-10-11-m5-writers-room-design.md §2.2. The ROLES `webdesk_writer`, `webdesk_translator`,
+    # `webdesk_seo_reviewer`, `webdesk_editor` are grants stored as data: a `user_roles` row at scopeType
+    # `company` (scopeId = the ERP company that owns the WebDesk tenant) PLUS one or more scope rows, which
+    # assemblePrincipal() attaches to that grant as `editorialScopes: [{siteId, allCollections, collections,
+    # allLocales, locales}]` (W1b; "all" is an explicit boolean, never an empty list). Collection keys are
+    # per-tenant data, so they live on the grant and never in this file (PV-D13: no tenant hard-wired here).
+    #
+    # Same family as client_website_editor above, and the same rules hold:
+    #   - NO perm_* mirror and NO bundle, permanently: a flat catalog key cannot say "this site, these
+    #     collections, these locales" and would over-grant.
+    #   - `company` scope ONLY. A global (or any other) grant of these roles matches NOTHING: a global grant
+    #     has no root and no tenant to bind its scope rows to. scope-constrained-roles.json pins them to
+    #     company, so assemblePrincipal() drops any resolved permission at another scope (IAM-SEC-06).
+    #   - Every attribute is guarded against an unfed resource: `siteId` (and, below the site role,
+    #     `collectionKey`, `locale`) must be non-empty, so a handler that forgot one matches nothing, even
+    #     against a hand-built grant whose scope row names "" -- and a grant with no `editorialScopes` at all
+    #     (has()) matches nothing.
+    #   - No variables.local; each of these sits in its OWN resource-policy rule (the org_unit_lead rule).
+    #
+    # webdesk_editorial_site    -- ANY of the four roles, with a scope row on resource.attr.siteId. The site
+    #                              gate (Phase 1 of the two-phase BFF gate) and the collection/media read.
+    # webdesk_editorial_reader  -- same, and the scope row covers resource.attr.collectionKey, in ANY locale.
+    #                              Content-item read.
+    # webdesk_writer / webdesk_translator / webdesk_seo_reviewer / webdesk_editor -- that ONE role, with a
+    #                              scope row covering site + collection + locale. Every other content action.
+    - name: webdesk_editorial_site
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.siteId) && request.resource.attr.siteId != "" &&
+            request.principal.attr.grants.exists(g,
+              (g.role == "webdesk_writer" || g.role == "webdesk_translator" ||
+                g.role == "webdesk_seo_reviewer" || g.role == "webdesk_editor") &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+              has(g.editorialScopes) &&
+              g.editorialScopes.exists(s, s.siteId == request.resource.attr.siteId))
+
+    - name: webdesk_editorial_reader
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.siteId) && request.resource.attr.siteId != "" &&
+            has(request.resource.attr.collectionKey) && request.resource.attr.collectionKey != "" &&
+            request.principal.attr.grants.exists(g,
+              (g.role == "webdesk_writer" || g.role == "webdesk_translator" ||
+                g.role == "webdesk_seo_reviewer" || g.role == "webdesk_editor") &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+              has(g.editorialScopes) &&
+              g.editorialScopes.exists(s, s.siteId == request.resource.attr.siteId &&
+                (s.allCollections == true || request.resource.attr.collectionKey in s.collections)))
+
+    - name: webdesk_writer
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.siteId) && request.resource.attr.siteId != "" &&
+            has(request.resource.attr.collectionKey) && request.resource.attr.collectionKey != "" &&
+            has(request.resource.attr.locale) && request.resource.attr.locale != "" &&
+            request.principal.attr.grants.exists(g, g.role == "webdesk_writer" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+              has(g.editorialScopes) &&
+              g.editorialScopes.exists(s, s.siteId == request.resource.attr.siteId &&
+                (s.allCollections == true || request.resource.attr.collectionKey in s.collections) &&
+                (s.allLocales == true || request.resource.attr.locale in s.locales)))
+
+    - name: webdesk_translator
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.siteId) && request.resource.attr.siteId != "" &&
+            has(request.resource.attr.collectionKey) && request.resource.attr.collectionKey != "" &&
+            has(request.resource.attr.locale) && request.resource.attr.locale != "" &&
+            request.principal.attr.grants.exists(g, g.role == "webdesk_translator" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+              has(g.editorialScopes) &&
+              g.editorialScopes.exists(s, s.siteId == request.resource.attr.siteId &&
+                (s.allCollections == true || request.resource.attr.collectionKey in s.collections) &&
+                (s.allLocales == true || request.resource.attr.locale in s.locales)))
+
+    - name: webdesk_seo_reviewer
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.siteId) && request.resource.attr.siteId != "" &&
+            has(request.resource.attr.collectionKey) && request.resource.attr.collectionKey != "" &&
+            has(request.resource.attr.locale) && request.resource.attr.locale != "" &&
+            request.principal.attr.grants.exists(g, g.role == "webdesk_seo_reviewer" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+              has(g.editorialScopes) &&
+              g.editorialScopes.exists(s, s.siteId == request.resource.attr.siteId &&
+                (s.allCollections == true || request.resource.attr.collectionKey in s.collections) &&
+                (s.allLocales == true || request.resource.attr.locale in s.locales)))
+
+    - name: webdesk_editor
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.siteId) && request.resource.attr.siteId != "" &&
+            has(request.resource.attr.collectionKey) && request.resource.attr.collectionKey != "" &&
+            has(request.resource.attr.locale) && request.resource.attr.locale != "" &&
+            request.principal.attr.grants.exists(g, g.role == "webdesk_editor" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId &&
+              has(g.editorialScopes) &&
+              g.editorialScopes.exists(s, s.siteId == request.resource.attr.siteId &&
+                (s.allCollections == true || request.resource.attr.collectionKey in s.collections) &&
+                (s.allLocales == true || request.resource.attr.locale in s.locales)))
+
     # Module-elevated approver (e.g. agency_approver) covering its module's resources.
     - name: module_approver
       parentRoles: ["user"]
@@ -1449,6 +1563,30 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "core.client_contact.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # WSK-D60 follow-up (2026-10-12) — the two client-website grant actions, for the permission-native `owner`.
+    # Plain global-or-company mirrors, same shape as perm_integration_connection_manage (IAM-14c). The keys
+    # (core.client_contact.manage_website_editor / manage_admin) were catalogued by WSK-49f with their bundle
+    # rows (company_admin, owner, platform_admin; manager for website_editor only) but deliberately given no
+    # mirror there, so `owner` -- which has ZERO role rules and reaches a kind only through a perm_* arm --
+    # was refused both. The RULES in resource_client_contact.yaml restrict these mirrors to resources that
+    # carry NO clientId (the STAFF route's shape), so a permission holder can never ride the PORTAL arm.
+    # These derived roles hold no `variables.local`, no attribute gate: the narrowing lives in the rule.
+    - name: perm_client_contact_manage_admin
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.client_contact.manage_admin" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_client_contact_manage_website_editor
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.client_contact.manage_website_editor" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     - name: perm_client_contact_read

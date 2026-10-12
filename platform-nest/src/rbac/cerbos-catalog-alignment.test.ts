@@ -132,11 +132,12 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // 416/101 -> 420/102.
     // WSK-49f (2026-10-11, WSK-D60): +2 pairs, NO new kind (client_contact.manage_website_editor and
     // client_contact.manage_admin on the EXISTING `client_contact` kind).
-    // M6-P3c (2026-10-12): +4 pairs / +1 kind (webdev_site: read/create/update/request_probe_consent),
-    // 422/102 -> 426/103.
-    // Merged: 416 base + 4 (webdesk_media_asset) + 2 (client_contact) + 4 (webdev_site) = 426 pairs;
-    // 101 + 1 + 0 + 1 = 103 kinds.
-    expect(catalog.length).toBe(426);
+    // Merged: 416 base + 4 (webdesk_media_asset) + 2 (client_contact) = 422 pairs; 101 + 1 + 0 = 102 kinds.
+    // M5-W1a (2026-10-11, the writers' room): +7 pairs, NO new kind (webdesk_content_item: submit/comment/
+    // request_changes/seo_signoff/approve/assign; webdesk_collection: manage_editorial). 422/102 -> 429/102.
+    // M6-P3c on top of M5-W1a (merged 2026-10-12): +4 pairs / +1 kind (webdev_site: read/create/update/
+    // request_probe_consent), so 429/102 -> 433/103 and 414 -> 418 grantable.
+    expect(catalog.length).toBe(433);
     expect(catalogKindSet.size).toBe(103);
   });
 

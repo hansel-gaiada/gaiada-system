@@ -30,7 +30,9 @@ import { createCompany, createUser, addMembership, createRole, grantRole } from 
 import { EditorialUnavailableError } from "./webdesk-control-client";
 import { setWebdeskApprovedCommandDepsForTests, NOT_CONFIGURED_EDITORIAL_SIGNER } from "./webdesk-approved-command";
 import { webdeskZoneB } from "./webdesk-content.service";
-import { webdeskPublicBase } from "./webdesk-media.service";
+import { mediaCapabilities, webdeskPublicBase } from "./webdesk-media.service";
+import { assemblePrincipal } from "../../rbac/principal";
+import { check } from "../../rbac/cerbos";
 import { webdevModule } from "./index";
 import { FakeZoneB, GAIADA_SITE, GAIADA_SLUG, OTHER_SITE, OTHER_SLUG, makeTestSigner, problem, type FakeMediaAsset } from "./webdesk-content-testkit";
 
@@ -440,6 +442,59 @@ describe.skipIf(!live)("WSK-43b · the media library BFF", () => {
       expect((await call("GET", `${base()}/sites/${GAIADA_SLUG}/${GAIADA_SITE}/collections`, editorA)).statusCode).toBe(200);
       expect((await call("GET", `${base()}/sites/${GAIADA_SLUG}/${GAIADA_SITE}/collections`, memberA)).statusCode).toBe(403);
       expect((await call("GET", `${site()}/media`, memberA)).statusCode).toBe(403);
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  describe("WSK-359 · capabilities: the list answers what the caller may do, from ONE Cerbos batch, so the UI disables controls up front", () => {
+    const caps = async (who: string) => {
+      const r = await call("GET", `${site()}/media`, who);
+      expect(r.statusCode, r.body).toBe(200);
+      return r.json().capabilities as Record<string, boolean>;
+    };
+
+    it("per tier: an editor and a company-scope manager read/upload/update but cannot delete; the publisher and the admin can do all four", async () => {
+      expect(await caps(editorA)).toEqual({ read: true, upload: true, update: true, delete: false });
+      expect(await caps(managerA)).toEqual({ read: true, upload: true, update: true, delete: false });
+      expect(await caps(publisherA)).toEqual({ read: true, upload: true, update: true, delete: true });
+      expect(await caps(adminA)).toEqual({ read: true, upload: true, update: true, delete: true });
+    });
+
+    it("a member holds nothing: the list itself is 403 (no body, so no capabilities), and the batch answers all four false", async () => {
+      const r = await call("GET", `${site()}/media`, memberA);
+      expect(r.statusCode).toBe(403);
+      expect(r.body).not.toContain("capabilities");
+      const principal = await assemblePrincipal(memberA, "high");
+      expect(await mediaCapabilities({ principal, tenantId: A } as never)).toEqual({ read: false, upload: false, update: false, delete: false });
+    });
+
+    it("PARITY: for every tier, each boolean equals the per-action `check()` the real handlers use (a drift in the batch's resource would fail here)", async () => {
+      for (const who of [editorA, managerA, publisherA, adminA, memberA]) {
+        const principal = (await assemblePrincipal(who, "high"))!;
+        const got = await mediaCapabilities({ principal, tenantId: A } as never);
+        for (const action of ["read", "upload", "update", "delete"] as const) {
+          const want = (await check(principal, { kind: "webdesk_media_asset", tenantId: A, module: "webdev" }, action)).allow;
+          expect(got![action], `${who} ${action}`).toBe(want);
+        }
+      }
+    });
+
+    it("the answer is ADVISORY: a control it says is off is still refused by the per-action check (editor delete is 403), and one it says is on works", async () => {
+      expect((await caps(editorA)).delete).toBe(false);
+      expect((await call("DELETE", `${site()}/media/${asset.assetId}`, editorA)).statusCode).toBe(403);
+      expect((await caps(editorA)).upload).toBe(true);
+      expect((await call("POST", `${site()}/media/upload-token`, editorA, { bucket: "media" })).statusCode).toBe(201);
+    });
+
+    it("a Cerbos that cannot answer is UNKNOWN (null), never 'denied'", async () => {
+      const principal = (await assemblePrincipal(editorA, "high"))!;
+      const prev = config.cerbosUrl;
+      config.cerbosUrl = "http://127.0.0.1:9";
+      try {
+        expect(await mediaCapabilities({ principal, tenantId: A } as never)).toBeNull();
+      } finally {
+        config.cerbosUrl = prev;
+      }
     });
   });
 

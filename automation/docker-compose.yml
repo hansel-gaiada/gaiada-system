@@ -53,6 +53,10 @@ services:
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
       # Pin former-default values that n8n warns will change in a future version.
       N8N_RUNNERS_TASK_TIMEOUT: "300"
+      # Code nodes run in the task runner, which refuses Node built-ins unless listed. wd-zoneb-intake.json verifies
+      # WebDesk's HMAC with `crypto`; without this it fails "Module 'crypto' is disallowed" and n8n still answers the
+      # webhook 200, so WebDesk counts every event as delivered while none reaches the ERP (found live 2026-10-12).
+      NODE_FUNCTION_ALLOW_BUILTIN: ${NODE_FUNCTION_ALLOW_BUILTIN:-crypto}
       N8N_UNVERIFIED_PACKAGES_ENABLED: "true"
       N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: "2147483648"
       N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: "5000"
@@ -78,6 +82,14 @@ services:
       # on-inbound-lead webhook ingest — fail-closed: stays off unless explicitly enabled.
       INGEST_ENABLED: ${INGEST_ENABLED:-false}
       INGEST_SECRET: ${INGEST_SECRET:-}
+      # WSK-12/61 Zone B intake (wd-zoneb-intake.json): the HMAC verify secret is the SAME value as WebDesk's
+      # WEBDESK_EVENT_SECRET (Zone B env); the MCP dedup call stays OFF unless WEBDEV_ZONEB_INTAKE_ENABLED=1; the
+      # tolerance (ms) bounds the accepted clock skew; an optional platform user id is notified on a new form.received.
+      # Absent from this block they never reach the container, so the intake 401s every event (the passthrough trap).
+      WEBDESK_EVENT_SECRET: ${WEBDESK_EVENT_SECRET:-}
+      WEBDEV_ZONEB_INTAKE_ENABLED: ${WEBDEV_ZONEB_INTAKE_ENABLED:-}
+      WEBDEV_ZONEB_EVENT_TOLERANCE_MS: ${WEBDEV_ZONEB_EVENT_TOLERANCE_MS:-}
+      WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID: ${WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID:-}
       # Reserved for SM-56 (Standard-queue collect edge) — consumed by nothing yet. SM-15's
       # sm-rank-collect workflow (the only prior consumer) was retired by SM-55 (architect
       # ruling, tracker §6ad/A13). SM-56 is PARKED — do not remove this believing it is dead.

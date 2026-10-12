@@ -44,6 +44,22 @@ describe("WSK-12 · validateZoneBEvent", () => {
     if (!result.ok) expect(result.reason).toMatch(/does not match the route tenant/);
   });
 
+  // The MCP hub strips path params from the body (mcp-hub callPlatform), so the bridge relays envelopes with NO tenantId;
+  // the route tenant, authorized by the AuthGuard and Cerbos, stands in. Found live 2026-10-12 ("tenantId is required").
+  it("ACCEPTS an envelope relayed by the MCP hub with tenantId stripped into the path, and carries the ROUTE tenant", () => {
+    const { tenantId: _stripped, ...relayed } = validFormReceivedBody();
+    const result = validateZoneBEvent(TENANT, relayed);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.tenantId).toBe(TENANT);
+  });
+
+  it("still REFUSES an empty or non-string body tenantId (present but invalid is not the hub's stripping)", () => {
+    for (const bad of ["", 42, null]) {
+      const result = validateZoneBEvent(TENANT, validFormReceivedBody({ tenantId: bad }));
+      expect(result.ok, `tenantId ${JSON.stringify(bad)} must be refused`).toBe(false);
+    }
+  });
+
   it("REFUSES a missing eventId", () => {
     const body = validFormReceivedBody();
     delete (body as Record<string, unknown>).eventId;

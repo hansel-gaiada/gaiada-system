@@ -198,3 +198,206 @@ describe("CANONICAL_DELEGATION_ROLES — mirrors agency-lead-convert.service.ts'
     expect(byRole.dns).toBe("position");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────── M5-P1: the lead pipeline helpers
+import {
+  PIPELINE_REFUSAL_TEXT,
+  allowedMoves,
+  checkDealInput,
+  dealInputValue,
+  filterQueue,
+  formatDeal,
+  historyNewestFirst,
+  isClosedStage,
+  mostRecentCurrency,
+  pipelineRefusalMessage,
+  precisionHint,
+  stageCounts,
+  stageLabel,
+  type LeadQueueRow,
+  type PipelineCurrency,
+  type PipelineStage,
+  type StageEvent,
+} from "./agencyLeads";
+
+const STAGES: PipelineStage[] = [
+  { key: "enquiry", position: 10, kind: "open", label: "Enquiry" },
+  { key: "contacted", position: 20, kind: "open", label: "Contacted" },
+  { key: "qualified", position: 30, kind: "open", label: "Qualified" },
+  { key: "proposal", position: 40, kind: "open", label: "Proposal sent" },
+  { key: "won", position: 90, kind: "won", label: "Won" },
+  { key: "lost", position: 99, kind: "lost", label: "Lost" },
+];
+const CURRENCIES: PipelineCurrency[] = [
+  { code: "IDR", symbol: "Rp", minorUnit: 0 },
+  { code: "USD", symbol: "$", minorUnit: 2 },
+];
+
+function row(id: string, status: LeadQueueRow["status"], stage: string, extra: Partial<LeadQueueRow> = {}): LeadQueueRow {
+  return {
+    id, orgName: id, contactName: null, contactEmail: null, contactPhone: null, source: "staff", status,
+    ownerId: null, ownerName: null, createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z",
+    ageSeconds: 0, hasSubmission: false, stage, dealValue: null, dealCurrency: null, stageEnteredAt: "2026-09-01T00:00:00Z", ...extra,
+  };
+}
+
+describe("allowedMoves: open stages only, never won or lost", () => {
+  it("offers the other open stages in position order", () => {
+    expect(allowedMoves(STAGES, "contacted", "in_review").map((s) => s.key)).toEqual(["enquiry", "qualified", "proposal"]);
+  });
+  it("never offers won or lost", () => {
+    const keys = allowedMoves(STAGES, "enquiry", "new").map((s) => s.key);
+    expect(keys).not.toContain("won");
+    expect(keys).not.toContain("lost");
+  });
+  it("offers nothing for a converted or declined lead", () => {
+    expect(allowedMoves(STAGES, "won", "converted")).toEqual([]);
+    expect(allowedMoves(STAGES, "lost", "declined")).toEqual([]);
+  });
+});
+
+describe("stageLabel / isClosedStage", () => {
+  it("uses the reference label, and falls back to a humanised key", () => {
+    expect(stageLabel(STAGES, "proposal")).toBe("Proposal sent");
+    expect(stageLabel(null, "on_hold")).toBe("On hold");
+  });
+  it("closes on kind, with the two structural keys as the no-reference fallback", () => {
+    expect(isClosedStage(STAGES, "won")).toBe(true);
+    expect(isClosedStage(STAGES, "qualified")).toBe(false);
+    expect(isClosedStage(null, "lost")).toBe(true);
+    expect(isClosedStage(null, "qualified")).toBe(false);
+  });
+});
+
+describe("formatDeal: exact decimal strings at the currency's minor unit", () => {
+  it("IDR has no decimals", () => {
+    expect(formatDeal("15000000.0000", "IDR", CURRENCIES)).toBe("IDR 15,000,000");
+    expect(formatDeal("0.0000", "IDR", CURRENCIES)).toBe("IDR 0");
+  });
+  it("USD keeps two", () => {
+    expect(formatDeal("10.2500", "USD", CURRENCIES)).toBe("USD 10.25");
+    expect(formatDeal("1234567.5000", "USD", CURRENCIES)).toBe("USD 1,234,567.50");
+  });
+  it("never rounds away a non-zero digit beyond the minor unit", () => {
+    expect(formatDeal("10.2550", "USD", CURRENCIES)).toBe("USD 10.255");
+  });
+  it("does no float arithmetic: a 16-digit value survives intact", () => {
+    expect(formatDeal("9999999999999999.0000", "IDR", CURRENCIES)).toBe("IDR 9,999,999,999,999,999");
+  });
+  it("an unknown currency trims the padding; an absent value is an em-dash", () => {
+    expect(formatDeal("5.5000", "SGD", CURRENCIES)).toBe("SGD 5.5");
+    expect(formatDeal(null, null, CURRENCIES)).toBe("—");
+  });
+  it("dealInputValue gives an editable plain number", () => {
+    expect(dealInputValue("15000000.0000")).toBe("15000000");
+    expect(dealInputValue("10.2500")).toBe("10.25");
+    expect(dealInputValue(null)).toBe("");
+  });
+});
+
+describe("checkDealInput: the API's shape rule plus the minor unit", () => {
+  it("accepts what the contract accepts", () => {
+    expect(checkDealInput("10.25", 2)).toBeNull();
+    expect(checkDealInput("1500", 0)).toBeNull();
+    expect(checkDealInput("0", 2)).toBeNull();
+  });
+  it("IDR (0) refuses 1500.5 and USD (2) refuses 10.255, as precision", () => {
+    expect(checkDealInput("1500.5", 0)).toBe("deal_value_precision");
+    expect(checkDealInput("10.255", 2)).toBe("deal_value_precision");
+  });
+  it("refuses anything that is not a plain decimal, as invalid", () => {
+    for (const bad of ["", "abc", "-5", "1,000", "1e3", "10.", ".5", "1.23456", "12345678901234567"]) {
+      expect(checkDealInput(bad, 2), bad).toBe("deal_value_invalid");
+    }
+  });
+  it("without a picked currency only the shape is checked", () => {
+    expect(checkDealInput("10.255", null)).toBeNull();
+  });
+  it("precisionHint names the currency's own limit", () => {
+    expect(precisionHint(CURRENCIES[0])).toMatch(/IDR has no decimals/);
+    expect(precisionHint(CURRENCIES[1])).toMatch(/USD allows up to 2 decimals/);
+    expect(precisionHint(null)).toBe("");
+  });
+});
+
+describe("mostRecentCurrency: pre-select only, no default", () => {
+  it("picks the currency of the most recently updated row that has one", () => {
+    const rows = [
+      row("a", "new", "enquiry", { dealCurrency: "IDR", updatedAt: "2026-09-01T00:00:00Z" }),
+      row("b", "new", "enquiry", { dealCurrency: "USD", updatedAt: "2026-09-05T00:00:00Z" }),
+      row("c", "new", "enquiry", { updatedAt: "2026-09-09T00:00:00Z" }),
+    ];
+    expect(mostRecentCurrency(rows)).toBe("USD");
+  });
+  it("is null when no lead has a value yet", () => {
+    expect(mostRecentCurrency([row("a", "new", "enquiry")])).toBeNull();
+  });
+});
+
+describe("filterQueue: it FILTERS, it never re-sorts (contract rule 1)", () => {
+  // Deliberately in the BFF's whose-move-it-is order, which is NOT stage order, NOT age order, NOT id order.
+  const rows = [
+    row("s1", "submitted", "proposal"),
+    row("n1", "new", "enquiry"),
+    row("i1", "invited", "contacted"),
+    row("s2", "in_review", "proposal"),
+    row("w1", "converted", "won"),
+    row("l1", "declined", "lost"),
+    row("n2", "nurturing", "enquiry"),
+  ];
+  it("no filter returns the rows in the order received", () => {
+    expect(filterQueue(rows, { stage: null, hideClosed: false }, STAGES).map((r) => r.id)).toEqual(["s1", "n1", "i1", "s2", "w1", "l1", "n2"]);
+  });
+  it("a stage filter keeps the received order within the stage", () => {
+    expect(filterQueue(rows, { stage: "proposal", hideClosed: false }, STAGES).map((r) => r.id)).toEqual(["s1", "s2"]);
+    expect(filterQueue(rows, { stage: "enquiry", hideClosed: false }, STAGES).map((r) => r.id)).toEqual(["n1", "n2"]);
+  });
+  it("hide closed drops won and lost only", () => {
+    expect(filterQueue(rows, { stage: null, hideClosed: true }, STAGES).map((r) => r.id)).toEqual(["s1", "n1", "i1", "s2", "n2"]);
+  });
+  it("counts are over all rows", () => {
+    expect(stageCounts(rows)).toEqual({ proposal: 2, enquiry: 2, contacted: 1, won: 1, lost: 1 });
+  });
+});
+
+describe("historyNewestFirst", () => {
+  const ev = (id: string, at: string): StageEvent => ({
+    id, fromStage: "enquiry", toStage: "contacted", dealValue: null, dealCurrency: null, actorId: null, actorName: null, viaAgent: null, occurredAt: at,
+  });
+  it("orders newest first and is stable for equal times", () => {
+    const out = historyNewestFirst([ev("old", "2026-09-01T00:00:00Z"), ev("tie-a", "2026-09-03T00:00:00Z"), ev("new", "2026-09-04T00:00:00Z"), ev("tie-b", "2026-09-03T00:00:00Z")]);
+    expect(out.map((e) => e.id)).toEqual(["new", "tie-a", "tie-b", "old"]);
+  });
+  it("does not mutate its input", () => {
+    const input = [ev("a", "2026-09-01T00:00:00Z"), ev("b", "2026-09-02T00:00:00Z")];
+    historyNewestFirst(input);
+    expect(input.map((e) => e.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("pipelineRefusalMessage: every typed reason in plain words", () => {
+  const REASONS = ["stage_unknown", "stage_terminal", "lead_closed", "deal_incomplete", "deal_value_invalid", "deal_currency_unknown", "deal_value_precision"];
+  it("has a sentence for each of the seven codes, and never leaks the code itself", () => {
+    for (const r of REASONS) {
+      const msg = pipelineRefusalMessage(r, 400, "raw backend text");
+      expect(msg, r).toBe(PIPELINE_REFUSAL_TEXT[r]);
+      expect(msg, r).not.toContain("_");
+      expect(msg, r).not.toBe("raw backend text");
+    }
+  });
+  it("a 403 without a known reason is a plain permission message", () => {
+    expect(pipelineRefusalMessage(undefined, 403, "forbidden")).toBe("You don't have permission to do that.");
+  });
+  it("otherwise the backend's own words", () => {
+    expect(pipelineRefusalMessage("something_new", 500, "boom")).toBe("boom");
+  });
+});
+
+describe("lead source labels (M5-L4 adds web)", () => {
+  it("web is Website form; every source has a label; an unknown one falls back to its key", async () => {
+    const { sourceLabel, SOURCE_LABEL } = await import("./agencyLeads");
+    expect(sourceLabel("web")).toBe("Website form");
+    expect(Object.keys(SOURCE_LABEL).sort()).toEqual(["invite", "open", "staff", "web"]);
+    expect(sourceLabel("partner")).toBe("partner");
+  });
+});

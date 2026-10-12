@@ -70,6 +70,20 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "media.usage": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-L1/L2 — the ERP reads one submission back after a form.received fact: read / webdesk:read.
   "forms.submission.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-W2b — the writers' room review flow (design 4.3): the nine writes are MEDIUM/operate (none changes what a
+  // production key sees; the publish gate that enforces approval is W2c on content.publish/schedule, still HIGH),
+  // the board and the history are reads.
+  "editorial.submit": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.withdraw": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.requestChanges": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.seoSignoff": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.approve": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.assign": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.comment": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.commentResolve": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.policySet": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "editorial.board": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "editorial.history": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
 };
 
 describe("control command registry — the impact-class map (design §07)", () => {
@@ -102,7 +116,7 @@ describe("control command registry — the impact-class map (design §07)", () =
     );
   });
 
-  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1), the two WSK-46 preview-token commands and the three WSK-43a media writes", () => {
+  it("EDITORIAL_COMMANDS is exactly the seven content.* writes (design §3.1), the two WSK-46 preview-token commands, the three WSK-43a media writes and the nine M5-W2b editorial.* writes", () => {
     expect([...EDITORIAL_COMMANDS].sort()).toEqual(
       [
         "content.create",
@@ -117,6 +131,15 @@ describe("control command registry — the impact-class map (design §07)", () =
         "media.uploadToken",
         "media.update",
         "media.delete",
+        "editorial.submit",
+        "editorial.withdraw",
+        "editorial.requestChanges",
+        "editorial.seoSignoff",
+        "editorial.approve",
+        "editorial.assign",
+        "editorial.comment",
+        "editorial.commentResolve",
+        "editorial.policySet",
       ].sort(),
     );
   });

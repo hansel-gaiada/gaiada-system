@@ -1192,8 +1192,42 @@ test("STATE refusal: WebDesk's scanner being down is not the file's fault, and s
   await expect(page.getByTestId("media-upload-failed")).toContainText("couldn't scan this file right now");
 });
 
-test("STATE read-only: a viewer browses the library, Upload is refused with a reason once tried, and Save and Delete say why they don't work", async ({ page, context }) => {
+test("WSK-359 · a viewer's controls are OFF up front (the list's capabilities): Upload, Save and Delete say why before anything is tried", async ({ page, context }) => {
   const id = await seedMedia({ title: "Villa", mime: "image/png", originalFilename: "villa.png" });
+  await loginAs(page, context, "gede@gaiada.com");
+  await openMedia(page);
+  await expect(page.getByTestId("media-tile")).toHaveCount(1);
+  await expect(page.getByTestId("media-upload")).toBeDisabled();
+  await expect(page.getByTestId("media-upload-why")).toContainText("You can't upload images here.");
+  await page.getByTestId("media-tile").first().click();
+  await expect(page.getByTestId("media-readonly")).toContainText("You can't edit images here.");
+  await expect(page.getByLabel("Title")).not.toBeEditable();
+  await expect(page.getByTestId("media-save")).toBeDisabled();
+  await expect(page.getByTestId("media-delete")).toBeDisabled();
+  await expect(page.getByTestId("media-delete-why")).toContainText("You can't delete images here.");
+  const st = await stub.state();
+  expect(st.mediaLog).toEqual([]); // nothing was sent to find out
+  expect(st.media.find((m) => m.assetId === id)).toMatchObject({ title: "Villa", deletedAt: null });
+});
+
+test("WSK-359 · a publisher's controls are all on, and an editor (no delete) has only Delete off, from the capabilities", async ({ page }) => {
+  await seedMedia({ title: "Villa", mime: "image/png", originalFilename: "villa.png" });
+  await openMedia(page);
+  await expect(page.getByTestId("media-upload")).toBeEnabled();
+  await page.getByTestId("media-tile").first().click();
+  await expect(page.getByTestId("media-delete")).toBeEnabled();
+  await stub.config({ mediaCaps: { delete: false } });
+  await openMedia(page);
+  await page.getByTestId("media-tile").first().click();
+  await expect(page.getByTestId("media-upload")).toBeEnabled();
+  await expect(page.getByLabel("Title")).toBeEditable();
+  await expect(page.getByTestId("media-delete")).toBeDisabled();
+  await expect(page.getByTestId("media-delete-why")).toContainText("Deleting needs a Web Dev publisher or a company admin.");
+});
+
+test("STATE read-only (the 403 FALLBACK): capabilities that say yes while the server refuses: Upload is refused with a reason once tried, and Save and Delete say why they don't work", async ({ page, context }) => {
+  const id = await seedMedia({ title: "Villa", mime: "image/png", originalFilename: "villa.png" });
+  await stub.config({ mediaCaps: { upload: true, update: true, delete: true } }); // the advisory answer is wrong for this viewer
   await loginAs(page, context, "gede@gaiada.com");
   await openMedia(page);
   await expect(page.getByTestId("media-tile")).toHaveCount(1);

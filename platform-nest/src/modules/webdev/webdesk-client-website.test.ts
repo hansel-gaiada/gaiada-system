@@ -688,8 +688,10 @@ describe.skipIf(!live)("WSK-49c · the client-mode website BFF", () => {
       expect(p[0].hadWs4).toBe(true);
       expect(p[0].claims).toMatchObject({ ce: true, sub: edA1, req: edA1, apr: id, cmd: "content.publish" });
       expect(await approvalRow(id)).toMatchObject({ status: "approved", execution_status: "executed" });
-      // the response is the client's view: no staging-rebuild internals
-      expect(r.json()).not.toHaveProperty("build");
+      // the response is the client's view (359, WSK-D65): the rebuild STATE only, never its internals (id, repo, ref, URL)
+      const build = (r.json() as { build?: Record<string, unknown> }).build;
+      expect(build).toBeDefined();
+      expect(Object.keys(build!).sort()).toEqual(["failureReason", "state"]);
       expect(r.json()).not.toHaveProperty("rebuild");
     });
 

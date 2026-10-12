@@ -24,8 +24,10 @@ async function ctx(): Promise<{ userId: string; tenant: string } | { error: stri
   return { userId, tenant };
 }
 
-function fail(e: unknown): { ok: false; error: string } {
-  if (e instanceof PlatformError) return { ok: false, error: e.message };
+/** `reason` is the backend's machine code and `httpStatus` its status: the pipeline cards branch on those
+ *  (contract rule 5), never on `error` text. Additive: the older cards read only `error`. */
+function fail(e: unknown): { ok: false; error: string; reason?: string; httpStatus?: number } {
+  if (e instanceof PlatformError) return { ok: false, error: e.message, reason: e.reason, httpStatus: e.status };
   return { ok: false, error: "Could not complete that. Please try again." };
 }
 
@@ -134,7 +136,7 @@ export async function revokeInviteAction(_prev: RevokeResult | null, formData: F
 }
 
 // ─────────────────────────────────────────────────────────────────── triage (open / decline / nurture)
-export interface TriageResult { ok: boolean; error?: string; status?: string }
+export interface TriageResult { ok: boolean; error?: string; status?: string; reason?: string; httpStatus?: number }
 
 export async function openLeadAction(_prev: TriageResult | null, formData: FormData): Promise<TriageResult> {
   const c = await ctx();
@@ -206,6 +208,12 @@ export interface ConvertResult {
   /** The 409 race artifact — someone else already converted this lead. Not a failure to dwell on:
    *  point at what exists (mirrors the webdev triage 409 convention). */
   existing?: ExistingConvertArtifact;
+  /** M5-P1: the deal the lead was converted with (decimal string), echoed by the backend. */
+  dealValue?: string | null;
+  dealCurrency?: string | null;
+  /** Typed refusal (`deal_*`) and HTTP status, for the plain-words rendering. */
+  reason?: string;
+  httpStatus?: number;
 }
 
 export async function convertLeadAction(_prev: ConvertResult | null, formData: FormData): Promise<ConvertResult> {
@@ -225,20 +233,102 @@ export async function convertLeadAction(_prev: ConvertResult | null, formData: F
     }
   }
 
+  // M5-P1: an OPTIONAL deal. It is sent only when a value was typed; a value without a currency (or the
+  // reverse) goes through as typed so the backend answers `deal_incomplete` in its own words. No default
+  // currency is ever invented here.
+  const dealValue = String(formData.get("dealValue") ?? "").trim();
+  const dealCurrency = String(formData.get("dealCurrency") ?? "").trim();
+  const body: { delegations: DelegationInput[]; deal?: { value: string; currency: string | null } } = { delegations };
+  if (dealValue) body.deal = { value: dealValue, currency: dealCurrency || null };
+
   try {
     const r = await platformFetch<{
       id: string; status: string; clientId: string; projectId: string; runId: string; delegations?: DelegationReportEntry[];
+      dealValue?: string | null; dealCurrency?: string | null;
     }>(`/api/${c.tenant}/agency/leads/${leadId}/convert`, c.userId, {
       method: "POST",
-      body: JSON.stringify({ delegations }),
+      body: JSON.stringify(body),
     });
     revalidatePath(`/agency/leads/${leadId}`);
     revalidatePath("/agency/leads");
-    return { ok: true, id: r.id, status: r.status, clientId: r.clientId, projectId: r.projectId, runId: r.runId, delegations: r.delegations };
+    return {
+      ok: true, id: r.id, status: r.status, clientId: r.clientId, projectId: r.projectId, runId: r.runId,
+      delegations: r.delegations, dealValue: r.dealValue, dealCurrency: r.dealCurrency,
+    };
   } catch (e) {
     if (e instanceof PlatformError && e.status === 409 && e.existing) {
-      return { ok: false, error: e.message, existing: e.existing as unknown as ExistingConvertArtifact };
+      return { ok: false, error: e.message, existing: e.existing as unknown as ExistingConvertArtifact, reason: e.reason, httpStatus: e.status };
     }
+    return fail(e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────── the pipeline (M5-P1)
+export interface MoveStageResult {
+  ok: boolean;
+  error?: string;
+  /** The backend's typed code (`stage_terminal`, `lead_closed`, …) and HTTP status. */
+  reason?: string;
+  httpStatus?: number;
+  /** `false` when the lead was already at that stage (200, nothing written). */
+  changed?: boolean;
+  stage?: string;
+}
+
+/** `POST …/stage` `{stage}`. Open stages only: the backend refuses won/lost with `stage_terminal`, and that
+ *  refusal is rendered, never swallowed. The page re-renders from `revalidatePath`, so the new stage and
+ *  the new history row come from server state, not from this result. */
+export async function moveStageAction(_prev: MoveStageResult | null, formData: FormData): Promise<MoveStageResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const leadId = String(formData.get("leadId") ?? "");
+  const stage = String(formData.get("stage") ?? "");
+  if (!leadId || !stage) return { ok: false, error: "Missing lead or stage." };
+  try {
+    const r = await platformFetch<{ id: string; stage: string; changed: boolean }>(`/api/${c.tenant}/agency/leads/${leadId}/stage`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({ stage }),
+    });
+    revalidatePath(`/agency/leads/${leadId}`);
+    revalidatePath("/agency/leads");
+    return { ok: true, changed: r.changed, stage: r.stage };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export interface SetDealResult {
+  ok: boolean;
+  error?: string;
+  reason?: string;
+  httpStatus?: number;
+  changed?: boolean;
+}
+
+/** `POST …/deal`. `intent=clear` sends the EXPLICIT pair of nulls (a body that omits both is incomplete, so
+ *  nothing can wipe a value by accident); anything else sends the typed value and the chosen currency as
+ *  they are, and the backend's typed refusal (`deal_incomplete`, `deal_value_invalid`,
+ *  `deal_currency_unknown`, `deal_value_precision`) comes back to be rendered. */
+export async function setDealAction(_prev: SetDealResult | null, formData: FormData): Promise<SetDealResult> {
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+  const leadId = String(formData.get("leadId") ?? "");
+  if (!leadId) return { ok: false, error: "Missing lead." };
+  const clear = String(formData.get("intent") ?? "") === "clear";
+  const value = String(formData.get("value") ?? "").trim();
+  const currency = String(formData.get("currency") ?? "").trim();
+  // Only the explicit Clear button may send two nulls: an empty form is "incomplete", never "wipe it".
+  if (!clear && !value && !currency) return { ok: false, error: "Enter both a value and a currency, or clear both.", reason: "deal_incomplete" };
+  const body = clear ? { value: null, currency: null } : { value: value || null, currency: currency || null };
+  try {
+    const r = await platformFetch<{ id: string; changed: boolean }>(`/api/${c.tenant}/agency/leads/${leadId}/deal`, c.userId, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    revalidatePath(`/agency/leads/${leadId}`);
+    revalidatePath("/agency/leads");
+    return { ok: true, changed: r.changed };
+  } catch (e) {
     return fail(e);
   }
 }

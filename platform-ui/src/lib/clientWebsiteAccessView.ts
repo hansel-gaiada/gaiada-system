@@ -79,17 +79,19 @@ export function parseWebsiteAccessList(body: unknown): WebsiteAccessList | null 
 }
 
 // ── The staff-side mirror ─────────────────────────────────────────────────────────────────────────
-// `resource_client_contact.yaml`: `manage_website_editor` is company_admin | manager (and platform_admin,
-// which matches everything); `manage_admin` is company_admin only (likewise platform_admin). `owner` is
-// NOT in either set: it is permission-native with no role rules, and these two actions deliberately have no
-// permission key, so the server refuses an owner (tracked as a defect, docs §16i). This is a UI MIRROR, never a second opinion: the page
-// shows the controls to whoever this says may, and a 403 still wins.
+// `resource_client_contact.yaml`: `manage_website_editor` is company_admin | manager | owner (and platform_admin,
+// which matches everything); `manage_admin` is company_admin | owner (likewise platform_admin), never manager.
+// `owner` is permission-native (no role rules), so the server admits it through a permission arm: the keys
+// `core.client_contact.manage_website_editor` / `manage_admin` are in its bundle (it mirrors company_admin) and
+// the policy mirrors them (docs §16i, PERMISSION-CONTRACT §27). This is a UI MIRROR, never a second opinion:
+// the page shows the controls to whoever this says may, and a 403 still wins.
 //
-// Deliberately NOT a new `Capability` in `rbac.ts`: both actions are role-arm only in Cerbos (no
-// `perm_*` mirror, no permission-catalog key), so the capability-parity guard has nothing to compare
-// a new capability against. Roles are read straight from `me`, scoped the way `can()` scopes them.
-const EDITOR_ROLES: ReadonlySet<string> = new Set(["platform_admin", "company_admin", "manager"]);
-const ADMIN_ROLES: ReadonlySet<string> = new Set(["platform_admin", "company_admin"]);
+// Deliberately NOT a new `Capability` in `rbac.ts`: the client-admin arm of `manage_website_editor` is
+// attribute-gated (one client), which a flat capability cannot express, so the capability-parity guard has
+// nothing to compare a new capability against. Roles are read straight from `me`, scoped the way `can()`
+// scopes them.
+const EDITOR_ROLES: ReadonlySet<string> = new Set(["platform_admin", "company_admin", "manager", "owner"]);
+const ADMIN_ROLES: ReadonlySet<string> = new Set(["platform_admin", "company_admin", "owner"]);
 
 function holdsRoleFor(me: Me, roles: ReadonlySet<string>, tenant: string | null | undefined): boolean {
   return me.roles.some((g) => {

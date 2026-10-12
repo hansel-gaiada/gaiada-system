@@ -223,6 +223,11 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
     expect(r.statusCode, r.body).toBe(200);
     expect(r.json()).toMatchObject({ status: "approved", executionStatus: "executed", selfPublish: true });
     expect(it.publishedVersion).toBe(2);
+    // WSK-359 (WSK-D65): the answer carries the rebuild as `{state, failureReason}` and NOTHING else of it (no build id, repo, ref or URL).
+    expect(r.json().build).toEqual({ state: "rebuilding", failureReason: null });
+    expect(r.body).not.toContain(REPO);
+    expect(r.body).not.toContain(REF);
+    expect(r.body).not.toContain("127.0.0.1");
 
     const sent = dispatches(gh);
     expect(sent).toHaveLength(1);
@@ -256,6 +261,7 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
     expect(await builds(id)).toHaveLength(0);
     const ok = await approve(ed2A1, id);
     expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json().build).toEqual({ state: "rebuilding", failureReason: null }); // the approve answer carries it too (control: the denied self-approval above carried none)
     expect(dispatches(gh)).toHaveLength(1);
     expect((await builds(id))[0]).toMatchObject({ state: "rebuilding", decided_by: ed2A1, repo: REPO, ref: REF });
     expect((await githubRows(id))[0].metadata).toMatchObject({ basis: "client-publish", ruling: "WSK-D65" });
@@ -279,11 +285,23 @@ describe.skipIf(!live)("WSK-49c / WSK-D65 · a client publish rebuilds staging, 
     const r = await call("POST", `${S()}/items/${it.itemId}/publish`, edA1, {});
     expect(r.statusCode, r.body).toBe(200);
     expect(r.json()).toMatchObject({ executionStatus: "executed" });
+    expect(r.json().build).toEqual({ state: "failed", failureReason: "client_publish_unverified" }); // the typed reason, still no repo / ref / URL
     expect(it.publishedVersion).toBe(2);
     const id = (await adminPool().query<{ id: string }>(`SELECT id FROM automation_approvals WHERE origin = 'webdesk' AND tenant_id = $1`, [A])).rows[0].id;
     expect(gh.calls).toEqual([]); // not even the token exchange
     expect(await builds(id)).toEqual([expect.objectContaining({ state: "failed", failure_reason: "client_publish_unverified", decided_by: edA1, dispatched_at: null })]);
     expect(await githubRows(id)).toEqual([]);
+  });
+
+  it("WSK-359: a site with NO rebuild target answers `build: {state: failed, failureReason: rebuild_not_configured}`; the publish stands and nothing is dispatched", async () => {
+    config.webdeskRebuild.targetsJson = "[]";
+    const it = draft("svc.d63-notarget");
+    const r = await call("POST", `${S()}/items/${it.itemId}/publish`, edA1, {});
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toMatchObject({ executionStatus: "executed", build: { state: "failed", failureReason: "rebuild_not_configured" } });
+    expect(Object.keys(r.json().build).sort()).toEqual(["failureReason", "state"]);
+    expect(it.publishedVersion).toBe(2);
+    expect(gh.calls).toEqual([]);
   });
 
   it("an UNLINKED site fails the same way (no link row at all)", async () => {

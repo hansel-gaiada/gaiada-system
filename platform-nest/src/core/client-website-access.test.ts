@@ -44,6 +44,8 @@ describe.skipIf(!TEST_URL)("WSK-49f: client_website_editor grant path (staff + c
   let manager: string;
   let plainMember: string;
   let otherAdmin: string;
+  let owner: string; // the permission-native `owner` of `co` (WSK-D60 follow-up): perm keys only, no role rules
+  let otherOwner: string; // an owner of the OTHER company
   // clients
   let clientA: string;
   let clientB: string;
@@ -110,12 +112,19 @@ describe.skipIf(!TEST_URL)("WSK-49f: client_website_editor grant path (staff + c
     manager = await createUser("mgr@w49f.test");
     plainMember = await createUser("mem@w49f.test");
     otherAdmin = await createUser("oa@w49f.test");
+    owner = await createUser("owner@w49f.test");
+    otherOwner = await createUser("owner-other@w49f.test");
+    const ownerRole = await createRole("owner"); // the migrated global role: its bundle comes from the migrations, not from here
     for (const u of [companyAdmin, manager, plainMember]) await addMembership(co, u);
     await addMembership(other, otherAdmin);
     await grantRole(companyAdmin, companyAdminRole, "company", co);
     await grantRole(manager, managerRole, "company", co);
     await grantRole(plainMember, memberRole, "company", co);
     await grantRole(otherAdmin, companyAdminRole, "company", other);
+    await addMembership(co, owner);
+    await addMembership(other, otherOwner);
+    await grantRole(owner, ownerRole, "company", co);
+    await grantRole(otherOwner, ownerRole, "company", other);
 
     clientA = await createClient(co, "Bali Beach Resort");
     clientB = await createClient(co, "Nusa Coffee Co");
@@ -242,6 +251,67 @@ describe.skipIf(!TEST_URL)("WSK-49f: client_website_editor grant path (staff + c
       const r = await app.inject({ method: "PUT", url: url.staffEditor(clientA, cid["target-a@w49f.test"]), headers: asUser(adminA) });
       expect(r.statusCode).toBe(403);
       expect(await editorRows(targetA)).toHaveLength(0);
+    });
+  });
+
+  // ════════════════════════════ owner (permission-native) ════════════════════════════
+  // WSK-D60 says Gaiada staff may grant. `owner` has zero role rules and reaches a kind only through a perm_* arm, so until
+  // the permission mirror landed it was refused both actions. Its perms here come from the REAL migrated `owner` bundle.
+  describe("owner: the permission-native role may grant what company_admin may", () => {
+    it("the migrated owner bundle really carries both keys (so these tests drive the real perm arm, not a fixture)", async () => {
+      const { rows } = await adminPool().query<{ key: string }>(
+        `SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id JOIN roles r ON r.id = rp.role_id
+          WHERE r.company_id IS NULL AND r.name = 'owner' AND p.key IN ('core.client_contact.manage_website_editor', 'core.client_contact.manage_admin') ORDER BY p.key`,
+      );
+      expect(rows.map((r) => r.key)).toEqual(["core.client_contact.manage_admin", "core.client_contact.manage_website_editor"]);
+    });
+
+    it("an owner grants and revokes the website editor: ONE grant row, audited with the owner as actor", async () => {
+      await clearGrants();
+      const k = cid["target-a@w49f.test"];
+      const before = (await auditRows(k, "client_website_editor.%")).length;
+      const put = await app.inject({ method: "PUT", url: url.staffEditor(clientA, k), headers: asUser(owner) });
+      expect(put.statusCode).toBe(200);
+      expect(put.json()).toMatchObject({ websiteEditor: true, changed: true, clientId: clientA, userId: targetA });
+      expect(await editorRows(targetA)).toEqual([{ name: "client_website_editor", scope_type: "client", scope_id: clientA }]);
+      const audit = await auditRows(k, "client_website_editor.%");
+      expect(audit).toHaveLength(before + 1);
+      expect(audit[audit.length - 1]).toMatchObject({ actor_id: owner, verb: "client_website_editor.granted" });
+      const del = await app.inject({ method: "DELETE", url: url.staffEditor(clientA, k), headers: asUser(owner) });
+      expect(del.statusCode).toBe(200);
+      expect(del.json()).toMatchObject({ websiteEditor: false, changed: true });
+      expect(await editorRows(targetA)).toHaveLength(0);
+    });
+
+    it("an owner lists the access (staff GET) and assigns / removes the admin capability, audited", async () => {
+      const list = await app.inject({ method: "GET", url: url.staffList(clientA), headers: asUser(owner) });
+      expect(list.statusCode).toBe(200);
+      const k = cid["viewer-a@w49f.test"]; // not target2-a: the company_admin admin test below counts that contact's audit rows
+      const put = await app.inject({ method: "PUT", url: url.staffAdmin(clientA, k), headers: asUser(owner) });
+      expect(put.statusCode).toBe(200);
+      expect(put.json()).toMatchObject({ capability: "admin", changed: true });
+      const del = await app.inject({ method: "DELETE", url: url.staffAdmin(clientA, k), headers: asUser(owner) });
+      expect(del.statusCode).toBe(200);
+      expect(del.json()).toMatchObject({ capability: "viewer", changed: true });
+      const audit = await auditRows(k, "client_contact.admin_%");
+      expect(audit.map((a) => [a.verb, a.actor_id])).toEqual([["client_contact.admin_granted", owner], ["client_contact.admin_revoked", owner]]);
+    });
+
+    it("an owner of ANOTHER company is denied on this tenant's route, on both actions (valid target; no write)", async () => {
+      const a = await app.inject({ method: "PUT", url: url.staffEditor(clientA, cid["target-a@w49f.test"]), headers: asUser(otherOwner) });
+      expect(a.statusCode).toBe(403);
+      const b = await app.inject({ method: "PUT", url: url.staffAdmin(clientA, cid["target-a@w49f.test"]), headers: asUser(otherOwner) });
+      expect(b.statusCode).toBe(403);
+      expect(await editorRows(targetA)).toHaveLength(0);
+      expect((await adminPool().query(`SELECT capability FROM client_contacts WHERE id = $1`, [cid["target-a@w49f.test"]])).rows[0].capability).toBe("viewer");
+    });
+
+    it("an owner on the PORTAL route is refused (a key holder never rides the portal arm): 403, no grant", async () => {
+      const r = await app.inject({ method: "PUT", url: url.portalEditor(clientA, cid["target-a@w49f.test"]), headers: asUser(owner) });
+      expect(r.statusCode).toBe(403);
+      expect(await editorRows(targetA)).toHaveLength(0);
+      const l = await app.inject({ method: "GET", url: url.portalList(clientA), headers: asUser(owner) });
+      expect(l.statusCode).toBe(403);
     });
   });
 

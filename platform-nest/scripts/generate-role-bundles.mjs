@@ -202,6 +202,19 @@ const DIRECT = {
   // role-permission-parity.db.test.ts.
   client_contact_admin: [],
   client_website_editor: [],
+  // M5-W1a (docs/plans/2026-10-11-m5-writers-room-design.md §2.5): the six writers' room derived roles map to
+  // NO real role on purpose. Their roles (webdesk_writer/translator/seo_reviewer/editor) are company-scoped
+  // grants whose reach is set by SCOPE ROWS (site, collections, locales) that a flat bundle cannot express,
+  // so they carry no bundle and no perm_* mirror; the proof of their reach is the live probe matrix
+  // (webdesk-writers-room-cerbos.test.ts + cerbos/tests/), never this derivation. A future "consistency"
+  // bundle for them would make the grant ceiling and can.scopeOnly() claim reach they do not have.
+  // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
+  webdesk_editorial_site: [],
+  webdesk_editorial_reader: [],
+  webdesk_writer: [],
+  webdesk_translator: [],
+  webdesk_seo_reviewer: [],
+  webdesk_editor: [],
 };
 
 const LMS_KINDS = new Set(["lms_course", "lms_enrollment"]);

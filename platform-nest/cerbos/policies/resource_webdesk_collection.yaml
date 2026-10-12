@@ -11,6 +11,16 @@
 #   read         — list collections and their compositions (the editor needs this to render forms).
 #   apply_schema — apply a composition change over the control channel (`schema.apply`, MEDIUM).
 #                  Publisher tier only: a schema change re-shapes every item in the collection.
+#   manage_editorial — M5-W1a (docs/plans/2026-10-11-m5-writers-room-design.md §2.1, §2.6): grant and revoke
+#                  the writers' room roles on a site and set a collection's review policy. SAME holders as
+#                  apply_schema (company_admin, webdev_manager, platform_admin). It is also the live CEILING
+#                  for an editorial grant (design §2.5): its holders reach every editorial action by
+#                  construction, so an editorial grant never meets the bundle-subset ceiling.
+#
+# M5-W1a also lets ANY writers' room grant on a site read that site's collections (the editor needs the
+# compositions to render a form): the derived role `webdesk_editorial_site` matches a grant whose scope rows
+# name resource.attr.siteId (route :siteId after resolveEditableSite(), never a body). Until W1c sends
+# siteId it reads "" and denies; the staff tiers read no siteId, so nothing that works today changes.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -36,11 +46,18 @@ resourcePolicy:
             variables.inTenant && variables.notLow &&
             request.resource.attr.module == "webdev"
 
-    - actions: ["apply_schema"]
+    # M5-W1a: the writers' room site read, in its OWN rule (an attribute-gated role never shares a rule
+    # with a scope-only one).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["webdesk_editorial_site"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    - actions: ["apply_schema", "manage_editorial"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    - actions: ["apply_schema"]
+    - actions: ["apply_schema", "manage_editorial"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager"]
       condition:

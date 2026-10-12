@@ -2824,6 +2824,9 @@ export class SearchController {
     const engagement = await withTenants([tenantId], (c) => engagementRow(c, id), { modules: ["search"] });
     if (!engagement) throw new NotFoundException("engagement not found");
     await authorize(req.principal, { kind: "resource_search_report", tenantId, module: "search" }, "create");
+    // M5-G0b (WSK-D36): no client-facing report is generated for the internal sentinel client.
+    const internal = await withTenants([tenantId], (c) => c.query(`SELECT 1 FROM clients WHERE id = $1 AND is_internal`, [engagement.clientId]));
+    if (internal.rows[0]) throw new BadRequestException("internal client has no client-facing reports");
 
     // Phase 1 (short, network-free transaction): resolve an existing draft row for this
     // engagement+period+kind (if any) + a metrics snapshot from data that already exists. A report

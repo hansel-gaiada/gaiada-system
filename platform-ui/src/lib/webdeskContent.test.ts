@@ -83,6 +83,15 @@ describe("wire validation: a 2xx body that does not match the spec is DRIFT, nev
     expect(run).toThrow(new RegExp(mention));
   });
 
+  it("M5-W2c: item.get's `editorial` member is optional (an older WebDesk sends none) and validated when present", () => {
+    expect(parseItemDetail(detail()).editorial).toBeUndefined();
+    expect(parseItemDetail({ ...detail(), editorial: { reviewRequired: true, state: "approved", approvedVersion: 2, approvedIsHead: false, openComments: 0 } }).editorial)
+      .toEqual({ reviewRequired: true, state: "approved", approvedVersion: 2 });
+    expect(parseItemDetail({ ...detail(), editorial: { reviewRequired: false, state: "draft", approvedVersion: null } }).editorial?.approvedVersion).toBeNull();
+    expect(() => parseItemDetail({ ...detail(), editorial: { reviewRequired: "yes", state: "draft", approvedVersion: null } })).toThrow(/editorial.reviewRequired/);
+    expect(() => parseItemDetail({ ...detail(), editorial: { reviewRequired: true, state: "draft" } })).toThrow(WireDrift);
+  });
+
   it("lint with no placeholder rules is empty, but a malformed placeholders block is drift", () => {
     expect(parseLint({}, "lint")).toEqual({ unresolvedTokens: [], markers: {} });
     expect(() => parseLint({ placeholders: { unresolvedTokens: "x", markers: {} } }, "lint")).toThrow(WireDrift);
@@ -440,5 +449,45 @@ describe("resolveAuthorNames is COSMETIC, and the only read here that swallows a
   it("returns an empty map on failure so authors fall back to short ids (it never states anything about content)", async () => {
     members.mockRejectedValue(new Error("403"));
     expect(await resolveAuthorNames("u", "c")).toEqual({});
+  });
+});
+
+describe("parseLint: the advisory `content` member (M5-W3b)", () => {
+  const base = { placeholders: { unresolvedTokens: [], markers: {} } };
+  it("absent (older WebDesk): no `content` key at all, never an empty one", () => {
+    expect("content" in parseLint(base, "lint")).toBe(false);
+  });
+  it("not an object: treated as absent", () => {
+    expect("content" in parseLint({ ...base, content: "nope" }, "lint")).toBe(false);
+    expect("content" in parseLint({ ...base, content: null }, "lint")).toBe(false);
+  });
+  it("partial: missing members default, malformed entries are skipped, unknown severity reads as info, unknown codes are kept", () => {
+    const l = parseLint({ ...base, content: { findings: [
+      { code: "h1.missing", severity: "warn", path: "/blocks/0", message: "No H1" },
+      { code: "future.rule", severity: "loud", message: "x" },
+      { code: 5, message: "bad" }, "junk",
+    ] } }, "lint");
+    expect(l.content).toEqual({
+      findings: [
+        { code: "h1.missing", severity: "warn", path: "/blocks/0", message: "No H1" },
+        { code: "future.rule", severity: "info", path: "/", message: "x" },
+      ],
+      aeo: null, unavailable: [],
+    });
+  });
+  it("full: findings, aeo with factors, unavailable", () => {
+    const l = parseLint({ ...base, content: {
+      findings: [{ code: "meta.title.too-long", severity: "info", path: "/seo/title", message: "Title is long" }],
+      aeo: { score: 72, factors: [{ id: "faq", label: "FAQ", points: 5, max: 15, detail: "1 Q&A" }, { id: "bad" }] },
+      unavailable: [{ rule: "twin.missing", reason: "unreadable localization" }, { reason: "no rule" }],
+    } }, "lint");
+    expect(l.content?.aeo).toEqual({ score: 72, factors: [{ id: "faq", label: "FAQ", points: 5, max: 15, detail: "1 Q&A" }] });
+    expect(l.content?.unavailable).toEqual([{ rule: "twin.missing", reason: "unreadable localization" }]);
+    expect(l.content?.findings).toHaveLength(1);
+  });
+  it("aeo null stays null (no score, not 0); the placeholder part is unchanged", () => {
+    const l = parseLint({ placeholders: { unresolvedTokens: ["{{a}}"], markers: { CONFIRM: 1 } }, content: { findings: [], aeo: null, unavailable: [] } }, "lint");
+    expect(l.content?.aeo).toBeNull();
+    expect(l.unresolvedTokens).toEqual(["{{a}}"]);
   });
 });

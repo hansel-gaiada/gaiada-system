@@ -11,6 +11,122 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.72.0` - M5 wave 3: data-subject rights and retention for website leads, the web-leads read, a staff alert, writers' room grants (2026-10-12) - DEV-VERIFIED
+
+WebDesk M5 wave 3, built by the M5 session (main `2e032678`).
+
+- **Migrations.**
+  - `202610111816_iam_editorial_grant_scopes` (M5-W1b): `user_role_editorial_scopes`, the per-site, collection and locale scope of a writers' room grant. FORCE RLS plus a `principal_lookup` policy, so principal assembly sees a user's own scopes and nobody else's. Guard triggers keep the four writers' room roles at `company` scope, as manual grants only and never on positions.
+  - `202610121835_agency_lead_privacy_retention` (M5-G5): `agency_leads.status_changed_at` as the retention clock (per-tenant backfill; if that backfill matches nothing, a lead is only kept longer) and the hashed suppression list. Every step is additive.
+- **Cerbos:** `resource_mcp_tool.yaml` lists `webdesk.editorial.grantRole` and `revokeRole` for the D14 re-drive. **Cerbos restart on deploy.**
+- **Writers' room grants (W1b):**
+  - One dedicated grant path writes the grant and its scope rows together and bumps the target's session.
+  - BFF `GET/POST/DELETE …/editorial/grants`.
+  - MCP `webdesk.editorial.grantRole` (HIGH) and `revokeRole` (MEDIUM).
+  - Legacy admin, the `ui` origin and positions refuse the four roles with `editorial_role_dedicated_path`.
+  - The roles take effect only when W1c wires the content routes. Until then the rules deny.
+- **Data-subject rights for website leads (G5):**
+  - `POST /api/:t/agency/privacy/{find|export|erase}` and MCP `agency_privacy.*` (HIGH, two-person WS4, never auto-run by D14).
+  - Attended use only until M5-G5b minimises the hub's stored arguments.
+  - Erase scrubs the person's fields and keeps the row.
+  - The suppression list stops an erased person from being re-imported.
+  - The 24-month retention purge is OFF unless `AGENCY_LEAD_RETENTION_PURGE_ENABLED=1`, and compose does not pass that variable through yet.
+- **Web-leads read (L6):** `GET /api/:t/agency/web-leads/:siteSlug` and MCP `agency_intake.listWebLeads`. Cerbos `agency_lead:read` runs before the slug is read. Attribution is an allow-list projection (click-id names only).
+- **Staff alert (L5):** an in-app (bell) notification on a new web lead, sent to `AGENCY_WEB_LEAD_ALERT_USER_IDS` (empty means nobody). The payload is the lead id, first name, form and link only. Web leads themselves stay off until `AGENCY_WEB_LEADS_ENABLED` is set, after counsel.
+- Verified on GitHub Actions 38196529791 on the merged tree: platform-nest 591 files / 8655 tests passed, 0 failed.
+
+### platform-ui `0.92.0` - M5 wave 3: the lead pipeline UI, a Leads tab and a Content checks card (2026-10-12) - DEV-VERIFIED
+
+- **Lead pipeline (P1-e):**
+  - Stage and value columns, plus stage chips that filter without re-sorting.
+  - A Pipeline card that offers moves only for open stages.
+  - Deal values in the currency's minor unit, sent as strings and never rounded.
+  - Stage history, newest first, and every typed refusal in plain words.
+- **Leads tab (L6)** in the Website workspace: web leads with an allow-listed attribution view and a consent badge. "Unknown" is never shown as consent.
+- **Content checks card (W3b-UI)** in the item editor: findings by severity with jump-to-field, and the AEO score. It is hidden in client mode.
+- Verified on GitHub Actions 38196529791: platform-ui 294 files / 5734 tests passed.
+
+### webdesk `0.11.0` - M5 wave 3: a server-side consent log (2026-10-12) - DEV-VERIFIED
+
+- **Migration 0017_consent_records:** FORCE RLS, no IP and no raw user agent stored, UPDATE refused.
+- **Public `POST /v1/t/:tenantSlug/consent`** (and `OPTIONS`):
+  - An allow-listed body; the server mints the consent ids.
+  - Fail-closed rate limits (`WEBDESK_CONSENT_RATE_LIMIT_*`) and no cookie.
+  - `consent` is now a reserved collection key.
+- **Links to the rest:**
+  - A submission may carry `visitor_consent.consentId`.
+  - The privacy find/export/erase commands reach consent ids.
+  - The purge runs at `WEBDESK_CONSENT_RETENTION_MONTHS` (default 26).
+- Applies through the release's automatic deploy-webdesk job. Nothing records until the site posts its banner decisions.
+- Verified on GitHub Actions 38196529791: webdesk-api 127 files / 1582 tests passed.
+
+### infra `0.13.0` - M5 wave 3: compose passes the web-lead alert recipients through (2026-10-12) - PROTOTYPED
+
+- `AGENCY_WEB_LEAD_ALERT_USER_IDS` with an EMPTY default, so nobody is alerted until it is set.
+
+### platform-nest `0.70.0` - M5 wave 2: a lead pipeline on agency_leads, the writers' room roles and review gate, the Umami read path (2026-10-12) - DEV-VERIFIED
+
+WebDesk M5 wave 2 (rulings WSK-D66 to D69), built by the M5 session.
+
+- **Migrations.**
+  - `202610111425_agency_lead_pipeline`: stages reference data; `stage`, `deal_value` and `deal_currency` on `agency_leads`, with a per-tenant backfill (converted → won, declined → lost, else enquiry); ADD-only CHECKs; an append-only stage history. It is self-asserting and transactional, so a bad backfill aborts cleanly.
+  - `202610111438_iam_agency_lead_pipeline_descriptions`.
+  - `202610111443_iam_writers_room_roles`.
+- **Cerbos:** the writers' room roles and review actions on `webdesk_content_item`, `webdesk_collection` and `webdesk_media_asset`, merged as a union with the WSK-49c client-editor rules. **Cerbos restart on deploy.**
+- The pipeline service, routes and MCP tools (`agency_pipeline.*`); the internal client hidden from client-facing surfaces; the writers' room publish gate and approver view; the Umami read path behind `UMAMI_BASE_URL` / `UMAMI_API_KEY` (dark until set).
+- Verified on the Linux gate by the M5 session (sumopod nest 8406/0 + ui 5558/0 + next build, WebDesk api 1356/0, migrations 659/0; GitHub Actions 38163365893 green), and with this release's merged tree on GitHub Actions.
+
+### platform-ui `0.90.0` - M5 wave 2: the Analytics tab and the writers' room approver view (2026-10-12) - DEV-VERIFIED
+
+- The Analytics tab (dark until the Umami env is set) and the writers' room approver view, built by the M5 session.
+
+### webdesk `0.10.0` - M5 wave 2: editorial review (off by default) (2026-10-12) - DEV-VERIFIED
+
+- Migration **0016_editorial_review** and the editorial review commands, state machine and publish gate. Review is OFF by default, so nothing changes until a policy is set. It applies through the release's automatic deploy-webdesk job.
+
+### infra `0.12.0` - M5 wave 2: compose passes the Umami and web-leads settings through (2026-10-12) - PROTOTYPED
+
+- New compose env passthroughs with EMPTY defaults: `UMAMI_BASE_URL`, `UMAMI_API_KEY`, `UMAMI_TIMEOUT_MS`, `AGENCY_WEB_LEADS_ENABLED` (leave unset until counsel).
+
+### platform-nest `0.69.0` - an owner may grant client website access; the portal's Website area learns versions, rebuild state, author names and media capabilities (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-ups.
+
+- **Owners on the client website grant actions (WSK-D60 gap).** `owner` is permission-native, and the keys `core.client_contact.manage_website_editor` / `manage_admin` already existed (from WSK-49f) with no rule reading them. New derived roles `perm_client_contact_manage_website_editor` / `perm_client_contact_manage_admin` (global-or-company mirrors) and two ALLOW rules on `client_contact`, gated `inTenant && notLow && inRoot && clientId == ""`: the STAFF shape only, so a key holder never passes a portal-shaped request. Existing rules byte-identical, no migration, no catalog change. **Cerbos restart on deploy.** Opus-reviewed (no blocker; the root gate and tighter pins added from its review).
+- **Client publish requests** carry `items:[{itemId, version}]`, so the portal shows the version a request asked for.
+- **A client publish answers the staging rebuild state** (`build:{state, failureReason}`, never a repo, ref or URL; WSK-D65).
+- **Author labels for clients** on item, version and list reads: a contact of the same client by name, Gaiada staff as "Gaiada", the company's automation accounts by name, anyone else "Someone else". One query per response, in the request's tenant.
+- **Media capabilities** on the media list (staff and client): `{read, upload, update, delete}` from one Cerbos batch; in client mode `delete` is always false; omitted when Cerbos cannot answer.
+- Verified: sumopod gate `m3r359` (platform-nest 8260 passed; its 4 reds, the media egress call and three tests following the new answers, fixed in `7a02d047`; ui 5561/5561, next build, repo checks PASS) and GitHub Actions 38165681282 green on every job for the exact merged tree (with M4 F1).
+
+### platform-ui `0.89.0` - owners get the website-access controls; the portal shows requested versions, rebuild state and names; media controls disable up front (2026-10-12) - DEV-VERIFIED
+
+- Staff Contacts page: `owner` gets the Website editor switches and Make/Remove admin, now that the server allows it.
+- Portal Website area: requests read "v<N> of <title>"; after a publish it says what the site is doing ("Your site is rebuilding…", "Live on your site.", "Published. Your site's automatic update isn't set up yet, so Gaiada will update it."); history shows names, with "Gaiada" for staff.
+- Media library and picker disable Upload, edit and Delete on first paint for a role without them, with the reason; the 403 handling stays as the fallback.
+- Verified: sumopod gate `m3r359` (platform-nest 8260 passed; its 4 reds, the media egress call and three tests following the new answers, fixed in `7a02d047`; ui 5561/5561, next build, repo checks PASS) and GitHub Actions 38165681282 green on every job for the exact merged tree (with M4 F1).
+
+### automation (n8n) `0.4.3` - n8n receives the Zone B intake's settings (2026-10-12) - PROTOTYPED
+
+- `automation/docker-compose.yml` forwards `WEBDESK_EVENT_SECRET`, `WEBDEV_ZONEB_INTAKE_ENABLED`, `WEBDEV_ZONEB_EVENT_TOLERANCE_MS` and `WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID` to n8n. Without them `wd-zoneb-intake` could never verify an event. The live wiring (import the workflow, set the values, then WebDesk's bridge URL) follows this release.
+
+### webdesk `0.9.0` - fail-soft OpenTelemetry traces (off by default) and a webhook cap (2026-10-12) - PROTOTYPED
+
+WebDesk M4, built by the M4 session; it rides this release through the automatic WebDesk deploy.
+
+- A fail-soft OpenTelemetry TRACES bootstrap for the api, off unless configured.
+- At most 10 ENABLED webhooks per tenant (M4 cost doc §3).
+- webdesk: CPU ceilings sum to 1.0 vCPU on the 2-vCPU box (WSK-D72): api 0.40, postgres 0.30, proxy/redis/rustfs 0.10 each (`webdesk/docker-compose.aicenter.yml`).
+- WS4 approval assertion v2 (EdDSA) supported on both sides; inert until keys are installed (M4 F1). WebDesk migration **0018** (a nullable audit column); the ERP compose gains `WEBDESK_CONTROL_WS4_SIGNING_KID` / `WEBDESK_CONTROL_WS4_SIGNING_KEY_FILE` and a key directory mount. While the kid is unset the platform keeps minting v1 (HMAC).
+
+### infra `0.11.0` - a WebDesk-only, write-only OTLP receiver on the ERP collector, off until a token is set (2026-10-12) - PROTOTYPED
+
+M4 T6a (WSK-D63 (2)), built by the M4 session.
+
+- The otel-collector gains `otlp/webdesk`, published ONLY on 172.17.0.1:4319 with bearer auth from `WEBDESK_OTLP_BEARER_TOKEN`. Unset (today), compose passes a fail-closed sentinel and it refuses everything. The ERP pipelines are unchanged. The deploy recreates the collector.
+- The WebDesk egress guard's one OTLP exception (docker0:port), off by default.
+- Enable steps (token, guard exception, WebDesk OTel env) are the M4 session's, with the owner.
+
 ### platform-nest `0.68.0` - website leads can arrive from the site's forms (off by default), and internal clients are marked (2026-10-12) - PROTOTYPED
 
 WebDesk M5 wave 1 (rulings WSK-D66 to D69). Built by the M5 session.

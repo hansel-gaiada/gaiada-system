@@ -57,11 +57,13 @@ export interface PortalPrincipal {
 export async function callerClientIds(c: PoolClient, principal: PortalPrincipal): Promise<string[]> {
   if (!principal.userId) throw new ForbiddenException("not a portal client");
   const r = await c.query<{ id: string }>(
+    // M5-G0b: the internal sentinel client is never part of a portal scope (WSK-D36).
     `SELECT cc.client_id AS id
        FROM client_contacts cc
+       JOIN clients ccl ON ccl.id = cc.client_id AND NOT ccl.is_internal
       WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
       UNION
-     SELECT cl.id FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL`,
+     SELECT cl.id FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL AND NOT cl.is_internal`,
     [principal.userId],
   );
   const ids = r.rows.map((row) => row.id);
@@ -85,7 +87,7 @@ export async function resolvePortalScope(c: PoolClient, principal: PortalPrincip
         AND cc.client_id = ANY($2::uuid[])
       UNION ALL
      SELECT NULL::uuid AS project_id, 'signer' AS capability
-       FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL`,
+       FROM clients cl WHERE cl.portal_user_id = $1 AND cl.deleted_at IS NULL AND NOT cl.is_internal`,
     [principal.userId, clientIds],
   );
   // Any client-wide grant (project_id IS NULL, or the legacy whole-client scheme) => unrestricted.

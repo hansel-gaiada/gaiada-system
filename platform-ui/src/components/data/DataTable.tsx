@@ -45,7 +45,8 @@ export interface DataTableSelection {
 interface Props {
   columns: Column[];
   rows: Record<string, unknown>[];
-  link?: { base: string; idKey: string; labelKey: string };
+  /** `badgeKey`: when that row field is a non-empty string it renders as a small badge after the link (e.g. "Internal"). */
+  link?: { base: string; idKey: string; labelKey: string; badgeKey?: string };
   searchKeys?: string[];
   pageSize?: number;
   csvName?: string;
@@ -307,6 +308,9 @@ export function DataTable({
                       return (
                         <td key={c.key} className={[rightAlign ? "dt--right" : "", numeric ? "dt--num" : ""].filter(Boolean).join(" ") || undefined}>
                           {isLink ? <Link href={`${link!.base}/${r[link!.idKey]}`} className="dt__link">{content}</Link> : content}
+                          {isLink && link!.badgeKey && typeof r[link!.badgeKey] === "string" && r[link!.badgeKey] ? (
+                            <span className="lux-badge" style={{ marginLeft: 8 }} data-testid="row-badge">{String(r[link!.badgeKey])}</span>
+                          ) : null}
                         </td>
                       );
                     })}
