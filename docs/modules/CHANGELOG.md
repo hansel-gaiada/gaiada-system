@@ -11,6 +11,16 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### automation (n8n) `0.5.2` - the Zone B intake answers 502 when the ERP refuses a record, and reads the hub's answer at all (2026-10-12) - DEV-VERIFIED
+
+`automation/workflows/wd-zoneb-intake.json` (WebDesk M3).
+
+- **It never read the hub's answer.** mcp-hub answers `tools/call` as an SSE frame (`event: message` / `data: {...}`); the result parser JSON-parsed the whole text, so every answer read as unparsed (live execution 2660: `parseError` on "event: mes") and no `form.received` could ever notify. It now takes the SSE data line (bare JSON still works).
+- **A refused record answered 200.** `recorded` is true only for a tool result with a boolean `inserted` (true = new, false = a deduped replay). A tool `isError`, a JSON-RPC error or the hub's HTTP error now goes to the new "Recorded?" gate's other branch, "Respond 502 (record failed)", with a typed reason. Both hub calls continue on error, so a failed record reaches the 502 and a failed notice keeps the 200.
+- WebDesk never retries a delivery (fail-soft by design), so a 502 makes a lost fact visible (WebDesk warns, n8n records it); it does not re-send it.
+- Tests: 7 new in `zoneb-intake-workflow-parity.test.ts` run the node's own code on the hub's real answer shapes and pin the wiring (all 7 fail on the old workflow). GitHub Actions run 38210969871 green on the branch.
+- **Live (gda-aicenter, 2026-10-12):** CLI-imported and active. A signed event for the WSK-49e seed tenant answered 200, recorded (`inserted: true`, execution 2666); one for a tenant that does not exist answered 502, "record refused: tool failed: module webdev not enabled for this company" (execution 2665). The release deploy does not ship `automation/`, so this is already live; nothing to re-import.
+
 ### platform-nest `0.84.0` - the scaffold reaches the provisioned repo: platform-nest commits it with the ERP App, first fill only (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6-P4b2 (design `docs/plans/2026-10-12-webdesk-m6-p4b2-scaffold-commit.md`). Built by the M6 session.
