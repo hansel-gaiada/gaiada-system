@@ -27,6 +27,6 @@ Every template carries `.github/workflows/site.yml`: `verify` is skipped in a te
 `qa/build-templates.sh` (M6-P4d2) proves, on Linux, that both templates and one scaffolded fullstack site install
 and build from a clean copy (no network beyond the npm registry, no secrets). Run it in a container:
 
-    docker run --rm -v "$PWD":/src:ro node:22-bookworm bash /src/webdesk/templates/qa/build-templates.sh /src
+    docker run --rm -v "$PWD":/src:ro node:24-bookworm bash /src/webdesk/templates/qa/build-templates.sh /src
 
 It prints PASS/FAIL per step and ends with `### build-templates PASS` or `FAIL` (exit 1). Run it on the server, not a laptop.

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # M6-P4d2 - a real install + build of both site templates, and of one scaffolded fullstack site, on Linux.
 #
-# Run inside a node:22-bookworm container (no secrets, no network beyond the npm registry), from a checkout
+# Run inside a node:24-bookworm container (no secrets, no network beyond the npm registry), from a checkout
 # or `git -c core.autocrlf=false archive` of the repo root:
 #
-#   docker run --rm -v "$PWD":/src:ro node:22-bookworm bash /src/webdesk/templates/qa/build-templates.sh /src
+#   docker run --rm -v "$PWD":/src:ro node:24-bookworm bash /src/webdesk/templates/qa/build-templates.sh /src
 #
 # Steps (each prints PASS/FAIL; the script exits 1 if any failed, and does not stop at the first failure):
 #   1  static-astro: npm install + npm run build         (stub vendor tarballs stand in for the pinned SDK/blocks)
