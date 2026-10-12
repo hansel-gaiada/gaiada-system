@@ -816,6 +816,14 @@ services:
       UMAMI_BASE_URL: ${UMAMI_BASE_URL:-}
       UMAMI_API_KEY: ${UMAMI_API_KEY:-}
       UMAMI_TIMEOUT_MS: ${UMAMI_TIMEOUT_MS:-}
+      # M5-V3-c — the insights collector's ops API (consented visitor channel), reached over WireGuard through the
+      # same read-gate as Umami (e.g. http://10.88.0.2:18743). INSIGHTS_READ_KEY lists events and bots; INSIGHTS_FORGET_KEY
+      # is a DIFFERENT key that only POSTs forget. Empty = "not configured". SEARCH_VISITORS_ENABLED: exactly "1" turns the
+      # visitor feature on (empty = off, never 0). Further SEARCH_VISITORS_* knobs arrive with V3-e at merge.
+      INSIGHTS_BASE_URL: ${INSIGHTS_BASE_URL:-}
+      INSIGHTS_READ_KEY: ${INSIGHTS_READ_KEY:-}
+      INSIGHTS_FORGET_KEY: ${INSIGHTS_FORGET_KEY:-}
+      SEARCH_VISITORS_ENABLED: ${SEARCH_VISITORS_ENABLED:-}
       # M5-V4: the daily content-decay job. OFF unless this is exactly "1" (empty = off, never 0). It only reads
       # our own Search Console rows and Umami (above); set SEARCH_DECAY_INTERVAL_MS (>= 60000) to change the daily cadence.
       SEARCH_DECAY_ENABLED: ${SEARCH_DECAY_ENABLED:-}
