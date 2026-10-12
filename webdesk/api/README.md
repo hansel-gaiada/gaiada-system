@@ -2451,3 +2451,46 @@ for every denial, every denial paired with the same call without `ce`), `test/cl
 resolvers, the command allow-list over the whole registry), `test/editorial-assertion-matrix.spec.ts` rows 27-31 (malformed
 `ce`, `ce: false`, `ce: true` exposed, an unknown claim still ignored, `ce` bound by the signature),
 `test/editorial-assertion-vectors.spec.ts` v4.
+
+## Content checks per site (M5-W3c, PROTOTYPED) — composition `lint.content`, vocabulary 1.3.0
+
+The advisory editorial checks (`src/control/content/lint-rules/**`: one H1, meta lengths, alt text, sources, internal links, the ID twin,
+answer-first, question headings, keyword placement, banned language, the AEO score) used to be tuned for gaiada.com only. A collection's
+composition may now carry `lint.content`; WebDesk serves many sites, so each collection sets its own thresholds. **Vocabulary 1.3.0 is a
+MINOR** (an optional key; the classifier computes it from `webdesk/delivery/test/fixtures/vocabulary-1.2.0.snapshot.json`, where `lint`'s
+key set became a snapshot dimension, as `ui`'s did in 1.2.0). No migration: a composition is stored data (`collections.schema`).
+
+- **Absent member or key = today's constants**, so a collection with no `lint.content` is byte-identical to before
+  (`test/content-lint-site-settings.spec.ts` runs the fixtures through both paths and compares the JSON).
+- **Validated at the composition write** (`schema.apply` -> `validateCollectionComposition`): unknown rule ids, unknown knobs, wrong types,
+  out-of-range values and inverted min/max pairs are refused with a path, never ignored. The stored value is re-validated on resolve; an
+  invalid stored value (only a hand-edited row) resolves to the defaults, wholesale, and never throws.
+- **One resolution** (`resolveContentRulesFromComposition`, called inside `computeContentLint` and by the sign-off snapshot), so a save and
+  `item.get` read the same settings (W3b's read == save invariant); `item.get` reflects the CURRENT composition.
+- **Advisory**: no setting can make a save fail. A rule set `enabled: false` is skipped (not listed in `unavailable`); `aeo.enabled: false`
+  gives `aeo: null`; `enabled: false` at the top removes the `content` member from the lint report (and from the sign-off snapshot).
+- `question-headings.minShare`, `answer-first.*` and `aeo.shortParagraphMaxWords` also feed the AEO score, so they still apply to it
+  when the finding rule itself is switched off. `id-twin.twin` and `banned-language.phrases` REPLACE the default maps.
+
+| Key (under `lint.content`) | Type | Default (today's constant) | Allowed |
+|---|---|---|---|
+| `enabled` | boolean | `true` | |
+| `longFormMinWords` | integer | `300` | 1..100000 |
+| `h1Field` | field name | `"h1"` | `^[A-Za-z][A-Za-z0-9_]{0,63}$` |
+| `primaryKeywordField` | field name | `"primary_keyword"` | same |
+| `altFields` | field name[] | `["image_alt_texts"]` | <= 50 names |
+| `rules.h1.enabled`, `rules.image-alt.enabled`, `rules.sources.enabled`, `rules.primary-keyword.enabled` | boolean | `true` | |
+| `rules.meta.enabled` | boolean | `true` | |
+| `rules.meta.titleMax` | integer | `60` | 1..1000 |
+| `rules.meta.descriptionMin` / `descriptionMax` | integer | `120` / `155` | 0..1000, min <= max |
+| `rules.internal-links.enabled` / `.min` | boolean / integer | `true` / `20` | min 0..10000 |
+| `rules.id-twin.enabled` / `.twin` | boolean / `{lang: lang[]}` | `true` / `{en:["id"], id:["en"]}` | <= 20 languages, codes `[A-Za-z]{2,3}` |
+| `rules.answer-first.enabled` / `.minWords` / `.maxWords` | boolean / integer | `true` / `40` / `60` | 0..1000, min <= max |
+| `rules.question-headings.enabled` / `.minShare` / `.starters` | boolean / number / string[] | `true` / `0.3` / the 24 EN+ID starters | 0..1 / <= 200 entries of 1..120 chars |
+| `rules.banned-language.enabled` / `.phrases` | boolean / `{lang: string[]}` | `true` / the 17 EN phrases | <= 20 languages, <= 200 phrases of 1..120 chars |
+| `rules.aeo.enabled` / `.shortParagraphMaxWords` | boolean / integer | `true` / `80` | 1..10000 |
+
+Not settings, on purpose: a "minimum sources" count and an "AEO warn level" do not exist in the rules today (sources.missing fires when a
+paragraph quotes a percentage and the body cites nothing; the AEO score is shown, never thresholded), so there is no constant to expose.
+Tests: `test/content-lint-site-settings.spec.ts` (no database), `webdesk/delivery/test/w3c-lint-content.test.mjs` (vocabulary suite), and
+the DB-backed extension in `test/content-reads.spec.ts` ("per-site lint.content settings", needs the Linux gate).

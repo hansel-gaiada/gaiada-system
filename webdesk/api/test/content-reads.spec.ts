@@ -200,7 +200,7 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       expect(body.collections.map((c: { key: string }) => c.key)).toEqual(["company", "navigation", "redirect", "service", "token-registry"]);
       const service = body.collections.find((c: { key: string }) => c.key === "service");
       expect(keysOf(service)).toEqual(["composition", "counts", "key", "updatedAt", "vocabularyVersion"]);
-      expect(service.vocabularyVersion).toBe("1.2.0"); // WSK-49a (1.1.0 was WSK-64)
+      expect(service.vocabularyVersion).toBe("1.3.0"); // M5-W3c (1.2.0 was WSK-49a, 1.1.0 WSK-64)
       expect(service.composition.ui).toEqual({ label: "Service pages", group: "Pages", titleField: "h1" });
       expect(Number.isNaN(Date.parse(service.updatedAt))).toBe(false);
       // non-deleted: seo(en) seo(id) draft-only sched unpub legacy = 6. live: seo(en) + legacy. pending: seo(en) seo(id) draft-only unpub.
@@ -581,6 +581,53 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       expect(head.lint.placeholders).toEqual({ unresolvedTokens: [], markers: { CONFIRM: 0, CLIENT: 0 } });
       expect(Array.isArray(head.lint.content.findings)).toBe(true);
       expect(Array.isArray(head.lint.content.unavailable)).toBe(true);
+    });
+
+    it("per-site lint.content settings (M5-W3c): the save and item.get read the same resolved settings", async () => {
+      const fxC = await createContentFixture("rdC");
+      const setLintContent = async (content: unknown) =>
+        asTenant(fxC.tenantId, async (db) => {
+          const { rows } = await db.query(`SELECT schema FROM collections WHERE id = $1`, [fxC.collections.service]);
+          const schema = rows[0].schema;
+          if (content === undefined) delete schema.lint.content;
+          else schema.lint.content = content;
+          await db.query(`UPDATE collections SET schema = $2::jsonb WHERE id = $1`, [fxC.collections.service, JSON.stringify(schema)]);
+        });
+      type ContentLint = { findings: { code: string }[]; aeo: unknown; unavailable: unknown[] };
+      const codes = (l: { content?: ContentLint }) => (l.content?.findings ?? []).map((f) => f.code).filter((c) => !c.startsWith("twin."));
+      const readLint = async (itemId: string) => (await get(itemUrl(fxC, itemId))).json().lint as { content?: ContentLint };
+
+      // 1. no lint.content: today's behaviour. A save with no `seo` reports the meta findings, and item.get agrees.
+      const a = await draft(fxC, "service.w3c-a", { fields: serviceFields({ h1: "W3c A" }), seo: {} });
+      expect(codes(a.lint)).toContain("meta.title.missing");
+      expect(codes(await readLint(a.item.itemId))).toEqual(codes(a.lint));
+
+      // 2. the site switches the meta rule and the AEO score off: a NEW save and item.get agree, and so does the old item.
+      await setLintContent({ rules: { meta: { enabled: false }, aeo: { enabled: false } } });
+      const b = await draft(fxC, "service.w3c-b", { fields: serviceFields({ h1: "W3c B" }), seo: {} });
+      expect(codes(b.lint).some((c: string) => c.startsWith("meta."))).toBe(false);
+      expect(b.lint.content.aeo).toBeNull();
+      expect(b.lint.content.unavailable).toEqual([]);
+      const readB = await readLint(b.item.itemId);
+      expect(codes(readB)).toEqual(codes(b.lint));
+      expect(readB.content!.aeo).toBeNull();
+      expect(codes(await readLint(a.item.itemId)).some((c) => c.startsWith("meta."))).toBe(false); // read == CURRENT settings
+
+      // 3. a threshold: a title limit of 1 makes the same title "too long"; item.get agrees with the save.
+      await setLintContent({ rules: { meta: { titleMax: 1 } } });
+      const c = await draft(fxC, "service.w3c-c", { fields: serviceFields({ h1: "W3c C" }), seo: { title: "Ab", description: "x".repeat(130) } });
+      expect(codes(c.lint)).toContain("meta.title.too-long");
+      expect(codes(await readLint(c.item.itemId))).toEqual(codes(c.lint));
+
+      // 4. the master switch: no `content` member on the save or on item.get; the item is still saved (advisory).
+      await setLintContent({ enabled: false });
+      const d = await draft(fxC, "service.w3c-d", { fields: serviceFields({ h1: "W3c D" }), seo: {} });
+      expect(d.lint.content).toBeUndefined();
+      expect((await readLint(d.item.itemId)).content).toBeUndefined();
+
+      // 5. back to nothing: today's constants again.
+      await setLintContent(undefined);
+      expect(codes(await readLint(a.item.itemId))).toContain("meta.title.missing");
     });
 
     it("lint resolves a token the registry defines", async () => {

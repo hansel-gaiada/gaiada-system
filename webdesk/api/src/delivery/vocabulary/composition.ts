@@ -28,6 +28,11 @@
 // WSK-49a (vocabulary 1.2.0, ruling WSK-D59) adds one optional key to each `ui` object (the collection's
 // and the field's): `clientEditable`. Editor metadata only, so it is PATCH inside a tenant contract and a
 // MINOR vocabulary release; the rule that resolves it is ./client-editable.ts.
+//
+// M5-W3c (vocabulary 1.3.0) adds one optional member to `lint`: `content`, the per-collection settings of the
+// advisory editorial content checks (the rules live in webdesk/api/src/control/content/lint-rules). The
+// validator CLOSES it: unknown rule ids, unknown knobs and out-of-range values are refused at the composition
+// write, never ignored. A MINOR vocabulary release; advisory only, so it can never make a save fail.
 import {
   FIELD_DEF_KEYS,
   FIELD_NAME_PATTERN,
@@ -51,6 +56,26 @@ export type PlaceholderRule =
       registry?: { collection: string; listField: string; keyField: string; valueField: string }
     }
   | { kind: 'marker'; open: string; close: string; label: string }
+
+/**
+ * 1.3.0 (M5-W3c): per-collection settings of the advisory content checks. Every member is optional; an absent
+ * member, rule or knob means "the platform default" (gaiada.com's documented values), so a composition without
+ * `lint.content` behaves exactly as before. The defaults live with the rules (api), not in the vocabulary.
+ */
+export interface ContentLintSettings {
+  /** Master switch: false = the item's lint report has no `content` member. */
+  enabled?: boolean
+  /** A body of at least this many words is long-form and gets the structural checks. */
+  longFormMinWords?: number
+  /** Top-level field holding the page H1 when the H1 is not a `# ` heading in the body. */
+  h1Field?: string
+  /** Top-level field holding the one primary keyword. */
+  primaryKeywordField?: string
+  /** Top-level fields (string or string[]) that hold image alt texts. */
+  altFields?: string[]
+  /** Per rule: `enabled` plus that rule's own thresholds (see CONTENT_LINT_RULE_KNOBS). */
+  rules?: { [ruleId: string]: { enabled?: boolean; [knob: string]: unknown } }
+}
 
 /** 1.1.0: editor-only presentation of a collection. */
 export interface CollectionUi {
@@ -90,7 +115,7 @@ export interface CollectionComposition {
   /** 1.1.0: editor-only. */
   ui?: CollectionUi
   /** 1.1.0: advisory checks computed on save and publish; never blocking. */
-  lint?: { placeholders?: PlaceholderRule[] }
+  lint?: { placeholders?: PlaceholderRule[]; content?: ContentLintSettings }
 }
 
 /** A whole tenant's collections, keyed by `collections.key` (§04). What WSK-19/WSK-15's codegen
@@ -120,7 +145,9 @@ const KNOWN_FIELD_UI_KEYS = new Set<string>(FIELD_UI_KEYS)
 /** 1.1.0: the keys a composition's `ui` object may carry (1.2.0 added `clientEditable`). */
 export const COLLECTION_UI_KEYS = ['label', 'description', 'group', 'order', 'titleField', 'clientEditable'] as const
 const KNOWN_COLLECTION_UI_KEYS = new Set<string>(COLLECTION_UI_KEYS)
-const KNOWN_LINT_KEYS = new Set(['placeholders'])
+/** 1.1.0 `placeholders`; 1.3.0 added `content`. */
+export const LINT_KEYS = ['placeholders', 'content'] as const
+const KNOWN_LINT_KEYS = new Set<string>(LINT_KEYS)
 const TOKEN_RULE_KEYS = new Set(['kind', 'open', 'close', 'registry'])
 const MARKER_RULE_KEYS = new Set(['kind', 'open', 'close', 'label'])
 const REGISTRY_KEYS = ['collection', 'listField', 'keyField', 'valueField'] as const
@@ -284,10 +311,129 @@ function validateCollectionUi(path: string, raw: unknown, fields: unknown): Comp
   return out
 }
 
+// -------------------------------------------------------------------------------------------------
+// 1.3.0 (M5-W3c): lint.content
+// -------------------------------------------------------------------------------------------------
+type ContentKnob =
+  | { kind: 'int'; min: number; max: number }
+  | { kind: 'ratio'; min: number; max: number }
+  | { kind: 'strings'; maxItems: number; maxLen: number }
+  | { kind: 'localeMap'; maxKeys: number; maxItems: number; maxLen: number; valuesAreLocales?: boolean }
+
+const INT = (min: number, max: number): ContentKnob => ({ kind: 'int', min, max })
+
+/** The editorial content rules a composition can switch off or tune, with the knobs each one has (ids = the runner's rule ids). */
+export const CONTENT_LINT_RULE_KNOBS: Record<string, Record<string, ContentKnob>> = {
+  h1: {},
+  meta: { titleMax: INT(1, 1000), descriptionMin: INT(0, 1000), descriptionMax: INT(0, 1000) },
+  'image-alt': {},
+  sources: {},
+  'internal-links': { min: INT(0, 10000) },
+  'id-twin': { twin: { kind: 'localeMap', maxKeys: 20, maxItems: 20, maxLen: 3, valuesAreLocales: true } },
+  'answer-first': { minWords: INT(0, 1000), maxWords: INT(0, 1000) },
+  'question-headings': { minShare: { kind: 'ratio', min: 0, max: 1 }, starters: { kind: 'strings', maxItems: 200, maxLen: 120 } },
+  'primary-keyword': {},
+  'banned-language': { phrases: { kind: 'localeMap', maxKeys: 20, maxItems: 200, maxLen: 120 } },
+  // The AEO score is not a finding rule; it is switched and tuned here like one.
+  aeo: { shortParagraphMaxWords: INT(1, 10000) },
+}
+export const CONTENT_LINT_RULE_IDS: readonly string[] = Object.keys(CONTENT_LINT_RULE_KNOBS)
+/** Top-level members of lint.content. */
+export const CONTENT_LINT_TOP_KEYS = ['enabled', 'longFormMinWords', 'h1Field', 'primaryKeywordField', 'altFields', 'rules'] as const
+const LOCALE_FAMILY = /^[A-Za-z]{2,3}$/
+
+function validateStringList(path: string, v: unknown, maxItems: number, maxLen: number, pattern?: RegExp): CompositionIssue[] {
+  if (!Array.isArray(v)) return [issue(path, 'must be an array of strings', `string[] (at most ${maxItems})`)]
+  if (v.length > maxItems) return [issue(path, `has ${v.length} entries; at most ${maxItems} are allowed`, `string[] (at most ${maxItems})`)]
+  const out: CompositionIssue[] = []
+  v.forEach((x, i) => {
+    if (typeof x !== 'string' || x.length === 0 || x.length > maxLen || (pattern && !pattern.test(x))) {
+      out.push(issue(`${path}[${i}]`, `must be a non-empty string of at most ${maxLen} characters${pattern ? ' (a language code such as "en")' : ''}`, 'string'))
+    }
+  })
+  return out
+}
+
+function validateKnob(path: string, knob: ContentKnob, v: unknown): CompositionIssue[] {
+  switch (knob.kind) {
+    case 'int':
+      return typeof v === 'number' && Number.isInteger(v) && v >= knob.min && v <= knob.max ? [] : [issue(path, `must be a whole number from ${knob.min} to ${knob.max}`, `integer ${knob.min}..${knob.max}`)]
+    case 'ratio':
+      return typeof v === 'number' && Number.isFinite(v) && v >= knob.min && v <= knob.max ? [] : [issue(path, `must be a number from ${knob.min} to ${knob.max}`, `number ${knob.min}..${knob.max}`)]
+    case 'strings':
+      return validateStringList(path, v, knob.maxItems, knob.maxLen)
+    case 'localeMap': {
+      if (!isPlainObject(v)) return [issue(path, 'must be an object keyed by language code', '{ [language]: string[] }')]
+      const keys = Object.keys(v)
+      if (keys.length > knob.maxKeys) return [issue(path, `has ${keys.length} languages; at most ${knob.maxKeys} are allowed`)]
+      const out: CompositionIssue[] = []
+      for (const k of keys) {
+        if (!LOCALE_FAMILY.test(k)) out.push(issue(`${path}.${k}`, 'the key must be a language code such as "en"', 'language code'))
+        out.push(...validateStringList(`${path}.${k}`, v[k], knob.maxItems, knob.maxLen, knob.valuesAreLocales ? LOCALE_FAMILY : undefined))
+      }
+      return out
+    }
+  }
+}
+
+/** Validates ONE collection's `lint.content` value (1.3.0). Strict: unknown keys and out-of-range values are issues. */
+export function validateContentLintSettings(path: string, raw: unknown): CompositionIssue[] {
+  if (raw === undefined) return []
+  if (!isPlainObject(raw)) return [issue(path, 'lint.content must be an object', '{ enabled?, longFormMinWords?, h1Field?, primaryKeywordField?, altFields?, rules? }')]
+  const out = closedKeys(path, raw, new Set<string>(CONTENT_LINT_TOP_KEYS), 'lint.content')
+  out.push(...validateBooleanKey(path, raw.enabled, 'enabled'))
+  if (raw.longFormMinWords !== undefined) out.push(...validateKnob(`${path}.longFormMinWords`, INT(1, 100000), raw.longFormMinWords))
+  for (const k of ['h1Field', 'primaryKeywordField'] as const) {
+    if (raw[k] !== undefined && !(typeof raw[k] === 'string' && FIELD_NAME_PATTERN.test(raw[k] as string))) {
+      out.push(issue(`${path}.${k}`, `${k} must be a field name`, FIELD_NAME_PATTERN.source))
+    }
+  }
+  if (raw.altFields !== undefined) {
+    const list = validateStringList(`${path}.altFields`, raw.altFields, 50, 64)
+    out.push(...list)
+    if (list.length === 0) {
+      ;(raw.altFields as string[]).forEach((f, i) => {
+        if (!FIELD_NAME_PATTERN.test(f)) out.push(issue(`${path}.altFields[${i}]`, 'must be a field name', FIELD_NAME_PATTERN.source))
+      })
+    }
+  }
+  if (raw.rules !== undefined) {
+    const rp = `${path}.rules`
+    if (!isPlainObject(raw.rules)) {
+      out.push(issue(rp, 'rules must be an object keyed by rule id', CONTENT_LINT_RULE_IDS.join(' | ')))
+    } else {
+      out.push(...closedKeys(rp, raw.rules, new Set(CONTENT_LINT_RULE_IDS), 'content rule'))
+      for (const [id, body] of Object.entries(raw.rules)) {
+        const knobs = CONTENT_LINT_RULE_KNOBS[id]
+        if (!knobs) continue // already reported as an unknown rule id
+        const bp = `${rp}.${id}`
+        if (!isPlainObject(body)) {
+          out.push(issue(bp, 'a rule setting must be an object', `{ enabled?${Object.keys(knobs).map((k) => `, ${k}?`).join('')} }`))
+          continue
+        }
+        out.push(...closedKeys(bp, body, new Set(['enabled', ...Object.keys(knobs)]), `${id} rule`))
+        out.push(...validateBooleanKey(bp, body.enabled, 'enabled'))
+        for (const [k, knob] of Object.entries(knobs)) if (body[k] !== undefined) out.push(...validateKnob(`${bp}.${k}`, knob, body[k]))
+      }
+      // Cross-knob order: only when both are numbers, so one mistake yields one issue.
+      const order = (id: string, lo: string, hi: string): void => {
+        const b = (raw.rules as Record<string, unknown>)[id]
+        if (isPlainObject(b) && typeof b[lo] === 'number' && typeof b[hi] === 'number' && (b[lo] as number) > (b[hi] as number)) {
+          out.push(issue(`${rp}.${id}.${lo}`, `${lo} must not be greater than ${hi}`, `${lo} <= ${hi}`))
+        }
+      }
+      order('meta', 'descriptionMin', 'descriptionMax')
+      order('answer-first', 'minWords', 'maxWords')
+    }
+  }
+  return out
+}
+
 function validateLint(path: string, raw: unknown): CompositionIssue[] {
   if (raw === undefined) return []
-  if (!isPlainObject(raw)) return [issue(path, 'lint must be an object', '{ placeholders?: PlaceholderRule[] }')]
+  if (!isPlainObject(raw)) return [issue(path, 'lint must be an object', '{ placeholders?: PlaceholderRule[], content?: ContentLintSettings }')]
   const out = closedKeys(path, raw, KNOWN_LINT_KEYS, 'lint')
+  out.push(...validateContentLintSettings(`${path}.content`, raw.content))
   if (raw.placeholders === undefined) return out
   if (!Array.isArray(raw.placeholders)) return [...out, issue(`${path}.placeholders`, 'lint.placeholders must be an array', 'PlaceholderRule[]')]
   raw.placeholders.forEach((rule, i) => {

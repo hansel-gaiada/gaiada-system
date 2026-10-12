@@ -24,7 +24,11 @@
 //   fieldUiKeys       — the keys a FieldDef's `ui` object accepts (same unknown-key procedure).
 //   collectionUiKeys  — the keys a composition's `ui` object accepts.
 //
-// Both are readable from a 1.1.0 tree too (its validators already close both objects and list the
+// M5-W3c (vocabulary 1.3.0) adds one more:
+//
+//   lintKeys          — the keys a composition's `lint` object accepts (1.1.0 onward; same procedure).
+//
+// Both of the WSK-49 dimensions are readable from a 1.1.0 tree too (its validators already close both objects and list the
 // accepted keys), so the committed 1.1.0 fixture was captured with THIS probe against the untouched
 // 1.1.0 vocabulary (commit 85299efb, before any 1.2.0 edit).
 //
@@ -136,6 +140,18 @@ export function probeCollectionUiKeys(compositionModule) {
   return [...listed].sort()
 }
 
+export function probeLintKeys(compositionModule) {
+  const r = compositionModule.validateCollectionComposition('probe', { lint: { [UNKNOWN_PROBE_KEY]: true } })
+  const listed = keysFromUnknownKeyIssue(r.issues, `probe.lint.${UNKNOWN_PROBE_KEY}`)
+  for (const k of listed) {
+    const rr = compositionModule.validateCollectionComposition('probe', { lint: { [k]: undefined } })
+    if (rr.issues.some((i) => i.path === `probe.lint.${k}` && /unknown lint key/.test(i.message))) {
+      throw new Error(`wsk64-snapshot-probe: lint key "${k}" is listed as accepted but rejected as unknown`)
+    }
+  }
+  return [...listed].sort()
+}
+
 /** The snapshot of the vocabulary at `dir`, computed from that directory's own code only. */
 export async function probeVocabularySnapshot(dir = DEFAULT_VOCABULARY_DIR) {
   const breaking = await load(dir, 'breaking-change.ts')
@@ -153,6 +169,7 @@ export async function probeVocabularySnapshot(dir = DEFAULT_VOCABULARY_DIR) {
     compositionKeys: probeCompositionKeys(composition),
     fieldUiKeys: probeFieldUiKeys(composition),
     collectionUiKeys: probeCollectionUiKeys(composition),
+    lintKeys: probeLintKeys(composition),
   }
 }
 
