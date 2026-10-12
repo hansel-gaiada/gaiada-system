@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	site     = "11111111-2222-3333-4444-555555555555"
-	other    = "99999999-2222-3333-4444-555555555555"
-	readKey  = "read-key-for-tests-0123456789"
-	testIP   = "203.0.113.7"
-	collectP = "/lib/kestrel/e"
+	site      = "11111111-2222-3333-4444-555555555555"
+	other     = "99999999-2222-3333-4444-555555555555"
+	readKey   = "read-key-for-tests-0123456789"
+	forgetKey = "forget-key-for-tests-9876543210"
+	testIP    = "203.0.113.7"
+	collectP  = "/lib/kestrel/e"
 )
 
 type rig struct {
@@ -32,25 +33,28 @@ type rig struct {
 	ctr   *store.BotCounter
 	st    *stats.Counters
 	geoSt geo.Status
+	clock time.Time
 }
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
 	sum := sha256.Sum256([]byte(readKey))
+	fsum := sha256.Sum256([]byte(forgetKey))
 	env := map[string]string{
 		"COLLECT_API_ENDPOINT": collectP, "INSIGHTS_WEBSITES": site, "DATABASE_URL": "postgres://u:p@vdb/vdb",
 		"OPS_READ_KEY_SHA256": hex.EncodeToString(sum[:]), "BUILD_VERSION": "1.2.3-test",
+		"OPS_FORGET_KEY_SHA256": hex.EncodeToString(fsum[:]),
 	}
 	cfg, err := config.Load(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{store: store.NewMemory(), st: &stats.Counters{}}
+	r := &rig{store: store.NewMemory(), st: &stats.Counters{}, clock: rigNow}
 	r.geoSt = geo.Status{City: geo.FileStatus{Loaded: true, Version: "2026-10"}, ASN: geo.FileStatus{Loaded: true, Version: "2026-10"}}
 	r.ctr = store.NewBotCounter(r.store, slog.New(slog.DiscardHandler), r.st)
 	r.h = New(Options{
 		Config: cfg, GeoStatus: func() geo.Status { return r.geoSt }, Store: r.store, Counter: r.ctr, Stats: r.st,
-		Resolver: "network-only", Now: func() time.Time { return time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC) },
+		Resolver: "network-only", Now: func() time.Time { return r.clock },
 	}).Routes()
 	return r
 }
@@ -229,8 +233,7 @@ func TestOnlyGETAndOnlyListedPaths(t *testing.T) {
 			t.Errorf("%s healthz: %d", m, code)
 		}
 	}
-	// V3-b adds forget and events; they must not exist yet.
-	for _, p := range []string{"/ops/v1/forget", "/ops/v1/events", "/ops/v1/", "/ops", "/", "/metrics"} {
+	for _, p := range []string{"/ops/v1/", "/ops", "/", "/metrics", "/ops/v1/forget/x", "/ops/v1/events/1"} {
 		if code, _, _ := r.do("GET", p, auth()); code != 404 {
 			t.Errorf("%s: want 404, got %d", p, code)
 		}

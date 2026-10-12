@@ -34,6 +34,24 @@ const (
 // DefaultCompanyResolver is the resolver used when COMPANY_RESOLVER is empty (design 3.3).
 const DefaultCompanyResolver = "network-only"
 
+// The consented channel's two browser routes (design 4.4). Fixed: the edge routes and the site name these exact paths.
+const (
+	ConsentPath = "/lib/kestrel/v"
+	ForgetPath  = "/lib/kestrel/f"
+)
+
+// MaxBufferRetention is the longest the consented buffer may keep a row (design 4.7: 72 hours). It is a
+// promise in the privacy notice, so the variable can shorten it but never lengthen it.
+const MaxBufferRetention = 72 * time.Hour
+
+// TombstoneRetention is how long a forgotten id's hash is kept (design 4.7: 14 months, like the ERP's).
+const TombstoneRetention = 14 // months
+
+// DefaultConsentEventNames are the event names the consented channel accepts when CONSENT_EVENT_NAMES is empty:
+// the site's goal events (design 5.1) plus the form steps and the language switch. ASSUMPTION: the site's own
+// list is gaiada-web-revamp/src/scripts/tracking/events.ts, which this repository does not hold; V3-j confirms it.
+const DefaultConsentEventNames = "generate_lead,lead_form_start,lead_form_step,lead_form_send,cta_click,click_whatsapp,click_phone,click_email,section_view,language_switch"
+
 // Config is the validated configuration.
 type Config struct {
 	PublicAddr       string // aggregate channel; trusts X-Real-IP (set by the nginx edge)
@@ -48,12 +66,18 @@ type Config struct {
 	ASNFile          string
 	GeoRequired      bool
 	DatabaseURL      string
-	OpsReadKeySHA256 [32]byte
-	IPMode           string
-	CompanyResolver  string
-	BotFlushInterval time.Duration
-	LogLevel         slog.Level
-	Version          string
+	OpsReadKeySHA256 [32]byte // the ERP's read key: /ops/v1/events and /ops/v1/bots
+	// OpsForgetKeySHA256 is the SEPARATE key for /ops/v1/forget (design 4.4, O1): the read key cannot forget.
+	OpsForgetKeySHA256 [32]byte
+	ConsentEventNames  map[string]struct{} // accepted event names on the consented channel
+	ConsentRatePerSec  int                 // global ceiling for /lib/kestrel/v and /f batches per second
+	BufferRetention    time.Duration       // age at which a consented row is purged (default and maximum 72 h)
+	PurgeInterval      time.Duration       // how often the purge loop runs
+	IPMode             string
+	CompanyResolver    string
+	BotFlushInterval   time.Duration
+	LogLevel           slog.Level
+	Version            string
 }
 
 type loader struct {
@@ -98,6 +122,35 @@ func (l *loader) intRange(name string, def, min, max int64) int64 {
 	return n
 }
 
+// keyHash reads a required 64-hex SHA-256 into dst and reports whether it is valid.
+func (l *loader) keyHash(name, what string, dst *[32]byte) bool {
+	raw := l.required(name)
+	if raw == "" {
+		return false
+	}
+	b, err := hex.DecodeString(strings.ToLower(raw))
+	if err != nil || len(b) != 32 {
+		l.fail(name, "must be the 64-hex-character SHA-256 of the "+what+" key")
+		return false
+	}
+	copy(dst[:], b)
+	return true
+}
+
+// validEventName: the same shape the ERP's column accepts (<= 50) and the site uses (snake_case).
+func validEventName(s string) bool {
+	if len(s) == 0 || len(s) > 50 || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // onlyOne is the switch rule: on for exactly "1", off for everything else.
 func onlyOne(v string) bool { return v == "1" }
 
@@ -135,6 +188,8 @@ func Load(get func(string) string) (Config, error) {
 			l.fail("COLLECT_API_ENDPOINT", "must be one absolute path with no query, fragment or spaces")
 		case c.CollectPath == "/healthz", strings.HasPrefix(c.CollectPath, "/ops/"):
 			l.fail("COLLECT_API_ENDPOINT", "must not collide with /healthz or /ops/")
+		case c.CollectPath == ConsentPath || c.CollectPath == ForgetPath:
+			l.fail("COLLECT_API_ENDPOINT", "must not collide with the consented channel paths "+ConsentPath+" and "+ForgetPath)
 		}
 	}
 
@@ -178,14 +233,30 @@ func Load(get func(string) string) (Config, error) {
 
 	c.DatabaseURL = l.required("DATABASE_URL")
 
-	if raw := l.required("OPS_READ_KEY_SHA256"); raw != "" {
-		b, err := hex.DecodeString(strings.ToLower(raw))
-		if err != nil || len(b) != 32 {
-			l.fail("OPS_READ_KEY_SHA256", "must be the 64-hex-character SHA-256 of the read key")
-		} else {
-			copy(c.OpsReadKeySHA256[:], b)
-		}
+	readOK := l.keyHash("OPS_READ_KEY_SHA256", "read", &c.OpsReadKeySHA256)
+	forgetOK := l.keyHash("OPS_FORGET_KEY_SHA256", "forget", &c.OpsForgetKeySHA256)
+	if readOK && forgetOK && c.OpsReadKeySHA256 == c.OpsForgetKeySHA256 {
+		l.fail("OPS_FORGET_KEY_SHA256", "must differ from OPS_READ_KEY_SHA256 (the read key must not be able to forget)")
 	}
+
+	c.ConsentEventNames = map[string]struct{}{}
+	for _, part := range strings.Split(l.str("CONSENT_EVENT_NAMES", DefaultConsentEventNames), ",") {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if !validEventName(name) {
+			l.fail("CONSENT_EVENT_NAMES", "every name must be lower-case letters, digits and underscores, starting with a letter, at most 50 characters")
+			break
+		}
+		c.ConsentEventNames[name] = struct{}{}
+	}
+	if len(c.ConsentEventNames) == 0 && !hasErr(l.errs, "CONSENT_EVENT_NAMES") {
+		l.fail("CONSENT_EVENT_NAMES", "lists no event name")
+	}
+	c.ConsentRatePerSec = int(l.intRange("CONSENT_RATE_PER_SECOND", 100, 1, 10000))
+	c.BufferRetention = time.Duration(l.intRange("BUFFER_RETENTION_HOURS", 72, 1, 72)) * time.Hour
+	c.PurgeInterval = time.Duration(l.intRange("PURGE_INTERVAL_MINUTES", 15, 1, 1440)) * time.Minute
 
 	c.IPMode = l.str("FORWARD_IP_MODE", IPModePseudonym)
 	if c.IPMode != IPModePseudonym && c.IPMode != IPModeReal {

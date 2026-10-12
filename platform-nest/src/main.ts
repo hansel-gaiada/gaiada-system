@@ -176,8 +176,16 @@ import { registerRequestContext } from "./core/request-context";
 // 2026-08-24 — `:tenantId` shape validation. See src/core/tenant-param.ts for why this is a root
 // hook rather than a pipe on 602 `@Param("tenantId")` call sites.
 import { registerTenantParamValidation } from "./core/tenant-param";
+// PV4-03b — per-route body limits for the inline-base64 upload routes (the 1 MiB global default stays).
+import { installUploadBodyLimits, describeUploadRoutes, type UploadRoute } from "./core/upload-body-limits";
 
-export async function buildApp(): Promise<NestFastifyApplication> {
+export interface BuildAppOptions {
+  /** TEST SEAM ONLY: replaces the upload-route table so a test can prove the boot-time drift guard
+   *  throws on an entry that matches no registered route. Production passes nothing. */
+  uploadRoutes?: readonly UploadRoute[];
+}
+
+export async function buildApp(opts: BuildAppOptions = {}): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
   // default preserved for the test oracle).
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -264,7 +272,20 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // is what triggers. A hook added after it would apply to no Nest route at all — and would fail
   // silently, since "nothing rejected" is indistinguishable from "nothing malformed arrived".
   registerTenantParamValidation(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
-  await app.init();
+  // PV4-03b — raise `bodyLimit` on the inline-upload routes ONLY (payment proof + conversation
+  // attachments). Same placement rule as every hook above: this is an `onRoute` hook, so it must be
+  // installed before `app.init()` registers the routes. Fastify's 1 MiB default is untouched for every
+  // other route. See src/core/upload-body-limits.ts for the derivation of each limit.
+  const uploadLimits = installUploadBodyLimits(app.getHttpAdapter().getInstance() as unknown as FastifyInstance, opts.uploadRoutes);
+  try {
+    await app.init();
+    // Fail closed: a table entry that matched no (or two) registered routes means a renamed route has
+    // silently fallen back to 1 MiB. Refuse to boot rather than ship that.
+    uploadLimits.assertAllMatched();
+  } catch (err) {
+    await app.close().catch(() => undefined);
+    throw err;
+  }
   return app;
 }
 
@@ -841,6 +862,8 @@ async function bootstrap(): Promise<void> {
     console.warn("GITHUB_REPO_SYNC_ENABLED=true but GITHUB_REPO_SYNC_TENANT_ID is unset — sweep NOT started");
   }
   const app = await buildApp();
+  // eslint-disable-next-line no-console
+  for (const line of describeUploadRoutes()) console.log(`[upload-body-limits] ${line}`);
   const port = Number(process.env.PLATFORM_PORT ?? 3004);
   const host = process.env.HOST ?? "0.0.0.0";
   await app.listen({ port, host });

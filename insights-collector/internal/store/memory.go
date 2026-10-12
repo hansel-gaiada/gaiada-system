@@ -18,10 +18,21 @@ type Memory struct {
 	Down bool
 	// Calls is every row ever passed to AddBotCounts, in order.
 	Calls []BotCount
+	// Now is the clock for tombstone creation times; time.Now when nil.
+	Now func() time.Time
+
+	events []ConsentedEvent
+	nextID int64
+	tombs  map[tombKey]tomb
+}
+
+type tomb struct {
+	reason  string
+	created time.Time
 }
 
 // NewMemory returns an empty Memory store.
-func NewMemory() *Memory { return &Memory{counts: map[string]int64{}} }
+func NewMemory() *Memory { return &Memory{counts: map[string]int64{}, tombs: map[tombKey]tomb{}} }
 
 // ErrDown is returned while Memory.Down is set.
 var ErrDown = errors.New("store down")

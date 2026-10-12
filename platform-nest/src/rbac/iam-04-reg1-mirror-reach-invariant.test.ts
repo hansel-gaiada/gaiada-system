@@ -538,6 +538,14 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "resource_search_finding.triage": ["search_manager", "search_staff"],
   "resource_search_finding.accept_risk": ["search_manager"],
   "resource_search_property.attest": ["search_manager"],
+  // M5-V3-f (2026-10-12): same module-mediated shape as `attest` above. The role arm needs a search_manager grant AND
+  // `resource.attr.module == "search"`; the perm mirror (perm_resource_search_property_{read_visitors,view_replay}) needs
+  // neither the module nor the grant, only the permission key, which the search_manager bundle carries. Every handler
+  // that authorizes this kind passes module "search" (SearchController; the V3-g visitors controller must too), so the
+  // gap is unreachable today. Recorded, not fixed: the mirror IS the requested "a granted permission grants exactly its
+  // action" and is the only way a grant outside the search_manager role (e.g. via a position) can reach it.
+  "resource_search_property.read_visitors": ["search_manager"],
+  "resource_search_property.view_replay": ["search_manager"],
   "resource_search_campaign.read": ["search_manager", "search_staff"],
   "resource_search_campaign.create": ["search_manager", "search_staff"],
   "resource_search_campaign.update": ["search_manager", "search_staff"],
