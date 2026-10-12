@@ -190,7 +190,9 @@ test("the item list shows each item's review state and filters by it", async ({ 
   await expect(page).toHaveURL(/review=in_review/);
   await expect(page.getByTestId("items-table")).toContainText("service.local-seo");
   await expect(page.getByTestId("items-table")).not.toContainText("service.web-design");
-  await expect(page.getByTestId("review-filter-note")).toContainText("loaded on this page");
+  // the server filtered the whole collection: no "this page only" caveat, and the filter survives paging links
+  await expect(page.getByTestId("review-filter-note")).toHaveCount(0);
+  await expect(page.getByTestId("filter-review")).toHaveValue("in_review");
 });
 
 test("the Writers' room tab opens the board, grouped by state with the site's counts; withheld counts are said in words", async ({ page }) => {

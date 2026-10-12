@@ -61,30 +61,16 @@ describe("ItemsPanel: the review-state filter", () => {
     expect(sel.value).toBe("in_review");
   });
 
-  it("keeps only the matching rows, and says it filters this page", () => {
-    render(withFilters(items(), "in_review", true));
-    expect(screen.getAllByRole("row")).toHaveLength(2); // header + the one match
-    expect(screen.getByText("B")).toBeTruthy();
-    expect(screen.queryByText("A")).toBeNull();
-    const note = screen.getByTestId("review-filter-note").textContent ?? "";
-    expect(note).toMatch(/in review items among the 4 loaded on this page/);
-    expect(note).toMatch(/does not search them/);
-  });
-
-  it("rows that never reported a review state, and rows where review is off, never match a state", () => {
-    render(withFilters([
-      summary({ itemId: "z", slug: "z", title: "Z" }),
-      summary({ itemId: "y", slug: "y", title: "Y", editorial: rev("draft", { reviewRequired: false }) }),
-      summary({ itemId: "a", slug: "a", title: "A", editorial: rev("draft") }),
-    ], "draft"));
-    expect(screen.queryByText("Z")).toBeNull();
-    expect(screen.queryByText("Y")).toBeNull();
-    expect(screen.getByText("A")).toBeTruthy();
-    expect(screen.getByTestId("review-filter-note").textContent).toMatch(/1 item on this page had no review state reported and is not shown/);
+  it("the server did the filtering: every row it returned is shown, none is dropped again, and there is no 'this page only' caveat", () => {
+    // what `?reviewState=in_review` returns from WebDesk is already the filtered collection (all pages); the panel must not re-filter it
+    render(withFilters([items()[1], summary({ itemId: "z", slug: "z", title: "Z" }), summary({ itemId: "y", slug: "y", title: "Y", editorial: rev("draft", { reviewRequired: false }) })], "in_review", true));
+    expect(screen.getAllByRole("row")).toHaveLength(4); // header + the 3 rows given
+    expect(screen.queryByTestId("review-filter-note")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/loaded on this page|does not search/);
   });
 
   it("no match is said as such, not as an empty collection", () => {
-    render(withFilters([summary({ editorial: rev("draft") })], "approved"));
+    render(withFilters([], "approved"));
     expect(screen.getByText("No items match these filters.")).toBeTruthy();
   });
 

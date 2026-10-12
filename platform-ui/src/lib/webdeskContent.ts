@@ -632,6 +632,7 @@ export async function wdCall<T>(path: string, userId: string, parse: (raw: unkno
 // ── Paths ────────────────────────────────────────────────────────────────────────────────────────
 
 const enc = encodeURIComponent;
+const REVIEW_STATE_VALUES = ["draft", "in_review", "changes_requested", "approved"] as const;
 export const contentBase = (company: string) => `/api/${enc(company)}/modules/webdev/content`;
 export const siteBase = (company: string, tenantSlug: string, siteId: string) =>
   `${contentBase(company)}/sites/${enc(tenantSlug)}/${enc(siteId)}`;
@@ -651,12 +652,15 @@ export function listCollections(userId: string, company: string, tenantSlug: str
 
 export interface ItemListQuery {
   locale?: string; state?: string; q?: string; cursor?: string; limit?: number;
+  /** M5-W2e: draft | in_review | changes_requested | approved, filtered by WebDesk over the WHOLE collection. An unknown value is not sent. */
+  reviewState?: string;
 }
 
 export function listItems(userId: string, company: string, tenantSlug: string, siteId: string, collectionKey: string, q: ItemListQuery = {}) {
   const p = new URLSearchParams();
   if (q.locale) p.set("locale", q.locale);
   if (q.state) p.set("state", q.state);
+  if (q.reviewState && (REVIEW_STATE_VALUES as readonly string[]).includes(q.reviewState)) p.set("reviewState", q.reviewState);
   if (q.q) p.set("q", q.q);
   if (q.cursor) p.set("cursor", q.cursor);
   p.set("limit", String(Math.min(q.limit ?? 100, 100)));

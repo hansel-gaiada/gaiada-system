@@ -887,7 +887,12 @@ export class WebdeskContentService {
     // PHASE 2 (before the query is validated): reading a collection's items. `collectionKey` is the route's (WebDesk 404s
     // `collection-not-found` for one that does not exist, so a forged key reads nothing); no locale: reading is any-locale.
     await authorize(gate.principal, ItemGate.resourceOf(gate, editable.site.siteId, null, { collectionKey, locale: "" }), "read");
-    const { slug, ...query } = strictQuery(rawQuery, ["locale", "state", "q", "includeDeleted", "cursor", "limit", "slug"]);
+    const { slug, ...query } = strictQuery(rawQuery, ["locale", "state", "reviewState", "q", "includeDeleted", "cursor", "limit", "slug"]);
+    // M5-W2e: WebDesk's `item.list` filters on `reviewState` (draft | in_review | changes_requested | approved); forwarded under that name.
+    // Checked here, after the phase-2 `authorize` above, so a denied caller is 403 for any query and an unknown value is a 400.
+    if (query.reviewState !== undefined && !REVIEW_STATES.includes(query.reviewState)) {
+      throw invalidRequest(`reviewState must be one of ${REVIEW_STATES.join(", ")}`);
+    }
     const read = (q: Query) =>
       this.zoneB.read({
         command: "item.list",

@@ -14,9 +14,8 @@ export const ITEM_STATES = ["draft", "live", "scheduled", "unpublished", "delete
 /** `content/[tenant]/[site]/[collection]` — the item list with locale / state / review state / pending / search
  *  filters. The filters are a plain GET form: the view stays server-rendered and shareable.
  *
- *  REVIEW (M5-W2e): each row shows its review state (words + shape, see `ReviewStateChip`). The review filter narrows the items LOADED
- *  ON THIS PAGE: the BFF's item list takes no `reviewState` parameter yet (a contract gap, FRONTEND-BFF-CONTRACT §27 note), so the
- *  panel says so rather than implying a site-wide search. A row whose review state WebDesk did not report never matches a state. */
+ *  REVIEW (M5-W2e): each row shows its review state (words + shape, see `ReviewStateChip`). The review filter is sent to the server
+ *  (`?reviewState=`, WebDesk's own filter), so it narrows the WHOLE collection and the pager follows the filtered list. */
 export function ItemsPanel({
   list, locales, filters, editorBase, authors, filterAction,
 }: {
@@ -35,8 +34,7 @@ export function ItemsPanel({
     : null;
   // Review column: shown when WebDesk reported a review member for at least one row (an older WebDesk sends none: no column, no claim).
   const showReview = list.items.some((i) => i.editorial !== undefined);
-  const rows = review ? list.items.filter((i) => i.editorial?.reviewRequired === true && i.editorial.state === review) : list.items;
-  const unreported = review ? list.items.filter((i) => i.editorial === undefined).length : 0;
+  const rows = list.items;
   return (
     <div className="wc-page">
       <form method="get" action={filterAction} className="wc-filter" aria-label="Filter items">
@@ -68,13 +66,6 @@ export function ItemsPanel({
         <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
         {filtered && <Link href={filterAction} className="lux-btn lux-btn--ghost lux-btn--sm">Clear</Link>}
       </form>
-
-      {review && (
-        <p className="wc-muted" role="note" data-testid="review-filter-note">
-          Showing the {reviewStateInfo(review).label.toLowerCase()} items among the {list.items.length} loaded on this page{list.page.hasMore ? "; more pages follow, and this filter does not search them until you open them" : ""}.
-          {unreported > 0 ? ` ${unreported} item${unreported === 1 ? "" : "s"} on this page had no review state reported and ${unreported === 1 ? "is" : "are"} not shown.` : ""}
-        </p>
-      )}
 
       {rows.length === 0 ? (
         <Card title="Items">

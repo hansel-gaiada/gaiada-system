@@ -282,6 +282,15 @@ describe("request shapes", () => {
     const url = new URL(fetchMock.mock.calls[0][0] as string, "http://x");
     expect(Object.fromEntries(url.searchParams)).toEqual({ locale: "id", state: "pending", q: "seo", cursor: "100", limit: "100" });
   });
+  it("M5-W2e: `reviewState` is forwarded (server-side filter over the whole collection); a value that is not a review state is not sent", async () => {
+    fetchMock.mockResolvedValue({ items: [], page: { cursor: null, hasMore: false, limit: 100 } });
+    await listItems("u", "c", "gaiada", "s1", "service", { reviewState: "in_review", state: "pending" });
+    await listItems("u", "c", "gaiada", "s1", "service", { reviewState: "published" });
+    const first = Object.fromEntries(new URL(fetchMock.mock.calls[0][0] as string, "http://x").searchParams);
+    const second = Object.fromEntries(new URL(fetchMock.mock.calls[1][0] as string, "http://x").searchParams);
+    expect(first).toEqual({ state: "pending", reviewState: "in_review", limit: "100" });
+    expect(second).toEqual({ limit: "100" });
+  });
   it("wdCall forwards init (method/body) untouched and validates the response", async () => {
     fetchMock.mockResolvedValue(writeResult());
     const r = await wdCall("/p", "u", parseItemWriteResult, { method: "PUT", body: "{}" });

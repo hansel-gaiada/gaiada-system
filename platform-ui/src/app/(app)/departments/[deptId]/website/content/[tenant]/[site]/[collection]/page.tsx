@@ -36,7 +36,7 @@ export default async function WebsiteCollectionPage({ params, searchParams }: { 
   }
 
   const [list, authors] = await Promise.all([
-    listItems(c.userId, c.company, tenant, site, collectionKey, { locale: sp.locale, state: sp.state, q: sp.q, cursor: sp.cursor }),
+    listItems(c.userId, c.company, tenant, site, collectionKey, { locale: sp.locale, state: sp.state, reviewState: sp.review, q: sp.q, cursor: sp.cursor }),
     resolveAuthorNames(c.userId, c.company),
   ]);
   if (list.kind !== "ok") return <WdRefusal result={list} subject={`the ${collectionLabel(collection)} list`} retryHref={here} />;

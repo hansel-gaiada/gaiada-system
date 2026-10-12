@@ -363,6 +363,8 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
       if (state === "live") its = its.filter((i) => i.publishState === "published");
       if (state === "scheduled" || state === "unpublished") its = its.filter((i) => i.publishState === state);
       if (state === "pending") its = its.filter((i) => summary(S, i).pendingChanges);
+      // M5-W2e: WebDesk's `reviewState` filter over the WHOLE collection (an item the flow never touched reads as draft).
+      if (query.get("reviewState")) its = its.filter((i) => (S.review.items.get(i.itemId)?.state ?? "draft") === query.get("reviewState"));
       const q = (query.get("q") ?? "").toLowerCase();
       if (q) its = its.filter((i) => i.slug.toLowerCase().includes(q) || (titleOf(S, i) ?? "").toLowerCase().includes(q));
       its.sort((a, b) => a.slug.localeCompare(b.slug) || a.locale.localeCompare(b.locale) || a.itemId.localeCompare(b.itemId));

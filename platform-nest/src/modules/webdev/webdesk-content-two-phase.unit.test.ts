@@ -304,6 +304,32 @@ describe("provenance: a body or a query cannot set siteId, collectionKey, locale
     expect(zb.calls.filter((c) => c.command === "item.list")).toHaveLength(0);
   });
 
+  it("M5-W2e: the item list takes `reviewState` as a filter: each state is forwarded under WebDesk's own name, an unknown one is a 400 after the check, and a denied caller is 403 for any value", async () => {
+    draftBy(WRITER, { slug: "post.rs" });
+    const g = await siteGate(writer(), "webdesk_content_item", "read");
+    for (const st of ["draft", "in_review", "changes_requested", "approved"]) {
+      zb.calls.length = 0;
+      await svc.listItems(g, site, "post", { reviewState: st, limit: "5" });
+      const call = zb.calls.find((c) => c.command === "item.list")!;
+      expect(call.query).toEqual({ reviewState: st, limit: "5" });
+    }
+    // an unknown or oddly-cased value never reaches WebDesk
+    for (const bad of ["", "Draft", "published", "in-review", "draft,approved"]) {
+      zb.calls.length = 0;
+      await expect(svc.listItems(g, site, "post", { reviewState: bad })).rejects.toMatchObject({ status: 400 });
+      expect(zb.calls.filter((c) => c.command === "item.list")).toHaveLength(0);
+    }
+    // the phase-2 read check ran BEFORE the value was looked at, with the route's collection
+    expect(asksOf("webdesk_content_item", "read").at(-1)!.resource).toMatchObject({ siteId: GAIADA_SITE, collectionKey: "post" });
+    // authorization first: a collection the writer has no scope for is 403 for a VALID value and for an invalid one alike, and WebDesk is not asked
+    zb.calls.length = 0;
+    await expect(svc.listItems(g, site, "guide", { reviewState: "draft" })).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(svc.listItems(g, site, "guide", { reviewState: "nonsense" })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(zb.calls.filter((c) => c.command === "item.list")).toHaveLength(0);
+    // and a second, repeated value is the existing one-string rule
+    await expect(svc.listItems(g, site, "post", { reviewState: ["draft", "approved"] })).rejects.toMatchObject({ status: 400 });
+  });
+
   it("create: collectionKey is the ROUTE's (collection.get proves it), locale is the body's, and nothing else the body says reaches Cerbos", async () => {
     const g = () => siteGate(writer(), "webdesk_content_item", "create");
     const body = { locale: "en", slug: "post.new", fields: { h1: "a" } };
