@@ -23,7 +23,7 @@
 //
 // AFTER COMMIT, fail-soft: tenant-webhook events (content.published / .unpublished / .scheduled,
 // item refs only, never values) and a `content.cache_invalidate` log line with the Cache-Tag set
-// (no CDN fronts /v1 yet; WSK-27 wires the purge). Neither can fail or undo a committed command.
+// (no CDN fronts /v1 yet; WSK-70 wires the purge, WSK-D50). Neither can fail or undo a committed command.
 //
 // Every public method takes an EditorialCommandContext, which holds the EditorialPrincipal that
 // EditorialAssertionGuard resolved; audit actor, content_versions.created_by and last_published_by

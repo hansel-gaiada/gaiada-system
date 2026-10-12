@@ -1,0 +1,19 @@
+---
+// Hand-owned page shell. Generated pages wrap their blocks in this layout.
+interface Props {
+  title: string;
+  lang?: string;
+}
+const { title, lang = "en" } = Astro.props;
+---
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

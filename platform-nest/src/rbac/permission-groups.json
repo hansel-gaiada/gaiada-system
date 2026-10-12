@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 155,
-      "grantablePermissionsInCatalog": 415,
-      "permissionsCoveredByGroups": 377,
+      "groups": 156,
+      "grantablePermissionsInCatalog": 419,
+      "permissionsCoveredByGroups": 381,
       "permissionsAdvancedOnly": 38,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 106
+      "sensitiveGroups": 107
     }
   },
   "groups": [
@@ -1777,6 +1777,19 @@
         "webdev.webdesk_media_asset.upload",
         "webdev.webdesk_media_asset.update",
         "webdev.webdesk_media_asset.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "webdev_site_registry",
+      "name": "Website Portfolio Registry",
+      "domain": "webdev",
+      "description": "View the estate's site portfolio registry, add a site to it, set a site's credential-vault pointer, and ask for probe consent on a client domain (files a request that grants nothing). M6-P3c: the registry's own kind, no longer borrowed from provisioning.",
+      "permissions": [
+        "webdev.site.read",
+        "webdev.site.create",
+        "webdev.site.update",
+        "webdev.site.request_probe_consent"
       ],
       "sensitive": true
     },

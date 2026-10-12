@@ -44,12 +44,12 @@ export class ConsoleReadsController {
   // touch. It reads Zone A's own tables only: no egress, nothing to be stale about, and no reason
   // for it to degrade when Zone B is unreachable.
   //
-  // Reuses `webdev_provisioned_site:read` rather than minting a Cerbos kind — the same reasoning as
-  // WSK-23, which established that precedent for this module's read surface: a new kind costs six
-  // coupled artifacts and this is the same audience reading the same department's site facts.
+  // Authorized as `webdev_site:read` (M6-P3c): the registry's own kind, behaviour-preserving against
+  // the `webdev_provisioned_site:read` it borrowed before. (The other console reads below still read
+  // `webdev_provisioned_site`, the Zone B mirror they actually describe.)
   @Get("console/portfolio")
   async portfolio(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string): Promise<PortfolioResult> {
-    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, "read");
+    await authorize(req.principal, { kind: "webdev_site", tenantId, module: "webdev" }, "read");
     return getPortfolio(tenantId);
   }
 
@@ -64,9 +64,10 @@ export class ConsoleReadsController {
   // ── WHY THE REQUESTER IS GATED ON A WEBDEV ACTION, NOT A SEARCH ONE ───────────────────────────
   // The obvious gate is `resource_search_property · read` — you should see a property to ask about
   // it. It is the wrong gate HERE: Web Dev staff read consent and hosting topology through the
-  // PORTFOLIO, which authorizes `webdev_provisioned_site · read` (see `portfolio()` above), and
-  // requiring a search action would lock out exactly the people the flow is for. So the requester
-  // proves the same thing they already proved to see the row, and no more.
+  // PORTFOLIO, which authorizes `webdev_site · read` (see `portfolio()` above), and requiring a
+  // search action would lock out exactly the people the flow is for. So the requester proves the same
+  // reach they already proved to see the row, and no more: `webdev_site · request_probe_consent` (M6-P3c)
+  // is its own action, with `read`'s exact role tiers today, so the two can diverge later.
   //
   // That is defensible because filing a request grants NOTHING and mutates no domain state: the
   // bounded risk is queue noise from someone who can already see the site, which is the audience
@@ -80,7 +81,7 @@ export class ConsoleReadsController {
     @Param("tenantId") tenantId: string,
     @Body() body: { propertyId?: string; basis?: string },
   ): Promise<{ ok: true; approvalId: string; domain: string; attestation: string }> {
-    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, "read");
+    await authorize(req.principal, { kind: "webdev_site", tenantId, module: "webdev" }, "request_probe_consent");
 
     // `requested_by` is the whole point of a request: it records WHO asserted the basis, and the
     // decide path's anti-privilege-amplification checks key on it. A principal with no user id

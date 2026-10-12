@@ -86,8 +86,8 @@ services:
     profiles: !reset []
     image: !reset null
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     command: !override ["node", "dist/main.js"]
     ports: !reset []
     # THE COMPOSE ENV-PASSTHROUGH TRAP, caught by the first real boot (2026-08-29).

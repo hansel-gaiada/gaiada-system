@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **187** capabilities across **16** owners
-- **98** writes · 89 reads
+- **189** capabilities across **16** owners
+- **98** writes · 91 reads
 - Writes by impact: **high 24** · medium 31 · low 43
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -43,7 +43,7 @@ unfalsifiable after.
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 14 |
-| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 27 |
+| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 28 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 5 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 20 |
+| webdev | `webdev` | 21 |
 
 ## Capabilities
 
@@ -244,6 +244,8 @@ unfalsifiable after.
 | webdev | `webdesk.site.rollback` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/rollback` | write | `high` |
 | webdev | `webdesk.site.setDomain` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/domain` | write | `high` |
 | webdev | `webdesk.siteStatus` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/status` | read | — |
+| webdev | `webdev.contracts.artifact` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact` | read | — |
+| webdev | `webdev.contracts.get` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId` | read | — |
 | webdev | `webdev.provisionSite` | `POST` | `/api/:tenantId/modules/webdev/provision` | write | `medium` |
 | webdev | `webdev.recordZoneBEvent` | `POST` | `/api/:tenantId/modules/webdev/zoneb-events` | write | `low` |
 | webdev | `webdev.refreshContract` | `POST` | `/api/:tenantId/modules/webdev/contracts/refresh` | write | `medium` |

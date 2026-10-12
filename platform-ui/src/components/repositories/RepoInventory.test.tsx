@@ -159,3 +159,11 @@ describe("RepoInventory — the department's code, one row per repo", () => {
     expect(screen.getByText(/github: hansel-gh · linked/i)).toBeInTheDocument();
   });
 });
+
+describe("RepoInventory — awaiting approval and failure reason (M6-P4f)", () => {
+  it("a repo waiting on an approval says so and links to it", () => {
+    render(<RepoInventory state={{ kind: "ok", rows: [row({ id: "p1", status: "pending", statusLabel: "Awaiting approval", approvalHref: "/approvals/appr-9", canReconcile: true })] }} github={github} mayReconcile actions={actions()} pipelineHref="/pipeline" />);
+    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /review the approval/i })).toHaveAttribute("href", "/approvals/appr-9");
+  });
+});

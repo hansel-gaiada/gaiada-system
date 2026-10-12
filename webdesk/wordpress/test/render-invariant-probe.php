@@ -37,7 +37,7 @@ function check(bool $ok, string $label): void
 $blocks = [
     ['type' => 'hero', 'props' => ['heading' => 'Welcome to Acme', 'subheading' => 'A distinctive seeded string: WSK35-HERO-MARKER']],
     ['type' => 'pricingTable', 'props' => ['tiers' => [['name' => 'Pro', 'price' => 99]]]], // NOT in the vocabulary
-    ['type' => 'richText', 'props' => ['value' => '<p>A distinctive seeded string: WSK35-RICHTEXT-MARKER</p>']],
+    ['type' => 'richText', 'props' => ['content' => '<p>A distinctive seeded string: WSK35-RICHTEXT-MARKER</p>']],
 ];
 
 $html = gaiada_render_blocks($blocks, 'article', 'welcome');
@@ -61,8 +61,8 @@ check(($reports[0]['collection'] ?? null) === 'article' && ($reports[0]['slug'] 
 //    check #5 above by accident; this proves the "known" path is not a no-op.
 // ---------------------------------------------------------------------------------------------
 $allKnown = [
-    ['type' => 'cta', 'props' => ['label' => 'WSK35-CTA-MARKER', 'href' => '/go']],
-    ['type' => 'faq', 'props' => ['items' => [['question' => 'WSK35-FAQ-Q', 'answer' => 'WSK35-FAQ-A']]]],
+    ['type' => 'cta', 'props' => ['heading' => 'WSK35-CTA-HEADING', 'buttonLabel' => 'WSK35-CTA-MARKER', 'buttonHref' => '/go']],
+    ['type' => 'faq', 'props' => ['items' => [['collection' => 'faqItem', 'slug' => 'WSK35-FAQ-Q']]]],
 ];
 $htmlAllKnown = gaiada_render_blocks($allKnown, 'article', 'faq-page');
 $reportsAllKnown = gaiada_drain_unknown_block_reports();

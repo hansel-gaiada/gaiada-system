@@ -1825,16 +1825,17 @@ every row that ever entered it was a direct test SQL INSERT. `vaultRef` is a POI
 must resolve to a real, same-tenant connection row, and a regression test asserts `webdev_sites`
 carries no column matching `/token|secret|password|credential/i`.
 
-Authz reuses the ALREADY-REGISTERED `webdev_provisioned_site` kind's existing literal actions
-(`provision` for create, `operate` for the vault-ref patch) rather than minting a new kind/action for
-this table — a deliberate, flagged trade-off (see `webdev.controller.ts`'s own VLT-2 comment): the
-`id` Cerbos sees for the PATCH names a `webdev_sites` row, not a `webdev_provisioned_sites` one.
+Authz (**M6-P3c, 2026-10-12**): the registry has its OWN Cerbos kind, `webdev_site` (`resource_webdev_site.yaml`:
+`read`/`create`/`update`/`request_probe_consent`), replacing the borrowed `webdev_provisioned_site`
+`provision`/`operate`/`read` that VLT-2 shipped with. Behaviour-preserving: each action carries the exact reach of the one
+it replaced (`create`<-`provision`, `update`<-`operate`, `read`<-`read`, `request_probe_consent`<-`read`), pinned by
+`src/rbac/cerbos-webdev-site.test.ts`. The `id` Cerbos sees for GET/PATCH names a `webdev_sites` row.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | POST | `/api/:t/modules/webdev/sites` | `{domain, environment?, projectId?, clientId?, hostKind?, hostRef?, access?, kind?, repoUrl?, repoBranch?, adoption?, contractVersion?, origin?, notes?}` → `201 WebdevSiteDto`. `vaultRef` is NOT accepted here (400 if present) — set it via the PATCH below, the one place that resolves it. `clientId` is deliberately nullable with no default (WSK-D35: an internal site with no client is a legitimate fact). 409 on a duplicate domain or a second `production` row for the same project (the table's own partial unique indexes). Authz: `webdev_provisioned_site` provision. |
-| ✅ | GET | `/api/:t/modules/webdev/sites/:id` | `WebdevSiteDto`. Authz: `webdev_provisioned_site` read. |
-| ✅ | PATCH | `/api/:t/modules/webdev/sites/:id` | Body must be EXACTLY `{vaultRef: string\|null}` — any other top-level key is a 400 (proves this cannot become a backdoor write path for any other column). `vaultRef` a string must resolve to an `integration_connections.id` in the SAME tenant (400 otherwise) or `null` to clear the pointer. Authz: `webdev_provisioned_site` operate. |
+| ✅ | POST | `/api/:t/modules/webdev/sites` | `{domain, environment?, projectId?, clientId?, hostKind?, hostRef?, access?, kind?, repoUrl?, repoBranch?, adoption?, contractVersion?, origin?, notes?}` → `201 WebdevSiteDto`. `vaultRef` is NOT accepted here (400 if present) — set it via the PATCH below, the one place that resolves it. `clientId` is deliberately nullable with no default (WSK-D35: an internal site with no client is a legitimate fact). 409 on a duplicate domain or a second `production` row for the same project (the table's own partial unique indexes). Authz: `webdev_site` create (M6-P3c; was `webdev_provisioned_site` provision, same reach). |
+| ✅ | GET | `/api/:t/modules/webdev/sites/:id` | `WebdevSiteDto`. Authz: `webdev_site` read (M6-P3c; was `webdev_provisioned_site` read, same reach). |
+| ✅ | PATCH | `/api/:t/modules/webdev/sites/:id` | Body must be EXACTLY `{vaultRef: string\|null}` — any other top-level key is a 400 (proves this cannot become a backdoor write path for any other column). `vaultRef` a string must resolve to an `integration_connections.id` in the SAME tenant (400 otherwise) or `null` to clear the pointer. Authz: `webdev_site` update (M6-P3c; was `webdev_provisioned_site` operate, same reach). |
 | — | — | — | `WebdevSiteDto`: `{id, tenantId, domain, environment, projectId, clientId, hostKind, hostRef, access, kind, repoUrl, repoBranch, adoption, contractVersion, origin, vaultRef, notes, createdAt, updatedAt}`. `getPortfolio()`'s read model (§24-adjacent) now also carries `vaultRef` on each `PortfolioSite`. |
 
 ### 16h. Social post client-review (SMM-31, D-16) — `src/core/social-client-review-portal.controller.ts` — **STATUS: DEV-VERIFIED backend; portal UI IN PROGRESS (SMM-32)**
@@ -3833,7 +3834,7 @@ existed. Its own module key is the EXISTING `webdev` (WSK-12/19/PRV-02 already o
 | GET | `/api/:t/modules/webdev/console/sites/:slug/releases` | `{ releases: ReleaseFact[], meta: DegradeMeta }` | `webdev_provisioned_site:read` |
 | GET | `/api/:t/modules/webdev/console/sites/:slug/submissions[?formId=]` | `{ submissions: SubmissionFact[], meta: DegradeMeta }` — slim projection only (`submissionId, formId, hasAttachments, receivedAt`); Zone A never receives submission content over the bridge, so this is PII-aware by construction, not by filtering | `webdev_provisioned_site:read` |
 | GET | `/api/:t/modules/webdev/console/contract-pins[?slug=]` | `{ pins: ContractPinStatus[] }` — WSK-19's pinned snapshot × the live-or-degraded "latest published" read | `webdev_contract_snapshot:read` (existing kind/action, WSK-19) |
-| GET | `/api/:t/modules/webdev/console/portfolio` | `{ projects: PortfolioProject[], counts }` — the ESTATE portfolio, grouped by project with each environment (`production`/`staging`/`preview`/`development`) as its own row. **Reads Zone A tables only — no `DegradeMeta`, because there is no egress and nothing to be stale about.** Left-joins `search_properties` for hosting topology and the `crawlConsent` gate rather than duplicating either. Distinct from `console/sites` above, which answers "which Zone B tenants exist"; this answers "what does the estate consist of", including the sites we do not host and must not touch | `webdev_provisioned_site:read` (existing kind/action) | **UI: `platform-ui/src/app/(app)/departments/[deptId]/sites/portfolio/page.tsx` (+ `[siteId]/page.tsx`, which resolves one row out of this same list read — there is no single-site GET) via `lib/webdeskPortfolio.ts`. As of 2026-09-03 this is Web Dev's ONLY site surface; `sites` `permanentRedirect`s here. See the `lastSeenAt`/`lastHttpStatus` warning below.** |
+| GET | `/api/:t/modules/webdev/console/portfolio` | `{ projects: PortfolioProject[], counts }` — the ESTATE portfolio, grouped by project with each environment (`production`/`staging`/`preview`/`development`) as its own row. **Reads Zone A tables only — no `DegradeMeta`, because there is no egress and nothing to be stale about.** Left-joins `search_properties` for hosting topology and the `crawlConsent` gate rather than duplicating either. Distinct from `console/sites` above, which answers "which Zone B tenants exist"; this answers "what does the estate consist of", including the sites we do not host and must not touch | `webdev_site:read` (M6-P3c; was `webdev_provisioned_site:read`, same reach) | **UI: `platform-ui/src/app/(app)/departments/[deptId]/sites/portfolio/page.tsx` (+ `[siteId]/page.tsx`, which resolves one row out of this same list read — there is no single-site GET) via `lib/webdeskPortfolio.ts`. As of 2026-09-03 this is Web Dev's ONLY site surface; `sites` `permanentRedirect`s here. See the `lastSeenAt`/`lastHttpStatus` warning below.** |
 
 ### ⚠ `lastSeenAt` / `lastHttpStatus` are returned and MUST NOT be rendered (2026-09-03)
 
@@ -3884,7 +3885,7 @@ Two consequences worth recording here, because they are contract-shaped:
 
 | Method | Path | Returns | Cerbos |
 |---|---|---|---|
-| POST | `/api/:t/modules/webdev/console/probe-consent-requests` | `{ ok, approvalId, domain, attestation }` — files an `automation_approvals` row with `origin='search'`, `workflow_id='search:probe_consent'`. 400 on a missing/short/oversized reference note; 404 unknown property; **409** already-consented; **409** an open request for the same property | `webdev_provisioned_site:read` (the SAME action the portfolio read uses — see below) | **UI: `platform-ui/src/lib/probeConsentActions.ts`, rendered by `components/webdesk/ProbeConsentRequest.tsx`** |
+| POST | `/api/:t/modules/webdev/console/probe-consent-requests` | `{ ok, approvalId, domain, attestation }` — files an `automation_approvals` row with `origin='search'`, `workflow_id='search:probe_consent'`. 400 on a missing/short/oversized reference note; 404 unknown property; **409** already-consented; **409** an open request for the same property | `webdev_site:request_probe_consent` (M6-P3c; was `webdev_provisioned_site:read`, same reach — its own action so it can diverge from `webdev_site:read` later) | **UI: `platform-ui/src/lib/probeConsentActions.ts`, rendered by `components/webdesk/ProbeConsentRequest.tsx`** |
 
 Owner rulings: `docs/plans/2026-09-03-probe-consent-rulings.md`. `search_properties.verified_at` is
 what the monitoring sweep builds its SSRF allowlist from, so setting it is the record that we may
@@ -3894,7 +3895,7 @@ this exists so that nobody sets it for themselves.
 Four things about this are contract-shaped and easy to get wrong:
 
 - **The requester is gated on a WEBDEV action, not a search one.** Web Dev reads consent and hosting
-  topology *through* §24's portfolio, which authorizes `webdev_provisioned_site:read`; requiring
+  topology *through* §24's portfolio, which authorizes `webdev_site:read` (so the request itself is `webdev_site:request_probe_consent`, M6-P3c — the same reach, its own action); requiring
   `resource_search_property:read` here would lock out exactly the people the flow is for. Filing
   grants nothing and mutates no domain state.
 - **The APPROVER is gated on `resource_search_property:update`** — the exact gate that endpoint uses

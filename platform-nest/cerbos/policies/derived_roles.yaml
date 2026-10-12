@@ -1011,6 +1011,31 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "webdev.provisioned_site.reconcile" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_webdev_site_* — M6-P3c (mirrors of the old webdev_provisioned_site read/provision arms)
+    - name: perm_webdev_site_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.site.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_webdev_site_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.site.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_webdev_site_request_probe_consent
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "webdev.site.request_probe_consent" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_hr_record_* — IAM-04-ROLLOUT-B12
     - name: perm_hr_record_read
       parentRoles: ["user"]

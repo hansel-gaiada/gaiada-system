@@ -1,0 +1,21 @@
+{
+  "name": "webdesk-site-template",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "astro": "^7.2.8",
+    "@gaiada/webdesk-blocks": "file:./vendor/webdesk-blocks.tgz",
+    "@gaiada/webdesk-sdk": "file:./vendor/webdesk-sdk.tgz"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.5",
+    "typescript": "^5.6.3"
+  }
+}

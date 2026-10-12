@@ -615,6 +615,7 @@ stub bindings — same rule, same reasoning, as WSK-05's `api-keys.controller.ts
 | `release.triggerRebuild` | `POST .../environments/:envId/rebuild` | medium | `webdesk:operate` | no | **yes** |
 | `job.get` / `job.list` | `GET .../jobs/:jobId` / `GET .../jobs` | read | `webdesk:read` | no | n/a — reads a job |
 | `contract.read` | `GET /control/v1/tenants/:slug/contract` | read | `webdesk:read` | no | no — always 501, see below |
+| `contract.regenerate` | `POST /control/v1/tenants/:slug/contract/regenerate` (one) / `POST /control/v1/contract/regenerate` (all active) | medium | `webdesk:operate` | no | no — queues runs, see "Live contract codegen" |
 
 The full map lives in code at `src/control/command-types.ts`'s `COMMAND_REGISTRY` (the single
 source of truth every guard and `test/control-command-registry.spec.ts` read from) — this table
@@ -624,6 +625,29 @@ Two documented departures from design §07's literal wording: `schema.propose` i
 `read` (this ticket's own brief narrows the AC to three tiers; propose never persists anything,
 which is what `read` means everywhere else in this map) and `job.get`/`job.list` are this
 ticket's own addition (job-tracking wasn't in the original C-05 list).
+
+### Live contract codegen (M6-P4r-b)
+
+A tenant's `contracts/<slug>/latest.json` (what the ERP's contract mirror reads) is produced inside the api, no manual step.
+
+- **Triggers.** `tenant.provision` and `schema.apply` enqueue a `contract-codegen` job **after** their command commits (the
+  command envelope's post-commit `after` hook, via `ContractCodegenTrigger`). It is fail-soft: an enqueue error or timeout (3 s) is
+  logged and changes nothing about the command's response, status or stored idempotency record. A replay enqueues nothing.
+  `schema.apply` still refuses a MAJOR change (`409 contract-major-change`) before anything is enqueued.
+- **Queue.** The job carries only `{ tenantSlug }`; its id is derived from the tenant, so a burst coalesces into one waiting job
+  (a change that commits while a run is active queues exactly one follow-up). Attempts 3, exponential backoff from 10 s, per-attempt
+  timeout 120 s, completed AND failed jobs removed (a failed job would otherwise occupy its id and swallow later enqueues).
+- **Worker.** In the api process, concurrency 1. It takes a Postgres advisory lock keyed on the tenant, runs the compiled generator
+  (`dist/codegen/generator.mjs`, loaded by `CompiledContractCodegenRunner` through a native `import()`), and releases the lock when
+  the run really ends, even after a timeout. Output goes only to RustFS (the api's own `webdesk-api` key, `artifacts` bucket).
+  A stored contract that already matches the tenant's composition and the vocabulary version is left alone (`unchanged`): the
+  generator would otherwise mint a PATCH version for an identical composition.
+- **Re-run and backfill.** `contract.regenerate` (above). Idempotent, never a deploy step. A run that failed all its attempts logs
+  `... FAILED ... re-run it with the contract.regenerate control command`.
+- **Config** (all optional): `WEBDESK_CONTRACT_CODEGEN_ENABLED` (default on; **off under `NODE_ENV=test`**),
+  `_QUEUE_NAME`, `_TIMEOUT_SECONDS` (120), `_ATTEMPTS` (3), `_BACKOFF_SECONDS` (10), and `WEBDESK_CODEGEN_BUNDLE` (a bundle path
+  override). Specs: `test/contract-codegen-{queue,processor,triggers}.spec.ts` need no services; `contract-codegen-live.spec.ts` needs
+  Postgres, Redis, RustFS and `npm run build`.
 
 ### `tenant.provision` and the tenant's locales (WSK-D18, WSK-D48)
 

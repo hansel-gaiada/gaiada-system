@@ -5,12 +5,14 @@
   "description": "WebDesk (Zone B) NestJS api — WSK-05 key lifecycle + scoped-auth + per-tenant read quotas. See README.md.",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:codegen",
+    "build:codegen": "node scripts/build-codegen-bundle.mjs",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "codegen:run": "node --import tsx src/codegen/generator/run-codegen.mts",
-    "codegen:gate": "node --import tsx src/codegen/generator/double-run-gate.mts"
+    "codegen:gate": "node --import tsx src/codegen/generator/double-run-gate.mts",
+    "codegen:gate:dist": "npm run build:codegen && node ../qa/p3-gate/double-run-gate-dist.mjs --tenants acme,globex"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1118.0",
@@ -47,6 +49,7 @@
     "@types/node": "^22.9.0",
     "@types/nodemailer": "^6.4.16",
     "@types/pg": "^8.11.10",
+    "esbuild": "0.21.5",
     "openapi-typescript": "7.13.0",
     "tsx": "4.19.0",
     "typescript": "^5.6.3",
