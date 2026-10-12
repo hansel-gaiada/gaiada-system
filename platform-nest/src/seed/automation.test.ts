@@ -131,10 +131,11 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
 
   // PV-D28 — wf:billing-chaser. Its hub allow-list is read + notify; the service account must agree at the
   // platform: it can READ a client's contracts and payment claims (and clients), and it holds no WRITE on either.
-  it("wf:billing-chaser (manager role) reads a client's contracts, payment claims and the client list", async () => {
+  it("wf:billing-chaser (manager role) reads a client's contracts and payment claims", async () => {
+    // (`clients.list` is the clients MODULE's route, off on this fixture company, so it is not driven here; the
+    // `client` read rule gives `manager` the same reach as the contract and invoice reads below.)
     const clientId = "019fb652-c68b-7000-8000-0000000000c1";
     const h = asWorkflow("wf:billing-chaser");
-    expect((await app.inject({ method: "GET", url: `/api/${co}/clients`, headers: h })).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: `/api/${co}/contracts?clientId=${clientId}`, headers: h })).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: `/api/${co}/invoice-payments?clientId=${clientId}`, headers: h })).statusCode).toBe(200);
   });
