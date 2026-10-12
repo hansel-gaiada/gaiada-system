@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **221** capabilities across **16** owners
-- **117** writes · 104 reads
-- Writes by impact: **high 24** · medium 35 · low 58
+- **224** capabilities across **16** owners
+- **118** writes · 106 reads
+- Writes by impact: **high 24** · medium 36 · low 58
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -52,7 +52,7 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 21 |
+| search | `search` | 22 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
@@ -138,6 +138,9 @@ unfalsifiable after.
 | reports | `reports.getMetrics` | `GET` | `/api/:tenantId/reports/metrics?metricKey=:metricKey&grain=:grain&from=:from&to=:to` | read | — |
 | reports | `reports.listPeriods` | `GET` | `/api/:tenantId/reports/periods?kind=:kind&from=:from&to=:to` | read | — |
 | search | `search.acknowledgeDecayFinding` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/decay/:findingId/acknowledge` | write | `low` |
+| search | `search.aiCrawlers.ingest` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/ai-crawlers/ingest` | write | `medium` |
+| search | `search.aiCrawlers.summary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/ai-crawlers/summary/range/:from/:to` | read | — |
+| search | `search.aiVisibility.summary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/ai-visibility-summary` | read | — |
 | search | `search.analyticsCtas` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/ctas/range/:from/:to` | read | — |
 | search | `search.analyticsForms` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/forms/range/:from/:to` | read | — |
 | search | `search.analyticsPages` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/pages/range/:from/:to` | read | — |

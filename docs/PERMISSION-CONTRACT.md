@@ -1754,7 +1754,30 @@ goal text) is the user's and stays in `assistant_messages` / `assistant_handoffs
 args in transit. Proof: `ai-agents/src/sensitive-tools.test.ts`, `ai-agents/src/sensitive-run.test.ts`, `platform-nest/src/modules/assistant/assistant-privacy-intent.test.ts`
 (no services) and `assistant-privacy-intent.db.test.ts` (Linux gate).
 
-## 30. M5-P2 — ad-platform conversion uploads: no new permission; the approver needs `update` on the property (2026-10-13, PROTOTYPED)
+## 30. PV4-02 — the `conversation` kind and the portal `converse` action (2026-10-12)
+
+Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-02; design decisions 1, 2, 9; owner rulings PV-D22, PV-D23, PV-D24). Status: **PROTOTYPED** (policy, catalog, bundles and tests are in the repo; the live Cerbos probe is the deploy step). There are no routes yet (PV4-03 adds them), so nothing in `FRONTEND-BFF-CONTRACT.md` changes here.
+
+**A new kind, `conversation`, with four staff actions.** `resource_conversation.yaml`, keys `core.conversation.{read,post,draft,manage}`:
+
+| Action | Reach (every rule `inTenant && notLow`) | What it is |
+|---|---|---|
+| `read` | `company_admin`, `manager`, `member`, `viewer` | see a client's threads and messages |
+| `post` | `company_admin`, `manager`, `member` | send a message to the client under the sender's own name |
+| `draft` | `company_admin`, `manager`, `member` | write a draft only staff see (an agent may hold this without `post`) |
+| `manage` | `company_admin`, `manager`, `member` | close or reopen a thread, edit its subject, retract a staff message |
+
+The shape is `resource_client.yaml`'s on purpose: a conversation is part of the client record, so it is never wider or narrower than the client it belongs to. Each action has a `perm_conversation_<action>` mirror under `inTenant && notLow && inRoot` (generic global-or-company, like `perm_client_*`). `platform_admin` holds the wildcard; `owner` mirrors `company_admin` exactly (bundle rows, asserted by the migration and `cerbos-conversation.test.ts`). `post` and `manage` are catalogued sensitive; `read` and `draft` are not. Two new authoring groups: `client_conversation` (staff) and `portal_conversation` (the client door).
+
+**Agents and automation never post or manage (PV-D23).** An `EFFECT_DENY` on `post` and `manage`, on `roles: ["user"]`, fires for `principal.attr.kind in ["automation","bot"]`. It has the same shape and the same delegation reasoning as the WebDesk `publish`/`schedule` DENY in `resource_webdesk_content_item.yaml`: `authorize()` checks the caller and, when `actFor` is set, the acting human, and either denial refuses; a persona acting for a human is denied as the CALLER, the human's own principal is unaffected. Under deny-overrides it beats the `platform_admin` wildcard, every role arm and the permission mirrors. `draft` and `read` are deliberately not listed: drafting is the agent's job, and a staff member then sends. `principalPayload()` already sends `kind` (`""` when unknown, which matches no DENY), and `resourcePayload()` already carries `tenantId`, `clientId` and `projectId`, so `cerbos.ts` needs no change.
+
+**The client reaches the conversation through `portal`, never through this kind.** `resource_portal.yaml` gains one action, `converse` (open a thread, post, edit or retract one's own message), on the existing `client` rule, with the same condition as the other client actions (`inTenant && inRoot`), plus `perm_portal_converse` (company-scope-only, like the other eight `perm_portal_*` mirrors) and the catalog key `portal.converse` (`uiGrantable:false`, like every `portal.*`). It is **not** conditioned on the contact's `capability` (owner ruling PV-D24: viewers post, because posting is not signing), exactly as `request_change` and `approve_post` are not; the capability is not a Cerbos attribute and no rule reads it (`cerbos-conversation.test.ts` pins that). Which rows a client may touch is `portal-scope.ts` and `portal-visibility.ts`, which Cerbos does not see. `portal.converse` is bundled on `client` and `platform_admin` only; `owner` and `company_admin` hold no `portal.*` key.
+
+**The `client` role invariant is now a test.** `client` appears in no resource policy except `resource_portal.yaml`; it was a comment in each policy header until `client-role-only-in-portal.test.ts` scanned `cerbos/policies` for it. Adding `client` to `resource_conversation.yaml` fails that test.
+
+**The six artifacts** (the `webdev_site` template, commit `2c5ab99e`): policy + derived roles; `cerbos.ts` (no change); `permission-catalog.json` (+5 keys: 104 kinds, 439 pairs, 424 grantable, 15 relationship, 204 sensitive); `permission-groups.json` (+2 groups); migration `202610130120_iam_conversation_permissions.sql`; the bundle generator (no resolver change: the kind names only direct roles, which `DIRECT` already maps) and `role-permission-bundles.json`, regenerated. Pinned tests moved: `cerbos-catalog-alignment`, `iam-215-boundary-pin`, `permission-groups-catalog-parity`, `ui-grantable-catalog`, and the portal action-set pins (`iam-04-b7-portal.{test,db.test}.ts`, `mon00i-portal-root-anchor.db.test.ts`, `iam-04-b6-social-portal.test.ts`). Deploy: Cerbos needs a restart (nothing hot-reloads), then probe a staff `member` ALLOW `post`, a `bot` DENY `post`, and a client ALLOW `converse`.
+
+## 31. M5-P2 — ad-platform conversion uploads: no new permission; the approver needs `update` on the property (2026-10-13, PROTOTYPED)
 
 No new Cerbos kind, action, role or permission key, no policy change, no restart. What is stated so nobody re-derives it:
 
