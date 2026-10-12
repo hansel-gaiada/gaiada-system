@@ -111,6 +111,14 @@ resolvers_of() {
 # version_ge <a> <b>: dotted numeric compare (a >= b)
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; }
 
+# cfg_get <file> <KEY>: the last KEY=value line, one pair of surrounding double quotes stripped. Parsed, never sourced.
+cfg_get() {
+  local v
+  v="$(sed -n "s/^[[:space:]]*$2=//p" "$1" 2>/dev/null | tail -n 1 || true)"
+  v="${v#\"}"
+  printf '%s' "${v%\"}"
+}
+
 # --- options --------------------------------------------------------------------------------------------------
 
 usage() { die "usage: $0 plan|apply|check|remove [--profile live|proof] [--user N] [--uid N] [--subid-start N] [--port N] [--operator N] [--cpu-quota P%] [--memory-max NG] [--tasks-max N] [--otlp-env PATH] [--tree DIR] [--etc-access] [--allow-restart]"; }
@@ -163,6 +171,20 @@ parse_args() {
   [[ "$CPU_QUOTA" =~ ^[1-9][0-9]{0,2}%$ ]] && [[ "$MEMORY_MAX" =~ ^[1-9][0-9]*[KMG]$ ]] || die "bad --cpu-quota or --memory-max"
   is_abs_path "$OTLP_ENV" || die "--otlp-env must be an absolute path"
   [ -z "$TREE" ] || is_abs_path "$TREE" || die "--tree must be an absolute path"
+  # A proof must never share the live guard's switch: remove and the proof's own probes toggle it.
+  if [ "$ROLE" = proof ]; then
+    case "$OTLP_ENV" in /etc/webdesk/*) die "a proof install must not use a switch under /etc/webdesk (that is the live guard's)" ;; esac
+  fi
+  derive_paths
+  CHANGED_DAEMON=0
+  STARTED_NOW=0
+  FAILS=0
+  RESOLVERS=""
+}
+
+# derive_paths: everything that follows from RL_USER, RL_UID, SUB_START and SUB_COUNT (remove re-derives it once
+# the uid has been read back from the passwd database).
+derive_paths() {
   SUB_END=$((SUB_START + SUB_COUNT - 1))
   [ "$RL_UID" -lt "$SUB_START" ] || [ "$RL_UID" -gt "$SUB_END" ] || die "uid $RL_UID lies inside its own subordinate range"
   HOME_DIR="/var/lib/$RL_USER"
@@ -175,10 +197,6 @@ parse_args() {
   RUNTIME="/run/user/$RL_UID"
   SOCK="$RUNTIME/docker.sock"
   GUARD_UNIT_INSTANCE="webdesk-rootless-guard@$RL_USER.service"
-  RESOLVERS=""
-  CHANGED_DAEMON=0
-  STARTED_NOW=0
-  FAILS=0
 }
 
 # --- runner ---------------------------------------------------------------------------------------------------
@@ -382,8 +400,12 @@ do_guard() {
   say "== 4 egress guard (before anything of $RL_USER runs)"
   local t
   t="$(mktemp -d)"
+  # RL_OTLP_CREATED=1 records that THIS install made the (empty) proof switch file, so remove may delete exactly that
+  # file and nothing the operator pointed it at. Sticky: a re-apply sees the file it made and must keep the 1.
+  local created=0
+  if [ "$ROLE" = proof ] && { [ ! -e "$OTLP_ENV" ] || [ "$(cfg_get "$CONF_FILE" RL_OTLP_CREATED)" = 1 ]; }; then created=1; fi
   render_template "$FILES/webdesk-rootless.conf.in" USER="$RL_USER" ROLE="$ROLE" UID="$RL_UID" PORT="$PORT" \
-    RESOLVERS="$RESOLVERS" OTLP_ENV="$OTLP_ENV" OPERATOR="$OPERATOR" >"$t/conf" || die "cannot render the guard config"
+    RESOLVERS="$RESOLVERS" OTLP_ENV="$OTLP_ENV" OPERATOR="$OPERATOR" OTLP_CREATED="$created" >"$t/conf" || die "cannot render the guard config"
   put_file "$GUARD_SRC" "$GUARD_BIN" 0755 root:root
   put_file "$FILES/webdesk-rootless-guard@.service" "$GUARD_UNIT" 0644 root:root
   put_file "$FILES/grant-socket.sh" "$GRANT_BIN" 0755 root:root
@@ -568,12 +590,53 @@ verify() {
 
 # --- remove (proof only) --------------------------------------------------------------------------------------
 
+# resolve_remove: the facts `remove` acts on come from the passwd database and the config THIS install wrote for
+# that user, never from defaults or from flags that could be mistyped. Dies (touching nothing) on any mismatch.
+# Sets RL_UID, SUB_START, SUB_COUNT, SUB_END (all re-derived) and OTLP_REMOVE ("" = delete no switch file).
+resolve_remove() {
+  local pw r ro rs rec created
+  pw="$(getent passwd "$RL_USER" | cut -d: -f3 || true)"
+  is_uint "$pw" || die "REFUSED: no account $RL_USER"
+  [ "$pw" -ge 100 ] && [ "$pw" -lt 60000 ] || die "REFUSED: $RL_USER has uid $pw, outside 100-59999"
+  if [ -n "${OVR[--uid]:-}" ] && [ "${OVR[--uid]}" != "$pw" ]; then
+    die "REFUSED: --uid ${OVR[--uid]} but $RL_USER is uid $pw in the passwd database"
+  fi
+  [ -f "$CONF_FILE" ] && [ ! -L "$CONF_FILE" ] || die "REFUSED: $CONF_FILE is absent: this install did not write it, so it is not ours to remove"
+  [ "$(cfg_get "$CONF_FILE" RL_UID)" = "$pw" ] || die "REFUSED: $CONF_FILE records RL_UID=$(cfg_get "$CONF_FILE" RL_UID), passwd says $pw"
+  [ "$(cfg_get "$CONF_FILE" RL_ROLE)" = proof ] || die "REFUSED: remove is for a PROOF install only ($CONF_FILE says role '$(cfg_get "$CONF_FILE" RL_ROLE)')"
+  RL_UID=$pw
+  # The subordinate range is whatever the files hold for this user: exactly one entry, the same in both.
+  r="$(awk -F: -v u="$RL_USER" 'NF == 3 && $1 == u && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { print $2, $3 }' "$SUBUID_FILE" 2>/dev/null)"
+  [ -n "$r" ] && [ "$(printf '%s\n' "$r" | wc -l)" -eq 1 ] || die "REFUSED: $RL_USER needs exactly one entry in $SUBUID_FILE"
+  read -r rs ro <<<"$r"
+  has_subid_entry "$SUBGID_FILE" "$RL_USER" "$pw" "$rs" "$ro" || die "REFUSED: $SUBGID_FILE does not hold the same range as $SUBUID_FILE"
+  if [ -n "${OVR[--subid-start]:-}" ] && [ "${OVR[--subid-start]}" != "$rs" ]; then
+    die "REFUSED: --subid-start ${OVR[--subid-start]} but $RL_USER owns $rs in $SUBUID_FILE"
+  fi
+  SUB_START=$rs
+  SUB_COUNT=$ro
+  local conf=$CONF_FILE
+  derive_paths
+  CONF_FILE=$conf # the file just validated, not a re-derived path
+  # The OTLP switch: only the file the install recorded as created by itself, never a path from the command line.
+  OTLP_REMOVE=""
+  rec="$(cfg_get "$CONF_FILE" RL_OTLP_ENV_FILE)"
+  created="$(cfg_get "$CONF_FILE" RL_OTLP_CREATED)"
+  if [ -n "${OVR[--otlp-env]:-}" ] && [ "${OVR[--otlp-env]}" != "$rec" ]; then
+    die "REFUSED: --otlp-env ${OVR[--otlp-env]} differs from the switch recorded in $CONF_FILE ($rec)"
+  fi
+  if [ "$created" = 1 ]; then
+    is_abs_path "$rec" || die "REFUSED: the recorded switch path '$rec' is not an absolute path"
+    case "$rec" in /etc/webdesk/*) die "REFUSED: the recorded switch $rec is under /etc/webdesk (the live guard's)" ;; esac
+    OTLP_REMOVE=$rec
+  fi
+}
+
 do_remove() {
   [ "$(id -u)" = 0 ] || die "root only"
-  local role
-  role="$(sed -n 's/^RL_ROLE=//p' "$CONF_FILE" 2>/dev/null | tail -n1)"
-  [ "$ROLE" = proof ] && [ "${role:-proof}" = proof ] || die "REFUSED: remove is for a PROOF install only (this is $RL_USER, role ${role:-$ROLE})"
-  say "== remove the proof install of $RL_USER"
+  [ "$ROLE" = proof ] || die "REFUSED: remove is for a PROOF install only (this is the $PROFILE profile)"
+  resolve_remove
+  say "== remove the proof install of $RL_USER (uid $RL_UID, subids $SUB_START-$SUB_END, read back from passwd and $CONF_FILE)"
   step "disable linger" loginctl disable-linger "$RL_USER"
   step "stop user@$RL_UID.service (daemon and containers)" systemctl stop "user@$RL_UID.service"
   local i d
@@ -585,7 +648,10 @@ do_remove() {
   for d in $ETC_DIRS; do
     if grep -q "^user:$RL_USER:" <<<"$(getfacl -cp "$d" 2>/dev/null)"; then step "drop $RL_USER's ACL entry on $d" setfacl -x "u:$RL_USER" "$d"; fi
   done
-  step "drop-ins and config" rm -rf "$(dirname "$USER_AT_DROPIN")" "$(dirname "$SLICE_DROPIN")" "$CONF_FILE" "$OTLP_ENV"
+  # Files, not trees: rm -f on the two drop-in files and the config, rmdir (never a recursive rm) on their directories.
+  step "drop-in files and config" rm -f "$USER_AT_DROPIN" "$SLICE_DROPIN" "$CONF_FILE"
+  step "drop-in directories (only if empty)" rmdir --ignore-fail-on-non-empty "$(dirname "$USER_AT_DROPIN")" "$(dirname "$SLICE_DROPIN")"
+  if [ -n "$OTLP_REMOVE" ]; then step "the proof's OTLP switch (created by its install)" rm -f "$OTLP_REMOVE"; fi
   step "systemd daemon-reload" systemctl daemon-reload
   step "subuid/subgid $SUB_START-$SUB_END" usermod --del-subuids "$SUB_START-$SUB_END" --del-subgids "$SUB_START-$SUB_END" "$RL_USER"
   local mounts

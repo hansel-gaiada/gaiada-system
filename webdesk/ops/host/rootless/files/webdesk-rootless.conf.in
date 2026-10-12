@@ -1,9 +1,11 @@
 # /etc/default/webdesk-rootless-@USER@ (M4 F6, WSK-D73), written by install-rootless.sh. Parsed (never
-# sourced) by webdesk-rootless-guard.sh; install-rootless.sh remove reads RL_ROLE. Not secret.
+# sourced) by webdesk-rootless-guard.sh; install-rootless.sh remove reads RL_ROLE, RL_UID,
+# RL_OTLP_ENV_FILE and RL_OTLP_CREATED (1 = this install made that file). Not secret.
 RL_ROLE=@ROLE@
 RL_UID=@UID@
 RL_PUBLISHED_PORTS="@PORT@"
 RL_RESOLVERS="@RESOLVERS@"
 RL_OTLP_ENV_FILE=@OTLP_ENV@
+RL_OTLP_CREATED=@OTLP_CREATED@
 RL_OPERATOR=@OPERATOR@
 RL_LOG=on

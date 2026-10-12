@@ -227,7 +227,7 @@ section_install() {
 
   echo "== install: the real templates render completely"
   local F="$HERE/files" R
-  R="$(render_template "$F/webdesk-rootless.conf.in" USER=webdesk-rootless ROLE=live UID=940 PORT=8380 RESOLVERS=169.254.169.254 OTLP_ENV=/etc/webdesk/guard.env OPERATOR=Hansel)"
+  R="$(render_template "$F/webdesk-rootless.conf.in" USER=webdesk-rootless ROLE=live UID=940 PORT=8380 RESOLVERS=169.254.169.254 OTLP_ENV=/etc/webdesk/guard.env OPERATOR=Hansel OTLP_CREATED=0)"
   assert "guard config: ports, resolver, the shared OTLP switch, role" \
     test "$(grep -E '^RL_(ROLE|PUBLISHED_PORTS|RESOLVERS|OTLP_ENV_FILE)=' <<<"$R" | tr '\n' ' ')" = 'RL_ROLE=live RL_PUBLISHED_PORTS="8380" RL_RESOLVERS="169.254.169.254" RL_OTLP_ENV_FILE=/etc/webdesk/guard.env '
   printf '%s\n' "$R" >"$T/rendered.conf"
@@ -350,6 +350,60 @@ section_install() {
   fi
   # The static guard: no root-side install/ln/chown/rm names a path in the user's tree.
   refute "do_home contains no root install/ln/chown/rm on the user's tree" bash -c     "sed -n '/^do_home() {/,/^}/p' '$HERE/install-rootless.sh' | grep -E '(^|[^_a-z])(install|ln|chown|rm) '| grep -v 'rm -rf \"\$t\"'"
+  echo "== install: remove reads the facts back from passwd and its own config (M1, M2)"
+  local RM="$T/rm"
+  mkdir -p "$RM"
+  getent() { [ "$1" = passwd ] && [ "$2" = wdproof-rootless ] && echo "wdproof-rootless:x:941:941::/var/lib/wdproof-rootless:/usr/sbin/nologin"; }
+  printf 'wdproof-rootless:700065536:65536\n' >"$RM/subuid"
+  cp "$RM/subuid" "$RM/subgid"
+  # rm_conf <role> <uid> <otlp-file> <created>
+  rm_conf() { printf 'RL_ROLE=%s\nRL_UID=%s\nRL_OTLP_ENV_FILE=%s\nRL_OTLP_CREATED=%s\n' "$1" "$2" "$3" "$4" >"$RM/conf"; }
+  # rr <extra parse_args options...>: what resolve_remove settles on, or its refusal
+  rr() {
+    (
+      parse_args remove --profile proof "$@" || exit 1
+      CONF_FILE="$RM/conf" SUBUID_FILE="$RM/subuid" SUBGID_FILE="$RM/subgid"
+      resolve_remove || exit 1
+      echo "$RL_UID $SUB_START $SUB_END [$OTLP_REMOVE] $USER_AT_DROPIN"
+    ) 2>&1
+  }
+  rm_conf proof 941 /etc/default/wdproof-rootless-otlp 1
+  same "remove derives the uid from passwd, the range from /etc/subuid, the switch from its own record" \
+    "941 700065536 700131071 [/etc/default/wdproof-rootless-otlp] /etc/systemd/system/user@941.service.d/50-webdesk-rootless.conf" "$(rr)"
+  assert "an explicit --uid that matches passwd is accepted" test "$(rr --uid 941 | cut -d' ' -f1)" = 941
+  refute "a typo --uid 1001 is refused (it would stop user@1001.service)" quiet rr --uid 1001
+  assert "  ... with a message naming passwd" grep -q 'passwd database' <<<"$(rr --uid 1001)"
+  rm_conf proof 942 /etc/default/wdproof-rootless-otlp 1
+  assert "a config whose RL_UID differs from passwd is refused" grep -q 'REFUSED: .*RL_UID=942' <<<"$(rr)"
+  rm -f "$RM/conf"
+  assert "an absent config is refused (no default role)" grep -q 'REFUSED: .*absent' <<<"$(rr)"
+  printf 'RL_UID=941\n' >"$RM/conf"
+  assert "a config with no RL_ROLE is refused, not defaulted to proof" grep -q "REFUSED: remove is for a PROOF install only" <<<"$(rr)"
+  rm_conf live 941 /etc/webdesk/guard.env 0
+  assert "a config that says live is refused" grep -q 'REFUSED: remove is for a PROOF install only' <<<"$(rr)"
+  rm_conf proof 941 /etc/default/wdproof-rootless-otlp 1
+  assert "--subid-start that differs from /etc/subuid is refused" grep -q 'REFUSED: --subid-start' <<<"$(rr --subid-start 700000000)"
+  printf 'wdproof-rootless:700065536:65536\nwdproof-rootless:900000000:65536\n' >"$RM/subuid"
+  assert "two subuid entries for the user are refused" grep -q 'exactly one entry' <<<"$(rr)"
+  printf 'wdproof-rootless:700065536:65536\n' >"$RM/subuid"
+  printf 'wdproof-rootless:700000000:65536\n' >"$RM/subgid"
+  assert "a subgid range that differs from the subuid range is refused" grep -q 'does not hold the same range' <<<"$(rr)"
+  cp "$RM/subuid" "$RM/subgid"
+  # M2
+  assert "--otlp-env /etc/webdesk/guard.env is refused for a proof at parse time (the live guard's switch)" \
+    grep -q 'must not use a switch under /etc/webdesk' <<<"$(rr --otlp-env /etc/webdesk/guard.env)"
+  assert "--otlp-env pointing anywhere but the recorded switch is refused by remove" \
+    grep -q 'differs from the switch recorded' <<<"$(rr --otlp-env /etc/default/other)"
+  rm_conf proof 941 /etc/default/wdproof-rootless-otlp 0
+  same "a switch the install did NOT create is never deleted" "941 700065536 700131071 [] /etc/systemd/system/user@941.service.d/50-webdesk-rootless.conf" "$(rr)"
+  rm_conf proof 941 /etc/webdesk/guard.env 1
+  assert "a recorded switch under /etc/webdesk is refused even if marked created" grep -q 'REFUSED: the recorded switch' <<<"$(rr)"
+  rm_conf proof 941 'relative/switch' 1
+  assert "a recorded relative path is refused" grep -q 'not an absolute path' <<<"$(rr)"
+  refute "do_remove never runs a recursive rm (rm -r/-rf)" bash -c "sed -n '/^do_remove() {/,/^}/p' '$HERE/install-rootless.sh' | grep -Eq 'rm -[a-z]*r'"
+  assert "do_remove deletes the switch with rm -f on OTLP_REMOVE only" bash -c "sed -n '/^do_remove() {/,/^}/p' '$HERE/install-rootless.sh' | grep -q 'rm -f \"\$OTLP_REMOVE\"'"
+  refute "do_remove never names the command-line OTLP_ENV" bash -c "sed -n '/^do_remove() {/,/^}/p' '$HERE/install-rootless.sh' | grep -q 'OTLP_ENV'"
+  unset -f getent
   echo "  END   install"
 }
 
@@ -444,7 +498,7 @@ section_roundtrip() {
   printf '%s\nwebdesk-rootless:700000000:65536\n' "$MEASURED_SUBIDS" >"$SUBUID_FILE"
   printf 'WEBDESK_OTLP_PORT=4319\n' >"$T/rt.guard.env"
   render_template "$HERE/files/webdesk-rootless.conf.in" USER=webdesk-rootless ROLE=live UID=940 PORT=8380 \
-    RESOLVERS=169.254.169.254 OTLP_ENV="$T/rt.guard.env" OPERATOR=Hansel >"$CONF_DIR/webdesk-rootless-webdesk-rootless"
+    RESOLVERS=169.254.169.254 OTLP_ENV="$T/rt.guard.env" OPERATOR=Hansel OTLP_CREATED=0 >"$CONF_DIR/webdesk-rootless-webdesk-rootless"
   same "installer-rendered config + the live OTLP switch -> the designed v4 rule set" "$WANT_V4" \
     "$( (load_cfg webdesk-rootless && payload_v4 "$OTLP_PORT") 2>&1)"
   same "  ... and the designed v6 rule set" "$WANT_V6" "$( (load_cfg webdesk-rootless && payload_v6) 2>&1)"
