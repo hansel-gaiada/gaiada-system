@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.96.0` - M5-W2e: the writers' room UI (2026-10-12) - DEV-VERIFIED
+
+- **Editorial panel in the item editor:**
+  - It shows the review state in words with a glyph per state (draft, in review, changes requested, approved, unknown), who submitted and when, the submitted and approved versions, SEO sign-off and a review log.
+  - Every action follows the item read's `allowed` and nothing else; when `allowed` is absent there are no buttons and the panel says why.
+  - Submit, SEO sign-off and approve wait while there are unsaved edits.
+  - Every WebDesk refusal (409 slugs, 403, unconfirmed 502, 503) is shown in plain words. A retry reuses its idempotency key.
+- **Comments** with field anchors (add, resolve, "Show field").
+- **The item list:** a review state per row, and a review-state filter over the whole collection.
+- **A Writers' room tab in the Website workspace:**
+  - The board, grouped by state. When counts are withheld for a scoped caller it says so instead of showing zeros.
+  - `writers/people`: list, grant and revoke writers' room roles. A 403 becomes "You can't manage writers here".
+- **Verified:**
+  - GitHub Actions 38205574410: platform-ui vitest green, `next build` compiled (123 pages) on Linux.
+  - Locally: full ui vitest 5983/5983. The WebDesk Playwright suite passed 109/109 on Windows `next dev` before the filter follow-up, and the new spec 11/11 after it. That suite is NOT run by CI.
+
+### platform-nest `0.80.0` - M5-W2e: the item list accepts a review-state filter (2026-10-12) - DEV-VERIFIED
+
+- `GET …/collections/:key/items` accepts `reviewState` (draft | in_review | changes_requested | approved) and forwards it to WebDesk's `item.list`.
+  - It is checked after the phase-2 read check, so a denied caller is 403 whatever the value.
+  - An unknown or repeated value is a 400 that never reaches WebDesk.
+- Unit test 31/31; GitHub Actions 38205574410 green.
+
 ### platform-nest `0.78.0` - M5-W2d: the writers' room review flow over the ERP (routes, MCP tools, notifications) (2026-10-12) - DEV-VERIFIED
 
 - **Routes.** 11 routes under `…/content/sites/:tenantSlug/:siteId/`:
