@@ -177,7 +177,7 @@ describe.skipIf(!TEST_URL)("PV4-07 · the conversation and minutes tools through
 
   const activities = async (entityId: string, verb: string) =>
     (await adminPool().query<{ actor_id: string; metadata: Record<string, unknown> & { via?: { agent?: string } } }>(
-      `SELECT actor_id, metadata FROM activities WHERE target_entity_id = $1 AND verb = $2 ORDER BY created_at`, [entityId, verb],
+      `SELECT actor_id, metadata FROM activities WHERE target_entity_id = $1 AND verb = $2 ORDER BY occurred_at`, [entityId, verb],
     )).rows;
   const messageRows = async (threadId: string) =>
     (await adminPool().query<{ id: string; author_id: string; author_side: string; drafted_by: string | null; body: string }>(
