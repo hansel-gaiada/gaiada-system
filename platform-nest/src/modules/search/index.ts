@@ -14,6 +14,7 @@ import { config } from "../../config";
 import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
 import { ANALYTICS_MCP_TOOLS } from "./umami-mcp-tools";
+import { DECAY_MCP_TOOLS } from "./content-decay-mcp-tools";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -158,6 +159,8 @@ export const searchModule: ModuleContract = {
     // own repeated bug).
     "202608221727_search_audit_v2_finding_states_checks_facts.sql",
     "202608221728_iam_search_finding_property_attest_permissions.sql",
+    // M5-V4: search_decay_findings (content-decay alerts). Registered AT WRITE TIME, same standing lesson.
+    "202610122200_search_decay_findings.sql",
     // M5-W4 (additive): the WebDesk link on search_content_briefs (site, collection, locale, item, assignee, the search facts a writer
     // needs) and a nullable property_id. Registered here AT WRITE TIME, same standing lesson as every comment above.
     "202610122300_search_content_briefs_webdesk_link.sql",
@@ -249,6 +252,8 @@ export const searchModule: ModuleContract = {
     // written; Cerbos resource_search_property · read). The range travels in the PATH because the hub
     // forwards only path params on a GET. Small cells come back as "<5" (R-V6).
     ...ANALYTICS_MCP_TOOLS,
+    // M5-V4 — content-decay findings: one read + two LOW writes (acknowledge, file a refresh brief).
+    ...DECAY_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",
