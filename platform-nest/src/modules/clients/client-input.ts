@@ -8,6 +8,7 @@
 // silently erased every other key. PATCH now MERGES: a string sets that key, `null` or "" deletes it,
 // an omitted key is untouched. `normalizeContactPatch` returns the two halves the SQL needs.
 import { BadRequestException } from "@nestjs/common";
+import { VALID_BUSINESS_TYPES } from "./centre/validation";
 
 /** The contact keys the staff UI edits. Other keys an importer or the API wrote are preserved on read
  *  and on merge — this list is what the UI knows how to label, not an allow-list for storage. */
@@ -48,6 +49,39 @@ export function normalizeOwner(raw: unknown): string | null | undefined {
   return raw;
 }
 
+/** PV3-04 (PV-D1): a client's business type is one of the registry's `businessTypes`, the same set the
+ *  Client Centre PATCH validates against (centre/validation.ts). On CREATE it is required, so a new
+ *  client is never "not set"; on PATCH `undefined` leaves it alone, and `null`/"" is refused (a type
+ *  cannot be cleared, only changed — "other" is the explicit way to say so). The refusals are typed:
+ *  the message IS the machine code, and `field` names the input. */
+export function normalizeBusinessType(raw: unknown, opts: { required: boolean }): string | undefined {
+  if (raw === undefined) {
+    if (opts.required) throw new BadRequestException({ message: "business_type_required", field: "businessType" });
+    return undefined;
+  }
+  if (raw === null || raw === "") {
+    throw new BadRequestException({ message: opts.required ? "business_type_required" : "business_type_invalid", field: "businessType" });
+  }
+  if (typeof raw !== "string" || !VALID_BUSINESS_TYPES.has(raw)) {
+    throw new BadRequestException({ message: "business_type_invalid", field: "businessType" });
+  }
+  return raw;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** PV3-04 (PV-D2): `undefined` = leave unchanged; `null`/"" = clear the group-company link; a uuid =
+ *  link to that company. SHAPE only: that the company exists, is live and shares the client tenant's
+ *  root is checked against `companies` by `assertGroupCompany` (group-company.ts), after authorization. */
+export function normalizeGroupCompanyId(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string" || !UUID_RE.test(raw)) {
+    throw new BadRequestException({ message: "group_company_invalid", field: "groupCompanyId" });
+  }
+  return raw.toLowerCase();
+}
+
 /** For CREATE: a full contact object, every value a non-empty string (blank values are dropped). */
 export function normalizeContactCreate(raw: unknown): Record<string, string> {
   if (raw === undefined || raw === null) return {};
@@ -83,16 +117,26 @@ export function normalizeNoteBody(raw: unknown): string {
   return body;
 }
 
+/** One side of an update, as `diffForActivity` reads it. `business_type` is the centre profile's type
+ *  (`null` = no profile row yet, i.e. "not set"); `group_company` is the linked company's NAME, so the
+ *  History reads as a name, not a uuid. Both are optional so a caller that does not touch them
+ *  (or a test that predates them) compares null with null and records nothing. */
+export interface ClientDiffSide {
+  name: string; status: string | null; owner_user_id: string | null; contact: Record<string, unknown> | null;
+  business_type?: string | null; group_company?: string | null;
+}
+
 /** The before/after list an update's activity row carries, so the client's History tab can say WHAT
  *  changed, not just "updated". Values are truncated to 200 characters, as the Client Centre does. */
 export function diffForActivity(
-  before: { name: string; status: string | null; owner_user_id: string | null; contact: Record<string, unknown> | null },
-  after: { name: string; status: string | null; owner_user_id: string | null; contact: Record<string, unknown> | null },
+  before: ClientDiffSide,
+  after: ClientDiffSide,
 ): { field: string; before: string | null; after: string | null }[] {
   const t = (v: unknown) => (v === null || v === undefined ? null : String(v).slice(0, 200));
   const out: { field: string; before: string | null; after: string | null }[] = [];
-  for (const f of ["name", "status", "owner_user_id"] as const) {
-    if (t(before[f]) !== t(after[f])) out.push({ field: f === "owner_user_id" ? "owner" : f, before: t(before[f]), after: t(after[f]) });
+  const LABEL = { owner_user_id: "owner", business_type: "businessType", group_company: "groupCompany" } as const;
+  for (const f of ["name", "status", "owner_user_id", "business_type", "group_company"] as const) {
+    if (t(before[f]) !== t(after[f])) out.push({ field: f in LABEL ? LABEL[f as keyof typeof LABEL] : f, before: t(before[f]), after: t(after[f]) });
   }
   const bc = before.contact ?? {};
   const ac = after.contact ?? {};

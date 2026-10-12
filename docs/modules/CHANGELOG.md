@@ -11,6 +11,72 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.72.0` - M5 wave 3: data-subject rights and retention for website leads, the web-leads read, a staff alert, writers' room grants (2026-10-12) - DEV-VERIFIED
+
+WebDesk M5 wave 3, built by the M5 session (main `2e032678`).
+
+- **Migrations.**
+  - `202610111816_iam_editorial_grant_scopes` (M5-W1b): `user_role_editorial_scopes`, the per-site, collection and locale scope of a writers' room grant. FORCE RLS plus a `principal_lookup` policy, so principal assembly sees a user's own scopes and nobody else's. Guard triggers keep the four writers' room roles at `company` scope, as manual grants only and never on positions.
+  - `202610121835_agency_lead_privacy_retention` (M5-G5): `agency_leads.status_changed_at` as the retention clock (per-tenant backfill; if that backfill matches nothing, a lead is only kept longer) and the hashed suppression list. Every step is additive.
+- **Cerbos:** `resource_mcp_tool.yaml` lists `webdesk.editorial.grantRole` and `revokeRole` for the D14 re-drive. **Cerbos restart on deploy.**
+- **Writers' room grants (W1b):**
+  - One dedicated grant path writes the grant and its scope rows together and bumps the target's session.
+  - BFF `GET/POST/DELETE …/editorial/grants`.
+  - MCP `webdesk.editorial.grantRole` (HIGH) and `revokeRole` (MEDIUM).
+  - Legacy admin, the `ui` origin and positions refuse the four roles with `editorial_role_dedicated_path`.
+  - The roles take effect only when W1c wires the content routes. Until then the rules deny.
+- **Data-subject rights for website leads (G5):**
+  - `POST /api/:t/agency/privacy/{find|export|erase}` and MCP `agency_privacy.*` (HIGH, two-person WS4, never auto-run by D14).
+  - Attended use only until M5-G5b minimises the hub's stored arguments.
+  - Erase scrubs the person's fields and keeps the row.
+  - The suppression list stops an erased person from being re-imported.
+  - The 24-month retention purge is OFF unless `AGENCY_LEAD_RETENTION_PURGE_ENABLED=1`, and compose does not pass that variable through yet.
+- **Web-leads read (L6):** `GET /api/:t/agency/web-leads/:siteSlug` and MCP `agency_intake.listWebLeads`. Cerbos `agency_lead:read` runs before the slug is read. Attribution is an allow-list projection (click-id names only).
+- **Staff alert (L5):** an in-app (bell) notification on a new web lead, sent to `AGENCY_WEB_LEAD_ALERT_USER_IDS` (empty means nobody). The payload is the lead id, first name, form and link only. Web leads themselves stay off until `AGENCY_WEB_LEADS_ENABLED` is set, after counsel.
+- **The same alert to chat (L5b, main `91932305`):** beside the bell, only when `AGENCY_WEB_LEAD_ALERT_CHAT=1` and the bot is configured. It sends the same four fields to wa-chat-bot's new route. One allow-list builds both channels. It is fail-soft with a 5 s timeout. A token that is not a plain first name becomes "someone". CI run 38197371511 green (nest alert tests 20/20).
+- Verified on GitHub Actions 38196529791 on the merged tree: platform-nest 591 files / 8655 tests passed, 0 failed.
+
+### platform-ui `0.92.0` - M5 wave 3: the lead pipeline UI, a Leads tab and a Content checks card (2026-10-12) - DEV-VERIFIED
+
+- **Lead pipeline (P1-e):**
+  - Stage and value columns, plus stage chips that filter without re-sorting.
+  - A Pipeline card that offers moves only for open stages.
+  - Deal values in the currency's minor unit, sent as strings and never rounded.
+  - Stage history, newest first, and every typed refusal in plain words.
+- **Leads tab (L6)** in the Website workspace: web leads with an allow-listed attribution view and a consent badge. "Unknown" is never shown as consent.
+- **Content checks card (W3b-UI)** in the item editor: findings by severity with jump-to-field, and the AEO score. It is hidden in client mode.
+- Verified on GitHub Actions 38196529791: platform-ui 294 files / 5734 tests passed.
+
+### webdesk `0.11.0` - M5 wave 3: a server-side consent log (2026-10-12) - DEV-VERIFIED
+
+- **Migration 0017_consent_records:** FORCE RLS, no IP and no raw user agent stored, UPDATE refused.
+- **Public `POST /v1/t/:tenantSlug/consent`** (and `OPTIONS`):
+  - An allow-listed body; the server mints the consent ids.
+  - Fail-closed rate limits (`WEBDESK_CONSENT_RATE_LIMIT_*`) and no cookie.
+  - `consent` is now a reserved collection key.
+- **Links to the rest:**
+  - A submission may carry `visitor_consent.consentId`.
+  - The privacy find/export/erase commands reach consent ids.
+  - The purge runs at `WEBDESK_CONSENT_RETENTION_MONTHS` (default 26).
+- Applies through the release's automatic deploy-webdesk job. Nothing records until the site posts its banner decisions.
+- Verified on GitHub Actions 38196529791: webdesk-api 127 files / 1582 tests passed.
+
+### infra `0.13.0` - M5 wave 3: compose passes the web-lead alert recipients through (2026-10-12) - PROTOTYPED
+
+- `AGENCY_WEB_LEAD_ALERT_USER_IDS` with an EMPTY default, so nobody is alerted until it is set.
+- M5-L5b: `AGENCY_WEB_LEAD_ALERT_CHAT` (platform; only exactly `1` enables it). On the bot: `WEB_LEAD_ALERT_CHAT_ID` and `WEB_LEAD_ALERT_LINK_BASE`, which falls back to `MAIL_LINK_BASE_URL`. All of them are EMPTY by default, which means off.
+
+### wa-chat-bot `0.10.0` - M5-L5b: a fixed-template web-lead alert route (2026-10-12) - PROTOTYPED
+
+- `POST /admin/alerts/web-lead`, authenticated with the existing admin token.
+  - **The body:** exactly `{leadId, firstName, form, link}`. An unknown key is a 400. The link must be `<WEB_LEAD_ALERT_LINK_BASE>/agency/leads/<leadId>`. The first name must be letters only, at most 40.
+  - **The message:** the bot composes it from a fixed template. The destination comes ONLY from `WEB_LEAD_ALERT_CHAT_ID`.
+  - **Refused destinations:** a monitored registry group, and any group not on the ignored list. Both are refused with 503 `alert-destination-refused`, logged without lead data. Use a DM or a Telegram private chat.
+  - **One alert per lead:** the sent set holds lead ids only and survives a restart. A replay returns 200 `replayed`.
+  - **Sending:** through the surface router, so the halt switch and the outbound ceiling apply. The alert is never written to chat history.
+- Off until `WEB_LEAD_ALERT_CHAT_ID` is set (503 `alert-destination-unset`). Live use needs the env set and the bot container recreated.
+- CI run 38197371511: wa-chat-bot 540 passed / 16 skipped (the Postgres-backed ones); the new route's suite is 45/45.
+
 ### platform-nest `0.70.0` - M5 wave 2: a lead pipeline on agency_leads, the writers' room roles and review gate, the Umami read path (2026-10-12) - DEV-VERIFIED
 
 WebDesk M5 wave 2 (rulings WSK-D66 to D69), built by the M5 session.

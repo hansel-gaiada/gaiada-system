@@ -341,6 +341,39 @@ describe.skipIf(!TEST_URL)("social module (SMM-02)", () => {
     expect(ids).not.toContain(idA);
   });
 
+  // ── PV3-03: the strict `?clientId=` facet on the engagement list ──────────────────────────────
+  it("PV3-03: engagements?clientId= returns only that client's rows; internal is empty (client_id is NOT NULL); garbage is 400", async () => {
+    const facetClient = await createClient(B, "Facet Brand");
+    const mine = newId();
+    const theirs = newId();
+    for (const [id, client] of [[mine, facetClient], [theirs, clientB]] as const) {
+      const r = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/engagements`, headers: asUser(manager),
+        payload: { id, clientId: client, name: `facet ${id.slice(0, 4)}` },
+      });
+      expect(r.statusCode).toBe(201);
+    }
+    const get = (qs: string, as = manager) =>
+      app.inject({ method: "GET", url: `/api/${B}/modules/social/engagements${qs}`, headers: asUser(as) });
+
+    const byClient = await get(`?clientId=${facetClient}`);
+    expect(byClient.statusCode).toBe(200);
+    const rows = byClient.json() as Array<{ id: string; clientId: string }>;
+    expect(rows.map((r) => r.id)).toEqual([mine]);
+    expect(rows.every((r) => r.clientId === facetClient)).toBe(true);
+
+    const internal = await get(`?clientId=internal`);
+    expect(internal.statusCode).toBe(200);
+    expect(internal.json()).toEqual([]);
+
+    expect((await get(`?clientId=not-a-uuid`)).statusCode).toBe(400);
+    // Authorization first: no grant at C (module lit, no role) is 403 even with a garbage clientId.
+    const denied = await app.inject({
+      method: "GET", url: `/api/${C}/modules/social/engagements?clientId=not-a-uuid`, headers: asUser(manager),
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+
   // ── brand profile: config only, upsert-shaped ────────────────────────────────────────────────
   it("upserts a brand profile idempotently and never stores corpus text", async () => {
     const first = await app.inject({

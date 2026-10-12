@@ -330,7 +330,7 @@ Drop rules (`src/forms/attribution.ts`; the submission always succeeds):
 
 Status: PROTOTYPED (unit-tested; the DB and HTTP specs and migration 0017 await the Linux gate). Context: `legal/website-visitor-addendum.md` R-V3 / F17 / section 3.6 (consent snapshot) / section 5 (retention), WSK-D67. The site still keeps the choice in localStorage `gaia-consent`; this is the evidence the site cannot forge afterwards.
 
-`POST /v1/t/:tenantSlug/consent` (public, like the forms route), `OPTIONS` for the preflight. The site posts on EVERY banner decision.
+`POST /v1/t/:tenantSlug/consent` (public, like the forms route), `OPTIONS` for the preflight. The site posts on EVERY banner decision. `consent` is therefore a **reserved collection key** (`delivery/reserved-collection-keys.ts`), like `forms` and `media`.
 
 ```jsonc
 // request (Content-Type: application/json, <= 2 KiB)

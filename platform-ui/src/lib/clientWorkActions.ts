@@ -5,6 +5,7 @@ import { getSessionUserId } from "./session-server";
 import { getMe, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can } from "./rbac";
+import { registry } from "./clientCentre";
 import {
   createClient, updateClient, deleteClient, createDeliverable, createTimeEntry, createClientNote, deleteClientNote,
   CLIENT_CONTACT_KEYS,
@@ -21,12 +22,37 @@ async function ctx(): Promise<{ userId: string; tenant: string; me: Me } | { err
   return { userId, tenant, me };
 }
 
+/** PV3-04: the platform's typed 400 codes, in words. Anything else is passed through as the server said it. */
+const CLIENT_CODE_TEXT: Record<string, string> = {
+  business_type_required: "Choose a business type.",
+  business_type_invalid: "That business type isn't one of the listed ones.",
+  group_company_invalid: "That group company isn't valid.",
+  group_company_self: "A company can't be its own client. Pick a different group company.",
+  group_company_not_found: "That group company no longer exists. Pick another.",
+  group_company_other_root: "That company belongs to a different group, so it can't be linked here.",
+};
+
 function pending(e: unknown): CWState {
   if (e instanceof PlatformError) {
     if (e.status === 404 || e.status === 405) return { error: "Not available yet — the backend endpoint is pending." };
-    return { error: e.message };
+    return { error: CLIENT_CODE_TEXT[e.message] ?? e.message };
   }
   throw e;
+}
+
+/** The business-type input: required, and one of the registry's. A missing choice never reaches the backend. */
+function readBusinessType(formData: FormData): { businessType: string } | { error: string } {
+  const businessType = String(formData.get("businessType") ?? "").trim();
+  if (!businessType) return { error: CLIENT_CODE_TEXT.business_type_required };
+  if (!registry.businessTypes.some((b) => b.id === businessType)) return { error: CLIENT_CODE_TEXT.business_type_invalid };
+  return { businessType };
+}
+
+/** The group-company input exists only on the form of a platform operator. An absent key means leave the
+ *  link alone (it is never sent, so a non-operator's save cannot 403); a present blank value clears it. */
+function readGroupCompany(formData: FormData): { groupCompanyId?: string | null } {
+  if (!formData.has("groupCompanyId")) return {};
+  return { groupCompanyId: String(formData.get("groupCompanyId") ?? "") || null };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -54,13 +80,18 @@ export async function createClientAction(_prev: CWState | null, formData: FormDa
   if (!can(c.me, "client.write", c.tenant)) return { error: "You don't have permission to add clients." };
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "Client name is required." };
+  const type = readBusinessType(formData);
+  if ("error" in type) return { error: type.error };
   const read = readContact(formData);
   if ("error" in read) return { error: read.error };
   const contact = Object.fromEntries(Object.entries(read.contact).filter(([, v]) => v !== null)) as Record<string, string>;
   const ownerUserId = String(formData.get("ownerUserId") ?? "") || null;
   let id: string;
   try {
-    id = (await createClient(c.userId, c.tenant, { name, status: String(formData.get("status") ?? "active"), contact, ownerUserId })).id;
+    id = (await createClient(c.userId, c.tenant, {
+      name, businessType: type.businessType, status: String(formData.get("status") ?? "active"), contact, ownerUserId,
+      ...readGroupCompany(formData),
+    })).id;
   } catch (e) { return pending(e); }
   revalidatePath("/clients");
   redirect(`/clients/${id}`);
@@ -76,11 +107,16 @@ export async function updateClientAction(clientId: string, _prev: CWState | null
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "Client name is required." };
   const status = String(formData.get("status") ?? "").trim();
+  const type = readBusinessType(formData);
+  if ("error" in type) return { error: type.error };
   const read = readContact(formData);
   if ("error" in read) return { error: read.error };
   const ownerUserId = String(formData.get("ownerUserId") ?? "") || null;
   try {
-    await updateClient(c.userId, c.tenant, clientId, { name, ...(status ? { status } : {}), contact: read.contact, ownerUserId });
+    await updateClient(c.userId, c.tenant, clientId, {
+      name, ...(status ? { status } : {}), contact: read.contact, ownerUserId, businessType: type.businessType,
+      ...readGroupCompany(formData),
+    });
   } catch (e) { return pending(e); }
   revalidatePath("/clients");
   revalidatePath(`/clients/${clientId}`, "layout");

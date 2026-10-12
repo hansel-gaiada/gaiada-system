@@ -107,8 +107,13 @@ export function validateZoneBEvent(routeTenantId: string, body: unknown): Schema
   if (typeof body.kind !== "string" || !(ZONEB_EVENT_KINDS as readonly string[]).includes(body.kind)) {
     return { ok: false, reason: `kind must be one of: ${ZONEB_EVENT_KINDS.join(", ")}` };
   }
-  if (!isNonEmptyString(body.tenantId)) return { ok: false, reason: "tenantId is required" };
-  if (body.tenantId !== routeTenantId) {
+  // The MCP hub (mcp-hub/src/module-tools.ts callPlatform) fills `:tenantId` in the path from the tool arguments and
+  // STRIPS it from the body, so an envelope relayed by the wd-zoneb-intake bridge arrives without one. The route tenant
+  // is authoritative (the AuthGuard and Cerbos authorized the caller against it), so an absent body tenantId takes it.
+  // A PRESENT one that disagrees is still refused, never silently overridden (found live, 2026-10-12).
+  if (body.tenantId !== undefined && !isNonEmptyString(body.tenantId)) return { ok: false, reason: "tenantId is required" };
+  const tenantId = body.tenantId === undefined ? routeTenantId : (body.tenantId as string);
+  if (tenantId !== routeTenantId) {
     return { ok: false, reason: "body tenantId does not match the route tenant" };
   }
   if (!isNonEmptyString(body.originSite)) return { ok: false, reason: "originSite is required" };
@@ -137,7 +142,7 @@ export function validateZoneBEvent(routeTenantId: string, body: unknown): Schema
     value: {
       eventId: body.eventId,
       kind,
-      tenantId: body.tenantId,
+      tenantId,
       originSite: body.originSite,
       occurredAt: body.occurredAt,
       data: body.data,

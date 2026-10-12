@@ -39,11 +39,11 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 14 |
+| agency | `agency` | 15 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 13 |
-| core | `agency` · `positions` · `role-grants` | 19 |
+| clients | `clients` | 14 |
+| core | `agency` · `positions` · `role-grants` | 20 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 4 |

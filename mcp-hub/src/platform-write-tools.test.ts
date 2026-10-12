@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { registerPlatformWriteTools } from "./platform-write-tools";
 import { getTool, resetRegistry } from "./registry";
 import { mintPrincipal } from "./principal";
+import { validateToolArgs } from "./validate-args";
 
 const principal = mintPrincipal({ provider: "whatsapp", externalId: "628110@c.us" });
 
@@ -165,5 +166,59 @@ describe("platform write-tools", () => {
     const out = await getTool("authz.check")!.handler({ tenantId: "co-1", resource: "task", action: "create" }, principal);
     expect(JSON.parse(out)).toEqual({ decision: "allow" });
     expect((spy as any).mock.calls[0][0]).toContain("/api/co-1/authz/check");
+  });
+
+  // PV3-04 (PV-D1, PV-D2): clients carry a required business type, and may be linked to a group company.
+  describe("clients.create / clients.update (PV3-04)", () => {
+    it("clients.create REQUIRES businessType: the hub's schema gate refuses a call without it, and an unknown type", () => {
+      const schema = getTool("clients.create")!.inputSchema;
+      const missing = validateToolArgs(schema, { tenantId: "co-1", name: "Acme" });
+      expect(missing.ok).toBe(false);
+      if (!missing.ok) expect(missing.errors.join(" ")).toMatch(/businessType/);
+      const unknown = validateToolArgs(schema, { tenantId: "co-1", name: "Acme", businessType: "pirate-ship" });
+      expect(unknown.ok).toBe(false);
+      expect(validateToolArgs(schema, { tenantId: "co-1", name: "Acme", businessType: "hotel" }).ok).toBe(true);
+      // "other" is a valid explicit choice, and the enum names every registry type.
+      expect(validateToolArgs(schema, { tenantId: "co-1", name: "Acme", businessType: "other" }).ok).toBe(true);
+    });
+
+    it("clients.create forwards businessType and groupCompanyId verbatim; the platform decides who may link", async () => {
+      const spy = mockFetch(201, { id: "cl-1" });
+      vi.stubGlobal("fetch", spy);
+      await getTool("clients.create")!.handler({ tenantId: "co-1", name: "Acme", businessType: "retail" }, principal);
+      expect(JSON.parse((spy as any).mock.calls[0][1].body)).toEqual({ name: "Acme", contact: {}, businessType: "retail" });
+      await getTool("clients.create")!.handler({ tenantId: "co-1", name: "Sibling", businessType: "hotel", groupCompanyId: "co-2" }, principal);
+      expect(JSON.parse((spy as any).mock.calls[1][1].body)).toMatchObject({ businessType: "hotel", groupCompanyId: "co-2" });
+    });
+
+    it("clients.update accepts businessType and groupCompanyId, and null CLEARS the link (it must reach the wire as null)", async () => {
+      const schema = getTool("clients.update")!.inputSchema;
+      expect(validateToolArgs(schema, { tenantId: "co-1", clientId: "cl-1", groupCompanyId: null }).ok).toBe(true);
+      expect(validateToolArgs(schema, { tenantId: "co-1", clientId: "cl-1", businessType: "pirate-ship" }).ok).toBe(false);
+      const spy = mockFetch(200, { id: "cl-1" });
+      vi.stubGlobal("fetch", spy);
+      await getTool("clients.update")!.handler({ tenantId: "co-1", clientId: "cl-1", businessType: "spa", groupCompanyId: null }, principal);
+      const [url, init] = (spy as any).mock.calls[0];
+      expect(url).toContain("/api/co-1/clients/cl-1");
+      expect(init.method).toBe("PATCH");
+      expect(JSON.parse(init.body)).toEqual({ businessType: "spa", groupCompanyId: null });
+      // An omitted groupCompanyId is NOT sent at all: a plain rename must not look like "touching" the link.
+      await getTool("clients.update")!.handler({ tenantId: "co-1", clientId: "cl-1", name: "Renamed" }, principal);
+      expect(JSON.parse((spy as any).mock.calls[1][1].body)).toEqual({ name: "Renamed" });
+    });
+
+    it("a platform 400 surfaces its typed reason, so the agent can correct the call", async () => {
+      vi.stubGlobal("fetch", mockFetch(400, { error: "group_company_other_root", field: "groupCompanyId" }));
+      await expect(
+        getTool("clients.update")!.handler({ tenantId: "co-1", clientId: "cl-1", groupCompanyId: "co-x" }, principal),
+      ).rejects.toThrow(/400: group_company_other_root/);
+    });
+
+    it("a non-operator's 403 on groupCompanyId is a thrown denial", async () => {
+      vi.stubGlobal("fetch", mockFetch(403, { error: "linking a client to a group company needs a platform operator" }));
+      await expect(
+        getTool("clients.update")!.handler({ tenantId: "co-1", clientId: "cl-1", groupCompanyId: "co-2" }, principal),
+      ).rejects.toThrow(/platform operator/);
+    });
   });
 });
