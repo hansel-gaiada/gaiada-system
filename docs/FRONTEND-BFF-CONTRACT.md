@@ -5207,7 +5207,7 @@ Design `docs/plans/2026-10-11-m5-writers-room-design.md` §2.3; attribute proven
 - **Phase 1, the handler's first statement:** Cerbos `webdesk_collection:read` on `{tenantId, module:"webdev", siteId}` (the route's `:siteId`). A caller no rule matches is 403 here, with no WebDesk call at all. A principal that holds no writers' room grant (and is not delegating) is ALSO asked the old attribute-free question for the real action, so a denied staff caller is refused exactly as before, before any egress. `GET sites` has no site: staff get the old company-level question; a writers' room grant is filtered site by site (`check`, no denial rows for the sites it may not read).
 - **Phase 2, before ANY body or query validation:** the real action, with `siteId` (the route's, after the cross-company wall), and `collectionKey`, `locale`, `ownerId` (WebDesk's `editorial.authorSub`), `reviewState` (`editorial.state`), `published` (`publishedVersion !== null`) from WebDesk's `item.get`. `create`: the route's collection (proven by `collection.get`), the body's `locale`, and for a locale twin the SOURCE item's state and `published`. A body or query that names any of these is a 400 AFTER the check and changes nothing the check saw. A denied caller is 403 for any body, and WebDesk receives no write. **A WebDesk that sends no `editorial` member reads as ownerId `""`, reviewState `""`: the writers' room rules fail closed, the staff tiers are unaffected.**
 - Read order changes you may see: `item.get` is read once for the head (the attribute source) and a second time, after the check, only when `?version=` is given; the preview route reads the item before it probes the site (a denied caller triggers no probe); `publish-requests` reads the items its body names before it validates the body.
-- **Decision for the UI (W2e):** a scoped `webdesk_editor` has no site-level `request_publish` (its rule needs a collection), so `GET …/publish-requests` (own requests) and `…/withdraw` stay the staff tiers' for now: **403 for a scoped editor**, fail closed. Needs a policy decision before the editorial panel can show "my pending requests" to a scoped editor.
+- A scoped `webdesk_editor` files publish requests (the filer re-checks `request_publish` on the same attribute-carrying resources, `itemResources`), and lists/withdraws its OWN requests under phase 1 plus the own-rows filter; no policy change.
 
 | Route group | Phase 1 | Phase 2 |
 |---|---|---|
@@ -5219,7 +5219,7 @@ Design `docs/plans/2026-10-11-m5-writers-room-design.md` §2.3; attribute proven
 | `POST …/collections/:key/items` | same | `webdesk_content_item:create`+siteId+route key+body locale (+ twin source state) |
 | `PUT`/`PATCH …/items/:id`, `POST …/restore`, `POST …/preview` | same | `webdesk_content_item:update` with the item's attributes |
 | `POST …/publish-requests` | same | `request_publish` per distinct (collection, locale, author, state, live) tuple of the items the body names; a malformed body is asked at site level |
-| `GET …/publish-requests`, `POST …/publish-requests/:a/withdraw` | same | none beyond phase 1 and the old `request_publish` question (own rows only) |
+| `GET …/publish-requests`, `POST …/publish-requests/:a/withdraw` | same | none beyond phase 1 (and, for staff tiers, the old `request_publish` question); own rows only |
 | `POST …/unpublish`, `POST …/delete` | same | `webdesk_content_item:unpublish`/`delete` with the item's attributes |
 
 ### Withdrawing a request, and the approvals façade

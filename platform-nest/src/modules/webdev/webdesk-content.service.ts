@@ -1362,7 +1362,7 @@ export class WebdeskContentService {
     // staff tier passes and a scoped editor (whose rules need a collection) does not: 403 before the 400.
     const refs = lenientPublishRefs(rawBody);
     const preReads = await mapPool(refs, ITEM_READ_CONCURRENCY, (it) => this.readItemAttrs(site, it.itemId, String(it.version)));
-    await this.authorizePublishTuples(gate, editable.site.siteId, preReads);
+    const itemResources = await this.authorizePublishTuples(gate, editable.site.siteId, preReads);
     const b = strictBody(rawBody, ["items", "publishAt", "unpublishAt", "note"]);
     const items = parsePublishItems(b.items);
     const publishAt = optInstant(b.publishAt, "publishAt");
@@ -1434,25 +1434,29 @@ export class WebdeskContentService {
         : { items: wireItems, ...(b.note !== undefined ? { note: b.note as string } : {}) },
       summary: { title: title.length > 300 ? `${title.slice(0, 297)}...` : title, counts },
       ...(gate.client ? { client: { clientId: gate.client.clientId, notifyDeciders: gate.client.notifyDeciders } } : {}),
+      // The filer's own defence-in-depth check asks about the SAME attribute-carrying resources phase 2 did (a scoped editor
+      // is matched by site/collection/locale, which the attribute-free resource lacks). Empty = absent there.
+      itemResources,
     });
     return { status: 202, body: { approvalId, command, itemCount: n } };
   }
 
-  /** `request_publish` for each distinct tuple of attributes among `reads` (bounded concurrency); with no reads, at site level. */
-  private async authorizePublishTuples(gate: ContentGate, siteId: string, reads: readonly ItemAttrs[]): Promise<void> {
+  /**
+   * `request_publish` for each distinct tuple of attributes among `reads` (bounded concurrency); with no reads, at site level.
+   * Returns the resources it asked about (empty for the site-level ask), which the filing function re-uses for its own check.
+   */
+  private async authorizePublishTuples(gate: ContentGate, siteId: string, reads: readonly ItemAttrs[]): Promise<Resource[]> {
     if (reads.length === 0) {
       await authorize(gate.principal, ItemGate.resourceOf(gate, siteId, null, { collectionKey: "", locale: "" }), "request_publish");
-      return;
+      return [];
     }
     const tuples = new Map<string, ItemAttrs>();
     for (const a of reads) tuples.set(JSON.stringify([a.collectionKey, a.locale, a.ownerId, a.reviewState, a.published]), a);
-    await mapPool([...tuples.values()], ITEM_READ_CONCURRENCY, (a) =>
-      authorize(
-        gate.principal,
-        ItemGate.resourceOf(gate, siteId, null, { collectionKey: a.collectionKey, locale: a.locale, ownerId: a.ownerId, reviewState: a.reviewState, published: a.published }),
-        "request_publish",
-      ),
+    const resources = [...tuples.values()].map((a) =>
+      ItemGate.resourceOf(gate, siteId, null, { collectionKey: a.collectionKey, locale: a.locale, ownerId: a.ownerId, reviewState: a.reviewState, published: a.published }),
     );
+    await mapPool(resources, ITEM_READ_CONCURRENCY, (r) => authorize(gate.principal, r, "request_publish"));
+    return resources;
   }
 
   /**

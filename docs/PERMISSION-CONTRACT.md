@@ -1602,8 +1602,7 @@ portal. `publish`/`schedule` are decide()-only and not listed.
 **Known limits, recorded so nobody rediscovers them.**
 1. *Existence oracle inside a site.* Phase 2 reads the item before it can be denied, so a scoped caller sees 404 `item-not-found` for an unknown id and 403 for an item it may not touch. Ids are uuids and phase 1 already
    proved the caller may read the site; it is not closed here.
-2. *`request_publish` has no site-level answer for a scoped editor.* `webdesk_editor` needs a collection, so listing and withdrawing one's OWN publish requests (`GET/POST …/publish-requests[/:a/withdraw]`) is 403 for it until a policy decision
-   (a `webdesk_editorial_site` rule for those two reads) is taken; the staff tiers are unchanged.
+2. *Filing re-asks with the same attributes.* `fileWebdeskCommandApproval` runs its own defence-in-depth `request_publish` check; `publish-requests` now passes it the attribute-carrying resources phase 2 built (`itemResources`; empty or absent = the old attribute-free check), so a scoped `webdesk_editor` can file. Listing and withdrawing one's OWN requests (`GET/POST …/publish-requests[/:a/withdraw]`) need only phase 1 and the own-rows filter for a writers' room grant (a writer or translator can never have filed one).
 3. *WebDesk can pre-empt a 403 on a read of a named version.* `publish-requests` reads each named item at its named version (for the content hash the approver sees); a version WebDesk does not have is its typed 404 before the check on that tuple.
 4. *A scoped principal's malformed `publish-requests` body is 403, not 400*: with no readable item the check is asked at site level, which a scoped editor cannot pass. Authorization first.
 

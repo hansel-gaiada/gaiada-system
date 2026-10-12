@@ -24,6 +24,7 @@ const h = vi.hoisted(() => {
   const probes: Array<{ resource: Res; action: string; who: string }> = [];
   const batches: Array<{ resource: Res; actions: readonly string[]; who: string }> = [];
   const state = { failBatch: false };
+  const filed: Array<{ itemResources?: Res[] }> = [];
   const STAFF_TIER = ["read", "create", "update", "request_publish", "submit", "comment"];
   const decide = (p: { userId: string | null; roles: Array<{ role: string; editorialScopes?: Array<{ siteId: string; allCollections: boolean; collections: string[]; allLocales: boolean; locales: string[] }> }> }, r: Res, a: string): boolean => {
     if (r.tenantId !== "aaaaaaaa-1111-0000-0000-000000000001") return false;
@@ -50,7 +51,7 @@ const h = vi.hoisted(() => {
     }
     return false;
   };
-  return { asks, probes, batches, state, decide };
+  return { asks, probes, batches, state, decide, filed };
 });
 
 vi.mock("../../core/http", async (importOriginal) => {
@@ -83,7 +84,7 @@ vi.mock("../../rbac/cerbos", async (importOriginal) => {
 // Filing a WS4 approval needs the database; the asks are what is under test, so the filer is a stub (its argument is recorded).
 vi.mock("./webdesk-approved-command", async (importOriginal) => {
   const real = await importOriginal<typeof import("./webdesk-approved-command")>();
-  return { ...real, fileWebdeskCommandApproval: (async () => ({ approvalId: "approval-stub" })) as typeof real.fileWebdeskCommandApproval };
+  return { ...real, fileWebdeskCommandApproval: (async (_p: unknown, _t: unknown, input: { itemResources?: Array<Record<string, unknown>> }) => { h.filed.push(input); return { approvalId: "approval-stub" }; }) as typeof real.fileWebdeskCommandApproval };
 });
 
 import { FakeZoneB, GAIADA_SITE, GAIADA_SLUG, makeTestSigner, type FakeItem } from "./webdesk-content-testkit";
@@ -132,6 +133,7 @@ beforeEach(() => {
   h.probes.length = 0;
   h.batches.length = 0;
   h.state.failBatch = false;
+  h.filed.length = 0;
   zb = new FakeZoneB(T, OTHER_CO);
   zb.compositions.set("post", { ui: { label: "Posts" } });
   zb.compositions.set("guide", { ui: { label: "Guides" } });
@@ -510,6 +512,9 @@ describe("publish-requests: phase 2 reads the named items before the body is val
     await expect(svc.requestPublish(sg, site, { items: [a, b, c].map((i) => ({ itemId: i.itemId, version: 1 })), note: "x" })).resolves.toMatchObject({ status: 202, body: { approvalId: "approval-stub", itemCount: 3 } });
     const asks = asksOf("webdesk_content_item", "request_publish").filter((x) => x.resource.id === undefined && x.resource.collectionKey === "post");
     expect(asks.map((x) => x.resource.ownerId).sort()).toEqual([OTHER_AUTHOR, WRITER].sort());
+    // the filer re-asks on exactly those attribute-carrying resources (a scoped editor is matched by them)
+    expect(h.filed).toHaveLength(1);
+    expect(h.filed[0].itemResources).toEqual(asks.map((x) => x.resource));
   });
 });
 
