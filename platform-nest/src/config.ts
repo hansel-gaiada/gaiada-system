@@ -654,6 +654,12 @@ const configBase = {
     pollIntervalMs: Number(process.env.PROVISION_POLL_INTERVAL_MS ?? 5_000),
     pollMaxIntervalMs: Number(process.env.PROVISION_POLL_MAX_INTERVAL_MS ?? 30_000),
     pollMaxMs: Number(process.env.PROVISION_POLL_MAX_MS ?? 5 * 60_000),
+    // M6-P4c2: how often the scheduled reconcile (modules/webdev/provision-reconcile-loop.ts) re-asks which
+    // provisioned sites are stuck short of `complete`. `${VAR:-}` hands over "" and Number("") is 0, so this
+    // goes through readIntervalMs: empty, junk, zero and anything under the 30 s floor all fall back to 5 min.
+    // There is deliberately no on/off flag (the loop's header says why); a very large value is the way to
+    // slow it down, and a row's own back-off schedule bounds the rest.
+    reconcileIntervalMs: readIntervalMs(process.env.PROVISION_RECONCILE_INTERVAL_MS, 5 * 60_000, 30_000),
   },
   // ERP repo control (webdesk-design-v2.md §08, WSK-D33) — per-KIND GitHub template repo, one
   // `owner/repo` string per §08's three canonical kinds (`static`/`fullstack`/`wp`). Read ONLY by
