@@ -152,6 +152,47 @@ export interface ExecutableApprovalEntry {
    * put an RLS decision in the least visible place available.
    */
   preconditionModules?: string[];
+
+  /**
+   * PV3 follow-up (2026-10-12) — a separation-of-duties check on the human who APPROVES, not on the
+   * principal who executes.
+   *
+   * Invariant 1 of `core/approval-execute.ts` re-drives an approved call as the ORIGINAL FILING
+   * PRINCIPAL. That is right for authority, and it is also why a route's maker-checker rule cannot see
+   * the approver: the route compares its own "maker" column with the FILER. For
+   * `invoicePayments.decide` that meant the person who recorded a payment could approve an agent's
+   * request to confirm it, and the payment was confirmed by its own recorder, one step removed. The
+   * route never learns who lifted the gate, so the rule has to be stated here, where the approver is
+   * known.
+   *
+   * Called twice, both times inside a `withTenants` transaction for the approval's own tenant, with
+   * `preconditionModules` in scope:
+   *   1. by `AutomationApprovalsController.decide()` (the ONE decide surface for automation/agent rows;
+   *      the `/approvals/:id/decide` façade delegates to it) BEFORE the decide UPDATE, with the
+   *      deciding principal (and the human an `actFor` call acts for). A refusal is a 403 carrying the
+   *      typed `reason`; the row stays `pending` and nothing executes.
+   *   2. by the executor's claim transaction, against the row's stored `decided_by`, so a row that
+   *      reached `approved` any other way (a future decide surface, a hand edit, a D14-07 retry of a row
+   *      decided before this check existed) is refused as well. There the row lands `failed` with
+   *      `approver_refused: <reason>` and the hub is never called.
+   *
+   * It is NOT a second authorization of the call: Cerbos still runs for real at execution, as the
+   * filer. It answers only "may THIS human be the one who lets it through?". Same rules as
+   * `precondition`: a typed snake_case reason, no writes, no network. Absent = no approver rule, which
+   * is every entry that shipped before this field.
+   */
+  approverCheck?(
+    client: PoolClient,
+    toolArgs: Record<string, unknown>,
+    approver: ApprovalApprover,
+  ): Promise<PreconditionVerdict>;
+}
+
+/** Who approved (or is approving) a D14 row. `actForUserId` is set when the decide call itself arrived
+ *  as a delegated (`x-act-for`) call, so a rule can refuse if EITHER human is the excluded one. */
+export interface ApprovalApprover {
+  userId: string;
+  actForUserId?: string;
 }
 
 /**
@@ -168,7 +209,7 @@ export interface ExecutableApprovalEntry {
  *    and notifies), never silently executable.
  */
 export type ExecutableApprovalInput = Pick<ExecutableApprovalEntry, "toolName"> &
-  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry" | "preconditionModules">>;
+  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry" | "preconditionModules" | "approverCheck">>;
 
 const registry = new Map<string, ExecutableApprovalEntry>();
 
@@ -204,6 +245,7 @@ export function registerExecutableApproval(entry: ExecutableApprovalInput): void
     // same thing to the executor, and normalizing would make "declares no modules" and "declares
     // none needed" indistinguishable to anyone auditing the registry.
     ...(entry.preconditionModules?.length ? { preconditionModules: [...entry.preconditionModules] } : {}),
+    ...(entry.approverCheck ? { approverCheck: entry.approverCheck } : {}),
   });
 }
 
@@ -2040,6 +2082,16 @@ export function registerAgencyPrivacyBars(): void {
 // call the route will then refuse; the row lands `failed` with the route's typed 403, loudly, which is the
 // correct outcome.
 //
+// ── THE ONE RULE THE ROUTE CANNOT SEE: WHO APPROVED (2026-10-12) ──────────────────────────────────
+// The route's maker-checker check compares `recorded_by` with the principal it is called as, which on a
+// re-drive is the FILER. The APPROVER never reaches the route. So the recorder could approve an agent's
+// request (filed by someone else) to decide their own payment, and it went through. `invoicePayments.decide`
+// therefore declares an `approverCheck` (see `ExecutableApprovalEntry.approverCheck`): the approver must not
+// be the payment's `recorded_by`, refused as `approver_recorded_this_payment` at decide time (403, the row
+// stays pending) and again at execution against the stored `decided_by`. It covers both decisions, confirm
+// and reject, because the route's own rule does: whoever recorded a payment decides neither. This is not a
+// copy of an authorization rule; it is the only place the approver's identity exists.
+//
 // ── LOCK SCOPE: THE ROW ───────────────────────────────────────────────────────────────────────────
 // One unit of consistency per contract (send, countersign are separate keys: a send and a countersign of
 // the same contract cannot both be valid, but they are different acts) and per payment. Core tables with
@@ -2105,6 +2157,34 @@ async function paymentDecidePrecondition(client: PoolClient, args: Record<string
   return { ok: true };
 }
 
+/** The typed reason an approval of `invoicePayments.decide` by the payment's own recorder is refused with. */
+export const APPROVER_RECORDED_THIS_PAYMENT = "approver_recorded_this_payment";
+
+/**
+ * Maker-checker for the APPROVER of `invoicePayments.decide` (see this section's 2026-10-12 note). Fails
+ * closed: bad args or a payment this tenant's session cannot see refuse rather than pass, because a check
+ * that answers "ok" on zero rows is exactly how an RLS mistake would reopen the hole silently. A payment
+ * with no `recorded_by` has no maker to exclude.
+ */
+async function paymentDecideApproverCheck(
+  client: PoolClient,
+  args: Record<string, unknown>,
+  approver: ApprovalApprover,
+): Promise<PreconditionVerdict> {
+  const { tenantId, id } = billingArgs(args, "paymentId");
+  if (!tenantId || !id) return { ok: false, reason: "missing_payment_args" };
+  const { rows } = await client.query<{ recorded_by: string | null }>(
+    `SELECT recorded_by FROM invoice_payments WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, id],
+  );
+  const p = rows[0];
+  if (!p) return { ok: false, reason: "payment_not_found" };
+  if (p.recorded_by && (p.recorded_by === approver.userId || p.recorded_by === approver.actForUserId)) {
+    return { ok: false, reason: APPROVER_RECORDED_THIS_PAYMENT };
+  }
+  return { ok: true };
+}
+
 /** Registers the three PV3-06 entries. Exported for the same reason the other bootstraps are. */
 export function registerContractBillingExecutableApprovals(): void {
   const key = (ns: string, idKey: "contractId" | "paymentId") => (args: Record<string, unknown>): string => {
@@ -2125,6 +2205,7 @@ export function registerContractBillingExecutableApprovals(): void {
     toolName: "invoicePayments.decide",
     lockKey: key("invoice-payment:decide", "paymentId"),
     precondition: paymentDecidePrecondition,
+    approverCheck: paymentDecideApproverCheck,
   });
 }
 

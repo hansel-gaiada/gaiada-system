@@ -30,7 +30,7 @@ import {
   createCompany, createUser, addMembership, createRole, grantRole, createClient, linkIdentity,
 } from "../testing/fixtures";
 import { allCoreTools } from "./core-tools";
-import { getExecutable } from "./approval-executables";
+import { APPROVER_RECORDED_THIS_PAYMENT, getExecutable } from "./approval-executables";
 import { executeApprovedAutomationWrite } from "./approval-execute";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -100,6 +100,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
   let owner: string; // owner of `tenant`: may countersign
   let recorder: string; // company_admin who RECORDS payments: may not confirm what they recorded
   let outsider: string; // a member with no role
+  let checker: string; // a second company_admin: an eligible approver who recorded nothing
   let clientA: string;
   let clientB: string;
   let invoiceA: string;
@@ -202,9 +203,12 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
     await grantRole(recorder, await createRole("company_admin"), "company", tenant);
     outsider = await createUser("outsider@pv306.test");
     await addMembership(tenant, outsider);
+    checker = await createUser("checker@pv306.test");
+    await addMembership(tenant, checker);
+    await grantRole(checker, await createRole("company_admin"), "company", tenant);
 
     const pool = adminPool();
-    for (const u of [admin, owner, recorder, outsider]) {
+    for (const u of [admin, owner, recorder, outsider, checker]) {
       await pool.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [tenant, u]);
     }
     await linkIdentity(admin, ADMIN.provider, ADMIN.externalId, true);
@@ -474,7 +478,9 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
     });
     afterEach(() => vi.restoreAllMocks());
 
-    async function fileApproved(tool: string, args: Record<string, unknown>, filedBy: string, impact: "medium" | "high"): Promise<string> {
+    async function fileApproved(
+      tool: string, args: Record<string, unknown>, filedBy: string, impact: "medium" | "high", decidedBy: string = admin,
+    ): Promise<string> {
       const id = newId();
       await withTenants([tenant], (c) =>
         c.query(
@@ -482,11 +488,35 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
              (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at,
               origin, origin_site, execution_status)
            VALUES ($1,$2,'wf:pv306-agent',$3,$4,$5,'approved',$6,$7,now(),'agent','main','pending')`,
-          [id, tenant, tool, JSON.stringify(args), impact, filedBy, admin],
+          [id, tenant, tool, JSON.stringify(args), impact, filedBy, decidedBy],
         ),
       );
       return id;
     }
+    /** A PENDING row, exactly as the hub's `approvals.request` files it (approval-filing.ts's INSERT): no
+     *  decider yet, `execution_status` at its column default. Decided below through the REAL routes. */
+    async function filePending(tool: string, args: Record<string, unknown>, filedBy: string): Promise<string> {
+      const id = newId();
+      await withTenants([tenant], (c) =>
+        c.query(
+          `INSERT INTO automation_approvals
+             (id, tenant_id, workflow_id, tool_name, tool_args, impact, requested_by, origin, agent_name, origin_site)
+           VALUES ($1,$2,'wf:pv306-agent',$3,$4,'high',$5,'agent',$6,'main')`,
+          [id, tenant, tool, JSON.stringify(args), filedBy, AGENT],
+        ),
+      );
+      return id;
+    }
+    const approvalOf = async (id: string) =>
+      (await adminPool().query<{ status: string; decided_by: string | null; execution_status: string; execution_error: string | null }>(
+        `SELECT status, decided_by, execution_status, execution_error FROM automation_approvals WHERE id = $1`, [id],
+      )).rows[0];
+    const decideRoute = (id: string, by: string, decision: "approved" | "rejected") =>
+      app.inject({ method: "POST", url: `/api/${tenant}/automation-approvals/${id}/decide`, headers: asUser(by), payload: { decision } });
+    const decideFacade = (id: string, by: string, decision: "approved" | "rejected") =>
+      app.inject({ method: "POST", url: `/api/${tenant}/approvals/${id}/decide`, headers: asUser(by), payload: { origin: "agent", decision } });
+    const confirmedBy = async (id: string) =>
+      (await adminPool().query<{ confirmed_by: string | null }>(`SELECT confirmed_by FROM invoice_payments WHERE id = $1`, [id])).rows[0]?.confirmed_by;
     const rowOf = async (id: string) =>
       (await adminPool().query<{ execution_status: string; execution_error: string | null; executed_by: string | null }>(
         `SELECT execution_status, execution_error, executed_by FROM automation_approvals WHERE id = $1`, [id],
@@ -547,6 +577,107 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       const again = await fileApproved("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "reject", reason: "x" }, admin, "high");
       expect(await executeApprovedAutomationWrite(tenant, again)).toMatchObject({ status: "failed", error: "precondition_failed: payment_not_pending" });
       expect(hubCalls).toBe(calls);
+    });
+
+    // ── maker-checker reaches the APPROVER (2026-10-12) ─────────────────────────────────────────
+    // The re-drive runs as the FILER, so the route's own check compares the recorder with the filer and
+    // never sees who approved. Before the approver rule, `recorder` approving `admin`'s agent request to
+    // confirm `recorder`'s own payment confirmed it.
+
+    it("🔴 the payment's RECORDER cannot approve an agent's request to confirm it: 403 approver_recorded_this_payment, the row stays pending, nothing executes", async () => {
+      const inv = await insertInvoice(clientA, 30);
+      const p = await insertPayment(inv, clientA, 30, recorder);
+      // Filed by `admin`'s agent: the filer is NOT the recorder, so the route's own check would pass at execution.
+      const a = await filePending("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "confirm" }, admin);
+
+      const r = await decideRoute(a, recorder, "approved");
+      expect(r.statusCode, r.body).toBe(403);
+      expect(r.json().reason).toBe(APPROVER_RECORDED_THIS_PAYMENT);
+      expect(String(r.json().error)).toMatch(/^approver_recorded_this_payment:/);
+      // The unified inbox façade delegates to the same handler, so it refuses the same way.
+      const viaFacade = await decideFacade(a, recorder, "approved");
+      expect(viaFacade.statusCode, viaFacade.body).toBe(403);
+      expect(viaFacade.json().reason).toBe(APPROVER_RECORDED_THIS_PAYMENT);
+
+      expect(await approvalOf(a)).toMatchObject({ status: "pending", decided_by: null, execution_status: "not_applicable" });
+      // Nothing to execute: the executor cannot claim a row that was never approved.
+      expect(await executeApprovedAutomationWrite(tenant, a)).toEqual({ status: "skipped", reason: "not_pending" });
+      expect(hubCalls).toBe(0);
+      expect(await paymentStatus(p)).toBe("pending");
+      expect(await activities(p, "confirmed")).toHaveLength(0);
+    });
+
+    it("🔴 approved by another eligible person, the same request executes exactly once, as the filer", async () => {
+      const inv = await insertInvoice(clientA, 35);
+      const p = await insertPayment(inv, clientA, 35, recorder);
+      const a = await filePending("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "confirm" }, admin);
+      expect((await decideRoute(a, recorder, "approved")).statusCode).toBe(403);
+
+      const ok = await decideRoute(a, checker, "approved");
+      expect(ok.statusCode, ok.body).toBe(200);
+      expect(await approvalOf(a)).toMatchObject({ status: "approved", decided_by: checker, execution_status: "pending" });
+
+      expect(await executeApprovedAutomationWrite(tenant, a)).toEqual({ status: "executed" });
+      expect(hubCalls).toBe(1);
+      expect(await paymentStatus(p)).toBe("confirmed");
+      expect(await confirmedBy(p)).toBe(admin); // D14 invariant 1: run as the FILER, never as the approver
+      expect(await activities(p, "confirmed")).toHaveLength(1);
+      // Once: a redelivery of the decided event finds nothing to claim.
+      expect(await executeApprovedAutomationWrite(tenant, a)).toEqual({ status: "skipped", reason: "not_pending" });
+      expect(hubCalls).toBe(1);
+    });
+
+    it("the recorder may still REJECT the request (rejecting executes nothing), and the rule covers a `reject` decision too", async () => {
+      const p = await insertPayment(invoiceA, clientA, 3, recorder);
+      const conf = await filePending("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "confirm" }, admin);
+      const r = await decideRoute(conf, recorder, "rejected");
+      expect(r.statusCode, r.body).toBe(200);
+      expect(await approvalOf(conf)).toMatchObject({ status: "rejected", execution_status: "not_applicable" });
+      // An agent's request to REJECT the recorder's payment: the route refuses the recorder either way, so the approver rule does too.
+      const rej = await filePending("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "reject", reason: "dup" }, admin);
+      const r2 = await decideRoute(rej, recorder, "approved");
+      expect(r2.statusCode, r2.body).toBe(403);
+      expect(r2.json().reason).toBe(APPROVER_RECORDED_THIS_PAYMENT);
+      expect(await paymentStatus(p)).toBe("pending");
+    });
+
+    it("🔴 second wall: a row the recorder approved by any other path is refused at EXECUTION (approver_refused), the hub is never called", async () => {
+      const inv = await insertInvoice(clientA, 20);
+      const p = await insertPayment(inv, clientA, 20, recorder);
+      // As if decided around the route (a future surface, a hand edit, a retry of a row decided before the rule existed).
+      const a = await fileApproved("invoicePayments.decide", { tenantId: tenant, paymentId: p, decision: "confirm" }, admin, "high", recorder);
+      expect(await executeApprovedAutomationWrite(tenant, a)).toEqual({
+        status: "failed", error: `approver_refused: ${APPROVER_RECORDED_THIS_PAYMENT}`,
+      });
+      expect(hubCalls).toBe(0);
+      expect(await paymentStatus(p)).toBe("pending");
+      expect((await approvalOf(a)).execution_status).toBe("failed");
+    });
+
+    it("the approver rule fails closed on bad args and missing rows, matches an act-for human, and passes a payment with no recorder", async () => {
+      const chk = (args: Record<string, unknown>, approver: { userId: string; actForUserId?: string }, t = tenant) =>
+        withTenants([t], (c) => getExecutable("invoicePayments.decide")!.approverCheck!(c, args, approver));
+      expect(await chk({ tenantId: tenant }, { userId: checker })).toEqual({ ok: false, reason: "missing_payment_args" });
+      expect(await chk({ tenantId: tenant, paymentId: newId() }, { userId: checker })).toEqual({ ok: false, reason: "payment_not_found" });
+      const p = await insertPayment(invoiceA, clientA, 2, recorder);
+      expect(await chk({ tenantId: tenant, paymentId: p }, { userId: checker })).toEqual({ ok: true });
+      expect(await chk({ tenantId: tenant, paymentId: p }, { userId: recorder })).toEqual({ ok: false, reason: APPROVER_RECORDED_THIS_PAYMENT });
+      expect(await chk({ tenantId: tenant, paymentId: p }, { userId: checker, actForUserId: recorder })).toEqual({ ok: false, reason: APPROVER_RECORDED_THIS_PAYMENT });
+      // Another tenant's session cannot see the payment: refused, never "no recorder, so ok".
+      const other = await createCompany("PV306 Other 2", ["agency", "clients"]);
+      expect(await chk({ tenantId: tenant, paymentId: p }, { userId: checker }, other)).toEqual({ ok: false, reason: "payment_not_found" });
+      const unrecorded = newId();
+      await withTenants([tenant], (c) =>
+        c.query(
+          `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site)
+           VALUES ($1, $2, $3, $4, 1, 'USD', now()::date, 'pending', NULL, 'test')`,
+          [unrecorded, tenant, invoiceA, clientA],
+        ),
+      );
+      expect(await chk({ tenantId: tenant, paymentId: unrecorded }, { userId: recorder })).toEqual({ ok: true });
+      // Only the payment tool declares one; the contract tools keep no approver rule.
+      expect(getExecutable("contracts.send")!.approverCheck).toBeUndefined();
+      expect(getExecutable("contracts.countersign")!.approverCheck).toBeUndefined();
     });
 
     it("preconditions fail closed on bad args and on missing rows, and are RLS-scoped to the approval's tenant", async () => {
