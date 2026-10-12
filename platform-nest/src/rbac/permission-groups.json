@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 156,
-      "grantablePermissionsInCatalog": 419,
-      "permissionsCoveredByGroups": 381,
+      "groups": 158,
+      "grantablePermissionsInCatalog": 424,
+      "permissionsCoveredByGroups": 386,
       "permissionsAdvancedOnly": 38,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 107
+      "sensitiveGroups": 108
     }
   },
   "groups": [
@@ -1807,6 +1807,29 @@
         "webdev.webdesk_collection.read"
       ],
       "sensitive": true
+    },
+    {
+      "key": "client_conversation",
+      "name": "Client Conversations",
+      "domain": "core",
+      "description": "Read a client's conversation, write draft replies for a person to send, post messages to the client under your own name, and close or retract. PV4-02: the staff side of the client conversation; post and manage are refused to agents and automation by Cerbos.",
+      "permissions": [
+        "core.conversation.read",
+        "core.conversation.draft",
+        "core.conversation.post",
+        "core.conversation.manage"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "portal_conversation",
+      "name": "Client Portal — Conversation",
+      "domain": "portal",
+      "description": "Open a thread and post, edit or retract your own messages to our team from the client portal. Open to every active contact, viewers included (PV-D24: posting is not signing).",
+      "permissions": [
+        "portal.converse"
+      ],
+      "sensitive": false
     }
   ],
   "advancedOnly": [

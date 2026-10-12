@@ -1556,6 +1556,41 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.client.update" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_conversation_* — PV4-02 (2026-10-12). Mirrors of the staff `conversation` role arms: read for
+    # company_admin/manager/member/viewer, post/draft/manage for company_admin/manager/member. Generic
+    # global-or-company shape, like perm_client_* (resource_client.yaml is the shape the kind copies).
+    - name: perm_conversation_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.conversation.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_conversation_post
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.conversation.post" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_conversation_draft
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.conversation.draft" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_conversation_manage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.conversation.manage" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_client_contact_* — IAM-04-ROLLOUT-B4
     - name: perm_client_contact_create
       parentRoles: ["user"]
@@ -2393,6 +2428,16 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "portal.edit_company_profile" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    # PV4-02 (2026-10-12, owner ruling PV-D24): the 9th `perm_portal_*` mirror, same shape and same safety
+    # argument as the 8 above — company-scope-only (no global branch), faithfully mirroring the `client`
+    # role-arm rule's own reach in resource_portal.yaml. NOT conditioned on the contact's `capability`.
+    - name: perm_portal_converse
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.converse" &&
               g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
 
     # ══════════ IAM-14b (2026-08-22) — integration_connection, SELF-SCOPED MIRROR ONLY ══════════

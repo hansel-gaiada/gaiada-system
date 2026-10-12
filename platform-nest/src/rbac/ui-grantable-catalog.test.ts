@@ -95,8 +95,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // uiGrantable:true like every other key on those kinds. 422 -> 429 / 407 -> 414.
     // M6-P3c on top of main (merged 2026-10-12): +4 pairs / +1 kind for webdev_site (read/create/update/request_probe_consent): total 430 -> 434, grantable 415 -> 419.
     // PV3-01 (2026-10-11): +1 grantable / +1 total on the EXISTING contract kind (`core.contract.countersign`), uiGrantable:FALSE.
-    expect(permissions.length).toBe(434);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(419);
+    // PV4-02 (2026-10-12): +5 grantable / +5 total: core.conversation.{read,post,draft,manage} (NEW kind,
+    // uiGrantable:true) and portal.converse (EXISTING portal kind, uiGrantable:FALSE like every portal.*). 434 -> 439 / 419 -> 424.
+    expect(permissions.length).toBe(439);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(424);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

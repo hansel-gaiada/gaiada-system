@@ -137,8 +137,10 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // request_changes/seo_signoff/approve/assign; webdesk_collection: manage_editorial). 422/102 -> 429/102.
     // M6-P3c on top of main (merged 2026-10-12): +4 pairs / +1 kind for webdev_site (read/create/update/request_probe_consent): pairs 430 -> 434, kinds 102 -> 103.
     // PV3-01 (2026-10-11): +1 pair on the EXISTING contract kind (`core.contract.countersign`, uiGrantable false, owner-only by a Cerbos grant rule).
-    expect(catalog.length).toBe(434);
-    expect(catalogKindSet.size).toBe(103);
+    // PV4-02 (2026-10-12): +5 pairs / +1 kind: `conversation` (read/post/draft/manage, NEW kind) and
+    // `portal.converse` (the client's door to it, on the EXISTING portal kind). Pairs 434 -> 439, kinds 103 -> 104.
+    expect(catalog.length).toBe(439);
+    expect(catalogKindSet.size).toBe(104);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {
