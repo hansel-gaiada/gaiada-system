@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **245** capabilities across **16** owners
-- **131** writes · 114 reads
-- Writes by impact: **high 24** · medium 37 · low 70
+- **250** capabilities across **16** owners
+- **132** writes · 118 reads
+- Writes by impact: **high 24** · medium 37 · low 71
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -39,20 +39,20 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 16 |
+| agency | `agency` | 17 |
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 14 |
-| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 32 |
+| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 34 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
-| invoice | `invoices` | 6 |
+| invoice | `invoices` | 7 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 27 |
+| search | `search` | 28 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
@@ -197,6 +197,11 @@ unfalsifiable after.
 | search | `search.setConversionTarget` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | write | `low` |
 | search | `search.setIndexNow` | `PATCH` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow` | write | `low` |
 | search | `search.submitUrls` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/submit` | write | `low` |
+| search | `search.visitors.get` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/visitors/:visitorId` | read | — |
+| search | `search.visitors.list` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/visitors/filter/:minScore/:order` | read | — |
+| search | `search.visitors.rules.list` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/visitors/interest-rules` | read | — |
+| search | `search.visitors.rules.set` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/visitors/interest-rules` | write | `low` |
+| search | `search.visitors.status` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/visitors/status` | read | — |
 | social | `social.addPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants` | write | `low` |
 | social | `social.approvePostVariant` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/approve` | write | `high` |
 | social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |

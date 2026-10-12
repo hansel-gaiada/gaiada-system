@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610131840_pv5_intercompany_ar_posting.sql`
+- Head: `202610131900_agency_dsr_visitor_subjects.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 274 (121 legacy `NNNN_`, 153 timestamped)
+- Applied files on disk: 276 (121 legacy `NNNN_`, 155 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -238,6 +238,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
+| `/api` | `platform-nest/src/modules/invoice/billing-profile.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/invoice.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
@@ -260,10 +261,12 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/conversions.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/experiments.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/indexnow.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/replays.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-analytics.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/visitors.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |

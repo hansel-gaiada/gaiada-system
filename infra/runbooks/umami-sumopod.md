@@ -483,6 +483,28 @@ Send the agreed public test IP (V2-d names it) through the edge exactly as secti
 7. **The vdb backup holds no personal data:** after `backup.sh`, decrypt on the laptop (restore test, section 10) and
    `zcat | grep -E '^COPY public\.(consented_events|replay_)'` prints nothing.
 
+**V2-d results (sumopod, 2026-10-13, throwaway project `umami-proof`: own name, subnet 10.211.93.0/28, port 18762).**
+
+- **The proof copy needs three edits.** The pinned `name:` and the fixed edge subnet would collide with the live project.
+  - Set `name: umami-proof`, a free /28 and `UMAMI_PUBLISH_PORT`.
+  - **Never run `geo-refresh.sh` from a proof copy:** it restarts the LIVE `umami-app-1` and `umami-collector-1` by name. Copy the City file and fetch ASN Lite by hand.
+  - `ERP_EDGE_SOURCE` = the proof edge network's gateway (`10.211.93.1`) when sending from the host to `172.17.0.1:<port>`.
+- **Image:**
+  - `ghcr.io/hansel-gaiada/gaiada-insights-collector:v1.0.0-alpha.367@sha256:180352ee6fa575eb2566329b97111e4cfcbb803d07a0151dde1251aee9143663`.
+  - Provenance verified with `gh attestation verify oci://…@sha256:… --owner hansel-gaiada`: SLSA v1, `release.yml` at the 367 tag. sumopod has no `cosign`; this check runs from a workstation.
+  - It reports `version: dev`, because the release build does not set the version.
+- **`check-config.sh` on an unmodified copy:** ALL PASS. The only WARN is the placeholder pin.
+- **DB-IP ASN Lite 2026-10 is 9,566,363 bytes,** so the 2 MB floor holds.
+- **Step 2:** the test IPs (81.2.69.142 and 8.8.4.4) appear 0 times in both dumps and in every log.
+- **Step 5:** a bot user agent was dropped and counted (`bot_counts: ua 1`). A datacenter address (52.95.110.1, Amazon) was dropped as `bot_asn`, which also proves the forwarded address reaches the collector.
+- **Steps 1 and 3 FAILED with the fd00::/8 pseudonym:**
+  - The events were stored, but with NO country, region or city.
+  - The cause: Umami 3.4.0's `getLocation` runs `is-localhost-ip` on the client address before reading any header, and that package treats fc00::/7 as local.
+  - A direct test into the app showed it plainly: `fd12:…` with `cf-ipcountry: GB` stored nothing, while `2001:db8:…` with the same headers stored GB / GB-ENG / London.
+  - **Fix:** the pseudonym moved to 2001:db8::/32 (insights-collector 0.3.1). This is NOT the `FORWARD_IP_MODE=real` fallback: Umami still never sees an IP.
+- **Step 4** (spoofed `cf-ipcountry: XX`) was inconclusive, because no location was stored at all.
+- **To finish:** re-run steps 1, 3 and 4 with the first image that carries 0.3.1. The proof project is STOPPED, not removed (`cd ~/umami-proof && docker compose up -d`). Remove it afterwards with `docker compose down -v && rm -rf ~/umami-proof`.
+
 ### C6. Rollback (collector out of the path; Umami collects directly)
 
 ```bash

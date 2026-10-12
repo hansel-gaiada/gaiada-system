@@ -17,7 +17,7 @@ A small Go service that sits between the public nginx `edge` and Umami on `sumop
 no egress). The site's Umami tracker is unchanged; its hits for `COLLECT_API_ENDPOINT` (`/lib/kestrel/e`) reach the collector first.
 
 ```
-edge nginx ──X-Real-IP──> :8080  POST /lib/kestrel/e  ──resolve once──> Umami app:3000 (fd… pseudonym + cf-* geo headers)
+edge nginx ──X-Real-IP──> :8080  POST /lib/kestrel/e  ──resolve once──> Umami app:3000 (2001:db8… pseudonym + cf-* geo headers)
                          :8080  POST /lib/kestrel/v   consented events (needs consentId)  ──> vdb consented_events (72 h buffer)
                          :8080  POST /lib/kestrel/f   withdrawal: delete the pair's rows AND recordings, tombstone the visitor id
                          :8080  POST /lib/kestrel/r   replay chunk (needs consentId; 404 unless REPLAY_ENABLED=1)  ──> vdb replay_sessions / replay_chunks (30 days)
@@ -28,7 +28,7 @@ Per hit (`internal/ingest`): parse `X-Real-IP` (400 if absent or invalid) → bo
 other type: 400 and dropped) → `payload.website` must be in `INSIGHTS_WEBSITES` (403) → look the address up once in DB-IP **City Lite**
 (country/region/city) and **ASN Lite** (number/organisation) → **bot** = vendored isbot list on the UA, or the ASN on `data/datacenter-asns.txt`
 (bots are not forwarded, are counted in `bot_counts`, and are answered `{"beep":"boop"}` like Umami does) → forward a FRESH request to Umami
-with only: `Content-Type`, `User-Agent`, `x-umami-cache` (passed through, ≤ 4 KB), `X-Real-IP: fd…` and `cf-ipcountry`/`cf-region-code`/`cf-ipcity`
+with only: `Content-Type`, `User-Agent`, `x-umami-cache` (passed through, ≤ 4 KB), `X-Real-IP: 2001:db8:…` and `cf-ipcountry`/`cf-region-code`/`cf-ipcity`
 when resolved. Umami's status and body come back to the tracker; 3 s timeout, then 502.
 
 ## The consented channel (V3-b; `internal/consent`, `internal/ops/events.go`, `internal/store/events*.go`)
@@ -99,7 +99,7 @@ Our own sampled rrweb recording (design 6.1 is the site's rules, 6.2 this). **OF
 ## Invariants (each has a test; do not weaken)
 
 - **The visitor's address never leaves the request's memory**: not in a log line (no access log; errors are typed constants), not in a
-  response, not in a stored row, not in what Umami receives. Umami gets `fd00::/8` = `0xfd` + the first 15 bytes of HMAC-SHA256(**day key**, IP).
+  response, not in a stored row, not in what Umami receives. Umami gets `2001:db8::/32` (the IPv6 documentation range) + the first 12 bytes of HMAC-SHA256(**day key**, IP). Not fd00::/8: Umami 3.4.0's `is-localhost-ip` treats fc00::/7 as local and then stores no location at all (proved on sumopod in M5-V2-d).
   The day key is 32 random bytes, in memory only, replaced at 00:00 UTC and on restart (`internal/ingest/pseudonym.go`). It is never
   written anywhere; that is what stops anyone testing guessed addresses against the pseudonym.
   *Only exception:* `FORWARD_IP_MODE=real`, the documented fallback if V2-d shows Umami 3.4.0 mishandles the pseudonym. Not the default; it
@@ -175,7 +175,9 @@ API vendor cannot be a resolver without a ruling and a network change.
   (`S%C3%A3o Paulo`)? The collector sends non-ASCII as percent-encoding; if Umami does not decode, change `headerSafe` in `ingest.go`.
 - DB-IP's City Lite MMDB field names (`country.iso_code`, `subdivisions[0]`, `city.names.en`) are assumed MaxMind-compatible. When a subdivision
   has no `iso_code`, the English name is sent as `cf-region-code`.
-- Does Umami accept an `fd…` `X-Real-IP` with `CLIENT_IP_HEADER=x-real-ip`? If not, `FORWARD_IP_MODE=real` is the recorded fallback.
+- ANSWERED by V2-d (sumopod, 2026-10-13): Umami 3.4.0 accepts a pseudonym as `X-Real-IP` but runs `is-localhost-ip` on it first, and an
+  `fd…` (fc00::/7) address counts as local, so it stored NO location. The pseudonym is now in 2001:db8::/32, which Umami treats as public and
+  for which it reads the `cf-*` headers. `FORWARD_IP_MODE=real` stays the fallback. Re-check on every Umami upgrade.
 
 ## Not here yet
 

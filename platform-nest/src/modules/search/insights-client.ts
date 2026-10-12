@@ -199,6 +199,32 @@ export async function readEventsPage(website: string, after: number, limit: numb
   return { events, next, malformed };
 }
 
+// ── bots (M5-V3-g: the Visitors status line and, later, the Analytics figure) ─────────────────────────────────────
+
+export interface BotCounts { from: string; to: string; total: number; byReason: Record<string, number> }
+
+/** GET /ops/v1/bots?website&from&to (read key): daily counts by reason, summed. Counts only, no visitor data. Typed InsightsError. */
+export async function readBotCounts(website: string, range: { from?: string; to?: string } = {}, opts: InsightsOpts = {}): Promise<BotCounts> {
+  const s = opts.settings === undefined ? insightsSettings() : opts.settings;
+  if (!s) throw new InsightsNotConfiguredError();
+  if (!UUID_RE.test(website)) throw new InsightsBadResponseError("website id is not a UUID");
+  const qs = new URLSearchParams({ website: website.toLowerCase() });
+  if (range.from) qs.set("from", range.from);
+  if (range.to) qs.set("to", range.to);
+  const body = await call(s, "GET", `/ops/v1/bots?${qs.toString()}`, s.readKey, undefined, opts);
+  if (!isObj(body) || !Array.isArray(body.days)) throw new InsightsBadResponseError("no days array");
+  const byReason: Record<string, number> = {};
+  let total = 0;
+  for (const d of body.days) {
+    if (!isObj(d) || typeof d.reason !== "string" || typeof d.count !== "number" || !Number.isFinite(d.count) || d.count < 0) {
+      throw new InsightsBadResponseError("a bot row is malformed");
+    }
+    byReason[d.reason] = (byReason[d.reason] ?? 0) + d.count;
+    total += d.count;
+  }
+  return { from: String(body.from ?? ""), to: String(body.to ?? ""), total, byReason };
+}
+
 // ── forget ───────────────────────────────────────────────────────────────────────────────────────
 
 export type ForgetMode = "withdraw" | "erase";

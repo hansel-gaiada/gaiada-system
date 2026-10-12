@@ -5,13 +5,13 @@ import { getSessionUserId } from "./session-server";
 import { getMe, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can, isElevated } from "./rbac";
-import { createInvoice, setInvoiceStatus, approveInvoice, type InvoiceStatus } from "./invoice";
+import { createInvoice, approveInvoice, issueInvoice, type IssueBlocker } from "./invoice";
 
 export interface InvoiceFormState { error?: string }
 // Shared shape for the status-transition actions below (approve/mark-sent/mark-paid), driven by
 // useActionState from a client component so a refusal renders as a real message next to the
 // button that produced it — never a silent no-op.
-export interface InvoiceActionState { error?: string; ok?: boolean }
+export interface InvoiceActionState { error?: string; ok?: boolean; blockers?: IssueBlocker[] }
 
 async function ctx() {
   const userId = await getSessionUserId();
@@ -48,34 +48,37 @@ export async function createInvoiceAction(_prev: InvoiceFormState | null, formDa
   redirect(`/invoices/${id}`);
 }
 
-// Was fire-and-forget (`<form action={fn}>`, void return, every PlatformError swallowed) — a
-// refusal (e.g. the backend's 400 "invoice must be approved before it can be marked 'sent'") landed
-// on the user as nothing happening at all. Now returns state so the calling client component can
-// show the real message via useActionState, matching the approve action below.
-async function setStatus(invoiceId: string, status: InvoiceStatus): Promise<InvoiceActionState> {
-  const c = await ctx();
-  if ("error" in c) return { error: c.error };
+// PV5-04 (PV-D7): "mark as sent" and "mark paid" are gone. An approved invoice is ISSUED: numbered, posted to the
+// ledger and frozen in one step on the server. Paid follows from confirmed payments, never from a button. A refusal
+// carries every blocker (no billing profile, finance module off, no open period, PKP unknown on a taxed invoice, ...),
+// which is returned here so the button can list them instead of failing one reason at a time.
+export async function issueInvoiceAction(invoiceId: string, _prev: InvoiceActionState | null, _formData?: FormData): Promise<InvoiceActionState> {
+  const userId = await getSessionUserId();
+  if (!userId) return { error: "Session expired — sign in again." };
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return { error: "Select a company first." };
   try {
-    await setInvoiceStatus(c.userId, c.tenant, invoiceId, status);
+    await issueInvoice(userId, tenant, invoiceId);
   } catch (e) {
-    if (e instanceof PlatformError) return { error: e.message };
+    if (e instanceof PlatformError) {
+      if (e.status === 403) return { error: "Issuing invoices is limited to company administrators, managers and owners." };
+      const blockers = (e.body as { blockers?: IssueBlocker[] } | undefined)?.blockers;
+      if (e.status === 409 && Array.isArray(blockers) && blockers.length > 0) {
+        return { error: "This invoice can't be issued yet:", blockers };
+      }
+      return { error: e.message };
+    }
     throw e;
   }
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/invoices");
   return { ok: true };
 }
-export async function markInvoiceSentAction(invoiceId: string, _prev: InvoiceActionState | null, _formData?: FormData): Promise<InvoiceActionState> {
-  return setStatus(invoiceId, "sent");
-}
-export async function markInvoicePaidAction(invoiceId: string, _prev: InvoiceActionState | null, _formData?: FormData): Promise<InvoiceActionState> {
-  return setStatus(invoiceId, "paid");
-}
 
 // IAM-GAP-01 — separate gate from `ctx()` above: approving is `invoice.approve` (company_admin/
-// manager), not the wider `company.manage` tier markInvoiceSent/markInvoicePaid/createInvoiceAction
-// use. Reusing `ctx()` would show the Approve control to an `owner` grant, which `company.manage`
-// covers but `invoice.approve` structurally does not (see rbac.ts's capability comment) — a dead
+// manager), not the wider `company.manage` tier createInvoiceAction uses. Reusing `ctx()` would
+// show the Approve control to an `owner` grant, which `company.manage` covers but `invoice.approve` structurally does not (see rbac.ts's capability comment) — a dead
 // button Cerbos would always 403.
 async function approveCtx() {
   const userId = await getSessionUserId();

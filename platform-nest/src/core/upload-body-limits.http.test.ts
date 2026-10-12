@@ -28,6 +28,7 @@ import { setStorageForTest, localStorage as diskStorage, type StorageBackend } f
 import { MAX_ATTACHMENT_TOTAL_BYTES, MAX_ATTACHMENTS } from "./conversation-core";
 import { MAX_PROOF_BYTES } from "./portal-commerce.controller";
 import { UPLOAD_ROUTES, inlineUploadBodyLimit } from "./upload-body-limits";
+import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -104,14 +105,11 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
     await addMembership(co, staffUser);
     await grantRole(staffUser, memberRole, "company", co);
 
-    invoice = newId();
-    await withTenants([co], (c) =>
-      c.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site)
-         VALUES ($1, $2, $3, current_date - 30, current_date - 1, 'sent', 'IDR', '[]', 100000000, $4)`,
-        [invoice, co, clientA, config.originSite],
-      ),
-    );
+    // PV5-04: a client can claim a payment only on an ISSUED invoice, so the fixture issues one for real.
+    await ensureBillingSetup(co);
+    invoice = (await createIssuedInvoice(co, {
+      clientId: clientA, actorId: staffUser, lines: [{ description: "Fixture work", amount: 100_000_000 }],
+    })).id;
 
     app = await buildApp();
   }, 120_000);

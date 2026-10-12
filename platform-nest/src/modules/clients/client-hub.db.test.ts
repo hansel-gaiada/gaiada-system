@@ -15,6 +15,7 @@ import { createCompany, createUser, addMembership, createClient, createProject }
 import { withTenants, newId } from "../../db";
 import { config } from "../../config";
 import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
+import { createIssuedInvoice, ensureBillingSetup } from "../../seed/billing-setup";
 
 const site = () => config.originSite;
 
@@ -157,14 +158,11 @@ describe.skipIf(!TEST_URL)("CC-1/CC-2 · client facet + hub aggregate", () => {
 
   // ── needsUs: the pending payment the endpoint exists to surface ────────────────────────────────
   it("🔴 a pending client payment is found for its client and not for another", async () => {
-    const invoiceId = newId();
-    await withTenants([tenant], (c) =>
-      c.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site)
-         VALUES ($1, $2, $3, current_date - 30, current_date - 1, 'sent', 'IDR', '[]'::jsonb, 1000, $4)`,
-        [invoiceId, tenant, clientA, site()],
-      ),
-    );
+    // PV5-04: a `sent` invoice is an ISSUED one (PV5-01b), so it is issued through the real path.
+    await ensureBillingSetup(tenant);
+    const invoiceId = (await createIssuedInvoice(tenant, {
+      clientId: clientA, actorId: staff, lines: [{ description: "Fixture work", amount: 1000 }],
+    })).id;
     await withTenants([tenant], (c) =>
       c.query(
         // `paid_on` is NOT NULL — the date the CLIENT says they paid, which is the whole point of the
