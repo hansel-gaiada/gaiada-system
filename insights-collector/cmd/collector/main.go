@@ -116,7 +116,7 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger, geodb *geo.
 
 	pub := ingest.New(ingest.Options{Config: cfg, Geo: geodb, Bots: detector, Counter: botCounter, Stats: counters, Log: log})
 	consented := consent.New(consent.Options{
-		Config: cfg, Geo: geodb, Bots: detector, Resolver: resolver, Store: st, Stats: counters, Log: log,
+		Config: cfg, Geo: geodb, Bots: detector, Resolver: resolver, Store: st, Replay: st, Stats: counters, Log: log,
 	})
 	opsH := ops.New(ops.Options{
 		Config: cfg, GeoStatus: geodb.Status, Store: st, Counter: botCounter, Stats: counters, Resolver: resolver.Name(),
@@ -145,18 +145,21 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger, geodb *geo.
 			ErrorLog:          quiet,
 		}
 	}
-	// The public port serves exactly three paths: the aggregate channel and the consented channel's two routes.
+	// The public port serves the aggregate channel, the consented channel's two routes and the replay route (which
+	// answers 404 itself unless REPLAY_ENABLED is exactly 1).
 	root := http.NewServeMux()
 	root.Handle(cfg.CollectPath, pub.Routes())
 	consentRoutes := consented.Routes()
 	root.Handle(config.ConsentPath, consentRoutes)
 	root.Handle(config.ForgetPath, consentRoutes)
+	root.Handle(config.ReplayPath, consentRoutes)
 	pubSrv, opsSrv := newServer(root), newServer(opsH.Routes())
 
 	log.Info("collector starting",
 		"version", cfg.Version, "geo", geodb.Status().String(), "resolver", resolver.Name(), "ip_mode", cfg.IPMode,
 		"datacenter_asns", detector.ASNCount(), "websites", len(cfg.Websites),
-		"buffer_retention_hours", int(cfg.BufferRetention.Hours()), "purge_interval_minutes", int(cfg.PurgeInterval.Minutes()))
+		"buffer_retention_hours", int(cfg.BufferRetention.Hours()), "purge_interval_minutes", int(cfg.PurgeInterval.Minutes()),
+		"replay", cfg.ReplayEnabled, "replay_budget_mb", cfg.ReplayBudgetBytes>>20, "replay_retention_days", int(cfg.ReplayRetention.Hours()/24))
 	if cfg.IPMode == config.IPModeReal {
 		log.Warn("FORWARD_IP_MODE=real: the visitor address is passed to Umami (documented fallback, not the default)")
 	}
@@ -167,7 +170,7 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger, geodb *geo.
 	bg, cancelBg := context.WithCancel(ctx)
 	flushed := make(chan struct{})
 	go func() { botCounter.Run(bg, cfg.BotFlushInterval); close(flushed) }()
-	purger := &store.Purger{St: st, Log: log, Stats: counters, Retention: cfg.BufferRetention, TombstoneMonths: config.TombstoneRetention}
+	purger := &store.Purger{St: st, Log: log, Stats: counters, Retention: cfg.BufferRetention, ReplayRetention: cfg.ReplayRetention, TombstoneMonths: config.TombstoneRetention}
 	purged := make(chan struct{})
 	go func() { purger.Run(bg, cfg.PurgeInterval); close(purged) }()
 	if ready != nil {

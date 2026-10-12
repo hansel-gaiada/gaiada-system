@@ -25,7 +25,51 @@ local stack). None of these mean "production-done".
 - **Actions:** sync, stop, abort and decide, shown only when the status allows them and the user can manage search.
 - Every refusal token and every `unavailable` reason is a sentence.
 - The tab 404s without the analytics toolkit or `search.view`.
-- **Tests:** vitest 114 scoped (5352 wider), tsc and `next build` green locally.
+- **Tests:** vitest 114 scoped (5352 wider), tsc and `next build` green locally; GitHub Actions 38282541845 green.
+
+### insights-collector `0.3.0` + infra `0.13.13` - M5-V6-a: the session replay channel (OFF; not deployed) (2026-10-13) - PROTOTYPED
+
+- **`POST /lib/kestrel/r`** takes one rrweb chunk (base64 gzip, or a JSON array) for a consented visitor and consent id.
+  - It is a plain 404 unless `REPLAY_ENABLED` is exactly `1`.
+  - A tombstoned id gets 410.
+- **Input is refused:** any typed input, including a masked value, makes the WHOLE chunk a 422, and nothing is stored.
+- **Size limits:** a decompression bomb is refused (256 KB compressed, 4 MB inflated). Caps per site per day, per visitor per day and a storage budget answer `{record:false}`.
+- **A leaked recording id cannot be appended to** from another visitor or website (403).
+- **Retention:** recordings go after 30 days at most (`REPLAY_RETENTION_DAYS` is 1–30). `forget` and `/f` remove them too.
+- **Ops** (read key only):
+  - `GET /ops/v1/replay/sessions` returns metadata;
+  - `GET /ops/v1/replay/chunks` returns content. Per O7, the ERP's MCP tool may call only the sessions route.
+- **Migration `0003_replay`** adds `replay_sessions` and `replay_chunks`, with no IP or UA column. `backup.sh` already excludes both, and a static test checks the names.
+- **Sumopod compose:** the five `REPLAY_*` variables are listed under `environment:` (empty = default).
+- The edge `/lib/kestrel/r` location stays off.
+- `go test -race` green locally and on GitHub Actions 38283161570, including the Postgres replay test.
+- **For the site (V6-d):** chunks are sent as base64 gzip strings, and input elements must be blocked in rrweb, or chunks carrying them are refused.
+
+### platform-nest `0.107.0` - M5-V3-e: consented visitor profiles, the ingest, withdrawal sweep and purge jobs (dark until `SEARCH_VISITORS_ENABLED=1`) (2026-10-13) - PROTOTYPED
+
+- **New files:**
+  - `insights-client.ts`, the collector ops client (paged events, forget with its own key);
+  - `visitor-consent-client.ts`, the WebDesk `consent.status` client;
+  - `visitor-scoring.ts`, pure interests and score;
+  - `visitor-jobs.ts`.
+- **Ingest** (every 10 min) holds one lock per property for the whole run. For each page it:
+  1. asks WebDesk about every consent id;
+  2. **transaction A:** deletes and tombstones the visitors whose consent is withdrawn or absent;
+  3. sends forget to the collector;
+  4. **transaction B:** re-reads the tombstones, then writes events and profiles and moves the cursor.
+  A repeated batch changes nothing.
+- **Sweep** (hourly) waits for the lock, so it runs after any ingest in flight. It re-asks WebDesk and deletes, tombstones and forgets withdrawn visitors.
+- **Purge** (daily) removes profiles 14 months after their last visit, and old tombstones.
+- **Outages fail safe:**
+  - A WebDesk outage proves neither consent nor withdrawal, so nothing is written or forgotten.
+  - A collector outage in the sweep still commits the ERP delete, and the forget is queued for retry.
+- **`main.ts`** starts the jobs only when `SEARCH_VISITORS_ENABLED` is exactly `1`.
+- **Env:**
+  - `INSIGHTS_BASE_URL`, `INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY`;
+  - `SEARCH_VISITORS_{INGEST,SWEEP,PURGE}_INTERVAL_MS` and `SEARCH_VISITORS_TIMEOUT_MS`: empty or `0` means the default.
+- **Restore runbook:** replay erasures before turning the jobs on.
+- **Tests:** 49 unit tests. GitHub Actions 38280483315 green, including the 20-case DB acceptance suite with fakes for both remotes and the sweep-during-ingest race.
+- **ERP compose:** passes through `SEARCH_VISITORS_{INGEST,SWEEP,PURGE}_INTERVAL_MS` and `SEARCH_VISITORS_TIMEOUT_MS`.
 
 ### platform-nest `0.106.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
 

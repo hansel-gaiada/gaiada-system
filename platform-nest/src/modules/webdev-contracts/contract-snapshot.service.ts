@@ -150,9 +150,9 @@ async function storeArtifact(
   const storageKey = `${tenantId}/webdev-contract-snapshots/${snapshotId}/${filename}`;
   await storage().put(storageKey, bytes);
   await c.query(
-    `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
-     VALUES ($1, $2, $3, 'webdev_contract_snapshot', $4, $5, $6, $7, $8, false, $9)`,
-    [id, tenantId, uploaderId, snapshotId, filename, contentType, bytes.byteLength, storageKey, config.originSite],
+    `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+     VALUES ($1, $2, $3, 'webdev_contract_snapshot', $4, $5, $6, $7, $8, $9, false, $10)`,
+    [id, tenantId, uploaderId, snapshotId, filename, contentType, bytes.byteLength, storageKey, sha256Hex(bytes), config.originSite],
   );
   return id;
 }

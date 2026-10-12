@@ -55,18 +55,21 @@ type Options struct {
 	Bots     *bot.Detector
 	Resolver company.Resolver
 	Store    store.EventStore
-	Stats    *stats.Counters
-	Log      *slog.Logger
-	Now      func() time.Time // time.Now when nil
+	// Replay is the recording store (V6-a). Nil means the replay route cannot store anything and answers 404.
+	Replay store.ReplayStore
+	Stats  *stats.Counters
+	Log    *slog.Logger
+	Now    func() time.Time // time.Now when nil
 }
 
-// Handler serves /lib/kestrel/v and /lib/kestrel/f.
+// Handler serves /lib/kestrel/v, /lib/kestrel/f and /lib/kestrel/r (replay; see replay.go).
 type Handler struct {
 	cfg      config.Config
 	geo      *geo.DB
 	bots     *bot.Detector
 	resolver company.Resolver
 	st       store.EventStore
+	replay   store.ReplayStore
 	stats    *stats.Counters
 	log      *slog.Logger
 	now      func() time.Time
@@ -83,16 +86,17 @@ func New(o Options) *Handler {
 		now = time.Now
 	}
 	return &Handler{
-		cfg: o.Config, geo: o.Geo, bots: o.Bots, resolver: o.Resolver, st: o.Store, stats: o.Stats, log: o.Log,
+		cfg: o.Config, geo: o.Geo, bots: o.Bots, resolver: o.Resolver, st: o.Store, replay: o.Replay, stats: o.Stats, log: o.Log,
 		now: now, lim: newLimiter(o.Config.ConsentRatePerSec), lastLog: map[string]time.Time{},
 	}
 }
 
-// Routes serves only the two consented-channel paths; everything else is 404.
+// Routes serves only the consented-channel paths (/v, /f and, when replay is on, /r); everything else is 404.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(config.ConsentPath, h.serveEvents)
 	mux.HandleFunc(config.ForgetPath, h.serveForget)
+	mux.HandleFunc(config.ReplayPath, h.serveReplay)
 	return mux
 }
 

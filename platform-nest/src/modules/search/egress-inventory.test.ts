@@ -100,6 +100,9 @@ const APPROVED_EGRESS: Record<string, string> = {
   //     Only used when SEARCH_BING_MODE is exactly "live"; the default (simulate) never reaches it.
   "indexnow.ts": "IndexNow ping (api.indexnow.org) + the property's own key file — M5-P5a, flag SEARCH_INDEXNOW_ENABLED=1, https/public-host only",
   "bing-client.ts": "Bing Webmaster API (ssl.bing.com) — M5-P5a, per-client vault key, live only when SEARCH_BING_MODE=live",
+  // M5-V3-e · SEVENTH class: the ERP's own insights collector (consented-event buffer) over WireGuard through the read gate:
+  // GET /ops/v1/events with the read key, POST /ops/v1/forget (delete-only) with the forget key. Exact filename.
+  "insights-client.ts": "insights collector ops API (INSIGHTS_BASE_URL gate on WireGuard) — M5-V3-e, events read + delete-only forget",
 };
 
 /** Each approved egress file's OWN config namespace, and the namespaces it must NEVER reference —
@@ -116,6 +119,7 @@ const CONFIG_NAMESPACES = [
   "UMAMI_BASE_URL",
   "SEARCH_INDEXNOW_ENABLED",
   "SEARCH_BING_MODE",
+  "INSIGHTS_BASE_URL",
 ];
 // The two google/ files SHARE `config.search.google` — deliberate, and it does not weaken the guard:
 // the assertion is that each approved file references its own namespace and NONE of the others, so
@@ -135,6 +139,7 @@ const OWN_NAMESPACE: Record<string, string> = {
   "umami-client.ts": "UMAMI_BASE_URL",
   "indexnow.ts": "SEARCH_INDEXNOW_ENABLED",
   "bing-client.ts": "SEARCH_BING_MODE",
+  "insights-client.ts": "INSIGHTS_BASE_URL",
 };
 
 interface Finding {

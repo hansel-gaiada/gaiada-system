@@ -21,7 +21,7 @@
 // Contract signing mirrors `scope_signoffs`: one row per party, UNIQUE, idempotent on re-sign, and the
 // contract flips to `signed` only on the transition where BOTH parties are present.
 import {
-  BadRequestException, Body, Controller, Get, HttpCode, NotFoundException,
+  BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException,
   Param, Post, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -31,6 +31,8 @@ import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { storage } from "./storage";
+import { sha256Hex } from "./content-hash";
+import { clientIpOf, hashForEvidence, userAgentOf } from "./evidence";
 import { scrubText, isScrubbableText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
 import { requireSigner, resolvePortalScope, type PortalScope } from "./portal-scope";
@@ -301,7 +303,10 @@ export class PortalCommerceController {
         // `canSign` is the exact conjunction the POST below enforces, surfaced so the UI disables the
         // button for the same reasons the server would refuse — rather than offering an action that
         // 403s. Kept as ONE expression in ONE place for that reason.
-        canSign: scope.canSign && k.status === "sent" && !signatures.rows.some((s: Record<string, unknown>) => s.party === "client"),
+        // PV5-06: a certified-tier contract is signed through a provider, never by typed name, so it is never
+        // offered to the typed-name form (the POST refuses it the same way).
+        canSign: scope.canSign && k.status === "sent" && k.signatureTier !== "certified"
+          && !signatures.rows.some((s: Record<string, unknown>) => s.party === "client"),
         viewOnly: !scope.canSign,
         signatures: signatures.rows,
         document: doc.rows[0] ?? null,
@@ -321,15 +326,21 @@ export class PortalCommerceController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("contractId") contractId: string,
-    @Body() body: { signerName?: string; signerTitle?: string; agree?: boolean },
+    @Body() body: { signerName?: string; signerTitle?: string; agree?: boolean; contentSha256?: string },
   ) {
     const b = body ?? {};
+    // PV5-06: AUTHORIZE BEFORE VALIDATING. This used to read the body first, so a caller who may not sign got
+    // a 400 about the body instead of a 403, and a denial test with a thin body silently stopped testing
+    // authorization.
+    await authorize(req.principal, { kind: "portal", tenantId }, "sign");
     // An explicit attestation is what makes a typed name a signature rather than a form field. Refused
     // server-side so the record can never contain a signature the signer did not affirm.
     if (b.agree !== true) throw new BadRequestException("you must confirm you agree to the terms");
     const signerName = (b.signerName ?? "").trim();
     if (signerName.length < 2) throw new BadRequestException("signerName required");
-    await authorize(req.principal, { kind: "portal", tenantId }, "sign");
+    // PV5-06: the client signs WHAT THEY SAW. `contentSha256` is the hash the GET handed them; it is only an
+    // echo, compared below against the hash the server fixed at send. It is never stored and never trusted.
+    const echoed = typeof b.contentSha256 === "string" ? b.contentSha256.trim().toLowerCase() : "";
 
     const out = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
@@ -356,18 +367,43 @@ export class PortalCommerceController {
         throw new BadRequestException(`this agreement is ${k.status} and cannot be signed`);
       }
       if (k.termEnded) throw new BadRequestException("this agreement's term has ended — ask your account manager to re-issue it");
+      // PV5-06: a certified-tier contract is signed through a certified provider, never by a typed name.
+      if (k.signatureTier === "certified") {
+        throw new BadRequestException({
+          message: "this agreement is signed through a certified signing provider, not by typed name",
+          reason: "certified_tier",
+        });
+      }
+      // PV5-06: sign what you saw. A contract sent since PV5-06 carries the hash fixed at send; the echo must
+      // match it, else NOTHING is written. A contract sent before PV5-06 carries none (it cannot be repaired:
+      // nothing recorded what it said), so it signs as it always did and its signature records no hash.
+      if (k.contentSha256) {
+        if (!echoed) {
+          throw new BadRequestException({
+            message: "contentSha256 is required: reload the agreement and sign again",
+            reason: "content_hash_required",
+          });
+        }
+        if (echoed !== k.contentSha256) {
+          throw new ConflictException({
+            message: "this agreement changed since you opened it; reload it and read it again before signing",
+            reason: "content_changed",
+          });
+        }
+      }
 
       const ins = await c.query(
         `INSERT INTO contract_signatures
-           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, origin_site)
-         VALUES ($1, $2, $3, 'client', $4, $5, $6, $7, $8, $9)
+           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256, origin_site)
+         VALUES ($1, $2, $3, 'client', $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (contract_id, party) DO NOTHING`,
         [
           newId(), tenantId, contractId, req.principal.userId,
           scrubText(signerName).text.slice(0, 200),
           b.signerTitle ? scrubText(b.signerTitle).text.slice(0, 200) : null,
           hashForEvidence(clientIpOf(req), tenantId),
-          String(req.headers["user-agent"] ?? "").slice(0, 400),
+          userAgentOf(req),
+          k.contentSha256,
           config.originSite,
         ],
       );
@@ -480,9 +516,13 @@ export class PortalCommerceController {
   }
 
   private async ownedContract(c: PoolClient, scope: PortalScope, contractId: string) {
-    const r = await c.query<{ id: string; clientId: string; title: string; status: string; termEnded: boolean; fileId: string | null }>(
+    const r = await c.query<{
+      id: string; clientId: string; title: string; status: string; termEnded: boolean; fileId: string | null;
+      contentSha256: string | null; signatureTier: string | null;
+    }>(
       `SELECT k.id, k.client_id AS "clientId", k.title, k.reference, k.version, k.status,
               k.value::float8 AS value, k.currency, k.body_md AS "bodyMd", k.file_id AS "fileId",
+              k.content_sha256 AS "contentSha256", k.signature_tier AS "signatureTier",
               to_char(k.starts_on, 'YYYY-MM-DD') AS "startsOn",
               to_char(k.ends_on, 'YYYY-MM-DD') AS "endsOn",
               k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.decline_reason AS "declineReason",
@@ -559,9 +599,9 @@ export class PortalCommerceController {
     await storage().put(storageKey, bytes);
     await c.query(
       `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename,
-                          content_type, byte_size, storage_key, scrubbed, origin_site)
-       VALUES ($1, $2, $3, 'invoice_payment', $4, $5, $6, $7, $8, $9, $10)`,
-      [fileId, tenantId, uploaderId, paymentId, filename, contentType, bytes.byteLength, storageKey, scrubbed, config.originSite],
+                          content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+       VALUES ($1, $2, $3, 'invoice_payment', $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [fileId, tenantId, uploaderId, paymentId, filename, contentType, bytes.byteLength, storageKey, sha256Hex(bytes), scrubbed, config.originSite],
     );
     return fileId;
   }
@@ -585,26 +625,4 @@ export class PortalCommerceController {
     if (!ids.length) return;
     await notifyBestEffort(tenantId, actorId, ids, type, payload);
   }
-}
-
-/** The client's IP as the proxy reports it, or the socket's. Read for EVIDENCE only and immediately
- *  hashed — never stored, logged or compared raw. `x-forwarded-for` is spoofable by the client, which
- *  is fine for its purpose here (weak corroboration in a dispute) and would NOT be fine if anything
- *  authorized on it. Nothing does. */
-function clientIpOf(req: FastifyRequest): string {
-  const fwd = req.headers["x-forwarded-for"];
-  const first = Array.isArray(fwd) ? fwd[0] : (fwd ?? "").split(",")[0];
-  return (first || req.ip || "").trim();
-}
-
-/** Salted, truncated SHA-256. The tenant id is the salt so the same address does not produce the same
- *  digest across companies, and the digest is truncated because 128 bits is ample for "same browser?"
- *  and the shorter value is less useful to anyone who exfiltrates the table. */
-function hashForEvidence(value: string, salt: string): string | null {
-  if (!value) return null;
-  // Local require rather than a top-level import: this is the only crypto use in the file, and
-  // node:crypto at module scope would load in the edge-ish test paths that never call it.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createHash } = require("node:crypto") as typeof import("node:crypto");
-  return createHash("sha256").update(`${salt}:${value}`).digest("hex").slice(0, 32);
 }
