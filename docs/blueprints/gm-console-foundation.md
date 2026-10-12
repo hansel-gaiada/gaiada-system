@@ -333,3 +333,6 @@ almost entirely composition of reads that already work.
   while the estate changed underneath it. Manufacturing a figure would have left the console
   disagreeing with the general ledger, with people already quoting it.
 - **OQ-4** — nav: hoist GM inside `Departments`, or give it its own pinned single-row group?
+  **Superseded 2026-10-13 by DW-D2:** the sidebar shows one workspace at a time. Every department, GM first, is
+  listed in the workspace switcher and in Company › Departments, and the "never hide a department" rule is kept. Unplaced
+  owners land on the Office of the GM (DW-D1). See `docs/plans/2026-10-13-department-workspaces.md`.

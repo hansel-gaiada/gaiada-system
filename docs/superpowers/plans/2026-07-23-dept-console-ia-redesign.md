@@ -4,6 +4,10 @@
 **Status:** Phase A DONE (2026-07-23) — template + Web Dev + Creatives migrated,
 verified end-to-end (tsc clean, 248 unit tests green, live browser drive confirms
 both consoles). Phase B (SEO + SMM) not started.
+
+> **Superseded in part (2026-10-13, owner rulings DW-D1 to DW-D8):** the [Department workspaces plan](../../plans/2026-10-13-department-workspaces.md)
+> moves each workspace's groups into the **sidebar** (the primary group strip is retired), keeps one tab strip
+> per group, renames Home to **Overview**, and grows `deptToolkits.ts` into a workspace registry. Routes stay unchanged.
 **Scope:** Redesign the department-console navigation from a single flat tab strip to a
 two-level grouped IA; migrate Web Dev + Creatives onto it; make the toolkit a clean,
 extensible template ready for SEO and SMM (designed now, built next).
