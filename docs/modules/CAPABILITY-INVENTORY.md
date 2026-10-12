@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **176** capabilities across **16** owners
-- **92** writes · 84 reads
-- Writes by impact: **high 22** · medium 29 · low 41
+- **184** capabilities across **16** owners
+- **97** writes · 87 reads
+- Writes by impact: **high 24** · medium 30 · low 43
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -43,10 +43,10 @@ unfalsifiable after.
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 14 |
-| core | `agency` · `positions` · `role-grants` | 20 |
+| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 27 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
-| invoice | `invoices` | 4 |
+| invoice | `invoices` | 5 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
@@ -82,6 +82,12 @@ unfalsifiable after.
 | core | `agency_privacy.erase` | `POST` | `/api/:tenantId/agency/privacy/erase` | write | `high` |
 | core | `agency_privacy.export` | `POST` | `/api/:tenantId/agency/privacy/export` | write | `high` |
 | core | `agency_privacy.find` | `POST` | `/api/:tenantId/agency/privacy/find` | write | `high` |
+| core | `contracts.countersign` | `POST` | `/api/:tenantId/contracts/:contractId/countersign` | write | `high` |
+| core | `contracts.createDraft` | `POST` | `/api/:tenantId/contracts` | write | `low` |
+| core | `contracts.get` | `GET` | `/api/:tenantId/contracts/:contractId` | read | — |
+| core | `contracts.list` | `GET` | `/api/:tenantId/contracts?clientId=:clientId` | read | — |
+| core | `contracts.send` | `POST` | `/api/:tenantId/contracts/:contractId/send` | write | `medium` |
+| core | `contracts.updateDraft` | `PATCH` | `/api/:tenantId/contracts/:contractId` | write | `low` |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
 | core | `iam.listAttachableRoles` | `GET` | `/api/:tenantId/positions/attachable-roles` | read | — |
@@ -91,6 +97,8 @@ unfalsifiable after.
 | core | `iam.requestOverride` | `POST` | `/api/:tenantId/role-grants/overrides` | write | `low` |
 | core | `iam.revokeRoleGrant` | `DELETE` | `/api/:tenantId/role-grants/:grantId` | write | `medium` |
 | core | `iam.unassignPosition` | `POST` | `/api/:tenantId/positions/:positionId/unassign` | write | `medium` |
+| core | `invoicePayments.decide` | `POST` | `/api/:tenantId/invoice-payments/:paymentId/decide` | write | `high` |
+| core | `invoicePayments.list` | `GET` | `/api/:tenantId/invoice-payments?clientId=:clientId` | read | — |
 | finance | `finance.apAging` | `GET` | `/api/:tenantId/finance/ap/aging` | read | — |
 | finance | `finance.arAging` | `GET` | `/api/:tenantId/finance/ar/aging` | read | — |
 | finance | `finance.balanceSheet` | `GET` | `/api/:tenantId/finance/balance-sheet` | read | — |
