@@ -304,7 +304,7 @@ export class WebdevController {
     }
   }
 
-  /** Re-poll now (staff + the scheduled `wd-provision-reconcile` flow). Also the RESUME path for a
+  /** Re-poll now (staff; the in-process scheduled loop, provision-reconcile-loop.ts, calls the same functions). Also the RESUME path for a
    *  row whose egress never happened — which is why it is Cerbos-gated with its own action rather
    *  than folded into `read`: reconcile can cause an egress. */
   @Post("provisioned-sites/:id/reconcile")

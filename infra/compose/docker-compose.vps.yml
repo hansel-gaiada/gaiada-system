@@ -1056,6 +1056,10 @@ services:
       CLIENT_PROPERTY_TARGETS_PATH: ${CLIENT_PROPERTY_TARGETS_PATH:-}
       CLIENT_PROPERTY_TARGETS_INTERVAL_MS: ${CLIENT_PROPERTY_TARGETS_INTERVAL_MS:-}
 
+      # M6-P4c2 — the provisioned-site reconcile loop's cadence. Blank = 5 minutes (floor 30 s; parsed by
+      # readIntervalMs, so "" never becomes 0). No on/off flag by design; see provision-reconcile-loop.ts.
+      PROVISION_RECONCILE_INTERVAL_MS: ${PROVISION_RECONCILE_INTERVAL_MS:-}
+
       # M6-P4g — the org Actions secret NAMES a registered, locked repo is granted read access to (comma-separated).
       # Empty = the default `WEBDESK_DEPLOY_GRANT`. Names only: the ERP never holds a secret value (WSK-D29).
       WEBDESK_DEPLOY_SECRET_NAMES: ${WEBDESK_DEPLOY_SECRET_NAMES:-}
