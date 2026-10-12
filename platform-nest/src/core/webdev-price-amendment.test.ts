@@ -25,6 +25,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole, create
 import type { OutboxEvent } from "../events/types";
 import { amendmentSignedHandler, AMENDMENT_UNBLOCKED_TYPE } from "./amendment-signed-handler";
 import { isDeadContractStatus, isStartBlocked } from "./webdev-amendment";
+import { FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -100,14 +101,29 @@ describe.skipIf(!TEST_URL)("PV4-04: a price change lands in Contracts & billing 
     const id = newId();
     const status = o.status ?? "signed";
     await sql(
+      // PV5-06: a contract that is not a draft must have its content fixed (hash, time and tier together), or the
+      // CHECK contracts_content_fixed_when_sent refuses the row; a draft must have none (contracts_draft_not_fixed).
       `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, version, status, body_md, currency,
-                              sent_at, signed_at, created_by, origin_site)
+                              sent_at, signed_at, created_by, origin_site, content_sha256, content_fixed_at, signature_tier)
        VALUES ($1, $2, $3, $4, $5, $6, 1, $7, 'Terms.', 'IDR',
-               CASE WHEN $7 <> 'draft' THEN now() END, CASE WHEN $7 = 'signed' THEN now() END, $8, $9)`,
-      [id, co, o.clientId, o.projectId ?? null, o.title ?? "Baseline", o.reference ?? null, status, admin, config.originSite],
+               CASE WHEN $7 <> 'draft' THEN now() END, CASE WHEN $7 = 'signed' THEN now() END, $8, $9,
+               CASE WHEN $7 <> 'draft' THEN $10 END, CASE WHEN $7 <> 'draft' THEN now() END,
+               CASE WHEN $7 <> 'draft' THEN 'attested' END)`,
+      [id, co, o.clientId, o.projectId ?? null, o.title ?? "Baseline", o.reference ?? null, status, admin, config.originSite, FIXTURE_TERMS_SHA256],
     );
     return id;
   }
+
+  /** Force a DRAFT contract into a dead state. A declined contract was, by definition, sent, so its content is
+   *  fixed in the same UPDATE (PV5-06: contracts_content_fixed_when_sent). `void` of an unsent draft needs none. */
+  const kill = (contractId: string, status: "declined" | "void") =>
+    sql(
+      `UPDATE contracts SET status = $2,
+              content_sha256 = COALESCE(content_sha256, $3), content_fixed_at = COALESCE(content_fixed_at, now()),
+              signature_tier = COALESCE(signature_tier, 'attested'), sent_at = COALESCE(sent_at, now())
+        WHERE id = $1`,
+      [contractId, status, FIXTURE_TERMS_SHA256],
+    );
 
   let seq = 0;
   const uniq = () => `pv404-${++seq}-${Math.random().toString(36).slice(2, 8).replace(/[0-9]/g, "z")}`;
@@ -165,6 +181,17 @@ describe.skipIf(!TEST_URL)("PV4-04: a price change lands in Contracts & billing 
     return (r.json() as { amendmentContractId: string }).amendmentContractId;
   }
 
+  /** The client's signature the way the portal does it (PV5-06): read the contract, echo the content hash
+   *  `send` fixed, so the signer signs WHAT THEY SAW. */
+  async function clientSign(contractId: string) {
+    const seen = await app.inject({ method: "GET", url: `/api/${co}/portal/contracts/${contractId}`, headers: asUser(signerC) });
+    expect(seen.statusCode, seen.body).toBe(200);
+    return app.inject({
+      method: "POST", url: `/api/${co}/portal/contracts/${contractId}/sign`, headers: asUser(signerC),
+      payload: { signerName: "Client Signer", agree: true, contentSha256: (seen.json() as { contentSha256: string }).contentSha256 },
+    });
+  }
+
   /** Drive a draft amendment to `signed` the real way: terms, send, the client signs, a platform admin countersigns. */
   async function signForReal(contractId: string): Promise<void> {
     const terms = await app.inject({
@@ -173,10 +200,7 @@ describe.skipIf(!TEST_URL)("PV4-04: a price change lands in Contracts & billing 
     expect(terms.statusCode, terms.body).toBe(200);
     const sent = await app.inject({ method: "POST", url: `/api/${co}/contracts/${contractId}/send`, headers: asUser(admin) });
     expect(sent.statusCode, sent.body).toBe(200);
-    const client = await app.inject({
-      method: "POST", url: `/api/${co}/portal/contracts/${contractId}/sign`, headers: asUser(signerC),
-      payload: { signerName: "Client Signer", agree: true },
-    });
+    const client = await clientSign(contractId);
     expect(client.statusCode, client.body).toBe(200);
     expect(await statusOf(contractId)).toBe("sent"); // one side only: NOT signed yet
     const ours = await app.inject({
@@ -437,10 +461,7 @@ describe.skipIf(!TEST_URL)("PV4-04: a price change lands in Contracts & billing 
         expect(whileSent.json()).toMatchObject({ error: "amendment_not_signed", existing: { amendmentStatus: "sent" } });
 
         // Sign it for real: the client signs, then a platform admin countersigns.
-        const client = await app.inject({
-          method: "POST", url: `/api/${co}/portal/contracts/${contractId}/sign`, headers: asUser(signerC),
-          payload: { signerName: "Client Signer", agree: true },
-        });
+        const client = await clientSign(contractId);
         expect(client.statusCode, client.body).toBe(200);
         expect((await triage(cr.id, { action: "convert", route: s.route, priceImpact: "changes_price" })).statusCode).toBe(409);
         const ours = await app.inject({
@@ -511,7 +532,7 @@ describe.skipIf(!TEST_URL)("PV4-04: a price change lands in Contracts & billing 
       it(`a ${dead} amendment keeps the request blocked; re-triage with changes_price makes a FRESH draft and re-points`, async () => {
         const cr = await internalCr();
         const first = await changesPrice(cr.id);
-        await sql(`UPDATE contracts SET status = $2 WHERE id = $1`, [first, dead]);
+        await kill(first, dead);
 
         // Still blocked: a work route does not start (it makes the fresh amendment instead of a run/task).
         const again = await triage(cr.id, { action: "convert", route: "mini_run", priceImpact: "changes_price" });
@@ -535,7 +556,7 @@ describe.skipIf(!TEST_URL)("PV4-04: a price change lands in Contracts & billing 
       expect(live.json()).toMatchObject({ error: "amendment_exists", existing: { amendmentContractId: first } });
       expect(await crRow(cr.id)).toMatchObject({ status: "new", price_impact: "changes_price", amendment_contract_id: first });
 
-      await sql(`UPDATE contracts SET status = 'void' WHERE id = $1`, [first]);
+      await kill(first, "void");
       const dead = await triage(cr.id, { action: "convert", route: "pm_task", priceImpact: "none" });
       expect(dead.statusCode, dead.body).toBe(200);
       expect(await crRow(cr.id)).toMatchObject({ status: "in_progress", route: "pm_task", price_impact: "none", amendment_contract_id: null });
@@ -655,7 +676,7 @@ describe.skipIf(!TEST_URL)("PV4-04: a price change lands in Contracts & billing 
       expect((await crRow(cr.id)).amendment_contract_id).toBe(first);
 
       // Declined: the request is blocked and may be re-pointed by drafting the re-issue.
-      await sql(`UPDATE contracts SET status = 'declined' WHERE id = $1`, [first]);
+      await kill(first, "declined");
       const fresh = await create({ kind: "amendment", amendsId: sowX, changeRequestId: cr.id, reference: "PV404-RE-2" });
       expect(fresh.statusCode, fresh.body).toBe(201);
       expect((await crRow(cr.id)).amendment_contract_id).toBe(fresh.json().id);
