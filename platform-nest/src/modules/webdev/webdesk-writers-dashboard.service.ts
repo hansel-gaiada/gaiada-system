@@ -21,7 +21,7 @@ import { authorize } from "../../core/http";
 import { checkActions, type Resource } from "../../rbac/cerbos";
 import { assemblePrincipal, type Principal } from "../../rbac/principal";
 import {
-  ItemGate, WebdeskProblem, invalidRequest, isPlainObject, probeAllowed, strictQuery, webdeskZoneB,
+  ItemGate, WebdeskProblem, holdsEditorialGrant, invalidRequest, isPlainObject, probeAllowed, strictQuery, webdeskZoneB,
   type ContentGate, type EditableSite, type SiteRef, type WebdeskZoneB,
 } from "./webdesk-content.service";
 import {
@@ -150,6 +150,9 @@ export function cerbosAuthz(check: PairChecker = checkActions): DashboardAuthz {
   const resourceOf = (gate: ContentGate, siteId: string) => (p: Pair): Resource => ItemGate.resourceOf(gate, siteId, null, { collectionKey: p.collectionKey, locale: p.locale });
   return {
     async siteWide(gate, siteId) {
+      // A writers' room grant can pass a site-level `read` too (a grant over ALL collections matches with no collection named), and
+      // that must not turn a writer into a staff tier: anyone who holds such a grant, and any delegated call, is judged pair by pair.
+      if (gate.principal.actFor || holdsEditorialGrant(gate.principal)) return false;
       const res: Resource = { kind: "webdesk_content_item", tenantId: gate.tenantId, module: "webdev", siteId };
       if (!(await probeAllowed(gate.principal, res, READ))) return false;
       await authorize(gate.principal, res, READ); // the real, audited check (session, delegation) once the answer is yes
@@ -266,7 +269,9 @@ export class WebdeskWritersDashboardService {
 
     // PHASE 2 — what the dashboard lists is decided by Cerbos before the query is looked at.
     const collections = await this.webdesk.collections(site);
-    const withItems = collections.filter((c) => c.liveItems === null || c.liveItems > 0).sort((a, b) => a.key.localeCompare(b.key));
+    // Collections that have a page address first (those are the articles), then the rest, each by key: a stable order the cursor can resume.
+    const hasAddress = (c: WdCollection): number => (typeof routePatternOf(c.composition) === "string" ? 0 : 1);
+    const withItems = collections.filter((c) => c.liveItems === null || c.liveItems > 0).sort((a, b) => hasAddress(a) - hasAddress(b) || a.key.localeCompare(b.key));
     const defaultLocale = editable.tenant.defaultLocale;
     const pairsOf = (c: WdCollection): Pair[] => (c.locales.length > 0 ? c.locales : [defaultLocale]).map((locale) => ({ collectionKey: c.key, locale }));
     const allPairs = withItems.flatMap(pairsOf);

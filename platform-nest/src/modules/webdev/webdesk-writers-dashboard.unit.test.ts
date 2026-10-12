@@ -2,6 +2,8 @@
 // parsers and SQL text, the Umami reads against a fake fetch, and the SERVICE (order, visibility, outages, pagination, chunking)
 // against stubs for WebDesk, Cerbos and the four sources. The HTTP + real Cerbos + Postgres behaviour is
 // `webdesk-writers-dashboard.test.ts` (the Linux gate).
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { ForbiddenException, HttpException, ServiceUnavailableException } from "@nestjs/common";
 import { webdevModule } from "./index";
@@ -18,7 +20,7 @@ import {
   parseUmamiTime, readUmami, type DashboardSources, type SourcesInput,
 } from "./webdesk-writers-dashboard-sources";
 import {
-  WebdeskWritersDashboardService, domainsOf, pairKey, pairVerdicts, parseQuery,
+  WebdeskWritersDashboardService, cerbosAuthz, domainsOf, pairKey, pairVerdicts, parseQuery,
   type DashboardAuthz, type DashboardWebdesk, type Pair, type PairVerdict, type WdCollection, type WdItemRow,
 } from "./webdesk-writers-dashboard.service";
 
@@ -519,7 +521,7 @@ describe("WebdeskWritersDashboardService", () => {
       cursor = r.page.cursor;
       expect(cursor).not.toBeNull();
     }
-    expect(seen).toEqual(["pa0", "pa1", "pa2", "po0", "po1", "po2", "po3", "po4"]); // `page` sorts before `post`
+    expect(seen).toEqual(["po0", "po1", "po2", "po3", "po4", "pa0", "pa1", "pa2"]); // `post` has a page address, so it comes before `page`
     await expect(s.read(gateFor(ME), site, { cursor: "junk" }, NOW)).rejects.toMatchObject({ status: 400 });
     await expect(s.read(gateFor(ME), site, { cursor: encodeCursor({ collection: "elsewhere", webdesk: null }) }, NOW)).rejects.toMatchObject({ status: 400 });
   });
@@ -543,6 +545,24 @@ describe("WebdeskWritersDashboardService", () => {
     await svc({ wd: fakeWebdesk({ collections: cols, items: {} }).wd, authz: az.authz }).read(gateFor(ME), site, {}, NOW);
     expect(az.calls.pairs).toHaveLength(1);
     expect(az.calls.pairs[0]).toHaveLength(120);
+  });
+});
+
+describe("cerbosAuthz.siteWide: a writers' room grant never makes a staff tier", () => {
+  const grantee = (role: string, over: Record<string, unknown> = {}) => ({ userId: ME, roles: [{ role, scopeType: "company", scopeId: TENANT }], assurance: "high", ...over }) as unknown as Principal;
+  const gateOf = (principal: Principal) => ({ principal, tenantId: TENANT } as unknown as ContentGate);
+  // These principals are judged WITHOUT any Cerbos call: the answer is "no" before the network is touched (so no CERBOS_URL is needed).
+  it("a writer, translator, SEO reviewer or editor grant is judged pair by pair, even over all collections", async () => {
+    const az = cerbosAuthz(async () => { throw new Error("must not be called"); });
+    for (const role of ["webdesk_writer", "webdesk_translator", "webdesk_seo_reviewer", "webdesk_editor"]) {
+      expect(await az.siteWide(gateOf(grantee(role)), SITE_ID)).toBe(false);
+    }
+  });
+  it("scope rows alone count as a grant, and so does a delegated call", async () => {
+    const az = cerbosAuthz();
+    const scoped = { userId: ME, roles: [{ role: "member", scopeType: "company", scopeId: TENANT, editorialScopes: [{ siteId: SITE_ID }] }], assurance: "high" } as unknown as Principal;
+    expect(await az.siteWide(gateOf(scoped), SITE_ID)).toBe(false);
+    expect(await az.siteWide(gateOf(grantee("webdev_manager", { actFor: { userId: OTHER } })), SITE_ID)).toBe(false);
   });
 });
 
@@ -599,5 +619,45 @@ describe("MCP tool", () => {
     expect((t as { impact?: string }).impact).toBeUndefined();
     expect(t!.inputSchema).toMatchObject({ required: ["tenantId", "tenantSlug", "siteId"] });
     expect(t!.description).toMatch(/never a visitor, a lead's name, address or id/i);
+  });
+});
+
+// ── the UI's own parser against this BFF's real answers ──────────────────────────────────────────────
+// platform-ui `lib/webdeskDashboard.ts#parseDashboard` is STRICT (a figure is a value or an explained absence, a view count under 5 is "<5", a
+// path and its reason are one fact). The service's real output, in every state this file builds, must pass it. Loaded with a computed
+// dynamic import so the Nest tsc never follows it into platform-ui (the pattern of webdesk-content-ui-contract.test.ts); skipped when
+// platform-ui is not checked out beside platform-nest.
+const UI_LIB = resolve(__dirname, "../../../../platform-ui/src/lib");
+describe.skipIf(!existsSync(join(UI_LIB, "webdeskDashboard.ts")))("the real BFF body passes the UI's strict parser", () => {
+  const parse = async (body: unknown): Promise<any> => {
+    const mod = (await import(/* @vite-ignore */ join(UI_LIB, "webdeskDashboard.ts"))) as { parseDashboard(v: unknown): any };
+    return mod.parseDashboard(JSON.parse(JSON.stringify(body))); // over the wire: JSON in, JSON out
+  };
+  const run = (parts: { wd: DashboardWebdesk; authz: DashboardAuthz; sources?: DashboardSources }, q: unknown = {}) => svc(parts).read(gateFor(ME), site, q, NOW);
+
+  it("with every figure, with an outage, with no page address, and empty", async () => {
+    const f = { collections: [POST, { key: "guide", composition: {}, liveItems: 1, locales: ["en"] }], items: { post: POSTS, guide: [row("g1", "g", ME)] } };
+    const staff = () => fakeAuthz({ siteWide: true }).authz;
+    const full = await parse(await run({ wd: fakeWebdesk(f).wd, authz: staff() })); // collections with a page address first: `post`, then `guide`
+    expect(full.items).toHaveLength(4);
+    expect(full.page.hasMore).toBe(true);
+    const guide = await parse(await run({ wd: fakeWebdesk(f).wd, authz: staff() }, { cursor: full.page.cursor }));
+    expect(guide.items.map((i: { slug: string }) => i.slug)).toEqual(["g"]);
+    expect(guide.items[0].pagePath).toBeNull();
+    expect(guide.sources.umami.state).toBe("not_asked");
+    const down = await run({ wd: fakeWebdesk(f).wd, authz: staff(), sources: fakeSources({ umami: sourceFail("umami_unreachable"), decay: sourceFail("decay_unavailable") }).sources });
+    expect((await parse(down)).sources.umami.state).toBe("unavailable");
+    const small = fakeSources({ umami: sourceOk(umamiOk({ "/blog/mine-1": 3 }, { "/blog/mine-1": 90 })) });
+    const sc = await parse(await run({ wd: fakeWebdesk(f).wd, authz: staff(), sources: small.sources }));
+    expect(sc.items.find((i: { slug: string }) => i.slug === "mine-1").metrics.views.value.current).toBe("<5");
+    expect((await parse(await run({ wd: fakeWebdesk({ collections: [], items: {} }).wd, authz: staff() }))).items).toEqual([]);
+  });
+
+  it("with a decay finding and a decay check that is off", async () => {
+    const f = { collections: [POST], items: { post: [row("i1", "mine-1", ME)] } };
+    const withFinding = fakeSources({ decay: sourceOk({ enabled: true, byPath: new Map([["/blog/mine-1", finding]]) }) });
+    expect((await parse(await run({ wd: fakeWebdesk(f).wd, authz: fakeAuthz({ siteWide: true }).authz, sources: withFinding.sources }))).items[0].decay.value.status).toBe("open");
+    const off = fakeSources({ decay: sourceOk({ enabled: false, byPath: new Map() }) });
+    expect((await parse(await run({ wd: fakeWebdesk(f).wd, authz: fakeAuthz({ siteWide: true }).authz, sources: off.sources }))).items[0].decay.reason.code).toBe("decay_off");
   });
 });

@@ -7,6 +7,8 @@
 // and not zero; a denied caller is 403 with a valid request beside a positive control; >50 (collection, language) pairs still work.
 // Needs DATABASE_URL_TEST + CERBOS_URL, the test Cerbos restarted on the W1a policies. NOT RUN LOCALLY (owner order: no docker on
 // the laptop); it runs on the Linux gate (CI).
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
@@ -35,7 +37,7 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
   let app: NestFastifyApplication;
   let A: string;
   let B: string;
-  let publisherA: string, writerA: string, otherWriter: string, editorAll: string, nobody: string, editorB: string;
+  let publisherA: string, writerA: string, otherWriter: string, editorAll: string, writerAll: string, nobody: string, editorB: string;
   let propertyId: string;
   const leadIds: string[] = [];
   let zb: FakeZoneB;
@@ -88,11 +90,13 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
     writerA = await mk(A, "writer@w8.test", "member");
     otherWriter = await mk(A, "other-writer@w8.test", "member");
     editorAll = await mk(A, "editor@w8.test", "member");
+    writerAll = await mk(A, "writer-all@w8.test", "member");
     nobody = await mk(A, "nobody@w8.test", "member");
     editorB = await mk(B, "editor-b@w8.test", "member");
     await editorial(A, writerA, "webdesk_writer", GAIADA_SITE, ["post"], ["en"]);
     await editorial(A, otherWriter, "webdesk_writer", GAIADA_SITE, ["post"], ["en"]);
     await editorial(A, editorAll, "webdesk_editor", GAIADA_SITE, "all", "all");
+    await editorial(A, writerAll, "webdesk_writer", GAIADA_SITE, "all", "all"); // a writer over EVERY collection and language: still only their own work
     await editorial(B, editorB, "webdesk_editor", OTHER_SITE, "all", "all");
 
     // The search property of the site: the FakeZoneB's staging domain is the only environment with a hostname.
@@ -168,12 +172,25 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
 
   const body = (r: { body: string }) => JSON.parse(r.body) as { scope: string; items: Array<Record<string, any>>; sources: Record<string, any>; page: Record<string, any> };
   const bySlug = (b: ReturnType<typeof body>, slug: string) => b.items.find((i) => i.slug === slug);
+  /** Every page of a dashboard, merged: a request lists ONE collection (those with a page address first), the cursor carries on. */
+  const dashAll = async (as: string, qs = "") => {
+    const pages: Array<ReturnType<typeof body>> = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 50; i++) {
+      const r = await dash(as, `${qs}${qs ? "&" : "?"}limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      expect(r.statusCode, r.body).toBe(200);
+      const b = body(r);
+      pages.push(b);
+      if (!b.page.hasMore) break;
+      cursor = b.page.cursor;
+    }
+    return { ...pages[0], items: pages.flatMap((p) => p.items) };
+  };
 
   it("a STAFF tier sees every published article with its page path and its figures from all four sources", async () => {
-    const r = await dash(publisherA);
-    expect(r.statusCode, r.body).toBe(200);
-    const b = body(r);
+    const b = await dashAll(publisherA);
     expect(b.scope).toBe("all_site");
+    expect(b.items[0].collectionKey).toBe("post"); // the collection with a page address comes first
     expect(b.items.map((i) => i.slug).sort()).toEqual(["g1", "hello", "world"]); // the unpublished draft is not an article yet
     const hello = bySlug(b, "hello")!;
     expect(hello.pagePath).toBe("/blog/hello/");
@@ -192,6 +209,18 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
     expect(g1.metrics.views).toMatchObject({ value: null, reason: { code: "no_route_pattern" } });
   });
 
+  it("the real body (full, and during an Umami outage) passes the UI's strict parser (platform-ui lib/webdeskDashboard.ts)", async () => {
+    const lib = resolve(__dirname, "../../../../platform-ui/src/lib/webdeskDashboard.ts");
+    if (!existsSync(lib)) return; // platform-ui not checked out beside platform-nest
+    const { parseDashboard } = (await import(/* @vite-ignore */ join(lib))) as { parseDashboard(v: unknown): { items: unknown[] } };
+    expect(parseDashboard(JSON.parse((await dash(publisherA)).body)).items).toHaveLength(2); // the first page: `post`
+    expect(parseDashboard(JSON.parse((await dash(publisherA, "?collection=guide")).body)).items).toHaveLength(1); // no page address
+    umami = "down";
+    expect(parseDashboard(JSON.parse((await dash(publisherA)).body)).items).toHaveLength(2);
+    umami = "ok";
+    expect(parseDashboard(JSON.parse((await dash(writerA)).body)).items).toHaveLength(1);
+  });
+
   it("LEAD COUNTS NEVER EXPOSE IDENTITIES: no lead id, name, organisation, address, phone, click id or UTM anywhere in the response", async () => {
     for (const who of [publisherA, editorAll, writerA]) {
       const raw = (await dash(who)).body;
@@ -200,16 +229,23 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
   });
 
   it("a WRITER sees only their own articles; another writer sees theirs; neither sees a collection outside their grant", async () => {
-    const a = body(await dash(writerA));
+    const a = await dashAll(writerA);
     expect(a.scope).toBe("scoped");
     expect(a.items.map((i) => i.slug)).toEqual(["hello"]);
     expect(a.items[0].mine).toBe(true);
-    expect(body(await dash(otherWriter)).items.map((i) => i.slug)).toEqual(["world"]);
+    expect((await dashAll(otherWriter)).items.map((i) => i.slug)).toEqual(["world"]);
+  });
+
+  it("a writer whose grant covers ALL collections and languages is still only a writer: no staff view of everyone's work", async () => {
+    seed("all-mine", "post", writerAll);
+    const b = await dashAll(writerAll);
+    expect(b.scope).toBe("scoped");
+    expect(b.items.map((i) => i.slug)).toEqual(["all-mine"]);
   });
 
   it("an EDITOR (assign on the pair) sees everything in scope; ?mine=true narrows an editor to their own", async () => {
-    expect(body(await dash(editorAll)).items.map((i) => i.slug).sort()).toEqual(["g1", "hello", "world"]);
-    expect(body(await dash(editorAll, "?mine=true")).items).toEqual([]);
+    expect((await dashAll(editorAll)).items.map((i) => i.slug).sort()).toEqual(["g1", "hello", "world"]);
+    expect((await dashAll(editorAll, "?mine=true")).items).toEqual([]);
     expect(body(await dash(publisherA, "?collection=post&period=7d")).items.map((i) => i.slug).sort()).toEqual(["hello", "world"]);
   });
 
@@ -245,7 +281,7 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
   it("a property with no Search Console rows for the period is 'unavailable', not 0 clicks", async () => {
     await withTenants([A], (c) => c.query(`UPDATE search_gsc_performance SET simulated = true WHERE property_id = $1`, [propertyId]), S);
     try {
-      const hello = bySlug(body(await dash(publisherA)), "hello")!;
+      const hello = bySlug(await dashAll(publisherA), "hello")!;
       expect(hello.metrics.clicks).toMatchObject({ value: null, reason: { code: "gsc_no_data" } });
       expect(hello.metrics.topQueries.value).toBeNull();
     } finally {
