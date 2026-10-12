@@ -93,9 +93,12 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 (P2-03) — permissions.ui_grantable + p
       expect(mismatches, mismatches.join("\n")).toEqual([]);
     });
 
-    it("exactly 23 rows are ui_grantable=false (15 relationship + 8 portal.* — CC-D4 added portal.edit_company_profile)", async () => {
+    // PV3-01 (2026-10-11): 23 -> 24. `core.contract.countersign` is the first non-portal, non-relationship
+    // key held false on purpose: countersigning is owner-only by a Cerbos GRANT rule, and the key (catalogued
+    // only because the policy names the action) must never ride a UI-built bundle. Deliberate pin update.
+    it("exactly 24 rows are ui_grantable=false (15 relationship + 8 portal.* + core.contract.countersign)", async () => {
       const { rows } = await withGlobal((c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions WHERE ui_grantable = false`));
-      expect(Number(rows[0].n)).toBe(23);
+      expect(Number(rows[0].n)).toBe(24);
     });
   });
 

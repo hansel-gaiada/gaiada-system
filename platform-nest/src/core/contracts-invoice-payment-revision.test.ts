@@ -67,7 +67,7 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     await addMembership(tenant, recorder);
     await grantRole(admin, await createRole("company_admin"), "company", tenant);
     app = await buildApp();
-    clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme" } })).json().id;
+    clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme", businessType: "other" } })).json().id;
   });
   afterAll(async () => {
     await app.close();
@@ -134,5 +134,85 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     const row = await withTenants([tenant], (c) => c.query<{ status: string }>(`SELECT status FROM invoices WHERE id = $1`, [invoiceId]));
     expect(row.rows[0].status).toBe("void"); // unchanged — the UPDATE's WHERE status='sent' matched 0 rows
     expect(await getRevisions(invoiceId)).toHaveLength(0); // no mutation happened -> no revision recorded
+  });
+
+  // PV3-03 / CC-1: the `?clientId=` facet on the finance confirmation queue.
+  describe("GET invoice-payments?clientId= (strict client facet)", () => {
+    let otherClient: string;
+    const pay: Record<string, string> = {};
+
+    // `invoice_payments.client_id` is nullable (0075), so `internal` genuinely selects rows here: the
+    // payments on an invoice that names no client.
+    async function insertPaymentFor(client: string | null, amount: number): Promise<string> {
+      const invoiceId = newId();
+      const id = newId();
+      await withTenants([tenant], async (c) => {
+        await c.query(
+          `INSERT INTO invoices (id, tenant_id, client_id, status, currency, lines, total, origin_site, created_by, updated_by)
+           VALUES ($1, $2, $3, 'sent', 'USD', '[]', $4, 'test', $5, $5)`,
+          [invoiceId, tenant, client, amount, admin],
+        );
+        await c.query(
+          `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site)
+           VALUES ($1, $2, $3, $4, $5, 'USD', now()::date, 'pending', $6, 'test')`,
+          [id, tenant, invoiceId, client, amount, recorder],
+        );
+      });
+      return id;
+    }
+
+    beforeAll(async () => {
+      otherClient = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Facet Other", businessType: "other" } })).json().id;
+      pay.mine = await insertPaymentFor(clientId, 111);
+      pay.theirs = await insertPaymentFor(otherClient, 222);
+      pay.clientless = await insertPaymentFor(null, 333);
+    });
+
+    const get = (qs: string, as = admin) =>
+      app.inject({ method: "GET", url: `/api/${tenant}/invoice-payments${qs}`, headers: asUser(as) });
+    type Row = { id: string; clientId: string | null };
+
+    it("no clientId returns every client's payments, unchanged", async () => {
+      const r = await get("");
+      expect(r.statusCode).toBe(200);
+      const ids = (r.json() as Row[]).map((x) => x.id);
+      expect(ids).toEqual(expect.arrayContaining([pay.mine, pay.theirs, pay.clientless]));
+    });
+
+    it("a uuid lists only that client's payments, never another client's", async () => {
+      const r = await get(`?clientId=${clientId}`);
+      expect(r.statusCode).toBe(200);
+      const rows = r.json() as Row[];
+      expect(rows.map((x) => x.id)).toContain(pay.mine);
+      expect(rows.map((x) => x.id)).not.toContain(pay.theirs);
+      expect(rows.map((x) => x.id)).not.toContain(pay.clientless);
+      expect(rows.every((x) => x.clientId === clientId)).toBe(true);
+    });
+
+    it("composes with ?status=", async () => {
+      const r = await get(`?clientId=${otherClient}&status=pending`);
+      expect(r.statusCode).toBe(200);
+      expect((r.json() as Row[]).map((x) => x.id)).toEqual([pay.theirs]);
+      const none = await get(`?clientId=${otherClient}&status=confirmed`);
+      expect(none.json()).toEqual([]);
+    });
+
+    it("internal lists only clientless payments", async () => {
+      const r = await get("?clientId=internal");
+      expect(r.statusCode).toBe(200);
+      const rows = r.json() as Row[];
+      expect(rows.map((x) => x.id)).toContain(pay.clientless);
+      expect(rows.map((x) => x.id)).not.toContain(pay.mine);
+      expect(rows.map((x) => x.id)).not.toContain(pay.theirs);
+      expect(rows.every((x) => x.clientId === null)).toBe(true);
+    });
+
+    it("a non-uuid is a 400", async () => {
+      expect((await get("?clientId=not-a-uuid")).statusCode).toBe(400);
+    });
+
+    it("authorization runs before validation: no grant -> 403, even with a garbage clientId", async () => {
+      expect((await get("?clientId=not-a-uuid", recorder)).statusCode).toBe(403);
+    });
   });
 });

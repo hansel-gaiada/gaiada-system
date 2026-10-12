@@ -17,15 +17,41 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # COUNTERSIGNING IS OWNER-ONLY, and that is the point of splitting it out. `platform_admin` /
-    # `group_executive` are covered by the wildcard above; company_admin deliberately is NOT listed
-    # here. Binding the company to a contract worth real money should not be reachable by the same
-    # grant that lets someone tidy up a draft.
+    # COUNTERSIGNING IS OWNER-ONLY, and that is the point of splitting it out. Binding the company to
+    # a contract worth real money should not be reachable by the same grant that lets someone tidy up
+    # a draft, so company_admin is deliberately NOT given `countersign` above, and neither is any
+    # permission-arm rule below. Who countersigns (PV3-01, 2026-10-11):
+    #   - an `owner` of the contract's company: the rule just below;
+    #   - `platform_admin`, through the wildcard above (the operator tier).
+    # Nobody else. No `perm_*` rule names countersign, so a permission key cannot reach it: neither
+    # company_admin nor any custom role, however many `core.contract.*` keys it holds. The catalog
+    # does list `core.contract.countersign` (every literal action here must be catalogued), but only
+    # as `uiGrantable: false`, bundled onto platform_admin alone, and read by no rule.
     #
     # ⚠ THIS IS NOT THE CLIENT'S SIGNATURE PATH. A client never touches this resource: their
     # countersignature goes through `resource_portal`'s `sign` action, scoped to their own contracts by
     # portal-scope.ts. The two parties are authorized by two different policies on purpose, so widening
     # one can never accidentally widen the other.
+
+    # PV3-01 (2026-10-11): the owner arm the comment above always described and nothing implemented
+    # (plan trap 7). The recorded intent ("owner-only, deliberately narrower than company_admin",
+    # docs/plans/2026-08-04-client-portal-deployment.md) is unchanged; this only makes it true.
+    #
+    # Company-scope grant only (owner is never global — owner-role.db.test.ts), and ON THIS tenant:
+    # an owner of another company gets nothing here. Written inline under `roles: ["user"]` for the
+    # reason resource_report_document.yaml's PV1-06a rule gives: `owner` has no derived role
+    # (permission-native, IAM-04c §3), and countersign must not gain a perm_* rule. Owner's bundle is
+    # unchanged: this rule reads the GRANT, never `attr.perms`.
+    - actions: ["countersign"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.principal.attr.grants.exists(g, g.role == "owner" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["manager"]

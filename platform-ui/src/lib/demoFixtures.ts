@@ -8,7 +8,7 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
-import { clientCentreDemo } from "./demoClientCentre";
+import { clientCentreDemo, demoCentreRegisterClient, demoCentreSetBusinessType, demoIsBusinessType } from "./demoClientCentre";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { agencyLeadsDemo } from "./demoAgencyLeads";
@@ -739,7 +739,27 @@ const CLIENTS: Record<string, unknown>[] = [
   { id: "cl-1", name: "Northwind Traders", contact: { email: "ops@northwind.example" }, status: "active", custom_fields: {} },
   { id: "cl-2", name: "Cedar Group", contact: { email: "hello@cedar.example" }, status: "active", custom_fields: {} },
   { id: "cl-3", name: "Lumen Studio", contact: {}, status: "prospect", custom_fields: {} },
+  // PV3-04 (PV-D2): a client that IS one of our own companies, linked to `co-resort`.
+  { id: "cl-4", name: "Viceroy", contact: { email: "accounts@viceroy.example" }, status: "active", custom_fields: {}, groupCompany: { id: "co-resort", name: "Viceroy" } },
 ];
+
+// PV3-04: the demo twins of the backend's platform-operator gate (admin/elevated.ts `isPlatformOperator`:
+// platform_admin at global scope, or the owner of a ROOT company) and of `checkGroupCompany`
+// (modules/clients/group-company.ts: not the client's own company, exists, same root). Same typed codes.
+function demoIsPlatformOperator(identity: { roles: { role: string; scopeType: string; scopeId: string | null }[] }): boolean {
+  const isRoot = (id: string | null) => COMPANIES.some((c) => c.id === id && c.root_company_id === c.id);
+  return identity.roles.some((r) =>
+    (r.role === "platform_admin" && r.scopeType === "global") || (r.role === "owner" && r.scopeType === "company" && isRoot(r.scopeId)));
+}
+function demoGroupCompany(tenant: string, target: unknown): { error: string } | { company: { id: string; name: string } } {
+  if (typeof target !== "string" || !target) return { error: "group_company_invalid" };
+  if (target === tenant) return { error: "group_company_self" };
+  const co = COMPANIES.find((c) => c.id === target);
+  const own = COMPANIES.find((c) => c.id === tenant);
+  if (!co) return { error: "group_company_not_found" };
+  if (!co.root_company_id || co.root_company_id !== own?.root_company_id) return { error: "group_company_other_root" };
+  return { company: { id: co.id as string, name: co.name as string } };
+}
 // CC-D10 demo stores: empty until the demo session writes to them.
 const DEMO_CLIENT_NOTES: Record<string, { id: string; body: string; authorId: string; authorName: string; createdAt: string }[]> = {};
 const DEMO_CLIENT_HISTORY: Record<string, { id: string; verb: string; metadata: Record<string, unknown>; occurredAt: string; actorId: string; actorName: string }[]> = {};
@@ -2707,11 +2727,17 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const needsUs = cid === "cl-1"
       ? [
           { kind: "payment", id: "dpay-1", label: "Confirm a client-recorded payment", context: "USD 2,400", href: "/invoices/inv-1", since: daysAgoIso(11) },
-          { kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/requests` },
+          { kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work` },
         ]
       : [];
+    // PV3-05: no contracts page exists yet (PV3-08 adds `/clients/:id/billing`), so the contract item
+    // points at the hub Overview rather than at the nonexistent `/commercial`. The review item gives the
+    // Projects area's post-review list a reachable state in demo mode.
     const needsClient = cid === "cl-1"
-      ? [{ kind: "contract", id: "dk-1", label: "Awaiting client signature", context: "Statement of Work — redesign", href: `/clients/${cid}/commercial`, since: daysAgoIso(4) }]
+      ? [
+          { kind: "contract", id: "dk-1", label: "Awaiting client signature", context: "Statement of Work — redesign", href: `/clients/${cid}`, since: daysAgoIso(4) },
+          { kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3) },
+        ]
       : [];
     const money = invoices.length
       ? {
@@ -2727,7 +2753,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       : null;
     const doneTasks = tasks.filter((t) => t.status === "done").length;
     return ok({
-      client: { id: client.id, name: client.name, status: client.status ?? null, contact: client.contact ?? null },
+      client: { id: client.id, name: client.name, status: client.status ?? null, contact: client.contact ?? null, groupCompany: client.groupCompany ?? null },
       projects: {
         total: projects.length,
         active: projects.filter((pr) => !["done", "complete", "archived", "cancelled"].includes(String(pr.status))).length,
@@ -2787,7 +2813,23 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (clientOne && m === "PATCH") {
     const c = CLIENTS.find((x) => x.id === clientOne[1]);
     if (!c) return { status: 404, json: { error: "client not found" } };
-    const b = JSON.parse(body || "{}") as { name?: string; status?: string; ownerUserId?: string | null; contact?: Record<string, string | null> };
+    const b = JSON.parse(body || "{}") as {
+      name?: string; status?: string; ownerUserId?: string | null; contact?: Record<string, string | null>;
+      businessType?: unknown; groupCompanyId?: unknown;
+    };
+    // PV3-04, in the backend's order: the operator gate first, then validation of the values.
+    if (b.groupCompanyId !== undefined && !demoIsPlatformOperator(currentIdentity)) {
+      return { status: 403, json: { error: "linking a client to a group company needs a platform operator" } };
+    }
+    if (b.businessType !== undefined && !demoIsBusinessType(b.businessType)) {
+      return { status: 400, json: { error: "business_type_invalid", field: "businessType" } };
+    }
+    let linked: { id: string; name: string } | null = null;
+    if (b.groupCompanyId !== undefined && b.groupCompanyId !== null && b.groupCompanyId !== "") {
+      const g = demoGroupCompany(tenantFromPath(p)!, b.groupCompanyId);
+      if ("error" in g) return { status: 400, json: { error: g.error, field: "groupCompanyId" } };
+      linked = g.company;
+    }
     const changes: { field: string; before: string | null; after: string | null }[] = [];
     const set = (field: string, key: string, v: unknown) => {
       const before = (c[key] as string | null | undefined) ?? null;
@@ -2799,6 +2841,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       set("owner", "owner_user_id", b.ownerUserId || null);
       const members = (MEMBERS[tenantFromPath(p)!] ?? []) as { user_id: string; name: string }[];
       c.owner_name = members.find((mm) => mm.user_id === c.owner_user_id)?.name ?? null;
+    }
+    if (b.groupCompanyId !== undefined) {
+      const before = (c.groupCompany as { name: string } | null | undefined)?.name ?? null;
+      if (before !== (linked?.name ?? null)) changes.push({ field: "groupCompany", before, after: linked?.name ?? null });
+      c.groupCompany = linked;
+    }
+    if (b.businessType !== undefined) {
+      const t = demoCentreSetBusinessType(clientOne[1], b.businessType as string, userId);
+      if (t.changed) changes.push({ field: "businessType", before: t.before, after: b.businessType as string });
     }
     if (b.contact) {
       // Key-level merge, exactly as the backend: a string sets, null/"" deletes, omitted is untouched.
@@ -2815,7 +2866,27 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   }
   const clientsMatch = p.match(/^\/api\/[^/]+\/clients$/);
   if (clientsMatch) {
-    if (m === "POST") { const b = JSON.parse(body || "{}"); const c = { id: demoId("cl"), name: String(b.name ?? "New client"), contact: b.contact ?? {}, status: (b.status as string) ?? "active", custom_fields: {} }; CLIENTS.push(c); return { status: 201, json: { id: c.id } }; }
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}");
+      // PV3-04, in the backend's order: the operator gate, then a REQUIRED business type, then the group company.
+      if (b.groupCompanyId !== undefined && !demoIsPlatformOperator(currentIdentity)) {
+        return { status: 403, json: { error: "linking a client to a group company needs a platform operator" } };
+      }
+      if (b.businessType === undefined || b.businessType === null || b.businessType === "") {
+        return { status: 400, json: { error: "business_type_required", field: "businessType" } };
+      }
+      if (!demoIsBusinessType(b.businessType)) return { status: 400, json: { error: "business_type_invalid", field: "businessType" } };
+      let groupCompany: { id: string; name: string } | null = null;
+      if (b.groupCompanyId !== undefined && b.groupCompanyId !== null && b.groupCompanyId !== "") {
+        const g = demoGroupCompany(tenantFromPath(p)!, b.groupCompanyId);
+        if ("error" in g) return { status: 400, json: { error: g.error, field: "groupCompanyId" } };
+        groupCompany = g.company;
+      }
+      const c = { id: demoId("cl"), name: String(b.name ?? "New client"), contact: b.contact ?? {}, status: (b.status as string) ?? "active", custom_fields: {}, groupCompany };
+      CLIENTS.push(c);
+      demoCentreRegisterClient(c.id, c.name, c.status, b.businessType, userId);
+      return { status: 201, json: { id: c.id } };
+    }
     return ok(CLIENTS);
   }
   // Deliverables
@@ -2823,7 +2894,9 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (delivMatch) {
     if (m === "POST") { const b = JSON.parse(body || "{}"); const d = { id: demoId("dl"), project_id: (b.projectId as string) ?? null, client_id: (b.clientId as string) ?? null, name: String(b.name ?? "New deliverable"), status: (b.status as string) ?? "todo", due_date: (b.dueDate as string) ?? null }; DELIVERABLES.push(d); return { status: 201, json: { id: d.id } }; }
     const pid = url.searchParams.get("projectId");
-    return ok(pid ? DELIVERABLES.filter((d) => d.project_id === pid) : DELIVERABLES);
+    // PV3-05: `?clientId=` is filtered here too, as the real controller does (a fixture that ignored it
+    // would show every client's deliverables on the hub and hide a broken facet).
+    return ok(applyDemoClientFilter(pid ? DELIVERABLES.filter((d) => d.project_id === pid) : DELIVERABLES, url.searchParams.get("clientId"), "client_id"));
   }
 
   const fieldsMatch = p.match(/^\/api\/[^/]+\/custom-fields$/);

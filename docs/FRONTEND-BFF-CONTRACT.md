@@ -131,7 +131,7 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ | GET/POST | `/api/:t/projects/:pid/tasks` | list + create. |
 | ✅ | PATCH | `/api/:t/tasks/:id` | BUILT (`core.controller.ts`). Base task update. |
 | ✅ | Agency | `/api/:t/modules/agency/campaigns[/:cid/briefs]`, `/approvals/pending`, `/approvals/:id/decide` | campaigns + approvals ✅; **briefs GET+POST ✅** (`agency.controller.ts`); assets GET+POST ✅, submit ✅. **Still no campaign detail/edit/delete endpoints** (not in route inventory). |
-| ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. **Additive (M5-G0b):** every client row carries `isInternal: boolean` (the WSK-D36 internal sentinel; the list shows an "Internal" badge, and `GET /clients/centre` rows carry `isInternal` too). The sentinel is HIDDEN from the portal and portal scope, portal login provisioning, report delivery and AI report drafting (`400`), invoice creation (`404 client not found`), the knowledge client ingest and assistant client citations; staff lists, the Clients Centre and monitoring still show it. |
+| ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. **Additive (M5-G0b):** every client row carries `isInternal: boolean` (the WSK-D36 internal sentinel; the list shows an "Internal" badge, and `GET /clients/centre` rows carry `isInternal` too). The sentinel is HIDDEN from the portal and portal scope, portal login provisioning, report delivery and AI report drafting (`400`), invoice creation (`404 client not found`), the knowledge client ingest and assistant client citations; staff lists, the Clients Centre and monitoring still show it. **PV3-04: POST now REQUIRES `businessType`; see §26.** |
 | ✅ (UI built) | GET/POST/PATCH | `/api/:t/deliverables[?projectId][/:id]` | BUILT (`client-work.controller.ts`). UI: `/deliverables` list + `/deliverables/new`. |
 | ✅ (UI built) | GET/POST | `/api/:t/time-entries` | BUILT (incl. PATCH). UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
 | ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`invoice.controller.ts`: GET, GET/:id, POST, PATCH). **Invoices** UI: `/invoices` list + `/invoices/new` (generate from billable time in a period × rate) + `/invoices/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/invoice.ts`. `company.manage` only. |
@@ -1744,14 +1744,16 @@ a client-recorded payment can never leave `pending`.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/contracts` | `?clientId`, `?status`. Authz: `contract` read (company_admin/manager). |
-| ✅ | GET | `/api/:t/contracts/:contractId` | Adds `signatures[]`. |
+| ✅ | GET | `/api/:t/contracts` | `?clientId`, `?status`. Authz: `contract` read (company_admin/manager). **PV3-01 (PROTOTYPED):** `?clientId` is the strict CC-1 facet (`parseClientFilter(raw, true)`): a uuid, or `internal` (`client_id IS NULL`, always empty here since a contract always has a client); anything else is a **400** (it used to 500 on a uuid cast). Parsed after the read check, so an unauthorized caller still gets 403. Every row carries `canCountersign` (below). |
+| ✅ | GET | `/api/:t/contracts/:contractId` | Adds `signatures[]`, and `canCountersign` (PV3-01). |
 | ✅ | POST | `/api/:t/contracts` | Always created `draft`. Validates the project belongs to the named client; `supersedesId` bumps `version`. |
 | ✅ | PATCH | `/api/:t/contracts/:contractId` | Draft-only, except `status:'void'`. A sent/signed contract is re-issued via `supersedesId`, never edited. |
 | ✅ | POST | `/api/:t/contracts/:contractId/send` | `draft → sent` + notifies signer contacts. Refuses with no document or `bodyMd`. Action `send`. |
-| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign` — **owner-only** (`platform_admin`/`group_executive`); company_admin deliberately excluded. |
-| ✅ | GET | `/api/:t/invoice-payments` | `?status` — finance's confirmation queue. Authz: `invoice` read. |
+| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign`. **Corrected 2026-10-11 (PV3-01, PROTOTYPED):** allowed for an **`owner` of the contract's company** (company-scope `owner` grant on this tenant) and for `platform_admin` (its wildcard). `group_executive` no longer exists. company_admin, manager, an owner of another company, and any custom role (even one holding every `core.contract.*` key, `core.contract.countersign` included) get 403: no permission-arm rule reads that key, which is catalogued `uiGrantable: false` only because the policy names the action. Validates `signerName` before it authorizes. |
+| ✅ | GET | `/api/:t/invoice-payments` | `?status`, `?clientId=<uuid>\|internal` — finance's confirmation queue. `clientId` is the strict §22a facet (PV3-03, PROTOTYPED): a uuid lists only that client's payments (filters `invoice_payments.client_id`), `internal` lists payments whose invoice names no client (the column is nullable), a non-uuid is **400**. Authz: `invoice` read, checked before `clientId` is validated. |
 | ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update. |
+
+**`canCountersign` (PV3-01, PROTOTYPED).** On every row of both GETs. True only when all three hold: Cerbos allows `countersign` on `{kind:"contract", tenantId}` for this caller (ONE soft check per request, never per row; for an `actFor` call the acting user must be allowed too), the status is `sent`, and there is no `provider` signature. It is a hint for showing the Countersign control; the POST stays the authority. A probe failure reads as `false`, never a 500.
 
 **⚠ STILL NO STAFF UI FOR §16e's WRITES.** Contracts must be created/sent and payments confirmed via
 API. Whoever owns finance needs to know the decide endpoint exists, or client payments accumulate as
@@ -4483,8 +4485,8 @@ One parameter, one vocabulary, on every staff list that can be narrowed to a cli
 
 ⚠ **This is a CONVENIENCE FILTER, NOT an authorization boundary.** `core/client-filter.ts`; the
 distinction from `core/portal-scope.ts` (which IS a boundary) is spelled out in both files' headers.
-Consequences that are deliberate and must not be "hardened": a malformed value resolves to **every
-row**, never to deny — a filter that fails closed silently hides work and is indistinguishable from
+Consequences that are deliberate and must not be "hardened": on the default (fail-open) lists a
+malformed value resolves to **every row** (the PV3-03 lists below are strict and answer 400 instead; neither ever denies as a boundary would) — a filter that fails closed silently hides work and is indistinguishable from
 "there is nothing here"; and passing another client's id is not an escalation and must not 403, since
 the same caller could already read the list unfiltered. Staff isolation stays RLS (tenant) + Cerbos
 (action). Ids compare **as text**, so a hand-edited query string misses rather than 500ing.
@@ -4498,13 +4500,18 @@ reachable from no scope at all. `is_internal` stays a data-quality signal, not t
 | ✅ NEW | GET | `/api/:t/projects?clientId=` | `core/core.controller.ts`. Was unfiltered; the client page used to fetch the tenant and narrow in the browser. |
 | ✅ NEW | GET | `/api/:t/pm/tasks?clientId=` | `modules/pm/pm.controller.ts`. Joins through `projects` — there is no `pm_tasks.client_id`, by decision (one source of truth, no backfill, no sync trigger). Cheap: the task CTE already joins `projects`. **`pm_tasks.project_id` is `NOT NULL`, so no clientless-task branch is needed and adding one would be dead code.** |
 | ✅ NEW | GET | `/api/:t/invoices?clientId=` | `modules/invoice/invoice.controller.ts`. This list previously accepted no query parameters at all. |
-| ✅ PRE-EXISTING | GET | `/api/:t/{deliverables,contracts,pipeline/runs,meetings/recordings,webdev/change-requests,social/*}?clientId=` | Already had the parameter. **`internal` is NOT yet honoured on these six** — see the gap below. |
+| ✅ PV3-03 | GET | `/api/:t/{deliverables,pipeline/runs,meetings/recordings,webdev/change-requests,invoice-payments}?clientId=` | Honour the full vocabulary (uuid / `internal` / absent) in **strict** mode. `core/client-work.controller.ts`, `pipeline.controller.ts`, `meetings.controller.ts`, `webdev-change-requests.controller.ts`, `contracts.controller.ts` (`invoice-payments` only). `internal` = `client_id IS NULL`. |
+| ✅ PV3-03 | GET | `/api/:t/modules/social/{engagements,accounts}?clientId=` | Same strict facet. `social_engagements.client_id` and `social_accounts.client_id` are NOT NULL, so `internal` is a valid, always-empty selection there. There is no staff "post-review list" endpoint: the per-variant `GET variants/:id/client-review` (§16h) takes no list parameters. |
+| PV3-01 | GET | `/api/:t/contracts?clientId=` | Same strict facet; owned by PV3-01, not this ticket. |
 
-⛔ **KNOWN GAP (slice 2).** The six endpoints that already had `clientId` accept a uuid only; passing
-`internal` to them matches nothing rather than selecting clientless rows. A sentinel honoured on some
-client-filterable lists and silently empty on others is worse than not having one, so this is tracked,
-not left implicit. Still PENDING: `invoice-payments`, `time-entries`, and an `/approvals` list
-endpoint (none exists).
+**Strict mode (PV3-03).** `parseClientFilter(raw, true)`: the lists above answer a non-uuid that is not
+`internal` with **400**, not with every row. A hub page asking for one client must never silently get a
+different list. Authorization still runs first (a denied caller gets 403, not 400). This changes the
+earlier behaviour of these lists, which was a 500 (deliverables, meetings: uuid cast) or a silent empty
+list (pipeline, change requests: text compare), and `internal` previously selected nothing on all of
+them. The three original users (`projects`, `pm/tasks`, `invoices`) keep the fail-open mode above:
+changing that is out of scope. Still PENDING: `time-entries`, and an `/approvals` list endpoint (none
+exists).
 
 ### 22b. The hub aggregate (CC-2)
 
@@ -4997,9 +5004,9 @@ route below uses the existing `client` resource.
 
 | Method + path | Authz | Notes |
 |---|---|---|
-| `GET /api/:t/clients` · `GET /api/:t/clients/:id` | `client` read | **Additive:** each row now carries `owner_user_id` and `owner_name` (both null when unassigned). |
-| `POST /api/:t/clients` | `client` create | Body `{name, status?, contact?, ownerUserId?, customFields?}`. **Fix:** `status` is now stored (it was dropped, so every client was born `active`). |
-| `PATCH /api/:t/clients/:id` | `client` update | **Behaviour change:** `contact` is a key-level MERGE: a string sets that key, `null`/`""` deletes it, an omitted key is untouched. It used to replace the whole object. `ownerUserId`: omitted = unchanged, `null` = clear, a user id must be ACTIVE STAFF of this tenant (400 otherwise; checked through the tenant-scoped connection, so another tenant's user is refused). `name` must not be blank; `status` must be a lowercase token. The activity row carries `{changes: [{field, before, after}]}`. |
+| `GET /api/:t/clients` · `GET /api/:t/clients/:id` | `client` read | **Additive:** each row now carries `owner_user_id` and `owner_name` (both null when unassigned), and (PV3-04) `groupCompany: {id, name} \| null`. |
+| `POST /api/:t/clients` | `client` create | Body `{name, businessType, status?, contact?, ownerUserId?, groupCompanyId?, customFields?}`. **Fix:** `status` is now stored (it was dropped, so every client was born `active`). **PV3-04: `businessType` is REQUIRED** (see "PV3-04" below); `groupCompanyId` is platform-operator only. |
+| `PATCH /api/:t/clients/:id` | `client` update | **Behaviour change:** `contact` is a key-level MERGE: a string sets that key, `null`/`""` deletes it, an omitted key is untouched. It used to replace the whole object. `ownerUserId`: omitted = unchanged, `null` = clear, a user id must be ACTIVE STAFF of this tenant (400 otherwise; checked through the tenant-scoped connection, so another tenant's user is refused). `name` must not be blank; `status` must be a lowercase token. The activity row carries `{changes: [{field, before, after}]}`. **PV3-04:** also accepts `businessType` (omitted = unchanged; it can be changed, never cleared) and `groupCompanyId` (omitted = unchanged, `null` = clear; platform-operator only). |
 | `GET /api/:t/clients/:id/notes` | `client` read | Newest first, max 200: `[{id, body, authorId, authorName, createdAt}]`. |
 | `POST /api/:t/clients/:id/notes` | `client` update | Body `{body}` (1–5,000 chars, trimmed). Returns `{id}`. Writes activity `noted`. |
 | `DELETE /api/:t/clients/:id/notes/:noteId` | own note: `client` update · anyone else's: `client` delete | Soft delete. Writes activity `note_deleted`. |
@@ -5007,6 +5014,61 @@ route below uses the existing `client` resource.
 
 UI mirror: capabilities `client.write` (company_admin, manager, member, owner) and `client.delete`
 (company_admin, manager, owner) in `platform-ui/src/lib/rbac.ts`, matching `resource_client.yaml`.
+
+### PV3-04: a required business type and a group-company link (2026-10-11) — **STATUS: PROTOTYPED**
+
+Tickets: `docs/plans/2026-10-11-pv3-hub-symmetry-tickets.md` PV3-04. Rulings: PV-D1 (business type), PV-D2
+(a group company the agency serves is a client of the agency), PV-D13 (no company names or ids in code).
+Migration `202610111322_clients_group_company.sql` adds `clients.group_company_id uuid NULL REFERENCES
+companies(id)`, `CHECK (group_company_id IS DISTINCT FROM tenant_id)` and a partial index
+`(tenant_id, group_company_id) WHERE group_company_id IS NOT NULL`. No backfill; no RLS or grant change.
+
+**Business type** (`businessType`, one of `src/modules/clients/centre/registry.json` `businessTypes`: hotel,
+restaurant, hospital, spa, agency, services, retail, ecommerce, saas, other):
+
+| Call | Result |
+|---|---|
+| `POST` without `businessType` (or `""`/`null`) | `400 {error:"business_type_required", field:"businessType"}`; no client written |
+| `POST` / `PATCH` with a value not in the registry | `400 {error:"business_type_invalid", field:"businessType"}` |
+| `POST` with a valid type | `201 {id}`. The client AND its `client_centre_profiles` row (`business_type`, `revision 1`) are written in ONE transaction through the Client Centre store, so a new client is never "not set". The `client.created` event payload carries `businessType` |
+| `PATCH` with a type that differs | `200 {id}`. Upserts the profile row in the same transaction, bumps its `revision`, emits `client.centre_updated` (`{changes:["businessType"]}`, the same event the centre PATCH emits) and the History entry carries `{field:"businessType", before, after}`. A client with no profile row ("not set") records `before: null` |
+| `PATCH` with the same type | `200`; nothing written, no event, no History entry |
+
+Order of checks, both routes: Cerbos `client` create/update first (403), then the group-company authority
+(below), then shape validation, then the target company, then the transaction. Lead conversion
+(`agency-lead-convert.service.ts`) is unchanged: leads carry no type, so converted clients read `other` and
+land on the Clients list's review filter ("Business type: Other or not set"). The read side is unchanged
+too: `GET /clients/centre` and `GET /clients/:id/centre` report `other` for a client with no row; the
+centre read's `revision: 0` is how a caller tells "not set" from an explicit "other".
+
+**Group company** (`groupCompanyId`; reads return `groupCompany: {id, name} | null`, `null` also when the
+linked company has been deleted):
+
+| Caller | Result |
+|---|---|
+| `platform_admin` (global), or the owner of the ROOT company (`isPlatformOperator`) | may set, change or clear it (`null`) |
+| anyone else (member, manager, `company_admin`, the owner of a child company) sending the key at all, even `null` | `403 "linking a client to a group company needs a platform operator"`, checked BEFORE the target is validated, so the answer never reveals whether a company exists; the row is unchanged |
+| operator, value is not a uuid | `400 group_company_invalid` |
+| operator, the client's own company | `400 group_company_self` (the table CHECK is the backstop) |
+| operator, no such company or a soft-deleted one | `400 group_company_not_found` |
+| operator, a live company of ANOTHER root | `400 group_company_other_root` |
+| operator, a live company under the same root as the client's tenant | accepted; History records `{field:"groupCompany", before, after}` (company NAMES, not ids) |
+
+`companies` is global with no RLS, so the same-root rule is enforced in the application
+(`modules/clients/group-company.ts`, through `withGlobal`, the `resolveGithubOrgTenant` precedent), not by
+the FK. PV3-Q1 (who may link) is open for the owner; the default above is the lead's, and widening it is one
+condition in `assertMayTouchGroupCompany`.
+
+**MCP** (`mcp-hub/src/platform-write-tools.ts`): `clients.create` requires `businessType` (enum of the
+registry ids) and accepts `groupCompanyId`; `clients.update` accepts both (`groupCompanyId: null` clears).
+A platform 400 now surfaces its typed code in the tool error (`platform /api/.../clients 400: business_type_required`).
+
+**UI**: New client has a required Business type select (no default); Edit preselects the current type, or
+nothing for a client with no profile row (centre `revision` 0) and will not submit until one is chosen
+("Other" is a valid explicit choice). The Group company select is shown only to a platform operator. The
+hub header and the Clients list show the group company. The Clients list has a "Business type: Other or
+not set" filter (`?review=business-type`) over the centre list it already loads; if that read fails, or
+comes back empty for a company that has clients, the page says so and withholds the filter.
 
 ## 27. WebDesk content BFF — the "Website" editor's backend (WSK-59, 2026-10-10) — `src/modules/webdev/webdesk-content.{controller,service}.ts`, `platform-ui/src/lib/webdeskContent.ts` (WSK-44) — **STATUS: BACKEND DEV-VERIFIED (Linux, see the ticket report); UI: WSK-44 builds against this section; UI RE-VERIFIED against the real controller by WSK-44b (see "Re-verified" below)**
 

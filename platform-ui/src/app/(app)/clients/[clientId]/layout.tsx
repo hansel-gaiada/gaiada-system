@@ -55,14 +55,18 @@ export default async function ClientHubLayout({
   // reach zero for a healthy client and would therefore stop meaning anything.
   const tabs: ClientHubTab[] = [
     { segment: "", label: "Overview", badge: overview.needsUs.length },
-    { segment: "work", label: "Work", badge: overview.tasks.overdue },
-    // CC-D8 — Profile is the former Client Centre workspace (how the client's business is set up);
-    // Contacts & meetings is the former Details tab (who on the client side can see what, and when we
-    // meet). Status moved into the header; deliverables moved to Work, where the rest of the work is.
-    { segment: "profile", label: "Profile" },
-    { segment: "contacts", label: "Contacts & meetings" },
-    // CC-D10 — internal notes plus the change history (who renamed, re-owned or archived it, and when).
-    { segment: "notes", label: "Notes & history" },
+    // PV3-05 — the hub mirrors the portal's areas (PV-D4). "Work" is now Projects (it also holds
+    // deliverables, approvals, requests and meetings); Profile is Business; "Contacts & meetings" is
+    // People (meetings moved to Projects). Every path is unchanged. Contracts & billing arrives with its
+    // page in PV3-08, so no tab ever links to a page that is not there.
+    { segment: "work", label: "Projects", badge: overview.tasks.overdue },
+    // CC-D8 — Business is the former Client Centre workspace (how the client's business is set up);
+    // People is the former Details tab (owner, contact details, who on the client side has portal access).
+    { segment: "profile", label: "Business" },
+    { segment: "contacts", label: "People" },
+    // CC-D10 / PV3-05 — internal notes plus the change history. Staff only: the client never reads
+    // either, so it is styled apart from every client-visible area (`internal`).
+    { segment: "notes", label: "Internal", internal: true },
   ];
 
   // CC-D10: editing is `client.write` (any staff member), deleting is `client.delete` (manager+) —
@@ -81,6 +85,9 @@ export default async function ClientHubLayout({
         actions={
           <>
             {overview.client.status && <StatusBadge label={overview.client.status} />}
+            {overview.client.groupCompany && (
+              <span className="lux-badge" title="This client is one of our own group companies">Group company: {overview.client.groupCompany.name}</span>
+            )}
             <span style={{ font: "400 12px var(--font-body)", color: "var(--ink-muted)" }}>
               Owner: {overview.client.owner_name ?? "none"}
             </span>

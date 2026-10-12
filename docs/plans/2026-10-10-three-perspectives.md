@@ -617,7 +617,7 @@ sumopod. MAP is regenerated from a clean worktree.
 | 0 | **PV-0: Decide** | the open rulings, D5–D9 and D11; the glossary (§2.2) adopted in the root `CLAUDE.md` | owner |
 | 1 | **PV-2: Client portal re-cut** (tickets: `2026-10-10-pv2-portal-recut-tickets.md`) | fix the "completed project shows as active" bug; 5 areas with sub-tabs, **every existing URL kept** (§3.1); badges split by area; "Agreements" → "Contracts"; Active/Past projects (`projects.status` CHECK); a "your team" read; the provider company's brand in the header (§2.7); the D10 groundwork: a company tag on portal payloads, a per-company fetch in the BFF, and an explicit company choice replacing the "first company" fallback (§3.2); the Workspace ⇄ Client view switch, so Viceroy's own staff can reach Gaiada's portal | PV-D4, PV-D10 (ruled) |
 | 1 | **PV-1: Company context** *(alongside)* | `companies.vertical` plus backfill; the pack registry (PN and UI) with the **agency pack only**; `/me` returns the vertical; nav built from the pack; disabled-module rows hidden; toolkits keyed by (vertical, department); Group and Platform areas; scope markers. Side effect: Viceroy stops seeing agency rows | PV-D1 (ruled), D11 |
-| 2 | **PV-3: Hub symmetry and staff Contracts & billing** | hub labels renamed with paths kept (§4.2); the new **Contracts & billing** area at `/clients/[id]/billing` (contract draft, send and countersign; payment confirm queue); backend-computed `clientVisible` markers; the client-filter facets from the client-centric design, slice 2; **`clients.group_company_id`**, so Viceroy shows as a group client (PV-D2); business type required on client create and edit, plus a review list (§3.3) | PV-D4 (ruled) |
+| 2 | **PV-3: Hub symmetry and staff Contracts & billing** (tickets: `2026-10-11-pv3-hub-symmetry-tickets.md`) | hub labels renamed with paths kept (§4.2); the new **Contracts & billing** area at `/clients/[id]/billing` (contract draft, send and countersign; payment confirm queue); backend-computed `clientVisible` markers; the client-filter facets from the client-centric design, slice 2; **`clients.group_company_id`**, so Viceroy shows as a group client (PV-D2); business type required on client create and edit, plus a review list (§3.3) | PV-D4 (ruled) |
 | 3 | **PV-4: Conversation** | threads and messages tables; the new Cerbos kind (six artifacts); portal and hub UI; SSE topic; notifications; MCP tool; the billing-landing rule enforced on price-changing change requests | D5, PV-2, PV-3 |
 | 4 | **PV-5: Contracts & billing depth** | invoice of record (number, issue and due dates, tax, issuer legal details from company settings); **intercompany tagging** of invoices to group clients (F9-04); a client document library; signature tiers; gateway | D7, D8, D9; Finance |
 | 5 | **PV-6: Client Business re-cut** | Business areas with Setup · Connections · Services & results; service KPIs by `client_id`; placeholder leaves removed; reconcile with AD-3 (CC-D6) | D6 |
@@ -649,7 +649,9 @@ sumopod. MAP is regenerated from a clean worktree.
 7. **Contract countersign authority.** The role arm grants countersign to `platform_admin` only
    (`company_admin` is deliberately excluded; `group_executive` is gone). Before PV-3 ships, verify
    that the company `owner` reaches it through the permission arm. Otherwise the new Contracts & billing tab
-   has a button nobody can press.
+   has a button nobody can press. **Checked 2026-10-11: the owner does NOT reach it.** No countersign
+   rule or permission key exists, so only `platform_admin` can countersign. PV3-01 adds an owner-only
+   rule (PV-3 tickets, finding 2).
 8. **Module wall reads.** Service KPIs in the Business area read module tables (`social_*`,
    `search_*`). A read without `{modules: [...]}` returns zero rows with no error, which looks like
    "no results".
