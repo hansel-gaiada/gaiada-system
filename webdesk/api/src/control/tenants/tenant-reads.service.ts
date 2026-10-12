@@ -26,6 +26,8 @@ export interface TenantListSite {
   siteId: string;
   name: string;
   kind: string;
+  /** 'active' | 'archived' (0019). An archived site is listed, never hidden: the staff UI shows it as archived. */
+  status: string;
   environments: TenantListEnvironment[];
 }
 
@@ -55,8 +57,8 @@ export class TenantReadsService {
       const sites = await this.db.withTenant(t.id, (db) =>
         db.transaction(async (client) => {
           await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
-          const { rows: siteRows } = await client.query<{ id: string; name: string; kind: string }>(
-            `SELECT id, name, kind FROM sites WHERE tenant_id = $1 ORDER BY created_at, id`,
+          const { rows: siteRows } = await client.query<{ id: string; name: string; kind: string; status: string }>(
+            `SELECT id, name, kind, status FROM sites WHERE tenant_id = $1 ORDER BY created_at, id`,
             [t.id],
           );
           const { rows: envRows } = await client.query<{ id: string; site_id: string; name: string; domain: string | null; status: string }>(
@@ -68,6 +70,7 @@ export class TenantReadsService {
               siteId: s.id,
               name: s.name,
               kind: s.kind,
+              status: s.status,
               environments: envRows
                 .filter((e) => e.site_id === s.id)
                 .map((e) => ({ envId: e.id, name: e.name, domain: e.domain, status: e.status })),

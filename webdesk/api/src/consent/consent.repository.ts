@@ -37,6 +37,7 @@ export class ConsentRepository {
       db.query<{ site_id: string }>(
         `SELECT site_id FROM environments
           WHERE tenant_id = $1 AND domain IS NOT NULL AND lower(btrim(domain, ' /')) = $2
+            AND site_id IN (SELECT id FROM sites WHERE tenant_id = $1 AND status = 'active')
           ORDER BY (name = 'production') DESC, site_id
           LIMIT 1`,
         [tenantId, host],

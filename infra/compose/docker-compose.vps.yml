@@ -1055,6 +1055,10 @@ services:
       # never reaches the container, which is why it is listed here. Interval parsed by readIntervalMs().
       CLIENT_PROPERTY_TARGETS_PATH: ${CLIENT_PROPERTY_TARGETS_PATH:-}
       CLIENT_PROPERTY_TARGETS_INTERVAL_MS: ${CLIENT_PROPERTY_TARGETS_INTERVAL_MS:-}
+
+      # M6-P4g — the org Actions secret NAMES a registered, locked repo is granted read access to (comma-separated).
+      # Empty = the default `WEBDESK_DEPLOY_GRANT`. Names only: the ERP never holds a secret value (WSK-D29).
+      WEBDESK_DEPLOY_SECRET_NAMES: ${WEBDESK_DEPLOY_SECRET_NAMES:-}
     volumes:
       - platform-files:/data/files
       # M6-P3d — host dir the platform writes the probe-target file into (the image runs as root; the

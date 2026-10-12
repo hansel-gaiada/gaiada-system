@@ -58,12 +58,14 @@ describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools (+ WSK-59 cont
     }
   });
 
-  // WSK-59 re-pointed the first two routes at the real channel; the key route files a key.mint approval since 2026-10-11.
-  const NOW_REAL = ["webdesk.schema.apply", "webdesk.site.provision", "webdesk.key.mint"];
+  // WSK-59 re-pointed the first two routes at the real channel; the key route files a key.mint approval since 2026-10-11;
+  // the archive route files a site.archive approval since 2026-10-12.
+  const NOW_REAL = ["webdesk.schema.apply", "webdesk.site.provision", "webdesk.key.mint", "webdesk.site.archive"];
   const STILL_NOT_WIRED = WEBDESK_REGISTRY_TOOLS.filter((n) => !NOW_REAL.includes(n));
 
-  it("🔴 the seven tools whose routes are STILL 501 ALWAYS refuse with webdesk_control_plane_not_wired — the honest answer", async () => {
-    expect(STILL_NOT_WIRED).toHaveLength(7);
+  it("🔴 the six tools whose routes are STILL 501 ALWAYS refuse with webdesk_control_plane_not_wired — the honest answer", async () => {
+    expect(STILL_NOT_WIRED).toHaveLength(6);
+    expect(STILL_NOT_WIRED).not.toContain("webdesk.site.archive");
     for (const name of STILL_NOT_WIRED) {
       const verdict = await getExecutable(name)!.precondition({} as never, {});
       expect(verdict, name).toEqual({ ok: false, reason: "webdesk_control_plane_not_wired" });
@@ -93,6 +95,18 @@ describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools (+ WSK-59 cont
     expect(await mint.precondition({} as never, { ...ok, envId: undefined })).toEqual({ ok: false, reason: "env_id_invalid" });
     expect(await mint.precondition({} as never, { ...ok, scope: "admin" })).toEqual({ ok: false, reason: "scope_invalid" });
     expect(mint.lockKey(ok)).toBe(`webdesk:${site}`);
+  });
+
+  it("2026-10-12: webdesk.site.archive carries a REAL structural precondition (its route files a site.archive approval now); it stays registered", async () => {
+    const archive = getExecutable("webdesk.site.archive")!;
+    const site = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+    expect(archive).toBeDefined();
+    expect(WEBDESK_REGISTRY_TOOLS).toContain("webdesk.site.archive");
+    expect(await archive.precondition({} as never, { tenantSlug: "gaiada", siteId: site })).toEqual({ ok: true });
+    expect(await archive.precondition({} as never, { tenantSlug: "", siteId: site })).toEqual({ ok: false, reason: "tenant_slug_invalid" });
+    expect(await archive.precondition({} as never, { tenantSlug: "gaiada", siteId: "nope" })).toEqual({ ok: false, reason: "site_id_invalid" });
+    expect(await archive.precondition({} as never, {})).toEqual({ ok: false, reason: "tenant_slug_invalid" });
+    expect(archive.lockKey({ tenantSlug: "gaiada", siteId: site })).toBe(`webdesk:${site}`);
   });
 
   describe("WSK-59 — webdesk.content.unpublish / delete (the editor's MEDIUM tools)", () => {

@@ -37,6 +37,9 @@
 // M5-W3c (vocabulary 1.3.0) closed the same blind spot for `lint`: its key set is a snapshot dimension now
 // (`lintKeys`), so adding `lint.content` is rated MINOR, not PATCH. Any VALUE change of a tenant's `lint`
 // (placeholders or content settings) is still advisory-only: PATCH.
+//
+// M5-W8b (vocabulary 1.4.0): `ui.routePattern` needed no new dimension: the collection `ui` key set already is one, so the
+// new key is rated MINOR from the 1.3.0 snapshot; a VALUE change inside a tenant contract is a `ui` edit, so PATCH.
 import { MULTIPLE_CAPABLE_PRIMITIVES, PRIMITIVE_NAMES, FIELD_DEF_KEYS, FIELD_UI_KEYS, type FieldDef, type PrimitiveName } from './primitives'
 import { BLOCKS, BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, type BlockDef, type BlockType } from './blocks'
 import { COLLECTION_UI_KEYS, COMPOSITION_KEYS, LINT_KEYS, type CollectionUi, type ContentLintSettings, type PlaceholderRule } from './composition'

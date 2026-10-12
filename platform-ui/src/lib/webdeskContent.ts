@@ -171,10 +171,13 @@ function parseEnvironment(v: unknown, path: string): EnvironmentRef {
 }
 function parseSite(v: unknown, path: string): SiteRef {
   const o = obj(v, path);
-  return {
+  const site: SiteRef = {
     siteId: key(o, "siteId", str, path), name: key(o, "name", str, path), kind: key(o, "kind", str, path),
     environments: key(o, "environments", arr(parseEnvironment), path),
   };
+  // WebDesk 0019 (site.archive): additive and optional, so an older Zone B still parses.
+  const status = opt(o, "status", str, path); if (status !== undefined) site.status = status;
+  return site;
 }
 function parseTenant(v: unknown, path: string): TenantRef {
   const o = obj(v, path);
@@ -428,6 +431,9 @@ export function parseKeyRequest(v: unknown): KeyRequestFiled {
   if ("alreadyPending" in o && o.alreadyPending !== true) throw new WireDrift("key-request.alreadyPending", "true or absent", o.alreadyPending);
   return { approvalId, alreadyPending: o.alreadyPending === true };
 }
+
+/** `POST …/control/sites/:siteId/archive` -> 202 `{approvalId}` | `{approvalId, alreadyPending: true}`: the same wire shape as a key request. */
+export const parseArchiveRequest = parseKeyRequest;
 
 /** `POST …/items/:itemId/preview` -> 200 `{previewUrl, expiresAt, version}`. STRICT, because the answer is OPENED IN A NEW TAB: the URL must be
  *  https, point at the site's `/preview/` page, carry the token in the FRAGMENT (`#t=…`) and no query string. Anything else is drift and
@@ -907,6 +913,14 @@ export async function loadSiteContext(userId: string, company: string, tenantSlu
   const site = tenant?.sites.find((s) => s.siteId === siteId);
   if (!tenant || !site) return { kind: "not_found", slug: "site-not-found" };
   return { kind: "ok", data: { tenant, site, collections: collections.data } };
+}
+
+/** The display name of a site, for a site.archive approval's summary (the row's `tool_args` carry only ids). COSMETIC, like
+ *  `findKeyTarget`: a failed read yields `null` and the summary shows the ids instead of taking the approval page down. */
+export async function findSiteName(userId: string, company: string, tenantSlug: string, siteId: string): Promise<string | null> {
+  const sites = await listSites(userId, company);
+  if (sites.kind !== "ok") return null;
+  return sites.data.tenants.find((t) => t.slug === tenantSlug)?.sites.find((s) => s.siteId === siteId)?.name ?? null;
 }
 
 /** Names for a key.mint approval's environment and site, from the wall's own site read. COSMETIC, like `resolveAuthorNames`: the

@@ -53,7 +53,9 @@ export interface FakeItem {
   slug: string;
   headVersion: number;
   publishedVersion: number | null;
-  publishState: "draft" | "published" | "unpublished";
+  publishState: "draft" | "published" | "unpublished" | "scheduled";
+  /** M5-W5: the item's `publish_at` (item.list/item.get send it; the review board does not, as WebDesk's). */
+  publishAt?: string | null;
   deletedAt: string | null;
   /** WSK-49c: a version may carry `seo` and generic blocks (after the fields block); both default to empty, as before. */
   versions: Array<{ version: number; fields: unknown; contentHash: string; createdBy: string; createdAt: string; note: string | null; seo?: Record<string, unknown>; blocks?: unknown[] }>;
@@ -76,7 +78,7 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "site.archive", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 
 /** WSK-43b: one library asset as the fake holds it (the real row is `media_assets`, migration 0014). */
@@ -118,6 +120,8 @@ export class FakeZoneB {
   /** `env`: the site's two environment ids. Optional so a test can push a bare tenant; one is assigned (once,
    *  then stable) the first time the tenant is listed or a key is minted for it. */
   readonly tenants: Array<{ companyRef: string; slug: string; status: string; siteId: string; env?: { production: string; staging: string } }> = [];
+  /** site.archive: the site ids this fake has archived (tenant.list reports their `status`; a second archive is 409). Cleared by reset(). */
+  readonly archivedSites = new Set<string>();
   /** Every plaintext `key.mint` returned, in order (so a test can scan storage and logs for it). */
   readonly mintedKeys: string[] = [];
   /** Every preview token `content.previewToken` returned, in order (WSK-46: a test scans logs and the ledger for them). */
@@ -163,6 +167,7 @@ export class FakeZoneB {
     this.stagingDomain = "staging.gaiada.test";
     this.mintedUploadTokens.length = 0;
     this.mintKeys.clear();
+    this.archivedSites.clear();
     this.forms.clear();
     this.media.clear();
     this.items.clear();
@@ -229,7 +234,7 @@ export class FakeZoneB {
       headVersion: i.headVersion,
       publishedVersion: i.publishedVersion,
       publishState: i.publishState,
-      publishAt: null,
+      publishAt: i.publishAt ?? null,
       unpublishAt: null,
       deletedAt: i.deletedAt,
       updatedAt: new Date().toISOString(),
@@ -290,7 +295,7 @@ export class FakeZoneB {
         tenants: rows.map((t) => ({
           slug: t.slug, status: t.status, defaultLocale: "en", locales: ["en", "id"],
           sites: [{
-            siteId: t.siteId, name: "Main", kind: "astro",
+            siteId: t.siteId, name: "Main", kind: "astro", status: this.archivedSites.has(t.siteId) ? "archived" : "active",
             // `environments.domain` is nullable in WebDesk (a site with no hostname yet): one of each.
             environments: [
               { envId: this.envOf(t).production, name: "production", domain: null, status: "pending" },
@@ -331,9 +336,10 @@ export class FakeZoneB {
       case "item.list": {
         const q = req.query ?? {};
         const rows = [...this.items.values()].filter(
-          (i) => i.siteId === p.siteId && i.collectionKey === p.key && !i.deletedAt && (!q.locale || i.locale === q.locale) && (!q.q || i.slug.includes(q.q)),
+          (i) => i.siteId === p.siteId && i.collectionKey === p.key && !i.deletedAt && (!q.locale || i.locale === q.locale) && (!q.q || i.slug.includes(q.q)) && (!q.state || (q.state === "live" ? i.publishState === "published" && i.publishedVersion !== null : i.publishState === q.state)),
         );
-        return ok({ items: rows.map((i) => this.itemJson(i)), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
+        // M5-W5: `editorial` rides a row that has one, as WebDesk's item.list sends it.
+        return ok({ items: rows.map((i) => ({ ...this.itemJson(i), ...(i.editorial ? { editorial: i.editorial } : {}) })), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
       }
       case "item.get": {
         const i = this.items.get(p.itemId);
@@ -354,12 +360,17 @@ export class FakeZoneB {
       }
       case "editorial.board": {
         // M5-W2d: every item of the site that carries an editorial member, ALL collections (the BFF filters by Cerbos).
-        const rows = [...this.items.values()].filter((i) => i.siteId === p.siteId && i.editorial);
+        const all = [...this.items.values()].filter((i) => i.siteId === p.siteId && i.editorial);
+        // M5-W5: keyset paging as WebDesk's board does (here by position; the cursor is opaque to the BFF). `limit` defaults to everything.
+        const size = req.query?.limit ? Number(req.query.limit) : all.length;
+        const at = req.query?.cursor ? Number(req.query.cursor) : 0;
+        const rows = all.slice(at, at + size);
+        const more = at + size < all.length;
         return ok({
           items: rows.map((i) => ({ itemId: i.itemId, collectionKey: i.collectionKey, locale: i.locale, slug: i.slug, title: null, headVersion: i.headVersion, publishState: i.publishState, editorial: i.editorial })),
-          counts: { draft: rows.length, in_review: 0, changes_requested: 0, approved: 0 },
+          counts: { draft: all.length, in_review: 0, changes_requested: 0, approved: 0 },
           policies: [...new Set(rows.map((i) => i.collectionKey))].map((collectionKey) => ({ collectionKey, reviewRequired: true, seoSignoffRequired: false, updatedBy: null, updatedAt: new Date().toISOString() })),
-          page: { cursor: null, hasMore: false, limit: 50 },
+          page: { cursor: more ? String(at + size) : null, hasMore: more, limit: size },
         });
       }
       case "editorial.history": {
@@ -541,6 +552,12 @@ export class FakeZoneB {
         const key = `wdsk_${randomBytes(24).toString("base64url")}`;
         this.mintedKeys.push(key);
         return ok({ id: randomUUID(), key, scope: b.scope, envId: b.envId, tenantId: randomUUID(), createdAt: now, replayed: false }, 201);
+      }
+      case "site.archive": {
+        // WebDesk lifecycle.service#archiveSite: terminal; an already-archived site is a 409 (nothing is claimed).
+        if (this.archivedSites.has(String(p.siteId))) return problem(409, "conflict", { detail: "site is already archived" });
+        this.archivedSites.add(String(p.siteId));
+        return ok({ site: { id: p.siteId, name: "Main", status: "archived" }, replayed: false }, 201);
       }
       case "content.publish": {
         // WSK-66's in-band publish (WS4 + editorial `apr`); the fake only needs to flip the state.

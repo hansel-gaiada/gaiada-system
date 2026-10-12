@@ -285,7 +285,7 @@ check('ui.clientEditable is accepted on a collection and on a field', validateCo
 check('a non-boolean collection ui.clientEditable is refused', validateCollectionComposition('c', { ui: { label: 'L', clientEditable: 'yes' } }).issues.some((i) => i.path === 'c.ui.clientEditable'))
 check('a non-boolean field ui.clientEditable is refused', validateCollectionComposition('c', { fields: [{ name: 'a', primitive: 'text', ui: { clientEditable: 1 } }] }).issues.some((i) => i.path === 'c.fields[0].ui.clientEditable'))
 check('FIELD_UI_KEYS carries clientEditable', FIELD_UI_KEYS.includes('clientEditable'))
-check('a composition authored against 1.1.0 is still accepted (a MINOR is a superset)', isVocabularyVersionSupported('1.1.0') === true && isVocabularyVersionSupported('1.2.0') === true && isVocabularyVersionSupported('1.4.0') === false)
+check('a composition authored against 1.1.0 is still accepted (a MINOR is a superset)', isVocabularyVersionSupported('1.1.0') === true && isVocabularyVersionSupported('1.2.0') === true && isVocabularyVersionSupported('1.5.0') === false)
 
 // =================================================================================================
 // The classifier: COMPUTED, not asserted
@@ -297,7 +297,7 @@ check('the fixture is the 1.1.0 snapshot', v110.vocabularyVersion === '1.1.0', v
 // M5-W3c moved the vocabulary on to 1.3.0, so the 1.2.0 release is rated against ITS OWN committed capture.
 const v120 = load(path.join(HERE, 'fixtures', 'vocabulary-1.2.0.snapshot.json'))
 check('the 1.2.0 fixture is the 1.2.0 snapshot', v120.vocabularyVersion === '1.2.0', v120.vocabularyVersion)
-check('VOCABULARY_VERSION is at least 1.2.0 (now 1.3.0, see w3c-lint-content.test.mjs)', VOCABULARY_VERSION === '1.3.0', VOCABULARY_VERSION)
+check('VOCABULARY_VERSION is at least 1.2.0 (now 1.4.0, see w8b-route-pattern.test.mjs)', VOCABULARY_VERSION === '1.4.0', VOCABULARY_VERSION)
 const rated = classifyVocabularyChange(v110, v120)
 console.log('  >>> classifyVocabularyChange(1.1.0 fixture, current):')
 console.log(JSON.stringify(rated, null, 2).replace(/^/gm, '      '))

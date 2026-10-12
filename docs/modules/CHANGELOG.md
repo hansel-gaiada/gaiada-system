@@ -11,6 +11,132 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.95.0` - M5-W8: the writer dashboard read (2026-10-12) - DEV-VERIFIED
+
+- **The read:** `GET …/content/sites/:tenantSlug/:siteId/writers/dashboard?period&collection&locale&mine&cursor&limit`. For each live item the caller may read, it returns:
+  - the page path, from W8b's `ui.routePattern` and `pagePathFor`;
+  - Umami views and average time;
+  - Search Console clicks, impressions and the top 3 queries;
+  - trends against the previous period;
+  - a COUNT of web leads whose landing or form page is that path (the SQL selects no identity: no id, name, email or phone);
+  - the open V4 decay finding.
+- **Who sees what:** writers (and translators and SEO reviewers) see their own items; editors (`assign` on the pair) and staff see everything in scope.
+- **Authorization:** W1c's gate, then Cerbos per pair, at most 50 in flight.
+- **Missing data:** any source failure is null with a reason, never 0. Only a WebDesk or Cerbos failure is a 503. Views under 5 show as "<5".
+- MCP read `webdesk.writers.dashboard`.
+- **Until gaiada.com's collections set `ui.routePattern`, each item says "no route pattern".**
+- **Verified** on GitHub Actions 38259107918: the DB/Cerbos/HTTP suite 12/12 (incl. a lead seeded with identity fields absent from the response, and 52 pairs across pages), unit 59/59.
+
+### platform-ui `0.100.0` - M5-W8: the writer dashboard (2026-10-12) - DEV-VERIFIED
+
+- **`writers/dashboard`:** cards per article with views, time, Search Console figures, lead count, trend arrows with words, and a decay badge.
+- "Unavailable" is said in words, never shown as 0.
+- Filters: period, collection, language, and my articles / all I can see.
+- A strict parser treats a wrong shape as contract drift.
+- **Verified** on GitHub Actions 38259107918: the WebDesk Playwright suite against the built app passed 132, incl. 6 dashboard specs with axe.
+
+### webdesk `0.23.0` - `site.archive` is real: WS4-gated, irreversible, archived sites stop serving (2026-10-12) - DEV-VERIFIED
+
+Owner ruling WSK-D78 (2026-10-12): archiving a site takes an approval. It mirrors `tenant.archive` at site scope.
+
+- **Migration 0019_site_status**: `sites.status text NOT NULL DEFAULT 'active' CHECK (active|archived)`, additive. **Runs before the new api** (the code reads `sites.status`); the release's automatic deploy-webdesk applies it.
+- `POST /control/v1/tenants/:slug/sites/:siteId/archive` runs in the command envelope (WS4 claim, audit first, idempotent replay): `201 {site, replayed}`; already archived 409; unknown/other tenant 404. Terminal: nothing moves a site back to active.
+- An archived site's keys stop resolving (`/v1` 401, as for a revoked key: delivery, media, forms, consent), its preview tokens 404, its control-plane routes refuse `409 site-archived` (content, preview, media, editorial, forms, schema.apply, environment provision, promotion), the content tick skips its schedules, and the tenant listing shows `sites[].status`.
+- Tests: `site-archive.spec.ts` (refusals, archive, replay, 409/404/400, every effect, a sibling site untouched) and the 0019 migration test, both in CI.
+
+### platform-nest `0.94.1` - `site.archive` is filed as one WS4 approval (WSK-66 path) (2026-10-12) - DEV-VERIFIED
+
+- `POST /api/:t/modules/webdev/control/sites/:siteId/archive` `{tenantSlug}` answers `202 {approvalId[, alreadyPending]}` (was a 501 stub): `promote` on the site, the cross-company wall, one open request per site. decide() sends one WS4-asserted `site.archive` to Zone B; the requester can never decide it (403, row stays pending). No editorial assertion, no rebuild.
+- The MCP tool `webdesk.site.archive` keeps its D14 registry entry; its precondition is now structural and its input gained `tenantSlug`. No Cerbos policy change, no ERP migration.
+- Ship WebDesk first: an approval decided against an older WebDesk fails `webdesk_refused`.
+- Tests: `webdesk-site-archive.test.ts` (filing, de-dup, wall, tiers, self-approval refused with no Zone B call, a second admin executes once, ambiguous failure never resent). GitHub Actions run 38251086608 green.
+
+### platform-ui `0.99.1` - Archive site, with approval (2026-10-12) - DEV-VERIFIED
+
+- The site page gains "Archive this site" for users who may `promote`: a confirm that names the site and what archiving does, "This files a request. Nothing is archived until someone else approves it."; then "Archive requested — waiting for approval." An archived site says so and shows no control.
+- `/approvals/[id]` renders a "Site archive request" summary (site, the irreversible warning, the effects).
+
+### platform-nest `0.94.0` - the deploy gate is the org secret grant: only a registered, locked repo can read deploy secrets (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4g (design `docs/plans/2026-10-13-webdesk-m6-p4g-deploy-grant.md`). Built by the M6 session.
+
+- **The grant.** A provisioned site's repo is added to a deploy secret's "selected repositories" only when all of these hold, re-checked on every grant:
+  - completion is `complete`;
+  - a live `provisioned` `webdev_sites` row names the repo;
+  - the P4b2 scaffold is `committed` and the repo is the one GH-12 created;
+  - the default branch's head carries a `CONTRACT.lock` that names the pinned snapshot, read through the App's contents API.
+- **Two kinds of secret.**
+  - The fixed list `WEBDESK_DEPLOY_SECRET_NAMES` (default `WEBDESK_DEPLOY_GRANT`, the marker the templates' "Require deploy grant" step checks).
+  - One per-site secret, `siteDeploySecretName()` = `WEBDESK_DEPLOY_<SLUG>_<ENV>_<sha256(site id)[:8]>`, granted to that site's repo only. Secret names are org-wide while slugs are unique only per tenant, hence the hash.
+  - A secret that does not exist yet answers `pending` (named, not an error).
+  - A secret whose visibility is not "selected" is refused (`deploy_grant_secret_not_selected`).
+- **The ERP never holds a value (D29).**
+  - The only writes are `PUT` / `DELETE /orgs/{org}/actions/secrets/{name}/repositories/{id}`, plus a metadata `GET`.
+  - Each write is ledgered as `github.secret_write`, with the secret name and the GH-12 approval.
+  - Without the App's `organization_secrets` permission (O-3, not yet in effect live) a grant records `github_permission_missing: organization_secrets`, never a 500.
+- **State:** `NULL → pending → granted → revoked`, claimed before any GitHub write and serialized on the provisioning lock. A partial grant is finished by the next run, and the automatic path never undoes an operator's revoke.
+- **Trigger and routes.**
+  - The grant runs inline after P4b2's scaffold commit is recorded, as an additive `deployGrant` in the commit answer.
+  - `POST /api/:t/modules/webdev/provisioned-sites/:id/deploy-grant` (re-check + grant) and `DELETE …/deploy-grant` (revoke, body `{reason}` of 8–500 characters, human only).
+  - Gates: `webdev_provisioned_site · provision`, then `github_repo · push` on the org tenant. No Cerbos change, no hub tool.
+  - `GET provisioned-sites/:id` adds `deployGrant`.
+- **Migration `202610130100_webdev_deploy_grant.sql`**, additive: 14 `deploy_grant_*` columns on `webdev_provisioned_sites` plus a CHECK.
+- **Not built (follow-ups):** a scheduled re-check that revokes a repo which lost its lock, healing pending grants from the hourly reconcile, and the D14-gated exception path.
+- **Owner, in GitHub:**
+  1. Give the `gaiada-erp` App Organization permissions → Secrets: Read and write, and accept it on the installation.
+  2. Create the org secret `WEBDESK_DEPLOY_GRANT` (any value, "Selected repositories", none selected).
+  3. Later, each per-site secret by hand, under the exact name `deployGrant.siteSecretName` shows.
+- **Also fixed: a CHECK passes on NULL.** The live `wps_scaffold_links` (202610122130, M6-P4b2) read `scaffold_state IS NULL OR completion_state = 'complete'`, which accepts a scaffold state on a site whose completion is NULL. **Migration `202610130110_webdev_scaffold_links_null_safe.sql`** re-declares only that constraint with `IS NOT DISTINCT FROM` (no live row has a scaffold state). The new `wps_deploy_grant_links` had the same shape and was fixed before shipping. Both migrations are now listed in the webdev module. (0.91.0 left unused: the registry was already at 0.92.0.)
+- Verified on the Linux gate (sumopod): `m6p4g` found the NULL-CHECK defect (1 failure); `m6p4g3` on the fixed tree, 642 files / 9665 passed / 0 failed, incl. `deploy-grant.db.test.ts`, `deploy-grant-http.test.ts` (real Cerbos), `scaffold-commit.db.test.ts` with the new NULL-completion case.
+
+### infra `0.13.5` - the platform receives WEBDESK_DEPLOY_SECRET_NAMES (2026-10-12) - PROTOTYPED
+
+- `docker-compose.vps.yml` passes `WEBDESK_DEPLOY_SECRET_NAMES` to the platform (empty = the default marker). Names only, never values.
+
+### webdesk `0.22.0` - M5-W8b: a collection may declare its public route pattern (vocabulary 1.4.0) (2026-10-12) - DEV-VERIFIED
+
+- **The key:** an optional composition `ui.routePattern`, for example `/blog/{slug}/` or `/{locale}/insights/{slug}/`.
+- **The grammar:**
+  - a leading `/`, at most 200 characters, and a trailing slash allowed;
+  - each segment is a literal `[a-z0-9-]+`, exactly `{slug}` (required, once) or exactly `{locale}` (optional, at most once);
+  - no query, fragment, `..`, empty segment, uppercase or embedded token.
+- Anything else is refused at `schema.apply`.
+- `pagePathFor(pattern, {slug, locale, defaultLocale})` is exported from the vocabulary and its platform-nest copy. The default locale drops its `/{locale}` segment.
+- **Vocabulary 1.4.0 (MINOR):** the classifier rates 1.3.0 → 1.4.0 as MINOR with exactly that reason, and removing the key is MAJOR. Re-vendored into the api, blocks and platform-nest. The schema-draft prompt now mentions the key.
+- **Why:** the M5-W8 writer dashboard maps an item to its page path through this key. Until gaiada.com's collections set it (a schema apply), each article says "no route pattern" instead of showing numbers.
+- **Verified** on GitHub Actions 38250218990: the new `w8b-route-pattern` suite 48/48 plus every vocabulary suite.
+
+### platform-nest `0.92.0` - M5-W5: the writers' room calendar read (2026-10-12) - DEV-VERIFIED
+
+- **The read:** `GET …/content/sites/:tenantSlug/:siteId/editorial/calendar?from&to&collection&locale&authorSub`. It joins four sources:
+  - WebDesk's board (every page);
+  - scheduled items (the only source of `publish_at`);
+  - the site's pending WS4 publish/schedule requests;
+  - the W4 briefs.
+- **Authorization,** like W2d's board: W1c's `authorizeSite`, the wall, then Cerbos per (collection, locale), one resource per ask with at most 8 in flight, so never near the 50 limit. A scoped grant gets `countsWithheld`.
+- **Joins are limited to readable rows.** A request shows `requestedByMe`, never the filer. An unreadable brief shows `briefHidden`.
+- **Failures:** any failed part is a 503 `{error:"calendar_unavailable", reason:"<part>_unreadable"}`, never a partial list presented as complete. `truncated` is set past the caps.
+- MCP read `webdesk.editorial.calendar`.
+- **Verified** on GitHub Actions 38246080605: the DB/Cerbos/HTTP suite 7/7 and unit 33/33. The run's one red job was a 504 downloading promtool, green on re-run.
+
+### platform-ui `0.99.0` - M5-W5: the editorial calendar and the workflow board (2026-10-12) - DEV-VERIFIED
+
+- **`writers/calendar`:** month and week views. Items sit on one UTC day by publish time, a requested publish time, the planned date or the due date, with a legend that says which. Undated drafts go to an "Unscheduled" list.
+- **The board as a workflow:** columns by review state; cards show author, due date, the linked brief and a pending-request badge.
+- A read-only brief page.
+- Filters: collection, language, "assigned to me".
+- Every error, empty and withheld state is in words.
+- **Verified** on GitHub Actions 38246080605: the WebDesk Playwright suite against the built app passed 126, incl. 12 calendar specs with axe.
+- Not shown yet: the published version and pending swaps, which WebDesk's board doesn't send.
+
+### platform-ui `0.97.1` - the assistant FAB always opens the drawer, never the full page (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-up (the last flaky e2e from the full-suite sweep).
+
+- The FAB links to `/assistant`, which the `@drawer` intercepting route turns into a drawer. With the default prefetch the router could hold the FULL `/assistant` payload: on a hard-loaded `/tasks/t-4` the click opened the full page (1 in 6) or Escape's `back()` landed there (1 in 6), leaving no FAB to return focus to. The FAB now has `prefetch={false}`, so the click fetches the intercepted variant.
+- `assistant-drawer.spec.ts` clicks the FAB only once React has hydrated it (the `hydrated()` helper from `portal-website.spec.ts`).
+- Verified on sumopod (full Playwright, CI mode): the drawer spec repeated 8x, 33 passed, 0 failed (before: the Escape test failed 2 of 5). GitHub Actions run 38243752143 green (one unrelated wa-chat-bot timing flake re-run).
+
 ### platform-ui `0.97.0` - M5-W6 UI: the AI assist drawer in the item editor (2026-10-12) - DEV-VERIFIED
 
 - **Where it shows:** an "Assist" card in the editor's side rail, only when the item read's `allowed.update` is true. It is hidden when `allowed` is absent, in client mode, for a deleted item and in create mode.

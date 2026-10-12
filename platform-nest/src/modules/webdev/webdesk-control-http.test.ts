@@ -154,7 +154,7 @@ describe.skipIf(!TEST_URL)("WSK-31 · WebdeskControlController (HTTP, isolated a
     });
   });
 
-  describe("🔴 the seven HIGH write routes (Cerbos action: promote — §07 always-WS4 commands)", () => {
+  describe("🔴 the HIGH write routes (Cerbos action: promote — §07 always-WS4 commands)", () => {
     // 2026-10-11: `sites/:siteId/keys` FILES a key.mint approval now (webdesk-key-mint.test.ts covers it end to
     // end); here it keeps only the gate-first pairing: member 403, admin past the gate into body validation.
     it("POST sites/s1/keys: member DENIED; admin passes the gate and an incomplete body is a typed 400 (not 501, not 500)", async () => {
@@ -169,13 +169,25 @@ describe.skipIf(!TEST_URL)("WSK-31 · WebdeskControlController (HTTP, isolated a
       expect(allowed.statusCode).toBe(400);
       expect(allowed.json()).toMatchObject({ reason: "invalid_request" });
     });
+    // 2026-10-12: `sites/:siteId/archive` FILES a site.archive approval now (webdesk-site-archive.test.ts covers it end
+    // to end); here it keeps only the gate-first pairing: member 403, admin past the gate into body validation.
+    it("POST sites/s1/archive: member DENIED; admin passes the gate and a body without tenantSlug is a typed 400 (not 501, not 500)", async () => {
+      const denied = await app.inject({
+        method: "POST", url: `/api/${tenant}/modules/webdev/control/sites/s1/archive`, headers: asUser(member), payload: {},
+      });
+      expect(denied.statusCode).toBe(403);
+      const allowed = await app.inject({
+        method: "POST", url: `/api/${tenant}/modules/webdev/control/sites/s1/archive`, headers: asUser(admin), payload: {},
+      });
+      expect(allowed.statusCode).toBe(400);
+      expect(allowed.json()).toMatchObject({ reason: "invalid_request" });
+    });
     for (const [path, body] of [
       ["sites/s1/promote", {}],
       ["sites/s1/rollback", {}],
       ["sites/s1/domain", { domain: "example.com" }],
       ["keys/k1/rotate", {}],
       ["keys/k1/revoke", {}],
-      ["sites/s1/archive", {}],
     ] as const) {
       it(`POST ${path}: member DENIED, admin 501 (the stub) — the always-WS4 gate itself lives at mcp-hub, not here`, async () => {
         const denied = await app.inject({

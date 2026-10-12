@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { addAsset, handleMediaBff, mediaCfg, mediaState, seedMedia } from "./media.mjs";
 import { decorateItemDetail, decorateItemList, handleEditorial, seedReview } from "./editorial.mjs";
+import { handleDashboard } from "./dashboard.mjs";
 import { handleAssist, noteWrite } from "./assist.mjs";
 
 export { addAsset, handlePublicMedia, mediaState } from "./media.mjs";
@@ -346,6 +347,9 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
   // M5-W2e: the writers' room routes (board, grants, an item's review record and its review commands).
   const editorial = handleEditorial(S, { method, rest, query, body, userId, role });
   if (editorial) return editorial;
+  // M5-W8: the writer dashboard (dashboard.mjs).
+  const dashboard = handleDashboard(S, { method, rest, query, role });
+  if (dashboard) return dashboard;
 
   // M5-W6: the AI assist route (suggestions only). Every OTHER write is counted, so a spec can prove that Apply saved nothing.
   const assist = handleAssist(S, { method, rest, body });

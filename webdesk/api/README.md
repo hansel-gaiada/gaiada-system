@@ -601,7 +601,7 @@ stub bindings — same rule, same reasoning, as WSK-05's `api-keys.controller.ts
 | `tenant.provision` | `POST /control/v1/tenants` | medium | `webdesk:operate` | no | no |
 | `tenant.archive` | `POST /control/v1/tenants/:slug/archive` | **high** | `webdesk:promote` | **yes** | no |
 | `site.provision` | `POST /control/v1/tenants/:slug/sites` | medium | `webdesk:operate` | no | no |
-| `site.archive` | `POST /control/v1/tenants/:slug/sites/:siteId/archive` | **high** | `webdesk:promote` | **yes** | no — always 501, see below |
+| `site.archive` | `POST /control/v1/tenants/:slug/sites/:siteId/archive` | **high** | `webdesk:promote` | **yes** | no — see "site.archive" below |
 | `environment.provision` | `POST /control/v1/tenants/:slug/sites/:siteId/environments` | medium | `webdesk:operate` | no | no |
 | `environment.archive` | `POST /control/v1/tenants/:slug/environments/:envId/archive` | **high** | `webdesk:promote` | **yes** | no |
 | `schema.propose` | `POST .../sites/:siteId/collections/:key/schema/propose` | read | `webdesk:read` | no | no — draft only, never persisted |
@@ -731,13 +731,35 @@ context `ApiKeysService` has no parameter for — not a duplicate to fix.
   Cerbos-backed implementation to the same `POLICY_DECISION_POINT` token; no controller or guard
   changes when that happens.
 
+### site.archive (built 2026-10-12, migration 0019)
+
+`POST /control/v1/tenants/:slug/sites/:siteId/archive`, header `Idempotency-Key` required, HIGH, scope
+`webdesk:promote`, WS4 assertion over `{tenantSlug, siteId}` required. It was an always-501 stub while `sites` had no
+`status`; the owner ruled on 2026-10-12 that archiving a site takes an approval, and 0019 added
+`sites.status` (`active | archived`). It runs in the shared command envelope exactly like `tenant.archive`
+(audit row first, carrying the approval; one terminal `UPDATE ... SET status = 'archived' WHERE status = 'active'`;
+durable replay record). Answers `201 {site:{id,name,status:"archived"}, replayed}`. A retry of the same key after
+the archive replays the stored body; a FRESH key on an already-archived site is `409` (the audit row rolls back and
+the approval stays unclaimed); another tenant's or an unknown site is `404`; a malformed id is `400`.
+
+**Irreversible, like `tenant.archive`**: nothing moves a site back to `active`. What an archived site stops doing
+(the site-scope mirror of an archived tenant; the status is read where the tenant's status already was):
+
+| Surface | Archived site |
+|---|---|
+| `/v1` public reads, and every other API-key-guarded route (media, forms, consent) | its keys stop resolving (`ApiKeysService.resolve` returns null): `401 invalid-credentials`, the same body as a revoked key |
+| `/v1/t/:slug/preview/:token` | the token's site is archived: the same uniform `404 not-found` |
+| control-plane writes, publishes, schedules, media, editorial and form-definition routes | `409 site-archived` (RFC 9457 `.../errors/site-archived`), from `resolveTenantSite` |
+| control-plane reads of the site (items, collections, media, editorial) | the same `409 site-archived` |
+| `schema.apply`, `environment.provision`, `content.promote` on the site | `409` |
+| content tick (scheduled publish, swaps, takedowns) | the archived site's items are skipped: a pending schedule stays pending and never fires |
+| consent `Origin` resolution | an origin whose site is archived no longer resolves (`403`) |
+| `GET /control/v1/tenants` | the site is still listed, with `status: "archived"` (new additive `sites[].status`) |
+
+Stored content, versions and audit rows are kept (archiving is not deletion). Other sites of the tenant are untouched.
+
 ### What could not be built as specified
 
-- **`site.archive` — `sites` has no `status` column.** Every other lifecycle table
-  (`tenants`, `environments`) has one; `sites` was never given one in `0001_platform_core.sql`.
-  The command runs its full auth/idempotency/audit pipeline, then refuses with a documented
-  RFC-9457-shaped `501`. Needs a senior-db-approved migration adding `sites.status` — not
-  improvised here per the ticket's own instruction.
 - **`contract.read` — WSK-15 (codegen pipeline) does not exist.** Per the ticket brief ("serve
   the shape and return a documented not-yet-available error... do not invent artifacts"), this
   authenticates/authorizes/audits like a real command, then returns a `501` whose `detail` field
@@ -2586,3 +2608,19 @@ Not settings, on purpose: a "minimum sources" count and an "AEO warn level" do n
 paragraph quotes a percentage and the body cites nothing; the AEO score is shown, never thresholded), so there is no constant to expose.
 Tests: `test/content-lint-site-settings.spec.ts` (no database), `webdesk/delivery/test/w3c-lint-content.test.mjs` (vocabulary suite), and
 the DB-backed extension in `test/content-reads.spec.ts` ("per-site lint.content settings", needs the Linux gate).
+
+## Public page path per collection (M5-W8b, PROTOTYPED) — composition `ui.routePattern`, vocabulary 1.4.0
+
+A collection's composition may declare where its items are served on the public site: `ui.routePattern`, for example
+`/blog/{slug}/` or `/{locale}/insights/{slug}/`. The writers dashboard (M5-W8) maps an item to its page with it to look up analytics and
+Search Console figures. **Vocabulary 1.4.0 is a MINOR** (an optional key in the closed `ui` key set; the classifier computes it from
+`webdesk/delivery/test/fixtures/vocabulary-1.3.0.snapshot.json`; a value edit inside a tenant contract is PATCH). No migration, no stored value changes.
+
+- **Grammar** (refused at `schema.apply`, never ignored): starts with `/`; at most 200 characters; every segment is a literal of
+  `[a-z0-9-]`, or exactly `{slug}` (required, once) or `{locale}` (optional, once); a trailing slash is allowed; no query, fragment, `..`,
+  empty segment, uppercase, dot or in-segment token.
+- **`pagePathFor(routePattern, { slug, locale, defaultLocale })`** (exported from the vocabulary, and from the copy vendored into
+  platform-nest) fills it in and returns the path, or `null` for an invalid pattern or a slug/locale that cannot be a URL segment. For the
+  tenant's DEFAULT language the `/{locale}` segment is left out (the site serves its default language at the root); a pattern without
+  `{locale}` gives every language the same address.
+- Tests: `webdesk/delivery/test/w8b-route-pattern.test.mjs` (`cd webdesk/api && node --import tsx ../delivery/test/w8b-route-pattern.test.mjs`).

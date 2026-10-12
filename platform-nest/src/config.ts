@@ -675,6 +675,11 @@ const configBase = {
     fullstack: process.env.ERP_REPO_TEMPLATE_FULLSTACK ?? "",
     wp: process.env.ERP_REPO_TEMPLATE_WP ?? "",
   },
+  // M6-P4g (docs/plans/2026-10-13-webdesk-m6-p4g-deploy-grant.md) — the org Actions secrets a registered, locked repo is
+  // granted READ access to (comma-separated NAMES; the ERP never holds a value, WSK-D29). Empty means the default,
+  // `WEBDESK_DEPLOY_GRANT` (the marker the templates' "Require deploy grant" step checks). Each secret must exist in the
+  // org with visibility "selected repositories"; parsed and validated by `modules/webdev/deploy-grant.ts`.
+  webdeskDeploySecretNames: process.env.WEBDESK_DEPLOY_SECRET_NAMES ?? "",
   // WSK-19 — the rail's Zone A end (docs/blueprints/webdesk-design.md §06). The control-channel
   // call `GET /control/v1/tenants/:slug/contract`, per the design's §03 A→B channel.
   //

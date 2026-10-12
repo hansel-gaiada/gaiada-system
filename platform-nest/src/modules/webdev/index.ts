@@ -31,6 +31,7 @@
 //    calling the hub tool (PRV-03), not an in-process handler — that indirection is what puts the WS4
 //    approval between the event and the write.
 import type { McpToolDef, ModuleContract } from "../contract";
+import { WEBDESK_WRITERS_DASHBOARD_TOOLS } from "./webdesk-writers-dashboard-mcp-tools";
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // M5-W2d — the writers' room review flow's MCP tools (docs/plans/2026-10-11-m5-writers-room-design.md §4.3, §8). Same BFF routes
@@ -161,6 +162,19 @@ export const WEBDESK_EDITORIAL_REVIEW_TOOLS: McpToolDef[] = [
       + "A caller with a scoped writers' room grant sees only the collections and locales its grant reaches.",
     minAssurance: "low", method: "GET",
     pathTemplate: `${CONTENT_BASE}/editorial/board`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_SITE_PROPS }, required: ["tenantId", "tenantSlug", "siteId"] },
+  },
+  {
+    name: "webdesk.editorial.calendar",
+    description:
+      "M5-W5. The editorial calendar and workflow board in one read: every item in the review flow plus every scheduled item, each with its review state, author, "
+      + "due and planned dates, `publish_at`, the pending publish/schedule requests on it (requested time, whether the caller filed it; never who) and its brief (title and "
+      + "assignee, only if the caller may read the brief), and one `placement` (publish_at, then the earliest requested publish time, then the planned date, then the due date). "
+      + "Rows are filtered by the caller's Cerbos read per (collection, locale); a scoped grant gets `countsWithheld: true` and no counts. Any part that cannot be read is a 503 "
+      + "naming it (`board`, `scheduled`, `briefs`, `requests`, `authorization`), never a shorter list; `truncated: true` means a cap cut a read. The hub drops a GET's query, so this "
+      + "returns every row with no date window (the UI passes `from`/`to` as UTC days).",
+    minAssurance: "low", method: "GET",
+    pathTemplate: `${CONTENT_BASE}/editorial/calendar`,
     inputSchema: { type: "object", properties: { ...EDITORIAL_SITE_PROPS }, required: ["tenantId", "tenantSlug", "siteId"] },
   },
   {
@@ -315,6 +329,10 @@ export const webdevModule: ModuleContract = {
     "202610120425_webdev_provisioned_sites_completion.sql",
     // M6-P4b2 (additive): the scaffold commit's state machine columns (first fill of the provisioned repo).
     "202610122130_webdev_scaffold_commit.sql",
+    // M6-P4g (additive): the deploy grant's state machine columns (org deploy-secret access for a registered, locked repo).
+    "202610130100_webdev_deploy_grant.sql",
+    // M6-P4g follow-up: wps_scaffold_links made NULL-safe (a scaffold state needs a completion that IS 'complete').
+    "202610130110_webdev_scaffold_links_null_safe.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
@@ -848,7 +866,11 @@ export const webdevModule: ModuleContract = {
     },
     {
       name: "webdesk.site.archive",
-      description: "Archive a WebDesk site. HIGH write — ALWAYS WS4, every principal class (§07). STUB: 501 webdesk_control_plane_not_wired.",
+      description:
+        "Request archiving a WebDesk site: files ONE site.archive approval (HIGH, WS4) and returns {approvalId} (a pending request for the same "
+        + "site is returned, with alreadyPending:true, instead of a second one). Nothing is archived until a DIFFERENT authorised user approves it. "
+        + "IRREVERSIBLE: an archived site serves no content and accepts no writes or publishes, and WebDesk has no un-archive. "
+        + "HIGH write — ALWAYS WS4, every principal class (§07).",
       minAssurance: "low",
       write: true,
       impact: "high",
@@ -856,8 +878,8 @@ export const webdevModule: ModuleContract = {
       pathTemplate: "/api/:tenantId/modules/webdev/control/sites/:siteId/archive",
       inputSchema: {
         type: "object",
-        properties: { tenantId: { type: "string" }, siteId: { type: "string" } },
-        required: ["tenantId", "siteId"],
+        properties: { tenantId: { type: "string" }, siteId: { type: "string" }, tenantSlug: { type: "string" } },
+        required: ["tenantId", "siteId", "tenantSlug"],
       },
     },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -1408,6 +1430,7 @@ export const webdevModule: ModuleContract = {
     },
     ...WEBDESK_EDITORIAL_REVIEW_TOOLS,
     ...WEBDESK_BRIEF_TOOLS,
+    ...WEBDESK_WRITERS_DASHBOARD_TOOLS,
   ],
   rollupProviders: [],
   uiManifest: [

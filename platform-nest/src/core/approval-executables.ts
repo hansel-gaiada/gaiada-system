@@ -872,7 +872,7 @@ export function registerWebdeskExecutableApprovals(): void {
       toolName,
       lockKey: (args) => webdeskLockKey(args, toolName),
       // WSK-59: the commands whose routes are now REAL carry a real (structural) precondition (schema.apply,
-      // site.provision; key.mint since 2026-10-11); the other seven stay honestly not-wired.
+      // site.provision; key.mint since 2026-10-11; site.archive since 2026-10-12); the other six stay honestly not-wired.
       precondition: WEBDESK_STRUCTURAL_PRECONDITIONS[toolName] ?? webdeskNotWiredPrecondition,
     });
   }
@@ -967,10 +967,22 @@ async function webdeskKeyMintPrecondition(_client: PoolClient, a: Record<string,
   return { ok: true };
 }
 
+/** 2026-10-12 (owner ruling: archiving a site takes an approval): `POST control/sites/:siteId/archive` stopped being a
+ *  501 stub. What it does on a re-drive is FILE a site.archive approval as the original requester (it never archives;
+ *  WSK-66 sends the archive at decide(), as a DIFFERENT user), exactly like key.mint above. The tool stays registered
+ *  (and stays in resource_mcp_tool.yaml's executable list: the D14 pairing is unchanged); only its precondition went
+ *  from always-refusing to structural. The wall, the active-site check and the de-dup run in the route. */
+async function webdeskSiteArchivePrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  if (!nonEmptyString(a.tenantSlug)) return { ok: false, reason: "tenant_slug_invalid" };
+  if (typeof a.siteId !== "string" || !UUID_RE_EXEC.test(a.siteId)) return { ok: false, reason: "site_id_invalid" };
+  return { ok: true };
+}
+
 const WEBDESK_STRUCTURAL_PRECONDITIONS: Record<string, (client: PoolClient, a: Record<string, unknown>) => Promise<PreconditionVerdict>> = {
   "webdesk.schema.apply": webdeskSchemaApplyPrecondition,
   "webdesk.site.provision": webdeskSiteProvisionPrecondition,
   "webdesk.key.mint": webdeskKeyMintPrecondition,
+  "webdesk.site.archive": webdeskSiteArchivePrecondition,
 };
 
 /** The two MEDIUM content tools that can suspend. Mirrored in `resource_mcp_tool.yaml`'s executable list. */

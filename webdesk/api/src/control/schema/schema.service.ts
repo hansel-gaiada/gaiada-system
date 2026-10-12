@@ -16,7 +16,7 @@
 //
 // M6-P4r-b: a successful apply queues the tenant's contract codegen after the command commits (the
 // envelope's `after` hook, via ContractCodegenTrigger: fail-soft, coalescing, skipped on a replay).
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { DbService } from "../../db/db.service";
 import { TenantLookupService } from "../../tenants/tenant-lookup.service";
@@ -176,8 +176,9 @@ export class SchemaService {
       auditArgs: { tenantSlug: input.tenantSlug, siteId: input.siteId, collectionKey: input.collectionKey },
       ws4ApprovalId: null,
       effect: async (client) => {
-        const siteCheck = await client.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
+        const siteCheck = await client.query<{ status: string }>(`SELECT status FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
         if (!siteCheck.rows[0]) throw new NotFoundException("site not found for this tenant");
+        if (siteCheck.rows[0].status !== "active") throw new ConflictException("site is archived — an archived site accepts no schema changes");
 
         // WSK-41: rate the change against what is stored now (locked, so two applies cannot both
         // be rated against the same baseline), and refuse MAJOR until WSK-42 governs it.

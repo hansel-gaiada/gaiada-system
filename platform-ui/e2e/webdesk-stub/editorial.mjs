@@ -9,6 +9,10 @@
 //   POST …/items/:itemId/editorial/{submit,withdraw,request-changes,seo-signoff,approve,assign,comments,comments/:id/resolve}
 //   GET  …/editorial/board                `countsWithheld` when `S.cfg.reviewCountsWithheld`
 //   GET  …/editorial/grants               publisher tier only (a viewer is the BFF's 403)
+//   GET  …/editorial/calendar             M5-W5: the board joined with pending publish requests and briefs (`countsWithheld` as the board);
+//                                         `S.cfg.calendarFail = "<part>"` answers 503 `{error, reason:"<part>_unreadable"}`; `S.cfg.briefHidden`
+//                                         hides every brief's title (`briefHidden: true`)
+//   GET  …/briefs/:briefId                M5-W5: the brief the calendar's card links to (an unknown id is the BFF's plain 404)
 //
 // Scenario controls (POST /__stub/config): `reviewAllowedAbsent` (omit `allowed`), `reviewCountsWithheld`, `reviewOff` (policy off), and
 // `reviewRefuse: "<slug>"` (the NEXT item command is refused with that typed 409 and changes nothing; one-shot).
@@ -49,7 +53,21 @@ export function seedReview() {
         events: [ev("ev-5", 3, "review.submitted", "gede-ic", "2026-10-10T08:30:00.000Z"), ev("ev-6", 3, "review.changes_requested", "dept-manager", "2026-10-10T09:30:00.000Z", "Add the hotel angle to the intro.")],
         comments: [],
       }],
+      // An undated draft (the Indonesian twin of the SEO page), with its own brief: it lands in the calendar's "Unscheduled" list.
+      ["itm-service-seo-id", {
+        state: "draft", authorSub: "gede-ic", submittedVersion: null, seoSignedVersion: null, seoSignedBy: null, approvedVersion: null, approvedBy: null, approvedAt: null,
+        dueAt: null, plannedPublishAt: null, briefRef: "brief-seo-2",
+        events: [ev("ev-7", 1, "review.created", "gede-ic", "2026-10-11T08:00:00.000Z")], comments: [],
+      }],
     ]),
+    // M5-W5: the site's PENDING publish/schedule approvals (the calendar shows them on the item they name) and the briefs the board points at.
+    requests: [
+      { approvalId: "apr-sched-1", itemId: "itm-service-web-design-en", command: "content.schedule", publishAt: "2026-10-25T09:00:00.000Z", unpublishAt: null, createdAt: "2026-10-10T00:00:00.000Z", requestedBy: "dept-manager" },
+    ],
+    briefs: {
+      "brief-seo-1": { id: "brief-seo-1", status: "draft", topic: "SEO services in Bali", targetQuery: "seo agency bali", searchIntent: "commercial", aiQuestions: ["How much does SEO cost in Bali?"], contentGaps: ["No pricing section"], outline: ["Intro", "Pricing", "Case studies"], body: "", geoNotes: null, collectionKey: "service", locale: "en", siteId: "site-gaiada-com", tenantSlug: "gaiada", itemId: "itm-service-seo-en", linkedAt: "2026-10-09T00:00:00.000Z", assigneeId: "gede-ic", createdAt: "2026-10-09T00:00:00.000Z", updatedAt: "2026-10-10T00:00:00.000Z" },
+      "brief-seo-2": { id: "brief-seo-2", status: "draft", topic: "SEO services in Bali (Indonesian)", targetQuery: "agensi seo bali", searchIntent: "commercial", aiQuestions: [], contentGaps: [], outline: ["Pengantar"], body: "", geoNotes: null, collectionKey: "service", locale: "id", siteId: "site-gaiada-com", tenantSlug: "gaiada", itemId: "itm-service-seo-id", linkedAt: "2026-10-11T00:00:00.000Z", assigneeId: "gede-ic", createdAt: "2026-10-11T00:00:00.000Z", updatedAt: "2026-10-11T00:00:00.000Z" },
+    },
     grants: [
       { grantId: "gr-1", userId: "gede-ic", name: "Gede", email: "gede@gaiada.com", role: "webdesk_writer", tenantSlug: "gaiada", siteId: "site-gaiada-com", allCollections: false, collections: ["service"], allLocales: true, locales: [], expiresAt: null, grantedBy: "dept-manager", updatedAt: "2026-10-09T08:00:00.000Z" },
     ],
@@ -113,6 +131,52 @@ function boardBody(S, query) {
   // A caller with a scoped grant gets no counts, and the flag (they would disclose the size of what the caller may not see).
   if (S.cfg.reviewCountsWithheld) return { ...body, countsWithheld: true };
   return { ...body, counts };
+}
+
+/** M5-W5: one date per item — publish_at, then the earliest pending requested time, then planned, then due (the BFF's rule). */
+function placementOf(publishState, publishAt, requests, planned, due) {
+  if (publishAt && (publishState === "scheduled" || publishState === "published")) return { kind: "publish_at", at: publishAt };
+  const asked = requests.map((r) => r.publishAt).filter(Boolean).sort()[0];
+  if (asked) return { kind: "requested_publish", at: asked };
+  if (planned) return { kind: "planned", at: planned };
+  if (due) return { kind: "due", at: due };
+  return null;
+}
+
+function calendarBody(S, query, userId) {
+  if (S.cfg.calendarFail) return R(503, { error: "calendar_unavailable", reason: `${S.cfg.calendarFail}_unreadable` });
+  const from = query.get("from"), to = query.get("to");
+  const wantCollection = query.get("collection"), wantLocale = query.get("locale"), wantAuthor = query.get("authorSub");
+  const day = (d) => Date.parse(`${d}T00:00:00.000Z`);
+  const entries = [];
+  for (const it of S.items.values()) {
+    if (it.deletedAt) continue;
+    const rv = S.review.items.get(it.itemId);
+    if (!rv && it.publishState !== "scheduled") continue;
+    if ((wantCollection && it.collectionKey !== wantCollection) || (wantLocale && it.locale !== wantLocale)) continue;
+    const view = viewOf(S, it, rv);
+    if (wantAuthor && view.authorSub !== wantAuthor) continue;
+    const reqs = S.review.requests.filter((r) => r.itemId === it.itemId).map((r) => ({ approvalId: r.approvalId, command: r.command, status: "pending", publishAt: r.publishAt, unpublishAt: r.unpublishAt, createdAt: r.createdAt, requestedByMe: r.requestedBy === userId }));
+    const placement = placementOf(it.publishState, it.publishAt ?? null, reqs, view.plannedPublishAt, view.dueAt);
+    if (from && to) {
+      if (placement ? !(Date.parse(placement.at) >= day(from) && Date.parse(placement.at) < day(to) + 86_400_000) : it.publishState === "published") continue;
+    }
+    const b = view.briefRef ? S.review.briefs[view.briefRef] : null;
+    entries.push({
+      itemId: it.itemId, collectionKey: it.collectionKey, locale: it.locale, slug: it.slug, title: titleOf(it), headVersion: head(it).n, publishState: it.publishState,
+      publishAt: it.publishAt ?? null, unpublishAt: null, reviewState: view.state, reviewRequired: view.reviewRequired, inFlow: !!rv, authorSub: view.authorSub,
+      dueAt: view.dueAt, plannedPublishAt: view.plannedPublishAt, submittedVersion: view.submittedVersion, approvedVersion: view.approvedVersion, openComments: view.openComments,
+      briefRef: view.briefRef, brief: b && !S.cfg.briefHidden ? { id: b.id, topic: b.topic, status: b.status, assigneeId: b.assigneeId } : null, briefHidden: !!b && !!S.cfg.briefHidden,
+      requests: reqs, placement,
+    });
+  }
+  const counts = Object.fromEntries(STATES.map((s) => [s, 0]));
+  for (const rv of S.review.items.values()) counts[rv.state] += 1;
+  const body = {
+    tenantSlug: "gaiada", siteId: "site-gaiada-com", from, to, truncated: false, entries,
+    policies: Object.entries(S.review.policies).map(([collectionKey, p]) => ({ collectionKey, reviewRequired: p.reviewRequired && !S.cfg.reviewOff, seoSignoffRequired: p.seoSignoffRequired })),
+  };
+  return R(200, S.cfg.reviewCountsWithheld ? { ...body, countsWithheld: true } : { ...body, counts });
 }
 
 function historyBody(S, it) {
@@ -211,6 +275,12 @@ function itemCommand(S, it, cmd, body, { role, userId }) {
 /** Dispatch for the editorial routes under `…/sites/:t/:s`. `rest` is what follows the site. Returns null for a path that is not editorial. */
 export function handleEditorial(S, { method, rest, query, body, userId, role }) {
   if (rest === "/editorial/board" && method === "GET") return R(200, boardBody(S, query));
+  if (rest === "/editorial/calendar" && method === "GET") return calendarBody(S, query, userId);
+  const bm = rest.match(/^\/briefs\/([^/]+)$/);
+  if (bm && method === "GET") {
+    const b = S.review.briefs[decodeURIComponent(bm[1])];
+    return b ? R(200, b) : R(404, { error: "brief not found" });
+  }
   if (rest === "/editorial/grants" && method === "GET") {
     // `manage_editorial` (company admin, owner, Web Dev manager): a viewer is the BFF's plain 403, for any caller who is not a publisher.
     if (role !== "publisher") return forbidden();

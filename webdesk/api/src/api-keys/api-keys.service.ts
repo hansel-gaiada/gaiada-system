@@ -191,8 +191,12 @@ export class ApiKeysService {
       const row = rows[0];
       if (!row || row.revoked_at) return null;
 
+      // site.archive: an ARCHIVED site's keys stop resolving (null = the same "invalid credentials" as a
+      // revoked key), so its public reads and every other key-guarded route refuse on the very next request.
       const { rows: envRows } = await db.query<{ site_id: string; name: string }>(
-        `SELECT site_id, name FROM environments WHERE id = $1 AND tenant_id = $2`,
+        `SELECT e.site_id, e.name FROM environments e
+           JOIN sites s ON s.id = e.site_id AND s.tenant_id = e.tenant_id
+          WHERE e.id = $1 AND e.tenant_id = $2 AND s.status = 'active'`,
         [row.env_id, tenantId],
       );
       const env = envRows[0];
