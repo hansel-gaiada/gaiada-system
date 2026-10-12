@@ -180,7 +180,7 @@ describe.skipIf(!TEST_URL)("M5-V3-g · consented visitor routes", () => {
     it("another company's property under my tenant path is 404 (and the same id under its own tenant works)", async () => {
       const res = await get(`/api/${A}/modules/search/properties/${propB}/visitors`);
       expect(res.statusCode).toBe(404);
-      expect(res.json().message).toBe("property not found");
+      expect(res.json().error).toBe("property not found"); // http-error.filter renders every HttpException as { error }
     });
     it("an unknown visitor on my property is 404 with its own reason; another property's visitor is 404 too", async () => {
       const unknown = await get(`${base()}/${newId()}`);
