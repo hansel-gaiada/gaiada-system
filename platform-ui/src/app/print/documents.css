@@ -1,0 +1,60 @@
+/* PV5-07 — print stylesheet for the document routes `/print/invoices/[jobToken]` and `/print/contracts/[jobToken]`.
+   Scoped under `.doc-print` (never a bare html/body/:root selector), the same discipline as TR-20's print.css, so it
+   cannot leak onto another route sharing a chunk. Always light: these are documents of record, and the renderer
+   emulates print + light anyway. Plain system fonts: Chromium embeds what it uses, and a document must not depend on
+   a web font loading in time. */
+
+.doc-print {
+  color: #111;
+  background: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  max-width: none;
+  padding: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.doc-print * { animation: none !important; transition: none !important; }
+
+.doc-print__title { font-size: 20pt; font-weight: 700; margin: 0 0 8pt; letter-spacing: 0.01em; }
+.doc-print__h2 { font-size: 12pt; font-weight: 700; margin: 14pt 0 6pt; }
+.doc-print__h3 { font-size: 10.5pt; font-weight: 700; margin: 10pt 0 4pt; }
+.doc-print p { margin: 0 0 6pt; }
+
+.doc-print__head { display: flex; justify-content: space-between; gap: 24pt; align-items: flex-start; margin-bottom: 12pt; }
+.doc-print__issuer-name { font-size: 13pt; font-weight: 700; }
+.doc-print__address { white-space: pre-line; }
+.doc-print__title-block { text-align: right; }
+
+.doc-print__facts { display: grid; grid-template-columns: max-content 1fr; gap: 2pt 12pt; margin: 0 0 8pt; }
+.doc-print__title-block .doc-print__facts { text-align: left; }
+.doc-print__facts dt { font-weight: 600; color: #333; }
+.doc-print__facts dd { margin: 0; }
+
+.doc-print__section { margin-top: 12pt; break-inside: avoid; }
+
+.doc-print__table { width: 100%; border-collapse: collapse; margin: 6pt 0 8pt; }
+.doc-print__table th,
+.doc-print__table td { border-bottom: 0.5pt solid #bbb; padding: 4pt 6pt; vertical-align: top; text-align: left; }
+.doc-print__table th { background: #f2f2f2; font-weight: 600; }
+.doc-print__table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.doc-print__table tr { break-inside: avoid; }
+
+.doc-print__totals { display: grid; grid-template-columns: 1fr max-content; gap: 2pt 16pt; margin: 0 0 0 auto; max-width: 60%; }
+.doc-print__totals dt { text-align: right; }
+.doc-print__totals dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.doc-print__totals-row { display: contents; }
+.doc-print__grand { font-weight: 700; font-size: 12pt; border-top: 1pt solid #111; padding-top: 3pt; }
+
+.doc-print__pay { border: 0.75pt solid #999; padding: 8pt 10pt; }
+.doc-print__void { border: 1.5pt solid #a00; color: #a00; font-weight: 700; padding: 6pt 10pt; }
+.doc-print__foot { margin-top: 18pt; color: #444; font-size: 9pt; }
+
+.doc-print__break { break-before: page; height: 0; }
+.doc-print__body { margin-top: 10pt; }
+.doc-print__hash { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 8.5pt; word-break: break-all; }
+.doc-print__ua { font-size: 8.5pt; word-break: break-word; }
+.doc-print__table--evidence { table-layout: fixed; }
+.doc-print__notice { border: 0.75pt solid #999; padding: 6pt 10pt; margin-top: 10pt; break-inside: avoid; }
+.doc-print__refusal { padding: 24pt; }

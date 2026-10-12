@@ -53,6 +53,8 @@ for anyone who already has an ERP identity.
 | ClamAV | GPL-2.0 (socket) | No | VirusTotal API, none | days | 🟢 |
 | imgproxy v3 | AGPL-3.0 | No | Thumbor (MIT), `sharp` in-process (Apache-2.0) | 1 wk | 🟢 |
 | **Payload 3** | MIT / Enterprise for SSO | **Via Enterprise** | **Own editorial layer — WSK-40…51** | in flight | 🟢² |
+| pdf-lib 1.17.1 *(PV5-07, 2026-10-13: joins an agreement's pages with its evidence page, embeds a non-PDF agreement, adds the signature field)* | MIT | No | `@cantoo/pdf-lib` (maintained, API-compatible fork); pdfkit for generation + qpdf for joining | days | 🟢¹⁵ |
+| @signpdf/signpdf + placeholder-pdf-lib + utils 3.3.0 *(PV5-07: the PAdES byte ranges and embedding the CMS in the PDF)* | MIT | No | Our own ~150 lines: the step is fully specified (ISO 32000-1 §12.8) and the CMS it embeds is already ours | days | 🟢¹⁵ |
 
 ¹ **Cerbos is Red by construction, and that is accepted.** The 259 policy files are *our* asset,
 not the vendor's leverage — the PDP is Apache-2.0 with no tier we depend on, so the realistic
@@ -62,6 +64,16 @@ adopt Cerbos Hub** (EST-D-VI2), so nothing we own lives outside this repo.
 ² Payload's exit is already funded and in flight — see
 [`webdesk-independence.md`](./webdesk-independence.md). Band reflects the post-audit finding that
 Payload holds two collections, one of which is a boot stub.
+
+¹⁵ **PDF joining and the company seal (PV5-07, PV-D25), added 2026-10-13, PROTOTYPED.** Both are libraries
+inside platform-nest, no service and no account. **The cryptography is not vendored:** the CAdES SignedData,
+the self-issued certificate and the DER they need are our own code (`platform-nest/src/core/der.ts`,
+`document-seal.ts`) over `node:crypto`, because @signpdf's own signer (node-forge) cannot emit the
+signing-certificate-v2 attribute PAdES baseline requires. **Abandonment axis:** pdf-lib's last release
+is 1.17.1 (May 2022): stable and widely used, but a freeze, not maintenance (the same caution as the
+faster-whisper row). Its fork `@cantoo/pdf-lib` is maintained and API-compatible, so the exit is a
+dependency swap. The @signpdf packages were last released 2025-12. Licences read from the published
+packages (all MIT; pdf-lib's transitive deps MIT, its tslib 0BSD). Nothing drilled.
 
 ## 3 · Observability
 
@@ -243,7 +255,7 @@ deliverable. **Protect the interface: no capability may call a provider SDK dire
 
 | Band | Count | Notes |
 |---|---|---|
-| 🟢 Green | 21 | +Umami, +DB-IP Lite (2026-10-11) |
+| 🟢 Green | 23 | +Umami, +DB-IP Lite (2026-10-11); +pdf-lib, +@signpdf (PV5-07, 2026-10-13) |
 | 🟡 Amber | 21 | all have a named replacement in this file; +IP-to-company candidate (2026-10-11); +VIDA e-signature and +Midtrans gateway (PV5-03 picks, 2026-10-12) |
 | 🔴 Red | 4 | **Cerbos** (accepted — our asset, no tier dependency) · **WAHA** (corrected 2026-09-21: Core/Apache-2.0, not a paid tier — Red now stands on *"groups have no fallback at any price"*) · **GitHub signing/provenance**⁷ (design decision, not migration) · **n8n WS11 pipeline**³ (the agentic-native bar slipped; 2–3 months, not weeks) |
 | **Seat-priced** | **4** *(was 5)* | GitHub *(being removed — machine identity + WSK-49)* · Payload *(being removed — WSK-40…51)* · Google Workspace *(edge tool)* · Claude Code *(accepted, dev tooling)*. — **Cloudflare dropped off this list 2026-09-21: the re-check found Workers Paid is per account, not per seat.** |
@@ -266,3 +278,4 @@ edge tool), and the agent army (deliberately accepted).
 | 2026-09-21 | **Two new findings from the sweep, both now rows above:** ① the GitHub row splits — CI/registry is Amber, **cosign-keyless + build-provenance is Red** (GitHub-OIDC-bound, no Forgejo equivalent); ② `fedirz/faster-whisper-server` is **archived upstream**, last built Jan 2025 — digest-pinned, but that is a freeze, not maintenance. **Abandonment is a distinct risk axis this register did not originally model.** |
 | 2026-10-11 | **Analytics and geo rows added (M5-G4/M5-V1):** Umami 3.x (🟢), DB-IP Lite (🟢), IP-to-company candidate (🟡, not chosen). Review in [`../plans/2026-10-11-m5-geo-and-company-data-review.md`](../plans/2026-10-11-m5-geo-and-company-data-review.md). Nothing drilled. |
 | 2026-10-12 | **PV-5 provider rows added (PV5-03):** certified e-signature VIDA (🟡, custody exit) and payment gateway Midtrans (🟡), runners-up Privy and DOKU. Owner ruling PV-D25 the same day: Midtrans approved; VIDA approved but parked until the certified tier is first needed. Comparison in [`pv5-provider-comparison.md`](./pv5-provider-comparison.md). Nothing drilled. |
+| 2026-10-13 | **PV5-07 rows added:** pdf-lib (🟢, joins and prepares PDFs) and @signpdf (🟢, PAdES byte ranges) for issued-invoice PDFs and the sealed signed copy of a contract (PV-D25). The seal's CMS and certificate are our own code over `node:crypto`; no new service, no new account. pdf-lib's release freeze noted (¹⁵). Nothing drilled. |

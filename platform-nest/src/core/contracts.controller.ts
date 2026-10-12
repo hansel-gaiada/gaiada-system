@@ -43,6 +43,7 @@ import { clientIpOf, hashForEvidence, userAgentOf } from "./evidence";
 import { certifiedSigningProvider, NO_CERTIFIED_PROVIDER } from "./signature-provider";
 import { lockChangeRequest } from "./webdev-cr-lock";
 import { UUID_RE, assertAmendable, isDeadContractStatus } from "./webdev-amendment";
+import { CONTRACT_SIGNED_COPY_FILE_ID } from "./document-read-fields";
 
 // PV3-07: `clientVisible` (a client-wide contact of the contract's client can read it in the portal) is
 // composed from the portal's own predicate, so a draft reads `false` here for exactly the reason the
@@ -65,7 +66,9 @@ const CONTRACT_SELECT = `
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client') AS "clientSigned",
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'provider') AS "providerSigned",
          (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
-         ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible"
+         ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible",
+         -- PV5-07: the sealed signed copy. NULL = not signed, or signed and still being prepared.
+         ${CONTRACT_SIGNED_COPY_FILE_ID("k")} AS "signedCopyFileId"
     FROM contracts k
     LEFT JOIN clients cl ON cl.id = k.client_id
     LEFT JOIN projects p ON p.id = k.project_id

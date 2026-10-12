@@ -1718,7 +1718,7 @@ becomes an existence oracle for another client's ids.
 | ✅ | GET | `/api/:t/portal/contracts` | `draft` excluded. `clientSigned`/`providerSigned`/`termEnded` per row (`termEnded` derived on read, never written back). **PV4-04 (PROTOTYPED):** every row also carries `kind` (`agreement \| amendment`), `amendsId` and `amendsReference` (the amended contract's id and reference, or `null`) and `changeRequestId`. The two joined rows go through the caller's own scope predicates, so a project-scoped contact never learns the id or reference of a contract, or the id of a request, outside their reach: out of scope reads `null`. |
 | ✅ | GET | `/api/:t/portal/contracts/:contractId` | Adds `bodyMd`, `document`, `signatures[]`, `canSign`, `viewOnly`. **`canSign` is the exact conjunction `POST /sign` enforces** — mirror it, never recompute it. **PV5-06 (PROTOTYPED):** adds `contentSha256` (the SHA-256 the server fixed when the contract was sent: the stored file's bytes, else the exact UTF-8 `bodyMd`; `null` only on a contract sent before PV5-06) and `signatureTier` (`attested` \| `certified`). `canSign` is also `false` for a `certified` contract. **PV4-04 (PROTOTYPED):** also `kind`, `amendsId`, `amendsReference`, `changeRequestId`, exactly as on the list. An amendment is shown like any other contract once it is `sent`; a `draft` amendment is 404, as every draft is. An amendment never voids or supersedes the contract it amends. |
 | ✅ | POST | `/api/:t/portal/contracts/:contractId/sign` | `{signerName, signerTitle?, agree:true, contentSha256}`. `agree` refused server-side if absent. Requires `signer` capability. Idempotent — a re-sign answers 200 `{alreadySigned:true}`, checked BEFORE the status check (signing is what changes the status). Flips to `signed` only when BOTH parties are present. **PV5-06 (PROTOTYPED): the client signs what they saw.** `contentSha256` is the hash the GET returned, echoed back; the server compares it (case-insensitively) with the hash it fixed at send and writes nothing on a difference: **409 `{error:"this agreement changed since you opened it; reload it and read it again before signing", reason:"content_changed"}`**. A contract with a stored hash and no echo is **400 `reason:"content_hash_required"`** (the page reloads and signs again). The signature row records the stored hash (never the echo), the salted IP hash and the user agent. A **`certified`-tier** contract refuses the typed name: **400 `reason:"certified_tier"`** (certified signing is parked, PV-D25). A contract sent before PV5-06 has no stored hash and signs as before, recording none. Authorization now runs BEFORE body validation (a caller who may not sign gets 403 for any body; before, a thin body got 400). Rows outside the caller's scope stay 404. UI: `portalSignContract` sends the hash from the hidden `contentSha256` field and, on the 409, reloads the page with "This agreement changed since you opened it…". |
-| ✅ | GET | `/api/:t/portal/files/:fileId` | The portal's OWN download. Resolves ownership by walking the file's parent entity through the scope predicate; parent kinds limited to `deliverable\|contract\|invoice_payment\|project\|conversation` (`conversation` = a message attachment, admitted through its thread and only while the message is not retracted, §29). Attachment-only + `nosniff` + sandbox CSP. **Do not link the staff `/files/:id/content` route from the portal** — it authorizes on the parent resource kind, which the `client` role does not hold, so it 403s by design. |
+| ✅ | GET | `/api/:t/portal/files/:fileId` | The portal's OWN download. Resolves ownership by walking the file's parent entity through the scope predicate; parent kinds limited to `deliverable\|contract\|invoice_payment\|project\|conversation\|invoice` (`conversation` = a message attachment, admitted through its thread and only while the message is not retracted, §29). **PV5-07 (PROTOTYPED):** `invoice` = an issued invoice's PDF (`files.role = 'invoice_pdf'`): admitted only when the invoice is ISSUED (`issued_at` set) and in the caller's scope, and only for the `invoice_pdf` file (any other file under an invoice is 404). A never-issued invoice that the portal lists (a cancelled `void`, a legacy one) has no downloadable PDF: 404. A contract's sealed signed copy rides the existing `contract` kind. Link these by `pdfFileId` / `signedCopyFileId` (§30a). Attachment-only + `nosniff` + sandbox CSP. **Do not link the staff `/files/:id/content` route from the portal** — it authorizes on the parent resource kind, which the `client` role does not hold, so it 403s by design. |
 
 ### 16c. Profile — `src/core/portal-profile.controller.ts`
 
@@ -6147,3 +6147,42 @@ series: receipts `{prefix}/RC/{yyyy}/{nnnn}`, credit notes `{prefix}/CN/{yyyy}/{
 - Legacy invoices (sent/paid before PV-5, `legacyUnissued: true`) are exempt from the CHECK, take no new payment
   claims, and keep the old confirm rule.
 - Agent tools for these routes are PV5-12; the screens are PV5-09.
+
+### 30a. Issued-invoice PDFs and the sealed signed copy (PV5-07, 2026-10-13) — `platform-nest/src/core/document-{jobs,render,seal,read-fields}.ts`, migration `202610132000_pv5_document_files_seal.sql` — **STATUS: PROTOTYPED (DB suite `src/core/document-jobs.db.test.ts` + unit suite `document-seal.test.ts` on the Linux CI gate; never driven against the real renderer or a real key on a server)**
+
+Decision 19: each document is rendered ONCE after commit (outbox `invoice.issued` / `contract.signed`, plus a sweep
+that retries anything still owed) and stored as a `files` row with a role and a SHA-256. It is never re-rendered on
+download. Decision 21 / PV-D25: a signed contract's copy is ONE PDF (the agreement, then the evidence page) carrying
+a PAdES seal made with the company's own self-issued key.
+
+**New read fields (additive; PV5-08 and PV5-09 consume exactly these names):**
+
+| Read | Field | Meaning |
+|---|---|---|
+| `GET /api/:t/invoices`, `GET /api/:t/invoices/:invoiceId` (staff, §4) | `pdfFileId: string \| null` | The live `invoice_pdf` file of an ISSUED invoice. `null` = not issued, or issued and **being prepared**. |
+| `GET /api/:t/portal/invoices`, `GET /api/:t/portal/invoices/:invoiceId` (§16b) | `pdfFileId: string \| null` | Same. Download with `GET /api/:t/portal/files/:pdfFileId`. |
+| `GET /api/:t/contracts`, `GET /api/:t/contracts/:contractId` (staff, §16e) | `signedCopyFileId: string \| null` | The live `contract_signed_copy` file (the sealed copy). `null` = not signed, or signed and **being prepared**. |
+| `GET /api/:t/portal/contracts`, `GET /api/:t/portal/contracts/:contractId` (§16b) | `signedCopyFileId: string \| null` | Same. Download with `GET /api/:t/portal/files/:signedCopyFileId`. |
+
+Staff download: `GET /api/:t/files/:fileId/content` (authorizes `invoice` / `contract` read on the parent, unchanged).
+`DELETE /api/:t/files/:fileId` on a role file answers **409** (and the database refuses it too).
+
+**Rules a consumer must not get wrong**
+- `null` on an issued invoice or a signed contract means **"being prepared"**, never "there is no document". Show it
+  as such; do not offer to generate one (there is no on-demand render route, by design).
+- A role file is a record: it cannot be deleted, replaced or changed (`trg_files_guard_role_file`), and there is at
+  most one live file per parent and role (`ux_files_live_role`).
+- The sealed copy verifies in any PAdES-aware reader as "unmodified since sealed", and shows the signer's identity as
+  **not verified** (the certificate is self-issued, not from a certification authority). That is expected; the
+  evidence page says so in plain words. Do not describe the copy as a certified signature anywhere in the UI.
+
+**Why a document is still "being prepared"** is in `document_jobs` (`status`, `last_error` = `<reason>: <words>`),
+and an owner of the company is notified once per stuck document (`document.preparation_blocked`). Reasons:
+`renderer_not_configured`, `render_failed`, `render_unverified` (the renderer returned a page that was not this
+document), `seal_keys_dir_not_configured`, `seal_key_missing`, `seal_key_unreadable`, `seal_certificate_missing`
+(blocked or failed: retried); `content_mismatch`, `content_missing`, `no_fixed_content`, `signatures_incomplete`,
+`signature_hash_mismatch` (refused: never sealed, not retried).
+
+**Internal only (not a BFF route):** `GET /internal/documents/print-payload/:jobToken` (no `/api`, no guards, the
+one-shot token is the whole authorization, GETDEL; TR-21's shape) feeds the platform-ui print routes
+`/print/invoices/[jobToken]` and `/print/contracts/[jobToken]`, which only the `report-renderer` sidecar opens.

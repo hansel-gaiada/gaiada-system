@@ -18,6 +18,11 @@ Scope boundary (do not extend without a ticket): TR-20 builds the platform-ui pr
 sidecar targets; TR-21 builds the one-shot `jobToken` orchestration in platform-nest that mints
 the URLs this service is handed. This service never sees a session cookie or tenant credential.
 
+**PV5-07 (2026-10-13)** also sends this sidecar `/print/invoices/{jobToken}` (an issued invoice's PDF, stored once)
+and `/print/contracts/{jobToken}` (a signed contract's evidence page, sealed afterwards by platform-nest). Same origin,
+same one-shot token, so **nothing here changed**: the same-origin rule already admits them. Known gap for a follow-up
+ticket: the fixed footer template says "Report" on those documents too.
+
 ## Working precedent
 
 `docs/blueprints/render-pdf.js` already solves the print-CSS/Playwright-PDF technique this
