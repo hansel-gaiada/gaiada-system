@@ -15,6 +15,8 @@ import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
 import { ANALYTICS_MCP_TOOLS } from "./umami-mcp-tools";
 import { DECAY_MCP_TOOLS } from "./content-decay-mcp-tools";
+import { CONVERSION_MCP_TOOLS } from "./conversions-mcp-tools";
+import { handleStageChanged as handleLeadStageChanged } from "./conversions.service";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -164,6 +166,8 @@ export const searchModule: ModuleContract = {
     // M5-W4 (additive): the WebDesk link on search_content_briefs (site, collection, locale, item, assignee, the search facts a writer
     // needs) and a nullable property_id. Registered here AT WRITE TIME, same standing lesson as every comment above.
     "202610122300_search_content_briefs_webdesk_link.sql",
+    // M5-P2: search_conversion_targets + search_conversion_uploads (the ledger). Registered AT WRITE TIME, same standing lesson.
+    "202610131200_search_conversion_uploads.sql",
   ],
   // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
   // module reconciliation, 14 declared keys):
@@ -254,6 +258,8 @@ export const searchModule: ModuleContract = {
     ...ANALYTICS_MCP_TOOLS,
     // M5-V4 — content-decay findings: one read + two LOW writes (acknowledge, file a refresh brief).
     ...DECAY_MCP_TOOLS,
+    // M5-P2 — ad-platform conversion uploads: targets (one LOW write), the ledger reads. The upload itself is a WS4 approval.
+    ...CONVERSION_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",
@@ -588,6 +594,11 @@ export const searchModule: ModuleContract = {
     // Producer: search.controller.ts applyProposalApi.
     "search.campaign.applied": handleCampaignApplied,
     "search.ai_visibility.changed": handleAiVisibilityChanged,
+    // M5-P2 (design §8.1): a lead's stage change plans an ad-platform conversion upload (gate, ledger claim, one WS4 approval). The
+    // event is emitted on entity type `agency_lead`, and main.ts's startConsumerLoop([...]) MUST list that stream, or this handler is
+    // registered and NEVER invoked (the SMM-14 trap; pinned by conversions.test.ts reading main.ts). It is deliberately NOT an
+    // `automation_approval.decided` handler: the upload executes in-band at decide() (search-sem-apply.test.ts forbids that handler).
+    "agency.lead.stage_changed": handleLeadStageChanged,
   },
   // routes: served by SearchController in the NestJS port.
 };

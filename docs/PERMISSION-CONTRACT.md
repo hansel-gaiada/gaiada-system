@@ -1753,3 +1753,17 @@ malformed identifier is not narrowed away (a bad phone next to a good email woul
 goal text) is the user's and stays in `assistant_messages` / `assistant_handoffs.goal_text`; the live `fileApproval` call to the hub still carries the real
 args in transit. Proof: `ai-agents/src/sensitive-tools.test.ts`, `ai-agents/src/sensitive-run.test.ts`, `platform-nest/src/modules/assistant/assistant-privacy-intent.test.ts`
 (no services) and `assistant-privacy-intent.db.test.ts` (Linux gate).
+
+## 30. M5-P2 — ad-platform conversion uploads: no new permission; the approver needs `update` on the property (2026-10-13, PROTOTYPED)
+
+No new Cerbos kind, action, role or permission key, no policy change, no restart. What is stated so nobody re-derives it:
+
+| Step | Authority | Where |
+|---|---|---|
+| Plan an upload (consume `agency.lead.stage_changed`) | none: an event handler with no principal; it only runs for a tenant with the `search` module enabled, and files an approval | `modules/search/conversions.service.ts` |
+| Configure a target (site slug, platform, stage, conversion) | `resource_search_property · update` on the property (the existing `search.property.update` permission) | `POST .../properties/:id/conversion-targets` |
+| Read targets and the ledger | `resource_search_property · read` | the three GETs |
+| **Approve (or reject) an upload** | the generic `automation_approval · decide` (company_admin) **and** `resource_search_property · update` on the property named in the row's `tool_args`, checked before the decision is written | `core/automation-approvals.controller.ts` decide(), same shape as probe consent |
+| Execute | in-band at decide(), as the decider; the D14 hub registry is not used (the tool is barred there) | `executeApprovedConversionUpload` |
+
+Two properties of the data worth knowing: the consent gate is strictly `visitor_consent.marketing === true` and runs at planning and again at execution; and the lead's contact fields and click id are read at execution, hashed in memory and never written down (the ledger, the approval args, the outbox and the logs hold ids, stages, kinds and typed reasons). Stage moves stay `triage`-tier (manager and up) as P1 ruled; a move is LOW because it cannot send anything: the upload needs its own approval. Proof: `modules/search/conversions.test.ts`, `conversions-consumer-wiring.test.ts` (no services) and `conversions.db.test.ts` (Linux gate).
