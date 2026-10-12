@@ -1,9 +1,24 @@
 # Runbook - WebDesk WS4 approval keys (M4 F1): install, switch, retire HMAC, rotate, revoke
 
-**Status: CODE BUILT, NOT LIVE.** Phases 1 and 2 of the design exist as code on branch `webdesk/m4-f1-ws4-eddsa`.
-The local unit matrix passes. The Linux and CI suites, the sumopod gate and every live step below are still to be
-run. **No WS4 key pair exists yet, and nothing here has been run on `gda-aicenter`.** The orchestrator runs every
-live step.
+**Status: LIVE on `gda-aicenter`, all three phases, 2026-10-12.** Kid `ws4-2026-10` (public thumbprint
+`rCTA_OpUekLvOvmpMomkWj4VhHJLOmyCkOSSbnFGbl0`).
+
+- **Phase 1** shipped with release 359.
+- **Phase 2** ran at 02:34–02:39Z: W1 gave `404` with the kid, and W2 gave `404`.
+- **Phase 3** ran at 02:40–02:44Z:
+  - Both HMAC keys are gone.
+  - The api logs `v1 (HMAC) retired`.
+  - A live v1 assertion was refused with `403 ... WS4 v1 (HMAC) assertions are no longer accepted`.
+  - `WS4_HMAC_RETIRED=1` probes passed 40/40.
+- **Still owed:** the owner reads the audit row of the first real HIGH command. It must say `ws4_assertion_version = 2`.
+
+The first live run found three defects in this runbook. All three are fixed below:
+
+- The `rmdir` was run without root.
+- The api restart did not recreate the container.
+- The runbook named the wrong file for the WebDesk v1 key.
+
+The evidence log is in the M4 plan's F1 section.
 
 - **Design:** `docs/plans/2026-10-11-webdesk-m4-plan.md`, section "F1 · WS4 approval assertion made asymmetric".
 - **Model:** `webdesk-editorial-keys.md` (WSK-40). This runbook follows it step for step, with its own key pair,
@@ -45,9 +60,9 @@ directories anyway: the WebDesk side must never be able to read the private key.
 | `WEBDESK_CONTROL_WS4_SIGNING_KID` | ERP `.env` | The active kid, e.g. `ws4-2026-10`. **Empty means the ERP mints v1.** Compose derives the key path from it, so switching is ONE value. |
 | `WEBDESK_CONTROL_WS4_SIGNING_KEY_DIR` | ERP `.env` | Leave unset (`/etc/gaiada/webdesk-ws4`). |
 | `WEBDESK_CONTROL_WS4_SIGNING_KEY_FILE` | ERP compose | Set by `docker-compose.vps.yml` to `/run/webdesk-ws4/ws4-signing.<kid>.pk8.pem`. Do not set it in `.env`. |
-| `WEBDESK_CONTROL_WS4_KEY` | ERP `.env` | The v1 HMAC key. Kept through phase 2, removed in phase 3. |
+| `WEBDESK_CONTROL_WS4_KEY` | ERP `.env` | The v1 HMAC key. Kept through phase 2, removed in phase 3 (**removed 2026-10-12**). |
 | `WEBDESK_WS4_JWKS_FILE` | WebDesk | Set by the aicenter overlay to `/etc/webdesk/ws4/ws4.jwks.json`. Do not put it in `/etc/webdesk/.env`. |
-| `WEBDESK_APPROVAL_ASSERTION_KEY` | WebDesk `/etc/webdesk/.env.control` | The v1 HMAC key, equal to the ERP's. Kept through phase 2, removed in phase 3. In production, an unset value or a published placeholder means v1 is refused. |
+| `WEBDESK_APPROVAL_ASSERTION_KEY` | WebDesk `/etc/webdesk/.env` (**not** `.env.control`: `webdesk/docker-compose.yml` names it under `environment:`, which outranks `env_file:`, so only the interpolation file can supply it) | The v1 HMAC key, equal to the ERP's. Kept through phase 2, removed in phase 3 (**removed 2026-10-12**). In production, an unset value or a published placeholder means v1 is refused. |
 
 **Kid convention:** `ws4-YYYY-MM`. On a second rotation within the same month, add a suffix (`ws4-2026-10b`). The
 keygen refuses a `--channel ws4` kid that does not start with `ws4-`.
@@ -69,10 +84,20 @@ keygen refuses a `--channel ws4` kid that does not start with `ws4-`.
 does not exist when the api container is created, Docker creates an empty **directory** at that host path. The api
 treats a directory as "v2 unavailable", which is safe. Phase 1 ships the mount before any key exists, so this
 directory WILL be there. The install step below must `rmdir` it before it writes the real file. Always check with
-`stat -c %F`.
+`sudo stat -c %F`. **Test and remove it as root**, because `/etc/webdesk` is `0700 webdesk-svc`. A plain
+`[ -d ... ]` run by the operator is simply false, so the `rmdir` is skipped. `install` then writes the key file
+INSIDE the leftover directory, and the api still reports "not a regular file". That happened on the first live run.
 
 **Footgun: the file mount pins an inode until restart.** Every step below restarts the api after changing the file.
 The restart is also what loads the new key set: the api reads the JWKS once, at boot.
+
+**"Restart api" in this runbook always means a recreate.** On the box, run
+`sudo docker compose -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml --env-file /etc/webdesk/.env up -d --no-deps --no-build --force-recreate api`
+from `/home/Hansel/gaiada-webdesk/webdesk`.
+
+- Without `--force-recreate`, a changed file under an unchanged compose config gives `Container webdesk-api-1 Running`.
+  Nothing restarts, and the old key set stays loaded.
+- Before you run it, check that `config --images` shows the digest that is already running.
 
 ## Probes (none writes anything)
 
@@ -111,6 +136,10 @@ const { loadWs4SigningKey } = require("/app/dist/modules/webdev/webdesk-ws4-asse
 })();
 JS
 ```
+
+**Reading the output.** Once the kid is set, the platform log prints `WS4 assertions: v2 (EdDSA, kid ...)` before
+**each** probe, W2 included. That line comes from loading the config, which both clients do. W2 still mints v1,
+because its `ws4Signing: undefined` override is applied last, over the config.
 
 **To prove that a specific RETIRED kid is refused:** run W1 with
 `loadWs4SigningKey({ keyFile: "/run/webdesk-ws4/ws4-signing.<old>.pk8.pem", kid: "<old>" })`. It must answer
@@ -168,12 +197,15 @@ After the deploy:
 
 1. **Generate:** use the command above with `--channel ws4 --kid ws4-2026-10` and no `--jwks`.
 2. **WebDesk public JWKS. Install it FIRST, so WebDesk can verify before the ERP signs.**
-   1. Remove the directory the phase-1 mount left: `[ -d /etc/webdesk/ws4/ws4.jwks.json ] && sudo rmdir /etc/webdesk/ws4/ws4.jwks.json`.
-   2. Run `sudo install -d -m 0750 --owner=$(stat -c %U /etc/webdesk/certs) --group=$(stat -c %G /etc/webdesk/certs) /etc/webdesk/ws4`.
+   1. Remove the directory the phase-1 mount left, **as root** (see the footgun):
+      `sudo sh -c 'd=/etc/webdesk/ws4/ws4.jwks.json; if [ -d "$d" ]; then ls -la "$d"; rm -f "$d/ws4.jwks.json"; rmdir "$d"; fi'`.
+      The `rm -f` cleans up after an earlier `install` that landed inside the directory.
+   2. Run `sudo install -d -m 0750 --owner=$(sudo stat -c %U /etc/webdesk/certs) --group=$(sudo stat -c %G /etc/webdesk/certs) /etc/webdesk/ws4`.
+      The `stat` needs `sudo` too, for the same reason.
    3. Run `sudo install -m 0444 /root/ws4-keygen/ws4.jwks.json /etc/webdesk/ws4/ws4.jwks.json`. It must be readable by
-      "other": the api runs with `cap_drop: ALL`.
-   4. **Restart api** with the box's usual compose file set, `--env-file /etc/webdesk/.env` and
-      `up -d --no-deps --no-build api` (see `webdesk-control-channel.md`, corrections 1 and 3).
+      "other": the api runs with `cap_drop: ALL`. Check that `sudo stat -c %F` says `regular file`.
+   4. **Restart api.** Use the exact recreate command from "Restart api" above. A plain `up -d` leaves the old api
+      running, because the compose config did not change.
    5. Expected log: `WS4 gate: v1 (HMAC) accepted ...; v2 (EdDSA) accepted, WS4 JWKS from WEBDESK_WS4_JWKS_FILE (...): kid(s) ws4-2026-10`.
       If the api crash-loops instead, read the `refused:` reason. A shared key with the editorial JWKS means the
       wrong file was installed.
@@ -205,24 +237,54 @@ SELECT ws4_assertion_version, count(*) FROM audit_entries
 Run it under the platform GUC and under each tenant's GUC, or as the backup role. Expect only `2`, plus `NULL` for
 any pre-0018 rows.
 
+**When the query is not needed.** The assertion is minted at send time, not stored, and lives 60 s. If no container
+holds a non-empty v1 key except the one platform you just switched, then no v1 assertion can be in flight once 60 s
+have passed since its recreate. Check that with
+`for c in $(docker ps --format '{{.Names}}'); do docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $c | grep -q '^WEBDESK_CONTROL_WS4_KEY=.' && echo $c; done`.
+That is how phase 3 ran on 2026-10-12, by the owner's decision ("phase 3 right after if v2 is proven"), about 2
+minutes after the switch.
+
 1. **ERP first: stop minting v1 entirely.** Remove `WEBDESK_CONTROL_WS4_KEY` from the ERP `.env` (delete the line)
    and run `up -d platform`. The client now mints only v2. If the v2 key ever became unusable, WS4 calls would answer
    503 rather than fall back. Run W1: it must still give `404`.
 2. **WebDesk: retire v1.**
-   1. Remove `WEBDESK_APPROVAL_ASSERTION_KEY` from `/etc/webdesk/.env.control`.
-   2. Restart api.
+   1. Back up `/etc/webdesk/.env` to a root-only directory. Then remove `WEBDESK_APPROVAL_ASSERTION_KEY` from it:
+      `sudo sed -i '/^WEBDESK_APPROVAL_ASSERTION_KEY=/d' /etc/webdesk/.env`.
+      It lives in `.env`, **not** in `.env.control` (see the variables table).
+   2. Restart api (the recreate command above). Then check that
+      `docker exec webdesk-api-1 sh -c '[ -z "$WEBDESK_APPROVAL_ASSERTION_KEY" ] && echo absent'` prints `absent`.
    3. Expected log: `WS4 gate: v1 (HMAC) retired: WEBDESK_APPROVAL_ASSERTION_KEY is not set; v2 (EdDSA) accepted ...`.
 3. **Prove v1 is refused.** There is no v1 key left on the ERP to mint with, and that is the point. Check two things
    instead:
    1. The boot line above.
    2. The verifier row in `webdesk/api/test/ws4-assertion-v2-matrix.spec.ts`, "v1 presented after the HMAC key is
       unset", which answers `WS4 v1 (HMAC) assertions are no longer accepted`.
+
+   **Live proof (done 2026-10-12).** The retired key is still in the root-only `.env` backup from step 1. Feed it to
+   the probe through **stdin**, so it is never in argv or printed. W2 then mints a real v1. Run this from the ERP
+   compose dir:
+   ```bash
+   b=.env.bak-<the step-1 backup>; v=$(grep '^WEBDESK_CONTROL_WS4_KEY=' "$b" | cut -d= -f2-); v=${v#\"}; v=${v%\"}
+   { printf "process.env.WEBDESK_CONTROL_WS4_KEY='%s';\n" "$v"; cat ws4-probe.js; } | docker exec -i gaiada-platform-1 node -; unset v
+   ```
+   `ws4-probe.js` is the JS body of the probe above. Pass:
+   - W1 gives `404`.
+   - W2 gives `403 WS4 assertion rejected: WS4 v1 (HMAC) assertions are no longer accepted: ...`.
 4. **Containment probe.** From now on, run `WS4_HMAC_RETIRED=1 bash webdesk/ops/probes/containment-probe.sh`. Probe 6
    no longer lists `WEBDESK_CONTROL_WS4_KEY` as shared by design, so it FAILS if that value reappears anywhere in the
    WebDesk surface. It is not in the ERP env any more, so the sweep just has one fewer needle; the switch keeps the
-   exemption from silently returning.
+   exemption from silently returning. Use a copy of the probe that has the OTLP bearer in its retired-mode list
+   (main `28e2580a`, first released after 359). An older deployed tree fails with
+   `ERP secret values present in the surface: WEBDESK_OTLP_BEARER_TOKEN`; that is a stale probe, not a leak.
 5. **Secrets layout.** WebDesk now holds no control-channel signing secret at all, matching the editorial channel
-   (WSK-D39). Record the phase-3 date in the M4 plan's F1 section.
+   (WSK-D39). Record the phase-3 date in the M4 plan's F1 section. **Done: 2026-10-12.**
+6. **Backups that still hold the dead key.** These copies still contain the v1 key:
+   - the ERP's `.env.bak-m4f1*` files;
+   - `/root/m4f1-backup/env.*` (the WebDesk `.env` taken before phase 3);
+   - the older `/etc/webdesk/.env.bak-*` files.
+
+   Nothing accepts the key any more. Keep the copies for 14 days as the phase-3 rollback, then shred them, after
+   2026-10-26.
 
 ## Rotation (kid N to kid N+1), zero downtime
 

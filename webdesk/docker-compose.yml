@@ -170,7 +170,9 @@ services:
       # Control-channel placeholders only — see .env.example's hard rule. Never a Zone A host.
       CONTROL_CHANNEL_JWKS_ISSUER_URL: ${CONTROL_CHANNEL_JWKS_ISSUER_URL}
       WEBDESK_EVENT_SECRET: ${WEBDESK_EVENT_SECRET}
-      WEBDESK_APPROVAL_ASSERTION_KEY: ${WEBDESK_APPROVAL_ASSERTION_KEY}
+      # WS4 v1 (HMAC). Only `.env` can supply it (this `environment:` entry outranks `env_file:`). Empty =
+      # v1 refused; production retired it 2026-10-12 (M4 F1 phase 3), hence `:-` (no unset-variable warning).
+      WEBDESK_APPROVAL_ASSERTION_KEY: ${WEBDESK_APPROVAL_ASSERTION_KEY:-}
     ports:
       - "${WEBDESK_API_PORT:-8382}:3000"
     depends_on:
