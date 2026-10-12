@@ -551,8 +551,11 @@ func TestPseudonymIsStablePerDayDiffersPerAddressAndRotates(t *testing.T) {
 	if NewDayKey(func() time.Time { return now }).Pseudonym(a) == k.Pseudonym(a) {
 		t.Error("two key sources must not share a key")
 	}
-	// Not reversible by brute force without the key: the pseudonym is not a plain hash of the address.
-	if p1.String() == "" || strings.Contains(p1.String(), "203") {
+	// Not reversible by brute force without the key, and it never carries the address: none of the address's four bytes
+	// appear as a run anywhere in the pseudonym. (A substring test on the TEXT, such as "203", was flaky: the 96 random
+	// bits are printed as hex, and a group like "8203" turns up by chance about once in a few hundred runs.)
+	raw4 := a.As4()
+	if p1.String() == "" || bytes.Contains(p1.AsSlice(), raw4[:]) {
 		t.Errorf("pseudonym must not echo the address: %v", p1)
 	}
 }
