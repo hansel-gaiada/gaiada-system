@@ -1705,3 +1705,14 @@ without the hints, and the ledger's `filed` row is written in the approval's tra
 auto-run (the bar in `core/approval-executables.ts` stands; `execution_status` stays `not_applicable`). The earlier "attended-only" caveat on
 these tools is withdrawn. Proof: `core/agency-privacy.filing.test.ts`, `core/approval-filing-minimise.test.ts` (no service) and
 `core/agency-privacy-unattended.db.test.ts` (Linux gate).
+
+**The ai-agents half (M5-G5c, PROTOTYPED).** G5b minimised the ERP's copy; the agent runner held its own. `ai-agents/src/sensitive-tools.ts` is
+the same idea there: a static per-tool registry, and for `agency_privacy.*` the persisted, logged and model-facing copy of a call is
+`{minimised:"agency-privacy.v1", hashes, hints}` (the ERP's `subjectHash`, same domain, byte-for-byte; hints `***@domain`, `***NN`) and of its
+result counts, ids and status only. The live hub call still carries the real identifiers. A per-goal scope also scrubs the learned values from the
+goal row, run rows, `agent_run_events` (append-only, and pushed to the SSE bus), outcome, blackboard, eval trace and episodic memory; it is seeded
+from the goal text for an agent that holds a policy tool, because the planner names the person before any tool call. No permission or policy
+changes. Residuals, stated plainly: (a) the live model call and the AI gateway still see the human's goal text and the model's own args (the
+model needs them to act); (b) a `fileOnSuspend:false` suspended intent returns the real args to its caller from memory (15-minute TTL) and the
+assistant stores them to file the approval later, because the ERP's minimiser accepts only its own shape; (c) the hash is unsalted, as the ERP's.
+Proof: `ai-agents/src/sensitive-tools.test.ts`, `ai-agents/src/sensitive-run.test.ts` (no services).

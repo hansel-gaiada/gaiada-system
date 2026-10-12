@@ -13,6 +13,7 @@
 import type { Provenance, Trust } from "../knowledge/store";
 import type { AgentStep } from "../agent";
 import type { AgentTrace, TraceStatus } from "../evals/trace";
+import { currentSensitiveScope } from "../sensitive-tools";
 
 export interface HumanFeedback {
   rating: "up" | "down";
@@ -41,6 +42,9 @@ export interface Episode {
 
 /** Build an episode from a Step-A trace. Recovers failed tools from the step details. */
 export function episodeFromTrace(t: AgentTrace, tenantId: string, provider?: string): Episode {
+  // M5-G5c — memory is the one place a run outlives its goal and feeds the trainer: it takes the goal's
+  // sensitive-tool scope as a last gate even if the trace it was handed was built by a caller that skipped it.
+  const scope = currentSensitiveScope();
   const failedTools = t.steps
     .filter((s: AgentStep) => s.kind === "tool" && s.detail.endsWith(" failed"))
     .map((s) => s.detail.replace(/ failed$/, ""));
@@ -48,9 +52,9 @@ export function episodeFromTrace(t: AgentTrace, tenantId: string, provider?: str
     runId: t.runId,
     agent: t.agent,
     tenantId,
-    goal: t.goal,
+    goal: scope ? scope.scrub(t.goal) : t.goal,
     status: t.status,
-    outcome: t.outcome,
+    outcome: scope && t.outcome !== null ? scope.scrub(t.outcome) : t.outcome,
     toolsCalled: t.toolsCalled,
     failedTools,
     modelCalls: t.modelCalls,
