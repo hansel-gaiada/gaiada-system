@@ -385,3 +385,45 @@ is proven").
   - **Compose clean-up:** the base file now reads `${WEBDESK_APPROVAL_ASSERTION_KEY:-}`. On the box the resolved
     config is byte-identical and the unset-variable warning is gone.
   - **Dead-key backups** are kept as the 14-day rollback; shred them after 2026-10-26.
+- 03:05:07Z: **first scheduled role-based WebDesk dump** (cron as Hansel): 3.87 MB, tables=29, tenants=2.
+- 03:07Z and 04:09Z: **releases 360 and 361 deployed to WebDesk by `release.yml`'s `deploy-webdesk`.** Both were
+  green. After each, the api:
+  - is on its new digest with 0 restarts;
+  - still logs v1 retired and v2 accepted;
+  - still signs with the platform kid `ws4-2026-10` and holds no v1 key;
+  - gives W1 `404`;
+  - passes the in-tree `WS4_HMAC_RETIRED=1` probe 40/40 (360's tree carries the OTLP allow-list fix).
+- 03:57Z: **`WEBDESK_ZONEB_BRIDGE_URL` set** to `https://erp.gaiada.online/n8n/webhook/wd-zoneb-intake` (the api was
+  recreated on 360; the owner confirmed keeping it).
+  - Why then: M3's two conditions were met. Release 360 carried the mcp-hub path-param fix, and session a8 drove a
+    signed `schedule.fired` from inside webdesk-api-1 (n8n execution 2655, `recordZoneBEvent` →
+    `{"inserted":true}`).
+  - Still open: the first real event. The owner's schedule plus approval on the seed tenant `wsk49e-test` also
+    closes F1's owed audit-row read.
+- 04:22Z: **the offsite pull runs at 20:15 UTC, not 04:15.** sumopod is CST, and Ubuntu's cron ignores `CRON_TZ`.
+  Every nightly dump reached offsite about 17 h late, and nothing alerted, because the metrics track the pull's own
+  time.
+  - Fixed, owner-approved: the crontab is now `15 12 * * *` CST (= 04:15 UTC), and the old crontab is backed up.
+  - One pull was run by hand at 04:26Z (pulled=43, failed=0), so today's `webdesk-20261012-030502` is offsite and
+    age-encrypted.
+  - `infra/runbooks/erp-offsite-backup.md` now says so.
+- **F6 (rootless) designed:** branch `webdesk/m4-f6-rootless`, plan `docs/plans/2026-10-12-webdesk-rootless-plan.md`.
+  - Gates:
+    - Linux gate m4f6p1 on sumopod: migrations 749/0, legacy 16/0/1, including the new `ops-test-rootless` 167/0 and
+      the deploy harness 60/0;
+    - the branch's containment probe in rootful mode on the box: 40/40.
+  - An Opus adversarial review found 1 BLOCKER, 5 MAJOR and several MINOR issues, plus 4 tests that could not fail.
+    - The BLOCKER: a re-run of `apply` writes as root through a symlink the daemon user can plant, which could
+      overwrite the ERP's docker unit.
+  - The fixes are in progress, and the merge and the P2 proof wait for them.
+- 04:38–04:49Z: **release 362 (M6: live contract codegen) deployed to WebDesk** (run 38204480203), the first release
+  with M6's in-api `contract-codegen` worker. Checks:
+  - api `sha256:1e304050…`, 0 restarts, 57 MiB / 768 MiB at idle;
+  - CodegenModule and the regenerate routes loaded, and the worker registered (BullMQ `meta` and `stalled-check`
+    keys);
+  - content tick errors=0, healthz 200;
+  - WS4 v2 only on both sides;
+  - probes 40/40 from 362's tree.
+
+  `contract.regenerate` is MEDIUM. Its first all-tenant run waits for M6-P4c, M6's RSS measurement and the owner,
+  and M4 watches the api's CPU and memory during it.
