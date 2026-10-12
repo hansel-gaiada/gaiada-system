@@ -131,7 +131,10 @@ func (m *Memory) Forget(_ context.Context, req ForgetRequest) (ForgetResult, err
 		kept = append(kept, e)
 	}
 	m.events = kept
-	return ForgetResult{DeletedEvents: deleted, TombstonedVisitors: len(req.VisitorIDs), TombstonedConsents: len(req.ConsentIDs)}, nil
+	recordings := m.deleteRecordings(func(r *memRecording) bool {
+		return r.s.Website == req.Website && (vis[r.s.VisitorID] || con[r.s.ConsentID])
+	})
+	return ForgetResult{DeletedEvents: deleted, DeletedRecordings: recordings, TombstonedVisitors: len(req.VisitorIDs), TombstonedConsents: len(req.ConsentIDs)}, nil
 }
 
 // ForgetPair implements EventStore.
@@ -152,6 +155,9 @@ func (m *Memory) ForgetPair(_ context.Context, website, visitorID, consentID str
 		kept = append(kept, e)
 	}
 	m.events = kept
+	m.deleteRecordings(func(r *memRecording) bool {
+		return r.s.Website == website && r.s.VisitorID == visitorID && r.s.ConsentID == consentID
+	})
 	return deleted, nil
 }
 

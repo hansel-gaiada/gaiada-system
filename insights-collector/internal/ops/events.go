@@ -215,10 +215,11 @@ func (h *Handler) forget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.o.Stats.ForgetOps.Add(1)
+	h.o.Stats.ForgottenRecording.Add(res.DeletedRecordings)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"website":    website,
 		"mode":       body.Mode,
-		"deleted":    map[string]int64{"events": res.DeletedEvents},
+		"deleted":    map[string]int64{"events": res.DeletedEvents, "recordings": res.DeletedRecordings},
 		"tombstoned": map[string]int{"visitors": res.TombstonedVisitors, "consents": res.TombstonedConsents},
 	})
 }

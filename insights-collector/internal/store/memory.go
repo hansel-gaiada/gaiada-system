@@ -24,6 +24,8 @@ type Memory struct {
 	events []ConsentedEvent
 	nextID int64
 	tombs  map[tombKey]tomb
+
+	replay map[string]*memRecording // by recording id
 }
 
 type tomb struct {
@@ -32,7 +34,9 @@ type tomb struct {
 }
 
 // NewMemory returns an empty Memory store.
-func NewMemory() *Memory { return &Memory{counts: map[string]int64{}, tombs: map[tombKey]tomb{}} }
+func NewMemory() *Memory {
+	return &Memory{counts: map[string]int64{}, tombs: map[tombKey]tomb{}, replay: map[string]*memRecording{}}
+}
 
 // ErrDown is returned while Memory.Down is set.
 var ErrDown = errors.New("store down")

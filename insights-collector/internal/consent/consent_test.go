@@ -76,7 +76,7 @@ func newRig(t *testing.T, extra map[string]string) *rig {
 	now := time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)
 	r := &rig{mem: store.NewMemory(), stats: &stats.Counters{}, logs: logs, clock: &now}
 	r.mem.Now = func() time.Time { return *r.clock }
-	r.h = New(Options{Config: cfg, Geo: g, Bots: det, Resolver: res, Store: r.mem, Stats: r.stats, Log: log, Now: func() time.Time { return *r.clock }})
+	r.h = New(Options{Config: cfg, Geo: g, Bots: det, Resolver: res, Store: r.mem, Replay: r.mem, Stats: r.stats, Log: log, Now: func() time.Time { return *r.clock }})
 	r.mux = r.h.Routes()
 	return r
 }

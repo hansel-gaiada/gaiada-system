@@ -150,10 +150,16 @@ func (p *Postgres) Forget(ctx context.Context, req ForgetRequest) (ForgetResult,
 	if err != nil {
 		return res, err
 	}
+	rec, err := tx.Exec(ctx, `DELETE FROM replay_sessions WHERE website = $1::text::uuid
+		AND (visitor_id = ANY($2::text[]::uuid[]) OR consent_id = ANY($3::text[]::uuid[]))`,
+		req.Website, nonNil(req.VisitorIDs), nonNil(req.ConsentIDs))
+	if err != nil {
+		return res, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return res, err
 	}
-	return ForgetResult{DeletedEvents: tag.RowsAffected(), TombstonedVisitors: len(req.VisitorIDs), TombstonedConsents: len(req.ConsentIDs)}, nil
+	return ForgetResult{DeletedEvents: tag.RowsAffected(), DeletedRecordings: rec.RowsAffected(), TombstonedVisitors: len(req.VisitorIDs), TombstonedConsents: len(req.ConsentIDs)}, nil
 }
 
 func nonNil(s []string) []string {
@@ -182,6 +188,11 @@ func (p *Postgres) ForgetPair(ctx context.Context, website, visitorID, consentID
 	tag, err := tx.Exec(ctx, `DELETE FROM consented_events WHERE website = $1::text::uuid
 		AND visitor_id = $2::text::uuid AND consent_id = $3::text::uuid`, website, visitorID, consentID)
 	if err != nil {
+		return 0, err
+	}
+	// The pair's recordings go too (their chunks cascade). The returned count stays the buffer rows, as before.
+	if _, err := tx.Exec(ctx, `DELETE FROM replay_sessions WHERE website = $1::text::uuid
+		AND visitor_id = $2::text::uuid AND consent_id = $3::text::uuid`, website, visitorID, consentID); err != nil {
 		return 0, err
 	}
 	return tag.RowsAffected(), tx.Commit(ctx)
