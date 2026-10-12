@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.13.3` - CI runs the WebDesk Playwright suite against the built app (M5-W2f) (2026-10-12) - DEV-VERIFIED
+
+- **CI step:** the platform-ui job runs `playwright.webdesk.config.ts` (webdesk-content, portal-website, webdesk-editorial; 109 stub-based tests) against the `next build` output, using `next start` via `WD_E2E_BUILT=1`. Before this, only a 1-test smoke e2e ran in CI. The local default stays `next dev`.
+- On failure the HTML report and the test results are uploaded for 7 days. CI gets `retries: 1`, the same as the main config.
+- `playwright.config.ts`'s `chromium` project now ignores the WebDesk spec families, so the smoke config can never run them without their stub.
+- **First Linux run** (GitHub Actions 38211912936): 108 passed and 1 flaky that passed on retry, in 3.0 min. Locally two specs are timing-sensitive under `next start` (`webdesk-content.spec.ts:89` skeleton and `:888` key.mint); watch them.
+
 ### ai-agents `0.11.0` - M5-G5c: an agent run keeps no raw identifiers from a privacy tool call (2026-10-12) - PROTOTYPED
 
 The ai-agents half of M5-G5b (built by the M5 session). No agent holds the `agency_privacy.*` tools today, so live behaviour is unchanged until one does.

@@ -41,7 +41,7 @@ versions below; the running build reports it at `GET /health`.
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.5.0` | PROTOTYPED | WS4 | 2026-10-12 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
-| infra | `0.13.2` | PROTOTYPED | WS10 | 2026-10-12 |
+| infra | `0.13.3` | PROTOTYPED | WS10 | 2026-10-12 |
 | wa-chat-bot | `0.10.0` | PROTOTYPED | WS5 | 2026-10-12 |
 | ai-agents | `0.11.0` | PROTOTYPED | WS8 | 2026-10-12 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
