@@ -74,6 +74,8 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "forms.define": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "forms.def.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "forms.def.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-V3-a — the consent log's latest record per consent id (the ERP's proof of visitor consent): read / webdesk:read.
+  "consent.status": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-W2b — the writers' room review flow (design 4.3): the nine writes are MEDIUM/operate (none changes what a
   // production key sees; the publish gate that enforces approval is W2c on content.publish/schedule, still HIGH),
   // the board and the history are reads.
