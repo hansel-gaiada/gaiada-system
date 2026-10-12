@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import type { Invoice } from "@/lib/invoice";
+import type { Me } from "@/lib/platform";
 
 // PV5-09 — the staff invoice page rendered as the server renders it: the issued view (number, dates, PDF or "being
 // prepared", the issuer as frozen with the bank account masked, tax and totals, the ledger link for the finance read tier,
@@ -33,8 +34,8 @@ const meMock = vi.mocked(getMe);
 const invoiceMock = vi.mocked(getInvoice);
 const readinessMock = vi.mocked(getIssueReadiness);
 
-const ADMIN = { userId: "u-fin", name: "Fin", email: "f@example.test", title: null, assurance: "high", companies: [{ id: "co-1", name: "Example", type: null }], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }] };
-const MEMBER = { ...ADMIN, roles: [{ role: "member", scopeType: "company", scopeId: "co-1" }] };
+const ADMIN: Me = { userId: "u-fin", name: "Fin", email: "f@example.test", title: null, assurance: "high", companies: [{ id: "co-1", name: "Example", type: null }], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }] };
+const MEMBER: Me = { ...ADMIN, roles: [{ role: "member", scopeType: "company", scopeId: "co-1" }] };
 
 const ISSUED: Invoice = {
   id: "inv-1", clientId: "cl-1", clientName: "Example Client", periodStart: "2026-09-01", periodEnd: "2026-09-30", status: "sent",
@@ -47,8 +48,8 @@ const ISSUED: Invoice = {
     bank: { name: "Example Bank", accountName: "Example Agency Ltd", accountNo: "1234567890" } },
 };
 
-const mount = async (inv: Invoice, me = ADMIN) => {
-  meMock.mockResolvedValue(me as Awaited<ReturnType<typeof getMe>>);
+const mount = async (inv: Invoice, me: Me = ADMIN) => {
+  meMock.mockResolvedValue(me);
   invoiceMock.mockResolvedValue(inv);
   return render(await InvoiceDetailPage({ params: Promise.resolve({ invoiceId: inv.id }) }));
 };
