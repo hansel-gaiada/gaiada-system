@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.20.0` - M5-W7: gaiada.com's author collection and the post → author relation, as data (2026-10-12) - PROTOTYPED
+
+- `webdesk/sites/gaiada-com/collections/author.json`: a localized (EN/ID) `author` collection with public E-E-A-T fields only:
+  - display name, role, bio, expertise topics, credentials;
+  - a photo with alt text;
+  - profile links (url + network + label);
+  - `published`.
+- There is no email, phone, user id or other private field. A recursive deny-list test enforces this.
+- `post-author-field.json`: the post's optional `author` relation as a delta. It is optional so the 315 existing items still validate. Today most of them carry the literal "[CONFIRM: author name and role]".
+- Both are validated by the real composition and item validators (22/22). The suite now runs in CI and in the Linux gate (`m5-w7-author`).
+- **Not applied anywhere:** applying waits for counsel's profile-consent and RoPA items (design Q3).
+- Follow-ups:
+  - the site's byline, author page and Person JSON-LD (site repo);
+  - an author picker in the ERP editor;
+  - the importer's name mapping;
+  - https-only links, which the vocabulary cannot express.
+
 ### platform-nest `0.87.0` - M5-W6: AI assist for the writers' room (suggestions only; a human applies them) (2026-10-12) - DEV-VERIFIED
 
 - **The route:** `POST …/content/sites/:tenantSlug/:siteId/items/:itemId/assist {kind, version?}` for `outline`, `meta_description`, `faq`, `translate_draft` (EN→ID first draft) and `alt_text`. It goes through `ai-gateway-go`'s existing client; no provider key in platform-nest.
