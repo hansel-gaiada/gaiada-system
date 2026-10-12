@@ -165,6 +165,11 @@ export type RefreshOutcome =
   | { outcome: "idempotent"; snapshot: SnapshotDto }
   /** TRIPWIRE (a). The downloaded artifacts do not hash to what Zone B's own response claimed. */
   | { outcome: "hash_mismatch"; claimedHash: string; recomputedHash: string; contractVersion: string }
+  /** TRIPWIRE (a') (M6-P4b0b). WebDesk claimed a sha256 for the block-library tarball and the bytes we downloaded
+   *  do not hash to it, or a hash was claimed but no tarball URL was offered (`recomputedHash: null`). Refused
+   *  before any write, like (a). `claimedHash` is plain hex (no `sha256:` prefix). A URL with NO claimed hash is
+   *  the older-WebDesk case and is NOT this outcome. */
+  | { outcome: "block_library_hash_mismatch"; claimedHash: string; recomputedHash: string | null; contractVersion: string }
   /** TRIPWIRE (b). An EXISTING row for this exact (tenant, slug, version) has a DIFFERENT stored
    *  hash than what this fetch recomputed — a codegen determinism breach, alerted (not just 4xx). */
   | { outcome: "determinism_breach"; existingSnapshotId: string; existingHash: string; recomputedHash: string; contractVersion: string };
@@ -196,6 +201,23 @@ export async function refreshContractSnapshot(args: RefreshArgs): Promise<Refres
   // ── TRIPWIRE (a) ──────────────────────────────────────────────────────────────────────────────
   if (contentHash !== meta.contentHash) {
     return { outcome: "hash_mismatch", claimedHash: meta.contentHash, recomputedHash: contentHash, contractVersion: meta.version };
+  }
+
+  // ── TRIPWIRE (a') — the block-library tarball against WebDesk's own sha256 claim (M6-P4b0b). ────
+  // Same shape and placement as (a): a pure function of "what we downloaded" vs "what Zone B claimed", checked
+  // before any transaction so nothing is persisted on failure. The tarball stays out of `contentHash`, so (a)
+  // cannot catch it. A claimed hash with no tarball to check is refused too (`recomputedHash: null`); a tarball
+  // with no claimed hash is the older-WebDesk case and stays accepted (the mirror still records its own sha256).
+  if (meta.artifacts.blockLibrarySha256 !== null) {
+    const recomputed = blockLibrary ? sha256Hex(blockLibrary) : null;
+    if (recomputed !== meta.artifacts.blockLibrarySha256) {
+      return {
+        outcome: "block_library_hash_mismatch",
+        claimedHash: meta.artifacts.blockLibrarySha256,
+        recomputedHash: recomputed,
+        contractVersion: meta.version,
+      };
+    }
   }
 
   return withWebdev(tenantId, async (c) => {

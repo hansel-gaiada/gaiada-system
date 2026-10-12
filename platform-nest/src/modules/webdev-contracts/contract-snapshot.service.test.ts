@@ -49,6 +49,9 @@ function fakeProvider(opts: {
   blockLibrary?: Buffer;
   /** Serve the PHP SDK too. */
   sdkPhp?: Buffer;
+  /** M6-P4b0b - WebDesk's claim of the tarball's sha256. Omitted = the honest claim (the real sha256 of `blockLibrary`,
+   *  or null when there is no tarball); `null` = no claim (an older WebDesk); a string = that exact (possibly false) claim. */
+  blockLibrarySha256?: string | null;
 }): WebdevControlProvider {
   const withPhp = { ...opts.artifacts, sdkPhp: opts.sdkPhp ?? opts.artifacts.sdkPhp };
   const { manifest, contentHash } = computeContentHash(withPhp);
@@ -63,6 +66,9 @@ function fakeProvider(opts: {
       openapiUrl: "https://fixture.invalid/openapi.v1.json",
       contractMdUrl: "https://fixture.invalid/CONTENT-CONTRACT.md",
       blockLibraryUrl: opts.blockLibrary ? "https://fixture.invalid/gaiada-webdesk-blocks-1.3.2.tgz" : null,
+      blockLibrarySha256: opts.blockLibrarySha256 !== undefined
+        ? opts.blockLibrarySha256
+        : opts.blockLibrary ? createHash("sha256").update(opts.blockLibrary).digest("hex") : null,
     },
     contentHash: opts.claimedHashOverride ?? contentHash,
     generatedAt: new Date().toISOString(),
@@ -314,6 +320,69 @@ describe.skipIf(!TEST_URL)("WSK-19 — contract-snapshot mirror: the two tripwir
       tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "4.1.0", artifacts, blockLibrary: Buffer.from("tarball") }),
     });
     expect(again.outcome).toBe("idempotent");
+  });
+
+  it("M6-P4b0b TRIPWIRE (a-prime): a block-library tarball that does not hash to WebDesk's claim is refused with ZERO writes (rows, files)", async () => {
+    const tarball = Buffer.from("the bytes we downloaded");
+    const claimed = createHash("sha256").update(Buffer.from("the bytes WebDesk meant")).digest("hex");
+    const before = await storedSnapshots(tenant, SLUG);
+    const filesBefore = await adminPool().query(`SELECT count(*)::int AS n FROM files WHERE tenant_id = $1`, [tenant]);
+
+    const outcome = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager,
+      provider: fakeProvider({ version: "7.0.0", artifacts: artifactSet("gen-bl-mismatch"), blockLibrary: tarball, blockLibrarySha256: claimed }),
+    });
+    expect(outcome).toEqual({
+      outcome: "block_library_hash_mismatch",
+      claimedHash: claimed,
+      recomputedHash: createHash("sha256").update(tarball).digest("hex"),
+      contractVersion: "7.0.0",
+    });
+
+    expect(await storedSnapshots(tenant, SLUG)).toHaveLength(before.length);
+    const filesAfter = await adminPool().query(`SELECT count(*)::int AS n FROM files WHERE tenant_id = $1`, [tenant]);
+    expect(filesAfter.rows[0].n).toBe(filesBefore.rows[0].n);
+  });
+
+  it("M6-P4b0b TRIPWIRE (a-prime): a claimed hash with NO tarball URL is refused (recomputedHash null), nothing persisted", async () => {
+    const claimed = "ab".repeat(32);
+    const before = await storedSnapshots(tenant, SLUG);
+    const outcome = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager,
+      provider: fakeProvider({ version: "7.1.0", artifacts: artifactSet("gen-bl-nourl"), blockLibrarySha256: claimed }),
+    });
+    expect(outcome).toEqual({ outcome: "block_library_hash_mismatch", claimedHash: claimed, recomputedHash: null, contractVersion: "7.1.0" });
+    expect(await storedSnapshots(tenant, SLUG)).toHaveLength(before.length);
+  });
+
+  it("M6-P4b0b: a matching claim persists as before, and a tarball with NO claim (an older WebDesk) is still accepted", async () => {
+    const tarball = Buffer.from("verified tarball");
+    const matched = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager,
+      provider: fakeProvider({ version: "7.2.0", artifacts: artifactSet("gen-bl-match"), blockLibrary: tarball }),
+    });
+    expect(matched.outcome).toBe("created");
+    const matchedRow = (await storedSnapshots(tenant, SLUG)).find((r) => r.contract_version === "7.2.0")!;
+    expect((matchedRow.artifacts.hashes as Record<string, string>).blockLibrary).toBe(createHash("sha256").update(tarball).digest("hex"));
+
+    const unclaimed = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager,
+      provider: fakeProvider({ version: "7.3.0", artifacts: artifactSet("gen-bl-noclaim"), blockLibrary: tarball, blockLibrarySha256: null }),
+    });
+    expect(unclaimed.outcome).toBe("created");
+    const unclaimedRow = (await storedSnapshots(tenant, SLUG)).find((r) => r.contract_version === "7.3.0")!;
+    expect(typeof unclaimedRow.artifacts.blockLibraryFile).toBe("string");
+  });
+
+  it("M6-P4b0b: the block-library check runs before the existing-row read, so a bad tarball on an already-recorded version is (a-prime), not idempotent", async () => {
+    const artifacts = artifactSet("gen-bl-replay");
+    const first = await refreshContractSnapshot({ tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "7.4.0", artifacts }) });
+    expect(first.outcome).toBe("created");
+    const again = await refreshContractSnapshot({
+      tenantId: tenant, slug: SLUG, fetchedBy: manager,
+      provider: fakeProvider({ version: "7.4.0", artifacts, blockLibrary: Buffer.from("tarball"), blockLibrarySha256: "cd".repeat(32) }),
+    });
+    expect(again.outcome).toBe("block_library_hash_mismatch");
   });
 
   it("THIRD WALL: another tenant's snapshot list is empty — RLS, not application filtering", async () => {

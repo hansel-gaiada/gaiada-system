@@ -106,6 +106,13 @@ export interface ContractReadResponse {
      *  `latest.json` has no `artifactKeys.blockLibrary` (an older pointer, or an image without a baked
      *  tarball). Additive: a reader that ignores it is unaffected (the WSK-34 `sdkPhpUrl` precedent). */
     blockLibraryUrl: string | null;
+    /** M6-P4b0b — hex sha256 of the tarball `blockLibraryUrl` names, so the ERP mirror can verify the bytes it
+     *  downloaded. It is the pointer's `blockLibrarySha256` when `artifactKeys.blockLibrary` is present AND the
+     *  value is exactly 64 lowercase hex characters; `null` otherwise (an older pointer, an image without a baked
+     *  tarball, or a pointer value that is absent or malformed). A malformed value is never repaired or guessed:
+     *  never fabricate a hash. Plain hex, no `sha256:` prefix (unlike `contentHash`), and, like the tarball's own
+     *  hash in the pointer, not part of `contentHash`. Additive: a reader that ignores it is unaffected. */
+    blockLibrarySha256: string | null;
   };
   contentHash: string;
   generatedAt: string;

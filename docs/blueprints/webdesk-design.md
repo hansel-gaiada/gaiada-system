@@ -586,7 +586,9 @@ GET /control/v1/tenants/:slug/contract          (mTLS + svc-token, like every co
     "vocabularyVersion": "1.2.0",
     "blockLibrary": { "package": "@gaiada/webdesk-blocks", "version": "1.3.2", "range": "^1.3" },
     "artifacts": { "sdkTsUrl": "…", "sdkPhpUrl": null,     // null until P6 (D-10)
-                   "openapiUrl": "…", "contractMdUrl": "…" },   // short-lived pre-signed GETs
+                   "openapiUrl": "…", "contractMdUrl": "…",     // short-lived pre-signed GETs
+                   "blockLibraryUrl": null,                      // M6-P4b0: presigned tarball, null if none
+                   "blockLibrarySha256": null },                 // M6-P4b0b: hex sha256 of that tarball, null if none/unverifiable
     "contentHash": "sha256:…", "generatedAt": "…" }
 ```
 
