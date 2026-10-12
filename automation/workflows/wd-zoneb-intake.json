@@ -131,16 +131,47 @@
       "name": "MCP webdev.recordZoneBEvent (dedup insert, LOW write)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1320, 0]
+      "position": [1320, 0],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "// WSK-12 -- STEP 4: route on the dedup outcome (§10: \"form.received -> notification\"). Parses\n// mcp-hub's tools/call response (an MCP content envelope, same shape wd-digests.json's own\n// \"Parse notify result\" node already unwraps) and decides whether a notify call is warranted.\n// Deliberately narrow: only form.received facts that were a GENUINE new insert (never a\n// deduped replay) are candidates, and only when a recipient has actually been configured --\n// there is no per-tenant recipient-routing design yet (WSK-24's Sites tab is unbuilt), so this\n// flow does not invent one. Absent WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID, the fact still lands in\n// webdev_zoneb_event_log (the durable, always-true outcome) and simply raises no notification --\n// never a silent drop of the fact itself, only of the best-effort notice on top of it.\nlet parsed;\ntry {\n  const raw = $json.data || $json.body || $json;\n  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);\n  const outer = JSON.parse(text);\n  const contentText = outer.result && outer.result.content && outer.result.content[0] && outer.result.content[0].text;\n  parsed = contentText ? JSON.parse(contentText) : outer.result;\n} catch (e) {\n  parsed = { inserted: false, id: null, parseError: String(e) };\n}\n\nconst envelope = $('Gate + build MCP call').first().json.envelope;\nconst shouldNotify = envelope.kind === 'form.received' && parsed && parsed.inserted === true && !!$env.WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID;\n\nreturn [{ json: { envelope, outcome: parsed, shouldNotify } }];"
+        "jsCode": "// WSK-12 -- STEP 4: did the ERP record the fact, and does it warrant a notification (§10: \"form.received ->\n// notification\")? mcp-hub answers tools/call as a Streamable-HTTP SSE frame (\"event: message\\ndata: {json-rpc}\"),\n// not bare JSON. The first version JSON-parsed the whole text, so EVERY answer read as unparsed (found live\n// 2026-10-12, n8n execution 2660) and no form.received could ever notify. A refused record (a JSON-RPC error, a\n// tool result with isError, or the hub's HTTP error passed through by the node's onError) still answered 200, so\n// WebDesk counted a lost fact as delivered. Now `recorded` is true only for a tool result with a boolean\n// `inserted` (true = new, false = a deduped replay; both are durable); anything else answers 502.\n// Notify stays deliberately narrow: only a GENUINE new form.received insert, and only when a recipient has been\n// configured (WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID; there is no per-tenant recipient routing yet, WSK-24).\nfunction rpcOf(raw) {\n  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);\n  const data = text.split(/\\r?\\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim());\n  return JSON.parse(data.length > 0 ? data.join('\\n') : text);\n}\n\nlet outcome = null;\nlet failReason = null;\nif ($json.error) {\n  failReason = 'hub request failed: ' + String($json.error.message || JSON.stringify($json.error));\n} else {\n  try {\n    const rpc = rpcOf($json.data || $json.body || $json);\n    const result = rpc.result || {};\n    const text = result.content && result.content[0] && result.content[0].text;\n    if (rpc.error) failReason = 'hub error: ' + String(rpc.error.message || JSON.stringify(rpc.error));\n    else if (result.isError) failReason = 'record refused: ' + String(text || 'tool error');\n    else outcome = text ? JSON.parse(text) : result;\n  } catch (e) {\n    failReason = 'unreadable hub answer: ' + String(e);\n  }\n  if (failReason === null && (!outcome || typeof outcome.inserted !== 'boolean')) failReason = 'the tool result has no inserted flag';\n}\n\nconst recorded = failReason === null;\nconst envelope = $('Gate + build MCP call').first().json.envelope;\nconst shouldNotify = recorded && envelope.kind === 'form.received' && outcome.inserted === true && !!$env.WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID;\n\nreturn [{ json: { envelope, outcome, recorded, failReason: failReason === null ? null : failReason.slice(0, 300), shouldNotify } }];"
       },
       "name": "Parse dedup result + decide routing",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ String($json.recorded) }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Recorded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1760, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: 'record_failed', message: $json.failReason }) }}",
+        "options": { "responseCode": 502 }
+      },
+      "name": "Respond 502 (record failed)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1980, 140]
     },
     {
       "parameters": {
@@ -159,7 +190,7 @@
       "name": "Notify configured?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1760, 0]
+      "position": [1980, 0]
     },
     {
       "parameters": {
@@ -185,7 +216,8 @@
       "name": "MCP notify (LOW write)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1980, -80]
+      "position": [2200, -80],
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -196,7 +228,7 @@
       "name": "Respond 200",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [2200, 0]
+      "position": [2420, 0]
     }
   ],
   "connections": {
@@ -228,7 +260,13 @@
       "main": [[{ "node": "Parse dedup result + decide routing", "type": "main", "index": 0 }]]
     },
     "Parse dedup result + decide routing": {
-      "main": [[{ "node": "Notify configured?", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Recorded?", "type": "main", "index": 0 }]]
+    },
+    "Recorded?": {
+      "main": [
+        [{ "node": "Notify configured?", "type": "main", "index": 0 }],
+        [{ "node": "Respond 502 (record failed)", "type": "main", "index": 0 }]
+      ]
     },
     "Notify configured?": {
       "main": [
