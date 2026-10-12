@@ -121,7 +121,10 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // advancedOnly (governance, behind the writers' room people page). Relationship set untouched.
     // M6-P3c on top of main (merged 2026-10-12): +4 pairs / +1 kind for webdev_site (read/create/update/request_probe_consent): grantable 415 -> 419.
     // PV3-01 (2026-10-11): +1 pair on the EXISTING contract kind (`core.contract.countersign`, uiGrantable false, owner-only by a Cerbos grant rule).
-    expect(grantable.length).toBe(419);
+    // PV4-02 (2026-10-12): +5 grantable (core.conversation.{read,post,draft,manage} on the NEW conversation kind;
+    // portal.converse on the EXISTING portal kind); +2 authoring groups (`client_conversation`, `portal_conversation`),
+    // none advancedOnly. 419 -> 424.
+    expect(grantable.length).toBe(424);
     expect(relationshipKeys.size).toBe(15);
   });
 

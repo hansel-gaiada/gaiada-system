@@ -15,6 +15,7 @@ import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
 import { ANALYTICS_MCP_TOOLS } from "./umami-mcp-tools";
 import { DECAY_MCP_TOOLS } from "./content-decay-mcp-tools";
+import { AI_CRAWLER_MCP_TOOLS } from "./ai-crawler-mcp-tools";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -164,6 +165,8 @@ export const searchModule: ModuleContract = {
     // M5-W4 (additive): the WebDesk link on search_content_briefs (site, collection, locale, item, assignee, the search facts a writer
     // needs) and a nullable property_id. Registered here AT WRITE TIME, same standing lesson as every comment above.
     "202610122300_search_content_briefs_webdesk_link.sql",
+    // M5-P5b: search_ai_crawler_daily + search_ai_crawler_chunks (AI-crawler log aggregates). Registered AT WRITE TIME.
+    "202610131500_search_ai_crawler_log.sql",
   ],
   // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
   // module reconciliation, 14 declared keys):
@@ -254,6 +257,8 @@ export const searchModule: ModuleContract = {
     ...ANALYTICS_MCP_TOOLS,
     // M5-V4 — content-decay findings: one read + two LOW writes (acknowledge, file a refresh brief).
     ...DECAY_MCP_TOOLS,
+    // M5-P5b: AI-crawler log (ingest MEDIUM write, summary read) + the SM-16 AI-visibility summary read.
+    ...AI_CRAWLER_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",

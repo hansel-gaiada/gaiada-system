@@ -50,6 +50,7 @@ describe("Website -> Analytics -> site", () => {
     expect(screen.getByTestId("ai-search-total").textContent).toContain("12");
     expect(screen.getByText("home.hero")).toBeTruthy();
     expect(screen.getByText("83.3%")).toBeTruthy();
+    expect(screen.getByTestId("ai-visibility-link").getAttribute("href")).toMatch(/\/ai-visibility$/); // M5-P5b
   });
 
   it("shows small cells as <5 and never a raw small number", async () => {
