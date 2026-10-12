@@ -245,9 +245,13 @@ HITS=""
 #                             M4 F1 replaces it with an Ed25519 key WebDesk holds only the public half of;
 #                             after phase 3 (WS4_HMAC_RETIRED=1) it is no longer shared, and finding its value
 #                             in the surface is a FAIL like any other ERP secret.
-SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET WEBDESK_CONTROL_WS4_KEY"
+#   WEBDESK_OTLP_BEARER_TOKEN — the write-only telemetry bearer (WSK-D63 (2)): WebDesk presents it (in its
+#                             OTEL_EXPORTER_OTLP_HEADERS), the ERP collector's `otlp/webdesk` receiver checks it. It
+#                             can only WRITE traces/logs that the collector stamps service.namespace=webdesk; it reads
+#                             nothing and reaches nothing else. Found live by this probe at the T6a turn-on, 2026-10-12.
+SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET WEBDESK_CONTROL_WS4_KEY WEBDESK_OTLP_BEARER_TOKEN"
 if [ "$WS4_HMAC_RETIRED" = 1 ]; then
-  SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET"
+  SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET WEBDESK_OTLP_BEARER_TOKEN"
   echo "    WS4_HMAC_RETIRED=1: WEBDESK_CONTROL_WS4_KEY is NOT shared by design (M4 F1 phase 3)"
 fi
 while IFS=$'\t' read -r k v; do
