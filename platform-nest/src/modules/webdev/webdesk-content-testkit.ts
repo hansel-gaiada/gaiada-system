@@ -76,8 +76,8 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "media.uploadToken", "media.update", "media.delete"]);
-const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
+const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 
 /** WSK-43b: one library asset as the fake holds it (the real row is `media_assets`, migration 0014). */
 export interface FakeMediaAsset {
@@ -349,6 +349,21 @@ export class FakeZoneB {
           ...(i.editorial ? { editorial: { ...i.editorial, approvedIsHead: i.editorial.approvedVersion === i.headVersion } } : {}),
         });
       }
+      case "editorial.board": {
+        // M5-W2d: every item of the site that carries an editorial member, ALL collections (the BFF filters by Cerbos).
+        const rows = [...this.items.values()].filter((i) => i.siteId === p.siteId && i.editorial);
+        return ok({
+          items: rows.map((i) => ({ itemId: i.itemId, collectionKey: i.collectionKey, locale: i.locale, slug: i.slug, title: null, headVersion: i.headVersion, publishState: i.publishState, editorial: i.editorial })),
+          counts: { draft: rows.length, in_review: 0, changes_requested: 0, approved: 0 },
+          policies: [...new Set(rows.map((i) => i.collectionKey))].map((collectionKey) => ({ collectionKey, reviewRequired: true, seoSignoffRequired: false, updatedBy: null, updatedAt: new Date().toISOString() })),
+          page: { cursor: null, hasMore: false, limit: 50 },
+        });
+      }
+      case "editorial.history": {
+        const i = this.items.get(p.itemId);
+        if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
+        return ok({ itemId: i.itemId, collectionKey: i.collectionKey, headVersion: i.headVersion, deleted: false, editorial: i.editorial ?? null, seoSnapshot: null, events: [], eventsTruncated: false, comments: [], commentsTruncated: false });
+      }
       case "item.versions": {
         const i = this.items.get(p.itemId);
         if (!i || i.siteId !== p.siteId) return problem(404, "item-not-found");
@@ -408,6 +423,10 @@ export class FakeZoneB {
     if (this.dropBeforeApply) {
       this.dropBeforeApply = false;
       throw new WebdeskControlTransportError("link died before the request was written", 1, true, "ECONNRESET");
+    }
+    if (req.command.startsWith("editorial.")) {
+      // M5-W2d: the review commands are recorded (the call list is the assertion); WebDesk's state machine is not restated here.
+      return ok({ itemId: req.params?.itemId ?? null, editorial: { state: "in_review" }, replayed: false });
     }
     const result = this.apply(req, sub);
     if (this.dropAfterApply) {

@@ -163,7 +163,9 @@ function siteNotFound(): WebdeskProblem {
 
 export type ContentKind = "webdesk_content_item" | "webdesk_collection" | "webdesk_media_asset";
 /** `upload` is `webdesk_media_asset`'s (WSK-43b: minting an upload token). */
-export type ContentAction = "read" | "create" | "update" | "request_publish" | "unpublish" | "delete" | "apply_schema" | "upload";
+export type ContentAction = "read" | "create" | "update" | "request_publish" | "unpublish" | "delete" | "apply_schema" | "upload"
+  // M5-W2d: the editorial review actions (`webdesk_content_item`), and `webdesk_collection:manage_editorial` (the policy).
+  | "submit" | "comment" | "request_changes" | "seo_signoff" | "approve" | "assign" | "manage_editorial";
 
 /**
  * WSK-49c — the CLIENT context a gate carries when it was opened for a client editor (the portal BFF). Absent on every
@@ -691,6 +693,8 @@ interface ItemAttrs {
   reviewState: string;
   /** M5-W1c: `publishedVersion !== null`. */
   published: boolean;
+  /** M5-W2d: the item's title as WebDesk reported it (a notification names the item by it; never a body). */
+  itemTitle: string | null;
   /** M5-W1c: `editorial.submittedVersion` (the version an approval would be about), when WebDesk sent one. */
   submittedVersion: number | null;
   /** M5-W1c: the creator (`created_by`) of the version this read selected, and of the head: the Cerbos `creatorId` of `approve`. */
@@ -752,8 +756,8 @@ export class ItemGate {
   }
 
   /** @internal an existing item, from its `item.get`. `siteId` is the wall's own (`EditableSite.site.siteId`). */
-  static async forItem(gate: ContentGate, site: SiteRef, siteId: string, itemId: string, action: ContentAction, attrs: ItemAttrs): Promise<ItemGate> {
-    await authorize(gate.principal, ItemGate.resourceOf(gate, siteId, itemId, attrs), action);
+  static async forItem(gate: ContentGate, site: SiteRef, siteId: string, itemId: string, action: ContentAction, attrs: ItemAttrs, creatorId?: string): Promise<ItemGate> {
+    await authorize(gate.principal, ItemGate.resourceOf(gate, siteId, itemId, creatorId === undefined ? attrs : { ...attrs, creatorId }), action);
     return new ItemGate(gate, site, action, itemId, attrs.collectionKey, attrs.locale, attrs);
   }
 
@@ -804,6 +808,7 @@ function parseItemAttrs(body: unknown): ItemAttrs {
     ownerId: ed && typeof ed.authorSub === "string" ? ed.authorSub : "",
     reviewState: ed && typeof ed.state === "string" && REVIEW_STATES.includes(ed.state) ? ed.state : "",
     published: typeof item.publishedVersion === "number",
+    itemTitle: typeof item.title === "string" ? item.title.slice(0, 120) : null,
     submittedVersion: num(submitted),
     selectedCreatedBy: v && typeof v.createdBy === "string" ? v.createdBy : null,
     selectedVersion: v ? num(v.version) ?? num(v.n) : null,
@@ -936,12 +941,7 @@ export class WebdeskContentService {
   private async withAllowed(gate: ContentGate, site: SiteRef, siteId: string, itemId: string, attrs: ItemAttrs, res: ZoneBResult): Promise<ZoneBResult> {
     if (!isPlainObject(res.body) || gate.principal.actFor) return res;
     try {
-      let creatorId = "";
-      if (attrs.reviewState === "in_review" && attrs.submittedVersion !== null) {
-        if (attrs.submittedVersion === attrs.selectedVersion && attrs.selectedCreatedBy) creatorId = attrs.selectedCreatedBy;
-        else if (attrs.submittedVersion === attrs.headVersion && attrs.headCreatedBy) creatorId = attrs.headCreatedBy;
-        else creatorId = (await this.readItemRaw(site, itemId, String(attrs.submittedVersion))).attrs.selectedCreatedBy ?? "";
-      }
+      const creatorId = await this.approvalCreatorId(site, itemId, attrs);
       const got = await checkActions(
         gate.principal,
         ItemGate.resourceOf(gate, siteId, itemId, { collectionKey: attrs.collectionKey, locale: attrs.locale, ownerId: attrs.ownerId, reviewState: attrs.reviewState, published: attrs.published, creatorId }),
@@ -952,6 +952,31 @@ export class WebdeskContentService {
       logger.warn(`item allowed unavailable: ${(err as Error).message}`);
       return res;
     }
+  }
+
+  /**
+   * M5-W1c/W2d: the Cerbos `creatorId` of `approve`: the creator (`created_by`) of the version an approval would be about, i.e.
+   * the SUBMITTED version of an item in review (design 2.3, 4.4), read from the answer in hand or from one more `item.get`.
+   * "" when the item is not in review or WebDesk named no creator: the policy then denies (four eyes cannot be shown).
+   */
+  private async approvalCreatorId(site: SiteRef, itemId: string, attrs: ItemAttrs): Promise<string> {
+    if (attrs.reviewState !== "in_review" || attrs.submittedVersion === null) return "";
+    if (attrs.submittedVersion === attrs.selectedVersion && attrs.selectedCreatedBy) return attrs.selectedCreatedBy;
+    if (attrs.submittedVersion === attrs.headVersion && attrs.headCreatedBy) return attrs.headCreatedBy;
+    return (await this.readItemRaw(site, itemId, String(attrs.submittedVersion))).attrs.selectedCreatedBy ?? "";
+  }
+
+  /**
+   * M5-W2d PHASE 2 of an editorial item command (`webdesk-editorial.service.ts`): the cross-company wall, then WebDesk's
+   * `item.get`, then the REAL action with the item's attributes (`ownerId`, `reviewState`, `published`, collection and
+   * locale from WebDesk; for `approve` also `creatorId`, the creator of the submitted version, never the body's).
+   * Runs BEFORE the body is looked at, so a denied caller is 403 whatever it sent and nothing is written.
+   */
+  async openEditorialItem(gate: ContentGate, site: SiteRef, itemId: string, action: ContentAction): Promise<ItemGate> {
+    const editable = await gate.resolveSite(this.zoneB, site);
+    const { attrs } = await this.readItemRaw(site, itemId);
+    const creatorId = action === "approve" ? await this.approvalCreatorId(site, itemId, attrs) : undefined;
+    return ItemGate.forItem(gate, site, editable.site.siteId, itemId, action, attrs, creatorId);
   }
 
   async listVersions(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
@@ -1625,7 +1650,7 @@ function lenientPublishRefs(raw: unknown): Array<{ itemId: string; version: numb
 }
 
 /** Does Cerbos allow `principal` (and, on a delegated call, the human it acts for) `action` on `resource`? Writes no audit row. */
-async function probeAllowed(principal: Principal, resource: Resource, action: string): Promise<boolean> {
+export async function probeAllowed(principal: Principal, resource: Resource, action: string): Promise<boolean> {
   if (!(await check(principal, resource, action)).allow) return false;
   if (principal.actFor && principal.actFor.userId !== principal.userId) {
     const human = await assemblePrincipal(principal.actFor.userId, principal.assurance);
@@ -1636,7 +1661,7 @@ async function probeAllowed(principal: Principal, resource: Resource, action: st
 }
 
 /** `Promise.all` with a ceiling; the first failure rejects and stops handing out work. */
-async function mapPool<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+export async function mapPool<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
   let failed = false;

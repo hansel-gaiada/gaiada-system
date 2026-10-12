@@ -30,6 +30,7 @@ import {
   type ZoneBResult,
 } from "./webdesk-content.service";
 import { webdeskMedia } from "./webdesk-media.service";
+import { webdeskEditorial } from "./webdesk-editorial.service";
 
 /** Writes a Zone B problem exactly as Zone B sent it. */
 @Catch(WebdeskProblem)
@@ -275,5 +276,152 @@ export class WebdeskContentController {
   ) {
     const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "delete");
     send(reply, await webdeskContent.deleteItem(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
+  }
+
+  // ── M5-W2d: the writers' room review flow (docs/plans/2026-10-11-m5-writers-room-design.md §4.3) ─────────────
+  // Same two phases as every route above: `authorizeSite` first, then (in `webdesk-editorial.service.ts`) the item is read from
+  // WebDesk and the REAL action is checked with its attributes BEFORE the body is validated; then the signed command is forwarded.
+  // submit/withdraw -> `submit`; request-changes -> `request_changes`; seo-signoff -> `seo_signoff`; approve -> `approve` (maker != checker:
+  // the creator of the submitted version, from WebDesk's read); assign -> `assign`; comments -> `comment`; editorial-policy ->
+  // `webdesk_collection:manage_editorial`. The static `editorial/…` paths cannot collide with `items/:itemId`.
+
+  @Get("sites/:tenantSlug/:siteId/editorial/board")
+  async editorialBoard(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
+    send(reply, await webdeskEditorial.board(gate, { tenantSlug, siteId }, query));
+  }
+
+  @Get("sites/:tenantSlug/:siteId/items/:itemId/editorial")
+  async editorialHistory(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
+    send(reply, await webdeskEditorial.history(gate, { tenantSlug, siteId }, itemId, query));
+  }
+
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/submit")
+  @HttpCode(200)
+  async editorialSubmit(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "submit");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "submit", body, idempotencyKeyOf(idem)));
+  }
+
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/withdraw")
+  @HttpCode(200)
+  async editorialWithdraw(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "submit");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "withdraw", body, idempotencyKeyOf(idem)));
+  }
+
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/request-changes")
+  @HttpCode(200)
+  async editorialRequestChanges(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "request_changes");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "requestChanges", body, idempotencyKeyOf(idem)));
+  }
+
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/seo-signoff")
+  @HttpCode(200)
+  async editorialSeoSignoff(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "seo_signoff");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "seoSignoff", body, idempotencyKeyOf(idem)));
+  }
+
+  /** Phase 1 is the site-level read only: an attribute-free `approve` is denied for everyone (no creator is known yet), so the item decides. */
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/approve")
+  @HttpCode(200)
+  async editorialApprove(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "read");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "approve", body, idempotencyKeyOf(idem)));
+  }
+
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/assign")
+  @HttpCode(200)
+  async editorialAssign(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "assign");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "assign", body, idempotencyKeyOf(idem)));
+  }
+
+  /** 201 (WebDesk's status, passed through). */
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/comments")
+  async editorialComment(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "comment");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "comment", body, idempotencyKeyOf(idem)));
+  }
+
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/editorial/comments/:commentId/resolve")
+  @HttpCode(200)
+  async editorialCommentResolve(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Param("commentId") commentId: string,
+    @Headers("idempotency-key") idem: string | undefined, @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "comment");
+    send(reply, await webdeskEditorial.itemCommand(gate, { tenantSlug, siteId }, itemId, "commentResolve", body, idempotencyKeyOf(idem), commentId));
+  }
+
+  @Put("sites/:tenantSlug/:siteId/collections/:collectionKey/editorial-policy")
+  async editorialPolicy(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("collectionKey") collectionKey: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "manage_editorial");
+    send(reply, await webdeskEditorial.setPolicy(gate, { tenantSlug, siteId }, collectionKey, body, idempotencyKeyOf(idem)));
+  }
+
+  /** The MCP hub's method union has no PUT, so `webdesk.editorial.setPolicy` calls this alias: same path, same body, same semantics. */
+  @Patch("sites/:tenantSlug/:siteId/collections/:collectionKey/editorial-policy")
+  async editorialPolicyPatch(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("collectionKey") collectionKey: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "manage_editorial");
+    send(reply, await webdeskEditorial.setPolicy(gate, { tenantSlug, siteId }, collectionKey, body, idempotencyKeyOf(idem)));
   }
 }
