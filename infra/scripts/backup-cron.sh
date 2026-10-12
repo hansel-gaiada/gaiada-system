@@ -44,8 +44,8 @@ fi
 # still satisfy it and the run would report success. Each consolidated stack is therefore checked
 # by name, and only when its container is actually on this host — a box that does not host a stack
 # must not warn about it forever.
-for PAIR in 'webdesk-postgres-1 webdesk' \
-            'gaiada-social-social-postgres-1 postiz' \
+# (webdesk: retired 2026-10-12. Its own nightly writes and checks its dumps, on its own rootless daemon.)
+for PAIR in 'gaiada-social-social-postgres-1 postiz' \
             'gaiada-social-social-temporal-postgres-1 temporal' \
             'gaiada-social-social-temporal-postgres-1 temporal_visibility'; do
   set -- $PAIR

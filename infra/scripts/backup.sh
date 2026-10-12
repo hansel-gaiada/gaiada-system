@@ -185,12 +185,14 @@ waha_sessions
 # Roles for every cluster this box hosts. Restore order in a real recovery is globals FIRST, then
 # the per-database dumps — the reverse leaves the GRANTs unapplied, which is the bug found above.
 dump_globals host
-dump_globals webdesk webdesk-postgres-1 postgres
+# WebDesk: RETIRED here 2026-10-12 (owner ruling, M4). WebDesk runs on its own ROOTLESS daemon (F6), which this
+# script's `docker` cannot see, and its own nightly (webdesk/ops/scripts/webdesk-backup-nightly.sh, cron 03:05 UTC
+# as Hansel) writes both webdesk-*.sql.gz (as the read-only BYPASSRLS webdesk_backup) and a password-free
+# globals-webdesk-*.sql.gz into this same directory, which sumopod pulls. Restore drill: webdesk-restore-drill.sh.
 dump_globals social gaiada-social-social-postgres-1 postiz
 dump_globals temporal gaiada-social-social-temporal-postgres-1 temporal
 
-# WebDesk (WSK) — `postgres`, not `webdesk_owner`; see the role note above.
-dump_container webdesk-postgres-1 postgres webdesk
+# (WebDesk's data dump moved to its own nightly; see the note above the globals.)
 # gaiada-social (Postiz) + its Temporal pair. Temporal's two databases are useless apart: the
 # visibility store is rebuilt from, and must match, the main one.
 dump_container gaiada-social-social-postgres-1 postiz postiz
