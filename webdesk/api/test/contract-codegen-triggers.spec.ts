@@ -58,7 +58,7 @@ function rig(): Rig {
       else if (/INSERT INTO tenants/.test(sql)) {
         events.push("effect:tenant-insert");
         return { rows: [{ id: "t", slug: "newco", company_ref: TENANT.companyRef, status: "active", created_at: "now", default_locale: "id-ID", locales: ["id-ID"] }] };
-      } else if (/SELECT 1 FROM sites/.test(sql)) return { rows: [{ "?column?": 1 }] };
+      } else if (/SELECT (1|status) FROM sites/.test(sql)) return { rows: [{ "?column?": 1, status: "active" }] }; // schema.apply reads the site's status (site.archive)
       else if (/FOR UPDATE/.test(sql)) return { rows: collectionRows };
       else if (/INSERT INTO collections/.test(sql)) {
         events.push("effect:collection-upsert");
