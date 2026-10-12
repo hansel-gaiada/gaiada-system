@@ -89,7 +89,7 @@ describe("portal invoice · the invoice of record", () => {
     expect(screen.queryByRole("heading", { name: heading("Invoice of record") })).toBeNull();
     expect(screen.queryByText(/Being prepared/)).toBeNull();
     expect(screen.queryByRole("link", { name: /Download invoice/ })).toBeNull();
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/Sep 2026/);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/Sept? 2026/);
   });
 });
 

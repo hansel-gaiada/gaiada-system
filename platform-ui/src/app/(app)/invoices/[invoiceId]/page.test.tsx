@@ -82,7 +82,8 @@ describe("staff invoice page · the issued view", () => {
   it("shows the issuer as frozen, with the bank account masked until Show", async () => {
     await mount(ISSUED);
     const issuer = within(card("Issued by"));
-    expect(issuer.getByText("Example Agency Ltd")).toBeInTheDocument();
+    // The legal name, and the name the account is held in.
+    expect(issuer.getAllByText("Example Agency Ltd")).toHaveLength(2);
     expect(issuer.getByText("00.000.000.0-000.000")).toBeInTheDocument();
     expect(issuer.getByText("•••• 7890")).toBeInTheDocument();
     expect(issuer.queryByText("1234567890")).toBeNull();
