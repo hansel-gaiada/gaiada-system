@@ -181,8 +181,14 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     return { id: (r.json() as { id: string }).id, title };
   }
 
+  // PV4-04: a convert must now answer `priceImpact`. These MI-03 tests predate the rule and are about
+  // routing, so the helper answers `none` unless a test says otherwise; the rule itself (and the
+  // `changes_price` flow) is covered in webdev-price-amendment.test.ts, which sends raw payloads.
   const triage = (crId: string, payload: Record<string, unknown>, actor = admin) =>
-    app.inject({ method: "POST", url: `/api/${co}/webdev/change-requests/${crId}/triage`, headers: asUser(actor), payload });
+    app.inject({
+      method: "POST", url: `/api/${co}/webdev/change-requests/${crId}/triage`, headers: asUser(actor),
+      payload: payload.action === "convert" && !("priceImpact" in payload) ? { priceImpact: "none", ...payload } : payload,
+    });
 
   const verify = (crId: string, payload: Record<string, unknown> = {}, actor = admin) =>
     app.inject({ method: "POST", url: `/api/${co}/webdev/change-requests/${crId}/verify`, headers: asUser(actor), payload });

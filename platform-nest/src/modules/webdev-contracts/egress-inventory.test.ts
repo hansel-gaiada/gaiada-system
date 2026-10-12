@@ -88,6 +88,18 @@ describe("modules/webdev-contracts egress inventory (WSK-19, mirroring modules/w
     }
   });
 
+  // M6-P4j (WSK-D81): the real-channel provider moves every byte through `WebdeskControlClient` (the one file in
+  // modules/webdev that talks to WebDesk, listed in that directory's inventory). It must stay a delegate: a network
+  // call here would be a second, unreviewed path across the estate boundary.
+  it("the real-channel provider originates no outbound call itself and goes through the control client", () => {
+    const text = readFileSync(join(ROOT, "contract-fetch-webdesk.ts"), "utf8");
+    expect(files).toContain("contract-fetch-webdesk.ts");
+    expect("contract-fetch-webdesk.ts" in APPROVED_EGRESS).toBe(false);
+    expect(networkLines(text)).toEqual([]);
+    expect(text).toContain("../webdev/webdesk-control-client");
+    expect(text).not.toMatch(/node:https?|https?\.request/);
+  });
+
   it("the driver reads its OWN config namespace and no foreign one", () => {
     const text = readFileSync(join(ROOT, "contract-fetch-http.ts"), "utf8");
     expect(text).toContain("config.webdevControl");

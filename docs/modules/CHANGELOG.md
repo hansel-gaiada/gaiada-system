@@ -11,6 +11,53 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### automation `0.6.1` - M6-P4k: the delivery flow's repo check passes `tenantId` (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate.
+  - GH-12 made `github.repoStatus` require `tenantId`, but `pipeline-delivery.json`'s `MCP github.repoStatus` node still sent `{ repo }`.
+  - The hub refused the call, and `Repo ready?` read the refusal as "repo does not exist yet".
+  - So every run's `pm_approval` ended in a "repo needed" notice instead of `code.scaffold` (n8n execution 2697).
+- **The fix:** the node passes `tenantId` from `Load + decide`.
+- **Deploy:** the deploy does not ship `automation/workflows/`, so this needs a CLI re-import of `pipeline-delivery.json` (`ws11delivery0001`) and re-activation after the release.
+
+### mcp-hub `0.15.1` - M6-P4k: every workflow's MCP call is checked against its tool's required arguments (2026-10-13) - PROTOTYPED
+
+- **New test `src/workflow-tool-args.test.ts`:**
+  - It registers the hub's static tool sets and parses every `tools/call` in `automation/workflows/*.json`.
+  - It fails when a call omits an argument its tool's `inputSchema.required` names.
+  - Runtime-only module tools (`webdev.*` and the like), dynamic argument objects and spreads are skipped.
+  - A coverage floor (at least 40 checked calls, including the delivery flow's `github.repoStatus`) stops an empty scan from passing.
+- **Checked:** it fails on the pre-P4k `pipeline-delivery.json`, naming `github.repoStatus: missing tenantId`, and passes on the fixed file (3/3).
+
+### platform-nest `0.111.0` - M6-P4j: the contract pin runs over the real control channel (WSK-D81) (2026-10-13) - PROTOTYPED
+
+- **Bug (live 2026-10-13):** provision completion could never pin a contract snapshot, so no provisioned site got a `CONTRACT.lock` and `code.scaffold` could not run.
+  - **Wrong channel:** completion, the console reads and the snapshots controller used the WSK-19 bearer stub (`WEBDEV_CONTROL_BASE_URL`, unset in production). The configured four-layer client was never used for it.
+  - **Unreachable URLs:** the artifact URLs in the contract body are presigned against WebDesk's internal object store, unreachable from the ERP (`ENOTFOUND rustfs`).
+- **`webdesk-control-client.ts`:**
+  - every response carries `bodyBytes` (the exact bytes; `bodyText` and `json` are unchanged; optional in the type only so older test doubles compile);
+  - `getContractArtifact(tenantSlug, contractVersion, artifact)` reads the new WebDesk route;
+  - new `binaryResponse` request flag: `accept: */*`, and a 25 MiB response cap instead of 8 MiB, for that call only (reads only).
+- **New `contract-fetch-webdesk.ts`:** `WebdeskChannelContractProvider` (key `webdesk-control`). It validates the bundle with the same validator as the stub (now exported), remembers which artifact each returned URL stands for, and fetches the bytes through the client; it never requests a URL. An unknown URL is refused.
+- **Error mapping:**
+  - not configured -> `ContractControlNotConfiguredError`;
+  - transport, token and breaker-open errors, and any non-2xx -> `WebdevControlEgressError` (credential-free). The bundle read says "returned 404" as the stub did, because the completion port reads that as "contract not published yet".
+- **New `contract-control-provider.ts`:** `resolveContractControlProvider()`: the real channel when `WEBDESK_CONTROL_BASE_URL` is set, else the stub when `WEBDEV_CONTROL_BASE_URL` is set (dev), else not configured. The three call sites (`pinContractSnapshot`, `resolveConsoleProvider`, the snapshots controller) use it and keep their test overrides and not-configured mappings.
+- **No new env, no migration.** The mirror still verifies `contentHash` and the block-library sha256 over the bytes it fetched.
+- **Tests:** provider and selector unit tests, client `bodyBytes` and binary-read wire tests (TLS fixture), an egress-inventory row, and a DB-backed refresh over the real-channel provider. Not run locally (no Docker, no installed dependencies); the server gate runs them.
+
+### webdesk `0.26.0` - M6-P4j: contract artifact bytes over the control channel (WSK-D81) (2026-10-13) - PROTOTYPED
+
+- **New route:** `GET /control/v1/tenants/:tenantSlug/contract/:contractVersion/artifacts/:artifact` on the existing `ContractController`.
+  - `:artifact` is `openapi`, `sdkTs`, `sdkPhp`, `contractMd` or `blockLibrary` (anything else: 400).
+  - Raw bytes with `content-type` and `content-length`; 25 MiB cap (larger: 500, `contract-artifact-too-large`).
+  - A version this tenant has no artifacts for, or an artifact absent for it (`sdkPhp` and `blockLibrary` legitimately can be): 404, `contract-artifact-not-found`. The block library's key comes from `latest.json`, which only describes the latest version, so an older version has none.
+  - An inactive or unknown tenant: 404.
+- **Same capability as `contract.read`:** same guards, scope (`webdesk:read`) and audit command; the artifact and version go in the audit args, with the outcome. No new command, no policy or command-registry change, no WS4.
+- **Why:** the presigned URLs in the contract body name WebDesk's internal object store, unreachable from the ERP across the airlock (WSK-D81). The URLs stay in the body unchanged for in-estate consumers.
+- **`ContractReadService.readArtifact`** resolves the key with the same `artifactKey` rule it presigns with; the version must be plain semver, so nothing else reaches an object key.
+- **Tests:** a no-service spec for the service and handler (`contract-artifact-route.spec.ts`), and HTTP cases added to `codegen-contract-controller.spec.ts` (needs the DB and storage containers; server gate).
+
 ### platform-nest `0.110.0` - M5-V6-b: the ERP replay backend, recordings list and chunk stream behind `view_replay` (2026-10-13) - PROTOTYPED
 
 - **Routes:** `GET …/visitors/:visitorId/recordings` (metadata only) and `GET …/recordings/:recordingId/chunks?from&opening`, streamed through the BFF.

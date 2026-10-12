@@ -43,7 +43,7 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 15 |
-| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 34 |
+| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 35 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 7 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 28 |
 | social | `social` | 13 |
-| webdev | `webdev` | 30 |
+| webdev | `webdev` | 31 |
 
 ## Capabilities
 

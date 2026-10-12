@@ -38,7 +38,7 @@ import { notifyBestEffort } from "./client-notify";
 import { requireSigner, resolvePortalScope, type PortalScope } from "./portal-scope";
 // PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
 import {
-  contractInPortalScope, conversationAttachmentClientVisible, conversationThreadInPortalScope, deliverableClientVisible,
+  changeRequestInPortalScope, contractInPortalScope, conversationAttachmentClientVisible, conversationThreadInPortalScope, deliverableClientVisible,
   invoiceInPortalScope, invoicePaymentClientVisible, projectInPortalScope,
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
@@ -99,6 +99,16 @@ function dispositionHeader(filename: string): string {
   const ascii = filename.replace(/[\r\n"\\]/g, "_").replace(/[^\x20-\x7e]/g, "_");
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
+
+// PV4-04: the amendment fields every portal contract read carries. Both joined rows (the amended contract,
+// the change request that caused it) go through the CALLER'S scope predicates, so a project-scoped contact
+// never learns the id or reference of a contract, or the id of a request, outside their reach: out of scope
+// reads null, exactly like a row that is not there.
+const AMENDMENT_COLUMNS = `
+  k.kind, am.id AS "amendsId", am.reference AS "amendsReference", wcr.id AS "changeRequestId"`;
+const amendmentJoins = (params: { clients: number; projects: number }) => `
+  LEFT JOIN contracts am ON am.id = k.amends_id AND ${contractInPortalScope("am", params)}
+  LEFT JOIN webdev_change_requests wcr ON wcr.id = k.change_request_id AND ${changeRequestInPortalScope("wcr", params)}`;
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -323,8 +333,10 @@ export class PortalCommerceController {
                 -- Expiry is DERIVED for display and not written back: a nightly job that flips statuses
                 -- does not exist, and a portal that showed a live contract as expired (or the reverse)
                 -- because a cron missed a night would be worse than computing it on read.
-                (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded"
+                (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
+                ${AMENDMENT_COLUMNS}
            FROM contracts k LEFT JOIN projects p ON p.id = k.project_id
+           ${amendmentJoins({ clients: 1, projects: 2 })}
           WHERE ${contractInPortalScope("k", { clients: 1, projects: 2 })}
           ORDER BY k.created_at DESC LIMIT 200`,
         [scope.clientIds, scope.projectIds],
@@ -594,8 +606,10 @@ export class PortalCommerceController {
               to_char(k.ends_on, 'YYYY-MM-DD') AS "endsOn",
               k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.decline_reason AS "declineReason",
               k.project_id AS "projectId",
-              (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded"
+              (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
+              ${AMENDMENT_COLUMNS}
          FROM contracts k
+         ${amendmentJoins({ clients: 2, projects: 3 })}
         WHERE k.id = $1 AND ${contractInPortalScope("k", { clients: 2, projects: 3 })}`,
       [contractId, scope.clientIds, scope.projectIds],
     );

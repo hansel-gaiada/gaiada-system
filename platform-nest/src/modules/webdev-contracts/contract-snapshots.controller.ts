@@ -38,7 +38,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
-import { createWebdevControlHttpDriver } from "./contract-fetch-http";
+import { resolveContractControlProvider } from "./contract-control-provider";
 import { ContractControlNotConfiguredError, type WebdevControlProvider } from "./contract-fetch-provider";
 import {
   refreshContractSnapshot, listContractSnapshots, getContractSnapshot, getContractSnapshotArtifact,
@@ -56,7 +56,7 @@ export function setWebdevControlProviderForTests(p: WebdevControlProvider | null
 function resolveProvider(): WebdevControlProvider {
   if (providerOverride) return providerOverride;
   try {
-    return createWebdevControlHttpDriver();
+    return resolveContractControlProvider();
   } catch (err) {
     if (err instanceof ContractControlNotConfiguredError) {
       throw new ServiceUnavailableException("webdev control channel not configured");

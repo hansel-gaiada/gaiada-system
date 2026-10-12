@@ -6,7 +6,9 @@
 // ── WHAT THIS FILE DOES NOT DO, AND WHY (read before extending it) ────────────────────────────
 // It does NOT perform its own outbound HTTP call. It reuses WSK-19's already-approved egress
 // driver (`../webdev-contracts/contract-fetch-http.ts`'s `createWebdevControlHttpDriver` +
-// `WebdevControlProvider.getContractBundle`) exactly as built — no new egress file, no new
+// `WebdevControlProvider.getContractBundle`; since M6-P4j reached through
+// `../webdev-contracts/contract-control-provider.ts`'s selector, which prefers the real four-layer
+// channel) exactly as built — no new egress file, no new
 // `fetch`-shaped identifier anywhere in this file (verified against BOTH egress-inventory
 // scanners: `modules/webdev/egress-inventory.test.ts`, which enumerates this directory and would
 // flag a new outbound call here, and `modules/webdev-contracts/egress-inventory.test.ts`, which
@@ -51,7 +53,7 @@ import {
   listContractSnapshots,
   type SnapshotDto,
 } from "../webdev-contracts/contract-snapshot.service";
-import { createWebdevControlHttpDriver } from "../webdev-contracts/contract-fetch-http";
+import { resolveContractControlProvider } from "../webdev-contracts/contract-control-provider";
 import {
   ContractControlNotConfiguredError,
   type ContractBundleMeta,
@@ -298,7 +300,7 @@ export function setConsoleControlProviderForTests(p: WebdevControlProvider | nul
 function resolveConsoleProvider(): WebdevControlProvider | null {
   if (providerOverride) return providerOverride;
   try {
-    return createWebdevControlHttpDriver();
+    return resolveContractControlProvider();
   } catch (err) {
     if (err instanceof ContractControlNotConfiguredError) return null;
     throw err;
