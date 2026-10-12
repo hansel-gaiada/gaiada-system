@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.25.0` - M5-V5-a: the A/B `experiment` block and the publish lock (vocabulary 1.5.0) (2026-10-12) - DEV-VERIFIED
+
+- **The block:** a new block type `experiment`, with arms `a`–`d`, a test key, weights, and an override or replace per non-control arm.
+  - It is never client-editable: a client editor's create/update/publish involving it is a 422.
+  - It is non-visual in the blocks renderer and the WordPress theme, and `/v1` search skips it.
+  - `/v1` delivery stays additive: one more entry in `blocks`, with the envelope and read SQL unchanged.
+- **Vocabulary 1.4.0 → 1.5.0 (MINOR):** the classifier gives exactly that reason. Re-vendored into the api, blocks, platform-nest, the WordPress theme and ai-agents' generated theme copy.
+- **Codegen:** one shared `ExperimentBlock` schema. A closed fields-only collection becomes `anyOf [F] | [F,E]`, so existing SDK consumers still compile.
+- **The publish lock:**
+  - An item whose live version carries an experiment is "running".
+  - `content.publish` and a scheduled publish that change the experiment, or a control value it overrides, are refused with 409 `experiment-locked`, for every principal and the whole batch.
+  - Removing the block (with or without merging the winner) is always allowed.
+  - **Not covered yet:** promotion import and rollback (a follow-up).
+- **Verified:**
+  - GitHub Actions 38270368678 green (the new `v5a-experiment` suite of 100, every vocabulary suite, the codegen and SDK typecheck specs, the PHP probes, the DB-backed `experiment-block.spec.ts`).
+  - The templates' Linux check (`build-templates.sh`) 12/12 on sumopod, run by M6.
+- **After the deploy:** existing tenants' contracts change version on their next regenerate. Owner decision: an explicit `contract.regenerate` run (M6's recommendation).
+- `gaiadabali/template-wp` must be re-published (M6).
+
 ### insights-collector `0.1.0` - M5-V2-a: the enrichment collector, a new Go component (not deployed) (2026-10-12) - PROTOTYPED
 
 - **What it is:** `insights-collector/`, which will sit between the public nginx edge and Umami on sumopod (internal network only, no egress).
