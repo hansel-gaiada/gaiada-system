@@ -10,7 +10,7 @@
 //   GET  …/editorial/board                `countsWithheld` when `S.cfg.reviewCountsWithheld`
 //   GET  …/editorial/grants               publisher tier only (a viewer is the BFF's 403)
 //   GET  …/editorial/calendar             M5-W5: the board joined with pending publish requests and briefs (`countsWithheld` as the board);
-//                                         `S.cfg.calendarFail = "<part>"` answers 503 `{reason:"<part>_unreadable", part}`; `S.cfg.briefHidden`
+//                                         `S.cfg.calendarFail = "<part>"` answers 503 `{error, reason:"<part>_unreadable"}`; `S.cfg.briefHidden`
 //                                         hides every brief's title (`briefHidden: true`)
 //   GET  …/briefs/:briefId                M5-W5: the brief the calendar's card links to (an unknown id is the BFF's plain 404)
 //
@@ -144,7 +144,7 @@ function placementOf(publishState, publishAt, requests, planned, due) {
 }
 
 function calendarBody(S, query, userId) {
-  if (S.cfg.calendarFail) return R(503, { error: "calendar_unavailable", reason: `${S.cfg.calendarFail}_unreadable`, part: S.cfg.calendarFail });
+  if (S.cfg.calendarFail) return R(503, { error: "calendar_unavailable", reason: `${S.cfg.calendarFail}_unreadable` });
   const from = query.get("from"), to = query.get("to");
   const wantCollection = query.get("collection"), wantLocale = query.get("locale"), wantAuthor = query.get("authorSub");
   const day = (d) => Date.parse(`${d}T00:00:00.000Z`);

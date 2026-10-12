@@ -59,10 +59,11 @@ describe.skipIf(!live)("M5-W5 · the editorial calendar over HTTP, real Cerbos",
       [randomUUID(), A, publishAt ? "content.schedule" : "content.publish", JSON.stringify({ tenantSlug: GAIADA_SLUG, siteId: GAIADA_SITE, items: items.map((itemId) => ({ itemId, version: 1 })), ...(publishAt ? { publishAt } : {}) }), by, config.originSite],
     );
 
+  // W4's CHECKs: the link is all-or-none (site, slug, collection, locale), and `webdesk_item_id` and `linked_at` come together.
   const brief = async (id: string, itemId: string | null, collectionKey: string, topic: string, assignee: string | null) =>
     adminPool().query(
-      `INSERT INTO search_content_briefs (id, tenant_id, topic, status, outline, body, grounding, origin_site, webdesk_tenant_slug, webdesk_site_id, collection_key, locale, webdesk_item_id, assignee_id)
-       VALUES ($1,$2,$3,'draft','[]','','{}',$4,$5,$6,$7,'en',$8,$9)`,
+      `INSERT INTO search_content_briefs (id, tenant_id, topic, status, outline, body, grounding, origin_site, webdesk_tenant_slug, webdesk_site_id, collection_key, locale, webdesk_item_id, linked_at, assignee_id)
+       VALUES ($1,$2,$3,'draft','[]','','{}',$4,$5,$6,$7,'en',$8::uuid,CASE WHEN $8::uuid IS NULL THEN NULL ELSE now() END,$9)`,
       [id, A, topic, config.originSite, GAIADA_SLUG, GAIADA_SITE, collectionKey, itemId, assignee],
     );
 
@@ -135,7 +136,11 @@ describe.skipIf(!live)("M5-W5 · the editorial calendar over HTTP, real Cerbos",
     expect(ok.json().counts).toBeUndefined();
     expect(ok.json().countsWithheld).toBe(true);
     expect((await cal(noGrant, "?from=2026-10-01&to=2026-10-31")).statusCode).toBe(403);
-    expect((await cal(outsiderB, "?from=2026-10-01&to=2026-10-31")).statusCode).toBe(404); // another company's site: the wall
+    // a caller with no standing in company A at all is refused at phase 1 (403); the cross-company WALL (404) is for a caller INSIDE the company
+    // asking about a site that is not the company's
+    expect((await cal(outsiderB, "?from=2026-10-01&to=2026-10-31")).statusCode).toBe(403);
+    const foreign = await app.inject({ method: "GET", url: `/api/${A}/modules/webdev/content/sites/othertenant/${OTHER_SITE}/editorial/calendar?from=2026-10-01&to=2026-10-31`, headers: asUser(publisherA) });
+    expect(foreign.statusCode, foreign.body).toBe(404);
   });
 
   it("a request is shown only on a row the caller may read, with a flag and no filer", async () => {
@@ -182,7 +187,8 @@ describe.skipIf(!live)("M5-W5 · the editorial calendar over HTTP, real Cerbos",
     zb.failWith = new EditorialUnavailableError(25_000);
     const r = await cal(publisherA);
     expect(r.statusCode).toBe(503);
-    expect(r.json()).toMatchObject({ reason: "board_unreadable", part: "board" });
+    // the documented body (FRONTEND-BFF-CONTRACT §27): `{error, reason}`; the global error filter keeps `reason` and drops other members
+    expect(r.json()).toEqual({ error: "calendar_unavailable", reason: "board_unreadable" });
     expect(r.json()).not.toHaveProperty("entries");
   });
 
