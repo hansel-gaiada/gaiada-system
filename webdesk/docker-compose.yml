@@ -69,6 +69,12 @@ services:
       WEBDESK_ZONEB_ORIGIN_SITE: ${WEBDESK_ZONEB_ORIGIN_SITE:-webdesk}
       WEBDESK_ZONEB_EVENT_TIMEOUT_MS: ${WEBDESK_ZONEB_EVENT_TIMEOUT_MS:-5000}
       WEBDESK_ZONEB_EVENTS_ENABLED: ${WEBDESK_ZONEB_EVENTS_ENABLED:-true}
+      # M5 go-live: Turnstile on the public forms. Empty = the built-in stub (forms.config.ts reads both with `||`,
+      # so an empty value keeps TURNSTILE_MODE=stub). Set TURNSTILE_MODE=live + the Cloudflare secret only at go-live
+      # (infra/runbooks/m5-phase3-go-live.md). TURNSTILE_REQUEST_TIMEOUT_MS is deliberately NOT passed: it is read with
+      # `??`, so an empty value would become a 0 ms timeout.
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       # WSK-11 mail. A var in .env does NOTHING unless it is listed here
       # (the estate's compose-env-passthrough trap).
       MAIL_ENABLED: ${MAIL_ENABLED:-true}
