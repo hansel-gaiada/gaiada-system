@@ -3,11 +3,14 @@
 // a stale precondition) renders as a real message next to the button that produced it. Every
 // server action here returns `InvoiceActionState` via `useActionState` rather than the old
 // fire-and-forget `<form action={fn}>` pattern, which swallowed every error silently.
+//
+// PV5-04 (PV-D7): "Mark sent" became ISSUE (numbered, posted to the ledger, frozen in one step on the server), and
+// "Mark paid" is gone: paid follows from confirmed payments. When issuing is refused, the server's whole blocker list
+// is shown, so staff see everything that is missing at once. The full issued view is PV5-09.
 import { useActionState } from "react";
 import {
   approveInvoiceAction,
-  markInvoiceSentAction,
-  markInvoicePaidAction,
+  issueInvoiceAction,
   type InvoiceActionState,
 } from "@/lib/invoiceActions";
 import type { InvoiceStatus } from "@/lib/invoice";
@@ -23,7 +26,15 @@ function StatusButton({
   return (
     <form action={formAction}>
       <Button type="submit" size="sm" disabled={pending}>{pending ? pendingLabel : label}</Button>
-      {state?.error && <Toast message={state.error} />}
+      {state?.error && !state.blockers && <Toast message={state.error} />}
+      {state?.blockers && state.blockers.length > 0 && (
+        <div role="alert" className="sys-empty-note" style={{ margin: "6px 0 0", maxWidth: 360, textAlign: "left" }}>
+          <p style={{ margin: "0 0 4px" }}>{state.error}</p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {state.blockers.map((b) => <li key={b.code + b.message}>{b.message}</li>)}
+          </ul>
+        </div>
+      )}
     </form>
   );
 }
@@ -35,16 +46,20 @@ export function InvoiceActions({
   canBill,
   isCreator,
   legacyUnknownCreator,
+  invoiceNo,
 }: {
   invoiceId: string;
   status: InvoiceStatus;
   /** Holds `invoice.approve` (or is elevated) AND is not the invoice's own creator AND the
    *  creator is known (or the viewer is elevated, who alone can still reach a legacy row). */
   canApprove: boolean;
-  /** Holds `company.manage` (or is elevated) — the existing gate for mark sent/paid. */
+  /** Holds `company.manage` or `invoice.approve` (or is elevated): who is offered Issue. Cerbos `invoice`/`issue`
+   *  decides; a refusal renders as a message. */
   canBill: boolean;
   isCreator: boolean;
   legacyUnknownCreator: boolean;
+  /** PV5-04: set once issued. */
+  invoiceNo?: string | null;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
@@ -53,10 +68,7 @@ export function InvoiceActions({
           <StatusButton invoiceId={invoiceId} action={approveInvoiceAction} label="Approve" pendingLabel="Approving…" />
         )}
         {status === "approved" && canBill && (
-          <StatusButton invoiceId={invoiceId} action={markInvoiceSentAction} label="Mark sent" pendingLabel="Marking sent…" />
-        )}
-        {status === "sent" && canBill && (
-          <StatusButton invoiceId={invoiceId} action={markInvoicePaidAction} label="Mark paid" pendingLabel="Marking paid…" />
+          <StatusButton invoiceId={invoiceId} action={issueInvoiceAction} label="Issue" pendingLabel="Issuing…" />
         )}
       </div>
       {/* State-machine legibility (IAM-GAP-01): explain why draft has no send/pay control, and — the
@@ -79,12 +91,17 @@ export function InvoiceActions({
       )}
       {status === "draft" && (
         <p className="sys-empty-note" style={{ margin: 0, maxWidth: 320, textAlign: "right" }}>
-          Draft invoices must be approved before they can be sent or marked paid.
+          Draft invoices must be approved before they can be issued.
         </p>
       )}
       {status === "approved" && (
         <p className="sys-empty-note" style={{ margin: 0, maxWidth: 320, textAlign: "right" }}>
-          Approved — ready to send. Paid is unlocked once it has been sent.
+          Approved — ready to issue. Issuing gives it its number and records it in the books.
+        </p>
+      )}
+      {status === "sent" && (
+        <p className="sys-empty-note" style={{ margin: 0, maxWidth: 320, textAlign: "right" }}>
+          {invoiceNo ? `Issued as ${invoiceNo}.` : "Sent."} It is marked paid when confirmed payments cover it.
         </p>
       )}
     </div>

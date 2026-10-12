@@ -86,7 +86,7 @@ describe.skipIf(!TEST_URL)("search module (SM-02)", () => {
     expect(res.statusCode).toBe(200);
     const defs = res.json() as Array<{ name: string; method?: string; pathTemplate?: string }>;
     const searchDefs = defs.filter((d) => d.name.startsWith("search."));
-    expect(searchDefs.length).toBe(59); // M5-V5-c adds 9 experiment tools (3 reads + 6 low writes); M5-P5a adds 11 (IndexNow 6 + Bing 5); M5-P2 adds 4 conversion tools (3 reads + 1 low write); M5-P5b adds 3 (aiCrawlers.ingest medium write, aiCrawlers.summary + aiVisibility.summary reads); M5-V4 adds 3 decay tools (1 read + 2 low writes); M5-A4 adds 7 analytics reads; before: 22 = SM-10's draftReport (1) + SM-74's editReport/approveReport/previewReport/deliverReport (4) + SM-04/05/09/16/17/18/21/30 (13) = 18 base + 4 new
+    expect(searchDefs.length).toBe(64); // M5-V3-g adds 5 visitor tools (list/get/rules.list/status reads + rules.set low write); M5-V5-c adds 9 experiment tools (3 reads + 6 low writes); M5-P5a adds 11 (IndexNow 6 + Bing 5); M5-P2 adds 4 conversion tools (3 reads + 1 low write); M5-P5b adds 3 (aiCrawlers.ingest medium write, aiCrawlers.summary + aiVisibility.summary reads); M5-V4 adds 3 decay tools (1 read + 2 low writes); M5-A4 adds 7 analytics reads; before: 22 = SM-10's draftReport (1) + SM-74's editReport/approveReport/previewReport/deliverReport (4) + SM-04/05/09/16/17/18/21/30 (13) = 18 base + 4 new
     const listEngagements = searchDefs.find((d) => d.name === "search.listEngagements");
     expect(listEngagements?.method).toBe("GET");
     expect(listEngagements?.pathTemplate).toBe("/api/:tenantId/modules/search/engagements");
@@ -114,6 +114,7 @@ describe.skipIf(!TEST_URL)("search module (SM-02)", () => {
       "search.aiCrawlers.summary", "search.aiVisibility.summary", // M5-P5b
       "search.experiments.list", "search.experiments.get", "search.experiments.results", // M5-V5-c
       "search.getIndexNowStatus", "search.getIndexNowKey", "search.getBingStatus", "search.listBingPerformance", // M5-P5a
+      "search.visitors.list", "search.visitors.get", "search.visitors.rules.list", "search.visitors.status", // M5-V3-g
     ];
     for (const name of noImpact) {
       const tool = byName.get(name);
@@ -131,6 +132,7 @@ describe.skipIf(!TEST_URL)("search module (SM-02)", () => {
       "search.experiments.stop", "search.experiments.abort", "search.experiments.decide",
       "search.generateIndexNowKey", "search.setIndexNow", "search.submitUrls", "search.notifyContentChange", // M5-P5a
       "search.disconnectBing", "search.pullBing",
+      "search.visitors.rules.set", // M5-V3-g: changes how interests are derived; sends nothing
     ];
     for (const name of lowImpact) {
       expect(byName.get(name)?.impact, name).toBe("low");

@@ -24,7 +24,7 @@ import (
 
 // IP modes for what Umami is told about the visitor's address.
 const (
-	// IPModePseudonym (default): Umami receives an fd00::/8 address derived with a daily in-memory key.
+	// IPModePseudonym (default): Umami receives a 2001:db8::/32 address derived with a daily in-memory key.
 	IPModePseudonym = "pseudonym"
 	// IPModeReal is the documented fallback if V2-d shows Umami 3.4.0 mishandles the pseudonym: the real
 	// address goes to Umami over the internal network, as before the collector existed. Never the default.

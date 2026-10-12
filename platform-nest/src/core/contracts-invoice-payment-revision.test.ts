@@ -13,6 +13,8 @@ import { newId, withTenants } from "../db";
 import { buildApp } from "../main";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
+import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
+import { voidIssuedInvoice } from "../modules/invoice/issue";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -24,16 +26,15 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
   let recorder: string; // a DIFFERENT user who "recorded" the payment — decidePayment forbids recorder===confirmer
   let clientId: string;
 
+  // PV5-04: a `sent` invoice is an ISSUED one (PV5-01b), so it is issued through the real path (IDR, the books'
+  // currency); a `void` one is issued and then voided (a credit note in the ledger), the only way an issued invoice
+  // ends void.
   async function insertInvoice(total: number, status: "sent" | "void" = "sent"): Promise<string> {
-    const id = newId();
-    await withTenants([tenant], (c) =>
-      c.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, status, currency, lines, total, origin_site, created_by, updated_by)
-         VALUES ($1, $2, $3, $4, 'USD', '[]', $5, 'test', $6, $6)`,
-        [id, tenant, clientId, status, total, admin],
-      ),
-    );
-    return id;
+    const issued = await createIssuedInvoice(tenant, {
+      clientId, actorId: admin, lines: [{ description: "Fixture work", amount: total }],
+    });
+    if (status === "void") await voidIssuedInvoice(tenant, issued.id, admin, "fixture: cancelled");
+    return issued.id;
   }
 
   async function insertPayment(invoiceId: string, amount: number): Promise<string> {
@@ -41,7 +42,7 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     await withTenants([tenant], (c) =>
       c.query(
         `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, 'USD', now()::date, 'pending', $6, 'test')`,
+         VALUES ($1, $2, $3, $4, $5, 'IDR', now()::date, 'pending', $6, 'test')`,
         [id, tenant, invoiceId, clientId, amount, recorder],
       ),
     );
@@ -68,6 +69,7 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     await grantRole(admin, await createRole("company_admin"), "company", tenant);
     app = await buildApp();
     clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme", businessType: "other" } })).json().id;
+    await ensureBillingSetup(tenant);
   });
   afterAll(async () => {
     await app.close();
@@ -78,10 +80,10 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     const invoiceId = await insertInvoice(500);
     const paymentId = await insertPayment(invoiceId, 500);
 
-    // Baseline: one 'baseline_pre_revision_tracking' marker exists for NO invoice here — this
-    // invoice was created by direct SQL insert in THIS test run (not through the app), so unlike a
-    // pre-existing migration-era row it legitimately has ZERO revisions until the confirm below.
-    expect(await getRevisions(invoiceId)).toHaveLength(0);
+    // Baseline: the invoice was ISSUED through the real path (PV5-04), which records exactly one revision
+    // (approved -> sent, as `status_changed`).
+    const baseline = await getRevisions(invoiceId);
+    expect(baseline.map((r) => r.action)).toEqual(["status_changed"]);
 
     const r = await app.inject({
       method: "POST", url: `/api/${tenant}/invoice-payments/${paymentId}/decide`,
@@ -90,7 +92,7 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ invoicePaid: true });
 
-    const revs = await getRevisions(invoiceId);
+    const revs = (await getRevisions(invoiceId)).slice(baseline.length);
     expect(revs).toHaveLength(1);
     expect(revs[0]).toMatchObject({ action: "paid_via_payment_confirmation", actorId: admin });
     expect(revs[0].before?.status).toBe("sent");
@@ -105,6 +107,7 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
   it("a PARTIAL payment does not flip the invoice and records NO revision (no mutation happened, so no revision must appear)", async () => {
     const invoiceId = await insertInvoice(1000);
     const paymentId = await insertPayment(invoiceId, 300);
+    const baseline = (await getRevisions(invoiceId)).length;
 
     const r = await app.inject({
       method: "POST", url: `/api/${tenant}/invoice-payments/${paymentId}/decide`,
@@ -112,28 +115,27 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ invoicePaid: false });
-    expect(await getRevisions(invoiceId)).toHaveLength(0);
+    expect(await getRevisions(invoiceId)).toHaveLength(baseline);
   });
 
   it("a VOID invoice is never resurrected to 'paid' by a late confirmation, and records NO revision either", async () => {
     const invoiceId = await insertInvoice(200, "void");
     const paymentId = await insertPayment(invoiceId, 200);
+    const baseline = (await getRevisions(invoiceId)).length;
 
     const r = await app.inject({
       method: "POST", url: `/api/${tenant}/invoice-payments/${paymentId}/decide`,
       headers: asUser(admin), payload: { decision: "confirm" },
     });
-    expect(r.statusCode).toBe(200);
-    // PRE-EXISTING behaviour, unrelated to this ticket and left as-is: `invoicePaid` in the response
-    // is computed purely from the confirmed-ledger-sum-vs-total comparison, NOT from whether the
-    // guarded UPDATE below actually applied — so the API reports `invoicePaid: true` here even
-    // though the invoice itself correctly stays 'void' (the guard operates at the DB WHERE clause,
-    // invisible to this response field). Flagged in the IAM-GAP-02 report as a pre-existing quirk
-    // noticed while adding revision tracking, not something this ticket's scope covers fixing.
-    expect(r.json()).toMatchObject({ invoicePaid: true });
+    // PV5-04: confirming money against a voided invoice is now REFUSED (409, nothing written) rather than confirmed
+    // with a quirky `invoicePaid: true` (the IAM-GAP-02 quirk this test used to pin): the ledger invoice is void, so
+    // there is nothing to allocate the money to. The claim stays pending for a staff member to reject.
+    expect(r.statusCode).toBe(409);
     const row = await withTenants([tenant], (c) => c.query<{ status: string }>(`SELECT status FROM invoices WHERE id = $1`, [invoiceId]));
-    expect(row.rows[0].status).toBe("void"); // unchanged — the UPDATE's WHERE status='sent' matched 0 rows
-    expect(await getRevisions(invoiceId)).toHaveLength(0); // no mutation happened -> no revision recorded
+    expect(row.rows[0].status).toBe("void");
+    const pay = await withTenants([tenant], (c) => c.query<{ status: string }>(`SELECT status FROM invoice_payments WHERE id = $1`, [paymentId]));
+    expect(pay.rows[0].status).toBe("pending");
+    expect(await getRevisions(invoiceId)).toHaveLength(baseline); // no mutation happened -> no revision recorded
   });
 
   // PV3-03 / CC-1: the `?clientId=` facet on the finance confirmation queue.
@@ -142,14 +144,15 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     const pay: Record<string, string> = {};
 
     // `invoice_payments.client_id` is nullable (0075), so `internal` genuinely selects rows here: the
-    // payments on an invoice that names no client.
+    // payments on an invoice that names no client. PV5-04: the parent invoices are `approved` (unissued): this block
+    // tests the list facet only, and an invoice with no client cannot be issued.
     async function insertPaymentFor(client: string | null, amount: number): Promise<string> {
       const invoiceId = newId();
       const id = newId();
       await withTenants([tenant], async (c) => {
         await c.query(
           `INSERT INTO invoices (id, tenant_id, client_id, status, currency, lines, total, origin_site, created_by, updated_by)
-           VALUES ($1, $2, $3, 'sent', 'USD', '[]', $4, 'test', $5, $5)`,
+           VALUES ($1, $2, $3, 'approved', 'USD', '[]', $4, 'test', $5, $5)`,
           [invoiceId, tenant, client, amount, admin],
         );
         await c.query(

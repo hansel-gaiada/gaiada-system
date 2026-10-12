@@ -33,6 +33,7 @@ import {
 import { allCoreTools } from "./core-tools";
 import { APPROVER_RECORDED_THIS_PAYMENT, getExecutable } from "./approval-executables";
 import { executeApprovedAutomationWrite } from "./approval-execute";
+import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
 const AGENT = "agent:billing";
@@ -167,23 +168,18 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
     expect(r.statusCode, r.body).toBe(200);
     return id;
   }
+  // PV5-04: a `sent` invoice is an ISSUED one (PV5-01b): issued through the real path, in IDR (the books' currency).
   async function insertInvoice(clientId: string, total: number): Promise<string> {
-    const id = newId();
-    await withTenants([tenant], (c) =>
-      c.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, status, currency, lines, total, origin_site, created_by, updated_by)
-         VALUES ($1, $2, $3, 'sent', 'USD', '[]', $4, 'test', $5, $5)`,
-        [id, tenant, clientId, total, admin],
-      ),
-    );
-    return id;
+    return (await createIssuedInvoice(tenant, {
+      clientId, actorId: admin, lines: [{ description: "Fixture work", amount: total }],
+    })).id;
   }
   async function insertPayment(invoiceId: string, clientId: string, amount: number, recordedBy: string): Promise<string> {
     const id = newId();
     await withTenants([tenant], (c) =>
       c.query(
         `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, 'USD', now()::date, 'pending', $6, 'test')`,
+         VALUES ($1, $2, $3, $4, $5, 'IDR', now()::date, 'pending', $6, 'test')`,
         [id, tenant, invoiceId, clientId, amount, recordedBy],
       ),
     );
@@ -228,6 +224,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
 
     clientA = await createClient(tenant, "PV306 Client A");
     clientB = await createClient(tenant, "PV306 Client B");
+    await ensureBillingSetup(tenant);
     invoiceA = await insertInvoice(clientA, 500);
     invoiceB = await insertInvoice(clientB, 500);
     app = await buildApp();
@@ -689,7 +686,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       await withTenants([tenant], (c) =>
         c.query(
           `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site)
-           VALUES ($1, $2, $3, $4, 1, 'USD', now()::date, 'pending', NULL, 'test')`,
+           VALUES ($1, $2, $3, $4, 1, 'IDR', now()::date, 'pending', NULL, 'test')`,
           [unrecorded, tenant, invoiceA, clientA],
         ),
       );

@@ -11,6 +11,55 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.109.0` - M5-V3-h: rights requests cover consented visitor profiles and the collector (2026-10-13) - DEV-VERIFIED
+
+- **Requests:** a rights request (G5) can now name `visitorId` and/or `consentId` as well as email and phone. Only `sha256(lower(uuid))` hashes are kept in the approval, the ledger, events and the hub minimiser, and the approval binding covers them, so an approval never widens.
+- **Find and export** cover profiles. Export returns the profile and all its events.
+- **Erase:**
+  - takes the visitor-property lock on every property of the company, in order, with a 60 s deadline (or 503 `visitor_store_busy`, approval unused);
+  - deletes the matching profiles (their events cascade), including those behind each matched lead's consent id;
+  - writes an `erase` tombstone for both ids on every property;
+  - strips `consentId` from kept lead snapshots;
+  - sends the collector `forget mode:"erase"`.
+- **Collector outage:** the ERP side still commits, and the ledger records `queued` (never "delivered"). The forget is retried by the visitor jobs; ingest re-sends it for any buffered event, and the collector's 72 h expiry bounds what is left.
+- **Migration `202610131900_agency_dsr_visitor_subjects`:**
+  - `agency_dsr_requests` gains the two subject hashes and the profile, event, tombstone and forget columns.
+  - `dsr_has_subject` is re-declared only after a catalog check of its old definition.
+  - "An executed erase records `collector_forget`" is NULL-safe and `NOT VALID`, because the ledger is append-only.
+- `core-tools.ts`: the privacy tools take the new ids.
+- **Verified** on GitHub Actions 38285798954, including:
+  - the DB suites: a later ingest of the erased visitor's buffered events creates nothing, even with WebDesk still saying "granted";
+  - the grep test: no identifier in approvals, outbox, activities, the ledger or logs;
+  - the migration test.
+
+### platform-nest `0.108.0` - M5-V3-g: the visitors API and MCP tools (2026-10-13) - PROTOTYPED
+
+- **`SearchVisitorsController`** under `…/properties/:propertyId/visitors`:
+  - **list:** score, facet, tag, lead, seen-from and order filters; a keyset cursor; server order.
+  - **detail:** summary, the latest 200 events, interests, score parts with their maxima, and the lead.
+  - **interest rules:** `GET` (`read_visitors`), and `PUT` (`update`), which replaces the whole set (at most 100) and writes an activity row.
+  - **status:** configured, enabled, last ok ingest and 30-day bot counts. Not configured, disabled and unreachable each answer in words.
+- **Authorization:** checked before validation on every route; 403 and 404 are distinct.
+- **The lead link:**
+  - List rows say only `linked` or `none`, with no id and no per-row Cerbos probe.
+  - Detail returns the lead id only when the caller may `read` that `agency_lead`; otherwise "a lead you cannot open".
+- **MCP tools:** `search.visitors.list`, `.get`, `.rules.list`, `.rules.set` and `.status`. All are reads except `rules.set`, which is a low write. The hub forwards path params only, so the list tool binds a first-page path twin.
+- **Other changes:** `insights-client.ts` gains `readBotCounts`. BFF §28f. The capability inventory is regenerated.
+- **Tests:** 32 unit tests; GitHub Actions 38285548866 green, including the `visitors.db.test.ts` suite.
+
+### insights-collector `0.3.1` - M5-V2-d: the pseudonym moves to 2001:db8::/32 so Umami keeps the country (2026-10-13) - PROTOTYPED
+
+- **The bug:** proved on sumopod in a throwaway project. Umami 3.4.0 runs `is-localhost-ip` on the client address before it reads any location header, and that package treats fc00::/7 as local. With the `fd…` pseudonym, Umami stored NO country, region or city for any visitor.
+- **The fix:** the pseudonym is now an address in 2001:db8::/32, the IPv6 documentation range, which is never assigned to anyone. It is built from 96 HMAC bits under the in-memory daily key. A direct test stored GB / GB-ENG / London with it.
+- Umami still never sees an IP. This is not the `FORWARD_IP_MODE=real` fallback.
+- **Other V2-d results** (runbook §13, C5):
+  - `check-config.sh` ALL PASS;
+  - the 367 image's provenance verified;
+  - test IPs 0 times in both dumps and every log;
+  - bots dropped and counted, by UA and by datacenter ASN.
+- Steps 1, 3 and 4 are re-run with the first image that carries this fix.
+- The design §3.2, the addendum F6 and `CLAUDE.md` are updated.
+
 ### platform-ui `0.105.0` - M5-V5-d: the Experiments tab in Website → Analytics (2026-10-13) - PROTOTYPED
 
 - **List:** in server order, with the status, the goal, the visitors needed per variant and the projected days, all in words.

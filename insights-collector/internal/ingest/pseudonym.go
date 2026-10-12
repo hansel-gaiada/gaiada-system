@@ -27,8 +27,17 @@ type DayKey struct {
 // NewDayKey returns a key source using the given clock (time.Now in production).
 func NewDayKey(now func() time.Time) *DayKey { return &DayKey{now: now} }
 
-// Pseudonym returns an address in fd00::/8: the first byte is 0xfd and the other 120 bits are the first 15
-// bytes of HMAC-SHA256(day key, the address in 16-byte form). IPv4 and IPv4-mapped IPv6 give the same result.
+// pseudonymPrefix is 2001:db8::/32, the IPv6 DOCUMENTATION range (RFC 3849): never assigned to anyone, so a
+// pseudonym can never be mistaken for, or collide with, a real visitor's address.
+//
+// NOT fd00::/8 (the first choice). M5-V2-d proved on sumopod that Umami 3.4.0 runs `is-localhost-ip` on the
+// client address before reading any location header, and that package treats all of fc00::/7 as local: with an
+// fd… pseudonym Umami stored NO country, region or city even though the cf-* headers were set. With a 2001:db8
+// pseudonym the same request stored GB / GB-ENG / London from the headers. Re-check if Umami is upgraded.
+var pseudonymPrefix = [4]byte{0x20, 0x01, 0x0d, 0xb8}
+
+// Pseudonym returns an address in 2001:db8::/32: the first 32 bits are the prefix and the other 96 bits are the
+// first 12 bytes of HMAC-SHA256(day key, the address in 16-byte form). IPv4 and IPv4-mapped IPv6 give the same result.
 func (k *DayKey) Pseudonym(ip netip.Addr) netip.Addr {
 	key := k.currentKey()
 	raw := ip.Unmap().As16()
@@ -36,8 +45,8 @@ func (k *DayKey) Pseudonym(ip netip.Addr) netip.Addr {
 	m.Write(raw[:])
 	sum := m.Sum(nil)
 	var out [16]byte
-	out[0] = 0xfd
-	copy(out[1:], sum[:15])
+	copy(out[:4], pseudonymPrefix[:])
+	copy(out[4:], sum[:12])
 	return netip.AddrFrom16(out)
 }
 

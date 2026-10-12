@@ -12,6 +12,7 @@ import { AuthzCheckController } from "./core/authz-check.controller";
 import { AuthzPermissionsController } from "./core/authz-permissions.controller";
 import { ClientWorkController } from "./core/client-work.controller";
 import { InvoiceController } from "./modules/invoice/invoice.controller";
+import { BillingProfileController } from "./modules/invoice/billing-profile.controller";
 import { CollabController } from "./core/collab.controller";
 import { AutomationApprovalsController } from "./core/automation-approvals.controller";
 import { PipelineController } from "./core/pipeline.controller";
@@ -133,6 +134,7 @@ import { SearchReportsController } from "./modules/search/search-reports.control
 import { SearchAnalyticsController } from "./modules/search/search-analytics.controller";
 import { SearchContentDecayController } from "./modules/search/content-decay.controller";
 import { SearchConversionsController } from "./modules/search/conversions.controller";
+import { SearchVisitorsController } from "./modules/search/visitors.controller";
 import { SearchAiCrawlerController } from "./modules/search/ai-crawler.controller";
 import { SearchExperimentsController } from "./modules/search/experiments.controller";
 import { SearchIndexNowController } from "./modules/search/indexnow.controller";
@@ -194,7 +196,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, HrController, LoansController,
@@ -235,6 +237,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SearchAnalyticsController,
     SearchContentDecayController,
     SearchConversionsController,
+    SearchVisitorsController,
     SearchAiCrawlerController,
     SearchExperimentsController,
     SearchIndexNowController,
