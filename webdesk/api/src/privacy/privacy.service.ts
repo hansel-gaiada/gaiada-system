@@ -56,7 +56,7 @@ import { TenantLookupService } from "../tenants/tenant-lookup.service";
 import { AuditService } from "../audit/audit.service";
 import { CommandEnvelope, type EnvelopeInput } from "../control/command-envelope";
 import type { CommandName } from "../control/command-types";
-import { PrivacyRepository, type MatchedSubmissionRow, type MediaAssetLookupRow } from "./privacy.repository";
+import { PrivacyRepository, type ConsentRecordRow, type MatchedSubmissionRow, type MediaAssetLookupRow } from "./privacy.repository";
 import { PrivacyAttachmentsService, type ExportedAttachment } from "./privacy-attachments.service";
 import { resolveSubject, hashIdentifier } from "./identifier";
 import { PRIVACY_COMMAND_REGISTRY, type PrivacyCommandName } from "./command-types";
@@ -77,6 +77,8 @@ export type FindResult = {
   generatedAt: string;
   dsrRequestId: string;
   matches: FindMatch[];
+  /** M5-G6 (additive): present only when the identifier is a consent id (uuid): how many consent_records it has. */
+  consentRecordCount?: number;
 };
 
 export type ExportedSubmission = {
@@ -94,12 +96,38 @@ export type ExportedSubmission = {
   attachments: ExportedAttachment[];
 };
 
+export type ExportedConsentRecord = {
+  consentId: string;
+  siteId: string;
+  action: string;
+  analytics: boolean;
+  marketing: boolean;
+  noticeVersion: string;
+  recordedAt: string;
+  userAgentClass: string;
+};
+
+function exportedConsent(r: ConsentRecordRow): ExportedConsentRecord {
+  return {
+    consentId: r.consent_id,
+    siteId: r.site_id,
+    action: r.action,
+    analytics: r.analytics,
+    marketing: r.marketing,
+    noticeVersion: r.notice_version,
+    recordedAt: r.recorded_at,
+    userAgentClass: r.user_agent_class,
+  };
+}
+
 export type ExportResult = {
   tenantSlug: string;
   identifier: string;
   generatedAt: string;
   dsrRequestId: string;
   submissions: ExportedSubmission[];
+  /** M5-G6 (additive): present only when the identifier is a consent id (uuid): its whole decision history, oldest first. */
+  consentRecords?: ExportedConsentRecord[];
 };
 
 export type EraseResult = {
@@ -109,6 +137,8 @@ export type EraseResult = {
   dsrRequestId: string | null;
   submissionCount: number;
   attachmentCount: number;
+  /** M5-G6 (additive): present only when the identifier is a consent id (uuid): how many consent_records were deleted. */
+  consentRecordCount?: number;
   replayed: boolean;
 };
 
@@ -197,6 +227,7 @@ export class PrivacyCommandService {
           attachmentCount: attachmentRefs(r).length,
         }));
         const totalAttachments = matches.reduce((sum, m) => sum + m.attachmentCount, 0);
+        const consentRecordCount = subject.consentId ? (await this.repo.findConsentRecords(client, tenant.id, subject.consentId)).length : undefined;
         const dsr = await this.repo.insertDsrRequest(client, {
           tenantId: tenant.id,
           kind: "find",
@@ -207,7 +238,14 @@ export class PrivacyCommandService {
           attachmentCount: totalAttachments,
         });
         return {
-          result: { tenantSlug: input.tenantSlug, identifier: input.identifier, generatedAt: new Date().toISOString(), dsrRequestId: dsr.id, matches },
+          result: {
+            tenantSlug: input.tenantSlug,
+            identifier: input.identifier,
+            generatedAt: new Date().toISOString(),
+            dsrRequestId: dsr.id,
+            matches,
+            ...(consentRecordCount !== undefined ? { consentRecordCount } : {}),
+          },
         };
       },
       // Only the ledger reference is stored; see the header.
@@ -232,7 +270,7 @@ export class PrivacyCommandService {
     const subjectRefHash = hashIdentifier(subject.hashBasis);
 
     // The personal data stays in this closure: the envelope only ever sees the ledger reference.
-    let plan: { rows: MatchedSubmissionRow[]; assetsById: Map<string, MediaAssetLookupRow>; dsrRequestId: string } | undefined;
+    let plan: { rows: MatchedSubmissionRow[]; assetsById: Map<string, MediaAssetLookupRow>; dsrRequestId: string; consent?: ConsentRecordRow[] } | undefined;
 
     await this.envelope.run<{ dsrRequestId: string; submissionCount: number }>({
       ...this.claim("privacy.export", input, tenant.id, subjectRefHash),
@@ -252,7 +290,8 @@ export class PrivacyCommandService {
         // come from storage after the commit (below): storage I/O has no place inside a transaction.
         const assetIds = rows.flatMap((r) => attachmentRefs(r).map((a) => a.mediaAssetId));
         const assetRows = await this.repo.findMediaAssetsByIds(client, tenant.id, assetIds);
-        plan = { rows, assetsById: new Map(assetRows.map((a) => [a.id, a])), dsrRequestId: dsr.id };
+        const consent = subject.consentId ? await this.repo.findConsentRecords(client, tenant.id, subject.consentId) : undefined;
+        plan = { rows, assetsById: new Map(assetRows.map((a) => [a.id, a])), dsrRequestId: dsr.id, consent };
         return { result: { dsrRequestId: dsr.id, submissionCount: rows.length } };
       },
       withhold: (r) => ({ stored: r }),
@@ -291,7 +330,14 @@ export class PrivacyCommandService {
       });
     }
 
-    return { tenantSlug: input.tenantSlug, identifier: input.identifier, generatedAt: new Date().toISOString(), dsrRequestId: plan.dsrRequestId, submissions };
+    return {
+      tenantSlug: input.tenantSlug,
+      identifier: input.identifier,
+      generatedAt: new Date().toISOString(),
+      dsrRequestId: plan.dsrRequestId,
+      submissions,
+      ...(plan.consent ? { consentRecords: plan.consent.map(exportedConsent) } : {}),
+    };
   }
 
   async erase(input: {
@@ -308,7 +354,7 @@ export class PrivacyCommandService {
 
     const { replayed, ...summary } = await this.envelope.run<EraseSummary>({
       ...this.claim("privacy.erase", input, tenant.id, subjectRefHash),
-      effect: async (client) => ({ result: await this.performEraseInTx(client, tenant.id, normalized, subject.phoneRef, subjectRefHash, input) }),
+      effect: async (client) => ({ result: await this.performEraseInTx(client, tenant.id, normalized, subject.phoneRef, subject.consentId ?? null, subjectRefHash, input) }),
     });
 
     return { ...summary, tenantSlug: input.tenantSlug, identifier: input.identifier, replayed };
@@ -323,10 +369,14 @@ export class PrivacyCommandService {
     tenantId: string,
     normalizedIdentifier: string,
     phoneRef: string | null,
+    consentId: string | null,
     subjectRefHash: string,
     input: { actor: string; ws4ApprovalId: string | null },
   ): Promise<EraseSummary> {
     const rows = await this.repo.findByIdentifier(client, tenantId, normalizedIdentifier, phoneRef);
+    // M5-G6: a consent id also erases its consent_records (same transaction, so a later abort rolls it back too).
+    const consentExtra = async (): Promise<{ consentRecordCount?: number }> =>
+      consentId ? { consentRecordCount: await this.repo.deleteConsentRecords(client, tenantId, consentId) } : {};
 
     if (rows.length === 0) {
       // Nothing left to erase (already erased, already purged with a cleared ref, or never
@@ -340,7 +390,7 @@ export class PrivacyCommandService {
         submissionCount: 0,
         attachmentCount: 0,
       });
-      return { erasedAt: new Date().toISOString(), dsrRequestId: dsr.id, submissionCount: 0, attachmentCount: 0 };
+      return { erasedAt: new Date().toISOString(), dsrRequestId: dsr.id, submissionCount: 0, attachmentCount: 0, ...(await consentExtra()) };
     }
 
     const submissionIds = rows.map((r) => r.id);
@@ -378,6 +428,7 @@ export class PrivacyCommandService {
       dsrRequestId: dsr.id,
       submissionCount: submissionIds.length,
       attachmentCount: attachmentAssetIds.length,
+      ...(await consentExtra()),
     };
   }
 }

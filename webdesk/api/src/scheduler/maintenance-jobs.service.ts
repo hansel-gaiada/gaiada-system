@@ -11,6 +11,7 @@
 // DELETE of expired rows (the second finds them gone).
 import { Injectable, Logger } from "@nestjs/common";
 import { SubmissionsPurgeService } from "../forms/submissions-purge.service";
+import { ConsentPurgeService } from "../consent/consent-purge.service";
 import { PgIdempotencyStore } from "../control/idempotency/pg-idempotency-store";
 
 @Injectable()
@@ -20,19 +21,38 @@ export class MaintenanceJobsService {
   constructor(
     private readonly purge: SubmissionsPurgeService,
     private readonly idempotency: PgIdempotencyStore,
+    private readonly consentPurge: ConsentPurgeService,
   ) {}
 
-  /** The forms retention purge. Returns how many tenants were swept and how many submissions were scrubbed. */
+  /**
+   * The forms retention purge. Returns how many tenants were swept and how many submissions were scrubbed.
+   * M5-G6: the same hourly job also purges consent_records past their retention (consent/consent-purge.service.ts).
+   * The two are independent: a failure in one never stops the other from running, and either failure is logged
+   * and rethrown (the forms failure wins when both fail) so BullMQ records the job as failed. The returned shape
+   * is unchanged; the consent count is in the log line.
+   */
   async runFormsPurge(): Promise<{ tenants: number; purged: number }> {
+    let out: { tenants: number; purged: number } | undefined;
+    let formsErr: unknown;
     try {
       const results = await this.purge.purgeDueSubmissions();
-      const out = { tenants: results.length, purged: results.reduce((n, r) => n + r.purgedCount, 0) };
+      out = { tenants: results.length, purged: results.reduce((n, r) => n + r.purgedCount, 0) };
       this.logger.log(`forms retention purge: tenants=${out.tenants} purged=${out.purged}`);
-      return out;
     } catch (err) {
       this.logger.error(`forms retention purge failed: ${String(err)}`);
-      throw err;
+      formsErr = err;
     }
+    let consentErr: unknown;
+    try {
+      const results = await this.consentPurge.purgeExpiredConsent();
+      this.logger.log(`consent retention purge: tenants=${results.length} deleted=${results.reduce((n, r) => n + r.purgedCount, 0)}`);
+    } catch (err) {
+      this.logger.error(`consent retention purge failed: ${String(err)}`);
+      consentErr = err;
+    }
+    if (formsErr !== undefined) throw formsErr;
+    if (consentErr !== undefined) throw consentErr;
+    return out!;
   }
 
   /** The idempotency expiry sweep. Returns the store's own counts. */
