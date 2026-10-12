@@ -190,9 +190,11 @@ BEGIN
     RAISE EXCEPTION 'FINANCE_AR_EMPTY_INVOICE: invoice % has no lines', v_inv.invoice_no;
   END IF;
 
-  -- PV5-05: the CUSTOMER's receivable. The AR control account for an ordinary customer (resolved by
-  -- role, exactly as before), the counterparty's 1290-* for a group client.
-  v_ar := finance_ar_receivable_account(v_inv.customer_id);
+  -- TEETH (temporary, PV5-05): every invoice, group client or not, debits the AR control account.
+  SELECT code INTO v_ar FROM finance_accounts
+   WHERE tenant_id = v_inv.tenant_id AND is_control AND control_subledger = 'ar'
+     AND deleted_at IS NULL AND status = 'active'
+   ORDER BY code LIMIT 1;
 
   IF v_inv.tax_total > 0 THEN
     SELECT code INTO v_vat FROM finance_accounts
