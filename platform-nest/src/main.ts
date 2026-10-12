@@ -53,6 +53,7 @@ import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
 import { startClientTargetsLoop } from "./modules/monitoring/client-targets";
 import { rebuildTargets, startSiteBuildsLoop } from "./modules/webdev/site-builds.service";
 import { sweepScheduledRebuilds } from "./modules/webdev/scheduled-rebuilds.service";
+import { provisionReconcileStartLine, startProvisionReconcileLoop } from "./modules/webdev/provision-reconcile-loop";
 import { invoiceModule } from "./modules/invoice";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -777,6 +778,13 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log("MON-01 probe-target file off: CLIENT_PROPERTY_TARGETS_PATH is unset");
   }
+  // M6-P4c2: the provisioned-site reconcile. Nothing else advanced a site whose WebDesk codegen outlasted the
+  // 5-minute poll, so its contract was never pinned and the delivery code stage never resumed. It finishes
+  // work a company_admin already approved, through the manual route's own functions, so it has no off switch:
+  // PROVISION_RECONCILE_INTERVAL_MS is the whole control (see provision-reconcile-loop.ts).
+  startProvisionReconcileLoop(config.provision.reconcileIntervalMs);
+  // eslint-disable-next-line no-console
+  console.log(provisionReconcileStartLine());
   // WSK-60: the staging-rebuild stamp poller. It reads only rows that exist and GETs only the staging URL
   // an operator put in WEBDESK_REBUILD_TARGETS, so "a target is configured" is its whole gate: with none,
   // no build can have been dispatched and there is nothing to poll. WSK-61 rides the same tick: a

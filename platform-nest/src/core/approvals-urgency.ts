@@ -15,7 +15,9 @@
 // Caught by driving the flow, not by a type error — the origin is a plain string column.
 // `webdesk` added 2026-10-10 (WSK-59): WSK-66 files origin='webdesk' rows for content publish/schedule; unlisted here
 // they were invisible in the unified inbox and un-decidable through the façade.
-export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk";
+// `github` added 2026-10-12 (GH-12): a repo-creation request (`fileAutomationApproval` origin='github', filed by the Create-repository
+// click and by webdev.provisionSite) was the same trap: filed, decidable by id on the native route, invisible in the inbox and 400'd by the façade.
+export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk" | "github";
 
 /** Base tier per origin. Pipeline gates (client/delivery-blocking sign-off) and agency
  *  creative-review sit above automation/agent write-suspensions, which sit above hr leave asks
@@ -33,6 +35,10 @@ export const ORIGIN_BASE_WEIGHT: Record<ApprovalOrigin, number> = {
   // A publish request is a suspended outbound-public write: it ranks with automation/agent suspensions (and is
   // always filed impact 'high', so IMPACT_BONUS lifts it above a routine one).
   webdesk: 80,
+  // A repo-creation request is a suspended outbound write to an external system (GitHub), always filed impact 'high', and it
+  // stalls site provisioning for a client project while it waits. It ranks with automation/agent/webdesk suspensions (80);
+  // IMPACT_BONUS then lifts it above a routine row. Not above pipeline gates (client sign-off) or agency review.
+  github: 80,
   hr: 70,
 };
 

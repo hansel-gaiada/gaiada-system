@@ -1,9 +1,16 @@
-# The public collector gate. Rendered by the nginx image's envsubst: only TRACKER_SCRIPT_NAME and
-# COLLECT_API_ENDPOINT are substituted (nginx's own $variables are untouched). Each must be ONE absolute path.
+# The public collector gate. Rendered by the nginx image's envsubst: only TRACKER_SCRIPT_NAME,
+# COLLECT_API_ENDPOINT, EDGE_COLLECT_UPSTREAM and ERP_EDGE_SOURCE are substituted (nginx's own $variables are
+# untouched: the image substitutes only variables that exist in the container's environment). The two names
+# must each be ONE absolute path.
 upstream umami_app {
   server app:3000;
   keepalive 8;
 }
+
+# Docker's embedded DNS. The collector is resolved per request (a variable in proxy_pass below), never once at
+# start: it is restarted by geo-refresh.sh and on every deploy and may come back on a new address, and an edge
+# that cannot resolve it at start would also refuse to start for the rollback.
+resolver 127.0.0.11 valid=10s ipv6=off;
 
 # The only peer that may state a client address is erp-edge's Traefik (WSK-D71), which writes X-Forwarded-For
 # from the PROXY-protocol address mimi passed on and discards whatever the visitor sent. Trust ONLY the source
@@ -27,17 +34,56 @@ server {
     include /etc/nginx/proxy-common.inc;
   }
 
+  # The collect path goes to the enrichment collector (M5-V2), which resolves the address, pseudonymises it and
+  # forwards to Umami (stays the collector's upstream). EDGE_COLLECT_UPSTREAM is `collector:8080` normally and
+  # `app:3000` for the rollback (collector out of the path; then also restore SKIP_LOCATION_HEADERS=1).
+  # X-Real-IP is the real_ip-derived address (proxy-common.inc); 8080 on the collector trusts it, so it must only be
+  # reachable from this edge (it is: `internal` network, nothing published).
   location = ${COLLECT_API_ENDPOINT} {
     limit_except POST OPTIONS { deny all; }
-    proxy_pass http://umami_app;
+    set $collect_upstream "${EDGE_COLLECT_UPSTREAM}";
+    proxy_pass http://$collect_upstream;
     include /etc/nginx/proxy-common.inc;
   }
+
+  # The consented, forget and replay channels (V3-b: /v and /f, V6-a: /r) are TEMPLATED BUT OFF: they 404 through
+  # `location /` below until their ticket enables them. To enable one, uncomment its block IN THAT TICKET (it
+  # also needs its erp-edge route, V3-c) and keep the shape: exact path, POST/OPTIONS only, the collector's
+  # 8080, its own body cap where the design sets one.
+  #
+  # location = /lib/kestrel/v {          # V3-b consented events
+  #   limit_except POST OPTIONS { deny all; }
+  #   set $collect_upstream "collector:8080";
+  #   proxy_pass http://$collect_upstream;
+  #   include /etc/nginx/proxy-common.inc;
+  # }
+  # location = /lib/kestrel/f {          # V3-b forget (always 204)
+  #   limit_except POST OPTIONS { deny all; }
+  #   set $collect_upstream "collector:8080";
+  #   proxy_pass http://$collect_upstream;
+  #   include /etc/nginx/proxy-common.inc;
+  # }
+  # location = /lib/kestrel/r {          # V6-a replay chunks (design 6.2: 320 KB cap on this location only)
+  #   limit_except POST OPTIONS { deny all; }
+  #   client_max_body_size 320k;
+  #   set $collect_upstream "collector:8080";
+  #   proxy_pass http://$collect_upstream;
+  #   include /etc/nginx/proxy-common.inc;
+  # }
 
   # Docker healthcheck only (127.0.0.1 inside the container); deep: it asks Umami.
   location = /__ping {
     allow 127.0.0.1;
     deny all;
     proxy_pass http://umami_app/api/heartbeat;
+  }
+
+  # Docker healthcheck companion: the collector's own health (its ops port), loopback only. Never public.
+  location = /__ping_collector {
+    allow 127.0.0.1;
+    deny all;
+    set $collector_ops "collector:8081";
+    proxy_pass http://$collector_ops/healthz;
   }
 
   # Everything else, including the whole admin UI and the rest of /api: not here.
