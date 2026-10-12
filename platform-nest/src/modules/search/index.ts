@@ -23,6 +23,7 @@ import { AI_CRAWLER_MCP_TOOLS } from "./ai-crawler-mcp-tools";
 // SEARCH_VISITORS_ENABLED is exactly "1": startVisitorJobs() then returns null with no timer. Started from main.ts beside
 // startContentDecayLoop. No routes and no MCP tools here (those are V3-g).
 export { startVisitorJobs } from "./visitor-jobs";
+import { EXPERIMENT_MCP_TOOLS } from "./experiments-mcp-tools";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -183,6 +184,8 @@ export const searchModule: ModuleContract = {
     // M5-V3-d: consented visitor profiles (profiles, events, tombstones, interest rules, ingest state) + the agency_leads
     // consent-link index. Registered AT WRITE TIME, same standing lesson.
     "202610131600_search_visitor_profiles.sql",
+    // M5-V5-c: search_experiments + search_experiment_results (A/B pre-registrations and decision snapshots). Registered AT WRITE TIME.
+    "202610131800_search_experiments.sql",
   ],
   // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
   // module reconciliation, 14 declared keys):
@@ -279,6 +282,8 @@ export const searchModule: ModuleContract = {
     ...CONVERSION_MCP_TOOLS,
     // M5-P5b: AI-crawler log (ingest MEDIUM write, summary read) + the SM-16 AI-visibility summary read.
     ...AI_CRAWLER_MCP_TOOLS,
+    // M5-V5-c: A/B experiments (pre-registration, sync, results, stop/abort/decide): 3 reads + 6 LOW writes.
+    ...EXPERIMENT_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",

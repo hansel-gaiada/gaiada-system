@@ -28,6 +28,7 @@
 //   DATABASE_URL=... node dist/seed/portal-workspace.js
 import { newId, withGlobal, withTenants, closePool } from "../db";
 import { config } from "../config";
+import { sha256Hex } from "../core/content-hash";
 
 const site = () => config.originSite;
 const IDR = "IDR";
@@ -617,12 +618,15 @@ async function seedContracts(
       const signedAt = k.signed.length === 2 ? new Date().toISOString() : null;
       await withTenants([tenantId], (c) =>
         c.query(
+          // PV5-06: every seeded contract here was SENT, so it carries what a real send leaves: the SHA-256 of
+          // its exact terms, the stamp, and the attested tier (the database refuses a sent row without them).
           `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, version, status,
-                                  body_md, value, currency, starts_on, ends_on, sent_at, signed_at, created_by, origin_site)
-           VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11::date,$12::date,now(),$13,$14,$15)`,
+                                  body_md, value, currency, starts_on, ends_on, sent_at, signed_at,
+                                  content_sha256, content_fixed_at, signature_tier, created_by, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11::date,$12::date,now(),$13,$16,now(),'attested',$14,$15)`,
           [
             id, tenantId, clientId, k.onProject ? projectId : null, k.title, k.reference, k.status,
-            k.bodyMd, k.value, IDR, day(k.startOffset), day(k.endOffset), signedAt, staff, site(),
+            k.bodyMd, k.value, IDR, day(k.startOffset), day(k.endOffset), signedAt, staff, site(), sha256Hex(k.bodyMd ?? ""),
           ],
         ),
       );
@@ -634,14 +638,15 @@ async function seedContracts(
       if (has.rows[0]) continue;
       await withTenants([tenantId], (c) =>
         c.query(
-          `INSERT INTO contract_signatures (id, tenant_id, contract_id, party, signer, signer_name, signer_title, origin_site)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (contract_id, party) DO NOTHING`,
+          `INSERT INTO contract_signatures (id, tenant_id, contract_id, party, signer, signer_name, signer_title, content_sha256, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$9,$8) ON CONFLICT (contract_id, party) DO NOTHING`,
           [
             newId(), tenantId, id, party,
             party === "provider" ? staff : clientUser,
             party === "provider" ? "D. Syrowatka" : "Authorised signatory",
             party === "provider" ? "Director" : null,
             site(),
+            sha256Hex(k.bodyMd ?? ""),
           ],
         ),
       );

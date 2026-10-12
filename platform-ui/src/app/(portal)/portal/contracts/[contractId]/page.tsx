@@ -122,7 +122,7 @@ export default async function PortalContractPage({ params }: { params: Promise<{
           </Card>
         ) : signing.kind === "sign" ? (
           <Card title="Sign this agreement">
-            <PortalSignForm contractId={k.id} title={k.title} />
+            <PortalSignForm contractId={k.id} title={k.title} contentSha256={k.contentSha256} />
           </Card>
         ) : (
           <Card title="Signing">

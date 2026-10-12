@@ -14,6 +14,7 @@ import { newId, withTenants } from "../db";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
+import { FIXTURE_TERMS, FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../testing/fixtures";
 import { resolveClientRecipients } from "./client-notify";
 import { canEditCentre } from "./portal-centre.controller";
@@ -50,9 +51,10 @@ describe.skipIf(!TEST_URL)("WSK-49f: admin implies signer", () => {
     const id = newId();
     await withTenants([co], (c) =>
       c.query(
-        `INSERT INTO contracts (id, tenant_id, client_id, title, status, currency, sent_at, created_by, origin_site)
-         VALUES ($1,$2,$3,'MSA','sent','IDR',now(),$4,$5)`,
-        [id, co, clientA, staff, config.originSite],
+        `INSERT INTO contracts (id, tenant_id, client_id, title, status, currency, sent_at, body_md, content_sha256,
+                                content_fixed_at, signature_tier, created_by, origin_site)
+         VALUES ($1,$2,$3,'MSA','sent','IDR',now(),$6,$7,now(),'attested',$4,$5)`,
+        [id, co, clientA, staff, config.originSite, FIXTURE_TERMS, FIXTURE_TERMS_SHA256],
       ),
     );
     return id;
@@ -60,7 +62,7 @@ describe.skipIf(!TEST_URL)("WSK-49f: admin implies signer", () => {
   const sign = (contractId: string, who: string) =>
     app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${contractId}/sign`, headers: asUser(who),
-      payload: { signerName: "Some Signer", agree: true },
+      payload: { signerName: "Some Signer", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
   const openGate = async () => {
     const run = (await app.inject({ method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(staff), payload: { title: "Run", clientId: clientA } })).json().id;

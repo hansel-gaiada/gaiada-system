@@ -378,9 +378,9 @@ edge nginx --/lib/kestrel.js----------------------------------------------------
 
 What changed in `infra/sumopod/umami/`: `docker-compose.yml` (`vdb`, `collector`, `vdb-data` volume; the edge waits for the collector
 only softly, `required: false`), `nginx/edge.conf.template` (collect location -> `${EDGE_COLLECT_UPSTREAM}`, resolved per request;
-`/lib/kestrel/v`, `/f`, `/r` templated and commented out: they 404 until V3-b / V6-a), `geo-refresh.sh` (ASN Lite + collector restart),
+`/lib/kestrel/v`, `/f`, `/r` templated and commented out; V3-c (C7) enables `/v` and `/f`, `/r` stays off until V6-a), `geo-refresh.sh` (ASN Lite + collector restart),
 `backup.sh` and `umami-backup-receive.sh` (vdb), `.env.example`, and `check-config.sh` (the static gate).
-`read-gate` is NOT changed here: its `/ops/v1/` route (and the forget `POST`) is V3-c.
+`read-gate` is NOT changed here: its `/ops/v1/` routes (and the forget `POST`) are V3-c (C7).
 
 ### C0. Preflight (before anything is copied)
 
@@ -479,7 +479,7 @@ Send the agreed public test IP (V2-d names it) through the edge exactly as secti
 4. **A public `cf-ipcountry` does not land:** send one with `cf-ipcountry: XX` to the public path; the stored country must not be `XX`.
 5. **Bots are dropped and counted:** one hit with a bot user-agent answers `{"beep":"boop"}`, adds no `website_event`, and
    `docker exec umami-vdb-1 psql -U vdb -d vdb -c "select * from bot_counts"` shows a row. `identify` and an unknown website id: 400 and 403.
-6. **Every other path still 404s** publicly (section 8 step 2 list, plus `/lib/kestrel/v`, `/f`, `/r`, `/ops/v1/bots`, `/healthz`, `/__ping_collector`).
+6. **Every other path still 404s** publicly (section 8 step 2 list, plus `/lib/kestrel/r`, `/ops/v1/bots`, `/healthz`, `/__ping_collector`; `/lib/kestrel/v` and `/f` 404 only until V3-c, C7, routes them).
 7. **The vdb backup holds no personal data:** after `backup.sh`, decrypt on the laptop (restore test, section 10) and
    `zcat | grep -E '^COPY public\.(consented_events|replay_)'` prints nothing.
 
@@ -498,3 +498,105 @@ The edge does not need the collector to start (`required: false`, resolved per r
 Rehearse it once before the first live cutover (V2-e). A bad collector image: re-pin the previous `image:` (tag and digest) and
 `docker compose up -d collector`. Remove entirely: `docker compose rm -sf collector vdb`; delete `vdb-data` only after a verified off-box vdb dump.
 Backups outlive deletions: the vdb dump holds hashes and aggregates only; after any restore, tombstones must be re-applied before ingest resumes (V3-e).
+
+### C7. The consented channel's routes and keys (M5-V3-c) — status: PLANNED, artifacts written, nothing deployed
+
+What it adds (design `docs/plans/2026-10-12-m5-phase5-design.md` 4.4):
+
+```
+public:  site --https--> erp-edge Traefik (erp-insights-consented: Path /lib/kestrel/v | /lib/kestrel/f) --> edge nginx --> collector :8080
+ops:     platform-nest (gda-aicenter) --wg--> read-gate 10.88.0.2:18743 --/ops/v1/events|bots (GET), /ops/v1/forget (POST)--> collector :8081
+```
+
+- `infra/sumopod/erp-edge/dynamic/erp-insights.yml`: a second router `erp-insights-consented`, exactly two paths, the same middlewares as the
+  collect router (CORS to the site origins, 20 req/s per address, 32 KB body cap in Traefik; nginx caps `/v` at 16 KB and `/f` at 2 KB).
+- `nginx/edge.conf.template`: `/lib/kestrel/v` and `/f` enabled (exact path, POST and OPTIONS only, collector `8080`). `/r` stays off (V6-a).
+- `nginx/read.conf.template` (profile `erp-read`): `GET /ops/v1/events`, `GET /ops/v1/bots`, `POST /ops/v1/forget` to `collector:8081`, resolved
+  per request. The `Authorization` header passes through; the collector decides 401 (no or unknown key) and 403 (the wrong key for the route: the
+  read key on forget, the forget key on events). Any other method (a `DELETE`) is 403 at the gate; any other path 404. The ops API is not on the
+  public edge, so publicly `/ops/v1/*` is 404.
+- platform-nest env (`infra/compose/`): `INSIGHTS_BASE_URL` (`http://10.88.0.2:18743`), `INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY`,
+  `SEARCH_VISITORS_ENABLED` (exactly `1` turns the feature on). The two keys are the ones whose hashes C2 put in the collector's `.env`.
+
+**Deploy order** (each step starts only when the previous one is verified):
+
+1. Collector first. It already runs with `OPS_FORGET_KEY_SHA256` set (V3-b, C2); check `docker compose ps` (collector healthy) and that
+   `COLLECTOR_CONSENT_EVENT_NAMES` is set in `.env` (V3-j's list).
+2. sumopod: edge and read-gate (template changes); static gate first:
+   ```bash
+   # ~/umami is a COPY, not a checkout: ship the new files from a workstation first (the section 1 recipe), e.g.
+   #   git -c core.autocrlf=false archive origin/main infra/sumopod/umami | ssh sumopod 'tar -x --strip-components=3 -C ~/umami'
+   # (keeps .env, geo/ and data untracked by git), then on sumopod:
+   cd ~/umami && chmod +x *.sh && ./check-config.sh --deploy             # ALL PASS (renders and nginx -t the /v, /f and /ops/v1 locations)
+   docker compose up -d edge
+   docker compose --profile erp-read up -d read-gate                      # recreates it with the new template (it only serves the ERP)
+   docker exec umami-edge-1 nginx -T 2>/dev/null | grep -E 'location = /lib/kestrel/(v|f)'
+   docker exec umami-read-gate-1 nginx -T 2>/dev/null | grep -E 'location = /ops/v1'
+   ```
+3. sumopod: the erp-edge router (Traefik watches `dynamic/`, no restart):
+   ```bash
+   # ~/erp-edge is a COPY too: ship infra/sumopod/erp-edge/dynamic/erp-insights.yml the same way (git archive, never a CRLF copy), then:
+   cd ~/erp-edge && ls dynamic/ && docker logs --since 1m erp-edge-traefik-1 2>&1 | grep -i -E 'erp-insights|error' | tail
+   ```
+4. aicenter: put the two keys in files the checks read (once; type or paste at the prompt, never on a command line, never into a ticket):
+   ```bash
+   umask 077; mkdir -p ~/.insights-keys
+   read -rs -p 'read key: ' RK; echo; printf 'Authorization: Bearer %s\n' "$RK" > ~/.insights-keys/read.hdr; unset RK
+   read -rs -p 'forget key: ' FK; echo; printf 'Authorization: Bearer %s\n' "$FK" > ~/.insights-keys/forget.hdr; unset FK
+   ```
+   The same two values go into platform-nest's `.env` (`INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY`) for the ERP deploy; never into git.
+
+**Post-deploy checks** (from `gda-aicenter`; `-H @file` makes curl read the header from the file, so no key is on a command line or in `ps`):
+
+```bash
+RG=http://10.88.0.2:18743; PUB=https://insights.erp.gaiada.com; H=~/.insights-keys
+WEB=<the Umami website id from INSIGHTS_WEBSITES>
+Z=00000000-0000-0000-0000-000000000000
+# 1. the read key lists events and bots: 200
+curl -s -o /dev/null -w 'read key, events:    %{http_code} (200)\n' -H @$H/read.hdr "$RG/ops/v1/events?website=$WEB&limit=1"
+curl -s -o /dev/null -w 'read key, bots:      %{http_code} (200)\n' -H @$H/read.hdr "$RG/ops/v1/bots"
+# 2. the read key on forget is refused: 403 (the body is valid, so this tests the key, not validation)
+curl -s -o /dev/null -w 'read key, forget:    %{http_code} (403)\n' -X POST -H @$H/read.hdr -H 'Content-Type: application/json' \
+  -d "{\"website\":\"$WEB\",\"visitorIds\":[\"$Z\"],\"consentIds\":[],\"mode\":\"withdraw\"}" "$RG/ops/v1/forget"
+# 3. the forget key on events is refused: 403
+curl -s -o /dev/null -w 'forget key, events:  %{http_code} (403)\n' -H @$H/forget.hdr "$RG/ops/v1/events?website=$WEB&limit=1"
+# 4. no key: 401
+curl -s -o /dev/null -w 'no key, events:      %{http_code} (401)\n' "$RG/ops/v1/events?website=$WEB&limit=1"
+curl -s -o /dev/null -w 'no key, forget:      %{http_code} (401)\n' -X POST -H 'Content-Type: application/json' -d '{}' "$RG/ops/v1/forget"
+# 5. other methods and paths are refused at the gate, never 2xx
+curl -s -o /dev/null -w 'DELETE events:       %{http_code} (403)\n' -X DELETE -H @$H/read.hdr "$RG/ops/v1/events?website=$WEB"
+curl -s -o /dev/null -w 'DELETE forget:       %{http_code} (403)\n' -X DELETE -H @$H/forget.hdr "$RG/ops/v1/forget"
+curl -s -o /dev/null -w 'GET forget:          %{http_code} (403)\n' -H @$H/forget.hdr "$RG/ops/v1/forget"
+curl -s -o /dev/null -w 'POST events:         %{http_code} (403)\n' -X POST -H @$H/read.hdr "$RG/ops/v1/events"
+curl -s -o /dev/null -w 'other ops path:      %{http_code} (404)\n' -H @$H/read.hdr "$RG/ops/v1/other"
+curl -s -o /dev/null -w 'healthz via gate:    %{http_code} (404)\n' "$RG/healthz"
+# 6. the ops API is not public: 404, with and without a key
+curl -s -o /dev/null -w 'public events:       %{http_code} (404)\n' -H @$H/read.hdr "$PUB/ops/v1/events?website=$WEB"
+curl -s -o /dev/null -w 'public forget:       %{http_code} (404)\n' -X POST -H @$H/forget.hdr "$PUB/ops/v1/forget"
+# 7. the public consented channel is routed and validates: a /v body without a consentId is 400 (not 404, not 5xx)
+curl -s -o /dev/null -w 'public /v no consent: %{http_code} (400)\n' -X POST -H 'Content-Type: text/plain' \
+  -d "{\"website\":\"$WEB\",\"visitorId\":\"$Z\",\"events\":[]}" "$PUB/lib/kestrel/v"
+# 8. /f is routed and answers 204 for a well-formed body; GET on /v is not served; /r is off; the 16 KB cap holds
+curl -s -o /dev/null -w 'public /f:           %{http_code} (204)\n' -X POST -H 'Content-Type: text/plain' \
+  -d "{\"website\":\"$WEB\",\"visitorId\":\"$Z\",\"consentId\":\"00000000-0000-0000-0000-000000000001\"}" "$PUB/lib/kestrel/f"
+curl -s -o /dev/null -w 'GET /v:              %{http_code} (403 or 404, never 2xx)\n' "$PUB/lib/kestrel/v"
+curl -s -o /dev/null -w 'public /r:           %{http_code} (404)\n' -X POST -d '{}' "$PUB/lib/kestrel/r"
+head -c 20000 /dev/zero | tr '\0' a | curl -s -o /dev/null -w '/v over 16 KB:       %{http_code} (413)\n' -X POST -H 'Content-Type: text/plain' --data-binary @- "$PUB/lib/kestrel/v"
+```
+
+Then on sumopod: `docker compose logs --since 10m collector edge read-gate | grep -c -i -E 'bearer|authorization'` must print 0.
+Record the output in the ticket; the expected code is in each parenthesis. A `502` on an `/ops/v1` check means the collector is down or
+`read-gate` was not recreated; a `404` on `/lib/kestrel/v` means the edge was not recreated or the Traefik router did not load (step 3 logs).
+Note: the `/v` and `/f` bodies in checks 7 and 8 use the all-zero visitor id, which is a real (if unused) visitor to the collector: run
+`/f` once more with the forget key through `/ops/v1/forget` if a row appears (`events` with `visitorId=$Z`).
+
+**Rollback** (the consented channel only; the collect path and the Umami read path are untouched):
+
+1. erp-edge: delete the `erp-insights-consented` router from `dynamic/erp-insights.yml` (or `git revert` the V3-c commit and pull);
+   Traefik reloads on its own. Check: `curl -s -o /dev/null -w '%{http_code}\n' -X POST https://insights.erp.gaiada.com/lib/kestrel/v` prints 404.
+2. umami: comment the two `location = /lib/kestrel/(v|f)` blocks in `nginx/edge.conf.template` and the three `location = /ops/v1/...` blocks
+   in `nginx/read.conf.template` (or `git revert`), then `cd ~/umami && docker compose up -d edge && docker compose --profile erp-read up -d read-gate`.
+   Run `./check-config.sh` after commenting: it will FAIL the V3-c render checks, which is the expected signal that the channel is off.
+
+The ERP side degrades on its own: with `SEARCH_VISITORS_ENABLED` empty the visitor feature is off, and an empty `INSIGHTS_BASE_URL`
+reads as "not configured". Withdrawals and erasures that failed while the forget route was down stay queued in the ERP (V3-e) and are retried.

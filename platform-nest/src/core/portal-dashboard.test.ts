@@ -34,6 +34,7 @@ import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
 import { newId, withTenants } from "../db";
+import { FIXTURE_TERMS, FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -153,10 +154,11 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
       ] as Array<[string, string, string, string]>) {
         await c.query(
           `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, status, value, currency,
-                                  starts_on, ends_on, sent_at, created_by, origin_site)
+                                  starts_on, ends_on, sent_at, body_md, content_sha256, content_fixed_at, signature_tier,
+                                  created_by, origin_site)
            VALUES ($1, $2, $3, $4, 'Master Services Agreement', $5, 'sent', 25000, 'IDR',
-                   current_date - 1, current_date + 365, now(), $6, $7)`,
-          [id, co, client, project, reference, admin, site()],
+                   current_date - 1, current_date + 365, now(), $8, $9, now(), 'attested', $6, $7)`,
+          [id, co, client, project, reference, admin, site(), FIXTURE_TERMS, FIXTURE_TERMS_SHA256],
         );
       }
     });
@@ -324,7 +326,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
   it("a VIEWER cannot sign a contract", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${contractA}/sign`, headers: asUser(viewerA),
-      payload: { signerName: "Vic Viewer", agree: true },
+      payload: { signerName: "Vic Viewer", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.statusCode).toBe(403);
     expect(r.json().error).toMatch(/view-only/i);
@@ -341,7 +343,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
   it("a signer signs; the contract stays 'sent' until the provider countersigns", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${contractA}/sign`, headers: asUser(signerA),
-      payload: { signerName: "Sam Signer", signerTitle: "CEO", agree: true },
+      payload: { signerName: "Sam Signer", signerTitle: "CEO", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ complete: false, alreadySigned: false });
@@ -354,7 +356,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
   it("re-signing is idempotent, not an error", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${contractA}/sign`, headers: asUser(signerA),
-      payload: { signerName: "Sam Signer", agree: true },
+      payload: { signerName: "Sam Signer", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.statusCode).toBe(200);
     expect(r.json().alreadySigned).toBe(true);
@@ -373,9 +375,10 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     const c2 = newId();
     await withTenants([co], (c) =>
       c.query(
-        `INSERT INTO contracts (id, tenant_id, client_id, title, status, currency, sent_at, created_by, origin_site)
-         VALUES ($1, $2, $3, 'Addendum', 'sent', 'IDR', now(), $4, $5)`,
-        [c2, co, clientA, admin, site()],
+        `INSERT INTO contracts (id, tenant_id, client_id, title, status, currency, sent_at, body_md, content_sha256,
+                                content_fixed_at, signature_tier, created_by, origin_site)
+         VALUES ($1, $2, $3, 'Addendum', 'sent', 'IDR', now(), $6, $7, now(), 'attested', $4, $5)`,
+        [c2, co, clientA, admin, site(), FIXTURE_TERMS, FIXTURE_TERMS_SHA256],
       ),
     );
     await withTenants([co], (c) =>
@@ -387,7 +390,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     );
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${c2}/sign`, headers: asUser(signerA),
-      payload: { signerName: "Sam Signer", agree: true },
+      payload: { signerName: "Sam Signer", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.json().complete).toBe(true);
     const detail = await app.inject({ method: "GET", url: `/api/${co}/portal/contracts/${c2}`, headers: asUser(signerA) });

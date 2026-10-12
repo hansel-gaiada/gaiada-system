@@ -2,7 +2,7 @@
 # provider, watch=true, so no restart). All names carry the `erp-insights-` prefix because file-provider names
 # are global across the directory (erp-status.yml is the status page's, authored by another session).
 #
-# The two paths below MUST equal TRACKER_SCRIPT_NAME and COLLECT_API_ENDPOINT in infra/sumopod/umami/.env.
+# The two paths of the first router MUST equal TRACKER_SCRIPT_NAME and COLLECT_API_ENDPOINT in infra/sumopod/umami/.env.
 #
 # SECURITY (GHSA-3xx8-742v-m4mq: the collector's cache token is replayable as a share token against the
 # read API): the router matches the host AND EXACTLY two paths. There is no catch-all router for this host, so
@@ -22,6 +22,23 @@ http:
       middlewares:
         # Outermost first. On the way back the response passes erp-insights-strip, then -cors, so the CORS
         # headers set last win over anything the upstream sent.
+        - erp-insights-cors
+        - erp-insights-secheaders
+        - erp-insights-ratelimit
+        - erp-insights-body
+        - erp-insights-strip
+      tls:
+        certResolver: erp-le
+
+    # M5-V3-c: the consented channel (collector /v events, /f forget). Same host, same service and middlewares as
+    # above, but its own router so it can be removed alone (rollback: delete this router, Traefik reloads). EXACTLY
+    # two more paths; /lib/kestrel/r (V6-a) and /ops/v1/* are NOT routed here (the ops API is never public).
+    erp-insights-consented:
+      rule: "Host(`insights.erp.gaiada.com`) && (Path(`/lib/kestrel/v`) || Path(`/lib/kestrel/f`))"
+      entryPoints:
+        - websecure
+      service: erp-insights
+      middlewares:
         - erp-insights-cors
         - erp-insights-secheaders
         - erp-insights-ratelimit

@@ -324,3 +324,116 @@ func TestServeConsentedChannelEndToEnd(t *testing.T) {
 		t.Errorf("address or id in the log output:\n%s", out)
 	}
 }
+
+// V6-a through real listeners: the replay route is a 404 until REPLAY_ENABLED=1; then a chunk is stored, listed and
+// streamed on the ops port with the read key, removed by the forget key, and the address is in no log line.
+func TestServeReplayChannelEndToEnd(t *testing.T) {
+	run := func(t *testing.T, enabled string) (pub, ops string, mem *store.Memory, logs *syncBuf, stop func()) {
+		t.Helper()
+		pubAddr, opsAddr := freeAddr(t), freeAddr(t)
+		cfg, err := config.Load(testEnv(map[string]string{"LISTEN_ADDR": pubAddr, "OPS_ADDR": opsAddr, "REPLAY_ENABLED": enabled}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		geotest.WriteBoth(t, dir)
+		g := geo.Open(dir, cfg.CityFile, cfg.ASNFile)
+		det, _ := bot.New(data.IsbotPatterns, data.DatacenterASNs)
+		res, _ := company.NewRegistry().Select("", company.Options{})
+		logs = &syncBuf{}
+		lg := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		mem = store.NewMemory()
+		ctx, cancel := context.WithCancel(context.Background())
+		ready := make(chan [2]string, 1)
+		done := make(chan error, 1)
+		go func() { done <- serve(ctx, cfg, lg, g, det, res, mem, ready) }()
+		select {
+		case <-ready:
+		case err := <-done:
+			t.Fatalf("serve returned early: %v", err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("serve did not become ready")
+		}
+		return pubAddr, opsAddr, mem, logs, func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Errorf("serve: %v", err)
+			}
+			g.Close()
+		}
+	}
+	call := func(t *testing.T, method, url, key, body string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, url, strings.NewReader(body))
+		req.Header.Set("X-Real-IP", testIP)
+		req.Header.Set("User-Agent", chrome)
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	const vid, cid, rec = "aaaaaaaa-0000-4000-8000-000000000001", "bbbbbbbb-0000-4000-8000-000000000001", "eeeeeeee-0000-4000-8000-000000000001"
+	chunk := `{"website":"` + site + `","visitorId":"` + vid + `","consentId":"` + cid + `","recordingId":"` + rec + `","seq":0,` +
+		`"chunk":[{"type":4,"data":{"href":"https://www.example.com/services/?utm=x"}},{"type":3,"data":{"source":3,"id":2,"x":0,"y":5}}]}`
+
+	t.Run("off by default", func(t *testing.T) {
+		pub, _, mem, _, stop := run(t, "")
+		defer stop()
+		if code, _ := call(t, "POST", "http://"+pub+"/lib/kestrel/r", "", chunk); code != 404 {
+			t.Errorf("REPLAY_ENABLED empty: want 404, got %d", code)
+		}
+		if len(mem.ReplaySessionsAll()) != 0 {
+			t.Error("a recording was stored while replay was off")
+		}
+	})
+
+	t.Run("on", func(t *testing.T) {
+		pub, ops, mem, logs, stop := run(t, "1")
+		if code, body := call(t, "POST", "http://"+pub+"/lib/kestrel/r", "", chunk); code != 200 || body != `{"record":true}` {
+			t.Fatalf("chunk: %d %s", code, body)
+		}
+		typed := strings.Replace(chunk, `{"type":3,"data":{"source":3,"id":2,"x":0,"y":5}}`, `{"type":3,"data":{"source":5,"id":2,"text":"typed"}}`, 1)
+		typed = strings.Replace(typed, `"seq":0`, `"seq":1`, 1)
+		if code, _ := call(t, "POST", "http://"+pub+"/lib/kestrel/r", "", typed); code != 422 {
+			t.Errorf("typed input: %d", code)
+		}
+		if s := mem.ReplaySessionsAll(); len(s) != 1 || s[0].Chunks != 1 {
+			t.Fatalf("stored: %+v", s)
+		}
+		code, body := call(t, "GET", "http://"+ops+"/ops/v1/replay/sessions?website="+site+"&visitorId="+vid, readKey, "")
+		if code != 200 || !strings.Contains(body, rec) || !strings.Contains(body, `"/services/"`) {
+			t.Errorf("sessions: %d %s", code, body)
+		}
+		code, body = call(t, "GET", "http://"+ops+"/ops/v1/replay/chunks?website="+site+"&recording="+rec, readKey, "")
+		if code != 200 || !strings.Contains(body, `"href":"https://www.example.com/services/"`) || strings.Contains(body, "utm") {
+			t.Errorf("chunks: %d %s", code, body)
+		}
+		// The ops routes are not on the public port, and the forget key cannot read.
+		if code, _ := call(t, "GET", "http://"+pub+"/ops/v1/replay/sessions?website="+site+"&visitorId="+vid, readKey, ""); code != 404 {
+			t.Errorf("ops route on the public port: %d", code)
+		}
+		if code, _ := call(t, "GET", "http://"+ops+"/ops/v1/replay/sessions?website="+site+"&visitorId="+vid, forgetKey, ""); code != 403 {
+			t.Errorf("forget key on a read route: %d", code)
+		}
+		// The browser's /f removes the pair's recording.
+		if code, _ := call(t, "POST", "http://"+pub+"/lib/kestrel/f", "", `{"website":"`+site+`","visitorId":"`+vid+`","consentId":"`+cid+`"}`); code != 204 {
+			t.Errorf("/f: %d", code)
+		}
+		if len(mem.ReplaySessionsAll()) != 0 {
+			t.Error("/f left the recording")
+		}
+		if code, _ := call(t, "POST", "http://"+pub+"/lib/kestrel/r", "", strings.Replace(chunk, `"seq":0`, `"seq":2`, 1)); code != 410 {
+			t.Errorf("a chunk after withdrawal: %d", code)
+		}
+		stop()
+		if out := logs.String(); strings.Contains(out, testIP) || strings.Contains(out, vid) || strings.Contains(out, cid) || strings.Contains(out, rec) {
+			t.Errorf("address or id in the log output:\n%s", out)
+		}
+	})
+}
