@@ -815,6 +815,74 @@ export const webdevModule: ModuleContract = {
       },
     },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // M5-L1d — WebDesk form definitions (docs/plans/2026-10-11-webdesk-m5-plan.md, M5-L1d). Before this a `form_defs` row
+    // could only be created by raw SQL. Same BFF routes as above (`webdesk-content.controller.ts` -> `webdesk-forms.service.ts`),
+    // authorised as the EXISTING Cerbos kind `webdesk_collection`: `apply_schema` for the write (company_admin,
+    // webdev_manager, platform_admin: the publisher tier that already guards a collection's composition) and `read` for the
+    // reads. No new kind.
+    //
+    // IMPACT. `define` is `medium`, WebDesk's own class for `forms.define`: it changes what a PUBLIC form accepts and which
+    // consent notice it records, but never touches /v1 delivery or published content. An unattended caller (n8n, an agent)
+    // SUSPENDS for a human decision; an attended human is not suspended. It is deliberately NOT yet a D14 executable (not in
+    // `core/approval-executables.ts` nor `resource_mcp_tool.yaml`'s list, which are outside this change's paths): approving
+    // an unattended suspension therefore re-drives nothing (`not_applicable`), so for now only an attended human can
+    // define a form. Pairing it is a one-line change in each of those two files.
+    //
+    // `define` is a PATCH here because the hub's method union has no PUT; the BFF accepts PUT and PATCH on the same path.
+    // The body is `{schema, notify?, retentionDays, consentNoticeVersion}`: the shape of webdesk/sites/gaiada-com/forms/*.json
+    // without its `key` (which is `formKey`). WebDesk's typed 422 `form-definition-invalid` and 409 `consent-version-unchanged`
+    // reach an HTTP caller untouched; the hub shows an agent only its generic "platform ... <status>" error.
+    {
+      name: "webdesk.forms.list",
+      description: "List the form definitions of one WebDesk site (key, form id, fields, consent notice and version, retention).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId"],
+      },
+    },
+    {
+      name: "webdesk.forms.get",
+      description: "Read one form definition of a WebDesk site by its key (the stored fields, honeypot, consent notice text and version, retention days, notify).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, formKey: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId", "formKey"],
+      },
+    },
+    {
+      name: "webdesk.forms.define",
+      description:
+        "Create or replace one PUBLIC form's definition on a WebDesk site, by its key (an upsert; redefining keeps the form id the site posts to). "
+        + "`schema` is { fields: [{key,type,required?,maxLength?,options?}], honeypotField?, consentNotice: {text}, attachments? } with field types "
+        + "text, textarea, email, tel, number, boolean, date, select; an email/phone-looking field must be typed email/tel. `retentionDays` (1..3650) and "
+        + "`consentNoticeVersion` are required. Changing the consent notice text without a NEW version is refused (409 consent-version-unchanged). "
+        + "MEDIUM write: an unattended caller is suspended for human approval.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" },
+          formKey: { type: "string", description: "The form's stable key, e.g. contact. [a-z0-9][a-z0-9_-]{0,63}." },
+          schema: { type: "object", description: "{ fields, honeypotField?, consentNotice: { text }, attachments? }" },
+          notify: { type: "object", description: "Optional { to?: {email, name?}, templateKey?, autoresponder?, autoresponderTemplateKey? }." },
+          retentionDays: { type: "integer", minimum: 1, maximum: 3650 },
+          consentNoticeVersion: { type: "string", description: "Required. Must change whenever consentNotice.text changes." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "formKey", "schema", "retentionDays", "consentNoticeVersion"],
+      },
+    },
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
     // M5-W1b — the writers' room grant path (docs/plans/2026-10-11-m5-writers-room-design.md §2.6). Same BFF routes as
     // the UI (`webdesk-editorial-grants.controller.ts`), authorised as Cerbos `webdesk_collection:manage_editorial`.
     //

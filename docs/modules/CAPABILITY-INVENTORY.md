@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **176** capabilities across **16** owners
-- **92** writes · 84 reads
-- Writes by impact: **high 22** · medium 29 · low 41
+- **179** capabilities across **16** owners
+- **93** writes · 86 reads
+- Writes by impact: **high 22** · medium 30 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 18 |
+| webdev | `webdev` | 19 |
 
 ## Capabilities
 
@@ -215,6 +215,9 @@ unfalsifiable after.
 | webdev | `webdesk.editorial.grantRole` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | write | `high` |
 | webdev | `webdesk.editorial.listGrants` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | read | — |
 | webdev | `webdesk.editorial.revokeRole` | `DELETE` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants/:userId/:role` | write | `medium` |
+| webdev | `webdesk.forms.define` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey` | write | `medium` |
+| webdev | `webdesk.forms.get` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey` | read | — |
+| webdev | `webdesk.forms.list` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms` | read | — |
 | webdev | `webdesk.key.mint` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/keys` | write | `high` |
 | webdev | `webdesk.key.revoke` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/revoke` | write | `high` |
 | webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |

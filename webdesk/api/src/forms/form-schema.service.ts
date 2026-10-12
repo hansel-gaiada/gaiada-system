@@ -18,7 +18,11 @@ import { Injectable } from "@nestjs/common";
 import { z, ZodTypeAny } from "zod";
 import { formsConfig } from "./forms.config";
 
-export type FormFieldType = "text" | "textarea" | "email" | "number" | "boolean" | "date" | "select";
+// M5-L1d: the known field types, as DATA so the `forms.define` validator (control/forms/form-definition.ts) and
+// this type cannot drift. `tel` is new (additive): a phone field. It validates like short text; what makes it
+// matter is subject-refs.ts, which derives the phone correlator from the first `tel`-typed field.
+export const FORM_FIELD_TYPES = ["text", "textarea", "email", "tel", "number", "boolean", "date", "select"] as const;
+export type FormFieldType = (typeof FORM_FIELD_TYPES)[number];
 
 export type FormFieldDef = {
   key: string;
@@ -50,6 +54,7 @@ function zodForField(field: FormFieldDef): ZodTypeAny {
       break;
     case "text":
     case "textarea":
+    case "tel":
       base = z.string().trim().max(maxLength);
       break;
     case "number":

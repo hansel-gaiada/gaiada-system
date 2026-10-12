@@ -1557,6 +1557,17 @@ name lists agree across the TS, the migration and `derived_roles.yaml`; scope at
 scope-less grant probing DENY through the real `check()`, atomicity, revoke); `src/modules/webdev/webdesk-editorial-grants.test.ts`
 (the routes over `app.inject` with real Cerbos: denials with valid bodies and no egress, the wall, the generic refusals with positive controls).
 
+### 27.2 M5-L1d — WebDesk form definitions reuse `webdesk_collection` (2026-10-12, PROTOTYPED)
+
+**No new kind, role, permission, bundle row or policy rule.** `forms.define` (WebDesk, MEDIUM / `webdesk:operate`) is authorised in the ERP as Cerbos
+`webdesk_collection` · **`apply_schema`** (company_admin, webdev_manager / module_manager, platform_admin; sensitive publisher tier), and `forms.def.list` / `forms.def.get` as
+`webdesk_collection` · **`read`**. Why `apply_schema`: a form definition is the composition of a PUBLIC intake (the fields it accepts, the consent notice it records, how long it keeps
+submissions), the same family as a collection's composition, which `apply_schema` already guards; WebDesk classifies both MEDIUM / operate. No `client` rule exists on this kind
+for either action, the BFF opens the STAFF gate (`authorizeContent`, never `openClient`), and WebDesk's `forms.define` carries no editorial assertion (like `schema.apply`), so a
+client-editor principal (`ce`) cannot be expressed on it. MCP: `webdesk.forms.define` (**medium**, PATCH alias), `webdesk.forms.list` / `webdesk.forms.get` (read), assurance `low`.
+FRONTEND-BFF-CONTRACT §27 "WebDesk form definitions". **Open follow-up:** `webdesk.forms.define` is NOT a D14 executable (`core/approval-executables.ts` + `resource_mcp_tool.yaml`'s list are
+outside this change), so an unattended suspension, once approved, re-drives nothing: only an attended human can define a form until the pair is added.
+
 ## 28. WSK-D60 follow-up — `owner` may grant a client's website access and the client `admin` capability (2026-10-12)
 
 **The gap.** WSK-49f catalogued `core.client_contact.manage_website_editor` / `manage_admin` and bundled them (company_admin, owner,

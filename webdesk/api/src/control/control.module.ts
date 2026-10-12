@@ -66,6 +66,9 @@ import { TenantReadsController } from "./tenants/tenant-reads.controller";
 // M5-L1/L2 — forms.submission.get.
 import { FormsReadsService } from "./forms/forms-reads.service";
 import { FormsReadsController } from "./forms/forms-reads.controller";
+// M5-L1d — forms.define / forms.def.list / forms.def.get.
+import { FormDefsService } from "./forms/form-defs.service";
+import { FormDefsController } from "./forms/form-defs.controller";
 // M5-W2b — the writers' room review commands and reads.
 import { EditorialCommandsService } from "./editorial/editorial-commands.service";
 import { EditorialCommandsController } from "./editorial/editorial-commands.controller";
@@ -134,6 +137,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     ContentReadsController,
     TenantReadsController,
     FormsReadsController,
+    FormDefsController,
     EditorialCommandsController,
     EditorialReadsController,
   ],
@@ -155,6 +159,7 @@ const editorialPrincipalResolverClass = process.env.NODE_ENV === "test" ? DevMod
     ContentReadsService,
     TenantReadsService,
     FormsReadsService,
+    FormDefsService,
     EditorialCommandsService,
     EditorialReadsService,
     { provide: CONTROL_CHANNEL_AUTHENTICATOR, useClass: controlChannelAuthenticatorClass },

@@ -309,7 +309,7 @@ export function idempotencyKeyOf(raw: string | string[] | undefined): string {
 
 export interface EgressWrite {
   /** Zone B's CommandName, hashed into the editorial assertion and recorded in the ledger. */
-  command: WebdeskBffEditorialCommand | "schema.apply" | "site.provision";
+  command: WebdeskBffEditorialCommand | "schema.apply" | "site.provision" | "forms.define";
   /** `webdesk.content.update` etc. */
   verb: string;
   method: "POST" | "PUT" | "PATCH" | "DELETE";
@@ -318,7 +318,7 @@ export interface EgressWrite {
   /** Omitted for a body-less write (WSK-43b's `media.delete`): no body is sent, and Zone B hashes the params alone. */
   body?: Record<string, unknown>;
   idempotencyKey: string;
-  /** Present for the editorial commands only (schema.apply and site.provision carry none: design §3.1). */
+  /** Present for the editorial commands only (schema.apply, site.provision and forms.define carry none: design §3.1). */
   editorial?: { tenantSlug: string; siteId: string };
   /** WSK-49c: set only by a client-mode call. The editorial assertion then carries `ce: true` (WebDesk's client-editor
    *  marker, WSK-D59/D62), and both ledger rows say so. It only ever RESTRICTS what WebDesk accepts; a staff call omits it. */

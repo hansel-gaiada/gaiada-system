@@ -26,6 +26,7 @@ import {
   type ZoneBResult,
 } from "./webdesk-content.service";
 import { webdeskMedia } from "./webdesk-media.service";
+import { defineFormDefinition, getFormDefinition, listFormDefinitions } from "./webdesk-forms.service";
 
 /** Writes a Zone B problem exactly as Zone B sent it. */
 @Catch(WebdeskProblem)
@@ -98,6 +99,52 @@ export class WebdeskContentController {
   ) {
     const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "read");
     send(reply, await webdeskContent.getVersion(gate, { tenantSlug, siteId }, itemId, n, query));
+  }
+
+  // ── form definitions (M5-L1d): Cerbos `webdesk_collection` (`read` / `apply_schema`), no new kind ───────────────
+  // The write is WebDesk's `forms.define` (MEDIUM): an upsert of one public form's definition by (site, key). WebDesk's
+  // typed 409 `consent-version-unchanged` and 422 `form-definition-invalid` (with `issues`) pass through untouched.
+
+  @Get("sites/:tenantSlug/:siteId/forms")
+  async listForms(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "read");
+    send(reply, await listFormDefinitions(gate, { tenantSlug, siteId }));
+  }
+
+  @Get("sites/:tenantSlug/:siteId/forms/:formKey")
+  async getForm(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("formKey") formKey: string, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "read");
+    send(reply, await getFormDefinition(gate, { tenantSlug, siteId }, formKey));
+  }
+
+  @Put("sites/:tenantSlug/:siteId/forms/:formKey")
+  async defineForm(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("formKey") formKey: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "apply_schema");
+    send(reply, await defineFormDefinition(gate, { tenantSlug, siteId }, formKey, body, idempotencyKeyOf(idem)));
+  }
+
+  /** The MCP hub's method union has no PUT, so `webdesk.forms.define` calls this alias: same path, same body, same semantics. */
+  @Patch("sites/:tenantSlug/:siteId/forms/:formKey")
+  async defineFormPatch(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("formKey") formKey: string, @Headers("idempotency-key") idem: string | undefined,
+    @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "apply_schema");
+    send(reply, await defineFormDefinition(gate, { tenantSlug, siteId }, formKey, body, idempotencyKeyOf(idem)));
   }
 
   // ── the media library (WSK-43b): its own Cerbos kind, `webdesk_media_asset` ──────────────────────
