@@ -48,8 +48,13 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // M6-P4a: webdev.contracts.get / webdev.contracts.artifact are the READ-ONLY (write:false) snapshot
   // reads code.scaffold v2 needs.
   // M6-P4e: webdev.provisionedSites.list / .get are the READ-ONLY (write:false) reads the code stage uses to
-  // wait for provisioning to complete; the only other webdev tools in this entry.
-  "wf:delivery": ["pipeline.getRun", "pipeline.artifacts.get", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "webdev.provisionSite", "webdev.contracts.get", "webdev.contracts.artifact", "webdev.provisionedSites.list", "webdev.provisionedSites.get", "notify", "approvals.request"],
+  // wait for provisioning to complete.
+  // M6-P4b2: webdev.provisionedSites.commitScaffold is the ONE webdev write here that runs unattended: write:true,
+  // impact:"low", because it can do nothing but the FIRST FILL of the repo a company_admin already approved for this
+  // provisioning (platform-nest refuses any write over a non-template commit, re-hashes every byte and pins the lock to
+  // the site's snapshot). The code.scaffold v2 job calls it with this workflow's OBO envelope; platform-nest writes with
+  // its ERP App, the hub never holds a write credential. A re-scaffold over a filled repo must be a different, medium tool.
+  "wf:delivery": ["pipeline.getRun", "pipeline.artifacts.get", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "webdev.provisionSite", "webdev.contracts.get", "webdev.contracts.artifact", "webdev.provisionedSites.list", "webdev.provisionedSites.get", "webdev.provisionedSites.commitScaffold", "notify", "approvals.request"],
   "wf:scope": ["pipeline.getRun", "pipeline.openGate", "notify"],
   // pm.createDoc / pm.createTask (WD-06, D-4): the report-track sink — a PM doc + review task
   // under the run's project, scoped to wf:report ONLY (invisible to wf:scope/wf:delivery/etc).

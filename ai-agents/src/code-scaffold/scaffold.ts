@@ -8,7 +8,6 @@ import { parsePrototypeSpec } from "./prototype-spec";
 import { composePages, type GeneratedFile } from "./page-composer";
 import { buildContractLock, contractLockFileContent } from "./contract-lock";
 import { generateConformanceTest, conformanceTestFilePath } from "./conformance-test";
-import { generateQaHarnessWorkflow, qaHarnessWorkflowFilePath } from "./qa-harness-workflow";
 import { generateSdkClientModule } from "./sdk-client-template";
 import { gitignore, envExample, readme, tsconfig, packageJson } from "./templates/common";
 import { astroConfig } from "./templates/astro-site";
@@ -208,7 +207,9 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
     path: conformanceTestFilePath(),
     content: generateConformanceTest({ tenantSlug, referencedCollections, blockTypesUsed }),
   });
-  files.push({ path: qaHarnessWorkflowFilePath(), content: generateQaHarnessWorkflow({}) });
+  // M6-P4b2: no `.github/` file. Workflows belong to the per-kind TEMPLATE (they run with the repo's secrets and the
+  // org's runners, and every template already ships `.github/workflows/site.yml`); platform-nest refuses a tree that
+  // changes `.github/`. The QA-harness workflow (qa-harness-workflow.ts) moves into the static template with webdev P5.
 
   const gapSummary = gaps.length > 0 ? ` ${gaps.length} vocabulary gap(s) left as TODO + schema-proposal drafts.` : "";
   return finish(
@@ -222,7 +223,8 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
 
 /** Writes the tree (dry run: a local commit and nothing else) and builds the result. The manifest and the lock's
  *  exact text ride in the result so a caller that never sees the work dir (the runner, M6-P4b2's committer) has
- *  the whole description of what was composed. */
+ *  the whole description of what was composed; `generatedFiles` (in memory only, never serialized) is what the runner
+ *  hands platform-nest to commit. */
 async function finish(
   files: GeneratedFile[],
   contractLock: ContractLock,
@@ -236,6 +238,7 @@ async function finish(
     content,
     files: files.map((f) => f.path),
     fileManifest: fileManifest(files),
+    generatedFiles: files,
     gaps,
     contractLock,
     contractLockContent: contractLockFileContent(contractLock),

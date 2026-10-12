@@ -100,6 +100,35 @@ describe("WS11 delivery tools", () => {
       expect(sent).not.toMatch(/push|remote/i);
     });
 
+    // M6-P4b2: provisionedSiteId asks the finished job to hand its tree to platform-nest (first fill). It rides BESIDE the
+    // frozen envelope as `commit`, and nothing else changes: still no remote, no mode, no credential.
+    it("with provisionedSiteId, the goal carries commit: {provisionedSiteId} beside the unchanged envelope", async () => {
+      const f = accepted();
+      vi.stubGlobal("fetch", f);
+      const site = "cccccccc-0000-4000-8000-000000000003";
+      const out = JSON.parse(await getTool("code.scaffold")!.handler({ ...full, provisionedSiteId: site }, principal));
+      expect(out).toMatchObject({ goalId: "goal-1", commitRequested: true });
+      expect(out.content).toMatch(/platform-nest commits the tree to provisioned site/);
+      const sent = (f as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls[0][1].body;
+      const goal = JSON.parse(JSON.parse(sent).goal);
+      expect(goal.commit).toEqual({ provisionedSiteId: site });
+      const { commit: _c, ...envelope } = goal;
+      expect(envelope).toEqual({
+        runId: "run-9", repoUrl: full.repoUrl, siteKind: "node", prdArtifact: full.prdArtifact, prototypeArtifact: full.prototypeArtifact,
+        contractSnapshotId: full.contractSnapshotId, constraints: { blockLibraryVersion: "", maxRevise: 3 },
+      });
+      expect(sent).not.toMatch(/push|remote|token/i);
+    });
+
+    it("refuses a provisionedSiteId that is not a uuid, before any call; without one, commitRequested is false", async () => {
+      const f = accepted();
+      vi.stubGlobal("fetch", f);
+      await expect(getTool("code.scaffold")!.handler({ ...full, provisionedSiteId: "acme-site" }, principal)).rejects.toThrow(/provisionedSiteId must be/);
+      expect(f).not.toHaveBeenCalled();
+      const out = JSON.parse(await getTool("code.scaffold")!.handler(full, principal));
+      expect(out.commitRequested).toBe(false);
+    });
+
     it("still accepts the legacy wf:delivery keys prd / prototype / repo as aliases", async () => {
       const f = accepted();
       vi.stubGlobal("fetch", f);

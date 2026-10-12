@@ -8,6 +8,8 @@
 // shape; changing a field here silently breaks the other end with no compiler to catch it, since the
 // two live in separate repos/processes. If a real field is missing, that is a spec gap to REPORT, not
 // a reason to add one here.
+import type { GeneratedFile } from "./page-composer";
+
 export type SiteKind = "astro" | "node" | "wp";
 
 export interface ScaffoldConstraints {
@@ -79,6 +81,9 @@ export interface ScaffoldResult {
   contractLock?: ContractLock;
   /** M6-P4b1 - the exact text of the composed `CONTRACT.lock` (repo root). Present with `files`. */
   contractLockContent?: string;
+  /** M6-P4b2 - the composed files themselves, IN MEMORY ONLY (never serialized into a goal result or a blackboard):
+   *  what the runner offers platform-nest to commit. Present with `files`. */
+  generatedFiles?: GeneratedFile[];
   /** The ref actually pushed (branch/sha), or the local bare-repo path in dry-run mode. */
   pushedTo?: string;
   error?: string;

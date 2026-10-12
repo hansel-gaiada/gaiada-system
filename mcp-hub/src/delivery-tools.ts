@@ -87,8 +87,13 @@ export function registerDeliveryTools(): void {
   // POST /goals path agents.invoke uses, with the caller's OBO identity forwarded verbatim) and returns the goal
   // id at once. The job composes a site from the pinned contract snapshot, the signed PRD and the accepted
   // prototype, in DRY-RUN mode only: nothing is pushed anywhere (the hub and the agents hold no GitHub write
-  // credential; platform-nest commits the returned file tree, M6-P4b2). Poll `agents.status` with the goal id: the
-  // finished goal carries the file list (path, size, sha256) and the CONTRACT.lock text in its blackboard entry.
+  // credential). Poll `agents.status` with the goal id: the finished goal carries the file list (path, size, sha256)
+  // and the CONTRACT.lock text in its blackboard entry.
+  //
+  // M6-P4b2: with `provisionedSiteId`, the goal also carries `commit: { provisionedSiteId }` (beside the frozen envelope,
+  // never inside it). The finished job then OFFERS the tree to platform-nest through `webdev.provisionedSites.commitScaffold`
+  // with the same OBO identity; platform-nest verifies it and writes the first fill with its ERP App, or refuses. This
+  // handler still sends no remote, no mode and no credential: it cannot select a push.
   //
   // INPUT. Required: tenantId, contractSnapshotId (webdev_contract_snapshots.id, THE pin), siteKind
   // ("astro" | "node" | "wp"), prdArtifact, prototypeArtifact (pipeline_stages.artifact_ref, resolved by the job
@@ -100,7 +105,7 @@ export function registerDeliveryTools(): void {
   registerTool({
     name: "code.scaffold",
     description:
-      "Claude Code v2: start a code.scaffold job that composes a site repo (siteKind astro, node = Next + Nest apps/web, or wp) from a pinned contract snapshot, the signed PRD and the accepted prototype. DRY RUN only: nothing is pushed. ASYNCHRONOUS: returns { goalId, status: 'queued', mode: 'dry_run', content } at once; poll agents.status for the file list and the CONTRACT.lock.",
+      "Claude Code v2: start a code.scaffold job that composes a site repo (siteKind astro, node = Next + Nest apps/web, or wp) from a pinned contract snapshot, the signed PRD and the accepted prototype. The job never pushes. With provisionedSiteId, the finished job hands the tree to platform-nest, which commits it as the FIRST FILL of that site's repo with the ERP App (webdev.provisionedSites.commitScaffold), or refuses. ASYNCHRONOUS: returns { goalId, status: 'queued', mode: 'dry_run', commitRequested, content } at once; poll agents.status for the file list, the CONTRACT.lock and the commit result.",
     minAssurance: "low",
     write: true,
     impact: "low",
@@ -113,6 +118,10 @@ export function registerDeliveryTools(): void {
         prdArtifact: { type: "string", description: "artifact_ref of the signed PRD stage (alias: prd)." },
         prototypeArtifact: { type: "string", description: "artifact_ref of the accepted design stage (alias: prototype)." },
         repoUrl: { type: "string", description: "The PM-created repo (alias: repo). Not used by a dry run." },
+        provisionedSiteId: {
+          type: "string",
+          description: "webdev_provisioned_sites.id whose provisioning is complete: the finished tree is committed there by platform-nest (first fill only). Omit for a pure dry run.",
+        },
         runId: { type: "string", description: "The pipeline run this belongs to, for correlation." },
         blockLibraryVersion: { type: "string", description: "Default: the snapshot's own pinned library version." },
         maxRevise: { type: "number" },
@@ -133,6 +142,10 @@ export function registerDeliveryTools(): void {
         throw new Error("contractSnapshotId required: code.scaffold v2 builds against a pinned contract snapshot (webdev_contract_snapshots.id)");
       }
       if (!SCAFFOLD_SITE_KINDS.includes(siteKind)) throw new Error(`siteKind must be one of ${SCAFFOLD_SITE_KINDS.join(", ")}`);
+      const provisionedSiteId = str(args.provisionedSiteId).trim();
+      if (provisionedSiteId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(provisionedSiteId)) {
+        throw new Error("provisionedSiteId must be a webdev_provisioned_sites id (uuid)");
+      }
 
       // The job's goal text is the frozen §06 scaffold envelope (ai-agents/src/code-scaffold/envelope.ts), and
       // nothing in it can select a push: the runner job is dry-run only.
@@ -151,7 +164,7 @@ export function registerDeliveryTools(): void {
       const r = await runnerFetch("POST", "/goals", principal, {
         tenantId,
         agent: SCAFFOLD_AGENT,
-        goal: JSON.stringify(envelope),
+        goal: JSON.stringify(provisionedSiteId ? { ...envelope, commit: { provisionedSiteId } } : envelope),
         ...(typeof args.requestedBy === "string" ? { requestedBy: args.requestedBy } : {}),
         envelope: { provider: principal.provider, externalId: principal.externalId },
       });
@@ -162,7 +175,10 @@ export function registerDeliveryTools(): void {
         mode: "dry_run",
         siteKind,
         contractSnapshotId,
-        content: `code.scaffold v2 job ${accepted.id} queued (dry run, ${siteKind}); poll agents.status with { goalId, tenantId } for the file list and CONTRACT.lock.`,
+        commitRequested: Boolean(provisionedSiteId),
+        content: provisionedSiteId
+          ? `code.scaffold v2 job ${accepted.id} queued (${siteKind}); when it finishes, platform-nest commits the tree to provisioned site ${provisionedSiteId} (first fill). Poll agents.status with { goalId, tenantId } for the commit result.`
+          : `code.scaffold v2 job ${accepted.id} queued (dry run, ${siteKind}); poll agents.status with { goalId, tenantId } for the file list and CONTRACT.lock.`,
       });
     },
   });

@@ -1,3 +1,7 @@
+// M6-P4b2: NO LONGER EMITTED by the scaffolder. `.github/` belongs to the per-kind template (platform-nest refuses a
+// scaffold tree that changes it: workflows run with the repo's secrets), so this text is now the REFERENCE for the
+// static template's QA-harness workflow, which lands there with webdev P5. Kept, with its test, for that move.
+//
 // WSK-20 — §06: "the QA-harness CI workflow pre-wired (a stub until webdev P5 ships the harness —
 // the workflow file + signed-webhook target land now so the harness drops in without a repo change)".
 //
