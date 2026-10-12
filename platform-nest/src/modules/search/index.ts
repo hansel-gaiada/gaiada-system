@@ -19,6 +19,10 @@ import { INDEXNOW_MCP_TOOLS } from "./indexnow-mcp-tools";
 import { CONVERSION_MCP_TOOLS } from "./conversions-mcp-tools";
 import { handleStageChanged as handleLeadStageChanged } from "./conversions.service";
 import { AI_CRAWLER_MCP_TOOLS } from "./ai-crawler-mcp-tools";
+// M5-V3-e: the consented-visitor jobs (ingest every 10 min, withdrawal sweep hourly, retention purge daily). Dark unless
+// SEARCH_VISITORS_ENABLED is exactly "1": startVisitorJobs() then returns null with no timer. Started from main.ts beside
+// startContentDecayLoop. No routes and no MCP tools here (those are V3-g).
+export { startVisitorJobs } from "./visitor-jobs";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
