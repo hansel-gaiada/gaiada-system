@@ -144,7 +144,7 @@ describe("runCodeScaffold — siteKind gating (WSK-D28 / webdesk-design-v2.md §
 });
 
 describe("runCodeScaffold — success path", () => {
-  it("produces CONTRACT.lock pinned to the exact snapshot, the conformance test, and the QA-harness stub", async () => {
+  it("produces CONTRACT.lock pinned to the exact snapshot and the conformance test, and no .github/ file (the template owns it)", async () => {
     const result = await runCodeScaffold(baseEnvelope(), {
       tenantId: "t1",
       snapshotProvider: FakeContractSnapshotProvider.withOne(fixtureSnapshot()),
@@ -163,7 +163,8 @@ describe("runCodeScaffold — success path", () => {
     });
     expect(result.files).toContain("CONTRACT.lock");
     expect(result.files).toContain("src/__generated__/contract-conformance.test.ts");
-    expect(result.files).toContain(".github/workflows/qa-harness.yml");
+    // M6-P4b2: `.github/` belongs to the template; platform-nest refuses a tree that changes it.
+    expect(result.files!.some((f) => f.startsWith(".github/"))).toBe(false);
     expect(result.files).toContain("src/lib/webdesk-sdk.ts");
     expect(result.gaps).toEqual([]);
   });

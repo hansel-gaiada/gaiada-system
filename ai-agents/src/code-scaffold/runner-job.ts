@@ -7,7 +7,16 @@
 // The target is hard-coded to `{ mode: "dry_run" }`. Nothing in the goal text can select a push: the goal is
 // parsed into the frozen envelope and every other key is ignored, so a `mode` or a `remoteUrl` in it changes
 // nothing. The agents' GitHub App and the hub are read-only by design; only platform-nest holds the write
-// credential (D29). M6-P4b2 makes platform-nest commit the tree this job returns.
+// credential (D29).
+//
+// ── THE COMMIT IS platform-nest's (M6-P4b2) ────────────────────────────────────────────────────────
+// A goal may carry `commit: { provisionedSiteId }` beside the envelope (the delivery workflow sends it once the
+// site's provisioning is complete). Then, after a successful dry run, this job OFFERS the composed tree to
+// platform-nest through the hub tool `webdev.provisionedSites.commitScaffold` (commit-request.ts), with the run's
+// OBO envelope, carrying the files by value. platform-nest re-hashes every byte, checks CONTRACT.lock against the
+// site's pinned snapshot, and writes the first fill with the ERP App, or refuses. This job still never pushes and
+// never holds a credential; `mode` stays "dry_run" because it describes the composer, and the commit's outcome is
+// its own field. Without `commit` the job is exactly the M6-P4b1 dry run.
 //
 // ── THE RESULT IS DATA, NOT A PATH ─────────────────────────────────────────────────────────────────
 // The tree is composed in a temp dir (so the dry-run writer exercises the real write + local commit), and the
@@ -24,6 +33,7 @@ import { runCodeScaffold } from "./scaffold";
 import { HubContractSnapshotProvider } from "./contract-snapshot-provider";
 import { HubArtifactFetcher } from "./artifact-fetcher";
 import { cleanupWorkDir } from "./git-writer";
+import { commitThroughPlatform, parseCommitTarget, type ScaffoldCommitRecord, type ScaffoldCommitTarget } from "./commit-request";
 
 /** The `agent` name a goal carries to be dispatched to this job. */
 export const CODE_SCAFFOLD_AGENT = "code-scaffold-v2";
@@ -32,11 +42,14 @@ export const CODE_SCAFFOLD_AGENT = "code-scaffold-v2";
  *  runner's usual 4000-character goal cap is raised for this agent only. */
 export const SCAFFOLD_GOAL_MAX_CHARS = 100_000;
 
-export type ScaffoldGoalPayload = ScaffoldJobEnvelope;
+/** The goal text: the frozen envelope, plus (M6-P4b2) an optional `commit` beside it, never inside it. */
+export type ScaffoldGoalPayload = ScaffoldJobEnvelope & { commit?: ScaffoldCommitTarget };
 
 /** "invalid_job": the goal text was not a valid envelope. "job_failed": the composer or the dry-run writer threw
- *  (for example the runner image has no `git`). Both are results, so the runner records them as a failed goal. */
-export type ScaffoldJobOutcome = ScaffoldOutcome | "invalid_job" | "job_failed";
+ *  (for example the runner image has no `git`). Both are results, so the runner records them as a failed goal.
+ *  M6-P4b2: "committed" (a commit was asked for and platform-nest committed the tree, or already had) and
+ *  "commit_failed" (it refused, or the size check did; `commit.error` names why). */
+export type ScaffoldJobOutcome = ScaffoldOutcome | "invalid_job" | "job_failed" | "committed" | "commit_failed";
 
 export interface ScaffoldJobResult {
   outcome: ScaffoldJobOutcome;
@@ -53,6 +66,8 @@ export interface ScaffoldJobResult {
   contractLockContent?: string;
   contractLock?: ContractLock;
   gaps?: VocabularyGap[];
+  /** M6-P4b2 - present when the goal asked for a commit: platform-nest's reply, or the refusal token. */
+  commit?: ScaffoldCommitRecord;
 }
 
 const SITE_KINDS: readonly string[] = ["astro", "node", "wp"];
@@ -98,10 +113,14 @@ export async function runScaffoldJob(args: {
   tenantId: string;
   envelope: Envelope;
   callTool: ToolCaller;
+  /** The runner goal's id, recorded by platform-nest with a commit for correlation. */
+  goalId?: string;
 }): Promise<ScaffoldJobResult> {
   let job: ScaffoldJobEnvelope;
+  let commitTarget: ScaffoldCommitTarget | null;
   try {
     job = parseScaffoldGoal(args.goal);
+    commitTarget = parseCommitTarget(args.goal);
   } catch (err) {
     const message = (err as Error).message;
     return { outcome: "invalid_job", mode: "dry_run", content: message, error: message };
@@ -130,16 +149,38 @@ export async function runScaffoldJob(args: {
   // The dry-run writer leaves its work dir for a caller that wants to look; this caller does not.
   if (result.pushedTo) await cleanupWorkDir(result.pushedTo).catch(() => undefined);
 
+  // M6-P4b2: offer the composed tree to platform-nest, only after a successful dry run, only when asked.
+  let commit: ScaffoldCommitRecord | undefined;
+  if (commitTarget && result.outcome === "dry_run" && result.generatedFiles) {
+    commit = await commitThroughPlatform({
+      callTool: args.callTool,
+      envelope: args.envelope,
+      tenantId: args.tenantId,
+      target: commitTarget,
+      runId: job.runId,
+      goalId: args.goalId,
+      contractSnapshotId: job.contractSnapshotId,
+      files: result.generatedFiles,
+    });
+  }
+  const outcome: ScaffoldJobOutcome = commit ? (commit.outcome === "refused" ? "commit_failed" : "committed") : result.outcome;
+  const commitNote = !commit
+    ? ""
+    : commit.outcome === "refused"
+      ? ` The commit was refused: ${commit.error}.`
+      : ` platform-nest ${commit.outcome === "committed" ? "committed" : "had already committed"} it to ${commit.repo}@${commit.branch} as ${commit.commitSha}.`;
+
   return {
-    outcome: result.outcome,
+    outcome,
     mode: "dry_run",
     siteKind: job.siteKind,
     contractSnapshotId: job.contractSnapshotId,
-    content: result.content,
-    ...(result.error ? { error: result.error } : {}),
+    content: result.content + commitNote,
+    ...(result.error ? { error: result.error } : commit?.outcome === "refused" ? { error: commit.error } : {}),
     ...(result.fileManifest ? { files: result.fileManifest } : {}),
     ...(result.contractLockContent ? { contractLockContent: result.contractLockContent } : {}),
     ...(result.contractLock ? { contractLock: result.contractLock } : {}),
     ...(result.gaps ? { gaps: result.gaps } : {}),
+    ...(commit ? { commit } : {}),
   };
 }

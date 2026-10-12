@@ -53,11 +53,16 @@ const PROTOTYPE = JSON.stringify({
 
 const TARBALL = Buffer.from("fake-blocks-tarball-never-opened");
 
-interface FixtureOpts { withBlockLibrary?: boolean; withSdkPhp?: boolean }
+interface FixtureOpts {
+  withBlockLibrary?: boolean;
+  withSdkPhp?: boolean;
+  /** M6-P4b2: how the fake hub answers webdev.provisionedSites.commitScaffold (unset: the call is unexpected). */
+  commit?: (args: Record<string, unknown>) => string;
+}
 
 /** A fake hub: `webdev.contracts.get`, `webdev.contracts.artifact` and `pipeline.artifacts.get`, recording every call. */
 function fakeHub(opts: FixtureOpts = {}) {
-  const { withBlockLibrary = true, withSdkPhp = true } = opts;
+  const { withBlockLibrary = true, withSdkPhp = true, commit } = opts;
   const calls: { name: string; args: Record<string, unknown>; envelope: Envelope }[] = [];
   const meta = {
     id: SNAPSHOT,
@@ -96,6 +101,7 @@ function fakeHub(opts: FixtureOpts = {}) {
       if (args.artifactRef === PROTO_REF) return JSON.stringify({ resolvable: true, content: PROTOTYPE });
       return JSON.stringify({ resolvable: false, reason: "artifact_ref is not a stored file id", content: null });
     }
+    if (name === "webdev.provisionedSites.commitScaffold" && commit) return commit(args);
     throw new Error(`unexpected hub tool ${name}`);
   };
   return { callTool, calls };
@@ -246,6 +252,8 @@ function expectCommonDryRunInvariants(detail: GoalDetail, result: ScaffoldJobRes
   expect(paths(files)).toEqual([...paths(files)].sort());
   // no path escapes the repo
   for (const p of paths(files)) expect(p.startsWith("/") || p.split("/").includes("..")).toBe(false);
+  // M6-P4b2: `.github/` belongs to the template (platform-nest refuses a tree that changes it)
+  expect(paths(files).some((p) => p.startsWith(".github/"))).toBe(false);
 }
 
 describe("code.scaffold v2 dry run through the real runner path", () => {
@@ -256,7 +264,6 @@ describe("code.scaffold v2 dry run through the real runner path", () => {
     const p = paths(result!.files);
     expect(p).toEqual(
       expect.arrayContaining([
-        ".github/workflows/qa-harness.yml",
         "astro.config.mjs",
         "package.json",
         "src/lib/webdesk-sdk.ts",
@@ -390,6 +397,75 @@ describe("the job never pushes and never leaks authority", () => {
   it("makes no model call (the fake model throws if asked)", async () => {
     const { detail } = await runGoal(scaffoldGoal("node"));
     expect(detail.status).toBe("ok");
+  });
+});
+
+// M6-P4b2 — with `commit: { provisionedSiteId }` beside the envelope, the finished dry run is OFFERED to platform-nest
+// through ONE hub tool, carrying the files by value. The job still never pushes; platform-nest decides and writes.
+describe("M6-P4b2 — the composed tree is offered to platform-nest, never pushed", () => {
+  const SITE_ID = "dddddddd-0000-4000-8000-000000000004";
+  const RUN_ID = "eeeeeeee-0000-4000-8000-000000000005";
+  const COMMIT = "c".repeat(40);
+  const reply = (args: Record<string, unknown>) =>
+    JSON.stringify({
+      outcome: "committed", siteId: args.siteId, repo: "acme-org/acme-site", branch: "main", baseSha: "b".repeat(40), treeSha: "a".repeat(40),
+      commitSha: COMMIT, snapshotId: SNAPSHOT, manifestSha256: "f".repeat(64), fileCount: (args.files as unknown[]).length, totalBytes: 1,
+    });
+  const committing = (extra: Record<string, unknown> = {}) => scaffoldGoal("astro", { runId: RUN_ID, commit: { provisionedSiteId: SITE_ID }, ...extra });
+
+  it("calls webdev.provisionedSites.commitScaffold ONCE, with the OBO identity, the pin and every file by value", async () => {
+    resetExecLog();
+    const { detail, result, hub } = await runGoal(committing(), { commit: reply });
+    expect(detail.status).toBe("ok");
+    expect(result!.outcome).toBe("committed");
+    expect(result!.mode).toBe("dry_run"); // the composer's mode: this job never pushes
+    expect(result!.commit).toMatchObject({ provisionedSiteId: SITE_ID, outcome: "committed", commitSha: COMMIT, repo: "acme-org/acme-site" });
+    expect(result!.content).toMatch(/committed it to acme-org\/acme-site@main/);
+
+    const calls = hub.calls.filter((c) => c.name === "webdev.provisionedSites.commitScaffold");
+    expect(calls).toHaveLength(1);
+    const c = calls[0];
+    expect(c.envelope).toEqual(OBO);
+    expect(c.args).toMatchObject({ tenantId: TENANT, siteId: SITE_ID, runId: RUN_ID, contractSnapshotId: SNAPSHOT, goalId: detail.id });
+    const files = c.args.files as Array<{ path: string; base64: string; sha256: string; bytes: number }>;
+    // exactly the composed tree, and each entry's hash and size describe its own bytes
+    expect(files.map((f) => f.path)).toEqual(paths(result!.files));
+    for (const f of files) {
+      const bytes = Buffer.from(f.base64, "base64");
+      expect(bytes.byteLength).toBe(f.bytes);
+      expect(sha(bytes)).toBe(f.sha256);
+      expect(result!.files!.find((m) => m.path === f.path)!.sha256).toBe(f.sha256);
+    }
+    expect(Buffer.from(files.find((f) => f.path === "CONTRACT.lock")!.base64, "base64").toString("utf8")).toBe(result!.contractLockContent);
+    // no credential, no remote, no push: git ran locally only
+    expect(JSON.stringify(c.args)).not.toMatch(/token|remote|https:\/\/github/i);
+    expect(getExecLog().some((cmd) => /\bpush\b|\bremote\b/.test(cmd))).toBe(false);
+    // the bytes never reach the goal's blackboard: only the commit's result does
+    expect(JSON.stringify(detail.blackboard)).not.toContain(files.find((f) => f.path === "vendor/webdesk-sdk/index.d.ts")!.base64.slice(0, 200));
+  });
+
+  it("a refusal from platform-nest is an honest failed goal naming the token", async () => {
+    const { detail, result } = await runGoal(committing(), { commit: () => { throw new Error("tool failed: scaffold_repo_not_pristine"); } });
+    expect(detail.status).toBe("failed");
+    expect(detail.errorKind).toBe("commit_failed");
+    expect(result!.commit).toEqual({ provisionedSiteId: SITE_ID, outcome: "refused", error: "scaffold_repo_not_pristine" });
+    expect(result!.content).toMatch(/refused: scaffold_repo_not_pristine/);
+    expect(result!.files!.length).toBeGreaterThan(0); // the dry run's manifest is still reported
+  });
+
+  it("a commit needs the run id the site was provisioned for: without one, nothing is sent", async () => {
+    const { detail, result, hub } = await runGoal(scaffoldGoal("astro", { commit: { provisionedSiteId: SITE_ID } }), { commit: reply });
+    expect(detail.errorKind).toBe("commit_failed");
+    expect(String((result!.commit as { error: string }).error)).toMatch(/^scaffold_run_mismatch/);
+    expect(hub.calls.some((c) => c.name === "webdev.provisionedSites.commitScaffold")).toBe(false);
+  });
+
+  it("a malformed commit request is invalid_job; a failed dry run is never offered", async () => {
+    const bad = await runGoal(committing({ commit: { provisionedSiteId: "not-a-uuid" } }), { commit: reply });
+    expect(bad.detail.errorKind).toBe("invalid_job");
+    const refused = await runGoal(scaffoldGoal("wp", { runId: RUN_ID, commit: { provisionedSiteId: SITE_ID } }), { withSdkPhp: false, commit: reply });
+    expect(refused.detail.errorKind).toBe("rejected_site_kind");
+    expect(refused.hub.calls.some((c) => c.name === "webdev.provisionedSites.commitScaffold")).toBe(false);
   });
 });
 
