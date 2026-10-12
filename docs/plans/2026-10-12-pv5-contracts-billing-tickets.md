@@ -11,6 +11,10 @@
     at or above a counsel-set threshold, or when staff mark a contract.
   - PV-D9: a provider-hosted checkout for issued invoices. A verified provider notice confirms the
     payment with no staff step, and bank transfer with proof stays.
+  - PV-D25 (added 2026-10-12, after PV5-03): **Midtrans** for payments. Certified signing goes through
+    **VIDA, but only when first needed**: PV5-11 is parked until counsel sets a threshold or a client
+    asks. Until then, every contract signs in our own tier, which gains a **company seal** on each
+    signed PDF (PV5-07).
   - Also PV-D4 (the five areas, every URL kept), PV-D5 (money and legal effects land in Contracts &
     billing), PV-D10 (one client record per company), PV-D2 (Viceroy is a group client of Gaiada)
     and PV-D13 (no company names or ids in code).
@@ -27,10 +31,12 @@
   the provider's own payment page, or by bank transfer with a proof, as today. An online payment
   shows as paid within a minute, with no staff step.
 - **Clients** sign a contract knowing exactly what they sign. If the contract changed after they
-  opened it, the signature is refused and the page reloads. Each signature has an evidence page.
-  Large contracts, or ones staff mark, are signed through a certified e-signature provider.
-- **Clients** get a **Documents** list under Contracts & billing: signed contracts with their
-  evidence, issued invoices as PDFs, and payment receipts.
+  opened it, the signature is refused and the page reloads. A signed contract comes back as one PDF:
+  the contract, its evidence page, and our company seal, which shows in any PDF reader that the file
+  has not been altered since. Certified signing through a provider comes later, when counsel or a
+  client needs it (PV-D25).
+- **Clients** get a **Documents** list under Contracts & billing: signed contracts (the sealed
+  copy), issued invoices as PDFs, and payment receipts.
 - **Staff** issue an approved invoice with one button. The button lists what is missing (no billing
   profile, finance module off, no open period, PKP unknown on a taxed invoice) instead of failing.
   An issued invoice is in the books the moment it is issued, and a confirmed payment posts its
@@ -150,6 +156,7 @@
 | 18 | The Documents list holds **legal and money documents only**: signed contracts plus their evidence, issued invoice PDFs and payment receipts. Deliverables stay under Projects | §2.3: Contracts & billing holds legal and money instruments |
 | 19 | PDFs of issued invoices and of signature evidence are **rendered once and stored** as files with a SHA-256, through an outbox job after commit. They are never re-rendered on download | A document must not change because a template did |
 | 20 | Group clients: the AR customer carries `counterparty_company_id` (from `clients.group_company_id` on first issue). Issue debits that counterparty's `1290-*` receivable (created by `finance_ensure_intercompany_accounts`), and the AR reconciliation counts the tagged receivables with the control | Finding 6; F9-04's "an untagged intercompany posting is a visible mistake" |
+| 21 | **Company seal (PV-D25).** A signed contract is issued as one PDF (the document, then its evidence page) sealed with a PAdES signature by the company's own key. The certificate is self-issued in the billing profile's legal name, so readers show "unmodified since sealed", but "identity not verified by a trusted authority". The evidence page says so in plain words. No third-party timestamp authority: the seal carries our server time | The client's own copy proves its integrity without our database. Legal standing is unchanged (uncertified), and no new vendor is added |
 
 ## Waves
 
@@ -159,8 +166,9 @@
 | 2 | PV5-04 (issue through the ledger), PV5-05 (intercompany posting), PV5-06 (fixed content and the signature tiers) | 04 and 05 need 01 and 02. 05 changes `finance_ar_issue_invoice`, which 04 calls, so 05 merges first or 04 rebases. 06 needs 01 |
 | 3 | PV5-07 (PDFs), PV5-08 (Documents and the staff file route), PV5-09 (screens), PV5-12 (agent tools) | 07 needs 04 and 06; 08 needs 07; 09 needs 04 and 06 |
 | — | **Release A**: PV5-13 part A | invoice of record, attested signing, Documents, intercompany |
-| 4 | PV5-10 (payment gateway), PV5-11 (certified signing) | Each needs 03's pick, the owner's sandbox account, and Release A live |
+| 4 | PV5-10 (Midtrans checkout) | needs the owner's Midtrans sandbox keys and Release A live |
 | — | **Release B**: PV5-13 part B | after the sandbox drive and the owner's switch to production keys |
+| parked | PV5-11 (certified signing through VIDA) | PV-D25: unparks when counsel sets a threshold (PV5-Q1) or a client asks; then needs a VIDA sandbox |
 
 **Rules for every ticket:**
 
@@ -425,27 +433,52 @@ and their tests.
 - Typed-name signing of a certified contract is refused.
 - Teeth: skip the hash comparison and the mismatch test fails.
 
-### PV5-07: issued-invoice and signature-evidence PDFs
+### PV5-07: issued-invoice PDFs, and the sealed signed copy of a contract
 
-**Owner:** senior-integrator. **Wave 3.** Model: Sonnet·high.
+**Owner:** senior-integrator. **Wave 3.** Model: Opus·high (key handling and PDF signing).
 
-**Owned paths:** two print routes under `UI/app/print/` (beside TR-20's), a render job in `PN` on the
-outbox, and `report-renderer` only if its same-origin rule needs the new paths.
+**Owned paths:** two print routes under `UI/app/print/` (beside TR-20's), a render-and-seal job in
+`PN` on the outbox, a migration for the seal certificates, an ops script that creates a company's
+sealing key, and `report-renderer` only if its same-origin rule needs the new paths.
 
 **Change:**
-- After `invoice.issued`, and after a contract becomes `signed`, an outbox job mints a one-shot job
-  token (the TR-21 pattern), asks `report-renderer` for the PDF, and stores it as a file with
-  `sha256`:
-  - an issued invoice's PDF: `target_entity_type = 'invoice'`;
-  - a contract's evidence page (parties, names, titles, times, IP hashes, user agents, the content
-    hash, the tier): `target_entity_type = 'contract'`, kind `evidence`.
+- After `invoice.issued`, an outbox job mints a one-shot job token (the TR-21 pattern), asks
+  `report-renderer` for the PDF, and stores it as a file with `sha256` (`target_entity_type =
+  'invoice'`).
+- After a contract becomes `signed`, the same job builds the **sealed signed copy** (design decision
+  21, PV-D25):
+  1. Take the contract document: the attached PDF, verified against `content_sha256` first (refuse
+     on a mismatch), or `body_md` rendered through a print route.
+  2. Render the evidence page: parties, names, titles, times, IP hashes, user agents, the content
+     hash, the tier, and a plain-words note on what the seal proves and what it does not.
+  3. Join them into one PDF and apply a PAdES signature with the company's sealing key.
+  4. Store it as a file with `sha256` (`target_entity_type = 'contract'`, marked as the signed copy;
+     add a `files` column for the role if none exists).
+- **Keys:**
+  - One sealing key per company, created by the ops script. Neither the key nor its passphrase is
+    ever in the repo, the database or an env var.
+  - Mount it as a file. `env_file` mangles a multi-line PEM: it was empty on one compose and
+    truncated to 27 characters on another.
+  - The self-issued certificate names the billing profile's legal name. Public certificates are kept
+    in a table (company, serial, valid from/to, PEM), so a seal stays checkable after the key
+    rotates.
+  - A missing key fails loudly: the document stays "being prepared" and an owner is notified. It
+    never ships unsealed.
+- Use maintained open-source libraries for joining and signing PDFs, check their licences, and add
+  a vendor-exit row in the same change.
 - The job is idempotent and retried. A failure leaves the document marked "being prepared", never
   missing silently.
 - `DOWNLOADABLE` gains `invoice`, and `ownsEntity` admits only an issued invoice in the caller's
   scope.
 
-**Tests:** the job is idempotent (two runs store one file); an unissued invoice's PDF is not
-downloadable from the portal (404); the stored hash matches the stored bytes.
+**Tests:**
+- The job is idempotent: two runs store one file.
+- An unissued invoice's PDF is not downloadable from the portal (404).
+- The stored hash matches the stored bytes.
+- The sealed copy's signature verifies with the stored certificate, and flipping one byte breaks it.
+- A contract whose attached file no longer matches `content_sha256` is refused, not sealed.
+- No key means no file, and the failure is reported.
+- Teeth: skip the content check and the mismatch test fails.
 
 ### PV5-08: Documents (portal and staff), and the staff file route
 
@@ -498,20 +531,35 @@ reload notice.
 
 **Owner:** senior-integrator. **Wave 4.** Model: Opus·high (money path and webhook).
 
-**Needs:** PV5-03's pick approved, the owner's sandbox account, and Release A live.
+**Needs:** the owner's Midtrans sandbox keys (PV-D25) and Release A live. Read
+`docs/blueprints/pv5-provider-comparison.md` §2 and §4 first.
 
-**Owned paths:** `PN/src/payments/` (new: the `PaymentProvider` interface and one adapter), a
-webhook controller at `api/webhooks/payments/:provider`, the portal pay route, the env and compose
-wiring, and an egress inventory test for the provider host.
+**Owned paths:** `PN/src/payments/` (new: the `PaymentProvider` interface and a Midtrans Snap
+adapter), a webhook controller at `api/webhooks/payments/:provider`, the portal pay route, the env and
+compose wiring, and an egress inventory test for the provider host.
+
+**Midtrans specifics (from PV5-03):**
+- `order_id` is single-use, at most 50 characters from `A-Za-z0-9-_~.`. Mint one per checkout
+  attempt, never the invoice number, and keep it on `payment_checkouts`.
+- The notice carries `signature_key` = SHA-512(`order_id` + `status_code` + `gross_amount` + server
+  key). Compute and compare it in constant time.
+- There is no event id. The dedupe key is `order_id` plus `transaction_status` plus `status_code`, or
+  the transaction id; confirm which in the sandbox and record it in the controller header.
+- `settlement` can arrive before `pending`: never drop an out-of-order status as unknown.
+- Paid means `settlement`, or `capture` for cards, with `fraud_status = accept`. Anything else
+  writes no payment.
+- Midtrans retries for about 6 hours and wants a 200 within 5 seconds. So: verify, claim and answer
+  200, then do the status re-fetch and the posting from the outbox.
+- `gross_amount` is whole rupiah (design decision 16).
 
 **Change:**
 - `POST :tenantId/portal/invoices/:id/checkout` (portal scope, any active contact) creates or reuses
   an open `payment_checkouts` row for the outstanding amount (design decision 16) and returns the
   provider's hosted URL.
 - The webhook:
-  1. Verifies the signature over the raw body.
-  2. Claims `(provider, event_id)` in `provider_events`.
-  3. Re-fetches the payment from the provider's API.
+  1. Verifies the signature (for Midtrans, `signature_key`).
+  2. Claims the dedupe key in `provider_events`.
+  3. Re-fetches the payment from the provider's status API.
   4. Then, as the provider's `automation` user (one `users` row per provider, created by this
      ticket's migration and named in its header; it holds no roles, because this path is
      server-internal and checks no Cerbos rule, like the GitHub receiver), writes an
@@ -540,20 +588,30 @@ wiring, and an egress inventory test for the provider host.
 
 **Live:** the owner's sandbox drive pays one test invoice end to end before production keys go in.
 
-### PV5-11: certified signing
+### PV5-11: certified signing (PARKED, PV-D25)
 
-**Owner:** senior-integrator. **Wave 4.** Model: Opus·high.
+**Owner:** senior-integrator. **Parked.** Model: Opus·high.
 
-**Needs:** PV5-03's pick approved, the owner's sandbox account, and Release A live.
+**Parked until** counsel sets a threshold (PV5-Q1) or a client asks for a certified signature. Then
+it needs a VIDA sandbox and Release A live. Until then, "Mark certified" answers 409 (PV5-06), and
+every contract signs in our own tier with the company seal (PV5-07).
+
+**Before building, from PV5-03:**
+- VIDA's webhook has **no HMAC**, only Basic or OAuth2 credentials, so the re-fetch is the only
+  integrity control.
+- If VIDA has no status endpoint, call Download Signed Document on every notice and verify the
+  hash and signature locally. If neither is possible, re-scope this ticket before building.
+- VIDA charges per external signature, so create the envelope only when the client reaches the
+  sign step, not at send.
 
 **Owned paths:** `PN/src/signatures/` (new: the `SignatureProvider` interface and one adapter), a
 webhook controller at `api/webhooks/signatures/:provider`, `contracts.controller.ts` (the send and
 countersign branches for `certified`), and the env and compose wiring.
 
 **Change:**
-- Sending a certified contract creates the provider envelope from the fixed content (its hash must
-  match the file sent) with the client signer and our countersigner, and stores
-  `provider_envelope_id`.
+- When the client reaches the sign step on a certified contract, the server creates the provider
+  envelope from the fixed content (its hash must match the file sent) with the client signer and our
+  countersigner, and stores `provider_envelope_id`.
 - The portal contract page shows "Sign with <provider>", linking to the provider's signing page.
 - The webhook verifies, dedupes, and re-fetches the envelope status. Then it writes each
   `contract_signatures` row with `provider`, and on completion stores the provider's signed PDF and
@@ -599,20 +657,22 @@ the MCP hub registration, golden cases and the capability inventory.
   1. The owner or finance sets the billing profile.
   2. Issue one invoice: its number, the ledger journal, and the portal view with bank details.
   3. Record a manual payment and confirm it: the receipt posts and the invoice is paid.
-  4. Send, sign and countersign one attested contract: the hash is recorded and the evidence PDF is
-     in Documents.
+  4. Send, sign and countersign one attested contract: the hash is recorded, and the sealed signed
+     copy is in Documents and shows as unmodified in an ordinary PDF reader.
   5. Issue one invoice to the group client: it lands on `1290-*`.
 - This also closes PV-3's open countersign item.
 
 **Part B (after wave 4):**
-- Sandbox drives of PV5-10 and PV5-11, then release with production keys set by the owner.
-- One real online payment of a small test invoice, and one certified signature.
-- Vendor-exit rows re-checked.
+- A sandbox drive of PV5-10, then release with the production keys the owner sets.
+- One real online payment of a small test invoice.
+- The Midtrans vendor-exit row re-checked.
+- PV5-11, when it unparks, gets its own sandbox drive, release and one real certified signature.
 
 ## Owner steps
 
-1. Approve the provider picks from PV5-03, and open a sandbox account with each (wave 4 waits on
-   this).
+1. ~~Approve the provider picks~~ Done (PV-D25). **Register the company as a Midtrans merchant**
+   (deed, MoJHR decree, director's KTP and NPWP, company NPWP, NIB) and get sandbox keys; wave 4
+   waits on this. VIDA only when PV5-11 unparks.
 2. Ask counsel for PV5-Q1 and PV5-Q2.
 3. Make sure Finance records the agency company's PKP status (`is_pkp`). Taxed invoices wait on it.
 4. Set the billing profile on live, or name who does: the legal name, address, prefix and the bank
@@ -623,7 +683,7 @@ the MCP hub registration, golden cases and the capability inventory.
 
 | # | Question | Lead's default, used until ruled |
 |---|---|---|
-| PV5-Q1 | **Counsel:** the contract value at or above which a certified signature is required. Is an amendment measured by its own value, or together with its agreement? | **No threshold:** only staff-marked contracts are certified. An amendment to a certified agreement is certified |
+| PV5-Q1 | **Counsel:** the contract value at or above which a certified signature is required. Is an amendment measured by its own value, or together with its agreement? | **No threshold.** Under PV-D25 nothing is certified until PV5-11 unparks, which this answer can trigger. When it does, an amendment to a certified agreement is certified |
 | PV5-Q2 | **Counsel:** does stamp duty (bea meterai, UU 10/2020) apply to our agreements, and to invoices or receipts above Rp5,000,000, and should the ERP add an e-Meterai? | **Not applied by the system.** Staff handle it outside the ERP until counsel answers; PV5-03 records which providers can add one |
 | PV5-Q3 | The invoice number format | `{prefix}/{yyyy}/{nnnn}`, restarting each calendar year, with the prefix set in the billing profile |
 

@@ -403,7 +403,7 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       expect(wild.map((a: { bucketKey: string }) => a.bucketKey)).toEqual(["a/three.jpg", "a/one.png"]);
     });
 
-    it("tenant.list: {tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,environments:[{envId,name,domain,status}]}]}]}", async () => {
+    it("tenant.list: {tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,status,environments:[{envId,name,domain,status}]}]}]}", async () => {
       const r = await get(`/control/v1/tenants?companyRef=${companyB}`);
       expect(r.statusCode).toBe(200);
       expect(r.json()).toEqual({
@@ -418,6 +418,7 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
                 siteId: fxB.siteId,
                 name: "rdB site",
                 kind: "astro",
+                status: "active",
                 environments: [
                   { envId: fxB.productionEnvId, name: "production", domain: null, status: "active" },
                   { envId: fxB.stagingEnvId, name: "staging", domain: null, status: "active" },

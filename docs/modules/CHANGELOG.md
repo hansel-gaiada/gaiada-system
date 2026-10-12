@@ -11,6 +11,64 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.23.0` - `site.archive` is real: WS4-gated, irreversible, archived sites stop serving (2026-10-12) - DEV-VERIFIED
+
+Owner ruling WSK-D78 (2026-10-12): archiving a site takes an approval. It mirrors `tenant.archive` at site scope.
+
+- **Migration 0019_site_status**: `sites.status text NOT NULL DEFAULT 'active' CHECK (active|archived)`, additive. **Runs before the new api** (the code reads `sites.status`); the release's automatic deploy-webdesk applies it.
+- `POST /control/v1/tenants/:slug/sites/:siteId/archive` runs in the command envelope (WS4 claim, audit first, idempotent replay): `201 {site, replayed}`; already archived 409; unknown/other tenant 404. Terminal: nothing moves a site back to active.
+- An archived site's keys stop resolving (`/v1` 401, as for a revoked key: delivery, media, forms, consent), its preview tokens 404, its control-plane routes refuse `409 site-archived` (content, preview, media, editorial, forms, schema.apply, environment provision, promotion), the content tick skips its schedules, and the tenant listing shows `sites[].status`.
+- Tests: `site-archive.spec.ts` (refusals, archive, replay, 409/404/400, every effect, a sibling site untouched) and the 0019 migration test, both in CI.
+
+### platform-nest `0.94.1` - `site.archive` is filed as one WS4 approval (WSK-66 path) (2026-10-12) - DEV-VERIFIED
+
+- `POST /api/:t/modules/webdev/control/sites/:siteId/archive` `{tenantSlug}` answers `202 {approvalId[, alreadyPending]}` (was a 501 stub): `promote` on the site, the cross-company wall, one open request per site. decide() sends one WS4-asserted `site.archive` to Zone B; the requester can never decide it (403, row stays pending). No editorial assertion, no rebuild.
+- The MCP tool `webdesk.site.archive` keeps its D14 registry entry; its precondition is now structural and its input gained `tenantSlug`. No Cerbos policy change, no ERP migration.
+- Ship WebDesk first: an approval decided against an older WebDesk fails `webdesk_refused`.
+- Tests: `webdesk-site-archive.test.ts` (filing, de-dup, wall, tiers, self-approval refused with no Zone B call, a second admin executes once, ambiguous failure never resent). GitHub Actions run 38251086608 green.
+
+### platform-ui `0.99.1` - Archive site, with approval (2026-10-12) - DEV-VERIFIED
+
+- The site page gains "Archive this site" for users who may `promote`: a confirm that names the site and what archiving does, "This files a request. Nothing is archived until someone else approves it."; then "Archive requested — waiting for approval." An archived site says so and shows no control.
+- `/approvals/[id]` renders a "Site archive request" summary (site, the irreversible warning, the effects).
+
+### platform-nest `0.94.0` - the deploy gate is the org secret grant: only a registered, locked repo can read deploy secrets (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4g (design `docs/plans/2026-10-13-webdesk-m6-p4g-deploy-grant.md`). Built by the M6 session.
+
+- **The grant.** A provisioned site's repo is added to a deploy secret's "selected repositories" only when all of these hold, re-checked on every grant:
+  - completion is `complete`;
+  - a live `provisioned` `webdev_sites` row names the repo;
+  - the P4b2 scaffold is `committed` and the repo is the one GH-12 created;
+  - the default branch's head carries a `CONTRACT.lock` that names the pinned snapshot, read through the App's contents API.
+- **Two kinds of secret.**
+  - The fixed list `WEBDESK_DEPLOY_SECRET_NAMES` (default `WEBDESK_DEPLOY_GRANT`, the marker the templates' "Require deploy grant" step checks).
+  - One per-site secret, `siteDeploySecretName()` = `WEBDESK_DEPLOY_<SLUG>_<ENV>_<sha256(site id)[:8]>`, granted to that site's repo only. Secret names are org-wide while slugs are unique only per tenant, hence the hash.
+  - A secret that does not exist yet answers `pending` (named, not an error).
+  - A secret whose visibility is not "selected" is refused (`deploy_grant_secret_not_selected`).
+- **The ERP never holds a value (D29).**
+  - The only writes are `PUT` / `DELETE /orgs/{org}/actions/secrets/{name}/repositories/{id}`, plus a metadata `GET`.
+  - Each write is ledgered as `github.secret_write`, with the secret name and the GH-12 approval.
+  - Without the App's `organization_secrets` permission (O-3, not yet in effect live) a grant records `github_permission_missing: organization_secrets`, never a 500.
+- **State:** `NULL → pending → granted → revoked`, claimed before any GitHub write and serialized on the provisioning lock. A partial grant is finished by the next run, and the automatic path never undoes an operator's revoke.
+- **Trigger and routes.**
+  - The grant runs inline after P4b2's scaffold commit is recorded, as an additive `deployGrant` in the commit answer.
+  - `POST /api/:t/modules/webdev/provisioned-sites/:id/deploy-grant` (re-check + grant) and `DELETE …/deploy-grant` (revoke, body `{reason}` of 8–500 characters, human only).
+  - Gates: `webdev_provisioned_site · provision`, then `github_repo · push` on the org tenant. No Cerbos change, no hub tool.
+  - `GET provisioned-sites/:id` adds `deployGrant`.
+- **Migration `202610130100_webdev_deploy_grant.sql`**, additive: 14 `deploy_grant_*` columns on `webdev_provisioned_sites` plus a CHECK.
+- **Not built (follow-ups):** a scheduled re-check that revokes a repo which lost its lock, healing pending grants from the hourly reconcile, and the D14-gated exception path.
+- **Owner, in GitHub:**
+  1. Give the `gaiada-erp` App Organization permissions → Secrets: Read and write, and accept it on the installation.
+  2. Create the org secret `WEBDESK_DEPLOY_GRANT` (any value, "Selected repositories", none selected).
+  3. Later, each per-site secret by hand, under the exact name `deployGrant.siteSecretName` shows.
+- **Also fixed: a CHECK passes on NULL.** The live `wps_scaffold_links` (202610122130, M6-P4b2) read `scaffold_state IS NULL OR completion_state = 'complete'`, which accepts a scaffold state on a site whose completion is NULL. **Migration `202610130110_webdev_scaffold_links_null_safe.sql`** re-declares only that constraint with `IS NOT DISTINCT FROM` (no live row has a scaffold state). The new `wps_deploy_grant_links` had the same shape and was fixed before shipping. Both migrations are now listed in the webdev module. (0.91.0 left unused: the registry was already at 0.92.0.)
+- Verified on the Linux gate (sumopod): `m6p4g` found the NULL-CHECK defect (1 failure); `m6p4g3` on the fixed tree, 642 files / 9665 passed / 0 failed, incl. `deploy-grant.db.test.ts`, `deploy-grant-http.test.ts` (real Cerbos), `scaffold-commit.db.test.ts` with the new NULL-completion case.
+
+### infra `0.13.5` - the platform receives WEBDESK_DEPLOY_SECRET_NAMES (2026-10-12) - PROTOTYPED
+
+- `docker-compose.vps.yml` passes `WEBDESK_DEPLOY_SECRET_NAMES` to the platform (empty = the default marker). Names only, never values.
+
 ### webdesk `0.22.0` - M5-W8b: a collection may declare its public route pattern (vocabulary 1.4.0) (2026-10-12) - DEV-VERIFIED
 
 - **The key:** an optional composition `ui.routePattern`, for example `/blog/{slug}/` or `/{locale}/insights/{slug}/`.

@@ -49,6 +49,9 @@ export const problems = {
   collectionNotFound: () =>
     new ControlProblem(404, "collection-not-found", "Collection not found", "No such collection on this site."),
   siteNotFound: () => new ControlProblem(404, "site-not-found", "Site not found", "No such site for this tenant."),
+  /** The site exists but was archived (site.archive, irreversible): every write, publish and control read on it refuses. */
+  siteArchived: () =>
+    new ControlProblem(409, "site-archived", "Site archived", "This site was archived. An archived site accepts no writes or publishes and serves no content; archiving is not reversible."),
   compositionViolation: (issues: ProblemIssue[], detail = "The content does not satisfy the collection's composition.") =>
     new ControlProblem(422, "composition-violation", "Composition violation", detail, { issues }),
   payloadTooLarge: (detail: string) => new ControlProblem(413, "payload-too-large", "Payload too large", detail),

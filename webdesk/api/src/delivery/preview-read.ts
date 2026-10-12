@@ -60,7 +60,9 @@ export async function loadPreview(db: DeliveryDb, tenant: ResolvedTenant, token:
          JOIN content_items ci ON ci.id = pt.content_item_id
          JOIN collections c ON c.id = ci.collection_id
          JOIN content_versions v ON v.content_item_id = pt.content_item_id AND v.version = pt.version
+         JOIN sites st ON st.id = pt.site_id AND st.tenant_id = pt.tenant_id
         WHERE pt.token_hash = $1
+          AND st.status = 'active'
           AND pt.tenant_id = $2 AND ci.tenant_id = $2 AND v.tenant_id = $2
           AND ci.site_id = pt.site_id AND c.site_id = pt.site_id
           AND pt.revoked_at IS NULL AND pt.expires_at > now()

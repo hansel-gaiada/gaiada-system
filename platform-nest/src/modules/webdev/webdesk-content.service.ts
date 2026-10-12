@@ -324,7 +324,8 @@ export interface WebdeskTenantEntry {
   status: string;
   defaultLocale: string;
   locales: string[];
-  sites: Array<{ siteId: string; name: string; kind: string; environments: unknown[] }>;
+  /** `status` ('active' | 'archived') arrives from WebDesk migration 0019; absent from an older Zone B (read as active). */
+  sites: Array<{ siteId: string; name: string; kind: string; status?: string; environments: unknown[] }>;
 }
 
 export interface EditableSite {
@@ -1926,5 +1927,58 @@ export async function controlRequestKeyMint(
     siteId,
     args: { envId, scope },
     summary: { title: `Mint a ${envName} ${scope} API key for ${b.tenantSlug} (site "${site.name}")` },
+  });
+}
+
+/**
+ * `POST control/sites/:siteId/archive` body `{tenantSlug}` (owner ruling 2026-10-12): FILES one site.archive
+ * approval (HIGH, WS4) and answers `{approvalId}`. It never archives. WSK-66's executor sends the one Zone B
+ * `site.archive` at decide(), as the DECIDER (never the requester), so archiving a site takes a second person.
+ * Archiving is IRREVERSIBLE in WebDesk (no un-archive): the approval's title says so.
+ *
+ * The site must be one of THIS company's (the wall) and still active (an archived one is a 409
+ * `site-archived`, read from the wall's own answer; a stale cache is caught by Zone B's own 409 at execution).
+ * One open request per site: filing again returns the pending request's id with `alreadyPending: true`.
+ * The controller has already authorized `promote` on `webdev_provisioned_site`; the filer authorizes it again.
+ */
+export async function controlRequestSiteArchive(
+  principal: Principal,
+  tenantId: string,
+  siteIdParam: string,
+  rawBody: unknown,
+): Promise<{ approvalId: string; alreadyPending?: true }> {
+  const b = strictBody(rawBody, ["tenantSlug"]);
+  if (typeof b.tenantSlug !== "string" || b.tenantSlug === "") throw invalidRequest("tenantSlug is a required string");
+
+  const { site } = await webdeskZoneB.resolveEditableSite(tenantId, b.tenantSlug, siteIdParam);
+  if (site.status !== undefined && site.status !== "active") {
+    throw new WebdeskProblem(409, {
+      type: "https://webdesk.gaiada.online/errors/site-archived",
+      title: "Site archived",
+      status: 409,
+      detail: "This site is already archived.",
+    });
+  }
+  const siteId = site.siteId.toLowerCase();
+
+  const open = await withTenants([tenantId], async (c) => {
+    const r = await c.query<{ id: string }>(
+      `SELECT id FROM automation_approvals
+        WHERE tenant_id = $1 AND origin = 'webdesk' AND workflow_id = 'site.archive'
+          AND status = 'pending' AND deleted_at IS NULL
+          AND tool_args->>'siteId' = $2
+        ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, siteId],
+    );
+    return r.rows[0] ?? null;
+  });
+  if (open) return { approvalId: open.id, alreadyPending: true };
+
+  return fileWebdeskCommandApproval(principal, tenantId, {
+    command: "site.archive",
+    tenantSlug: b.tenantSlug,
+    siteId,
+    args: {},
+    summary: { title: `Archive site "${site.name}" of ${b.tenantSlug} (irreversible: it stops serving content and accepts no writes)` },
   });
 }

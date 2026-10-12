@@ -3,6 +3,8 @@ import { loadSiteContext } from "@/lib/webdeskContent";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CollectionsPanel } from "@/components/webdesk/content/CollectionsPanel";
 import { RequestKeyPanel } from "@/components/webdesk/content/RequestKeyPanel";
+import { ArchiveSitePanel } from "@/components/webdesk/content/ArchiveSitePanel";
+import { isSiteArchived } from "@/lib/webdeskContentModel";
 import { can } from "@/lib/rbac";
 import { WdRefusal } from "@/components/webdesk/content/WdRefusal";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
@@ -34,6 +36,12 @@ export default async function WebsiteSitePage({ params }: { params: Params }) {
         allowed={can(c.me, "webdev.promote", c.company)}
         scope={{ tenantSlug: tenant, siteId: site }}
         environments={ctx.data.site.environments}
+      />
+      <ArchiveSitePanel
+        allowed={can(c.me, "webdev.promote", c.company)}
+        archived={isSiteArchived(ctx.data.site)}
+        siteName={ctx.data.site.name}
+        scope={{ tenantSlug: tenant, siteId: site }}
       />
     </div>
   );

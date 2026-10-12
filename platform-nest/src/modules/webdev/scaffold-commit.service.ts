@@ -27,15 +27,18 @@ import { resolveGithubOrgTenant } from "../../core/github-org-tenant";
 import { erpGitCaller, githubStatusOf, type RepoRef } from "../../core/github/git-data";
 import { withGithubLedger } from "../../core/github/ledger";
 import { GithubApiError, GithubNotConfiguredError, GithubRateLimitedError, GithubTokenExchangeError } from "../../core/github/errors";
-import { GITHUB_CREATE_REPO_WORKFLOW } from "../../core/github/repo-creation";
 import { emitEvent } from "../../events/outbox.service";
 import type { Principal } from "../../rbac/principal";
 import { takeProvisionLock } from "./provisioning.service";
+import { resolveProvisionedRepo } from "./provisioned-repo";
+import { followScaffoldCommit, type DeployGrantSummary } from "./deploy-grant.service";
 import {
-  ScaffoldRefusal, commitScaffoldTree,
+  ScaffoldRefusal, commitScaffoldTree, repoUrlNames,
   type ClaimInput, type ScaffoldActor, type ScaffoldCommitDeps, type ScaffoldCommitResult, type ScaffoldRow,
   type ScaffoldState, type ScaffoldTx, type SnapshotFacts,
 } from "./scaffold-commit";
+
+export { repoUrlNames, resolveProvisionedRepo };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -234,37 +237,6 @@ async function readSnapshot(tenantId: string, snapshotId: string): Promise<Snaps
   return s ? { id: s.id, contractVersion: s.contract_version, vocabularyVersion: s.vocabulary_version, contentHash: s.content_hash } : null;
 }
 
-/** `https://github.com/<owner>/<name>[.git][/]`, case-insensitive on owner and name (GitHub's own rule). */
-export function repoUrlNames(repoUrl: string, owner: string, name: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(repoUrl);
-  } catch {
-    return false;
-  }
-  if (u.protocol !== "https:" || u.hostname.toLowerCase() !== "github.com") return false;
-  const parts = u.pathname.replace(/\/+$/, "").replace(/\.git$/i, "").split("/").filter(Boolean);
-  return parts.length === 2 && parts[0].toLowerCase() === owner.toLowerCase() && parts[1].toLowerCase() === name.toLowerCase();
-}
-
-/** The repo GH-12 created for this row, or null when any of the three facts disagree. */
-async function resolveRepo(tenantId: string, row: ScaffoldRow): Promise<RepoRef | null> {
-  const org = config.githubOrg;
-  if (!org || !row.providerRef || !row.repoUrl || !UUID_RE.test(row.providerRef)) return null;
-  const r = await withTenants([tenantId], (c) =>
-    c.query<{ status: string; tool_args: { name?: unknown } | null }>(
-      `SELECT status, tool_args FROM automation_approvals
-        WHERE id = $1 AND origin = 'github' AND workflow_id = $2 AND deleted_at IS NULL`,
-      [row.providerRef, GITHUB_CREATE_REPO_WORKFLOW],
-    ),
-  );
-  const a = r.rows[0];
-  if (!a || a.status !== "approved") return null;
-  const name = typeof a.tool_args?.name === "string" ? a.tool_args.name : "";
-  if (!name || !repoUrlNames(row.repoUrl, org, name)) return null;
-  return { owner: org, name };
-}
-
 /** A far-side error as ONE typed refusal (workflow-dispatch.ts's classification, for the Git Data API). */
 export function classifyGithubError(err: unknown): ScaffoldRefusal | null {
   if (err instanceof ScaffoldRefusal) return err;
@@ -319,17 +291,26 @@ export function parseScaffoldCommitBody(body: unknown): ScaffoldCommitBody {
 
 // ── composition ──────────────────────────────────────────────────────────────────────────────────
 
+/** The commit's answer, plus the M6-P4g deploy grant that followed it (additive). */
+export type ScaffoldCommitResponse = ScaffoldCommitResult & { deployGrant: DeployGrantSummary };
+
 /**
  * The route's whole job after its own `provision` check: resolve the org tenant, authorize `github_repo · push`
  * there, bind the ports, and run the state machine. Throws `ScaffoldRefusal` (typed, with its HTTP status) or
  * `ForbiddenException` (Cerbos).
+ *
+ * M6-P4g: once the first fill is `committed` (recorded in its own transaction by the state machine), the deploy grant
+ * follows in the same call, with the same principal and no new approval. It runs AFTER the commit is recorded and never
+ * throws (`followScaffoldCommit`), so the commit's answer is never turned into an error by it; its outcome rides along as
+ * `deployGrant`. An identical re-submit (`already_committed`) re-runs it, which is how a grant that could not finish
+ * resumes (for example once the App holds `organization_secrets`, O-3); a granted site answers from the row.
  */
 export async function commitScaffoldForSite(
   principal: Principal,
   tenantId: string,
   siteId: string,
   body: unknown,
-): Promise<ScaffoldCommitResult> {
+): Promise<ScaffoldCommitResponse> {
   const parsed = parseScaffoldCommitBody(body);
   const org = await resolveGithubOrgTenant(tenantId);
   if (!org.ok) {
@@ -341,7 +322,10 @@ export async function commitScaffoldForSite(
   await authorize(principal, { kind: "github_repo", tenantId: org.tenantId, module: "webdev" }, "push");
   const actor = await actorOf(principal);
   const deps = scaffoldCommitPorts({ tenantId, siteId, orgTenantId: org.tenantId, actor });
-  return commitScaffoldTree(deps, { siteId, runId: parsed.runId, goalId: parsed.goalId, contractSnapshotId: parsed.contractSnapshotId, files: parsed.files });
+  const committed = await commitScaffoldTree(deps, {
+    siteId, runId: parsed.runId, goalId: parsed.goalId, contractSnapshotId: parsed.contractSnapshotId, files: parsed.files,
+  });
+  return { ...committed, deployGrant: await followScaffoldCommit(principal, tenantId, siteId) };
 }
 
 /** The real ports, for one site. Exported for the DB suite, which drives the state machine below the authz checks
@@ -350,7 +334,7 @@ export function scaffoldCommitPorts(a: { tenantId: string; siteId: string; orgTe
   return {
     withLockedSite: withLockedSite(a.tenantId, a.siteId),
     readSnapshot: (id) => readSnapshot(a.tenantId, id),
-    resolveRepo: (row) => resolveRepo(a.tenantId, row),
+    resolveRepo: (row) => resolveProvisionedRepo(a.tenantId, row),
     git: erpGitCaller(a.orgTenantId, a.actor.userId),
     ledger: (_step, target, perform) =>
       withGithubLedger(

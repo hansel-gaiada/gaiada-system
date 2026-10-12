@@ -276,7 +276,9 @@ export class ContentCommandsService {
 
   /**
    * Resolves the route's tenant and site. Any miss (unknown or archived tenant, a site of another
-   * tenant, a malformed id) is the same 404 site-not-found: no existence oracle across tenants.
+   * tenant, a malformed id) is the same 404 site-not-found: no existence oracle across tenants. A site of
+   * this tenant that was ARCHIVED (site.archive) is a 409 site-archived: the caller is authenticated and
+   * already scoped to the tenant, so naming the state leaks nothing and tells staff why.
    */
   async resolveTenantSite(
     tenantSlug: string,
@@ -290,11 +292,14 @@ export class ContentCommandsService {
       return rows[0] ?? null;
     });
     if (!tenant || tenant.status !== "active" || !UUID_RE.test(siteId)) throw problems.siteNotFound();
-    const siteExists = await this.db.withTenant(tenant.id, async (db) => {
-      const { rows } = await db.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [siteId, tenant.id]);
-      return rows.length > 0;
+    const siteStatus = await this.db.withTenant(tenant.id, async (db) => {
+      const { rows } = await db.query<{ status: string }>(`SELECT status FROM sites WHERE id = $1 AND tenant_id = $2`, [siteId, tenant.id]);
+      return rows[0]?.status ?? null;
     });
-    if (!siteExists) throw problems.siteNotFound();
+    if (siteStatus === null) throw problems.siteNotFound();
+    // site.archive: the site-scope mirror of the archived-tenant refusal above. Every content, media, editorial
+    // and forms-definition route resolves its site here, so this one line closes them all.
+    if (siteStatus !== "active") throw problems.siteArchived();
     return {
       tenant: { id: tenant.id, slug: tenant.slug, defaultLocale: tenant.default_locale, locales: tenant.locales },
       siteId,

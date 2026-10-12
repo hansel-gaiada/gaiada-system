@@ -8,8 +8,8 @@
 // `control.<command>` / `control.<command>.replay` rows itself, as the first statement of the
 // command's own transaction (so a HIGH command claims its WS4 approval before its effect). M3 T5b
 // moved the promotion (content.promote / content.rollback) and privacy (find / export / erase)
-// commands onto the envelope too. What still audits through this class: site.archive (no effect),
-// schema.propose and contract.read (reads). Other services still inject it but no longer call it.
+// commands onto the envelope too. site.archive (0019) is on the envelope as well. What still audits
+// through this class: schema.propose and contract.read (reads). Other services still inject it but no longer call it.
 //
 // Scope: audited here are the C-05 command set's actual commands (lifecycle/schema/keys/release)
 // plus contract.read (explicitly named in the ticket's command list, §5). Deliberately NOT

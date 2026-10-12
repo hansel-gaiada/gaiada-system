@@ -64,10 +64,16 @@ export class LifecycleController {
 
   @Post(":tenantSlug/sites/:siteId/archive")
   @Command("site.archive")
-  async archiveSite(@Req() req: ControlRequest, @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string) {
-    const { principal } = requireControlContext(req);
+  async archiveSite(
+    @Req() req: ControlRequest,
+    @Param("tenantSlug") tenantSlug: string,
+    @Param("siteId") siteId: string,
+    @Headers("idempotency-key") idempotencyKeyRaw: string | undefined,
+  ) {
+    const { principal, ws4ApprovalId } = requireControlContext(req);
     assertUuid(siteId, "siteId");
-    return this.lifecycle.archiveSite({ tenantSlug, siteId, actor: principal.subject });
+    const idempotencyKey = assertIdempotencyKey(idempotencyKeyRaw);
+    return this.lifecycle.archiveSite({ tenantSlug, siteId, actor: principal.subject, idempotencyKey, ws4ApprovalId });
   }
 
   @Post(":tenantSlug/sites/:siteId/environments")

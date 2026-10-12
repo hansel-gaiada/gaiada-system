@@ -2,11 +2,12 @@
 // provision/archive, as idempotent commands (design §04's own DDL is the domain model; nothing
 // here alters it).
 //
-// M3 T5a — every command here except site.archive runs in the shared command envelope
+// M3 T5a — every command here runs in the shared command envelope
 // (../command-envelope.ts): ONE transaction holding the `control.<cmd>` audit row FIRST (on the
-// two HIGH archives it carries ws4_approval_id, which claims the approval before the write), the
+// HIGH archives it carries ws4_approval_id, which claims the approval before the write), the
 // domain write on the same client, and the durable replay record. tenant.provision/archive run under
-// the platform scope (tenant_id NULL audit row), the rest under the tenant's. Ids of the rows being
+// the platform scope (tenant_id NULL audit row), the rest under the tenant's (site.archive included).
+// Ids of the rows being
 // created are generated before the transaction, because the audit row that names them is its first
 // statement.
 //
@@ -15,19 +16,19 @@
 // replay), so a tenant gets a current contracts/<slug>/latest.json without a manual step. The response
 // and the stored replay record do not depend on it.
 //
-// The two ARCHIVE commands resolve their tenant WHATEVER ITS STATUS (M3 T8): a retry of an archive
+// The ARCHIVE commands resolve their tenant WHATEVER ITS STATUS (M3 T8): a retry of an archive
 // (same Idempotency-Key, response lost) arrives when the tenant is already archived, and must reach the
 // envelope so begin() answers it from the stored record. Only a FRESH run needs an active tenant, and it
 // is refused inside the effect with the same 404 as before.
 //
-// site.archive is the exception: it has no effect (the `sites` table has no status column, so it only
-// ever answers 501), takes no idempotency key, and records its audit row through CommandAuditService.
-// It consumes no approval and changes nothing, so there is nothing to claim.
-import { ConflictException, Injectable, NotFoundException, NotImplementedException } from "@nestjs/common";
+// site.archive (owner ruling 2026-10-12: archiving a site TAKES an approval; migration 0019 added
+// sites.status) is the site-scope mirror of tenant.archive: the same envelope, the same WS4 claim, one
+// terminal UPDATE. Everything an archived tenant stops doing, an archived site stops doing at site scope
+// (see 0019 and the README's "site.archive" section for the list of read sites).
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { TenantLookupService } from "../../tenants/tenant-lookup.service";
 import { AuditService } from "../../audit/audit.service";
-import { CommandAuditService } from "../command-audit.service";
 import { CommandEnvelope } from "../command-envelope";
 import { ContractCodegenTrigger } from "../../codegen/contract-codegen.trigger";
 
@@ -49,7 +50,6 @@ function isUniqueViolation(err: unknown): boolean {
 export class LifecycleService {
   constructor(
     private readonly tenants: TenantLookupService,
-    private readonly commandAudit: CommandAuditService,
     private readonly envelope: CommandEnvelope,
     private readonly auditHash: AuditService,
     private readonly codegen: ContractCodegenTrigger,
@@ -186,34 +186,45 @@ export class LifecycleService {
   }
 
   /**
-   * §04's `sites` table has NO status column — nowhere to record an archived state.
-   * `check-rls-integrity.mjs`'s heuristic and every other table in this ledger models lifecycle
-   * via a `status` text column; sites was never given one. Per the ticket's own instruction
-   * ("Schema changes go through the senior-db seat... do not improvise DDL"), this command
-   * authenticates/authorizes/audits exactly like a real one, then refuses with a structured,
-   * documented error rather than inventing a fake success or silently no-op'ing. Needs a
-   * senior-db-approved migration adding `sites.status` before this can execute for real.
+   * site.archive: the site-scope mirror of archiveTenant. HIGH, always WS4-gated; one terminal write,
+   * sites.status 'active' -> 'archived' (0019), with no way back. Same shape as the tenant one:
+   *   - the tenant is resolved WHATEVER ITS STATUS, so a retry (same Idempotency-Key, response lost) after
+   *     the archive reaches the envelope and is answered from the stored record; only a FRESH run needs an
+   *     active tenant, and is refused inside the effect with the same 404 as before;
+   *   - a fresh run on a site that is already archived is refused inside the effect (409), which rolls the
+   *     audit row back and leaves the approval unclaimed, exactly as an archived tenant's 404 does;
+   *   - an unknown site, or another tenant's, is a 404 (the UPDATE is tenant-scoped and RLS-scoped).
+   * What archiving changes about reads, writes, schedules and previews is not done here: it is decided by
+   * the status the other code paths already read (api-keys resolve, resolveTenantSite, the scheduler tick,
+   * preview reads).
    */
-  async archiveSite(input: { tenantSlug: string; siteId: string; actor: string }): Promise<never> {
-    const tenant = await this.resolveActiveTenant(input.tenantSlug);
+  async archiveSite(input: { tenantSlug: string; siteId: string; actor: string; idempotencyKey: string; ws4ApprovalId: string | null }) {
+    const tenant = await this.resolveTenant(input.tenantSlug);
+    const args = { tenantSlug: input.tenantSlug, siteId: input.siteId };
 
-    await this.commandAudit.recordTenant({
-      tenantId: tenant.id,
+    return this.envelope.run<{ site: { id: string; name: string; status: string } }>({
       command: "site.archive",
+      scope: { kind: "tenant", tenantId: tenant.id },
+      scopeKey: `${input.tenantSlug}:site.archive:${input.idempotencyKey}`,
+      requestHash: this.auditHash.hashArgs(args),
       actor: input.actor,
-      args: { tenantSlug: input.tenantSlug, siteId: input.siteId, outcome: "not-yet-available" },
-    });
-
-    throw new NotImplementedException({
-      type: "https://webdesk.gaiada.online/errors/site-archive-not-yet-available",
-      title: "Site archive is not yet available",
-      status: 501,
-      detail:
-        "0001_platform_core.sql's `sites` table has no status column, so there is nowhere to record an " +
-        "archived state. This command's auth/idempotency/audit machinery all ran correctly; it has no " +
-        "domain effect to perform yet. Needs a senior-db-approved migration adding `sites.status` before " +
-        "this can execute.",
-      instance: `/control/v1/tenants/${input.tenantSlug}/sites/${input.siteId}/archive`,
+      auditArgs: args,
+      ws4ApprovalId: input.ws4ApprovalId,
+      effect: async (client) => {
+        // Fresh run only: an archived tenant gets the same 404 as every other command on it.
+        if (tenant.status !== "active") throw new NotFoundException("tenant not found");
+        const { rows } = await client.query<{ id: string; name: string; status: string }>(
+          `UPDATE sites SET status = 'archived' WHERE id = $1 AND tenant_id = $2 AND status = 'active'
+           RETURNING id, name, status`,
+          [input.siteId, tenant.id],
+        );
+        if (!rows[0]) {
+          const { rows: existing } = await client.query<{ status: string }>(`SELECT status FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
+          if (existing[0]) throw new ConflictException("site is already archived");
+          throw new NotFoundException("site not found for this tenant");
+        }
+        return { result: { site: rows[0] } };
+      },
     });
   }
 
@@ -242,8 +253,9 @@ export class LifecycleService {
       auditArgs: { ...args, envId },
       ws4ApprovalId: null,
       effect: async (client) => {
-        const siteCheck = await client.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
+        const siteCheck = await client.query<{ status: string }>(`SELECT status FROM sites WHERE id = $1 AND tenant_id = $2`, [input.siteId, tenant.id]);
         if (!siteCheck.rows[0]) throw new NotFoundException("site not found for this tenant");
+        if (siteCheck.rows[0].status !== "active") throw new ConflictException("site is archived — an archived site accepts no new environments");
         try {
           const { rows } = await client.query<{ id: string; name: string; domain: string | null; status: string }>(
             `INSERT INTO environments (id, site_id, tenant_id, name, domain, status)

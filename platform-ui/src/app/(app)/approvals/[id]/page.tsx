@@ -10,9 +10,10 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MailThreadPanel } from "@/components/mail/MailThreadPanel";
 import { WebdeskPublishSummary } from "@/components/webdesk/content/WebdeskPublishSummary";
 import { WebdeskKeyRequestSummary } from "@/components/webdesk/content/WebdeskKeyRequestSummary";
+import { WebdeskArchiveRequestSummary } from "@/components/webdesk/content/WebdeskArchiveRequestSummary";
 import { KeyMintDecide } from "@/components/webdesk/content/KeyMintDecide";
-import { findKeyTarget } from "@/lib/webdeskContent";
-import { isKeyMintApproval, parseKeyMintArgs } from "@/lib/webdeskContentModel";
+import { findKeyTarget, findSiteName } from "@/lib/webdeskContent";
+import { isKeyMintApproval, isSiteArchiveApproval, parseKeyMintArgs, parseSiteArchiveArgs } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
 
 // APPR-01 — the per-approval detail route emailed approval links actually land on now. Before
@@ -109,6 +110,11 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
   // key approved that way would be minted and thrown away). The row never holds the key; this render reads the row only.
   const isKeyMint = detail.kind === "automation_approval" && detail.origin === "webdesk" && isKeyMintApproval(detail.data);
   const keyArgs = isKeyMint && detail.kind === "automation_approval" ? parseKeyMintArgs(detail.data.toolArgs) : null;
+  // A WebDesk site.archive row (owner ruling 2026-10-12) is not a publish either: its own summary says WHICH site and what archiving
+  // does. Its decide control is the generic form below (the answer carries no secret, so nothing needs a custody component).
+  const isSiteArchive = detail.kind === "automation_approval" && detail.origin === "webdesk" && isSiteArchiveApproval(detail.data);
+  const archiveArgs = isSiteArchive && detail.kind === "automation_approval" ? parseSiteArchiveArgs(detail.data.toolArgs) : null;
+  const archiveSiteName = archiveArgs ? await findSiteName(userId, resolvedTenant, archiveArgs.tenantSlug, archiveArgs.siteId) : null;
   const keyTarget = keyArgs ? await findKeyTarget(userId, resolvedTenant, keyArgs.tenantSlug, keyArgs.siteId, keyArgs.envId) : null;
 
   // Hidden fields carry everything the façade needs (mirrors `pipeline/[runId]/page.tsx`'s
@@ -138,7 +144,7 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Approvals", href: "/approvals" }, { label: title }]} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <Eyebrow style={{ color: "var(--erp-accent)" }}>
-            {detail.kind === "automation_approval" ? (detail.origin === "webdesk" ? (isKeyMint ? "API key request" : "Website publish") : detail.origin) : "Agency"}
+            {detail.kind === "automation_approval" ? (detail.origin === "webdesk" ? (isKeyMint ? "API key request" : isSiteArchive ? "Site archive request" : "Website publish") : detail.origin) : "Agency"}
           </Eyebrow>
           <StatusBadge label={detail.data.status.replace(/_/g, " ")} />
         </div>
@@ -195,8 +201,12 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         {/* WSK-44 — an approval filed by the Website workspace (write-plane design §6/§10): what is being
             published, to which site, which versions against what is live, lint counts and the rebuild
             target. `toolArgs` is validated inside the component — never trusted as typed. */}
-        {detail.kind === "automation_approval" && detail.origin === "webdesk" && !isKeyMint && (
+        {detail.kind === "automation_approval" && detail.origin === "webdesk" && !isKeyMint && !isSiteArchive && (
           <WebdeskPublishSummary userId={userId} company={resolvedTenant} toolArgs={detail.data.toolArgs} workflowId={detail.data.workflowId} />
+        )}
+
+        {isSiteArchive && detail.kind === "automation_approval" && (
+          <WebdeskArchiveRequestSummary toolArgs={detail.data.toolArgs} siteName={archiveSiteName} />
         )}
 
         {isKeyMint && detail.kind === "automation_approval" && (

@@ -6,6 +6,9 @@
 //   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/reconcile  -> 200 site (+ `completion`, M6-P4c)
 //   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/scaffold-commit -> 200 commit | 404 | 409 | 422 | 429 | 502 | 503
 //        (M6-P4b2: the first fill of the provisioned repo with the scaffolded tree; scaffold-commit.ts)
+//   POST   /api/:tenantId/modules/webdev/provisioned-sites/:id/deploy-grant -> 200 grant | 404 | 409 | 429 | 502 | 503
+//   DELETE /api/:tenantId/modules/webdev/provisioned-sites/:id/deploy-grant -> 200 revoke | 404 | 409 | 422 | 429 | 502 | 503
+//        (M6-P4g: the deploy gate is the org secret grant; deploy-grant.ts)
 //   POST /api/:tenantId/modules/webdev/sites/:id/domain                 -> 200 registry site | 400 | 404 | 409 (M6-P4c2)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
@@ -43,7 +46,7 @@
 // (422 from the driver, mapped to 503 by the switch below, unchanged from how a `wp` request was
 // always refused before this ticket) — it does not block construction of the driver itself.
 import {
-  BadRequestException, Body, ConflictException, Controller, Get, HttpCode, HttpException, NotFoundException,
+  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, HttpException, NotFoundException,
   Param, Patch, Post, Query, Req, Res, ServiceUnavailableException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -62,8 +65,10 @@ import {
 import {
   claimProvisionedSiteDomain, createWebdevSite, getWebdevSite, patchWebdevSiteVaultRef, type WebdevSiteDto,
 } from "./site-registry.service";
-import { ScaffoldRefusal, type ScaffoldCommitResult } from "./scaffold-commit";
-import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto } from "./scaffold-commit.service";
+import { ScaffoldRefusal } from "./scaffold-commit";
+import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto, type ScaffoldCommitResponse } from "./scaffold-commit.service";
+import { DeployGrantRefusal, type DeployGrantResult, type DeployRevokeResult } from "./deploy-grant";
+import { grantDeployForSite, readDeployGrant, revokeDeployForSite, type DeployGrantDto } from "./deploy-grant.service";
 
 const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -100,6 +105,15 @@ async function displayNameFor(userId: string | null): Promise<string> {
   return r.rows[0]?.name?.trim() || "Gaiada ERP";
 }
 
+/** A deploy-grant refusal as its HTTP answer, `{error: <token>, reason}` (the P4b2 shape); anything else unchanged. */
+function deployGrantHttpError(err: unknown): unknown {
+  if (err instanceof DeployGrantRefusal) {
+    if (err.code === "not_found") return new NotFoundException("provisioned site not found");
+    return new HttpException({ message: err.code, reason: err.detail }, err.status);
+  }
+  return err;
+}
+
 @Controller("api/:tenantId/modules/webdev")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
 export class WebdevController {
@@ -118,13 +132,19 @@ export class WebdevController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-  ): Promise<SiteDto & { completion: ProvisionCompletionDto | null; scaffold: ScaffoldCommitDto | null }> {
+  ): Promise<SiteDto & { completion: ProvisionCompletionDto | null; scaffold: ScaffoldCommitDto | null; deployGrant: DeployGrantDto | null }> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "read");
     const site = await getProvisionedSite(tenantId, id);
     if (!site) throw new NotFoundException("provisioned site not found");
     // M6-P4c: where §08's completion stands (registry row, WebDesk tenant, pinned contract). Additive.
     // M6-P4b2: where the scaffold's first fill stands (state, commit, last error). Additive.
-    return { ...site, completion: await readProvisionCompletion(tenantId, id), scaffold: await readScaffoldCommit(tenantId, id) };
+    // M6-P4g: where the deploy grant stands (state, the secret NAMES, last error). Additive.
+    return {
+      ...site,
+      completion: await readProvisionCompletion(tenantId, id),
+      scaffold: await readScaffoldCommit(tenantId, id),
+      deployGrant: await readDeployGrant(tenantId, id),
+    };
   }
 
   /**
@@ -134,6 +154,7 @@ export class WebdevController {
    * `scaffold-commit.ts` (integrity, first-fill-only, crash-resume) and `scaffold-commit.service.ts` (the repo, the
    * `github_repo · push` check on the org tenant). This route gates `webdev_provisioned_site · provision`: the first
    * fill is the last leg of §08's provisioning. Refusals are `{error: <token>, reason}` with the token's status.
+   * M6-P4g: the answer also carries `deployGrant` (the grant that followed the commit; never an error by itself).
    */
   @Post("provisioned-sites/:id/scaffold-commit")
   @HttpCode(200)
@@ -142,7 +163,7 @@ export class WebdevController {
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
     @Body() body: unknown,
-  ): Promise<ScaffoldCommitResult> {
+  ): Promise<ScaffoldCommitResponse> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "provision");
     if (!SITE_ID_RE.test(id)) throw new NotFoundException("provisioned site not found");
     try {
@@ -153,6 +174,52 @@ export class WebdevController {
         throw new HttpException({ message: err.code, reason: err.detail }, err.status);
       }
       throw err;
+    }
+  }
+
+  /**
+   * M6-P4g — the deploy gate. Re-checks every condition (a live registry row, the scaffold committed, the GH-12 repo, a
+   * CONTRACT.lock at the default branch's head naming the pinned snapshot) and grants the repo READ access to each
+   * configured org deploy secret (`WEBDESK_DEPLOY_SECRET_NAMES`). Idempotent; completes a partial grant; also undoes an
+   * operator's revoke (the automatic path after the scaffold commit never does). The ERP never holds a secret value.
+   * Gates (inside the service, shared with the automatic path): `webdev_provisioned_site · provision` on the request
+   * tenant, then `github_repo · push` on the GitHub org tenant. No body.
+   */
+  @Post("provisioned-sites/:id/deploy-grant")
+  @HttpCode(200)
+  async grantDeploy(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ): Promise<DeployGrantResult> {
+    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "provision");
+    if (!SITE_ID_RE.test(id)) throw new NotFoundException("provisioned site not found");
+    try {
+      return await grantDeployForSite(req.principal, tenantId, id, "operator");
+    } catch (err) {
+      throw deployGrantHttpError(err);
+    }
+  }
+
+  /**
+   * M6-P4g — revoke the deploy grant: the repo is removed from every deploy secret it may hold (configured and recorded).
+   * Body `{reason}` (8 to 500 characters), validated only after both gates. A human operator action: no hub tool reaches
+   * it. Same two gates as the grant; both refuse low assurance.
+   */
+  @Delete("provisioned-sites/:id/deploy-grant")
+  @HttpCode(200)
+  async revokeDeploy(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<DeployRevokeResult> {
+    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "provision");
+    if (!SITE_ID_RE.test(id)) throw new NotFoundException("provisioned site not found");
+    try {
+      return await revokeDeployForSite(req.principal, tenantId, id, body);
+    } catch (err) {
+      throw deployGrantHttpError(err);
     }
   }
 
