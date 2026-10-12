@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.101.0` - M5-V3-d: the schema for consented visitor profiles (DDL only; nothing writes to it yet) (2026-10-12) - DEV-VERIFIED
+
+- **Migration `202610131600_search_visitor_profiles`** adds five tables, each FORCE RLS in the `search` scope:
+  - `search_visitor_profiles`;
+  - `search_visitor_events` (composite FK, cascades with its profile; data allow-listed and size-capped; path-only);
+  - `search_visitor_tombstones` (32-byte hashes only, outliving everything);
+  - `search_interest_rules`;
+  - `search_visitor_ingest_state`.
+- A trigger refuses to create or update a profile whose visitor id or consent id is tombstoned. Its error message carries no id.
+- `agency_leads` gains one index, `ix_lead_consent_id`, on `(visitor_consent->>'consentId')`.
+- No IP or user-agent column: a self-check refuses one.
+- No GRANT, SECURITY DEFINER or BYPASSRLS. No data changes.
+- **The tombstone hash contract:** `sha256(utf8(lower-case uuid text))`, which V3-e and V3-h must use.
+- **Verified** on GitHub Actions 38269863029: 15 tests (cross-tenant, unset-GUC and missing-scope reads are 0 rows and writes are refused; the cascade; the tombstone guard; applied as a NOBYPASSRLS role).
+
 ### platform-nest `0.100.0` - M5-P5a: IndexNow on publish and a Bing Webmaster connector (both off by default) (2026-10-12) - DEV-VERIFIED
 
 - **Migrations:**
