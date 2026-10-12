@@ -86,11 +86,12 @@ export class PreviewTokenCommandsService {
       return rows[0] ?? null;
     });
     if (!tenant || tenant.status !== "active" || !UUID_RE.test(siteId)) throw problems.siteNotFound();
-    const siteExists = await this.db.withTenant(tenant.id, async (db) => {
-      const { rows } = await db.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [siteId, tenant.id]);
-      return rows.length > 0;
+    const siteStatus = await this.db.withTenant(tenant.id, async (db) => {
+      const { rows } = await db.query<{ status: string }>(`SELECT status FROM sites WHERE id = $1 AND tenant_id = $2`, [siteId, tenant.id]);
+      return rows[0]?.status ?? null;
     });
-    if (!siteExists) throw problems.siteNotFound();
+    if (siteStatus === null) throw problems.siteNotFound();
+    if (siteStatus !== "active") throw problems.siteArchived(); // site.archive: same refusal as ContentCommandsService
     return { tenant: { id: tenant.id, slug: tenant.slug }, siteId };
   }
 

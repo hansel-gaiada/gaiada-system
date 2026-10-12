@@ -102,8 +102,9 @@ async function resolveSiteAndEnv(
   envId: string,
 ): Promise<{ siteId: string; envId: string }> {
   return db.withTenant(tenantId, async (scoped) => {
-    const site = await scoped.query(`SELECT 1 FROM sites WHERE id = $1 AND tenant_id = $2`, [siteId, tenantId]);
+    const site = await scoped.query<{ status: string }>(`SELECT status FROM sites WHERE id = $1 AND tenant_id = $2`, [siteId, tenantId]);
     if (!site.rows[0]) throw new NotFoundException("site not found for this tenant");
+    if (site.rows[0].status !== "active") throw new ConflictException("site is archived — an archived site cannot be promoted");
     const env = await scoped.query(`SELECT 1 FROM environments WHERE id = $1 AND site_id = $2 AND tenant_id = $3`, [envId, siteId, tenantId]);
     if (!env.rows[0]) throw new NotFoundException("environment not found for this site/tenant");
     return { siteId, envId };

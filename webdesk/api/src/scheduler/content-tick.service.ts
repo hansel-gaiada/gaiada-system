@@ -258,6 +258,7 @@ export class ContentTickService {
            FROM content_items ci
            JOIN collections c ON c.id = ci.collection_id
           WHERE ci.tenant_id = $1
+            AND ci.site_id IN (SELECT id FROM sites WHERE tenant_id = $1 AND status = 'active')
             AND ci.publish_state = 'scheduled' AND ci.publish_at <= $2::timestamptz AND ci.deleted_at IS NULL
             AND ci.id <> ALL($3::uuid[])
           ORDER BY ci.publish_at, ci.id
@@ -298,6 +299,7 @@ export class ContentTickService {
            JOIN content_items ci ON ci.id = cs.content_item_id
            JOIN collections c ON c.id = ci.collection_id
           WHERE cs.tenant_id = $1
+            AND ci.site_id IN (SELECT id FROM sites WHERE tenant_id = $1 AND status = 'active')
             AND cs.executed_at IS NULL AND cs.cancelled_at IS NULL AND cs.failed_at IS NULL
             AND cs.publish_at <= $2::timestamptz
             AND ci.id <> ALL($3::uuid[])
@@ -395,6 +397,7 @@ export class ContentTickService {
            FROM content_items ci
            JOIN collections c ON c.id = ci.collection_id
           WHERE ci.tenant_id = $1
+            AND ci.site_id IN (SELECT id FROM sites WHERE tenant_id = $1 AND status = 'active')
             AND ci.publish_state IN ('published', 'scheduled') AND ci.unpublish_at <= $2::timestamptz AND ci.deleted_at IS NULL
             AND ci.id <> ALL($3::uuid[])
           ORDER BY ci.unpublish_at, ci.id

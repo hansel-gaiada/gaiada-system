@@ -115,7 +115,7 @@ function rig(): Rig {
     nextBegin,
     collectionRows,
     tenantSlugs,
-    lifecycle: new LifecycleService(tenants, commandAudit, envelope, audit, trigger),
+    lifecycle: new LifecycleService(tenants, envelope, audit, trigger),
     schema: new SchemaService(db, tenants, commandAudit, envelope, audit, trigger),
     regenerate: new ContractRegenerateService(tenants, envelope, audit, trigger),
   };
