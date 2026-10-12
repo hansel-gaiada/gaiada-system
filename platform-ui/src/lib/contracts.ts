@@ -39,6 +39,9 @@ export interface Contract {
   /** PV3-01: the backend's answer to "may THIS caller countersign THIS row right now". The page shows the
    *  Countersign control only when this is exactly `true`. It is never derived from a role in the browser. */
   canCountersign: boolean;
+  /** PV3-07: whether the client sees this row, computed by the backend from the portal's own rules. Declared so
+   *  the types merge cleanly; this page does not render it (PV3-09 does). */
+  clientVisible?: boolean;
 }
 
 export interface ContractSignature {
@@ -73,6 +76,8 @@ export interface InvoicePayment {
   rejectedReason: string | null;
   invoiceTotal: number;
   invoiceStatus: string;
+  /** PV3-07: backend-computed "the client sees this". Declared, not rendered (PV3-09). */
+  clientVisible?: boolean;
 }
 
 // ── contract groups ─────────────────────────────────────────────────────────────────────────────
