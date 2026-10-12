@@ -61,9 +61,9 @@ import { githubRequest } from "../../core/github/github-app.service";
 import { GithubApiError } from "../../core/github/errors";
 import { GITHUB_CREATE_REPO_WORKFLOW } from "../../core/github/repo-creation";
 import {
-  ProvisionEgressError,
-  type CanonicalFramework, type CreateProjectInput, type CreateProjectResult,
-  type ProvisionProject, type ProvisionProvider,
+  FRAMEWORK_TO_KIND, ProvisionEgressError,
+  type CreateProjectInput, type CreateProjectResult,
+  type ProvisionProject, type ProvisionProvider, type SiteKind,
 } from "./provision-provider";
 
 /** The seam is not usable in this deployment at all (no GitHub org configured — the same
@@ -79,16 +79,11 @@ export class ErpRepoControlNotConfiguredError extends Error {
 }
 
 /** §08's kind vocabulary, keyed the other direction from `provisioning.service.ts`'s
- *  `STACK_TO_FRAMEWORK`: that map SELECTS a framework from a caller-supplied kind hint; this one
- *  recovers the kind FROM an already-selected canonical framework, purely to pick a template. Kept
- *  local to this file — no other module needs "which kind does this framework belong to". */
-const FRAMEWORK_TO_KIND: Readonly<Record<CanonicalFramework, "static" | "fullstack" | "wp">> = {
-  vite: "static", astro: "static",
-  nextjs: "fullstack", node: "fullstack",
-  wp: "wp",
-};
-
-type RepoKind = "static" | "fullstack" | "wp";
+ *  `STACK_TO_FRAMEWORK`: that map SELECTS a framework from a caller-supplied kind hint;
+ *  `FRAMEWORK_TO_KIND` recovers the kind FROM an already-selected canonical framework, here purely to
+ *  pick a template. M6-P4c moved it to `provision-provider.ts`, because the `webdev_sites` row that
+ *  provisioning now completes records the same kind, and one table must serve both. */
+type RepoKind = SiteKind;
 
 interface RepoTemplate {
   owner: string;

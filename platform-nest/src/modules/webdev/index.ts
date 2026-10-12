@@ -52,6 +52,9 @@ export const webdevModule: ModuleContract = {
     "202610111443_iam_writers_room_roles.sql",
     // WSK-60 (additive): the staging rebuild ledger + the stale-staging marker (third wall).
     "202610101730_webdev_site_builds.sql",
+    // M6-P4c (additive): the provisioning completion state machine's columns (§08: registry row,
+    // WebDesk tenant, pinned contract snapshot) on webdev_provisioned_sites.
+    "202610120425_webdev_provisioned_sites_completion.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
@@ -356,6 +359,32 @@ export const webdevModule: ModuleContract = {
           kind: { type: "string", enum: ["astro", "node", "wp"] }, name: { type: "string" },
         },
         required: ["tenantId", "tenantSlug", "kind", "name"],
+      },
+    },
+    // M6-P4c: WebDesk `contract.regenerate` (M6-P4r-b's re-run / backfill command). MEDIUM, matching WebDesk's
+    // own class (command-types.ts: medium / webdesk:operate, no WS4): an attended human runs it; an unattended
+    // caller SUSPENDS into a D14 approval and is re-driven as itself on approval — registered in BOTH
+    // `core/approval-executables.ts` (registerWebdeskContractExecutableApprovals) AND resource_mcp_tool.yaml.
+    {
+      name: "webdesk.contract.regenerate",
+      description:
+        "Regenerate the WebDesk contract (OpenAPI, SDKs, CONTENT-CONTRACT.md, the block library pointer) for ONE of this "
+        + "company's WebDesk tenants (`slug`), or for EVERY active tenant of this company when `slug` is omitted (never "
+        + "another company's). Queues WebDesk's codegen; the new contract becomes `contracts/<slug>/latest.json`, which "
+        + "webdev.refreshContract then mirrors. Answers {scope, tenants:[{tenantSlug, outcome: queued|failed, replayed, "
+        + "enqueue?, error?}]}. MEDIUM write — WS4 for automation principals.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/control/contract/regenerate",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          slug: { type: "string", description: "WebDesk tenant slug. Omit to regenerate every active tenant of this company." },
+        },
+        required: ["tenantId"],
       },
     },
     {

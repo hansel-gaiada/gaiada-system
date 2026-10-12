@@ -57,6 +57,18 @@ export type CreateProjectResult =
  *  directly needs no change here. */
 export type CanonicalFramework = "vite" | "nextjs" | "astro" | "node" | "wp";
 
+/** §08's kind vocabulary (WSK-D28): one word per kind, mapped everywhere. */
+export type SiteKind = "static" | "fullstack" | "wp";
+
+/** Canonical framework -> §08 kind. ONE table, read by `erp-repo-control-provider.ts` (to pick the
+ *  per-kind template) and by `provision-completion.ts` (to record `webdev_sites.kind`, M6-P4c), so the
+ *  repo and the registry row can never disagree about what kind a site is. */
+export const FRAMEWORK_TO_KIND: Readonly<Record<CanonicalFramework, SiteKind>> = {
+  vite: "static", astro: "static",
+  nextjs: "fullstack", node: "fullstack",
+  wp: "wp",
+};
+
 export interface CreateProjectInput {
   /** The validated slug (`PROVISION_SLUG_RE`) — becomes the repo name AND the public hostname. */
   name: string;

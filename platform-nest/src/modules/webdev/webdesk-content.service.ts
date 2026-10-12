@@ -59,7 +59,7 @@
 // A failed read is a typed 503, never `[]` (an empty list is a claim). A write with no signer or no
 // channel is a typed 503, never a silent failure: writes are refused BEFORE any ledger row, because
 // nothing was attempted.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ForbiddenException,
@@ -377,7 +377,7 @@ export function idempotencyKeyOf(raw: string | string[] | undefined): string {
 
 export interface EgressWrite {
   /** Zone B's CommandName, hashed into the editorial assertion and recorded in the ledger. */
-  command: WebdeskBffEditorialCommand | "schema.apply" | "site.provision";
+  command: WebdeskBffEditorialCommand | "schema.apply" | "site.provision" | "tenant.provision" | "contract.regenerate";
   /** `webdesk.content.update` etc. */
   verb: string;
   method: "POST" | "PUT" | "PATCH" | "DELETE";
@@ -1717,6 +1717,73 @@ export async function controlProvisionSite(principal: Principal, tenantId: strin
     // The wall's answer is stale the moment a site is added; the next call refetches.
     webdeskZoneB.clearSiteCache(tenantId);
   }
+}
+
+/**
+ * M6-P4c: `POST control/contract/regenerate` body `{slug?}` (+ optional `Idempotency-Key`). Files WebDesk's
+ * `contract.regenerate` (M6-P4r-b): queues a fresh contract-codegen run, after which the ERP mirrors the new
+ * `latest.json` through `contracts/refresh`. MEDIUM on WebDesk (no WS4); on the ERP it is `impact:"medium"`,
+ * so an unattended caller (n8n, an agent) SUSPENDS into a D14 approval and is re-driven as itself on approval
+ * (`registerWebdeskContractExecutableApprovals`), while an attended human runs it directly. The controller
+ * has already authorised `operate` on `webdev_provisioned_site`.
+ *
+ *   * `slug` given: ONE tenant, which must be an ACTIVE tenant of THIS company (the wall: anything else is
+ *     the uniform 404 `site-not-found`). Zone B's typed answers pass through, as for every control write.
+ *   * `slug` omitted: every active tenant of THIS company, one per-tenant command each. Deliberately NOT
+ *     WebDesk's platform-wide `POST /control/v1/contract/regenerate`: that one regenerates every company's
+ *     tenants, and a company-scoped principal must not cause effects in another company. A tenant whose
+ *     command fails is reported as `failed` with a typed token; the others still run.
+ * The response is `{scope: "tenant"|"company", tenants: [{tenantSlug, outcome: "queued"|"failed", replayed?, enqueue?, error?}]}`.
+ * An empty `tenants` for scope `company` is a fact (the company has no active tenant), never a degraded read:
+ * a failed tenant list is a typed 503.
+ */
+export async function controlRegenerateContract(
+  principal: Principal,
+  tenantId: string,
+  rawBody: unknown,
+  idempotencyKey: string,
+): Promise<ZoneBResult> {
+  const b = rawBody === undefined || rawBody === null ? {} : strictBody(rawBody, ["slug"]);
+  if (b.slug !== undefined && (typeof b.slug !== "string" || b.slug === "")) throw invalidRequest("slug must be a non-empty string when given");
+  const one = typeof b.slug === "string" ? b.slug : null;
+  const slugs = one !== null
+    ? [(await webdeskZoneB.resolveEditableTenant(tenantId, one)).slug]
+    : (await webdeskZoneB.tenantsOf(tenantId, { fresh: true })).filter((t) => t.status === "active").map((t) => t.slug);
+
+  const tenants: Array<Record<string, unknown>> = [];
+  for (const slug of slugs) {
+    // One tenant: the caller's key as-is. Company scope: a per-tenant key derived from it (same caller key
+    // => same per-tenant keys, so a retried company call is a replay on every tenant, never a second run).
+    const key = one !== null ? idempotencyKey : `regen-${createHash("sha256").update(`${idempotencyKey}:${slug}`).digest("hex")}`;
+    try {
+      const r = await webdeskZoneB.write(principal, tenantId, {
+        command: "contract.regenerate",
+        verb: "webdesk.contract.regenerate",
+        method: "POST",
+        path: "/control/v1/tenants/:tenantSlug/contract/regenerate",
+        params: { tenantSlug: slug },
+        idempotencyKey: key,
+        entity: { type: "webdesk_tenant", id: null },
+        ledger: { tenantSlug: slug, scope: one !== null ? "tenant" : "company" },
+      });
+      const body = isPlainObject(r.body) ? r.body : {};
+      tenants.push({
+        tenantSlug: slug,
+        outcome: "queued",
+        replayed: body.replayed === true,
+        ...(isPlainObject(body.enqueue) ? { enqueue: body.enqueue } : {}),
+      });
+    } catch (err) {
+      if (one !== null) throw err;
+      const error = err instanceof WebdeskProblem
+        ? `webdesk_refused: ${err.getStatus()} ${problemSlug(err.problem) ?? "unknown"}`
+        : err instanceof HttpException
+          ? errorToken(err)
+          : `webdesk_error: ${(err as Error)?.name ?? "unknown"}`;
+      tenants.push({ tenantSlug: slug, outcome: "failed", error });
+    }
+  }
+  return { status: 200, body: { scope: one !== null ? "tenant" : "company", tenants } };
 }
 
 /**

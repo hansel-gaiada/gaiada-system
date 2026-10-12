@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **186** capabilities across **16** owners
-- **97** writes · 89 reads
-- Writes by impact: **high 24** · medium 30 · low 43
+- **187** capabilities across **16** owners
+- **98** writes · 89 reads
+- Writes by impact: **high 24** · medium 31 · low 43
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 20 |
+| webdev | `webdev` | 21 |
 
 ## Capabilities
 
@@ -219,6 +219,7 @@ unfalsifiable after.
 | webdev | `webdesk.content.restoreVersion` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/restore` | write | `low` |
 | webdev | `webdesk.content.unpublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/unpublish` | write | `medium` |
 | webdev | `webdesk.content.update` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId` | write | `low` |
+| webdev | `webdesk.contract.regenerate` | `POST` | `/api/:tenantId/modules/webdev/control/contract/regenerate` | write | `medium` |
 | webdev | `webdesk.deploy.staging` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/deploy/staging` | write | `medium` |
 | webdev | `webdesk.editorial.grantRole` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | write | `high` |
 | webdev | `webdesk.editorial.listGrants` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | read | — |
