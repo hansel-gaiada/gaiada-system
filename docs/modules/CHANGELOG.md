@@ -11,12 +11,77 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+<<<<<<< HEAD
 ### insights-collector `0.3.2` - the consented channel's default event names are the site's real list (2026-10-13) - PROTOTYPED
 
 - **New default `CONSENT_EVENT_NAMES`:** the 13 names M5-V3-j confirmed from the site (`section_view`, `cta_click`, `click_whatsapp`, `click_phone`, `click_email`, `click_directions`, `save_contact`, `switch_language`, `lead_form_start`, `lead_form_step`, `lead_form_send`, `generate_lead`, `page_not_found`).
 - **Why:** the first guess said `language_switch`, but the site sends `switch_language`, so language switches would have been dropped silently.
 - **Docs:** `/lib/kestrel/f` is documented as 204, with 400/429/503 only for a malformed body, a full limiter or a store outage (it is not always 204).
 - `go test -race` is green.
+=======
+### platform-nest `0.111.2` - M6-P4m: a redelivered event cannot reopen an approved beat (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate, run 1.
+  - The n8n bridge is at-least-once. A delivery execution that outlived `N8N_BRIDGE_TIMEOUT_MS` (120 s at the time, against a ~130 s design call) was redelivered.
+  - Its twin reopened `pm_review` on the same design stage 13 s after a human had approved the first.
+  - WD-29 deduplicated only a PENDING twin.
+- **The fix:** `POST pipeline/gates` also returns the existing gate when a STAGE-scoped twin of the same kind and side is already decided `approved` or `signed` (`deduped: true` with that gate's real status).
+  - A run-level gate (no stage: `prd_sign`, `scope_signoff`) and a beat decided `changes_requested` or `rejected` can still be opened again.
+  - The live trigger was already removed on 2026-10-13 (`N8N_BRIDGE_TIMEOUT_MS=300000`).
+- **Tests:** three DB cases in `pipeline-race.test.ts`:
+  - the redelivered open after approval returns the decided gate, with no new row and no phantom audit row;
+  - a re-request after `changes_requested` opens;
+  - a signed `prd_sign` does not suppress a new one.
+
+### ai-gateway-go `0.13.3` - M6-P4n: an empty length-cut answer is an error, and a reasoning model's thinking can be capped (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate.
+  - The live provider is OpenRouter's `z-ai/glm-5.3-flash`, a reasoning model whose thinking tokens count against `max_tokens`.
+  - `design.prototype` came back HTTP 200 with empty content after 59.8 s (`OPENAI_MAX_TOKENS=4096`) and again after 110 s (16000).
+  - `openai.go` returned `""` as success, so the hub stored a blank design and the delivery flow opened the PM's review on it.
+- **The fix:**
+  - Empty content (after trim) with `finish_reason == "length"` is now an error: `openai returned no content: the token budget ran out (...)`. The chain fails over; the echo terminator still ends it.
+  - Empty content with `finish_reason == "stop"` stays a legitimate `""`. Partial content cut by length is still returned.
+- **New optional env `OPENAI_REASONING_MAX_TOKENS`** (int, default 0):
+  - Above 0 it adds OpenRouter's `"reasoning": {"max_tokens": N}` to the chat body. Unset, empty or 0 sends nothing, so the body is byte-identical to before (OpenAI's own API does not take the field).
+  - A direct probe of the same prompt: no cap took 99.5 s and 5938 reasoning tokens; a cap of 3000 took 30.5 s, `finish_reason: stop`, about 25x cheaper.
+- **Tests:** four new in `openai_test.go` (the field only when configured, empty+length errors, empty+stop stays `""`, partial content kept). `go vet` and `go test ./...` green locally.
+- **Deploy:** set `OPENAI_REASONING_MAX_TOKENS=3000` in the box `.env` (the compose passthrough is in infra 0.13.14) and recreate the gateway. Until then behaviour is only the new error.
+
+### mcp-hub `0.15.2` - M6-P4n: an empty or echoed generation fails the tool (2026-10-13) - PROTOTYPED
+
+- **What:** `gatewayComplete` (behind `design.prototype`, `llm.extract` and `llm.summarize`) throws when the answer is empty after trim ("the model returned no text") or is the gateway's echo fallback (`[echo — no provider key configured]` prefix: "no real provider produced this").
+- **Why:** a brief, PRD, report or scope is never legitimately empty or an echo. Storing one opened the next stage on a blank artifact.
+- **Effect:** the tool fails, the n8n node errors, the webhook answers 5xx and platform-nest's at-least-once bridge redelivers the event: a bounded natural retry.
+- **Not changed:** `gatewayMedia` (OCR, vision, transcribe) keeps its own contract.
+- **Tests:** new `gateway-client.test.ts`, plus cases in the delivery, pipeline and hub suites. `src/workflow-tool-args.test.ts` still passes. Full suite 411 passed, `tsc --noEmit` clean.
+
+### automation `0.6.2` - M6-P4n: a PM's design rejection at beat 1 revises the design (2026-10-13) - PROTOTYPED
+
+- **The bug:** in `pipeline-delivery.json` `Load + decide`, a design stage's `pm_review` decided `changes_requested` matched no branch, so the run went to noop and stopped. Only the client's `customer_feedback` `changes_requested` triggered `revise_design`.
+- **The fix:** that `pm_review` now yields `revise_design` while `designs.length < MAX_DESIGNS`, else `escalate_revise`, with the note taken from that gate. Every other branch is unchanged; the revise nodes read only `Load + decide`'s `note` and `prd`, never a `customer_feedback` gate.
+- **Tests:** five new cases in `platform-nest/src/modules/webdev/automation-prd-kind.test.ts` run the shipped node (two fail without the fix). They need no service.
+- **Deploy:** the deploy does not ship `automation/workflows/`, so this needs a CLI re-import of `pipeline-delivery.json` (`ws11delivery0001`) and re-activation after the release.
+
+### infra `0.13.14` - M6-P4n: the gateway receives OPENAI_REASONING_MAX_TOKENS (2026-10-13) - PROTOTYPED
+
+- **What:** `docker-compose.vps.yml` passes `OPENAI_REASONING_MAX_TOKENS: ${OPENAI_REASONING_MAX_TOKENS:-}` to ai-gateway, and `.env.example` documents it. Empty parses as the default 0 (`envInt` falls back on an empty value), which means "not sent".
+### platform-nest `0.111.1` - M6-P4o: the contract mirror hashes exactly as WebDesk does (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate right after 368 made the pin reach WebDesk (M6-P4j).
+  - Every pin was refused as `contract_hash_mismatch`.
+  - The ERP hashed its own reading of §05: compact JSON with key `openapi`.
+  - WebDesk's generator hashes `stableStringify` of the digests keyed `openapiJson`: sorted keys, 2-space indent, trailing newline.
+  - Proved on live bytes for `m6-gate-static-prd`: WebDesk's form reproduced the claimed `sha256:a0e75f24…` exactly, and the old ERP form gave `sha256:5618a218…`.
+- **The fix:** new `contentHashFromDigests()` in `contract-snapshot.service.ts` computes WebDesk's form.
+  - A missing PHP SDK omits the `sdkPhp` key; it is no longer hashed as `null`.
+  - `computeContentHash()` keeps returning the ERP-keyed manifest (stored as `artifacts.hashes`) and derives the hash through it.
+  - No live snapshot row exists yet, so nothing on file changes.
+- **Tests:**
+  - `contract-content-hash.test.ts` pins the live digests and hash (5 tests).
+  - `webdesk/api/test/codegen-content-hash-parity.spec.ts` pins the same constants against WebDesk's own `stableStringify` (no WebDesk version bump: test only).
+  - A canonical-form change on either side now fails a test on that side.
+>>>>>>> origin/main
 
 ### platform-ui `0.107.0` - M5-V6-c: the session-replay player and the recordings list (2026-10-13) - PROTOTYPED
 

@@ -181,6 +181,14 @@ describe("WS11 pipeline hub tools", () => {
     expect(JSON.parse(out)).toEqual({ kind: "report", content: "sorry, here is a plain summary", confidence: null });
   });
 
+  // M6-P4n: an empty or echoed generation must fail, never be wrapped as the artifact.
+  it("llm.extract refuses an empty generation and the gateway's echo fallback", async () => {
+    vi.stubGlobal("fetch", mockFetch(200, { text: "   " }));
+    await expect(getTool("llm.extract")!.handler({ kind: "prd", text: "notes" }, principal)).rejects.toThrow(/returned no text/);
+    vi.stubGlobal("fetch", mockFetch(200, { text: "[echo — no provider key configured] You are extracting" }));
+    await expect(getTool("llm.extract")!.handler({ kind: "prd", text: "notes" }, principal)).rejects.toThrow(/echo fallback/);
+  });
+
   it("llm.extract rejects an unknown kind and empty text", async () => {
     await expect(getTool("llm.extract")!.handler({ kind: "bogus", text: "x" }, principal)).rejects.toThrow(/kind must be/);
     await expect(getTool("llm.extract")!.handler({ kind: "prd", text: "" }, principal)).rejects.toThrow(/text required/);

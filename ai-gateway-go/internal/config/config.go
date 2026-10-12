@@ -27,15 +27,18 @@ type Config struct {
 	OpenAIModel       string
 	OpenAIVisionModel string
 	OpenAIMaxTokens   int
-	WhisperURL        string
-	WhisperModel      string
+	// OpenAIReasoningMaxTokens (OPENAI_REASONING_MAX_TOKENS, M6-P4n): OpenRouter's reasoning cap,
+	// sent as body `reasoning.max_tokens` only when > 0. 0 (unset/empty) = not sent.
+	OpenAIReasoningMaxTokens int
+	WhisperURL               string
+	WhisperModel             string
 	// HermesURL/HermesModel (ASST-15): hermes-gateway, a SEPARATE standalone shim service (never
 	// this process itself) that runs the local Hermes agent as the brain. Empty URL means
 	// Available()==false — same "unconfigured, not a failure" posture as every other optional
 	// provider. HermesModel is whatever hermes-gateway itself reports configuring (HERMES_MODEL on
 	// THAT process) — this gateway never picks Hermes' model, only names it for the wire's `meta`.
-	HermesURL             string
-	HermesModel           string
+	HermesURL   string
+	HermesModel string
 	// HermesToken: the bearer hermes-gateway requires. That shim authenticates BEFORE it routes, so
 	// an unauthenticated call gets 401 on EVERY path — which is exactly what this provider used to
 	// send (no Authorization header at all), making the `hermes` provider unusable from the day it
@@ -116,25 +119,26 @@ func splitCsv(v string) []string {
 
 func Load() Config {
 	return Config{
-		Port:                  envInt("GATEWAY_PORT", 3002),
-		Host:                  envOr("HOST", "0.0.0.0"),
-		GatewayToken:          envOr("GATEWAY_TOKEN", ""),
-		GeminiAPIKey:          envOr("GEMINI_API_KEY", ""),
-		GeminiModel:           envOr("GEMINI_MODEL", "gemini-1.5-flash"),
-		AnthropicAPIKey:       envOr("ANTHROPIC_API_KEY", ""),
-		AnthropicModel:        envOr("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
-		OllamaURL:             envOr("OLLAMA_URL", "http://localhost:11434"),
-		OllamaModel:           envOr("OLLAMA_MODEL", "llama3.2"),
-		OllamaEmbedModel:      envOr("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
-		OpenAIBaseURL:         envOr("OPENAI_BASE_URL", ""),
-		OpenAIAPIKey:          envOr("OPENAI_API_KEY", ""),
-		OpenAIModel:           envOr("OPENAI_MODEL", "deepseek-v4-flash"),
-		OpenAIVisionModel:     envOr("OPENAI_VISION_MODEL", "qwen3.5:397b"),
-		OpenAIMaxTokens:       envInt("OPENAI_MAX_TOKENS", 1024),
-		WhisperURL:            envOr("WHISPER_URL", ""),
-		WhisperModel:          envOr("WHISPER_MODEL", "Systran/faster-whisper-small"),
-		HermesURL:             envOr("HERMES_URL", ""),
-		HermesModel:           envOr("HERMES_MODEL", ""),
+		Port:                     envInt("GATEWAY_PORT", 3002),
+		Host:                     envOr("HOST", "0.0.0.0"),
+		GatewayToken:             envOr("GATEWAY_TOKEN", ""),
+		GeminiAPIKey:             envOr("GEMINI_API_KEY", ""),
+		GeminiModel:              envOr("GEMINI_MODEL", "gemini-1.5-flash"),
+		AnthropicAPIKey:          envOr("ANTHROPIC_API_KEY", ""),
+		AnthropicModel:           envOr("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+		OllamaURL:                envOr("OLLAMA_URL", "http://localhost:11434"),
+		OllamaModel:              envOr("OLLAMA_MODEL", "llama3.2"),
+		OllamaEmbedModel:         envOr("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+		OpenAIBaseURL:            envOr("OPENAI_BASE_URL", ""),
+		OpenAIAPIKey:             envOr("OPENAI_API_KEY", ""),
+		OpenAIModel:              envOr("OPENAI_MODEL", "deepseek-v4-flash"),
+		OpenAIVisionModel:        envOr("OPENAI_VISION_MODEL", "qwen3.5:397b"),
+		OpenAIMaxTokens:          envInt("OPENAI_MAX_TOKENS", 1024),
+		OpenAIReasoningMaxTokens: envInt("OPENAI_REASONING_MAX_TOKENS", 0),
+		WhisperURL:               envOr("WHISPER_URL", ""),
+		WhisperModel:             envOr("WHISPER_MODEL", "Systran/faster-whisper-small"),
+		HermesURL:                envOr("HERMES_URL", ""),
+		HermesModel:              envOr("HERMES_MODEL", ""),
 		// Same nested-envOr idiom as DLPClassifierModel below: an explicit override, else the shared
 		// GATEWAY_TOKEN (which is what hermes-gateway's own env file names), else empty.
 		HermesToken:           envOr("HERMES_TOKEN", envOr("GATEWAY_TOKEN", "")),

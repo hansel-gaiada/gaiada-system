@@ -65,11 +65,25 @@ function sha256Hex(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
 }
 
-/** §05/§06: contentHash = sha256 over a CANONICAL manifest of per-artifact hashes. Sorted keys (the
- *  `JSON.stringify(obj, sortedKeyArray)` idiom — passing an array as the replacer both FILTERS and
- *  ORDERS the emitted keys), no timestamp anywhere in the hashed body. `sdkPhp: null` hashes as the
- *  literal JSON `null` rather than being omitted, so a P6-absent tenant's manifest shape can never
- *  collide with a P6-present one that happens to hash the same three other artifacts. */
+/** §05/§06: contentHash = sha256 over a CANONICAL manifest of per-artifact hashes, computed EXACTLY as WebDesk's
+ *  generator computes it (`webdesk/api/src/codegen/generator/build-artifacts.mts`): `stableStringify` of the hex
+ *  digests keyed `contractMd`, `openapiJson`, `sdkPhp`, `sdkTs` (sorted keys, 2-space indent, trailing newline), no
+ *  timestamp anywhere. For a flat object, `JSON.stringify(obj, sortedKeyArray, 2)` is that same text: an array
+ *  replacer both FILTERS and ORDERS the keys.
+ *
+ *  M6-P4o: until 2026-10-13 this hashed the ERP's own reading of §05 (compact JSON, key `openapi`), which can never
+ *  equal WebDesk's claim, so tripwire (a) refused every live pin as `hash_mismatch`. It went unseen because no pin
+ *  had ever run live (M6-P4j). A generation without a PHP SDK (before WSK-34) has no `sdkPhp` key in WebDesk's
+ *  manifest, so a null digest is omitted, not hashed as `null`. */
+export function contentHashFromDigests(d: { contractMd: string; openapi: string; sdkPhp: string | null; sdkTs: string }): string {
+  const zoneB: Record<string, string> = { contractMd: d.contractMd, openapiJson: d.openapi, sdkTs: d.sdkTs };
+  if (d.sdkPhp !== null) zoneB.sdkPhp = d.sdkPhp;
+  const canonical = JSON.stringify(zoneB, Object.keys(zoneB).sort(), 2) + "\n";
+  return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+}
+
+/** The per-artifact digests under the ERP's own key names (stored as the snapshot's `artifacts.hashes`; `openapi`,
+ *  not WebDesk's `openapiJson`), and the content hash computed from them in WebDesk's form. */
 export function computeContentHash(artifacts: RawArtifactSet): { manifest: Record<string, string | null>; contentHash: string } {
   const manifest: Record<string, string | null> = {
     contractMd: sha256Hex(artifacts.contractMd),
@@ -77,8 +91,12 @@ export function computeContentHash(artifacts: RawArtifactSet): { manifest: Recor
     sdkPhp: artifacts.sdkPhp ? sha256Hex(artifacts.sdkPhp) : null,
     sdkTs: sha256Hex(artifacts.sdkTs),
   };
-  const canonical = JSON.stringify(manifest, Object.keys(manifest).sort());
-  const contentHash = `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+  const contentHash = contentHashFromDigests({
+    contractMd: manifest.contractMd as string,
+    openapi: manifest.openapi as string,
+    sdkPhp: manifest.sdkPhp,
+    sdkTs: manifest.sdkTs as string,
+  });
   return { manifest, contentHash };
 }
 

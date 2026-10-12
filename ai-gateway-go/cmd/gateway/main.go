@@ -41,7 +41,7 @@ func buildProviderList(names []string, cfg config.Config, client *http.Client) [
 	registry := map[string]providers.Provider{
 		"whisper": providers.NewWhisperProvider(cfg.WhisperURL, cfg.WhisperModel, client),
 		"ollama":  providers.NewOllamaProvider(cfg.OllamaURL, cfg.OllamaModel, cfg.OllamaEmbedModel, client),
-		"openai":  providers.NewOpenAIProvider(cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIVisionModel, cfg.OpenAIMaxTokens, client),
+		"openai":  providers.NewOpenAIProvider(cfg.OpenAIBaseURL, cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIVisionModel, cfg.OpenAIMaxTokens, client).WithReasoningMaxTokens(cfg.OpenAIReasoningMaxTokens),
 		"gemini":  providers.NewGeminiProvider(cfg.GeminiAPIKey, cfg.GeminiModel, client),
 		"claude":  providers.NewClaudeProvider(cfg.AnthropicAPIKey, cfg.AnthropicModel, client),
 		// hermes (ASST-15): hermes-gateway is a SEPARATE local shim process (never a cloud

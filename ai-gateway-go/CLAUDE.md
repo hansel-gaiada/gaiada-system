@@ -33,6 +33,12 @@ identity to a provider. Everything about this service follows from that.
 
 - **Provider chain with failover + circuit breaker.** `echo` is the keyless terminator — it is
   what makes the stack work with zero credentials, so don't remove it as "dead code".
+- **Reasoning models on the `openai` provider (M6-P4n).** On OpenRouter a reasoning model's thinking
+  tokens count against `OPENAI_MAX_TOKENS`, so it can spend the whole budget and return HTTP 200 with
+  empty content. Empty content with `finish_reason=length` is therefore an **error** (the chain fails
+  over; empty with `stop` stays a legitimate `""`). `OPENAI_REASONING_MAX_TOKENS` (default 0 = not
+  sent) adds OpenRouter's `"reasoning": {"max_tokens": N}` body field to cap the thinking; never set
+  it against OpenAI's own API, which does not take the field.
 - **Fail-closed auth + DLP**, daily cost cap, egress audit, and a **DialContext-enforced egress
   allowlist** (enforced at dial time, not by URL inspection — a redirect can't slip past it).
 - Optional local-Ollama DLP classifier, fail-closed, opt-in via `DLP_CLASSIFIER_ENABLED`.

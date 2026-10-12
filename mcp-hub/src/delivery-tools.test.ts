@@ -35,6 +35,14 @@ describe("WS11 delivery tools", () => {
     expect(JSON.parse(out)).toEqual({ content: "# Prototype\nscreens..." });
   });
 
+  // M6-P4n: a blank or echoed design must fail the tool, not become the design stage's artifact.
+  it("design.prototype refuses an empty generation and the gateway's echo fallback", async () => {
+    vi.stubGlobal("fetch", mockFetch(200, { text: "" }));
+    await expect(getTool("design.prototype")!.handler({ prd: "build a login page" }, principal)).rejects.toThrow(/returned no text/);
+    vi.stubGlobal("fetch", mockFetch(200, { text: "[echo — no provider key configured] You are a senior product designer" }));
+    await expect(getTool("design.prototype")!.handler({ prd: "build a login page" }, principal)).rejects.toThrow(/echo fallback/);
+  });
+
   it("design.prototype requires a prd", async () => {
     await expect(getTool("design.prototype")!.handler({ prd: "" }, principal)).rejects.toThrow(/prd required/);
   });
