@@ -42,7 +42,7 @@ unfalsifiable after.
 | agency | `agency` | 14 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 13 |
+| clients | `clients` | 14 |
 | core | `agency` · `positions` · `role-grants` | 19 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
