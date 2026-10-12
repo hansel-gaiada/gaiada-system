@@ -31,6 +31,23 @@ import { latestPointerKey } from "../src/codegen/artifact-keys";
 import type { LatestContractPointer } from "../src/codegen/contract-manifest.types";
 import { S3StorageAdapter } from "../src/storage/s3-storage.adapter";
 import { storageConfig } from "../src/storage/storage.config";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+
+/** The worker loads the compiled bundle. The gate and CI run `npm test` without `npm run build`, so build the
+ *  bundle here when it is missing (esbuild, seconds) instead of depending on a step outside the suite; a build
+ *  that still yields no bundle fails HERE, loudly, not as a mysterious timeout. */
+function ensureBundle(): string {
+  try {
+    return resolveBundlePath();
+  } catch {
+    execFileSync(process.execPath, [join(__dirname, "..", "scripts", "build-codegen-bundle.mjs")], {
+      cwd: join(__dirname, ".."),
+      stdio: "inherit",
+    });
+    return resolveBundlePath();
+  }
+}
 
 const MIGRATOR_URL = process.env.MIGRATE_DATABASE_URL!;
 const TITLE = { name: "title", primitive: "text" };
@@ -149,7 +166,7 @@ describe("contract codegen, live: the REAL compiled generator behind the REAL qu
 
   beforeAll(async () => {
     // The worker loads the compiled bundle; a missing one must fail HERE, loudly, not as a mysterious timeout.
-    resolveBundlePath();
+    ensureBundle();
     app = await boot();
   });
   afterAll(async () => {
@@ -226,7 +243,7 @@ describe("contract codegen, live: the REAL compiled generator behind the REAL qu
 describe("contract codegen, live: the backfill creates a pointer for a tenant that had none", { timeout: 120_000 }, () => {
   let app: NestFastifyApplication;
   beforeAll(async () => {
-    resolveBundlePath();
+    ensureBundle();
     app = await boot();
   });
   afterAll(async () => {
