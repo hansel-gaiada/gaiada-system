@@ -21,6 +21,30 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # PV4-05 (client-shared meeting minutes): `share_minutes` publishes a meeting's MINUTES (not the recording,
+    # transcript or participants, which stay internal) to the meeting's client in the portal. It reaches exactly the
+    # roles that hold `update` here (company_admin, manager, member): whoever may edit the meeting may share its
+    # minutes. Saving a draft (PUT .../minutes) is `update`, so an agent may DRAFT minutes; sharing is the human act.
+    - actions: ["share_minutes"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ══════════ automation and bot principals never share minutes (PV-D23, PV-4 design decision 9) ══════════
+    # Nothing an agent writes reaches a client until a staff member approves it. Same `roles: ["user"]` DENY shape as
+    # resource_conversation.yaml (PV4-02) and resource_webdesk_content_item.yaml's T7 `publish`/`schedule` DENY, so
+    # under deny-overrides it beats every ALLOW (the platform_admin wildcard and the perm mirror included). It reads
+    # `principal.attr.kind` (users.kind, sent by principalPayload()); `has()` makes a raw caller that omits the
+    # attribute evaluate to false (no deny) rather than raise a CEL error. `update` (draft the minutes) and `read` are
+    # deliberately NOT listed. DELEGATION: authorize() checks the CALLER and, when `actFor` is set, the acting human
+    # too, and either denial refuses.
+    - actions: ["share_minutes"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
     # WD-26 (DEF-1 relink sweep): admin/service-only, mirrors resource_work_activity.yaml's ingest
     # tier — this is a bulk reconciliation action over the whole registry, not an everyday staff
     # action on "my" recording.
@@ -53,4 +77,8 @@ resourcePolicy:
     - actions: ["relink"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_meeting_recording_relink"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["share_minutes"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_meeting_recording_share_minutes"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

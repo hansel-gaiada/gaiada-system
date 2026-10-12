@@ -23,6 +23,9 @@
 //   2. In portal-visibility.ts, flip `contractInPortalScope`'s NULL-project arm (`true` -> `false`) and
 //      the project-scoped contract assertion fails; flip `runInPortalScope`'s (`false` -> `true`) and
 //      the project-scoped run assertion fails.
+//   3. (PV4-05, meeting minutes) In portal-visibility.ts, drop `status = 'shared'` from `meetingMinutesClientVisible`:
+//      the portal then lists the draft, and the minutes parity fails on it. Flip `meetingMinutesInPortalScope`'s
+//      NULL-project arm (`false` -> `true`) and the project-scoped contact's minutes assertion fails.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
@@ -65,6 +68,9 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
     cr0: newId(), cr2: newId(), crInternal: newId(),
     reviewPending: newId(), reviewChanges: newId(),
     task: newId(), meeting: newId(),
+    // PV4-05: four meetings with minutes. Shared on a project; shared on no project; a DRAFT; shared on a meeting with NO CLIENT.
+    meetShared: newId(), meetWide: newId(), meetDraft: newId(), meetNoClient: newId(),
+    mmShared: newId(), mmWide: newId(), mmDraft: newId(), mmNoClient: newId(),
   };
 
   const get = async (user: string, path: string) => {
@@ -215,6 +221,28 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
          VALUES ($1, $2, 'pv307-meet', $3, $4, 'Kickoff', $5)`,
         [f.meeting, co, client, p1, site()],
       );
+
+      // PV4-05: meetings with minutes. Minutes carry no client or project of their own: both come from the meeting.
+      const meeting = (id: string, clientId: string | null, projectId: string | null, title: string) =>
+        c.query(
+          `INSERT INTO meeting_recordings (id, tenant_id, meeting_id, client_id, project_id, title, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [id, co, `pv405-${id}`, clientId, projectId, title, site()],
+        );
+      await meeting(f.meetShared, client, p1, "Shared on a project");
+      await meeting(f.meetWide, client, null, "Shared, client-wide");
+      await meeting(f.meetDraft, client, p1, "Draft minutes");
+      await meeting(f.meetNoClient, null, null, "Internal, shared stamp but no client");
+      const minutes = (id: string, meetingId: string, status: "draft" | "shared") =>
+        c.query(
+          `INSERT INTO meeting_minutes (id, tenant_id, meeting_recording_id, body_md, status, shared_at, shared_by)
+           VALUES ($1, $2, $3, 'Minutes text', $4, $5, $6)`,
+          [id, co, meetingId, status, status === "shared" ? new Date() : null, status === "shared" ? admin : null],
+        );
+      await minutes(f.mmShared, f.meetShared, "shared");
+      await minutes(f.mmWide, f.meetWide, "shared");
+      await minutes(f.mmDraft, f.meetDraft, "draft");
+      await minutes(f.mmNoClient, f.meetNoClient, "shared");
     });
 
     // Post reviews: one pending (needsClient) and one sent back for changes (needsUs). The posts and
@@ -281,6 +309,13 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
       const ids = ((await get(scoped, "/portal/change-requests")) as Row[]).map((r) => r.id);
       expect(ids).toContain(f.cr0);
       expect(ids).not.toContain(f.cr2);
+    });
+
+    it("PV4-05: does NOT see the minutes of a project-less meeting, only its own project's (PV4-Q1)", async () => {
+      const ids = ((await get(scoped, "/portal/meetings")) as Row[]).map((r) => r.id);
+      expect(ids).toContain(f.mmShared);
+      expect(ids).not.toContain(f.mmWide);
+      expect(ids).not.toContain(f.mmDraft);
     });
 
     it("does NOT see a project-less run, only its own project's", async () => {
@@ -374,6 +409,28 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
       staff.map((r) => ({ id: r.userId, clientVisible: r.clientVisible })),
       portal.contacts.map((r) => r.id),
     );
+  });
+
+  it("meeting minutes: staff `clientVisible` equals presence in the portal list, with a hidden row of each hiding reason (draft, no client)", async () => {
+    const portalIds = ((await get(signer, "/portal/meetings")) as Row[]).map((r) => r.id);
+    const staff: Row[] = [];
+    for (const [meetingId, minutesId] of [
+      [f.meetShared, f.mmShared], [f.meetWide, f.mmWide], [f.meetDraft, f.mmDraft], [f.meetNoClient, f.mmNoClient],
+    ] as const) {
+      const r = (await get(admin, `/meetings/${meetingId}/minutes`)) as { minutes: { id: string; clientVisible: unknown } };
+      expect(r.minutes.id).toBe(minutesId);
+      staff.push({ id: r.minutes.id, clientVisible: r.minutes.clientVisible });
+    }
+    expectParity("meeting minutes", staff, portalIds.filter((id) => staff.some((s) => s.id === id)));
+    expect(staff.find((r) => r.id === f.mmShared)?.clientVisible).toBe(true);
+    expect(staff.find((r) => r.id === f.mmWide)?.clientVisible).toBe(true);
+    expect(staff.find((r) => r.id === f.mmDraft)?.clientVisible).toBe(false);
+    expect(staff.find((r) => r.id === f.mmNoClient)?.clientVisible).toBe(false);
+    // The meeting itself is still never client-visible, with or without minutes.
+    for (const m of [f.meeting, f.meetShared, f.meetWide]) {
+      const r = (await get(admin, `/meetings/recordings/${m}`)) as Row;
+      expect(r.clientVisible, `meeting ${m}`).toBe(false);
+    }
   });
 
   it("tasks and meetings answer false from NEVER_CLIENT_VISIBLE", async () => {

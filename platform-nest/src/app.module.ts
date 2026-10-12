@@ -135,6 +135,7 @@ import { SearchContentDecayController } from "./modules/search/content-decay.con
 import { SearchConversionsController } from "./modules/search/conversions.controller";
 import { SearchVisitorsController } from "./modules/search/visitors.controller";
 import { SearchAiCrawlerController } from "./modules/search/ai-crawler.controller";
+import { SearchExperimentsController } from "./modules/search/experiments.controller";
 import { SearchIndexNowController } from "./modules/search/indexnow.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
@@ -237,6 +238,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SearchConversionsController,
     SearchVisitorsController,
     SearchAiCrawlerController,
+    SearchExperimentsController,
     SearchIndexNowController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,

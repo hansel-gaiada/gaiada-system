@@ -6,7 +6,7 @@ import { registerPlatformTools } from "./platform-tools";
 import { registerPlatformWriteTools } from "./platform-write-tools";
 import { registerModuleTools } from "./module-tools";
 import { registerWorkActivityTools } from "./work-activity-tools";
-import { AUTOMATION_ALLOWLIST } from "./automation-policy";
+import { AUTOMATION_ALLOWLIST, workflowScope } from "./automation-policy";
 import type { Principal } from "./principal";
 
 // An n8n workflow principal (as minted from OBO headers x-obo-provider/x-obo-external-id).
@@ -112,6 +112,58 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
       expect(authorize(p, "notify").allow).toBe(true);
       expect(authorize(p, "reports.getDocument").allow).toBe(false);
     }
+  });
+
+  // PV-D28 — wf:billing-chaser: a daily read-and-remind job over the contract and payment tools. Its scope is
+  // EXACTLY four tools, and every tool that would let it DECIDE is refused by the workflow-scope check. The
+  // billing tools come from platform-nest's core defs (not this package), so they are stubbed here with the
+  // shape those defs carry: the two lists are plain reads at minAssurance "low" (an n8n principal is capped at
+  // "low", so a "verified" read would be refused on assurance before scope is ever consulted), and the five
+  // forbidden tools keep their real impacts.
+  describe("wf:billing-chaser (PV-D28): read-and-remind only", () => {
+    const READS = ["contracts.list", "invoicePayments.list"];
+    const FORBIDDEN: Array<[string, "low" | "medium" | "high"]> = [
+      ["contracts.send", "medium"],
+      ["contracts.countersign", "high"],
+      ["invoicePayments.decide", "high"],
+      ["contracts.createDraft", "low"],
+      ["contracts.updateDraft", "low"],
+    ];
+    beforeEach(() => {
+      for (const name of READS) {
+        registerTool({ name, description: "billing read", minAssurance: "low", inputSchema: { type: "object" }, handler: async () => "[]" });
+      }
+      for (const [name, impact] of FORBIDDEN) {
+        registerTool({ name, description: "billing write", minAssurance: "low", write: true, impact, inputSchema: { type: "object" }, handler: async () => "{}" });
+      }
+    });
+
+    it("is scoped to EXACTLY clients.list, contracts.list, invoicePayments.list and notify", () => {
+      expect([...AUTOMATION_ALLOWLIST["wf:billing-chaser"]].sort()).toEqual(["clients.list", "contracts.list", "invoicePayments.list", "notify"]);
+      expect(visibleTools(wf("wf:billing-chaser")).map((t) => t.name).sort()).toEqual(["clients.list", "contracts.list", "invoicePayments.list", "notify"]);
+    });
+
+    it("its four tools run unattended as a real low-assurance n8n principal (reads, plus notify as a LOW write)", () => {
+      for (const name of ["clients.list", "contracts.list", "invoicePayments.list", "notify"]) {
+        expect(authorize(wf("wf:billing-chaser"), name).allow, name).toBe(true);
+      }
+    });
+
+    it("🔴 cannot send, countersign, decide a payment, or create/edit a draft: each is refused by workflowScope, not merely suspended", () => {
+      for (const [name] of FORBIDDEN) {
+        expect(workflowScope("wf:billing-chaser"), name).not.toContain(name);
+        const d = authorize(wf("wf:billing-chaser"), name);
+        expect(d.allow, name).toBe(false);
+        if (!d.allow) expect(d.reason, name).toMatch(/not scoped/);
+      }
+    });
+
+    it("no other workflow is scoped to the billing reads, and no workflow at all to any billing write", () => {
+      for (const [id, tools] of Object.entries(AUTOMATION_ALLOWLIST)) {
+        for (const [name] of FORBIDDEN) expect(tools, `${id} ${name}`).not.toContain(name);
+        if (id !== "wf:billing-chaser") for (const name of READS) expect(tools, `${id} ${name}`).not.toContain(name);
+      }
+    });
   });
 
   // PRV-03 — the provision<->ERP seam's automation entry point. Registration is part of the
