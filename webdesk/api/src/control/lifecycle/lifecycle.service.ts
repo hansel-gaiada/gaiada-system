@@ -6,9 +6,14 @@
 // (../command-envelope.ts): ONE transaction holding the `control.<cmd>` audit row FIRST (on the
 // two HIGH archives it carries ws4_approval_id, which claims the approval before the write), the
 // domain write on the same client, and the durable replay record. tenant.provision/archive run under
-// the platform scope (tenant_id NULL audit row), the rest under the tenant's. Nothing runs after
-// commit. Ids of the rows being created are generated before the transaction, because the audit row
-// that names them is its first statement.
+// the platform scope (tenant_id NULL audit row), the rest under the tenant's. Ids of the rows being
+// created are generated before the transaction, because the audit row that names them is its first
+// statement.
+//
+// M6-P4r-b: tenant.provision is the one command here with a post-commit step. Its `after` queues the
+// new tenant's contract codegen (ContractCodegenTrigger: fail-soft, never rejects, and never runs on a
+// replay), so a tenant gets a current contracts/<slug>/latest.json without a manual step. The response
+// and the stored replay record do not depend on it.
 //
 // The two ARCHIVE commands resolve their tenant WHATEVER ITS STATUS (M3 T8): a retry of an archive
 // (same Idempotency-Key, response lost) arrives when the tenant is already archived, and must reach the
@@ -24,6 +29,7 @@ import { TenantLookupService } from "../../tenants/tenant-lookup.service";
 import { AuditService } from "../../audit/audit.service";
 import { CommandAuditService } from "../command-audit.service";
 import { CommandEnvelope } from "../command-envelope";
+import { ContractCodegenTrigger } from "../../codegen/contract-codegen.trigger";
 
 interface TenantRow {
   id: string;
@@ -46,6 +52,7 @@ export class LifecycleService {
     private readonly commandAudit: CommandAuditService,
     private readonly envelope: CommandEnvelope,
     private readonly auditHash: AuditService,
+    private readonly codegen: ContractCodegenTrigger,
   ) {}
 
   private async resolveActiveTenant(slug: string) {
@@ -109,7 +116,11 @@ export class LifecycleService {
                  RETURNING id, slug, company_ref, status, created_at, default_locale, locales`,
                 [tenantId, input.slug, input.companyRef],
               );
-          return { result: { tenant: rows[0] } };
+          return {
+            result: { tenant: rows[0] },
+            // Strictly after the commit; the trigger swallows and logs every failure.
+            after: async () => void (await this.codegen.requestRun(input.slug, "tenant.provision")),
+          };
         } catch (err) {
           if (isUniqueViolation(err)) {
             throw new ConflictException(`tenant slug '${input.slug}' already exists — provisioning with a NEW idempotency key does not rename or reuse an existing tenant`);

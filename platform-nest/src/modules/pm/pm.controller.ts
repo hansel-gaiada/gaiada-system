@@ -19,6 +19,7 @@ import { allocateTaskSeq, deriveUniqueShortCode, displayCode } from "../../core/
 import { isProjectStatus, unknownProjectStatusError } from "../../core/project-status";
 import { todayIso, addDaysIso } from "../../core/dept-resolution";
 import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
+import { staffNeverClientVisible } from "../../core/portal-visibility";
 // P4-E2 — the person-axis boundary this endpoint reuses verbatim rather than re-deriving (see the
 // endpoint's own header comment for why). Mirrors reports.controller.ts's import of the same file;
 // the reverse direction (reports/document-builder.ts, report-rollups.ts importing `effectiveStatuses`
@@ -1800,6 +1801,8 @@ export class PmController {
                  t.estimate_minutes AS "estimateMinutes",
                  t.tags, t.depends_on AS "dependsOn", t.custom_fields AS "customFields",
                  t.recurrence, t.updated_at AS "updatedAt",
+                 -- PV3-07: the portal lists no tasks, so this is the NEVER_CLIENT_VISIBLE constant.
+                 ${staffNeverClientVisible("task")} AS "clientVisible",
                  -- description/subtasks/estimateMinutes/customFields/recurrence and the two
                  -- subqueries below were ALL missing from this CTE's projection (P4-A1) even
                  -- though every OTHER task reader (TASK_SELECT above) has always carried them:

@@ -1610,6 +1610,18 @@ portal. `publish`/`schedule` are decide()-only and not listed.
 `allowed` equals the batch answer, `GET sites` filtering, twin provenance, the controller's first statement); `src/modules/webdev/webdesk-content-two-phase.test.ts` (real Cerbos + Postgres + the real principal assembly over `app.inject`, every denial
 beside a positive control, `allowed` against a direct `checkActions` for the same principal and resource; needs the Linux gate). The existing webdev suites (`webdesk-content.test.ts`, `webdesk-media.test.ts`, the client suites, the preview suite) pin the staff behaviour.
 
+### 27.3 M5-L1d — WebDesk form definitions reuse `webdesk_collection` (2026-10-12, PROTOTYPED)
+
+**No new kind, role, permission, bundle row or policy rule.** `forms.define` (WebDesk, MEDIUM / `webdesk:operate`) is authorised in the ERP as Cerbos
+`webdesk_collection` · **`apply_schema`** (company_admin, webdev_manager / module_manager, platform_admin; sensitive publisher tier), and `forms.def.list` / `forms.def.get` as
+`webdesk_collection` · **`read`**. Why `apply_schema`: a form definition is the composition of a PUBLIC intake (the fields it accepts, the consent notice it records, how long it keeps
+submissions), the same family as a collection's composition, which `apply_schema` already guards; WebDesk classifies both MEDIUM / operate. No `client` rule exists on this kind
+for either action, the BFF opens the STAFF gate (`authorizeSite`, never `openClient`), and WebDesk's `forms.define` carries no editorial assertion (like `schema.apply`), so a
+client-editor principal (`ce`) cannot be expressed on it. MCP: `webdesk.forms.define` (**medium**, PATCH alias), `webdesk.forms.list` / `webdesk.forms.get` (read), assurance `low`.
+**Two-phase (W1c, §27.2):** each handler's first statement is `authorizeSite(…, siteId, "webdesk_collection", action)` (phase 1: `read` on the route's site; for a principal with no writers' room grant also the old attribute-free question). The write then asks its REAL action, `webdesk_collection:apply_schema` with `siteId` set, for EVERY principal inside `defineFormDefinition`, before body validation and before any WebDesk call, so a writer or editor holding a grant on the site (who passes phase 1) is denied. The reads need nothing beyond phase 1.
+FRONTEND-BFF-CONTRACT §27 "WebDesk form definitions". **Open follow-up:** `webdesk.forms.define` is NOT a D14 executable (`core/approval-executables.ts` + `resource_mcp_tool.yaml`'s list are
+outside this change), so an unattended suspension, once approved, re-drives nothing: only an attended human can define a form until the pair is added.
+
 ### 27.4 M5-W2d — the review routes: which action decides each (2026-10-12, PROTOTYPED)
 
 No policy change: W2d only adds the BFF and MCP surface over the W1a rules, through the W1c two-phase gate. Phase 1 is `webdesk_collection:read` on the route's site (`authorizeSite`) for every route; for the item commands the principal that holds no

@@ -1,0 +1,45 @@
+{
+  "key": "contact",
+  "schema": {
+    "fields": [
+      {
+        "key": "name",
+        "type": "text",
+        "required": true,
+        "maxLength": 200
+      },
+      {
+        "key": "selectcontact",
+        "type": "select",
+        "required": true,
+        "options": [
+          "email",
+          "whatsapp"
+        ]
+      },
+      {
+        "key": "email_address",
+        "type": "email",
+        "maxLength": 320
+      },
+      {
+        "key": "phone_number",
+        "type": "tel",
+        "maxLength": 40
+      },
+      {
+        "key": "message",
+        "type": "textarea",
+        "required": true,
+        "maxLength": 5000
+      }
+    ],
+    "honeypotField": "_hp",
+    "consentNotice": {
+      "text": "We are Gaiada, a group of companies; the company responsible for your details is named in our privacy policy. We use what you send in this form only to reply to you and to prepare for a conversation about your enquiry, and we keep it for 90 days. If you accepted marketing cookies in our cookie banner, we may also tell Google, Meta and LinkedIn, using scrambled (hashed) contact details, that your visit became an enquiry. Sending this form does not depend on that choice. Read how we use your data and how to ask us to see, correct or delete it in our privacy policy: /privacy-policy/"
+    }
+  },
+  "notify": {},
+  "retentionDays": 90,
+  "consentNoticeVersion": "site-2026-10-11"
+}

@@ -76,7 +76,7 @@ export interface FakeCall {
   hadWs4: boolean;
 }
 
-const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
+const WRITES = new Set(["content.publish", "content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "schema.apply", "site.provision", "key.mint", "media.uploadToken", "media.update", "media.delete", "forms.define", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 const EDITORIAL = new Set(["content.create", "content.update", "content.restoreVersion", "content.unpublish", "content.delete", "content.previewToken", "media.uploadToken", "media.update", "media.delete", "editorial.submit", "editorial.withdraw", "editorial.requestChanges", "editorial.seoSignoff", "editorial.approve", "editorial.assign", "editorial.comment", "editorial.commentResolve", "editorial.policySet"]);
 
 /** WSK-43b: one library asset as the fake holds it (the real row is `media_assets`, migration 0014). */
@@ -131,6 +131,8 @@ export class FakeZoneB {
   /** WSK-43b: every plaintext upload token `media.uploadToken` returned, in order (so a test can scan storage and logs for it). */
   readonly mintedUploadTokens: string[] = [];
   private readonly mintKeys = new Set<string>();
+  /** M5-L1d: the form definitions by `${siteId}:${key}`, as WebDesk's `forms.define` stores them (the id survives a redefinition). */
+  readonly forms = new Map<string, { formId: string; key: string; siteId: string; schema: Record<string, unknown>; notify: unknown; retentionDays: number; consentNoticeVersion: string; createdAt: string; updatedAt: string }>();
   /** Throw this from the NEXT `send` (a breaker-open, a transport failure, ...). Persistent until cleared. */
   failWith: Error | null = null;
   /** Respond to the NEXT write with this instead of applying it. */
@@ -161,6 +163,7 @@ export class FakeZoneB {
     this.stagingDomain = "staging.gaiada.test";
     this.mintedUploadTokens.length = 0;
     this.mintKeys.clear();
+    this.forms.clear();
     this.media.clear();
     this.items.clear();
     this.failWith = null;
@@ -397,6 +400,13 @@ export class FakeZoneB {
         );
         return ok({ assets: rows.map((a) => this.assetJson(a)), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
       }
+      // M5-L1d: reads are answered by THIS switch; only writes reach apply().
+      case "forms.def.list":
+        return ok({ forms: [...this.forms.values()].filter((f) => f.siteId === p.siteId).sort((x, y) => x.key.localeCompare(y.key)) });
+      case "forms.def.get": {
+        const f = this.forms.get(`${p.siteId}:${p.formKey}`);
+        return f ? ok({ form: f }) : problem(404, "form-not-found");
+      }
       case "media.usage": {
         const a = this.media.get(p.assetId);
         if (!a || a.siteId !== p.siteId) return problem(404, "media-asset-not-found");
@@ -557,6 +567,20 @@ export class FakeZoneB {
         if (a.usedBy.length > 0) return problem(409, "media-in-use", { detail: "The asset is used by content.", total: a.usedBy.length, items: a.usedBy });
         a.deletedAt = now;
         return ok({ assetId: a.assetId, deletedAt: now, purgeAfter: new Date(Date.now() + 86_400_000).toISOString(), alreadyDeleted: false, replayed: false });
+      }
+      case "forms.define": {
+        // WebDesk form-defs.service#define, reduced to what the BFF must carry: the id survives a redefinition, and the notice
+        // text cannot change under an unchanged version (409 consent-version-unchanged).
+        const key = `${p.siteId}:${p.formKey}`;
+        const prev = this.forms.get(key);
+        const schema = b.schema as Record<string, unknown>;
+        const text = (schema?.consentNotice as { text?: string } | undefined)?.text ?? "";
+        const prevText = (prev?.schema?.consentNotice as { text?: string } | undefined)?.text ?? "";
+        if (prev && prevText !== text && prev.consentNoticeVersion === b.consentNoticeVersion) return problem(409, "consent-version-unchanged");
+        const t = new Date().toISOString();
+        const form = { formId: prev?.formId ?? randomUUID(), key: String(p.formKey), siteId: String(p.siteId), schema, notify: b.notify ?? {}, retentionDays: Number(b.retentionDays), consentNoticeVersion: String(b.consentNoticeVersion), createdAt: prev?.createdAt ?? t, updatedAt: t };
+        this.forms.set(key, form);
+        return ok({ form, created: !prev, consentNoticeChanged: !!prev && prevText !== text, replayed: false });
       }
       case "schema.apply":
         return ok({ collectionKey: p.collectionKey, bump: "minor", reasons: [], persisted: true, replayed: false }, 201);

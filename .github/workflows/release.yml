@@ -118,6 +118,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # M6-P4r-a: the webdesk-api image carries the packed @gaiada/webdesk-blocks tarball. Pack it
+      # BEFORE the build, with the Dockerfile's own `blocks` stage (so node, npm and the file list are
+      # exactly the image's and the sha256 cannot differ from what the image builds), and hand its
+      # sha256 + version to the real build as build-args. The Dockerfile re-checks them and fails the
+      # build on a mismatch. The stage's layers stay in this job's builder cache, so the main build
+      # reuses them. Skipped for every other component.
+      - name: Pack the block library (webdesk-api)
+        id: blocks
+        if: matrix.component == 'webdesk-api'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/blocks"
+          docker buildx build -f webdesk/api/Dockerfile --target blocks-export --output "type=local,dest=$out" webdesk
+          sha="$(cut -d' ' -f1 "$out/SHA256SUMS")"
+          tgz="$(ls "$out"/gaiada-webdesk-blocks-*.tgz)"
+          test "$(sha256sum "$tgz" | cut -d' ' -f1)" = "$sha"
+          ver="$(basename "$tgz" .tgz)"
+          ver="${ver#gaiada-webdesk-blocks-}"
+          echo "block library $ver sha256 $sha"
+          {
+            echo "sha256=$sha"
+            echo "version=$ver"
+            echo "build_args<<BLOCKS_ARGS_EOF"
+            echo "BLOCKS_SHA256=$sha"
+            echo "BLOCKS_VERSION=$ver"
+            echo "BLOCKS_ARGS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@v6
@@ -129,7 +157,20 @@ jobs:
           # a flat string: the GHCR prune step below builds `package-name: gaiada-${{ matrix.component }}`
           # from it, and the image name (`gaiada-webdesk-api`) is deliberately hyphenated even though
           # the source path (`webdesk/api`) is not — same convention synthetic-prober already sets.
-          context: ${{ matrix.component == 'synthetic-prober' && './infra/observability/synthetic-prober' || matrix.component == 'webdesk-api' && './webdesk/api' || format('./{0}', matrix.component) }}
+          #
+          # M6-P4r-a: webdesk-api's context is now ./webdesk (NOT ./webdesk/api), with the Dockerfile
+          # at webdesk/api/Dockerfile. The image bakes in the block-library tarball (webdesk/blocks/)
+          # and the contract generator inlines webdesk/delivery/vocabulary/, both siblings of api/.
+          # webdesk/.dockerignore admits only api/, blocks/, delivery/. `file:` is set for that
+          # component only; for every other component the expression is '' and docker/build-push-action
+          # then passes no --file at all (it forwards `file` only when non-empty), so each keeps its
+          # default <context>/Dockerfile.
+          context: ${{ matrix.component == 'synthetic-prober' && './infra/observability/synthetic-prober' || matrix.component == 'webdesk-api' && './webdesk' || format('./{0}', matrix.component) }}
+          file: ${{ matrix.component == 'webdesk-api' && './webdesk/api/Dockerfile' || '' }}
+          # webdesk-api only (the pack step above leaves it empty for every other component):
+          # BLOCKS_SHA256 / BLOCKS_VERSION. The Dockerfile re-packs the tarball itself and FAILS THE
+          # BUILD if its sha256 or version differ from these, so the LABELs it sets are verified.
+          build-args: ${{ steps.blocks.outputs.build_args }}
           push: true
           tags: ${{ env.IMAGE }}:${{ env.TAG }}
           provenance: false # we attach a richer SLSA attestation below

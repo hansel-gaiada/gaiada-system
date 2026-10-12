@@ -34,7 +34,7 @@ export function planCi({ files, forceAll = false, groups = cfg.CI_GROUPS, shared
     reasons[name] = hit ? `changed: ${hit}` : "no relevant change -> skipped";
   }
   outputs.any_test = ["wa_chat_bot", "mcp_hub", "ai_agents", "report_renderer"].some((k) => outputs[k]);
-  outputs.any_webdesk_light = ["webdesk_root", "webdesk_blocks", "webdesk_deploy"].some((k) => outputs[k]);
+  outputs.any_webdesk_light = ["webdesk_root", "webdesk_blocks", "webdesk_deploy", "webdesk_wordpress"].some((k) => outputs[k]);
   return { outputs, reasons };
 }
 
@@ -78,7 +78,8 @@ export function planRelease({
     const files = diff(base.commit);
     const sharedHit = files.find((f) => matches(f, shared));
     if (sharedHit) { build.push(comp.name); reasons[comp.name] = `shared input changed since ${base.tag}: ${sharedHit}`; continue; }
-    const hit = files.find((f) => f.startsWith(comp.path));
+    const prefixes = [comp.path, ...(comp.deps ?? [])];
+    const hit = files.find((f) => prefixes.some((p) => f.startsWith(p)));
     if (hit) { build.push(comp.name); reasons[comp.name] = `changed since ${base.tag}: ${hit}`; continue; }
 
     retag.push({ component: comp.name, fromTag: base.tag, digest });

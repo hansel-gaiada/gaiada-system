@@ -24,6 +24,10 @@ export interface ClientBallItem {
   context: string;
   href: string;
   since: string | null;
+  /** PV3-07: computed by the backend from the portal's own predicates. True when a client-wide contact of
+   *  this row's client can read it in the portal; a project-scoped contact may see less. Optional because
+   *  an older server omits it. Never derive it in the browser (BFF §22d). */
+  clientVisible?: boolean;
 }
 
 export interface ClientMoneyRow {

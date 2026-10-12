@@ -117,3 +117,13 @@ describe("CreateRepoForm — for a PRD run", () => {
   });
 
 });
+
+describe("CreateRepoForm — kinds offered", () => {
+  it("offers WordPress enabled alongside Static and Full-stack", () => {
+    render(<CreateRepoForm runs={[]} actions={actions()} prdHref="/x/prd" />);
+    const wp = screen.getByRole("option", { name: "WordPress" }) as HTMLOptionElement;
+    expect(wp.disabled).toBe(false);
+    expect(screen.getByRole("option", { name: /Static/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Full-stack/ })).toBeInTheDocument();
+  });
+});

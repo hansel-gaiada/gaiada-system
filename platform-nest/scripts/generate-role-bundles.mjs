@@ -246,9 +246,12 @@ function moduleStaffTargets(kind, cond) {
   // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
   // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
   // WSK-43b (2026-10-11): `webdesk_media_asset` (the media library) joins them, same reasoning.
+  // M6-P3c (2026-10-12): `webdev_site` (the webdev_sites portfolio registry) joins them; its module-tier
+  // rules mirror webdev_provisioned_site's, so the mapping is the same webdev module tier.
   // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
-      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset") {
+      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset" ||
+      kind === "webdev_site") {
     return ["webdev_staff"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
@@ -280,9 +283,12 @@ function moduleManagerTargets(kind, cond) {
   // WSK-47 (2026-10-10): the two WebDesk editorial kinds join the webdev module tier. Their
   // module-tier rules pin `module == "webdev"` in the condition, so this mapping is literal.
   // WSK-43b (2026-10-11): `webdesk_media_asset` (the media library) joins them, same reasoning.
+  // M6-P3c (2026-10-12): `webdev_site` (the webdev_sites portfolio registry) joins them; its module-tier
+  // rules mirror webdev_provisioned_site's, so the mapping is the same webdev module tier.
   // Kept byte-aligned across generate-role-bundles.mjs and role-permission-parity.db.test.ts.
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo" ||
-      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset") {
+      kind === "webdesk_content_item" || kind === "webdesk_collection" || kind === "webdesk_media_asset" ||
+      kind === "webdev_site") {
     return ["webdev_manager"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];

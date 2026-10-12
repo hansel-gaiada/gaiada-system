@@ -50,6 +50,8 @@ export interface MeetingRecording {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** PV3-07: always false on the list read (no portal read of meetings exists). Absent on the detail. */
+  clientVisible?: boolean;
 }
 export interface MeetingRecordingDetail extends MeetingRecording {
   local_hint: string | null;

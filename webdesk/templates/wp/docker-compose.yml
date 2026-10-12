@@ -1,0 +1,25 @@
+# LOCAL DEV ONLY. This file must never reach a server; production WordPress is deployed per M6-P6.
+# Set the variables from .env.example in a local, uncommitted .env.
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: ${WORDPRESS_DB_PASSWORD:?set WORDPRESS_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+  wordpress:
+    image: wordpress:6-php8.3-apache
+    depends_on: [db]
+    ports:
+      - "127.0.0.1:8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:?set WORDPRESS_DB_PASSWORD}
+      GAIADA_WEBDESK_BASE_URL: ${GAIADA_WEBDESK_BASE_URL:-}
+      GAIADA_WEBDESK_API_KEY: ${GAIADA_WEBDESK_API_KEY:-}
+      GAIADA_WEBDESK_TENANT: ${GAIADA_WEBDESK_TENANT:-}
+    volumes:
+      - ./wp-content/themes/gaiada-webdesk:/var/www/html/wp-content/themes/gaiada-webdesk

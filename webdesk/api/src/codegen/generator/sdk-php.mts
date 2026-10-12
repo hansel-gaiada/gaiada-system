@@ -107,11 +107,16 @@ export function generatePhpSdk(openApiDocument: OpenApiDocument): string {
   lines.push("{");
   lines.push("    private string $baseUrl;");
   lines.push("    private string $apiKey;");
+  lines.push("    private float $timeoutSeconds;");
   lines.push("");
-  lines.push("    public function __construct(string $baseUrl, string $apiKey)");
+  lines.push("    public function __construct(string $baseUrl, string $apiKey, float $timeoutSeconds = 5.0)");
   lines.push("    {");
+  lines.push("        if ($timeoutSeconds <= 0) {");
+  lines.push("            throw new \\InvalidArgumentException('timeoutSeconds must be positive');");
+  lines.push("        }");
   lines.push("        $this->baseUrl = rtrim($baseUrl, '/');");
   lines.push("        $this->apiKey = $apiKey;");
+  lines.push("        $this->timeoutSeconds = $timeoutSeconds;");
   lines.push("    }");
   lines.push("");
   lines.push("    /**");
@@ -161,7 +166,8 @@ export function generatePhpSdk(openApiDocument: OpenApiDocument): string {
   lines.push("                'Authorization: Bearer ' . $this->apiKey,");
   lines.push("                'Accept: application/json',");
   lines.push("            ],");
-  lines.push("            CURLOPT_TIMEOUT => 10,");
+  lines.push("            CURLOPT_CONNECTTIMEOUT_MS => (int) min(2000, $this->timeoutSeconds * 1000),");
+  lines.push("            CURLOPT_TIMEOUT_MS => (int) ($this->timeoutSeconds * 1000),");
   lines.push("        ]);");
   lines.push("        $body = curl_exec($ch);");
   lines.push("        if ($body === false) {");

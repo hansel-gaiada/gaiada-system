@@ -25,6 +25,10 @@ export interface Project {
   custom_fields: Record<string, unknown>;
   // WD-28: unique per tenant, derived on creation + backfilled for legacy rows.
   shortCode: string | null;
+  /** PV3-07: computed by the backend from the portal's own predicates. True when a client-wide contact of
+   *  this row's client can read it in the portal; a project-scoped contact may see less. Optional because
+   *  an older server omits it. Never derive it in the browser (BFF §22d). */
+  clientVisible?: boolean;
 }
 export interface ProjectDetail extends Project {
   client_name: string | null;
@@ -221,7 +225,13 @@ export interface ClientHistoryEntry {
   id: string; verb: string; occurredAt: string; actorId: string | null; actorName: string | null;
   metadata: { changes?: { field: string; before: string | null; after: string | null }[]; via?: string; [k: string]: unknown };
 }
-export interface Deliverable { id: string; project_id: string; client_id: string | null; name: string; status: string; due_date: string | null }
+export interface Deliverable {
+  id: string; project_id: string; client_id: string | null; name: string; status: string; due_date: string | null;
+  /** PV3-07: computed by the backend from the portal's own predicates. True when a client-wide contact of
+   *  this row's client can read it in the portal; a project-scoped contact may see less. Optional because
+   *  an older server omits it. Never derive it in the browser (BFF §22d). */
+  clientVisible?: boolean;
+}
 export interface TimeEntry { id: string; user_id: string; project_id: string; task_id: string | null; minutes: number; billable: boolean; entry_date: string; notes: string }
 
 export const listClients = (u: string, t: string) =>

@@ -36,6 +36,8 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "job.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "job.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "contract.read": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M6-P4r-b -- queues contract-codegen runs (re-run + backfill); MEDIUM/operate like schema.apply.
+  "contract.regenerate": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // WSK-41 — write-plane design §3.1 and ruling WSK-D46: publish and schedule are HIGH for every
   // principal (always WS4); unpublish and delete are MEDIUM under promote (a takedown never waits
   // for a second person); draft writes are MEDIUM under operate.
@@ -68,6 +70,10 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "media.usage": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-L1/L2 — the ERP reads one submission back after a form.received fact: read / webdesk:read.
   "forms.submission.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-L1d — a site's form definitions: forms.define is MEDIUM/operate (schema.apply's family, no WS4), the reads are read.
+  "forms.define": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "forms.def.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "forms.def.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-W2b — the writers' room review flow (design 4.3): the nine writes are MEDIUM/operate (none changes what a
   // production key sees; the publish gate that enforces approval is W2c on content.publish/schedule, still HIGH),
   // the board and the history are reads.

@@ -13,6 +13,9 @@
 //      `{bump, reasons}`;
 //   3. REFUSES a `major` change (409 contract-major-change) until WSK-42 governs MAJOR contract
 //      changes. A new collection is MINOR ("collection added").
+//
+// M6-P4r-b: a successful apply queues the tenant's contract codegen after the command commits (the
+// envelope's `after` hook, via ContractCodegenTrigger: fail-soft, coalescing, skipped on a replay).
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { DbService } from "../../db/db.service";
@@ -29,6 +32,7 @@ import {
   type TenantContractSnapshot,
 } from "../../delivery/vocabulary/breaking-change";
 import { ControlProblem } from "../content/content-problem";
+import { ContractCodegenTrigger } from "../../codegen/contract-codegen.trigger";
 import { isReservedCollectionKey, RESERVED_COLLECTION_KEYS } from "../../delivery/reserved-collection-keys";
 
 /**
@@ -70,6 +74,7 @@ export class SchemaService {
     private readonly commandAudit: CommandAuditService,
     private readonly envelope: CommandEnvelope,
     private readonly auditHash: AuditService,
+    private readonly codegen: ContractCodegenTrigger,
   ) {}
 
   private async resolveActiveTenant(slug: string) {
@@ -198,7 +203,12 @@ export class SchemaService {
            RETURNING id, key, schema, updated_at`,
           [randomUUID(), tenant.id, input.siteId, input.collectionKey, schemaJson],
         );
-        return { result: { collection: rows[0], bump: rating.bump, reasons: rating.reasons } };
+        return {
+          result: { collection: rows[0], bump: rating.bump, reasons: rating.reasons },
+          // M6-P4r-b: queue the tenant's contract codegen strictly AFTER the commit. A MAJOR change threw above, so
+          // nothing is queued for a refused apply. Fail-soft (the trigger never rejects) and skipped on a replay.
+          after: async () => void (await this.codegen.requestRun(input.tenantSlug, "schema.apply")),
+        };
       },
     });
   }

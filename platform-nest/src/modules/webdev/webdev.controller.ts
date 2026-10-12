@@ -225,22 +225,14 @@ export class WebdevController {
   // registry's first write path. DISTINCT table from `webdev_provisioned_sites` above: this is the
   // "what exists" registry (portfolio-reads.service.ts), not the "how it was born" mirror.
   //
-  // ── AUTHZ: REUSE, NOT A NEW KIND OR ACTION ──────────────────────────────────────────────────────
-  // No Cerbos resource kind exists for `webdev_sites` itself, and this ticket does not mint one (the
-  // six-artifact cost — a new policy file, a catalog entry, a migration seeding permissions/
-  // role_permissions, etc. — is out of scope for a first write path, and per the estate's own
-  // "reuse beats adding" instruction). It reuses the ALREADY-REGISTERED, already-tested
-  // `webdev_provisioned_site` kind's existing literal actions instead — the SAME reuse move
-  // `webdesk-control.controller.ts` already made for its own stub control-plane routes
-  // (resource_webdev_provisioned_site.yaml's WSK-31 note): `provision` for "create a new registry
-  // entry" and `operate` for "a medium-impact management write on a site" (setting vault_ref). Both
-  // are manager-tier (company_admin/manager/module_manager), which is the right tier for a registry
-  // write — never a plain-member action. This is a deliberate, flagged trade-off: the `id` passed to
-  // Cerbos for the PATCH is a `webdev_sites` row id, not a `webdev_provisioned_sites` one — Cerbos
-  // does not cross-check an id against a real row of any particular table, so this is safe, but a
-  // FUTURE reader should not assume `resource.attr.id` under this kind always names a provisioned-
-  // site row. If a dedicated `webdev_site` kind is ever minted, both authorize() calls below are the
-  // only two call sites that need to move.
+  // ── AUTHZ: THE REGISTRY'S OWN KIND, `webdev_site` (M6-P3c) ──────────────────────────────────────
+  // `resource_webdev_site.yaml` carries four actions: `create` (POST sites), `read` (GET sites/:id),
+  // `update` (PATCH sites/:id, the vault_ref pointer write) and `request_probe_consent`
+  // (console-reads.controller.ts). Until M6-P3c these routes borrowed `webdev_provisioned_site`'s
+  // `provision`/`read`/`operate`; the new kind is BEHAVIOUR-PRESERVING, each action carrying the exact
+  // reach of the one it replaced (the policy's header holds the table), so no principal gained or lost
+  // access. `webdev_provisioned_site` is untouched and still serves the provisioning routes above.
+  // `id` passed for GET/PATCH is a `webdev_sites` row id, which is what `webdev_site` means.
   @Post("sites")
   @HttpCode(201)
   async createSite(
@@ -248,7 +240,7 @@ export class WebdevController {
     @Param("tenantId") tenantId: string,
     @Body() body: Record<string, unknown>,
   ): Promise<WebdevSiteDto> {
-    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, "provision");
+    await authorize(req.principal, { kind: "webdev_site", tenantId, module: "webdev" }, "create");
     // vaultRef is deliberately not accepted here — see site-registry.service.ts's own header. A
     // caller sending it gets a clear, named rejection rather than a silently-ignored field.
     if ("vaultRef" in body) {
@@ -284,7 +276,7 @@ export class WebdevController {
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
   ): Promise<WebdevSiteDto> {
-    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "read");
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "read");
     const site = await getWebdevSite(tenantId, id);
     if (!site) throw new NotFoundException("webdev site not found");
     return site;
@@ -302,7 +294,7 @@ export class WebdevController {
     @Param("id") id: string,
     @Body() body: Record<string, unknown>,
   ): Promise<WebdevSiteDto> {
-    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "operate");
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "update");
     const keys = Object.keys(body ?? {});
     if (keys.length !== 1 || keys[0] !== "vaultRef") {
       throw new BadRequestException(

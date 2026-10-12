@@ -34,7 +34,7 @@ import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "./project-stat
 // $1 = clientIds uuid[], $2 = projectIds uuid[] | null) now lives and is exported there.
 import {
   PROJECT_SCOPE, contractInPortalScope, deliverableClientVisible, gateClientVisible, inCallerClients,
-  invoiceInPortalScope, invoicePaymentClientVisible, invoicePaymentInPortalScope, milestoneClientVisible,
+  invoiceInPortalScope, invoicePaymentClientVisible, milestoneClientVisible,
   runClientVisible, runInPortalScope,
 } from "./portal-visibility";
 
@@ -464,11 +464,14 @@ export class PortalWorkspaceController {
            FROM invoices i
           WHERE ${invoiceInPortalScope("i", { clients: 1 })}
          UNION ALL
+         -- PV3-02c: a payment is reached THROUGH a visible invoice, so one on a deleted or draft invoice
+         -- never shows (the invoices branch above hides that invoice).
          SELECT 'payment', pp.id::text, 'Payment received', pp.status,
                 COALESCE(pp.confirmed_at, pp.created_at), 'happened',
                 pp.currency || ' ' || pp.amount::text, NULL
-           FROM invoice_payments pp
-          WHERE ${invoicePaymentInPortalScope("pp", "timeline", { clients: 1 })}
+           FROM invoice_payments pp JOIN invoices pi ON pi.id = pp.invoice_id
+          WHERE ${invoicePaymentClientVisible("pp", "timeline")}
+            AND ${invoiceInPortalScope("pi", { clients: 1 })}
          ORDER BY at DESC
          LIMIT ${cap}`,
         [scope.clientIds, scope.projectIds],

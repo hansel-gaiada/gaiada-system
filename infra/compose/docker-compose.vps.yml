@@ -710,6 +710,12 @@ services:
       # correctly while the value platform reports about itself was blank. Only driving the real
       # endpoint surfaced it; the unit tests used fixtures that had a login set.
       GITHUB_ORG: ${GITHUB_ORG:-}
+      # M6-P4d (WSK-D74): the per-kind template repos ERP repo control generates a new site repo from
+      # (`erpRepoTemplates` in platform-nest/src/config.ts; an unset kind is refused with a reason).
+      # Without these lines the .env values never reach the container.
+      ERP_REPO_TEMPLATE_STATIC: ${ERP_REPO_TEMPLATE_STATIC:-}
+      ERP_REPO_TEMPLATE_FULLSTACK: ${ERP_REPO_TEMPLATE_FULLSTACK:-}
+      ERP_REPO_TEMPLATE_WP: ${ERP_REPO_TEMPLATE_WP:-}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.

@@ -16,6 +16,18 @@ running real books on the ledger.
 `sumopod` **pulls** those dumps at 04:15 UTC over the WireGuard tunnel, encrypts each one in the
 pipe, and keeps them under its own retention policy.
 
+**The crontab line is `15 12 * * *`, in local time.** sumopod runs on CST (UTC+8), and Ubuntu's
+`cron` 3.0pl1 **ignores `CRON_TZ`**, so 12:15 CST is 04:15 UTC.
+
+- **The earlier bug.** Until 2026-10-12 the line was `CRON_TZ=UTC` + `15 4 * * *`. The `CRON_TZ` line
+  was dead, so the pull really ran at **20:15 UTC**, about 17 h after the dumps it copies. If
+  gda-aicenter had been lost just before a pull, the newest offsite copy would have been up to
+  ~40 h old instead of ~16 h. No alert noticed, because the staleness metrics track the pull's own
+  time.
+- **Fixed.** The fix and its evidence are recorded in M4 (`TASKS.md`). The old crontab is backed up
+  as `~/erp-offsite/state/crontab.bak-20261012T042510Z`.
+- **Never add a `CRON_TZ` line here.** If the box's timezone changes, recompute the local hour.
+
 | | |
 |---|---|
 | Source | `gda-aicenter` `~/gaiada-backups/` (10.88.0.1 over `wg0`) |

@@ -9,15 +9,12 @@
 //   STORAGE_ENDPOINT=http://localhost:PORT STORAGE_ACCESS_KEY_ID=... STORAGE_SECRET_ACCESS_KEY=... \
 //     node --import tsx src/codegen/generator/run-codegen.mts --tenant <slug> [--emit-event]
 //
-// A currently-unwired trigger, by design: nothing in this ticket's scope calls this from
-// `schema.apply` (WSK-21's `SchemaService` — out of this ticket's owned files) or from a
-// scheduler. Flagged as a follow-up in the ticket report, matching the pattern
-// WSK-10/11/12 each already used for their own "not wired into X" gaps.
+// This CLI is now the manual/dev path only. M6-P4r-b wired the live trigger: `tenant.provision` and
+// `schema.apply` queue a run after their commit (src/codegen/contract-codegen.*.ts), and the
+// `contract.regenerate` control command is the re-run/backfill path.
 import pg from "pg";
-import { fetchTenantComposition } from "./fetch-composition.mts";
-import { buildContractArtifacts } from "./build-artifacts.mts";
-import { createGeneratorStorageAdapter, readLatestPointer, publishArtifacts } from "./storage-io.mts";
-import type { TenantContractSnapshot } from "../../../../delivery/vocabulary/breaking-change.ts";
+import { createGeneratorStorageAdapter } from "./storage-io.mts";
+import { generateTenantContract } from "./generate-tenant.mts";
 // Resolved via `cjs-interop.mts` — see storage-io.mts's header comment for why (the `tsx` vs
 // `vitest`/Vite CJS/ESM interop mismatch across the module-system boundary this ticket straddles).
 import type * as ZoneBEventEmitterNs from "../../events/zoneb-event-emitter.service";
@@ -54,27 +51,13 @@ async function main() {
   const storage = createGeneratorStorageAdapter();
 
   try {
-    const fetched = await fetchTenantComposition(pool, tenantSlug);
-    if (!fetched) {
+    const result = await generateTenantContract(pool, storage, tenantSlug);
+    if (!result) {
       console.error(`no active tenant found for slug "${tenantSlug}"`);
       process.exitCode = 1;
       return;
     }
-
-    const previousPointer = await readLatestPointer(storage, tenantSlug);
-    const previous = previousPointer
-      ? { version: previousPointer.contractVersion, snapshot: previousPointer.compositionSnapshot as TenantContractSnapshot }
-      : null;
-
-    const built = await buildContractArtifacts({
-      tenantSlug: fetched.tenantSlug,
-      defaultLocale: fetched.defaultLocale,
-      locales: fetched.locales,
-      composition: fetched.composition,
-      previous,
-    });
-
-    const pointer = await publishArtifacts(storage, tenantSlug, built);
+    const { fetched, built, pointer } = result;
 
     console.log(
       JSON.stringify(
