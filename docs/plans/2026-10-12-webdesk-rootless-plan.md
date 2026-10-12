@@ -524,7 +524,14 @@ wdc()         { (cd "$WD" && sudo -n env DOCKER_HOST="$RL" docker compose --env-
      `node:22-bookworm@<digest of the rootful one>`.
    - The private api image is loaded and checked the way the live-swap runbook already does:
      `docker save "$API" | DOCKER_HOST=$RL docker load`, where `API` is the `WEBDESK_API_IMAGE` value from
-     `/etc/webdesk/.env`. Refuse unless the loaded id equals the digest.
+     `/etc/webdesk/.env`.
+     - **Then tag it:** `DOCKER_HOST=$RL docker image tag "${API##*@}" "${API%@*}:staged"`. A save of a digest
+       reference loads as a **nameless** image (RepoTags and RepoDigests empty; found in P2 A4, 2026-10-12), so
+       compose's `name@sha256:…` answers "No such image". With the containerd store, a tag of the same repository
+       pointing at that digest makes the digest reference resolve. `docker tag` refuses a digest as the target.
+     - Refuse unless `DOCKER_HOST=$RL docker image inspect "$API"` returns an id equal to the digest.
+     - The same applies to the live-swap runbook's manual load (above). `proof/proof-lib.sh`'s `stage_api_image`
+       does exactly this.
 4. `wdc config -q` succeeds against the rootless daemon. It changes nothing.
 
 **P4. Cut-over**, in an owner-approved 15-minute window, with no release tag pushed during it (≈0.5 session).

@@ -183,10 +183,15 @@ stage_api_image() {
   if [ "$have" = "$dig" ]; then pass "api image already on the proof daemon (id = digest ${dig:0:19})"; return 0; fi
   dr image inspect "$api" >/dev/null 2>&1 || { fail "the api image is not on the rootful daemon ($api)"; return 1; }
   out="$(dr save "$api" | dp load 2>&1)" || { fail "docker save | docker load failed: $(printf '%s' "$out" | tail -n 2 | tr '\n' ' ')"; return 1; }
+  # A save of a DIGEST reference loads as a NAMELESS image (RepoTags and RepoDigests empty; measured in P2 A4 run 1,
+  # 2026-10-12), so compose's `name@sha256:…` cannot resolve it ("No such image"). With the containerd store, a tag of
+  # the same repository pointing at that digest makes the digest reference resolve. `docker tag` refuses a digest
+  # target name, so tag <repo>:wdproof-staged, then REQUIRE the digest reference itself to resolve to the digest.
+  dp image inspect --format '{{.Id}}' "$dig" >/dev/null 2>&1 || { fail "nothing with id $dig was loaded"; return 1; }
+  dp image tag "$dig" "${api%@*}:wdproof-staged" || { fail "could not tag the loaded image ${api%@*}:wdproof-staged"; return 1; }
   id="$(dp image inspect --format '{{.Id}}' "$api" 2>/dev/null || true)"
-  if [ -z "$id" ]; then id="$(grep -oE 'sha256:[0-9a-f]{64}' <<<"$out" | tail -n 1 || true)"; fi
-  if [ "$id" = "$dig" ]; then pass "api image staged on the proof daemon: loaded id equals the digest ($dig)"; return 0; fi
-  fail "loaded api image id '${id:-none}' != digest '$dig': REFUSING (do not run this image)"
+  if [ "$id" = "$dig" ]; then pass "api image staged on the proof daemon: $api resolves, id equals the digest"; return 0; fi
+  fail "after load + tag, $api resolves to '${id:-nothing}', not $dig: REFUSING (do not run this image)"
   return 1
 }
 
