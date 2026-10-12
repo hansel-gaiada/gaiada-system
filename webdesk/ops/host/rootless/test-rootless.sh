@@ -55,7 +55,7 @@ WANT_V4='*filter
 -A WDRL940-OUT -m conntrack --ctdir REPLY -j WDRL940-DENY
 -A WDRL940-OUT -d 169.254.169.254/32 -p udp -m udp --dport 53 -j RETURN
 -A WDRL940-OUT -d 169.254.169.254/32 -p tcp -m tcp --dport 53 -j RETURN
--A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -m hashlimit --hashlimit-above 300/sec --hashlimit-burst 600 --hashlimit-mode srcip --hashlimit-name otlp940 -j DROP
+-A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -m hashlimit --hashlimit-above 300/sec --hashlimit-burst 600 --hashlimit-mode srcip --hashlimit-name o940x060731 -j DROP
 -A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -j RETURN
 -A WDRL940-OUT -m addrtype --dst-type LOCAL -j WDRL940-DENY
 -A WDRL940-OUT -d 0.0.0.0/8 -j WDRL940-DENY
@@ -89,6 +89,9 @@ section_guard() {
   . "$HERE/webdesk-rootless-guard.sh"
   set +e
   local got L A
+  # No root here: the test's own uid plays root for the switch-file ownership check, and the host's addresses are fixed.
+  TRUSTED_UID="$(stat -c %u "$T")"
+  local_addrs() { printf '%s\n' 127.0.0.1 10.0.0.5 172.17.0.1; }
   # live args: tag uid first last ports resolvers otlp-addr otlp-port pps log
   L=(WDRL940 940 700000000 700065535 8380 169.254.169.254 172.17.0.1)
 
@@ -195,6 +198,209 @@ section_guard() {
   assert "the config hash changes when the OTLP switch flips (check catches a stale guard)" test -n "$h_on" -a "$h_on" != "$h_off"
   SUBUID_FILE="$T/g.dup"
   dies "load_cfg refuses a user with two subuid entries" load_cfg webdesk-rootless
+
+  echo "== guard: the OTLP switch is not trusted blindly (M3)"
+  # an OTLP address/port that the loader must refuse; each leaves the exception OFF and says so
+  otlp_case() { # otlp_case <env-file-content> [mode]: prints "<ctorigdst lines> | <warning>"
+    printf '%b' "$1" >"$T/guard.env"
+    chmod "${2:-644}" "$T/guard.env"
+    local out w
+    out="$( (load_cfg webdesk-rootless && payload_v4 "$OTLP_PORT") 2>"$T/warn")"
+    w="$(cat "$T/warn")"
+    printf '%s | %s' "$(grep -c ctorigdst <<<"$out")" "$w"
+  }
+  SUBUID_FILE="$T/g.subuid"
+  same "a good switch (172.17.0.1 is local, port 4319): the exception is ON" "2 | " "$(otlp_case 'WEBDESK_OTLP_PORT=4319\n')"
+  assert "WEBDESK_OTLP_ADDR=169.254.169.254 (the metadata service) is refused" \
+    grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=80\nWEBDESK_OTLP_ADDR=169.254.169.254\n')"
+  assert "link-local 169.254.1.1 is refused even with a high port" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=169.254.1.1\n')"
+  assert "loopback 127.0.0.1 is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=127.0.0.1\n')"
+  assert "an address that is not local to this host (8.8.8.8) is refused" \
+    grep -q '^0 | .*not an address of this host' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=8.8.8.8\n')"
+  assert "a second local address (10.0.0.5) is accepted" grep -q '^2 | ' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=10.0.0.5\n')"
+  assert "port 22 is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=22\n')"
+  assert "port 80 (privileged) is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=80\n')"
+  assert "port 1023 is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=1023\n')"
+  assert "port 1024 is accepted" grep -q '^2 | ' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=1024\n')"
+  assert "port 65535 is accepted" grep -q '^2 | ' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=65535\n')"
+  assert "port 65536 is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=65536\n')"
+  refused "render_v4 itself refuses an OTLP port 22" render_v4 WDRL940 940 700000000 700065535 8380 169.254.169.254 172.17.0.1 22 300 on
+  refused "render_v4 itself refuses an OTLP port 443" render_v4 WDRL940 940 700000000 700065535 8380 169.254.169.254 172.17.0.1 443 300 on
+  refused "render_v4 itself refuses the metadata address" render_v4 WDRL940 940 700000000 700065535 8380 169.254.169.254 169.254.169.254 4319 300 on
+  refused "render_v4 itself refuses loopback as the OTLP address" render_v4 WDRL940 940 700000000 700065535 8380 169.254.169.254 127.0.0.1 4319 300 on
+  # ownership and writability of the file and its directory
+  printf 'WEBDESK_OTLP_PORT=4319\n' >"$T/guard.env"
+  chmod 644 "$T/guard.env"
+  same "a root-owned (here: TRUSTED_UID-owned), 0644 file in a 0755/0700 directory is trusted" "" "$(untrusted_reason "$T/guard.env")"
+  local saved=$TRUSTED_UID
+  TRUSTED_UID=$((saved + 1))
+  assert "a switch file not owned by the trusted uid is refused" grep -q 'is not owned by uid' <<<"$(untrusted_reason "$T/guard.env")"
+  TRUSTED_UID=$saved
+  mkdir -p "$T/wdir"
+  printf 'WEBDESK_OTLP_PORT=4319\n' >"$T/wdir/guard.env"
+  chmod 644 "$T/wdir/guard.env"
+  chmod 664 "$T/guard.env"
+  if [ "$(stat -c %a "$T/guard.env")" != 664 ]; then echo "  note  this shell ignores chmod: the mode and ownership checks run on the Linux gate"; else
+    assert "a group-writable switch file is refused" grep -q 'group- or other-writable' <<<"$(untrusted_reason "$T/guard.env")"
+    assert "  ... and the loader leaves the exception OFF, and says it refused the file" grep -q '^0 | .*refusing the OTLP switch' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\n' 664)"
+    chmod 646 "$T/guard.env"
+    assert "an other-writable switch file is refused" grep -q 'group- or other-writable' <<<"$(untrusted_reason "$T/guard.env")"
+    chmod 644 "$T/guard.env"
+    chmod 777 "$T/wdir"
+    assert "a world-writable directory is refused" grep -q 'directory .* group- or other-writable' <<<"$(untrusted_reason "$T/wdir/guard.env")"
+    chmod 775 "$T/wdir"
+    assert "a group-writable directory is refused" grep -q 'directory .* group- or other-writable' <<<"$(untrusted_reason "$T/wdir/guard.env")"
+    chmod 755 "$T/wdir"
+    same "the same directory at 0755 is fine" "" "$(untrusted_reason "$T/wdir/guard.env")"
+  fi
+  assert "a directory owned by someone else (webdesk-svc owns /etc/webdesk) is refused" \
+    grep -q 'directory .* is not owned by uid' <<<"$( stat() { if [ "$1" = -c ] && [ "$2" = %u ] && [ "$3" = "$T/wdir" ]; then echo 999; else command stat "$@"; fi; }; untrusted_reason "$T/wdir/guard.env")"
+  TRUSTED_UID=$saved
+  ln -s "$T/guard.env" "$T/guard.lnk" 2>/dev/null
+  if [ -L "$T/guard.lnk" ]; then assert "a symlinked switch file is refused" grep -q 'symlink' <<<"$(untrusted_reason "$T/guard.lnk")"; else echo "  note  no real symlinks in this shell: symlink case runs on the Linux gate"; fi
+  rm -f "$T/guard.env"
+
+  echo "== guard: m2 - a changed rate or port makes a NEW hashlimit table"
+  local n1 n2 n3 n4
+  hn() { render_v4 WDRL940 940 700000000 700065535 8380 169.254.169.254 "${1:-172.17.0.1}" "$2" "$3" on | sed -n 's/.*--hashlimit-name \([^ ]*\) .*/\1/p'; }
+  n1="$(hn 172.17.0.1 4319 300)"; n2="$(hn 172.17.0.1 4319 600)"; n3="$(hn 172.17.0.1 4320 300)"; n4="$(hn 172.17.0.1 4319 300)"
+  assert "the hashlimit name differs when the rate changes" test -n "$n1" -a "$n1" != "$n2"
+  assert "the hashlimit name differs when the port changes" test "$n1" != "$n3"
+  assert "the same settings keep the same name (a plain reload does not leak tables)" test "$n1" = "$n4"
+  assert "the name is at most 15 characters (the kernel's limit)" test "${#n1}" -le 15 -a "${#n2}" -le 15
+  assert "a 5-digit uid still fits in 15 characters" test "$(render_v4 WDRL59999 59999 700000000 700065535 8380 169.254.169.254 172.17.0.1 4319 300 on | sed -n 's/.*--hashlimit-name \([^ ]*\) .*/\1/p' | tr -d '\n' | wc -c)" -le 15
+
+  echo "== guard: check logic on synthetic iptables output (fake iptables on PATH)"
+  # A fake iptables family keeps a tiny ruleset in files, so apply / check / remove run end to end without root.
+  # The fake never exits 0 on something it does not understand, so a changed call shape fails the test.
+  local FB="$T/fakebin"
+  mkdir -p "$FB"
+  cat >"$FB/iptables" <<'FAKE'
+#!/usr/bin/env bash
+# fake iptables / ip6tables: state in $FAKE_DIR/<prog>.OUTPUT and <prog>.chain.<name>
+prog="$(basename "$0")"
+st="$FAKE_DIR/$prog"
+[ "${1:-}" = -w ] && shift
+cmd=${1:-}
+shift || true
+case "$cmd" in
+  -C) grep -qxF -- "-A $1 $2 $3" "$st.$1" 2>/dev/null ;;
+  -I) { printf -- '-A %s %s %s\n' "$1" "$3" "$4"; cat "$st.$1" 2>/dev/null || true; } >"$st.new" && mv "$st.new" "$st.$1" ;;
+  -D) awk -v l="-A $1 $2 $3" '$0 == l && !d { d = 1; next } { print }' "$st.$1" >"$st.new" && mv "$st.new" "$st.$1" ;;
+  -S) if [ "$1" = OUTPUT ]; then echo "-P OUTPUT ACCEPT"; cat "$st.OUTPUT" 2>/dev/null; else
+        [ -f "$st.chain.$1" ] || exit 1
+        echo "-N $1"; cat "$st.chain.$1"
+      fi ;;
+  -F) [ -f "$st.chain.$1" ] || exit 1; : >"$st.chain.$1" ;;
+  -X) [ -f "$st.chain.$1" ] || exit 1; rm -f "$st.chain.$1" ;;
+  *) echo "fake iptables: unsupported: $cmd $*" >&2; exit 2 ;;
+esac
+FAKE
+  cat >"$FB/iptables-restore" <<'FAKE'
+#!/usr/bin/env bash
+prog="$(basename "$0")"; prog="${prog%-restore}"
+st="$FAKE_DIR/$prog"
+in="$(cat)"
+[ -z "${FAKE_RESTORE_FAIL_ALL:-}" ] || { echo "fake restore: forced failure" >&2; exit 1; }
+if [ -n "${FAKE_RESTORE_FAIL_MATCH:-}" ] && grep -q -- "$FAKE_RESTORE_FAIL_MATCH" <<<"$in"; then echo "fake restore: forced failure on $FAKE_RESTORE_FAIL_MATCH" >&2; exit 1; fi
+printf '%s\n' "$in" >"$st.last-restore"
+while IFS= read -r line; do
+  case "$line" in
+    :*) c="${line#:}"; c="${c%% *}"; : >"$st.chain.$c" ;;
+    -A\ *) c="${line#-A }"; c="${c%% *}"; printf '%s\n' "$line" >>"$st.chain.$c" ;;
+  esac
+done <<<"$in"
+FAKE
+  cp "$FB/iptables" "$FB/ip6tables"
+  cp "$FB/iptables-restore" "$FB/ip6tables-restore"
+  chmod +x "$FB"/*
+  export FAKE_DIR="$T/fakestate"
+  mkdir -p "$FAKE_DIR"
+  IPT="$FB/iptables" IPT6="$FB/ip6tables" IPT_RESTORE="$FB/iptables-restore" IPT6_RESTORE="$FB/ip6tables-restore"
+  STATE_DIR="$T/gstate"
+  need_root() { :; }
+  SUBUID_FILE="$T/g.subuid"
+  rm -f "$T/guard.env"
+  load_cfg webdesk-rootless
+  fresh() { rm -rf "$FAKE_DIR" "$STATE_DIR"; mkdir -p "$FAKE_DIR"; unset FAKE_RESTORE_FAIL_ALL FAKE_RESTORE_FAIL_MATCH; }
+  chk_out() { cmd_check 2>&1; }
+  fresh
+  ( cmd_apply ) >/dev/null 2>&1
+  assert "apply against the fake iptables succeeds" test $? = 0
+  assert "  ... it wrote the marker" test -e "$STATE_DIR/webdesk-rootless.active"
+  assert "  ... both address families hold their OUTPUT jump" test "$(cat "$FAKE_DIR/iptables.OUTPUT")" = "-A OUTPUT -j WDRL940-SEL" -a "$(cat "$FAKE_DIR/ip6tables.OUTPUT")" = "-A OUTPUT -j WDRL940-SEL"
+  assert "  ... the v4 chains hold exactly the rendered rules (no OTLP line, switch absent)" \
+    test "$(grep -c '^-A WDRL940-OUT' "$FAKE_DIR/iptables.chain.WDRL940-OUT")" = "$(payload_v4 '' | grep -c '^-A WDRL940-OUT')"
+  assert "check PASSES right after apply" quiet cmd_check
+  # m1: our jump first, then any other rule -> must still pass (it failed falsely before: sed 1,/re/ never ends on line 1)
+  printf -- '-A OUTPUT -d 10.1.1.1/32 -j ACCEPT\n' >>"$FAKE_DIR/iptables.OUTPUT"
+  assert "m1: our jump FIRST followed by a foreign rule: check passes" quiet cmd_check
+  printf -- '-A OUTPUT -j WDRL941-SEL\n' >>"$FAKE_DIR/ip6tables.OUTPUT"
+  assert "m1: our jump first followed by another instance's selector: check passes" quiet cmd_check
+  printf -- '-A OUTPUT -j WDRL941-SEL\n-A OUTPUT -j WDRL940-SEL\n' >"$FAKE_DIR/iptables.OUTPUT"
+  assert "another instance's selector BEFORE ours is allowed (it accepts nothing)" quiet cmd_check
+  printf -- '-A OUTPUT -d 10.1.1.1/32 -j ACCEPT\n-A OUTPUT -j WDRL940-SEL\n' >"$FAKE_DIR/iptables.OUTPUT"
+  refute "m1: a foreign rule BEFORE our jump: check FAILS" quiet cmd_check
+  assert "  ... and names the offending rule" grep -q 'rules precede the guard in OUTPUT: -A OUTPUT -d 10.1.1.1/32 -j ACCEPT' <<<"$(chk_out)"
+  printf -- '-A OUTPUT -j WDRL940-SEL\n' >"$FAKE_DIR/iptables.OUTPUT"
+  assert "check passes again once the order is restored" quiet cmd_check
+  printf -- '-A OUTPUT -j WDRL940-SEL\n-A OUTPUT -j WDRL940-SEL\n' >"$FAKE_DIR/iptables.OUTPUT"
+  refute "two OUTPUT jumps: check FAILS" quiet cmd_check
+  printf -- '-A OUTPUT -j WDRL940-SEL\n' >"$FAKE_DIR/iptables.OUTPUT"
+  rm -f "$FAKE_DIR/iptables.chain.WDRL940-OUT"
+  refute "a flushed/missing chain: check FAILS (drift)" quiet cmd_check
+  fresh
+  ( cmd_apply ) >/dev/null 2>&1
+  : >"$FAKE_DIR/iptables.chain.WDRL940-DENY"
+  refute "an emptied chain: check FAILS (drift)" quiet cmd_check
+  fresh
+  ( cmd_apply ) >/dev/null 2>&1
+  rm -f "$STATE_DIR/webdesk-rootless.active"
+  refute "no marker: check FAILS" quiet cmd_check
+  fresh
+  ( cmd_apply ) >/dev/null 2>&1
+  printf 'WEBDESK_OTLP_PORT=4319\n' >"$T/guard.env"
+  chmod 644 "$T/guard.env"
+  load_cfg webdesk-rootless
+  refute "the OTLP switch flipped without a reload: check FAILS (stale guard)" quiet cmd_check
+  rm -f "$T/guard.env"
+  load_cfg webdesk-rootless
+  # failure paths of apply
+  fresh
+  ( cmd_apply ) >/dev/null 2>&1
+  assert "precondition: a marker exists" test -e "$STATE_DIR/webdesk-rootless.active"
+  export FAKE_RESTORE_FAIL_ALL=1
+  ( cmd_apply ) >/dev/null 2>&1
+  local rc=$?
+  assert "apply: a payload that fails to load exits non-zero" test "$rc" -ne 0
+  refute "apply: ... and removes the marker (the daemon cannot start unguarded)" test -e "$STATE_DIR/webdesk-rootless.active"
+  fresh
+  ( cmd_apply ) >/dev/null 2>&1
+  printf 'WEBDESK_OTLP_PORT=4319\n' >"$T/guard.env"
+  chmod 644 "$T/guard.env"
+  load_cfg webdesk-rootless
+  export FAKE_RESTORE_FAIL_MATCH=ctorigdst
+  ( cmd_apply ) >"$T/apply.out" 2>&1
+  assert "apply: an OTLP payload the kernel refuses is retried WITHOUT it, and the guard is ACTIVE" test -e "$STATE_DIR/webdesk-rootless.active"
+  assert "  ... with OTLP reported OFF" grep -q 'OTLP OFF' "$T/apply.out"
+  refute "  ... and no OTLP rule loaded" grep -q ctorigdst "$FAKE_DIR/iptables.chain.WDRL940-OUT"
+  unset FAKE_RESTORE_FAIL_MATCH
+  refute "  ... and check FAILS until it is fixed (stale vs the requested config)" quiet cmd_check
+  rm -f "$T/guard.env"
+  load_cfg webdesk-rootless
+  fresh
+  ( cmd_apply ) >/dev/null 2>&1
+  processes_in_set() { echo 4242; }
+  ( cmd_remove ) >"$T/rm.out" 2>&1
+  rc=$?
+  assert "remove REFUSES while a process of the uid set runs" test "$rc" -ne 0
+  assert "  ... says which pid" grep -q 'REFUSED: pid 4242' "$T/rm.out"
+  assert "  ... and the guard stays: jump, chains and marker" test -e "$STATE_DIR/webdesk-rootless.active" -a -s "$FAKE_DIR/iptables.OUTPUT" -a -f "$FAKE_DIR/iptables.chain.WDRL940-OUT"
+  processes_in_set() { echo; }
+  ( cmd_remove ) >/dev/null 2>&1
+  refute "remove with no process left unhooks the jump" test -s "$FAKE_DIR/iptables.OUTPUT"
+  refute "  ... deletes the chains" test -f "$FAKE_DIR/iptables.chain.WDRL940-OUT" -o -f "$FAKE_DIR/ip6tables.chain.WDRL940-SEL"
+  refute "  ... and the marker" test -e "$STATE_DIR/webdesk-rootless.active"
   echo "  END   guard"
 }
 
@@ -425,8 +631,8 @@ section_install() {
   ETC_READ_NO="$EV/secret"
   # an as_user that behaves like the real one: can read ok and /etc/os-release, not secret, cannot list /etc/webdesk
   as_user() { case "$*" in true | "test -r /etc/os-release" | "test -r $EV/ok") return 0 ;; esac; return 1; }
-  if [ -d /etc/webdesk ]; then assert "etc_access_ok passes with a correct as_user (needs /etc/webdesk)" quiet etc_access_ok
-  else echo "  note  no /etc/webdesk here: the final ls check of etc_access_ok is skipped on this host"; fi
+  ETC_ROOT="$EV"
+  assert "etc_access_ok passes with a correct as_user" quiet etc_access_ok
   as_user() { return 1; }
   refute "etc_access_ok is FALSE when runuser itself fails (every negative would otherwise pass)" quiet etc_access_ok
   as_user() { case "$*" in true | "test -r /etc/os-release") return 0 ;; esac; return 1; }
@@ -531,6 +737,9 @@ section_roundtrip() {
   mkdir -p "$CONF_DIR"
   printf '%s\nwebdesk-rootless:700000000:65536\n' "$MEASURED_SUBIDS" >"$SUBUID_FILE"
   printf 'WEBDESK_OTLP_PORT=4319\n' >"$T/rt.guard.env"
+  chmod 644 "$T/rt.guard.env"
+  TRUSTED_UID="$(stat -c %u "$T")"
+  local_addrs() { printf '%s\n' 127.0.0.1 172.17.0.1; }
   render_template "$HERE/files/webdesk-rootless.conf.in" USER=webdesk-rootless ROLE=live UID=940 PORT=8380 \
     RESOLVERS=169.254.169.254 OTLP_ENV="$T/rt.guard.env" OPERATOR=Hansel OTLP_CREATED=0 >"$CONF_DIR/webdesk-rootless-webdesk-rootless"
   same "installer-rendered config + the live OTLP switch -> the designed v4 rule set" "$WANT_V4" \

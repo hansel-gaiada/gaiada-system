@@ -42,6 +42,10 @@
 #   RL_RESOLVERS="169.254.169.254"   the host's resolvers, as slirp4netns reads them (udp/tcp 53 only)
 #   RL_OTLP_ENV_FILE=/etc/webdesk/guard.env   optional; its WEBDESK_OTLP_PORT / _ADDR / _PPS keys are the
 #                                    SAME switch the rootful guard reads (one switch for both guards)
+#                                    The file is only read if root owns it and its directory and nobody else can write
+#                                    either; the OTLP port must be 1024-65535 (not 22) and the address one of THIS
+#                                    host's own, never loopback, link-local or the metadata service. Otherwise the
+#                                    exception stays OFF and a warning says why.
 #   RL_LOG=on                        rate-limited LOG of dropped packets (prefix WDRL<uid>-DENY, with uid)
 # The uid comes from the passwd database and the range from /etc/subuid at every run, so the rules always
 # follow the real account. Root only. Installed as /usr/local/sbin/webdesk-rootless-guard.sh.
@@ -59,6 +63,9 @@ IPT6_RESTORE="${WEBDESK_IP6TABLES_RESTORE:-/usr/sbin/ip6tables-restore}"
 DENY_V4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
 OTLP_DEFAULT_ADDR=172.17.0.1
 OTLP_DEFAULT_PPS=300
+# The only uid whose ownership makes the OTLP switch file trustworthy. A plain variable, not read from the
+# environment (tests set it after sourcing this file; nothing else may).
+TRUSTED_UID=0
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'webdesk-rootless-guard: WARNING: %s\n' "$*" >&2; }
@@ -74,6 +81,43 @@ is_ipv4() {
   [[ "${1:-}" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
   IFS=. read -r a b c d <<<"$1"
   for x in "$a" "$b" "$c" "$d"; do [ "$((10#$x))" -le 255 ] || return 1; done
+}
+
+# otlp_port_ok <port>: unprivileged, and never ssh. (The OTLP exception opens ONE host port to the daemon's uids.)
+otlp_port_ok() { is_port "${1:-}" && [ "$1" -ge 1024 ] && [ "$1" != 22 ]; }
+
+# otlp_addr_class_ok <ipv4>: refuses 0/8, loopback, link-local (the 169.254.169.254 metadata service) outright.
+otlp_addr_class_ok() {
+  is_ipv4 "${1:-}" || return 1
+  case "$1" in 0.* | 127.* | 169.254.*) return 1 ;; esac
+  return 0
+}
+
+# local_addrs: every IPv4 address configured on this host, one per line (tests replace this function).
+local_addrs() { ip -4 -o addr show 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }'; }
+
+# is_local_addr <ipv4>: the address belongs to THIS host. The OTLP exception rides a DNAT to the collector, so
+# its original destination must be an address the host owns (docker0), never an arbitrary one.
+is_local_addr() {
+  local a
+  a="$(local_addrs)" || return 1
+  grep -qxF -- "$1" <<<"$a"
+}
+
+# untrusted_reason <file>: prints why the switch file cannot be trusted (nothing if it can). A file or a
+# directory that anyone but TRUSTED_UID owns, or that anyone but the owner can write, lets a process in the
+# rootless uid set or the rootful WebDesk uid pick the guard's inputs.
+untrusted_reason() {
+  local f=$1 d m
+  [ ! -L "$f" ] || { echo "it is a symlink"; return 0; }
+  [ -f "$f" ] || { echo "it is not a regular file"; return 0; }
+  [ "$(stat -c %u "$f")" = "$TRUSTED_UID" ] || { echo "it is not owned by uid $TRUSTED_UID"; return 0; }
+  m="$(stat -c %a "$f")"
+  [ $((8#$m & 022)) = 0 ] || { echo "it is group- or other-writable (mode $m)"; return 0; }
+  d="$(dirname "$f")"
+  [ "$(stat -c %u "$d")" = "$TRUSTED_UID" ] || { echo "its directory $d is not owned by uid $TRUSTED_UID"; return 0; }
+  m="$(stat -c %a "$d")"
+  [ $((8#$m & 022)) = 0 ] || { echo "its directory $d is group- or other-writable (mode $m)"; return 0; }
 }
 
 # subid_range <subuid-file> <user> <uid> -> "start count". Exactly one entry, by name or by uid, or fail.
@@ -109,9 +153,15 @@ render_v4() {
   for p in $ports; do is_port "$p" || return 1; done
   [ -n "$resolvers" ] || return 1
   for r in $resolvers; do is_ipv4 "$r" || return 1; done
-  if [ -n "$oport" ]; then is_port "$oport" && is_ipv4 "$oaddr" && is_uint "$opps" || return 1; fi
+  if [ -n "$oport" ]; then otlp_port_ok "$oport" && otlp_addr_class_ok "$oaddr" && is_uint "$opps" || return 1; fi
   case "$log" in on | off) ;; *) return 1 ;; esac
-  local SEL="$tag-SEL" OUT="$tag-OUT" DENY="$tag-DENY"
+  local SEL="$tag-SEL" OUT="$tag-OUT" DENY="$tag-DENY" hname=""
+  # xt_hashlimit keeps a table by NAME and reuses it across a reload, so a changed rate would keep the old one.
+  # The name therefore carries a digest of address, port and rate (<= 15 characters: the kernel's name limit).
+  if [ -n "$oport" ]; then
+    hname="o${tag#WDRL}x$(printf '%s:%s:%s' "$oaddr" "$oport" "$opps" | sha256sum | cut -c1-6)"
+    hname="${hname:0:15}"
+  fi
   printf '*filter\n:%s - [0:0]\n:%s - [0:0]\n:%s - [0:0]\n' "$SEL" "$OUT" "$DENY"
   printf -- '-A %s -m owner --uid-owner %s -j %s\n' "$SEL" "$uid" "$OUT"
   printf -- '-A %s -m owner --uid-owner %s-%s -j %s\n' "$SEL" "$s" "$e" "$OUT"
@@ -129,7 +179,7 @@ render_v4() {
   if [ -n "$oport" ]; then
     if [ "$opps" -gt 0 ]; then
       printf -- '-A %s -p tcp -m conntrack --ctorigdst %s/32 --ctorigdstport %s -m hashlimit --hashlimit-above %s/sec --hashlimit-burst %s --hashlimit-mode srcip --hashlimit-name %s -j DROP\n' \
-        "$OUT" "$oaddr" "$oport" "$opps" "$((opps * 2))" "otlp${tag#WDRL}"
+        "$OUT" "$oaddr" "$oport" "$opps" "$((opps * 2))" "$hname"
     fi
     printf -- '-A %s -p tcp -m conntrack --ctorigdst %s/32 --ctorigdstport %s -j RETURN\n' "$OUT" "$oaddr" "$oport"
   fi
@@ -188,16 +238,27 @@ load_cfg() {
   OTLP_ADDR="" OTLP_PORT="" OTLP_PPS=""
   local of
   of="$(conf_get "$CONF" RL_OTLP_ENV_FILE)"
+  local why
   if [ -n "$of" ] && [ -r "$of" ]; then
-    OTLP_PORT="$(conf_get "$of" WEBDESK_OTLP_PORT)"
-    OTLP_ADDR="$(conf_get "$of" WEBDESK_OTLP_ADDR)"
-    OTLP_PPS="$(conf_get "$of" WEBDESK_OTLP_PPS)"
+    why="$(untrusted_reason "$of")"
+    if [ -n "$why" ]; then
+      warn "refusing the OTLP switch $of ($why): the OTLP exception stays OFF (default-deny holds)"
+    else
+      OTLP_PORT="$(conf_get "$of" WEBDESK_OTLP_PORT)"
+      OTLP_ADDR="$(conf_get "$of" WEBDESK_OTLP_ADDR)"
+      OTLP_PPS="$(conf_get "$of" WEBDESK_OTLP_PPS)"
+    fi
   fi
   OTLP_ADDR="${OTLP_ADDR:-$OTLP_DEFAULT_ADDR}"
   OTLP_PPS="${OTLP_PPS:-$OTLP_DEFAULT_PPS}"
-  if [ -n "$OTLP_PORT" ] && ! { is_port "$OTLP_PORT" && is_ipv4 "$OTLP_ADDR" && is_uint "$OTLP_PPS"; }; then
-    warn "malformed OTLP settings in $of: the OTLP exception stays OFF (default-deny holds)"
-    OTLP_PORT=""
+  if [ -n "$OTLP_PORT" ]; then
+    if ! { otlp_port_ok "$OTLP_PORT" && otlp_addr_class_ok "$OTLP_ADDR" && is_uint "$OTLP_PPS"; }; then
+      warn "malformed or forbidden OTLP settings in $of (port 1024-65535 and not 22; address not loopback/link-local): the OTLP exception stays OFF (default-deny holds)"
+      OTLP_PORT=""
+    elif ! is_local_addr "$OTLP_ADDR"; then
+      warn "OTLP address $OTLP_ADDR in $of is not an address of this host: the OTLP exception stays OFF (default-deny holds)"
+      OTLP_PORT=""
+    fi
   fi
 }
 
@@ -294,7 +355,7 @@ cmd_check() {
     if [ "$("$ipt" -w -S OUTPUT | grep -c -- "^-A OUTPUT -j $TAG-SEL\$" || true)" = 1 ]; then ok "$(basename "$ipt"): one OUTPUT jump to $TAG-SEL"
     else bad "$(basename "$ipt"): OUTPUT does not jump to $TAG-SEL exactly once"; fi
     # Nothing may run before our jump except other instances' selector jumps (none of them accepts anything).
-    first="$("$ipt" -w -S OUTPUT | grep '^-A OUTPUT' | sed -n "1,/-j $TAG-SEL\$/p" | grep -v -E -- '-j WDRL[0-9]+-SEL$' || true)"
+    first="$("$ipt" -w -S OUTPUT | grep '^-A OUTPUT' | sed -n "0,/-j $TAG-SEL\$/p" | grep -v -E -- '-j WDRL[0-9]+-SEL$' || true)"
     if [ -z "$first" ]; then ok "$(basename "$ipt"): no rule precedes the guard in OUTPUT"; else bad "$(basename "$ipt"): rules precede the guard in OUTPUT: $(one_line "$first")"; fi
   done
   ns="$(awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf 2>/dev/null | sort -u | tr '\n' ' ')"

@@ -50,6 +50,7 @@ CGROUP_ROOT="${WEBDESK_RL_CGROUP_ROOT:-/sys/fs/cgroup}"
 SUB_UID_MAX_AUTO=600100000
 # The api's bind sources (docker-compose.aicenter.yml). The directories get a search-only ACL; the files must
 # then be readable, the secrets beside them must NOT be, and the directory must not be listable.
+ETC_ROOT=/etc/webdesk
 ETC_DIRS="/etc/webdesk /etc/webdesk/certs /etc/webdesk/editorial /etc/webdesk/ws4"
 ETC_READ_OK="/etc/webdesk/certs/ca-cert.pem /etc/webdesk/editorial/editorial.jwks.json /etc/webdesk/ws4/ws4.jwks.json"
 ETC_READ_NO="/etc/webdesk/.env /etc/webdesk/.env.control"
@@ -559,8 +560,8 @@ etc_access_ok() {
     [ -e "$f" ] || return 1
     ! as_user test -r "$f" || return 1
   done
-  [ -d /etc/webdesk ] || return 1
-  ! as_user ls /etc/webdesk
+  [ -d "$ETC_ROOT" ] || return 1
+  ! as_user ls "$ETC_ROOT"
 }
 tree_ok() {
   local f
