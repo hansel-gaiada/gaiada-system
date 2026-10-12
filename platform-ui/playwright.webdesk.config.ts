@@ -26,7 +26,8 @@ export default defineConfig({
   testDir: "./e2e",
   // M5-W2e: the writers' room (webdesk-editorial.spec.ts) runs on the same stub too (stub/editorial.mjs).
   // WSK-49d: the portal's Website area (e2e/portal-website.spec.ts) runs on the same stub, so the staff and client editors share one fixture.
-  testMatch: /(webdesk-content|webdesk-editorial|portal-website)\.spec\.ts/,
+  // M5-W8: the writer dashboard (webdesk-dashboard.spec.ts) runs on the same stub too (webdesk-stub/dashboard.mjs).
+  testMatch: /(webdesk-content|webdesk-editorial|webdesk-dashboard|portal-website)\.spec\.ts/,
   // One worker, no file parallelism: the stub is ONE in-memory store and every test resets it first.
   fullyParallel: false,
   workers: 1,

@@ -39,6 +39,7 @@ export default async function WebsiteWritersBoardPage({ params, searchParams }: 
         filters={{ state: sp.state, collection: sp.collection }}
         filterAction={here}
         peopleHref={`${c.writersBase}/people/${encodeURIComponent(t.slug)}/${encodeURIComponent(s.siteId)}`}
+        dashboardHref={`${c.writersBase}/dashboard/${encodeURIComponent(t.slug)}/${encodeURIComponent(s.siteId)}`}
       />
     </div>
   );

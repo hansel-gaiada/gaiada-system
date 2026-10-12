@@ -15,7 +15,7 @@ import "./editorial.css";
  * column heads then show only how many cards are on screen: a withheld count is never drawn as 0.
  */
 export function WritersBoard({
-  board, editorBase, authors, filters, filterAction, peopleHref,
+  board, editorBase, authors, filters, filterAction, peopleHref, dashboardHref,
 }: {
   board: EditorialBoard;
   /** `…/website/content/:tenant/:site` — card links are `${editorBase}/${collection}/${slug}?locale=`. */
@@ -25,6 +25,8 @@ export function WritersBoard({
   filterAction: string;
   /** The people (grants) page for this site; passed for every viewer: the page itself answers 403 for a non-publisher. */
   peopleHref: string;
+  /** M5-W8: the writer dashboard for this site (how the published articles are doing). Optional: absent draws no link. */
+  dashboardHref?: string;
 }) {
   const reviewOn = board.policies.filter((p) => p.reviewRequired);
   const collections = Array.from(new Set([...board.policies.map((p) => p.collectionKey), ...board.items.map((i) => i.collectionKey)])).sort();
@@ -39,6 +41,7 @@ export function WritersBoard({
       <p className="wc-lede">
         Everything on this site that is in the review flow, by where it stands. Open an item to read it, comment, send it for review or review it.
         {" "}<Link href={peopleHref} data-testid="people-link">Manage writers</Link>
+        {dashboardHref ? <>{" "}<Link href={dashboardHref} data-testid="dashboard-link">Writer dashboard</Link></> : null}
       </p>
 
       {board.countsWithheld ? (
