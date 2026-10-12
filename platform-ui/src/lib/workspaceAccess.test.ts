@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
 import { navFor } from "@/components/shell/nav";
 import { sidebarRows, workspaceBySlug, type Gate } from "./workspaces";
-import { concreteRows, gateAllows, resolveMyWorkspaces, type OrgTreeNode } from "./workspaceAccess";
+import { concreteRows, gateAllows, homeArea, resolveMyWorkspaces, type OrgTreeNode } from "./workspaceAccess";
+import { areaFor, resolveArea } from "./areas";
 
 type Company = Me["companies"][number];
 const AGENCY: Company = { id: "co-a", name: "Agency", type: null, vertical: "agency", rootCompanyId: "co-root" };
@@ -212,5 +213,20 @@ describe("concreteRows", () => {
     expect(rows.map((r) => r.key)).not.toContain("pm");
     expect(rows.map((r) => r.key)).not.toContain("tools");
     expect(rows.find((r) => r.key === "people")!.tabs.map((t) => t.href)).toEqual(["/hr/people", "/hr/onboarding", "/companies/co-a/org"]);
+  });
+});
+
+describe("homeArea feeds the last-area rule (lib/areas.ts)", () => {
+  it("is the home department, the functional slug, or the Company area", () => {
+    const placed = resolveMyWorkspaces({ me: me([member()]), tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) });
+    expect(homeArea(placed.home)).toEqual({ kind: "workspace", deptId: "d-web" });
+    const hr = resolveMyWorkspaces({ me: me([{ role: "hr_staff", scopeType: "company", scopeId: "co-a" }]), tenantId: "co-a", root: agencyTree() });
+    expect(homeArea(hr.home)).toEqual({ kind: "workspace", slug: "hr" });
+    expect(homeArea({ kind: "company" })).toEqual({ kind: "company" });
+  });
+
+  it("draws a personal page on a fresh load inside the home workspace", () => {
+    const placed = resolveMyWorkspaces({ me: me([member()]), tenantId: "co-a", root: agencyTree({ web: ["u-1"] }) });
+    expect(resolveArea(areaFor("/me/inbox"), null, homeArea(placed.home))).toEqual({ kind: "workspace", deptId: "d-web" });
   });
 });
