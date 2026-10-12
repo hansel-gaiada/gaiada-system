@@ -22,10 +22,15 @@ export class ClientWorkController {
     await authorize(req.principal, { kind: "deliverable", tenantId }, "read");
     // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400, never every client).
     // Parsed AFTER authorize so a denial is a denial, not a validation error.
-    const filter = clientFilterSql(parseClientFilter(clientId, true), "d.client_id", 2);
-    // PV3-07: `clientVisible` travels through the PROJECT, as the portal reads deliverables (by project,
-    // `PROJECT_SCOPE`), so the row's client is the project's, not the nullable `deliverables.client_id`.
-    // The `?clientId=` facet (PV3-03) still filters `d.client_id`; it is qualified now only because of the join.
+    // PV3-07 follow-up: the facet decides ownership the way the portal does, by the deliverable's PROJECT
+    // (`dp.client_id`), never by the nullable `deliverables.client_id`. The portal reaches a deliverable
+    // only through `JOIN projects p ... PROJECT_SCOPE` (portal-workspace.controller.ts), so the project's
+    // client is the one that can see it; `COALESCE(d.client_id, dp.client_id)` would list a deliverable
+    // under a client whose portal cannot reach it (own client_id set, project internal). So `<uuid>` =
+    // the project belongs to that client, and `internal` = the project has no client (or, under the LEFT
+    // JOIN, no project at all: also unreachable from any portal).
+    const filter = clientFilterSql(parseClientFilter(clientId, true), "dp.client_id", 2);
+    // PV3-07: `clientVisible` travels through the PROJECT for the same reason.
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT d.id, d.project_id, d.client_id, d.name, d.status, d.due_date, d.custom_fields,
