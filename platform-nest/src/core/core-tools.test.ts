@@ -64,6 +64,11 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "contracts.send",
       "contracts.countersign",
       "invoicePayments.decide",
+      // PV5-12: issue and void an invoice (HIGH, D14) and the masked billing profile. Pinned in invoice-issue-tools.test.ts.
+      "invoices.issueReadiness",
+      "invoices.issue",
+      "invoices.voidIssued",
+      "billingProfile.read",
     ]);
   });
 

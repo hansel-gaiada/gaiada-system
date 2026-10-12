@@ -238,6 +238,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
+| `/api` | `platform-nest/src/modules/invoice/billing-profile-agent.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/billing-profile.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/invoice.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
