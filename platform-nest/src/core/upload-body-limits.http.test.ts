@@ -7,7 +7,7 @@
 // attachments (10 MB total per message) were both unreachable above that size. Each pair below has the
 // same shape: the largest legitimate upload is ACCEPTED and stored, and one byte more reaches the
 // HANDLER, which refuses it in its own words. Fastify's 413 has a different status, a different body
-// (`FST_ERR_CTP_BODY_TOO_LARGE`) and never touches the DB; the assertions tell the two apart by body, not
+// (`413 payload_too_large`) and never touches the DB; the assertions tell the two apart by body, not
 // just by status, because a 4xx of either kind would otherwise satisfy a status-only check.
 //
 // Needs DATABASE_URL_TEST + a Cerbos loaded with the current policies. Runs on the Linux gate; skipped
@@ -43,8 +43,12 @@ const memoryStorage: StorageBackend = {
   async del(k) { memStore.delete(k); },
 };
 
-/** Fastify's refusal, as opposed to a handler's. */
-const FASTIFY_413 = "FST_ERR_CTP_BODY_TOO_LARGE";
+/** Fastify's body-limit refusal, as opposed to a handler's. Fastify raises FST_ERR_CTP_BODY_TOO_LARGE (413);
+ *  the app's LastResortExceptionFilter renders every 413 as `{error:"payload too large", code:"payload_too_large"}`
+ *  (last-resort-exception.filter.ts), so that body is the signature seen over HTTP. No handler in the three
+ *  controllers under test ever answers 413, so status 413 IS Fastify's. The "is NOT Fastify's" assertions
+ *  below also check the status is not 413, so they cannot pass vacuously on a mismatched body signature. */
+const FASTIFY_413 = "payload_too_large";
 const isFastify413 = (r: { statusCode: number; body: string }) => r.statusCode === 413 && r.body.includes(FASTIFY_413);
 
 /** `n` bytes as base64. Octet-stream content, so the text scrub never rewrites it and the stored size is exact. */
@@ -125,7 +129,6 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
       // The request body really is past the 1 MiB default (this is the case the defect refused).
       expect(proof.content.length).toBeGreaterThan(1024 * 1024 * 13);
       const r = await pay(proof);
-      expect(isFastify413(r), r.body.slice(0, 200)).toBe(false);
       expect(r.statusCode, r.body.slice(0, 300)).toBe(201);
       const out = r.json() as { id: string; status: string; proofFileId: string | null };
       expect(out.status).toBe("pending");
@@ -161,7 +164,6 @@ describe.skipIf(!TEST_URL)("PV4-03b: per-route body limits for the inline-upload
     it("open: 5 attachments totalling exactly the 10 MB cap are accepted and stored", async () => {
       const files = attachmentsTotalling(MAX_ATTACHMENT_TOTAL_BYTES);
       const r = await app.inject({ method: "POST", url: portalUrl(), headers: asUser(contact), payload: { body: "ten megabytes", attachments: files } });
-      expect(isFastify413(r), r.body.slice(0, 200)).toBe(false);
       expect(r.statusCode, r.body.slice(0, 300)).toBe(201);
       const out = r.json() as { threadId: string; messageId: string; attachmentIds: string[] };
       expect(out.attachmentIds).toHaveLength(MAX_ATTACHMENTS);
