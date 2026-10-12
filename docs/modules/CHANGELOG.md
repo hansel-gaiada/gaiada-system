@@ -71,7 +71,7 @@ local stack). None of these mean "production-done".
   - No live snapshot row exists yet, so nothing on file changes.
 - **Tests:**
   - `contract-content-hash.test.ts` pins the live digests and hash (5 tests).
-  - `webdesk/api/test/contract-content-hash-parity.spec.ts` pins the same constants against WebDesk's own `stableStringify` (no WebDesk version bump: test only).
+  - `webdesk/api/test/codegen-content-hash-parity.spec.ts` pins the same constants against WebDesk's own `stableStringify` (no WebDesk version bump: test only).
   - A canonical-form change on either side now fails a test on that side.
 
 ### platform-ui `0.107.0` - M5-V6-c: the session-replay player and the recordings list (2026-10-13) - PROTOTYPED

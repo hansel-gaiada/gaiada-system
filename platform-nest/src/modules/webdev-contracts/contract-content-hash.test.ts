@@ -4,7 +4,7 @@
 // (tenant `m6-gate-static-prd`, contract 1.0.0, the M6 P4 gate's throwaway site): the four per-artifact sha256
 // digests of the bytes `contract.read`'s artifact route served, and the `contentHash` WebDesk claimed for them.
 // The ERP's old form (compact JSON, key `openapi`) produced sha256:5618a218… for the same digests, so every live pin
-// was refused as `hash_mismatch`. `webdesk/api/test/contract-content-hash-parity.spec.ts` pins the same constants
+// was refused as `hash_mismatch`. `webdesk/api/test/codegen-content-hash-parity.spec.ts` pins the same constants
 // against WebDesk's own `stableStringify`, so a change on either side fails a test on that side.
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
