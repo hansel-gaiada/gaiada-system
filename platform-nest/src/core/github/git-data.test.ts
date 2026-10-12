@@ -25,7 +25,11 @@ describe("gitBlobSha", () => {
 });
 
 describe("erpGitCaller", () => {
-  beforeEach(() => vi.mocked(githubAppService.githubRequest).mockReset());
+  // A block body on purpose: a function RETURNED from beforeEach is a cleanup hook, and mockReset() returns the mock,
+  // so vitest would call githubRequest with no arguments after every test.
+  beforeEach(() => {
+    vi.mocked(githubAppService.githubRequest).mockReset();
+  });
 
   it("goes through githubRequest with the ERP role, the org tenant and the actor, nothing else", async () => {
     vi.mocked(githubAppService.githubRequest).mockResolvedValue({ data: { default_branch: "main" }, status: 200, rateLimit: { limit: null, remaining: null, resetAtMs: null } } as never);

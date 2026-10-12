@@ -113,7 +113,11 @@ describe.skipIf(!TEST_URL)("M6-P4b2 · scaffold-commit route (HTTP, isolated app
     await app.close();
     await teardownTestDb();
   });
-  beforeEach(() => vi.mocked(githubAppService.githubRequest).mockReset());
+  // A block body on purpose: a function RETURNED from beforeEach is a cleanup hook, and mockReset() returns the mock,
+  // so vitest would call githubRequest with no arguments after every test.
+  beforeEach(() => {
+    vi.mocked(githubAppService.githubRequest).mockReset();
+  });
 
   it("401 without a credential", async () => {
     const r = await app.inject({ method: "POST", url: `/api/${tenant}/modules/webdev/provisioned-sites/${newId()}/scaffold-commit`, payload: {} });
