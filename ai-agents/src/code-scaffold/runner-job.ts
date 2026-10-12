@@ -1,0 +1,145 @@
+// M6-P4b1 - `code.scaffold` v2 as an agent-runner job. The runner (runner/service.ts) dispatches a goal whose
+// `agent` is CODE_SCAFFOLD_AGENT here instead of to a model loop: there is no LLM in this path (WSK-D6: the
+// scaffolder composes files deterministically from untrusted PRD/prototype text, it never lets a model decide
+// what gets built).
+//
+// ── DRY RUN ONLY ────────────────────────────────────────────────────────────────────────────────────
+// The target is hard-coded to `{ mode: "dry_run" }`. Nothing in the goal text can select a push: the goal is
+// parsed into the frozen envelope and every other key is ignored, so a `mode` or a `remoteUrl` in it changes
+// nothing. The agents' GitHub App and the hub are read-only by design; only platform-nest holds the write
+// credential (D29). M6-P4b2 makes platform-nest commit the tree this job returns.
+//
+// ── THE RESULT IS DATA, NOT A PATH ─────────────────────────────────────────────────────────────────
+// The tree is composed in a temp dir (so the dry-run writer exercises the real write + local commit), and the
+// dir is removed before returning. What leaves this module is `ScaffoldJobResult`: the file list with sizes and
+// sha256, the `CONTRACT.lock` text, the gaps and the pin. The runner stores it as the goal's blackboard entry.
+//
+// ── CONTRACT (goal text) ───────────────────────────────────────────────────────────────────────────
+// The goal text is the JSON of ScaffoldGoalPayload (the frozen §06 envelope, minus a target). The company is the
+// goal's own `tenantId`, authoritative and tenant-pinned by the runner, never read from the text.
+import type { Envelope } from "../agent";
+import type { ToolCaller } from "./hub-client";
+import type { ScaffoldFileEntry, ScaffoldJobEnvelope, ScaffoldOutcome, ContractLock, SiteKind, VocabularyGap } from "./envelope";
+import { runCodeScaffold } from "./scaffold";
+import { HubContractSnapshotProvider } from "./contract-snapshot-provider";
+import { HubArtifactFetcher } from "./artifact-fetcher";
+import { cleanupWorkDir } from "./git-writer";
+
+/** The `agent` name a goal carries to be dispatched to this job. */
+export const CODE_SCAFFOLD_AGENT = "code-scaffold-v2";
+
+/** The goal text of a scaffold job holds the PRD/prototype artifact refs, which are stored text today, so the
+ *  runner's usual 4000-character goal cap is raised for this agent only. */
+export const SCAFFOLD_GOAL_MAX_CHARS = 100_000;
+
+export type ScaffoldGoalPayload = ScaffoldJobEnvelope;
+
+/** "invalid_job": the goal text was not a valid envelope. "job_failed": the composer or the dry-run writer threw
+ *  (for example the runner image has no `git`). Both are results, so the runner records them as a failed goal. */
+export type ScaffoldJobOutcome = ScaffoldOutcome | "invalid_job" | "job_failed";
+
+export interface ScaffoldJobResult {
+  outcome: ScaffoldJobOutcome;
+  /** Always "dry_run": this job never pushes. */
+  mode: "dry_run";
+  siteKind?: SiteKind;
+  contractSnapshotId?: string;
+  /** Human-readable summary. */
+  content: string;
+  error?: string;
+  /** Present when outcome is "dry_run". Sorted by path; every entry has its size and sha256. */
+  files?: ScaffoldFileEntry[];
+  /** The exact text of the composed `CONTRACT.lock` (repo root). */
+  contractLockContent?: string;
+  contractLock?: ContractLock;
+  gaps?: VocabularyGap[];
+}
+
+const SITE_KINDS: readonly string[] = ["astro", "node", "wp"];
+
+function nonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim() !== "";
+}
+
+/** Parses the goal text into the frozen envelope. Throws a plain Error naming the first problem. */
+export function parseScaffoldGoal(goal: string): ScaffoldJobEnvelope {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(goal);
+  } catch {
+    throw new Error("the goal text of a code-scaffold-v2 job must be the JSON scaffold envelope");
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("the scaffold envelope must be a JSON object");
+  const o = raw as Record<string, unknown>;
+  for (const key of ["runId", "repoUrl", "prdArtifact", "prototypeArtifact", "contractSnapshotId"] as const) {
+    if (!nonEmptyString(o[key])) throw new Error(`the scaffold envelope needs a non-empty "${key}"`);
+  }
+  if (typeof o.siteKind !== "string" || !SITE_KINDS.includes(o.siteKind)) {
+    throw new Error(`the scaffold envelope's "siteKind" must be one of ${SITE_KINDS.join(", ")}`);
+  }
+  const c = typeof o.constraints === "object" && o.constraints !== null ? (o.constraints as Record<string, unknown>) : {};
+  const maxRevise = typeof c.maxRevise === "number" && Number.isInteger(c.maxRevise) && c.maxRevise >= 0 ? c.maxRevise : 3;
+  return {
+    runId: o.runId as string,
+    repoUrl: o.repoUrl as string,
+    siteKind: o.siteKind as SiteKind,
+    prdArtifact: o.prdArtifact as string,
+    prototypeArtifact: o.prototypeArtifact as string,
+    contractSnapshotId: o.contractSnapshotId as string,
+    // "from the snapshot": empty means the scaffolder takes the snapshot's own pinned library version.
+    constraints: { blockLibraryVersion: typeof c.blockLibraryVersion === "string" ? c.blockLibraryVersion : "", maxRevise },
+  };
+}
+
+/** Runs one scaffold job against the hub (the run's OBO envelope), in dry-run mode. Never throws for a job
+ *  problem: a bad goal, a missing snapshot, a refused kind all come back as a result with a non-ok outcome. */
+export async function runScaffoldJob(args: {
+  goal: string;
+  tenantId: string;
+  envelope: Envelope;
+  callTool: ToolCaller;
+}): Promise<ScaffoldJobResult> {
+  let job: ScaffoldJobEnvelope;
+  try {
+    job = parseScaffoldGoal(args.goal);
+  } catch (err) {
+    const message = (err as Error).message;
+    return { outcome: "invalid_job", mode: "dry_run", content: message, error: message };
+  }
+
+  let result;
+  try {
+    result = await runCodeScaffold(job, {
+      tenantId: args.tenantId,
+      snapshotProvider: new HubContractSnapshotProvider(args.callTool, args.envelope),
+      artifactFetcher: new HubArtifactFetcher(args.callTool, args.envelope),
+      pushTarget: { mode: "dry_run" },
+    });
+  } catch (err) {
+    const message = (err as Error).message;
+    return {
+      outcome: "job_failed",
+      mode: "dry_run",
+      siteKind: job.siteKind,
+      contractSnapshotId: job.contractSnapshotId,
+      content: `code.scaffold v2 failed: ${message}`,
+      error: message,
+    };
+  }
+
+  // The dry-run writer leaves its work dir for a caller that wants to look; this caller does not.
+  if (result.pushedTo) await cleanupWorkDir(result.pushedTo).catch(() => undefined);
+
+  return {
+    outcome: result.outcome,
+    mode: "dry_run",
+    siteKind: job.siteKind,
+    contractSnapshotId: job.contractSnapshotId,
+    content: result.content,
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.fileManifest ? { files: result.fileManifest } : {}),
+    ...(result.contractLockContent ? { contractLockContent: result.contractLockContent } : {}),
+    ...(result.contractLock ? { contractLock: result.contractLock } : {}),
+    ...(result.gaps ? { gaps: result.gaps } : {}),
+  };
+}

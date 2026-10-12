@@ -1,6 +1,6 @@
 // WSK-20 — top-level orchestrator: FROZEN envelope in, ScaffoldResult out. Pure composition + one
 // guarded git push; see git-writer.ts's header for the D-6 boundary this respects.
-import type { ScaffoldJobEnvelope, ScaffoldResult, VocabularyGap } from "./envelope";
+import type { ScaffoldJobEnvelope, ScaffoldResult, VocabularyGap, ContractLock } from "./envelope";
 import type { ContractSnapshotProvider } from "./contract-snapshot-provider";
 import type { ArtifactFetcher } from "./artifact-fetcher";
 import { parseOpenApiCollections } from "./openapi-index";
@@ -11,8 +11,10 @@ import { generateConformanceTest, conformanceTestFilePath } from "./conformance-
 import { generateQaHarnessWorkflow, qaHarnessWorkflowFilePath } from "./qa-harness-workflow";
 import { generateSdkClientModule } from "./sdk-client-template";
 import { gitignore, envExample, readme, tsconfig, packageJson } from "./templates/common";
-import { astroConfig as astroConfigAstro } from "./templates/astro-site";
-import { astroConfig as astroConfigNode } from "./templates/node-site";
+import { astroConfig } from "./templates/astro-site";
+import { nodePackageJson, nodeEnvExample, nodeVendoredSdk, blockTypesModule, reactBlocksModule, NODE_WEB_ROOT } from "./templates/node-site";
+import { composeNextPages, InvalidPageSlugError } from "./next-page-composer";
+import { fileManifest, firstDuplicatePath } from "./file-manifest";
 import { wpSiteFiles } from "./templates/wp-site";
 import { writeAndPush, vendorFiles, sdkPackageJson, type PushTarget } from "./git-writer";
 
@@ -55,7 +57,9 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
   }
 
   const tenantSlug = snapshot.meta.webdeskTenantSlug;
-  const blockLibraryVersion = envelope.constraints.blockLibraryVersion;
+  // §06: the envelope's blockLibraryVersion is "from the snapshot"; an empty one (a caller that has not read the
+  // snapshot, such as the hub tool) takes the snapshot's own pinned library version.
+  const blockLibraryVersion = envelope.constraints.blockLibraryVersion || snapshot.meta.artifacts.blockLibrary?.version || "";
 
   if (envelope.siteKind === "wp") {
     // The PHP theme's ONLY real prerequisite is a generated PHP SDK (WSK-34) pinned on THIS
@@ -92,21 +96,75 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
     });
     wpFiles.push({ path: "CONTRACT.lock", content: contractLockFileContent(contractLock) });
 
-    const pushResult = await writeAndPush(wpFiles, deps.pushTarget);
-    return {
-      outcome: deps.pushTarget.mode === "dry_run" ? "dry_run" : "pushed",
-      content:
-        `Scaffolded a wp site for tenant "${tenantSlug}" pinned to contract snapshot ` +
-        `${snapshot.meta.id} (contract@${snapshot.meta.contractVersion}).`,
-      files: wpFiles.map((f) => f.path),
-      gaps: [],
+    return finish(
+      wpFiles,
       contractLock,
-      pushedTo: pushResult.pushedTo,
-    };
+      deps.pushTarget,
+      `Scaffolded a wp site for tenant "${tenantSlug}" pinned to contract snapshot ` +
+        `${snapshot.meta.id} (contract@${snapshot.meta.contractVersion}).`,
+      [],
+    );
   }
 
-  // M6-P4b0: an astro or node site cannot build without the block library (every page imports it). A snapshot
-  // with none is refused here, before anything is composed, never vendored empty.
+  const index = parseOpenApiCollections(snapshot.openApiDocument);
+  const { spec } = parsePrototypeSpec(prototypeText);
+
+  if (envelope.siteKind === "node") {
+    // M6-P4b1: the fullstack kind fills the Next + Nest template's `apps/web` only (templates/node-site.ts). It
+    // does not consume the Astro block library, so it does not refuse a snapshot that has none.
+    let composed;
+    try {
+      composed = composeNextPages(spec, index);
+    } catch (err) {
+      if (err instanceof InvalidPageSlugError) return { outcome: "prototype_invalid", content: err.message, error: err.message };
+      throw err;
+    }
+    const nodeFiles: GeneratedFile[] = [
+      ...composed.files,
+      { path: `${NODE_WEB_ROOT}/src/lib/webdesk-sdk.ts`, content: generateSdkClientModule({ tenantSlug }) },
+      blockTypesModule(),
+      reactBlocksModule(),
+      nodePackageJson(),
+      nodeEnvExample(),
+      { path: "docs/PRD.md", content: prdText },
+      { path: "docs/PROTOTYPE.md", content: prototypeText },
+      ...nodeVendoredSdk({ sdkTsSource: snapshot.sdkTsSource, contractVersion: snapshot.meta.contractVersion }),
+      {
+        path: conformanceTestFilePath(`${NODE_WEB_ROOT}/`),
+        content: generateConformanceTest({
+          tenantSlug,
+          referencedCollections: composed.referencedCollections,
+          blockTypesUsed: ["hero", "cta"],
+          blockTypesImport: "../lib/block-types",
+        }),
+      },
+    ];
+    const nodeLock = buildContractLock({
+      snapshotId: snapshot.meta.id,
+      contractVersion: snapshot.meta.contractVersion,
+      vocabularyVersion: snapshot.meta.vocabularyVersion,
+      contentHash: snapshot.meta.contentHash,
+      blockLibraryVersion,
+    });
+    nodeFiles.push({ path: "CONTRACT.lock", content: contractLockFileContent(nodeLock) });
+    const dup = firstDuplicatePath(nodeFiles);
+    if (dup) {
+      const message = `two prototype pages resolve to the same file "${dup}": make the page slugs distinct`;
+      return { outcome: "prototype_invalid", content: message, error: message };
+    }
+    const nodeGaps = composed.gaps.length > 0 ? ` ${composed.gaps.length} vocabulary gap(s) left as TODO + schema-proposal drafts.` : "";
+    return finish(
+      nodeFiles,
+      nodeLock,
+      deps.pushTarget,
+      `Scaffolded a node (Next + Nest, apps/web) site for tenant "${tenantSlug}" pinned to contract snapshot ${snapshot.meta.id} (contract@${snapshot.meta.contractVersion}).${nodeGaps}`,
+      composed.gaps,
+    );
+  }
+
+  // M6-P4b0: an astro site cannot build without the block library (every page imports it). A snapshot with none
+  // is refused here, before anything is composed, never vendored empty. (The node kind renders blocks with its own
+  // React renderer and does not need it; wp ships the PHP SDK instead.)
   if (!snapshot.blockLibraryTarball || snapshot.blockLibraryTarball.byteLength === 0) {
     return rejectedResult(
       `siteKind "${envelope.siteKind}" requires the @gaiada/webdesk-blocks library pinned on contract snapshot ` +
@@ -116,8 +174,6 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
     );
   }
 
-  const index = parseOpenApiCollections(snapshot.openApiDocument);
-  const { spec } = parsePrototypeSpec(prototypeText);
   const { files: pageFiles, gaps, referencedCollections } = composePages(spec, index);
 
   const files: GeneratedFile[] = [
@@ -127,8 +183,8 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
     envExample(),
     readme({ siteKind: envelope.siteKind, tenantSlug, blockLibraryVersion }),
     tsconfig(),
-    packageJson({ name: `webdesk-site-${tenantSlug}`, siteKind: envelope.siteKind, blockLibraryVersion }),
-    envelope.siteKind === "astro" ? astroConfigAstro() : astroConfigNode(),
+    packageJson({ name: `webdesk-site-${tenantSlug}`, siteKind: "astro", blockLibraryVersion }),
+    astroConfig(),
     { path: "docs/PRD.md", content: prdText },
     { path: "docs/PROTOTYPE.md", content: prototypeText },
     ...vendorFiles({
@@ -154,15 +210,35 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
   });
   files.push({ path: qaHarnessWorkflowFilePath(), content: generateQaHarnessWorkflow({}) });
 
-  const pushResult = await writeAndPush(files, deps.pushTarget);
-
   const gapSummary = gaps.length > 0 ? ` ${gaps.length} vocabulary gap(s) left as TODO + schema-proposal drafts.` : "";
+  return finish(
+    files,
+    contractLock,
+    deps.pushTarget,
+    `Scaffolded a ${envelope.siteKind} site for tenant "${tenantSlug}" pinned to contract snapshot ${snapshot.meta.id} (contract@${snapshot.meta.contractVersion}).${gapSummary}`,
+    gaps,
+  );
+}
+
+/** Writes the tree (dry run: a local commit and nothing else) and builds the result. The manifest and the lock's
+ *  exact text ride in the result so a caller that never sees the work dir (the runner, M6-P4b2's committer) has
+ *  the whole description of what was composed. */
+async function finish(
+  files: GeneratedFile[],
+  contractLock: ContractLock,
+  pushTarget: PushTarget,
+  content: string,
+  gaps: VocabularyGap[],
+): Promise<ScaffoldResult> {
+  const pushResult = await writeAndPush(files, pushTarget);
   return {
-    outcome: deps.pushTarget.mode === "dry_run" ? "dry_run" : "pushed",
-    content: `Scaffolded a ${envelope.siteKind} site for tenant "${tenantSlug}" pinned to contract snapshot ${snapshot.meta.id} (contract@${snapshot.meta.contractVersion}).${gapSummary}`,
+    outcome: pushTarget.mode === "dry_run" ? "dry_run" : "pushed",
+    content,
     files: files.map((f) => f.path),
+    fileManifest: fileManifest(files),
     gaps,
     contractLock,
+    contractLockContent: contractLockFileContent(contractLock),
     pushedTo: pushResult.pushedTo,
   };
 }

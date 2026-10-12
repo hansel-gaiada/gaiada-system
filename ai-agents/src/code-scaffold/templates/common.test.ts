@@ -29,11 +29,6 @@ describe("shared template fragments", () => {
     expect(pkg.dependencies["@astrojs/node"]).toBeUndefined();
   });
 
-  it("a node-siteKind package.json also declares @astrojs/node", () => {
-    const pkg = JSON.parse(String(packageJson({ name: "site", siteKind: "node", blockLibraryVersion: "1.3.2" }).content));
-    expect(pkg.dependencies["@astrojs/node"]).toBeDefined();
-  });
-
   it("tsconfig extends astro's strict preset", () => {
     const tc = JSON.parse(String(tsconfig().content));
     expect(tc.extends).toBe("astro/tsconfigs/strict");

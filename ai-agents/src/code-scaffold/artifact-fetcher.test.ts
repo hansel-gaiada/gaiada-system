@@ -33,4 +33,10 @@ describe("HubArtifactFetcher — the hub-tool adapter (pipeline.artifacts.get do
     const fetcher = new HubArtifactFetcher(callTool, envelope);
     expect(await fetcher.fetchText("t1", "ref")).toBe("");
   });
+
+  it("resolvable:false is a fetch failure, not an empty document (M6-P4b1)", async () => {
+    const callTool: ToolCaller = async () => JSON.stringify({ resolvable: false, reason: "artifact_ref is not a stored file id", content: null });
+    const fetcher = new HubArtifactFetcher(callTool, envelope);
+    await expect(fetcher.fetchText("t1", "https://example.com/proto")).rejects.toThrow(/not stored text.*not a stored file id/);
+  });
 });

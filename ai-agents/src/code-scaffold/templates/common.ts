@@ -1,4 +1,4 @@
-// WSK-20 — file fragments shared by both site-kind templates. Every value here is a STRING the
+// WSK-20 — file fragments for the astro site-kind template (the node kind has its own, node-site.ts). Every value here is a STRING the
 // scaffolder composes; none of it is ever executed by this process (WSK-D6).
 import type { GeneratedFile } from "../page-composer";
 
@@ -61,7 +61,7 @@ export function tsconfig(): GeneratedFile {
  *  step resolves. */
 export function packageJson(args: {
   name: string;
-  siteKind: "astro" | "node";
+  siteKind: "astro";
   blockLibraryVersion: string;
   astroVersion?: string;
 }): GeneratedFile {
@@ -87,8 +87,5 @@ export function packageJson(args: {
       typescript: "^5.6.3",
     },
   } as Record<string, unknown>;
-  if (args.siteKind === "node") {
-    (base.dependencies as Record<string, string>)["@astrojs/node"] = "^9.0.0";
-  }
   return { path: "package.json", content: JSON.stringify(base, null, 2) + "\n" };
 }

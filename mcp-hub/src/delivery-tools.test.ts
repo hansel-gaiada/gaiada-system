@@ -35,15 +35,105 @@ describe("WS11 delivery tools", () => {
     expect(JSON.parse(out)).toEqual({ content: "# Prototype\nscreens..." });
   });
 
-  it("design.prototype requires a prd; code.scaffold requires prd + prototype", async () => {
+  it("design.prototype requires a prd", async () => {
     await expect(getTool("design.prototype")!.handler({ prd: "" }, principal)).rejects.toThrow(/prd required/);
-    await expect(getTool("code.scaffold")!.handler({ prd: "x", prototype: "" }, principal)).rejects.toThrow(/prd and prototype required/);
   });
 
-  it("code.scaffold wraps the Gateway", async () => {
-    vi.stubGlobal("fetch", mockFetch(200, { text: "## Plan\nfile tree..." }));
-    const out = await getTool("code.scaffold")!.handler({ prd: "p", prototype: "proto", repo: "org/site" }, principal);
-    expect(JSON.parse(out)).toEqual({ content: "## Plan\nfile tree..." });
+  // M6-P4b1: code.scaffold is no longer a Gateway text stub. It starts an ai-agents runner job and returns the goal id.
+  describe("code.scaffold v2 (a runner job starter, dry run)", () => {
+    const savedRunner = { url: config.agentRunnerUrl, token: config.agentRunnerToken };
+    const full = {
+      tenantId: "aaaaaaaa-0000-4000-8000-000000000001",
+      contractSnapshotId: "bbbbbbbb-0000-4000-8000-000000000002",
+      siteKind: "node",
+      prdArtifact: "11111111-1111-4111-8111-111111111111",
+      prototypeArtifact: "22222222-2222-4222-8222-222222222222",
+      repoUrl: "https://github.com/gaiada/acme-site",
+      runId: "run-9",
+    };
+    beforeEach(() => {
+      config.agentRunnerUrl = "http://runner.test";
+      config.agentRunnerToken = "runner-token";
+    });
+    afterEach(() => {
+      config.agentRunnerUrl = savedRunner.url;
+      config.agentRunnerToken = savedRunner.token;
+    });
+
+    const accepted = () => vi.fn(async () => ({ ok: true, status: 202, json: async () => ({}), text: async () => JSON.stringify({ id: "goal-1", status: "queued" }) })) as unknown as typeof fetch;
+
+    it("is a LOW-impact write that never touches the Gateway", () => {
+      const t = getTool("code.scaffold")!;
+      expect(t.write).toBe(true);
+      expect(t.impact).toBe("low");
+      expect(JSON.stringify(t.inputSchema)).toContain("contractSnapshotId");
+    });
+
+    it("posts the frozen envelope as the goal of agent code-scaffold-v2, forwarding the caller's identity, and returns the goal id", async () => {
+      const f = accepted();
+      vi.stubGlobal("fetch", f);
+      const out = JSON.parse(await getTool("code.scaffold")!.handler(full, principal));
+      expect(out).toMatchObject({ goalId: "goal-1", status: "queued", mode: "dry_run", siteKind: "node" });
+      expect(out.content).toMatch(/goal-1.*dry run.*agents\.status/);
+
+      const [url, init] = (f as unknown as { mock: { calls: [string, { method: string; body: string; headers: Record<string, string> }][] } }).mock.calls[0];
+      expect(url).toBe("http://runner.test/goals");
+      expect(init.method).toBe("POST");
+      const body = JSON.parse(init.body);
+      expect(body).toMatchObject({ tenantId: full.tenantId, agent: "code-scaffold-v2", envelope: { provider: "n8n", externalId: "wf:delivery" } });
+      expect(JSON.parse(body.goal)).toEqual({
+        runId: "run-9",
+        repoUrl: full.repoUrl,
+        siteKind: "node",
+        prdArtifact: full.prdArtifact,
+        prototypeArtifact: full.prototypeArtifact,
+        contractSnapshotId: full.contractSnapshotId,
+        constraints: { blockLibraryVersion: "", maxRevise: 3 },
+      });
+    });
+
+    it("sends no push target and no mode: the job is dry-run only", async () => {
+      const f = accepted();
+      vi.stubGlobal("fetch", f);
+      await getTool("code.scaffold")!.handler({ ...full, mode: "push", remoteUrl: "https://x/y.git" }, principal);
+      const sent = (f as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls[0][1].body;
+      expect(sent).not.toMatch(/push|remote/i);
+    });
+
+    it("still accepts the legacy wf:delivery keys prd / prototype / repo as aliases", async () => {
+      const f = accepted();
+      vi.stubGlobal("fetch", f);
+      await getTool("code.scaffold")!.handler(
+        { tenantId: full.tenantId, contractSnapshotId: full.contractSnapshotId, siteKind: "astro", prd: "ref-prd", prototype: "ref-proto", repo: "acme-site" },
+        principal,
+      );
+      const goal = JSON.parse(JSON.parse((f as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls[0][1].body).goal);
+      expect(goal).toMatchObject({ prdArtifact: "ref-prd", prototypeArtifact: "ref-proto", repoUrl: "acme-site", runId: "unbound" });
+    });
+
+    it("refuses each missing required field by name, before any call", async () => {
+      const f = accepted();
+      vi.stubGlobal("fetch", f);
+      const h = getTool("code.scaffold")!.handler;
+      await expect(h({ ...full, tenantId: "" }, principal)).rejects.toThrow(/tenantId required/);
+      await expect(h({ ...full, prdArtifact: "" }, principal)).rejects.toThrow(/prdArtifact and prototypeArtifact required/);
+      await expect(h({ ...full, prototypeArtifact: "" }, principal)).rejects.toThrow(/prdArtifact and prototypeArtifact required/);
+      await expect(h({ ...full, contractSnapshotId: "" }, principal)).rejects.toThrow(/contractSnapshotId required/);
+      await expect(h({ ...full, siteKind: "php-legacy" }, principal)).rejects.toThrow(/siteKind must be one of astro, node, wp/);
+      // the legacy {prd, prototype, repo} call from wf:delivery carries no snapshot id or kind, and is refused plainly
+      await expect(h({ prd: "p", prototype: "q", repo: "r", tenantId: full.tenantId }, principal)).rejects.toThrow(/contractSnapshotId required/);
+      expect((f as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0);
+    });
+
+    it("surfaces the runner's own refusal (a full queue) instead of a bare failure", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}), text: async () => '{"error":"goal queue full"}' })) as unknown as typeof fetch);
+      await expect(getTool("code.scaffold")!.handler(full, principal)).rejects.toThrow(/429.*goal queue full/);
+    });
+
+    it("says plainly when no runner is configured", async () => {
+      config.agentRunnerUrl = "";
+      await expect(getTool("code.scaffold")!.handler(full, principal)).rejects.toThrow(/agent runner not configured/);
+    });
   });
 
   // GH-12 — github.createRepo is a PERMANENT refusal in the hub, not a "not configured yet" state:

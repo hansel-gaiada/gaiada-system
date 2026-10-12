@@ -106,6 +106,10 @@ export class HubContractSnapshotProvider implements ContractSnapshotProvider {
   async getSnapshotArtifacts(tenantId: string, snapshotId: string): Promise<ContractSnapshotArtifacts> {
     const rawMeta = await this.callTool("webdev.contracts.get", { tenantId, snapshotId }, this.envelope);
     const meta = parseToolJson<ContractSnapshotMeta>(rawMeta);
+    // A reply with no `artifacts` object is not a snapshot: refuse it before any artifact read is started.
+    if (!meta || typeof meta !== "object" || !meta.artifacts || typeof meta.artifacts !== "object") {
+      throw new Error(`webdev.contracts.get returned no artifacts for snapshot ${snapshotId}`);
+    }
 
     const [openapi, sdkTs, contractMd, blockLibrary, sdkPhp] = await Promise.all([
       this.artifactBytes(tenantId, snapshotId, "openapi"),

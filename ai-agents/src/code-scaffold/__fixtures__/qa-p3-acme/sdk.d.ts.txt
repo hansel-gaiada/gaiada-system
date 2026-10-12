@@ -1,0 +1,1015 @@
+export interface paths {
+    "/v1/t/qa-p3-acme/article": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List "article" items (cursor-paginated) */
+        get: operations["list_article"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/t/qa-p3-acme/article/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one "article" item by slug */
+        get: operations["get_article"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/t/qa-p3-acme/caseStudy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List "caseStudy" items (cursor-paginated) */
+        get: operations["list_caseStudy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/t/qa-p3-acme/caseStudy/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one "caseStudy" item by slug */
+        get: operations["get_caseStudy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/t/qa-p3-acme/redirect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List "redirect" items (cursor-paginated) */
+        get: operations["list_redirect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/t/qa-p3-acme/redirect/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one "redirect" item by slug */
+        get: operations["get_redirect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/t/qa-p3-acme/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Full-text search across every collection (Postgres tsvector, per-locale config) */
+        get: operations["search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/t/qa-p3-acme/sitemap.xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Generated sitemap.xml for the resolved locale (design §05 v1.1) */
+        get: operations["sitemap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
+export type webhooks = Record<string, never>;
+export interface components {
+    schemas: {
+        /** @description "caseStudy"'s typed field values: the props of the "fields" block at blocks[0] (vocabulary 1.1.0). Closed: no other keys. */
+        CollectionFields_caseStudy: {
+            client: string;
+            /** @enum {string} */
+            industry?: "retail" | "finance" | "health";
+        };
+        /** @description "redirect"'s typed field values: the props of the "fields" block at blocks[0] (vocabulary 1.1.0). Closed: no other keys. */
+        CollectionFields_redirect: {
+            target: string;
+        };
+        FieldsBlock_caseStudy: {
+            props: components["schemas"]["CollectionFields_caseStudy"];
+            /** @constant */
+            type: "fields";
+        };
+        FieldsBlock_redirect: {
+            props: components["schemas"]["CollectionFields_redirect"];
+            /** @constant */
+            type: "fields";
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 ("the /v1 envelope is frozen"). */
+        ItemEnvelope_article: {
+            blocks: ({
+                props: {
+                    ctaHref?: string;
+                    ctaLabel?: string;
+                    heading: string;
+                    media?: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    };
+                    subheading?: string;
+                };
+                /** @constant */
+                type: "hero";
+            } | {
+                props: {
+                    /** @description A Lexical-shaped JSON document ({ root: ... }) or a plain string fallback (primitives.ts's own documented jsonShape for 'richtext'). */
+                    content: string | ({
+                        root: Record<string, never>;
+                    } & {
+                        [key: string]: unknown;
+                    });
+                };
+                /** @constant */
+                type: "richText";
+            } | {
+                props: {
+                    body?: string;
+                    buttonHref: string;
+                    buttonLabel: string;
+                    heading: string;
+                };
+                /** @constant */
+                type: "cta";
+            } | {
+                props: Record<string, never>;
+                type: string;
+            })[];
+            collection: string;
+            locale: string;
+            localizations: {
+                locale: string;
+                slug: string;
+            }[];
+            meta: {
+                draft: boolean;
+                /** Format: date-time */
+                publishedAt: string | null;
+                /** Format: date-time */
+                updatedAt: string;
+                /** @description Reserved extension namespace (§05 v1.1) — additive forever. */
+                x: {
+                    [key: string]: unknown;
+                };
+            };
+            /** @description Free-form jsonb (SeoShape) — title/description/ogImage are documented conventions, not an exhaustive schema. */
+            seo: {
+                [key: string]: unknown;
+            };
+            slug: string;
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 ("the /v1 envelope is frozen"). */
+        ItemEnvelope_caseStudy: {
+            /** @description blocks[0] is always the "fields" block carrying this collection's typed field values (vocabulary 1.1.0, ruling WSK-D44); the collection's generic blocks may follow it. (Expressed as a union, not prefixItems: see openapi-builder.mts's header.) */
+            blocks: (components["schemas"]["FieldsBlock_caseStudy"] | {
+                props: {
+                    ctaHref?: string;
+                    ctaLabel?: string;
+                    heading: string;
+                    media?: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    };
+                    subheading?: string;
+                };
+                /** @constant */
+                type: "hero";
+            } | {
+                props: {
+                    author: string;
+                    avatar?: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    };
+                    /** @description A Lexical-shaped JSON document ({ root: ... }) or a plain string fallback (primitives.ts's own documented jsonShape for 'richtext'). */
+                    quote: string | ({
+                        root: Record<string, never>;
+                    } & {
+                        [key: string]: unknown;
+                    });
+                    role?: string;
+                };
+                /** @constant */
+                type: "testimonial";
+            } | {
+                props: {
+                    caption?: string;
+                    items: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    }[];
+                };
+                /** @constant */
+                type: "gallery";
+            } | {
+                props: Record<string, never>;
+                type: string;
+            })[];
+            collection: string;
+            locale: string;
+            localizations: {
+                locale: string;
+                slug: string;
+            }[];
+            meta: {
+                draft: boolean;
+                /** Format: date-time */
+                publishedAt: string | null;
+                /** Format: date-time */
+                updatedAt: string;
+                /** @description Reserved extension namespace (§05 v1.1) — additive forever. */
+                x: {
+                    [key: string]: unknown;
+                };
+            };
+            /** @description Free-form jsonb (SeoShape) — title/description/ogImage are documented conventions, not an exhaustive schema. */
+            seo: {
+                [key: string]: unknown;
+            };
+            slug: string;
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 ("the /v1 envelope is frozen"). */
+        ItemEnvelope_redirect: {
+            /** @description blocks[0] is always the "fields" block carrying this collection's typed field values (vocabulary 1.1.0, ruling WSK-D44); this collection allows no other blocks. */
+            blocks: [
+                components["schemas"]["FieldsBlock_redirect"]
+            ];
+            collection: string;
+            locale: string;
+            localizations: {
+                locale: string;
+                slug: string;
+            }[];
+            meta: {
+                draft: boolean;
+                /** Format: date-time */
+                publishedAt: string | null;
+                /** Format: date-time */
+                updatedAt: string;
+                /** @description Reserved extension namespace (§05 v1.1) — additive forever. */
+                x: {
+                    [key: string]: unknown;
+                };
+            };
+            /** @description Free-form jsonb (SeoShape) — title/description/ogImage are documented conventions, not an exhaustive schema. */
+            seo: {
+                [key: string]: unknown;
+            };
+            slug: string;
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 ("the /v1 envelope is frozen"). */
+        ItemEnvelope_search: {
+            blocks: ({
+                props: {
+                    ctaHref?: string;
+                    ctaLabel?: string;
+                    heading: string;
+                    media?: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    };
+                    subheading?: string;
+                };
+                /** @constant */
+                type: "hero";
+            } | {
+                props: {
+                    /** @description A Lexical-shaped JSON document ({ root: ... }) or a plain string fallback (primitives.ts's own documented jsonShape for 'richtext'). */
+                    content: string | ({
+                        root: Record<string, never>;
+                    } & {
+                        [key: string]: unknown;
+                    });
+                };
+                /** @constant */
+                type: "richText";
+            } | {
+                props: {
+                    caption?: string;
+                    items: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    }[];
+                };
+                /** @constant */
+                type: "gallery";
+            } | {
+                props: {
+                    body?: string;
+                    buttonHref: string;
+                    buttonLabel: string;
+                    heading: string;
+                };
+                /** @constant */
+                type: "cta";
+            } | {
+                props: {
+                    heading?: string;
+                    items: {
+                        collection: string;
+                        slug: string;
+                    }[];
+                };
+                /** @constant */
+                type: "featureGrid";
+            } | {
+                props: {
+                    formKey: {
+                        collection: string;
+                        slug: string;
+                    };
+                };
+                /** @constant */
+                type: "form";
+            } | {
+                props: {
+                    author: string;
+                    avatar?: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    };
+                    /** @description A Lexical-shaped JSON document ({ root: ... }) or a plain string fallback (primitives.ts's own documented jsonShape for 'richtext'). */
+                    quote: string | ({
+                        root: Record<string, never>;
+                    } & {
+                        [key: string]: unknown;
+                    });
+                    role?: string;
+                };
+                /** @constant */
+                type: "testimonial";
+            } | {
+                props: {
+                    heading?: string;
+                    items: {
+                        collection: string;
+                        slug: string;
+                    }[];
+                };
+                /** @constant */
+                type: "faq";
+            } | {
+                props: {
+                    heading?: string;
+                    logos: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    }[];
+                };
+                /** @constant */
+                type: "logoCloud";
+            } | {
+                props: Record<string, never>;
+                type: string;
+            })[];
+            collection: string;
+            locale: string;
+            localizations: {
+                locale: string;
+                slug: string;
+            }[];
+            meta: {
+                draft: boolean;
+                /** Format: date-time */
+                publishedAt: string | null;
+                /** Format: date-time */
+                updatedAt: string;
+                /** @description Reserved extension namespace (§05 v1.1) — additive forever. */
+                x: {
+                    [key: string]: unknown;
+                };
+            };
+            /** @description Free-form jsonb (SeoShape) — title/description/ogImage are documented conventions, not an exhaustive schema. */
+            seo: {
+                [key: string]: unknown;
+            };
+            slug: string;
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ListEnvelope. `items[].blocks` is `[]` unless `?expand=blocks` (router.ts). */
+        ListEnvelope_article: {
+            collection: string;
+            items: components["schemas"]["ItemEnvelope_article"][];
+            locale: string;
+            page: {
+                cursor: string | null;
+                hasMore: boolean;
+                limit: number;
+            };
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ListEnvelope. `items[].blocks` is `[]` unless `?expand=blocks` (router.ts). */
+        ListEnvelope_caseStudy: {
+            collection: string;
+            items: components["schemas"]["ListItemEnvelope_caseStudy"][];
+            locale: string;
+            page: {
+                cursor: string | null;
+                hasMore: boolean;
+                limit: number;
+            };
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ListEnvelope. `items[].blocks` is `[]` unless `?expand=blocks` (router.ts). */
+        ListEnvelope_redirect: {
+            collection: string;
+            items: components["schemas"]["ListItemEnvelope_redirect"][];
+            locale: string;
+            page: {
+                cursor: string | null;
+                hasMore: boolean;
+                limit: number;
+            };
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ListEnvelope. `items[].blocks` is `[]` unless `?expand=blocks` (router.ts). */
+        ListEnvelope_search: {
+            collection: string;
+            items: components["schemas"]["ItemEnvelope_search"][];
+            locale: string;
+            page: {
+                cursor: string | null;
+                hasMore: boolean;
+                limit: number;
+            };
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 ("the /v1 envelope is frozen"). */
+        ListItemEnvelope_caseStudy: {
+            /** @description [] unless ?expand=blocks (router.ts). When expanded, blocks[0] is the "fields" block, as on the item route. */
+            blocks: (components["schemas"]["FieldsBlock_caseStudy"] | {
+                props: {
+                    ctaHref?: string;
+                    ctaLabel?: string;
+                    heading: string;
+                    media?: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    };
+                    subheading?: string;
+                };
+                /** @constant */
+                type: "hero";
+            } | {
+                props: {
+                    author: string;
+                    avatar?: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    };
+                    /** @description A Lexical-shaped JSON document ({ root: ... }) or a plain string fallback (primitives.ts's own documented jsonShape for 'richtext'). */
+                    quote: string | ({
+                        root: Record<string, never>;
+                    } & {
+                        [key: string]: unknown;
+                    });
+                    role?: string;
+                };
+                /** @constant */
+                type: "testimonial";
+            } | {
+                props: {
+                    caption?: string;
+                    items: {
+                        alt?: string;
+                        height?: number;
+                        mime?: string;
+                        url: string;
+                        width?: number;
+                    }[];
+                };
+                /** @constant */
+                type: "gallery";
+            } | {
+                props: Record<string, never>;
+                type: string;
+            })[];
+            collection: string;
+            locale: string;
+            localizations: {
+                locale: string;
+                slug: string;
+            }[];
+            meta: {
+                draft: boolean;
+                /** Format: date-time */
+                publishedAt: string | null;
+                /** Format: date-time */
+                updatedAt: string;
+                /** @description Reserved extension namespace (§05 v1.1) — additive forever. */
+                x: {
+                    [key: string]: unknown;
+                };
+            };
+            /** @description Free-form jsonb (SeoShape) — title/description/ogImage are documented conventions, not an exhaustive schema. */
+            seo: {
+                [key: string]: unknown;
+            };
+            slug: string;
+        };
+        /** @description webdesk/delivery/vocabulary/envelope.ts's ItemEnvelope — frozen, identical for every tenant/collection except `blocks`, per design §05 hard rule 1 ("the /v1 envelope is frozen"). */
+        ListItemEnvelope_redirect: {
+            /** @description [] unless ?expand=blocks (router.ts). When expanded, blocks[0] is the "fields" block, as on the item route. */
+            blocks: (components["schemas"]["FieldsBlock_redirect"] | {
+                props: Record<string, never>;
+                type: string;
+            })[];
+            collection: string;
+            locale: string;
+            localizations: {
+                locale: string;
+                slug: string;
+            }[];
+            meta: {
+                draft: boolean;
+                /** Format: date-time */
+                publishedAt: string | null;
+                /** Format: date-time */
+                updatedAt: string;
+                /** @description Reserved extension namespace (§05 v1.1) — additive forever. */
+                x: {
+                    [key: string]: unknown;
+                };
+            };
+            /** @description Free-form jsonb (SeoShape) — title/description/ogImage are documented conventions, not an exhaustive schema. */
+            seo: {
+                [key: string]: unknown;
+            };
+            slug: string;
+        };
+        /** @description RFC 9457 Problem Details — the one error shape for every /v1 failure (design §05 v1.1, WSK-D18). */
+        ProblemDetails: {
+            detail?: string;
+            instance: string;
+            requestId: string;
+            status: number;
+            title: string;
+            /** Format: uri */
+            type: string;
+        };
+    };
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
+}
+export type $defs = Record<string, never>;
+export interface operations {
+    list_article: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                /** @description ?expand=blocks inlines full block content in a list response (router.ts default: blocks stripped). */
+                expand?: "blocks";
+                limit?: number;
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEnvelope_article"];
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_article: {
+        parameters: {
+            query?: {
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemEnvelope_article"];
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No published item with this slug in this collection. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_caseStudy: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                /** @description ?expand=blocks inlines full block content in a list response (router.ts default: blocks stripped). */
+                expand?: "blocks";
+                limit?: number;
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEnvelope_caseStudy"];
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_caseStudy: {
+        parameters: {
+            query?: {
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemEnvelope_caseStudy"];
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No published item with this slug in this collection. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_redirect: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                /** @description ?expand=blocks inlines full block content in a list response (router.ts default: blocks stripped). */
+                expand?: "blocks";
+                limit?: number;
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEnvelope_redirect"];
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_redirect: {
+        parameters: {
+            query?: {
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemEnvelope_redirect"];
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No published item with this slug in this collection. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    search: {
+        parameters: {
+            query: {
+                collection?: "article" | "caseStudy" | "redirect";
+                cursor?: string;
+                limit?: number;
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListEnvelope_search"];
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Internal error. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    sitemap: {
+        parameters: {
+            query?: {
+                /** @description Falls back to the tenant default when omitted or untranslated (design §05 locale rules). */
+                locale?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xml": string;
+                };
+            };
+            /** @description Missing or invalid API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+}

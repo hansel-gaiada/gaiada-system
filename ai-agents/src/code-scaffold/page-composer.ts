@@ -1,14 +1,10 @@
 // WSK-20 — turns a PrototypeSpec into generated repo pages, composed exclusively from
 // `@gaiada/webdesk-blocks` components fed by the ONE typed SDK client (sdk-client-template.ts).
 //
-// SITE-KIND INTERPRETATION (§06 leaves this open — reported): `astro` and `node` are both built on
-// the SAME Astro block-renderer library (webdesk/blocks, WSK-16, `peerDependencies: astro` — it has
-// no non-Astro build), which is the only installable block library this rail has (§06/§05 Layer 1).
-// This ticket reads "astro" siteKind as a fully static build (`output: 'static'`) and "node" siteKind
-// as the SAME Astro pages built for SSR via `@astrojs/node` (`output: 'server'`) — i.e. the two
-// differ only in astro.config.mjs's output/adapter (templates/astro-site.ts,
-// templates/node-site.ts), never in how a page is composed. This is a documented assumption, not a
-// frozen decision — flagged for architect confirmation in the ticket's report.
+// SITE-KIND NOTE (M6-P4b1): this composer is the ASTRO kind's. `astro` is a fully static Astro build over the Astro
+// block library (webdesk/blocks, WSK-16, `peerDependencies: astro`, no non-Astro build). The `node` kind used to
+// share these pages as an Astro SSR skeleton; that overwrote the Next + Nest template's workspace root, so `node`
+// now has its own composer (next-page-composer.ts) and template (templates/node-site.ts), writing only `apps/web`.
 import type { VocabularyGap } from "./envelope";
 import type { CollectionIndex } from "./openapi-index";
 import { collectionExists } from "./openapi-index";

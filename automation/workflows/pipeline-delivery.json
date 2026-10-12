@@ -577,7 +577,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 7, method: \"tools/call\", params: { name: \"code.scaffold\", arguments: { prd: $json.prd, prototype: $json.proto, repo: $json.slug } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 7, method: \"tools/call\", params: { name: \"code.scaffold\", arguments: { tenantId: $json.tenantId, runId: $json.runId, prd: $json.prd, prototype: $json.proto, repo: $json.slug } } }) }}",
         "options": {
           "response": {
             "response": {

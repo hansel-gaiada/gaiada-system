@@ -1,7 +1,8 @@
-// WSK-20 — public surface of the code.scaffold v2 goal. A future runner-service integration (wiring
-// `agent === "code-scaffold-v2"` into ai-agents/src/runner/service.ts's dispatch) imports from here;
-// this ticket does not touch service.ts itself (see this ticket's own report: out of strict scope).
-export type { ScaffoldJobEnvelope, ScaffoldConstraints, SiteKind, ScaffoldResult, ScaffoldOutcome, VocabularyGap, ContractLock } from "./envelope";
+// WSK-20 — public surface of the code.scaffold v2 goal. M6-P4b1 wired it into the runner: a goal whose
+// `agent` is "code-scaffold-v2" (CODE_SCAFFOLD_AGENT) is dispatched by ai-agents/src/runner/service.ts to
+// `runScaffoldJob` (runner-job.ts), dry run only.
+export { CODE_SCAFFOLD_AGENT, SCAFFOLD_GOAL_MAX_CHARS, runScaffoldJob, parseScaffoldGoal, type ScaffoldJobResult, type ScaffoldGoalPayload } from "./runner-job";
+export type { ScaffoldJobEnvelope, ScaffoldConstraints, SiteKind, ScaffoldResult, ScaffoldFileEntry, ScaffoldOutcome, VocabularyGap, ContractLock } from "./envelope";
 export { runCodeScaffold, type ScaffoldDeps } from "./scaffold";
 export type { PushTarget } from "./git-writer";
 export {

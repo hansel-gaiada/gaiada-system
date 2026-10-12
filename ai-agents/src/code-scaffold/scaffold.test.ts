@@ -183,8 +183,21 @@ describe("runCodeScaffold — success path", () => {
   });
 });
 
-describe("runCodeScaffold — the block library is required for astro and node (M6-P4b0)", () => {
-  it.each(["astro", "node"] as const)("refuses a %s site whose snapshot has no block library, naming the snapshot, and composes nothing", async (siteKind) => {
+describe("runCodeScaffold — the block library is required for astro only (M6-P4b0; node renders with its own React renderer, M6-P4b1)", () => {
+  it("node does not need the library: a snapshot without one still scaffolds apps/web", async () => {
+    const result = await runCodeScaffold(baseEnvelope({ siteKind: "node" }), {
+      tenantId: "t1",
+      snapshotProvider: FakeContractSnapshotProvider.withOne({ ...fixtureSnapshot(), blockLibraryTarball: null }),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    if (result.pushedTo) cleanupDirs.push(result.pushedTo);
+    expect(result.outcome).toBe("dry_run");
+    expect(result.files).toContain("apps/web/src/app/page.tsx");
+    expect(result.files).not.toContain("vendor/webdesk-blocks.tgz");
+  });
+
+  it.each(["astro"] as const)("refuses a %s site whose snapshot has no block library, naming the snapshot, and composes nothing", async (siteKind) => {
     const result = await runCodeScaffold(baseEnvelope({ siteKind }), {
       tenantId: "t1",
       snapshotProvider: FakeContractSnapshotProvider.withOne({ ...fixtureSnapshot(), blockLibraryTarball: null }),
