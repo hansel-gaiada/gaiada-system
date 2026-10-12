@@ -11,6 +11,64 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.106.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
+
+- **Migration `202610131800_search_experiments`** adds `search_experiments` (the pre-registration and lifecycle) and the append-only `search_experiment_results`. Both are FORCE RLS in the `search` scope.
+  - A trigger locks the pre-registration fields once a test has started.
+  - A trigger under a per-property advisory lock refuses an 11th running test.
+- **Routes** under `/api/:t/modules/search/properties/:propertyId/experiments`: list, register, get, patch (draft only), sync, results, stop, abort and decide.
+  - Reads need `resource_search_property:read`; writes need `update`.
+  - 9 MCP tools: 3 reads, and 6 writes at impact `low`.
+  - BFF §28e. The capability inventory is regenerated.
+- **Lifecycle:** draft → `sync` (running once the item's LIVE version carries the registered block; any drift from the plan is `plan_mismatch`) → `stop` (refused before the horizon) → `decide` (needs the block gone from live).
+  - `abort` is allowed from draft, running or stopped.
+  - The ERP never writes to WebDesk: the human publishes the block through the normal content flow.
+- **Before the horizon** the results carry progress and SRM only. They have no rate, difference, interval or p, and conversions are not even fetched.
+- **Refusals:**
+  - A projection over 56 days → 422 `underpowered`.
+  - An 11th test → 409 `too_many_running`.
+  - A Umami outage → `unavailable` with a reason, never zeros.
+  - Cells under 5 show as `"<5"`.
+- `started_at` is approximate, because WebDesk's `item.get` has no publish time. It errs late. Follow-up: expose `lastPublishedAt`.
+- Unit tests 69/69; GitHub Actions 38280136413 green (DB and HTTP suite included, after a test-isolation fix: drafts on the shared property were exhausting the 10-test cap).
+
+### infra `0.13.12` - M5-V3-c: routes and keys for the collector's consented channel and ops API (files only, not deployed) (2026-10-13) - PROTOTYPED
+
+- **erp-edge:** a separate router `erp-insights-consented` for exactly `/lib/kestrel/v` and `/lib/kestrel/f`. It uses the same service and middlewares as the collect path, so it can be removed on its own.
+- **Umami edge:** the `/v` (16 KB cap) and `/f` (2 KB) locations are on: exact path, POST/OPTIONS only, to `collector:8080`. `/r` stays off until V6-a.
+- **Read-gate** (WireGuard only):
+  - GET `/ops/v1/events` and `/ops/v1/bots`, and POST `/ops/v1/forget` (16 KB), to `collector:8081`;
+  - the Authorization header passes through untouched;
+  - every other method or path is refused.
+  - `/ops/v1/*` is not on the public edge.
+- **ERP:** `INSIGHTS_BASE_URL`, `INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY` and `SEARCH_VISITORS_ENABLED` are passed through to platform-nest (`${VAR:-}`, empty = off).
+- **`check-config.sh`** checks the new locations.
+- **Runbook C7:** deploy order, post-deploy checks run from aicenter with the keys read from files, and rollback.
+- Static checks only. `check-config.sh --deploy` runs on sumopod.
+
+### infra `0.13.11` - the live AI gateway reaches OpenRouter (2026-10-13) - DEV-VERIFIED
+
+- **Found while running the M6 P4 gate:** every LLM call on the live ERP had been returning the echo fallback (`[echo — no provider key configured]`) since the Ollama Cloud key died on 2026-09-30. Gemini and Claude have no keys; the OpenAI-compatible slot pointed at Ollama Cloud. So meeting summaries, PRD/report/scope extraction and design prototypes were placeholders.
+- **The owner chose** the company OpenRouter key with GLM 5.3 Flash. The box `.env` now sets `OPENAI_BASE_URL=https://openrouter.ai/api/v1`, `OPENAI_MODEL=z-ai/glm-5.3-flash` and the key (backup kept).
+- `docker-compose.vps.yml` adds `openrouter.ai` to the gateway's `EGRESS_ALLOWLIST`; without it the gateway logged `egress blocked (not on allowlist): openrouter.ai` and fell back to the echo again. `ollama.com` stays listed for a switch back.
+- Verified live 2026-10-13 on gda-aicenter: the box compose received the same allow-list line (hotfix, backup kept) and only the gateway was recreated; `POST /complete` from the platform container answered HTTP 200 with a real reply ("the live gateway is working"), provider `openai` (OpenRouter), no echo fallback.
+
+### platform-nest `0.105.0` / mcp-hub `0.15.0` / automation `0.6.0` - `wf:billing-chaser`: a daily read-and-remind job for contracts and payment claims (2026-10-13) - PROTOTYPED
+
+Owner ruling PV-D28 (the owner delegated the naming).
+
+- **automation:** `automation/workflows/billing-chaser.json`, declared id `wspv3billchase01`, cron `0 9 * * *` Asia/Makassar.
+  - It reads `clients.list`, then `contracts.list` and `invoicePayments.list` per client.
+  - It raises ONE in-app `notify` digest when there is: a payment claim pending for more than 2 days; a client-signed contract waiting for our countersignature for more than 1 day; or a sent contract unsigned by the client for more than 7 days.
+  - It stays silent when nothing qualifies, and fails loudly on a refused read.
+  - Recipients come from `BILLING_NOTIFY_USER_IDS`, falling back to the ops lead (`NOTIFY_USER_ID`). PV-D28's routing to each client's account owner needs an allowlisted owner read, and is a follow-up.
+- **mcp-hub:** `AUTOMATION_ALLOWLIST["wf:billing-chaser"]` = `clients.list`, `contracts.list`, `invoicePayments.list` and `notify` only. Tests prove send, countersign, decide, createDraft and updateDraft are refused for it.
+- **platform-nest:**
+  - `contracts.list` and `invoicePayments.list` drop to `minAssurance: "low"`, because an n8n principal is always low. Cerbos still requires `notLow` on every non-`platform_admin` contract and invoice read rule, and every write and `contracts.get` stay `verified`.
+  - `seed:automation` adds the `wf:billing-chaser` manager service account, which reads but gets 403 on countersign, send and decide.
+- **After deploy:** run `npm run seed:automation` once, then a CLI import of the workflow (`n8n import:workflow`, so the declared id is kept), then activate it.
+- Verified on sumopod: mcp-hub 29 files (400 passed); platform-nest 665 files, with only the capability inventory to regenerate (done on Linux); and 16 workflow tests that run its Code nodes on fixtures. Teeth: `contracts.send` added to the scope fails the scope tests.
+
 ### insights-collector `0.2.0` + infra `0.13.10` - M5-V3-b: the consented channel, forget, the ops events read and the 72-hour purge (not deployed) (2026-10-13) - PROTOTYPED
 
 - **`POST /lib/kestrel/v`** (consented events):

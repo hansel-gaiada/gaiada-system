@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 163,
-      "grantablePermissionsInCatalog": 430,
-      "permissionsCoveredByGroups": 391,
+      "groups": 164,
+      "grantablePermissionsInCatalog": 431,
+      "permissionsCoveredByGroups": 392,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 113
+      "sensitiveGroups": 114
     }
   },
   "groups": [
@@ -396,6 +396,16 @@
       "description": "Re-attach a recording to a different client or pipeline run. Rare and easy to misuse — can move a recording into the wrong client's context.",
       "permissions": [
         "core.meeting_recording.relink"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "meeting_minutes_share",
+      "name": "Share Meeting Minutes With Clients",
+      "domain": "core",
+      "description": "Publish a meeting's minutes to the meeting's client in the portal. PV4-05: the minutes only, never the recording, transcript or attendees. Kept separate from Meeting Recordings so the right to edit a meeting does not by itself carry the right to put words in front of a client; refused to agents and automation by Cerbos (an agent may draft minutes, a person shares them).",
+      "permissions": [
+        "core.meeting_recording.share_minutes"
       ],
       "sensitive": true
     },

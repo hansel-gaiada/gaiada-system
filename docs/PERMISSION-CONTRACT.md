@@ -1918,3 +1918,41 @@ exactly its action, root and assurance bounds); `src/rbac/search-visitor-actions
 and migration, plus the DB rows after migrating); and the pinned counts above. **Deploy: restart the Cerbos container and the live sidecar** (nothing hot-reloads),
 then probe: a `search_staff` principal is denied `read_visitors` and `view_replay`, a `search_manager` of the same company is allowed both, and a permission-only
 principal holding one key is allowed that one action.
+
+---
+
+## 34. PV4-05 — `share_minutes` on `meeting_recording`, and its agent DENY (2026-10-12, PROTOTYPED)
+
+Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-05; design decision 9; owner ruling PV-D23). Status: **PROTOTYPED** (policy, catalog,
+bundles, migration and tests are in the repo; the HTTP and live-Cerbos suites run on the Linux CI gate; the live Cerbos restart is the deploy step).
+BFF: `FRONTEND-BFF-CONTRACT.md` §29c.
+
+**One new action on an EXISTING kind, no new kind.** `meeting_recording` gains `share_minutes`: publish a meeting's **minutes** (the `meeting_minutes`
+table, PV4-01) to the meeting's client in the portal. The recording, transcript, participants and pipeline run stay internal; `meeting` stays in
+`NEVER_CLIENT_VISIBLE`, and only shared minutes reach a client (`meetingMinutesInPortalScope`).
+
+- **Reach: exactly the roles that hold `update` on this kind today** (`company_admin`, `manager`, `member`, under `variables.inTenant && variables.notLow`);
+  `viewer` holds neither. Whoever may edit a meeting may share its minutes. Perm mirror `perm_meeting_recording_share_minutes` (key
+  `core.meeting_recording.share_minutes`, `inTenant && notLow && inRoot`), so a permission holder (and the permission-native `owner`) reaches it too.
+  The key is **sensitive** (words put in front of a client under a named person) and `ui_grantable`.
+- **Agent DENY (PV-D23).** `EFFECT_DENY` of `share_minutes` for `principal.attr.kind in ["automation", "bot"]`, on `roles: ["user"]` (every principal carries it),
+  so under deny-overrides it beats every ALLOW: the `platform_admin` wildcard and the perm mirror included. Same shape as `resource_conversation.yaml`
+  (PV4-02) and `resource_webdesk_content_item.yaml`'s `publish`. **`update` is deliberately NOT denied**: an agent may DRAFT minutes
+  (`PUT /meetings/:id/minutes`, which records `drafted_by`); a person reads them and shares. Delegation: `authorize()` checks the caller and the `actFor`
+  human, and either denial refuses.
+- **The client never touches this kind.** A contact reads shared minutes through `portal` `read` (`GET /portal/meetings`, `/portal/meetings/:minutesId`);
+  the `client` derived role still appears only in `resource_portal.yaml` (`client-role-only-in-portal.test.ts`).
+- **Seeded by** `migrations/202610131740_iam_meeting_minutes_share.sql` (copied from `202610130500_iam_pv5_billing_actions.sql`'s existing-kind shape; the DO-block
+  asserts the exact holder set in both directions, that it equals the holders of `update`, and owner == company_admin). Held by `platform_admin`,
+  `company_admin`, `owner`, `manager`, `member`: 5 bundle rows. Authoring group `meeting_minutes_share` (its own group, so granting meeting editing does not
+  carry sharing; sensitive).
+- **Proof.** `src/rbac/cerbos-meeting-minutes.test.ts` (static pin always; live matrix on the gate: a member who may update may share; a `kind=bot` principal
+  holding `company_admin` is DENIED `share_minutes` and ALLOWED `update`; the same for `automation`, `platform_admin`, an owner-shaped bot and a bot holding
+  only the mirror) and the HTTP suite `src/core/meeting-minutes.controller.test.ts` (a bot gets a 403 on share and 200 on saving a draft).
+
+**Pinned counts moved (deliberately), on top of M5-V3-f** (rebased by the lead 2026-10-13; main's value, my delta, final): concrete pairs / grantable
+pairs 445 / 430 -> **446 / 431**; sensitive 210 -> **211**; kinds 104 (unchanged); `ui_grantable = true` 419 -> **420** (re-derived from the array);
+authoring groups 163 -> **164**; covered by groups 391 -> **392**; sensitive groups 113 -> **114**; role bundle
+pairs 1942 -> **1947** (platform_admin +1, company_admin +1, owner +1, manager +1, member +1). Tests moved: `cerbos-catalog-alignment`,
+`permission-groups-catalog-parity`, `ui-grantable-catalog`; `iam-215-boundary-pin` unchanged (no new kind). **Restart `gaiada-test-cerbos` and the live sidecar after
+deploying the policy files** (nothing hot-reloads).
