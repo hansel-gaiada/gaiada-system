@@ -18,6 +18,7 @@ import {
   type Envelope,
   type EmitStep,
 } from "../agent";
+import { scopeOrNew, runWithSensitiveScope } from "../sensitive-tools";
 
 export type TraceStatus =
   | "ok"
@@ -69,18 +70,22 @@ export async function traceRun(
   emit?: EmitStep,
 ): Promise<AgentTrace> {
   const startedAt = clock();
-  const base = {
+  // M5-G5c — the trace is the eval/WS9 observation surface and is written to JSONL: its goal must be built
+  // AFTER the run, through the goal's sensitive-tool scope (ambient when the runner opened one), so a person
+  // named in the goal text and learned from a policy tool's args never reaches it. Inactive scope: identity.
+  const scope = scopeOrNew();
+  const base = () => ({
     v: 1 as const,
     runId,
     agent: def.name,
     envelope,
-    goal,
+    goal: scope.scrub(goal),
     startedAt,
-  };
+  });
   try {
-    const run = await runAgent(def, goal, envelope, deps, emit);
+    const run = await runWithSensitiveScope(scope, () => runAgent(def, goal, envelope, deps, emit));
     return {
-      ...base,
+      ...base(),
       status: "ok",
       outcome: run.outcome,
       steps: run.steps,
@@ -92,9 +97,9 @@ export async function traceRun(
   } catch (err) {
     const { status, steps } = classifyError(err);
     return {
-      ...base,
+      ...base(),
       status,
-      outcome: (err as Error).message,
+      outcome: scope.scrub((err as Error).message),
       steps,
       modelCalls: steps.filter((s) => s.kind === "model").length,
       toolCalls: steps.filter((s) => s.kind === "tool").length,

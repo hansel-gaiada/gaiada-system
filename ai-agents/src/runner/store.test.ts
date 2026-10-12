@@ -50,6 +50,21 @@ describe.skipIf(!dbUp)("PgGoalStore (durable)", () => {
     expect(g).toMatchObject({ status: "ok", outcome: "done", modelCalls: 2, fanOut: 1 });
   });
 
+  it("finishGoal: a `goal` in the patch rewrites the goal text (M5-G5c scrub); absent, the text is untouched", async () => {
+    const mk = () => store.insertGoal({
+      tenantId: T_A, goal: "erase jane@example.com", agent: "supervisor", envelopeProvider: "platform", envelopeExternalId: "u1",
+      budget: { modelCalls: 1, toolCalls: 1 },
+    });
+    const kept = await mk();
+    await store.claimForRun(kept);
+    await store.finishGoal(kept, { status: "ok", outcome: "done" });
+    expect((await store.getGoal(kept, T_A))!.goal).toBe("erase jane@example.com");
+    const scrubbed = await mk();
+    await store.claimForRun(scrubbed);
+    await store.finishGoal(scrubbed, { status: "ok", outcome: "done", goal: "erase ***@example.com" });
+    expect((await store.getGoal(scrubbed, T_A))!.goal).toBe("erase ***@example.com");
+  });
+
   it("insertRun + getRun carries the transcript, tenant-pinned", async () => {
     const goalId = await store.insertGoal({
       tenantId: T_A, goal: "g", agent: "status-reporter", envelopeProvider: "platform", envelopeExternalId: "u1",

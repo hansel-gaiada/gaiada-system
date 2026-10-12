@@ -40,6 +40,19 @@ then the eval-gated trainer). An agent change without an eval case is unverifiab
 construction: agent behaviour is stochastic, so "I ran it once and it worked" is not evidence.
 Add the case, then change the agent.
 
+## Sensitive tools: what the run store may hold (M5-G5c)
+
+`src/sensitive-tools.ts` is a static per-tool policy registry, the agent-side twin of platform-nest's
+`core/approval-arg-minimisers.ts`. For `agency_privacy.{find,export,erase}` the PERSISTED / logged /
+model-facing copy of a call is `{minimised:"agency-privacy.v1", hashes, hints}` (the ERP's `subjectHash`,
+ported byte-for-byte; parity pinned by a vector computed from the ERP code) and of its RESULT counts, ids and
+status only. The LIVE hub call is unchanged. A per-goal `SensitiveScope` (AsyncLocalStorage, opened in
+`runner/service.ts`) also scrubs the learned literals from every other persisted string: goal text, outcome,
+blackboard, delegate events, errors, the trace, episodic memory. A tool with no policy is stored exactly as
+before. Another tool opts in with `registerSensitiveToolPolicy`; built-ins are imported statically so no boot
+order can leave one without its policy. Proof: `sensitive-tools.test.ts`, `sensitive-run.test.ts`.
+Known residuals are listed in `docs/PERMISSION-CONTRACT.md` §29.
+
 Memory/RAG is the **D9 owner** and uses pgvector; the knowledge graph is fed by the platform's
 event → graph bridge, so an empty graph usually means that bridge is off, not that ingest is
 broken.

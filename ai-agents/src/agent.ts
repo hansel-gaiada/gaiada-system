@@ -31,6 +31,7 @@
 // A genuine high-impact write still suspends for approval exactly as before (this block runs strictly
 // before the impact gate and never touches it).
 import { resolveToolAlias } from "./tool-aliases";
+import { scopeOrNew } from "./sensitive-tools";
 
 export const MAX_OFF_LIST_ATTEMPTS = 2;
 
@@ -398,6 +399,10 @@ export async function runAgent(
 ): Promise<AgentRun> {
   const steps: AgentStep[] = [];
   const transcript: string[] = [];
+  // M5-G5c — the goal's sensitive-tool scope (see sensitive-tools.ts). Ambient when a caller opened one
+  // (runner/service.ts does, per goal), else this run's own. INACTIVE unless a policy tool is called, in which
+  // case every persisted/emitted string below passes through it and nothing else here changes.
+  const scope = scopeOrNew();
   const approvals: ApprovalConsumption[] = [];
   let modelCalls = 0;
   let toolCalls = 0;
@@ -421,11 +426,19 @@ export async function runAgent(
     modelCalls++;
     const modelStart = Date.now();
     const raw = await deps.complete(buildPrompt(def, goal, transcript));
-    const modelDetail = raw.slice(0, 200);
+    // M5-G5c — parse FIRST: the persisted copy of the model's reply must be built knowing whether it carries
+    // a sensitive tool call. The alias is resolved here, once, and reused below (still before every gate).
+    const action = parseAction(raw);
+    const earlyTool = action && action.final === undefined && action.tool !== undefined ? resolveToolAlias(action.tool) : undefined;
+    const sensitiveCall = earlyTool !== undefined && scope.observeCall(earlyTool, action?.args ?? {});
+    // A sensitive call is recorded as {tool, minimised args}; anything else is the reply itself, with the
+    // goal's known literals scrubbed BEFORE the 200-char cut (a cut could otherwise leave half an address).
+    const modelDetail = sensitiveCall
+      ? JSON.stringify({ tool: earlyTool, args: scope.recordableArgs(earlyTool!, action?.args ?? {}) })
+      : scope.scrub(raw).slice(0, 200);
     steps.push({ kind: "model", detail: modelDetail });
     await emit?.({ kind: "model", detail: modelDetail, durationMs: Date.now() - modelStart });
 
-    const action = parseAction(raw);
     if (!action) {
       if (protocolRetries++ >= 1) {
         await emit?.({ kind: "error", detail: "model failed to produce a valid action twice — run aborted" });
@@ -436,12 +449,12 @@ export async function runAgent(
     }
     protocolRetries = 0;
 
-    if (action.final !== undefined) return finish(action.final);
+    if (action.final !== undefined) return finish(scope.scrub(action.final));
 
     // Alias resolution happens FIRST — before the allow-list lookup immediately below, and therefore
     // before every other gate in this function (D14-12 impact reconciliation, resolveApproval,
     // deps.callTool). See tool-aliases.ts's header for why that order is the whole security property.
-    const tool = resolveToolAlias(action.tool!);
+    const tool = earlyTool!;
     const declaredImpact = def.tools[tool];
     if (declaredImpact === undefined) {
       // Not on the allow-list at all. `deps.callTool` is NEVER reached on this branch, recoverable or
@@ -503,7 +516,7 @@ export async function runAgent(
         steps.push({ kind: "tool", detail: `${tool} ok` });
         await emit?.({ kind: "tool", detail: `${tool} ok`, durationMs: consultMs });
         transcript.push(
-          `TOOL ${tool}(${JSON.stringify(args)}) => ${resolution.result.slice(0, 2000)}` +
+          `TOOL ${tool}(${JSON.stringify(scope.recordableArgs(tool, args))}) => ${scope.recordableResult(tool, resolution.result).slice(0, 2000)}` +
             (resolution.truncated ? " [result truncated]" : "") +
             ` [executed under human approval ${resolution.approvalId}${resolution.consumed ? ", result reused from the approved execution — the tool was NOT called again" : ""}]`,
         );
@@ -521,7 +534,7 @@ export async function runAgent(
         // `resolution.reason` is deliberately NOT interpolated — see the type's doc. The model needs
         // exactly two facts: it was refused by a human, and re-asking is not an option.
         transcript.push(
-          `TOOL ${tool}(${JSON.stringify(args)}) REFUSED: a human REJECTED this exact call (approval ${resolution.approvalId}). ` +
+          `TOOL ${tool}(${JSON.stringify(scope.recordableArgs(tool, args))}) REFUSED: a human REJECTED this exact call (approval ${resolution.approvalId}). ` +
             "Do NOT request it again with the same arguments — choose a different action or finish.",
         );
         continue;
@@ -554,11 +567,15 @@ export async function runAgent(
       const result = await deps.callTool(tool, action.args ?? {}, { ...envelope, agent: `agent:${def.name}` });
       steps.push({ kind: "tool", detail: `${tool} ok` });
       await emit?.({ kind: "tool", detail: `${tool} ok`, durationMs: Date.now() - toolStart });
-      transcript.push(`TOOL ${tool}(${JSON.stringify(action.args ?? {})}) => ${result.slice(0, 2000)}`);
+      // M5-G5c — a policy tool's call and result enter the transcript (which is also the model's next prompt,
+      // so it reaches the Gateway) in their minimised form. No policy: exactly the line it always was.
+      transcript.push(
+        `TOOL ${tool}(${JSON.stringify(scope.recordableArgs(tool, action.args ?? {}))}) => ${scope.recordableResult(tool, result).slice(0, 2000)}`,
+      );
     } catch (err) {
       steps.push({ kind: "tool", detail: `${tool} failed` });
       await emit?.({ kind: "tool", detail: `${tool} failed`, durationMs: Date.now() - toolStart });
-      transcript.push(`TOOL ${tool} FAILED: ${(err as Error).message}`);
+      transcript.push(`TOOL ${tool} FAILED: ${scope.scrub((err as Error).message)}`);
     }
   }
 }

@@ -156,7 +156,12 @@ export interface FiledApproval {
  *  label. `args` are the model-composed tool args VERBATIM — this is the one place `ai-agents` returns
  *  them to a caller instead of filing them; the caller (the runner service, then platform-nest) is
  *  responsible for their custody from here (see the design's §7.2.4 custody chain) — `ai-agents` itself
- *  never persists them (no agents-DB migration in this ticket; the runner keeps them in-memory only). */
+ *  never persists them (no agents-DB migration in this ticket; the runner keeps them in-memory only).
+ *
+ *  M5-G5c: for a sensitive-policy tool (`agency_privacy.*`, see sensitive-tools.ts) these args are STILL the
+ *  real ones, on purpose. They are the live material the confirm flow files with the hub later, and the ERP's
+ *  own minimiser accepts only ITS shape, not ours. Like `fileApproval`'s hub call below, this is a boundary
+ *  crossing, not a stored copy: nothing in this service persists, logs or emits it. */
 export interface SuspendedIntent {
   tool: string;
   impact: WireImpact;
