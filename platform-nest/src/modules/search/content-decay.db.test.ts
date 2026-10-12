@@ -61,15 +61,15 @@ describe.skipIf(!TEST_URL)("M5-V4 · content decay", () => {
   };
 
   /** One GSC row per day per page across both windows: baseline days get `base` clicks, recent days `rec`. */
-  const seedGsc = async (propertyId: string, page: string, base: number, rec: number, simulated = false): Promise<void> => {
+  const seedGsc = async (propertyId: string, page: string, base: number, rec: number, simulated = false, impPerClick = 20): Promise<void> => {
     await withTenants([A], (c) => c.query(
       `INSERT INTO search_gsc_performance (id, tenant_id, property_id, date, query, page, device, clicks, impressions, position, row_hash, simulated)
        SELECT gen_random_uuid(), $1, $2, d::date, 'q', $3, 'DESKTOP',
               CASE WHEN d::date >= DATE '2026-09-12' THEN $5::int ELSE $4::int END,
-              CASE WHEN d::date >= DATE '2026-09-12' THEN $5::int * 20 ELSE $4::int * 20 END,
+              CASE WHEN d::date >= DATE '2026-09-12' THEN $5::int * $7::int ELSE $4::int * $7::int END,
               8, md5($2::uuid::text || $3 || d::text), $6
          FROM generate_series(DATE '2026-08-15', DATE '2026-10-09', interval '1 day') AS d`,
-      [A, propertyId, page, base, rec, simulated],
+      [A, propertyId, page, base, rec, simulated, impPerClick],
     ), S);
   };
 
@@ -105,7 +105,7 @@ describe.skipIf(!TEST_URL)("M5-V4 · content decay", () => {
     // 28 days at 20 clicks/day = 560 baseline; recent 5/day = 140: a real drop. /flat stays level. /tiny is below the floors.
     await seedGsc(propGsc, "https://gsc.example.com/drop/", 20, 5);
     await seedGsc(propGsc, "https://gsc.example.com/flat/", 20, 20);
-    await seedGsc(propGsc, "https://gsc.example.com/tiny/", 1, 0);
+    await seedGsc(propGsc, "https://gsc.example.com/tiny/", 1, 0, false, 5); // tiny on every metric: 28 clicks, 140 impressions
     await seedGsc(propUnverified, "https://unverified.example.com/drop/", 20, 5);
     await seedGsc(propSim, "https://sim.example.com/drop/", 20, 5, true); // simulated demo rows never alert
 
