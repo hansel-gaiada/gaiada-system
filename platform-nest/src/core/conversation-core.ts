@@ -220,6 +220,17 @@ export function unreadCountSql(threadAlias: string, readAlias: string, otherSide
               AND um.created_at > COALESCE(${readAlias}.last_read_at, '-infinity'::timestamptz))`;
 }
 
+/** SQL for "this thread is waiting for OUR reply": it is open and its last LIVE (non-retracted) message is the client's.
+ *  The staff list's `awaitingReply` column and `?awaitingReply=` filter (conversation.controller.ts) mean exactly this, and
+ *  the client hub's `needsUs` (clients.controller.ts) uses this fragment, so the two cannot drift. A thread with no live
+ *  message is never awaiting. `threadAlias` is a constant chosen by the caller, never input. */
+export function awaitingReplySql(threadAlias: string): string {
+  return `(${threadAlias}.status = 'open' AND COALESCE((
+            SELECT lmm.author_side FROM conversation_messages lmm
+             WHERE lmm.thread_id = ${threadAlias}.id AND lmm.retracted_at IS NULL
+             ORDER BY lmm.created_at DESC, lmm.id DESC LIMIT 1), '') = 'client')`;
+}
+
 /** A message row as BOTH sides read it, before per-side decoration. A retracted message NEVER carries
  *  its body or its attachments, to either side (lead deviation 4). */
 export interface MessageOut {

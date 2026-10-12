@@ -24,6 +24,20 @@ local stack). None of these mean "production-done".
 - **Forgetting:** withdrawn visitors' recordings go with V3-e's sweep forget. A recording under a live visitor with a foreign consent id is hidden and forgotten by consent id.
 - **Collector outage:** a typed 503 in words.
 - BFF §28g. The capability inventory is regenerated.
+- GitHub Actions 38288095210 green, including `replays.db.test.ts` (31 cases: the opening check, the live-profile re-check, the sweep forget).
+
+### platform-ui `0.106.0` - M5-V3-i: the Visitors tab, the "bot hits filtered" figure, and the visitor permission mirror (2026-10-13) - PROTOTYPED
+
+- **Website → Visitors** (a sixth tab):
+  - **List:** the 8-character id, last seen, visits, place, "Network" or "Company" with confidence, top interests, score, and a lead linked or none. It keeps server order, with filters and paging.
+  - **Detail:** score parts, interests, the timeline, and a linked lead. A restricted lead says "a lead you cannot open" and shows no id.
+  - **Interest-rules sub-page:** saves the complete set, and refusals show as sentences.
+  - The header line is the design's own sentence.
+  - Every non-ok pipeline state is a sentence, and stored rows stay visible beside it.
+- **The tab 404s and is hidden** (tab strip and command palette) without the toolkit or `read_visitors`, so plain search staff never see an empty list.
+- **Analytics** gains "bot hits filtered": the 30-day total, the window and the reasons; non-ok states are words.
+- **Permission mirror:** `lib/rbac.ts` / `rbac-capability-map.ts` mirror `search.property.read_visitors` and `search.property.view_replay` (V3-f) as `search.visitors.read` and `search.replay.view`.
+- **Tests:** vitest (6544 full, 841 after the merge), tsc and `next build` green locally; GitHub Actions 38287617124 green.
 
 ### platform-nest `0.109.0` - M5-V3-h: rights requests cover consented visitor profiles and the collector (2026-10-13) - DEV-VERIFIED
 

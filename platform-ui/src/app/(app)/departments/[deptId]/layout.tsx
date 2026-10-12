@@ -7,7 +7,7 @@ import { can } from "@/lib/rbac";
 import { getDepartment, myDeptTasksToday, myDeptBallTasks, myBlockedTasks, toRailPriority } from "@/lib/departments";
 import { titleWithRecurrenceGlyph, isDoneStatus, taskUrgency, openDependencies } from "@/lib/pm";
 import { getMyWorkQueue, projectQueueForCompany } from "@/lib/queue";
-import { toolkitFor } from "@/lib/deptToolkits";
+import { toolkitFor, visibleGroups } from "@/lib/deptToolkits";
 import { activeCompany } from "@/lib/companyContext";
 import { PageHeader } from "@/components/PageHeader";
 import { DeptTabs } from "@/components/shell/DeptTabs";
@@ -50,6 +50,8 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
   if (!dept) notFound();
 
   const toolkit = toolkitFor(activeCompany(me, tenant)?.vertical, dept.name);
+  // M5-V3-i: a tab that names a capability (`requires`) is offered only to holders of it (e.g. Website -> Visitors needs `read_visitors`).
+  const groups = visibleGroups(toolkit.groups, (t) => !!t.requires && can(me, t.requires, tenant));
   const canEditOrg = can(me, "org.edit", tenant);
 
   const queue = await getMyWorkQueue(me, userId, [{ id: tenant, name: tenant }]);
@@ -140,8 +142,8 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
         breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: dept.name }]}
         actions={canEditOrg ? <Link href={`/companies/${tenant}/org`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit structure</Link> : undefined}
       />
-      <DeptTabs groups={toolkit.groups} deptId={deptId} />
-      <DeptShellFrame groups={toolkit.groups} deptId={deptId} rail={<MyWorkRail today={today} waiting={waiting} ball={ball} />}>
+      <DeptTabs groups={groups} deptId={deptId} />
+      <DeptShellFrame groups={groups} deptId={deptId} rail={<MyWorkRail today={today} waiting={waiting} ball={ball} />}>
         {children}
       </DeptShellFrame>
       {/* AGPL-3.0 §13 source-offer (docs/plans/smm-tracker.md's "open items" table). Gated on the

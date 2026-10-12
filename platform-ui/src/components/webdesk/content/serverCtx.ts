@@ -5,6 +5,7 @@ import { getMe, type Me } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
 import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
+import { can } from "@/lib/rbac";
 import { activeCompany } from "@/lib/companyContext";
 
 /**
@@ -29,10 +30,12 @@ export interface WebsiteCtx {
   leadsBase: string;
   /** `/departments/:deptId/website/writers` (M5-W2e) */
   writersBase: string;
+  /** `/departments/:deptId/website/visitors` (M5-V3-i) */
+  visitorsBase: string;
 }
 
 /** `tab` is the Website tab the page lives under: a page behind a tab 404s for a department whose toolkit does not have it. */
-export async function requireWebsiteCtx(deptId: string, tab: "content" | "media" | "analytics" | "leads" | "writers" = "content"): Promise<WebsiteCtx> {
+export async function requireWebsiteCtx(deptId: string, tab: "content" | "media" | "analytics" | "leads" | "writers" | "visitors" = "content"): Promise<WebsiteCtx> {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -40,6 +43,9 @@ export async function requireWebsiteCtx(deptId: string, tab: "content" | "media"
   if (!company) notFound();
   const dept = await getDepartment(userId, company, deptId);
   if (!dept) notFound();
-  if (!deptTabs(toolkitFor(activeCompany(me, company)?.vertical, dept.name)).some((t) => t.key === tab)) notFound();
-  return { userId, me, company, deptId, contentBase: `/departments/${deptId}/website/content`, mediaBase: `/departments/${deptId}/website/media`, analyticsBase: `/departments/${deptId}/website/analytics`, leadsBase: `/departments/${deptId}/website/leads`, writersBase: `/departments/${deptId}/website/writers` };
+  const found = deptTabs(toolkitFor(activeCompany(me, company)?.vertical, dept.name)).find((t) => t.key === tab);
+  if (!found) notFound();
+  // A tab that names a capability (Visitors: `read_visitors`) 404s for a member without it: hidden, never an empty list.
+  if (found.requires && !can(me, found.requires, company)) notFound();
+  return { userId, me, company, deptId, contentBase: `/departments/${deptId}/website/content`, mediaBase: `/departments/${deptId}/website/media`, analyticsBase: `/departments/${deptId}/website/analytics`, leadsBase: `/departments/${deptId}/website/leads`, writersBase: `/departments/${deptId}/website/writers`, visitorsBase: `/departments/${deptId}/website/visitors` };
 }

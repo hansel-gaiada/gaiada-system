@@ -1681,6 +1681,14 @@ const configBase = {
     // zero side effects, not merely "nothing gets sent". 1 = live (still routes through the
     // dev-log adapter with no per-stream host configured — see provider.ts's resolveAdapter).
     enabled: process.env.MAIL_ENABLED === "1",
+    // PV4-06 — a SECOND, narrower gate for mail to CLIENT CONTACTS about Conversation messages
+    // (`conversation.message.staff`). The master gate above is on in the live estate (it feeds the
+    // staff-facing approval mail), so a new mail type that reaches people OUTSIDE the company must not
+    // ride on it: this one defaults OFF and only the exact string "1" turns it on (an empty value that
+    // a compose `${VAR:-}` passthrough writes reads as off, never as on). Off = `mailIntake` returns
+    // before it resolves an address, throttles, or enqueues: no `mail_log` row at all. The in-app
+    // notification still lands either way. Turn on only once a real client-delivery sender exists.
+    conversationClientMailEnabled: process.env.CONVERSATION_CLIENT_MAIL_ENABLED === "1",
     senderIntervalMs: Number(process.env.MAIL_SENDER_INTERVAL_MS ?? 15000),
     // VERP reply-token domain (§7.6). The local part (`reply+<token>@`) is built by the caller;
     // this is only the host half.

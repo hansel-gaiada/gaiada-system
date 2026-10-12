@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { PACKS } from "./packs";
-import { deptSlug, toolkitFor, hasBespokeToolkit, tabHref, deptTabs } from "./deptToolkits";
+import { deptSlug, toolkitFor, hasBespokeToolkit, tabHref, deptTabs, visibleGroups } from "./deptToolkits";
 
 describe("deptSlug", () => {
   it("normalises names to stable slugs", () => {
@@ -20,7 +20,7 @@ describe("toolkitFor", () => {
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "build", "website", "connections"]);
     // Flattened tabs preserve the full route set (paths unchanged from the flat model).
     expect(deptTabs(tk).map((t) => t.key)).toEqual([
-      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "content", "media", "analytics", "leads", "writers", "connections",
+      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "content", "media", "analytics", "leads", "writers", "visitors", "connections",
     ]);
     expect(tk.launchers.some((l) => l.key === "claude-code")).toBe(true);
   });
@@ -104,14 +104,22 @@ describe("Website group (WSK-44)", () => {
     expect(keys.indexOf("website")).toBe(keys.indexOf("connections") - 1);
   });
 
-  it("holds five tabs: Content (the whole /website/content sub-tree), Media (WSK-43c), Analytics (M5-A4), Leads (M5-L6) and the Writers' room (M5-W2e)", () => {
+  it("holds six tabs: Content (the whole /website/content sub-tree), Media (WSK-43c), Analytics (M5-A4), Leads (M5-L6), the Writers' room (M5-W2e) and Visitors (M5-V3-i)", () => {
     expect(website()?.label).toBe("Website");
-    expect(website()?.tabs.map((t) => [t.key, t.label, t.path])).toEqual([["content", "Content", "website/content"], ["media", "Media", "website/media"], ["analytics", "Analytics", "website/analytics"], ["leads", "Leads", "website/leads"], ["writers", "Writers' room", "website/writers"]]);
+    expect(website()?.tabs.map((t) => [t.key, t.label, t.path])).toEqual([["content", "Content", "website/content"], ["media", "Media", "website/media"], ["analytics", "Analytics", "website/analytics"], ["leads", "Leads", "website/leads"], ["writers", "Writers' room", "website/writers"], ["visitors", "Visitors", "website/visitors"]]);
     expect(tabHref("dept-1", website()!.tabs[0])).toBe("/departments/dept-1/website/content");
     expect(tabHref("dept-1", website()!.tabs[1])).toBe("/departments/dept-1/website/media");
     expect(tabHref("dept-1", website()!.tabs[2])).toBe("/departments/dept-1/website/analytics");
     expect(tabHref("dept-1", website()!.tabs[3])).toBe("/departments/dept-1/website/leads");
     expect(tabHref("dept-1", website()!.tabs[4])).toBe("/departments/dept-1/website/writers");
+    expect(tabHref("dept-1", website()!.tabs[5])).toBe("/departments/dept-1/website/visitors");
+  });
+
+  // M5-V3-i: the Visitors tab is personal data, so it names the capability that mirrors Cerbos `read_visitors`; no other Website tab does.
+  it("the Visitors tab requires search.visitors.read (read_visitors) and no other Website tab requires anything", () => {
+    const tabs = website()!.tabs;
+    expect(tabs.find((t) => t.key === "visitors")?.requires).toBe("search.visitors.read");
+    expect(tabs.filter((t) => t.key !== "visitors").every((t) => t.requires === undefined)).toBe(true);
   });
 
   it("is a Web Dev craft group only: no other department's toolkit advertises it", () => {
@@ -125,7 +133,7 @@ describe("Website group (WSK-44)", () => {
     const paths = deptTabs(toolkitFor("agency", "Web Dev")).map((t) => t.path);
     expect(new Set(paths).size).toBe(paths.length);
     const web = paths.filter((p) => p.startsWith("website"));
-    expect(web.length).toBe(5);
+    expect(web.length).toBe(6);
     expect(web.some((a) => web.some((b) => a !== b && b.startsWith(`${a}/`)))).toBe(false);
   });
 
@@ -150,6 +158,10 @@ describe("Website group (WSK-44)", () => {
       "writers/[tenant]/[site]/page.tsx",
       "writers/people/page.tsx",
       "writers/people/[tenant]/[site]/page.tsx",
+      "visitors/page.tsx",
+      "visitors/[tenant]/[site]/page.tsx",
+      "visitors/[tenant]/[site]/[visitorId]/page.tsx",
+      "visitors/[tenant]/[site]/interest-rules/page.tsx",
     ]) {
       expect(existsSync(resolve(root, rel)), rel).toBe(true);
     }
@@ -214,5 +226,20 @@ describe("tabHref", () => {
     const [home, projects] = deptTabs(tk);
     expect(tabHref("dept-1", home)).toBe("/departments/dept-1");
     expect(tabHref("dept-1", projects)).toBe("/departments/dept-1/projects");
+  });
+});
+
+describe("visibleGroups (M5-V3-i)", () => {
+  const web = () => toolkitFor("agency", "Web Dev").groups;
+  const keys = (gs: ReturnType<typeof web>) => gs.flatMap((g) => g.tabs.map((t) => t.key));
+
+  it("drops the Visitors tab for a viewer without the capability, and keeps every other tab", () => {
+    const without = visibleGroups(web(), () => false);
+    expect(keys(without)).not.toContain("visitors");
+    expect(keys(without)).toEqual(keys(web()).filter((k) => k !== "visitors"));
+  });
+
+  it("keeps it for a holder", () => {
+    expect(keys(visibleGroups(web(), (t) => t.requires === "search.visitors.read"))).toContain("visitors");
   });
 });

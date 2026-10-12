@@ -27,6 +27,15 @@ describe("palette entry builders", () => {
     expect(entries.every((e) => e.section === "Departments")).toBe(true);
   });
 
+  // M5-V3-i: a tab that names a capability is offered only when `allow` says the viewer holds it (no palette link that would 404).
+  it("buildDeptEntries leaves out a tab the viewer may not open, and offers it to one who may", () => {
+    const labels = (allow?: (t: { requires?: string }) => boolean) => buildDeptEntries([{ id: "dept-1", name: "Web Dev" }], "agency", allow as never).map((e) => e.label);
+    expect(labels()).toContain("Web Dev · Visitors");
+    expect(labels((t) => !t.requires)).not.toContain("Web Dev · Visitors");
+    expect(labels((t) => !t.requires)).toContain("Web Dev · Analytics");
+    expect(labels((t) => t.requires === "search.visitors.read")).toContain("Web Dev · Visitors");
+  });
+
   it("buildDeptEntries falls back to the generic Home-only toolkit for an unregistered department name", () => {
     // The generic toolkit has only the Home tab, which is deliberately skipped — so this
     // department contributes zero tier-2 entries, not a crash.

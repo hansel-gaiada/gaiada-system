@@ -415,6 +415,10 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/leads/[tenant]/[site]`
 - `/departments/[deptId]/website/media`
 - `/departments/[deptId]/website/media/[tenant]/[site]`
+- `/departments/[deptId]/website/visitors`
+- `/departments/[deptId]/website/visitors/[tenant]/[site]`
+- `/departments/[deptId]/website/visitors/[tenant]/[site]/[visitorId]`
+- `/departments/[deptId]/website/visitors/[tenant]/[site]/interest-rules`
 - `/departments/[deptId]/website/writers`
 - `/departments/[deptId]/website/writers/[tenant]/[site]`
 - `/departments/[deptId]/website/writers/briefs/[tenant]/[site]/[briefId]`

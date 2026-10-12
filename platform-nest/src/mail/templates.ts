@@ -233,6 +233,24 @@ function renderMonitoringAlert(payload: MonitoringAlertPayload): RenderedMail {
   return { subject, html, text };
 }
 
+/** PV4-06 — a client contact is told that staff wrote to them in the portal's Conversation. The mail carries NO message text
+ *  (the body stays in the portal, behind sign-in) and its ONLY link is the plain deep link: no token, no session, no
+ *  capability (M11). It is informational and never an approval mechanism. */
+export interface ConversationMessageStaffPayload {
+  href: string;
+  [key: string]: unknown;
+}
+
+function renderConversationMessageStaff(payload: ConversationMessageStaffPayload): RenderedMail {
+  const href = asStr(payload.href);
+  const subject = stripHeaderInjection("You have a new message");
+  const text = `You have a new message in your client portal. Sign in to read it: ${href}`;
+  const html =
+    `<p>You have a new message in your client portal.</p>` +
+    `<p><a href="${escapeHtml(safeHref(href))}">${escapeHtml(href)}</a></p>`;
+  return { subject, html, text };
+}
+
 const TEMPLATES
 : Record<string, (payload: Record<string, unknown>) => RenderedMail> = {
   "approval.warning": (p) => renderApprovalWarning(p as ApprovalMailPayload),
@@ -241,6 +259,7 @@ const TEMPLATES
   "auth.magic_link": (p) => renderAuthMagicLink(p as AuthMagicLinkPayload),
   "social.post_failed": (p) => renderSocialPostFailed(p as SocialPostFailedPayload),
   "monitoring.alert": (p) => renderMonitoringAlert(p as MonitoringAlertPayload),
+  "conversation.message.staff": (p) => renderConversationMessageStaff(p as ConversationMessageStaffPayload),
 };
 
 export function knownTemplateKeys(): string[] {
