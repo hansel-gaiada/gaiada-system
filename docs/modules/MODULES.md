@@ -42,7 +42,7 @@ versions below; the running build reports it at `GET /health`.
 | automation (n8n) | `0.4.3` | PROTOTYPED | WS4 | 2026-10-11 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.13.0` | PROTOTYPED | WS10 | 2026-10-12 |
-| wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
+| wa-chat-bot | `0.10.0` | PROTOTYPED | WS5 | 2026-10-12 |
 | ai-agents | `0.8.1` | PROTOTYPED | WS8 | 2026-08-23 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
