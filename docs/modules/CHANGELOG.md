@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.105.0` - M5-V5-d: the Experiments tab in Website → Analytics (2026-10-13) - PROTOTYPED
+
+- **List:** in server order, with the status, the goal, the visitors needed per variant and the projected days, all in words.
+- **Register form:**
+  - a refusal for being underpowered shows the projected days against the 56-day cap in words;
+  - α and power are shown as the fixed 0.05 and 0.8;
+  - two variants;
+  - the page and section are typed in for now, because there is no item picker yet.
+- **Detail view:**
+  - before the horizon, progress and the sample-ratio check only (the parser drops any rate, difference, interval or p even if one were sent);
+  - at the horizon, the full result, with small cells shown as "fewer than 5".
+- **Actions:** sync, stop, abort and decide, shown only when the status allows them and the user can manage search.
+- Every refusal token and every `unavailable` reason is a sentence.
+- The tab 404s without the analytics toolkit or `search.view`.
+- **Tests:** vitest 114 scoped (5352 wider), tsc and `next build` green locally.
+
 ### platform-nest `0.106.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
 
 - **Migration `202610131800_search_experiments`** adds `search_experiments` (the pre-registration and lifecycle) and the append-only `search_experiment_results`. Both are FORCE RLS in the `search` scope.
