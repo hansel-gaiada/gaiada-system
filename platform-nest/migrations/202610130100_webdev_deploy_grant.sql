@@ -85,7 +85,9 @@ BEGIN
   ) THEN
     ALTER TABLE webdev_provisioned_sites
       ADD CONSTRAINT wps_deploy_grant_links CHECK (
-        (deploy_grant_state IS NULL OR scaffold_state = 'committed')
+        -- IS NOT DISTINCT FROM, not `=`: with scaffold_state NULL, `= 'committed'` is NULL and a CHECK passes on NULL, so a
+        -- grant state could sit on a site that was never scaffolded (caught by deploy-grant.db.test.ts on the Linux gate).
+        (deploy_grant_state IS NULL OR scaffold_state IS NOT DISTINCT FROM 'committed')
         AND (deploy_grant_state IS NULL OR (
               deploy_grant_secret_names IS NOT NULL AND deploy_grant_snapshot_id IS NOT NULL
               AND deploy_grant_repository_id IS NOT NULL AND deploy_grant_head_sha IS NOT NULL

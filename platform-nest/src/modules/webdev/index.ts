@@ -315,6 +315,10 @@ export const webdevModule: ModuleContract = {
     "202610120425_webdev_provisioned_sites_completion.sql",
     // M6-P4b2 (additive): the scaffold commit's state machine columns (first fill of the provisioned repo).
     "202610122130_webdev_scaffold_commit.sql",
+    // M6-P4g (additive): the deploy grant's state machine columns (org deploy-secret access for a registered, locked repo).
+    "202610130100_webdev_deploy_grant.sql",
+    // M6-P4g follow-up: wps_scaffold_links made NULL-safe (a scaffold state needs a completion that IS 'complete').
+    "202610130110_webdev_scaffold_links_null_safe.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
