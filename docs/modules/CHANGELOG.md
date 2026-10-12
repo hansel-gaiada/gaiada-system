@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.19.0` - compose passes the live Turnstile switch through (empty = stub); the M5 phase 3 go-live runbook (2026-10-12) - PROTOTYPED
+
+- `webdesk/docker-compose.yml` now passes `TURNSTILE_MODE` and `TURNSTILE_SECRET_KEY` to the api, with EMPTY defaults. Before this, turning live Turnstile on for gaiada.com's forms would have needed a code change.
+  - `forms.config.ts` reads both with `||`, so an empty value keeps the built-in stub.
+  - `TURNSTILE_REQUEST_TIMEOUT_MS` is deliberately not passed: it is read with `??`, so an empty value would mean a 0 ms timeout.
+- `infra/runbooks/m5-phase3-go-live.md` puts the website → lead go-live in order:
+  - preconditions (counsel, Turnstile keys, privacy page, the site switch);
+  - live Turnstile on the rootless WebDesk daemon;
+  - the site's domains as WebDesk environments;
+  - applying the three form definitions, then the ERP leads flag and alerts;
+  - the site build env and CSP;
+  - a staging-then-production smoke test with privacy-tool cleanup, and a rollback.
+- GitHub Actions 38229648127 green. Nothing is switched on by this release.
+
 ### platform-ui `0.96.2` - the agency lead convert report survives the refresh that converts the lead (2026-10-12) - DEV-VERIFIED
 
 The last case of the Next 16.3 unmount sweep (WebDesk M3 follow-up).
