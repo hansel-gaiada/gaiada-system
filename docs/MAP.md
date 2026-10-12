@@ -36,7 +36,7 @@ Node scripts per component:
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
-- `webdesk` — `check:rls`, `check:rls:selftest`, `lint:migrations`, `migrate`, `test`
+- `webdesk` — `check:rls`, `check:rls:selftest`, `check:wp-template`, `lint:migrations`, `migrate`, `test`
 
 ## Compose
 
