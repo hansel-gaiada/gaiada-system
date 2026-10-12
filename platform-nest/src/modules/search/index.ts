@@ -15,6 +15,7 @@ import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
 import { ANALYTICS_MCP_TOOLS } from "./umami-mcp-tools";
 import { DECAY_MCP_TOOLS } from "./content-decay-mcp-tools";
+import { INDEXNOW_MCP_TOOLS } from "./indexnow-mcp-tools";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -164,6 +165,10 @@ export const searchModule: ModuleContract = {
     // M5-W4 (additive): the WebDesk link on search_content_briefs (site, collection, locale, item, assignee, the search facts a writer
     // needs) and a nullable property_id. Registered here AT WRITE TIME, same standing lesson as every comment above.
     "202610122300_search_content_briefs_webdesk_link.sql",
+    // M5-P5a: IndexNow key/switch + Bing connection columns on search_properties, search_indexnow_submissions, search_bing_performance;
+    // then the integration_connections.provider CHECK widened for 'bing_webmaster'. Registered AT WRITE TIME, same standing lesson.
+    "202610130200_search_indexnow_bing.sql",
+    "202610130210_integration_connections_bing_provider.sql",
   ],
   // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
   // module reconciliation, 14 declared keys):
@@ -254,6 +259,8 @@ export const searchModule: ModuleContract = {
     ...ANALYTICS_MCP_TOOLS,
     // M5-V4 — content-decay findings: one read + two LOW writes (acknowledge, file a refresh brief).
     ...DECAY_MCP_TOOLS,
+    // M5-P5a — IndexNow on publish + the Bing Webmaster connector: reads, LOW writes, one MEDIUM (connect: a credential).
+    ...INDEXNOW_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",
@@ -588,6 +595,11 @@ export const searchModule: ModuleContract = {
     // Producer: search.controller.ts applyProposalApi.
     "search.campaign.applied": handleCampaignApplied,
     "search.ai_visibility.changed": handleAiVisibilityChanged,
+    // M5-P5a NOTE: the IndexNow ping on an approved WebDesk publish is deliberately NOT declared here. This module registers NO
+    // `automation_approval.decided` handler (search-sem-apply.test.ts and probe-consent.test.ts pin that: the module's other approval
+    // path spends a client's ad budget, and "no handler exists" is the guarantee that deciding can never grow a second branch). The
+    // ping is a CORE event handler instead, registered from main.ts by registerIndexNowEventHandlers() (indexnow-webdesk.ts); it
+    // acts only on origin 'webdesk' + workflow 'content.publish' and can do nothing but queue URL submissions.
   },
   // routes: served by SearchController in the NestJS port.
 };
