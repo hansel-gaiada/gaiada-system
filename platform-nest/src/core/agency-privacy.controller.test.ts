@@ -17,7 +17,7 @@ vi.mock("./agency-privacy.service", async (orig) => ({
   executeAgencyPrivacyRequest: (...a: unknown[]) => executeAgencyPrivacyRequest(...a),
 }));
 
-import { AgencyPrivacyController } from "./agency-privacy.controller";
+import { AgencyPrivacyController, collectorWords } from "./agency-privacy.controller";
 
 const T = "11111111-1111-4111-8111-111111111111";
 const APPROVAL = "33333333-3333-4333-8333-333333333333";
@@ -122,7 +122,10 @@ describe("call 2 — every service outcome maps to its typed answer", () => {
   });
 
   it("an executed erase answers counts + outOfScope and audits counts only", async () => {
-    const counts = { leadCount: 2, submissionCount: 1, tokenCount: 1, outOfScopeCount: 1, suppressionCount: 2 };
+    const counts = {
+      leadCount: 2, submissionCount: 1, tokenCount: 1, outOfScopeCount: 1, suppressionCount: 2,
+      profileCount: 1, profileEventCount: 3, tombstoneCount: 2, collectorForget: "delivered", collectorForgetCalls: 1, collectorDeletedEvents: 4,
+    };
     const outOfScope = [{ leadId: "l-1", convertedClientId: "c-1", reason: "client_record_retention" }];
     executeAgencyPrivacyRequest.mockResolvedValue({
       outcome: "executed", requestId: "r", result: { kind: "erase", erasedAt: "2026-10-12T00:00:00.000Z", outOfScope, counts },
@@ -132,6 +135,7 @@ describe("call 2 — every service outcome maps to its typed answer", () => {
     expect(rep.code).toBe(200);
     expect(out).toEqual({
       outcome: "executed", kind: "erase", replayed: false, requestId: "r", erasedAt: "2026-10-12T00:00:00.000Z", counts, outOfScope,
+      collector: collectorWords("delivered"),
     });
     expect(writeActivity).toHaveBeenCalledWith(T, "u-1", "privacy_erase_executed", "agency_privacy_request", "r", { approvalId: APPROVAL, ...counts });
   });
@@ -139,7 +143,11 @@ describe("call 2 — every service outcome maps to its typed answer", () => {
   it("an erase replay returns the stored counts with replayed:true", async () => {
     const counts = { leadCount: 1, submissionCount: 0, tokenCount: 0, outOfScopeCount: 0, suppressionCount: 1 };
     executeAgencyPrivacyRequest.mockResolvedValue({ outcome: "replayed", requestId: "r", counts });
-    expect(await ctl.command(req, reply() as never, T, "erase", body)).toEqual({ outcome: "executed", kind: "erase", replayed: true, requestId: "r", counts });
+    expect(await ctl.command(req, reply() as never, T, "erase", body)).toEqual({
+      outcome: "executed", kind: "erase", replayed: true, requestId: "r", counts,
+      // a ledger row from before V3-h has no collector status: the words say so, and never claim a delivery
+      collector: collectorWords(null),
+    });
   });
 
   it("an executed export returns the leads; the activity row carries no field of them", async () => {
@@ -187,5 +195,61 @@ describe("call 2 without identifiers (M5-G5b)", () => {
     expect(await refusal(ctl.command(req, reply() as never, T, "erase", { approvalId: "" }))).toEqual({ status: 400, reason: "subject_invalid" });
     expect(executeAgencyPrivacyRequest).not.toHaveBeenCalled();
     expect(fileAgencyPrivacyRequest).not.toHaveBeenCalled();
+  });
+});
+
+// M5-V3-h — the visitor keys on the route, the busy answer, and the collector words.
+describe("M5-V3-h: visitor id / consent id, busy, collector words", () => {
+  const VISITOR = "AAAAAAAA-1111-4111-8111-111111111111";
+  const CONSENT = "bbbbbbbb-2222-4222-8222-222222222222";
+
+  it("a request by visitor id or consent id alone is filed (lower-cased; only through the parsed subject)", async () => {
+    fileAgencyPrivacyRequest.mockResolvedValue({ requestId: "r", approvalId: APPROVAL });
+    const rep = reply();
+    expect(await ctl.command(req, rep as never, T, "erase", { visitorId: VISITOR })).toMatchObject({ outcome: "suspended" });
+    expect(rep.code).toBe(202);
+    const filed = fileAgencyPrivacyRequest.mock.calls[0][0] as { subject: Record<string, unknown> };
+    expect(filed.subject).toMatchObject({ email: null, phone: null, visitorId: VISITOR.toLowerCase() });
+    expect(filed.subject.visitorIdHash).toMatch(/^[0-9a-f]{64}$/);
+    await ctl.command(req, reply() as never, T, "find", { consentId: CONSENT });
+    expect((fileAgencyPrivacyRequest.mock.calls[1][0] as { subject: Record<string, unknown> }).subject).toMatchObject({ consentId: CONSENT });
+    // The activity row carries the request and approval ids only.
+    expect(JSON.stringify(writeActivity.mock.calls).toLowerCase()).not.toContain(VISITOR.toLowerCase());
+    expect(JSON.stringify(writeActivity.mock.calls)).not.toContain(CONSENT);
+  });
+
+  it("a malformed visitor id or consent id is 400 subject_invalid, also next to an approvalId; nothing reaches a service", async () => {
+    for (const b of [{ visitorId: "not-a-uuid" }, { consentId: 42 }, { email: EMAIL, visitorId: "x" }, { approvalId: APPROVAL, consentId: "nope" }]) {
+      expect(await refusal(ctl.command(req, reply() as never, T, "erase", b))).toEqual({ status: 400, reason: "subject_invalid" });
+    }
+    expect(fileAgencyPrivacyRequest).not.toHaveBeenCalled();
+    expect(executeAgencyPrivacyRequest).not.toHaveBeenCalled();
+  });
+
+  it("a visitor id next to an approvalId is parsed and passed for the content binding", async () => {
+    executeAgencyPrivacyRequest.mockResolvedValue({ outcome: "mismatch" });
+    await refusal(ctl.command(req, reply() as never, T, "erase", { approvalId: APPROVAL, visitorId: VISITOR }));
+    expect((executeAgencyPrivacyRequest.mock.calls[0][0] as { subject: Record<string, unknown> }).subject).toMatchObject({ visitorId: VISITOR.toLowerCase() });
+  });
+
+  it("busy (a visitor job held the property lock) is 503 visitor_store_busy and writes no activity", async () => {
+    executeAgencyPrivacyRequest.mockResolvedValue({ outcome: "busy", requestId: "r" });
+    expect(await refusal(ctl.command(req, reply() as never, T, "erase", { email: EMAIL, approvalId: APPROVAL })))
+      .toEqual({ status: 503, reason: "visitor_store_busy" });
+    expect(writeActivity).not.toHaveBeenCalled();
+  });
+
+  it("find/export pass the visitor profiles through; erase's words never call a queued forget confirmed", async () => {
+    const counts = { leadCount: 0, submissionCount: 0, tokenCount: 0, outOfScopeCount: 0, suppressionCount: 0, profileCount: 1 };
+    executeAgencyPrivacyRequest.mockResolvedValue({
+      outcome: "executed", requestId: "r",
+      result: { kind: "find", outOfScope: [], counts, leads: [], visitorProfiles: [{ profileId: "p-1", matchedBy: ["visitor_id"] }] },
+    });
+    const out = (await ctl.command(req, reply() as never, T, "find", { visitorId: VISITOR, approvalId: APPROVAL })) as { visitorProfiles: unknown[] };
+    expect(out.visitorProfiles).toEqual([{ profileId: "p-1", matchedBy: ["visitor_id"] }]);
+    expect(collectorWords("queued")).toMatch(/NOT confirmed/);
+    expect(collectorWords("queued")).not.toMatch(/confirmed the erase/);
+    expect(collectorWords("delivered")).toMatch(/confirmed the erase/);
+    for (const s of ["not_needed", "not_configured", "id_not_held", null]) expect(collectorWords(s)).not.toMatch(/confirmed the erase/);
   });
 });

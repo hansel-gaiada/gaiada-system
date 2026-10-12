@@ -57,18 +57,46 @@ export function subjectHash(basis: string): string {
   return createHash("sha256").update(`${SUBJECT_HASH_DOMAIN}${basis}`).digest("hex");
 }
 
-/** One data subject: at least one of the two keys. Plaintext lives only in memory for the request. */
+/**
+ * M5-V3-h — the hash of a consented visitor's pseudonymous ids (the visitor id the privacy page shows them, and their
+ * consent id): hex(sha256(lower-case canonical uuid text)). This is V3-d's tombstone hash contract
+ * (migrations/202610131600_search_visitor_profiles.sql, `sha256(convert_to(id::text,'UTF8'))`) hex-encoded, so the
+ * ledger's `visitor_id_hash` decodes to the tombstone's `id_hash`. NOT `subjectHash` (no domain prefix): a uuid is
+ * not guessable, and the tombstone contract is fixed. The input must already be a validated uuid.
+ */
+export function pseudonymHash(uuid: string): string {
+  return createHash("sha256").update(uuid.toLowerCase(), "utf8").digest("hex");
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True for a canonical uuid string (any case). */
+export function isUuid(v: unknown): v is string {
+  return typeof v === "string" && UUID_RE.test(v);
+}
+
+/**
+ * One data subject: at least one key. Plaintext lives only in memory for the request.
+ * M5-V3-h adds the two visitor keys. They are OPTIONAL in the type so every older constructor (email/phone only)
+ * stays valid; absent and null mean the same thing ("not given").
+ */
 export interface Subject {
   email: string | null;
   phone: string | null;
   emailHash: string | null;
   phoneHash: string | null;
+  /** Lower-case uuid: the consented visitor id (privacy page, design §4.1 I6). */
+  visitorId?: string | null;
+  /** Lower-case uuid: the WebDesk consent log id the visitor's analytics consent was recorded under. */
+  consentId?: string | null;
+  visitorIdHash?: string | null;
+  consentIdHash?: string | null;
 }
 
 export type SubjectParse = { ok: true; subject: Subject } | { ok: false; reason: "subject_invalid"; message: string };
 
 /**
- * Parse a request body's `{ email?, phone? }`. At least one must be present and valid. A present-but-
+ * Parse a request body's `{ email?, phone?, visitorId?, consentId? }`. At least one must be present and valid. A present-but-
  * invalid key refuses the whole request rather than being dropped: an operator who typed a malformed phone
  * next to a valid email must not get a confident "no data" for the half that was ignored.
  */
@@ -77,6 +105,8 @@ export function parseSubject(body: unknown): SubjectParse {
   const refuse = (message: string): SubjectParse => ({ ok: false, reason: "subject_invalid", message });
   let email: string | null = null;
   let phone: string | null = null;
+  let visitorId: string | null = null;
+  let consentId: string | null = null;
   if (b.email !== undefined && b.email !== null) {
     if (typeof b.email !== "string" || b.email.length > EMAIL_MAX) return refuse("email must be a string of at most 320 characters");
     const e = normalizeEmail(b.email);
@@ -89,12 +119,25 @@ export function parseSubject(body: unknown): SubjectParse {
     if (!p) return refuse("phone must be 7 to 15 digits, optionally with a leading + or 00, spaces, dashes, dots or brackets");
     phone = p;
   }
-  if (!email && !phone) return refuse("give the person's email, phone, or both");
-  return {
-    ok: true,
-    subject: { email, phone, emailHash: email ? subjectHash(email) : null, phoneHash: phone ? subjectHash(phone) : null },
-  };
+  // M5-V3-h: the visitor's own ids, as the privacy page shows them. A uuid or nothing: never trimmed into shape.
+  if (b.visitorId !== undefined && b.visitorId !== null) {
+    if (!isUuid(b.visitorId)) return refuse("visitorId must be a uuid");
+    visitorId = b.visitorId.toLowerCase();
+  }
+  if (b.consentId !== undefined && b.consentId !== null) {
+    if (!isUuid(b.consentId)) return refuse("consentId must be a uuid");
+    consentId = b.consentId.toLowerCase();
+  }
+  if (!email && !phone && !visitorId && !consentId) return refuse(NO_SUBJECT_MESSAGE);
+  const subject: Subject = { email, phone, emailHash: email ? subjectHash(email) : null, phoneHash: phone ? subjectHash(phone) : null };
+  // Only set when given, so an email/phone subject keeps exactly its pre-V3-h shape.
+  if (visitorId) { subject.visitorId = visitorId; subject.visitorIdHash = pseudonymHash(visitorId); }
+  if (consentId) { subject.consentId = consentId; subject.consentIdHash = pseudonymHash(consentId); }
+  return { ok: true, subject };
 }
+
+/** The refusal when a request names nobody. One sentence, shared by the route and the hub minimiser. */
+export const NO_SUBJECT_MESSAGE = "give the person's email, phone, visitor id or consent id (any one or more)";
 
 /** True when a stored contact pair belongs to the subject (either key matching is enough). */
 export function contactMatches(subject: Pick<Subject, "email" | "phone">, stored: { email?: unknown; phone?: unknown }): boolean {

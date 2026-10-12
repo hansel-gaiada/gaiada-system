@@ -4940,6 +4940,42 @@ they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored 
   the approval it files holds hashes, never the identifier (the bullet above). They are still two-person and never
   auto-run; `execution_status` stays `not_applicable` and the ledger is the record that a request ran.
 
+#### Consented website-visitor profiles (M5-V3-h) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
+
+Additive to the three routes above; nothing existing changes shape. Design `docs/plans/2026-10-12-m5-phase5-design.md`
+§4.7 and §8 V3-h; addendum §9.1. Code: `core/agency-privacy.*`, `modules/search/visitor-erase.ts`; migration
+`202610131900_agency_dsr_visitor_subjects.sql`.
+
+- **Body.** `{ email?, phone?, visitorId?, consentId?, approvalId? }`. `visitorId` is the consented visitor id the
+  site's privacy page shows the person; `consentId` is their consent log id. Each is a uuid (lower-cased); any one of
+  the four keys is enough; a present but malformed one is `400 subject_invalid`. Content binding covers them: an
+  approval filed for a visitor id does not run for another one, nor with a key added. Visitor keys never reach a
+  lead's contact data (leads are found by email or phone only).
+- **Who is in scope.** The profiles whose visitor id or consent id was given, the profiles under the consent id
+  snapshotted on every lead that matched the email/phone DIRECTLY (`visitor_consent.consentId`), and, closed over
+  shared ids, any profile sharing a visitor or consent id with one of those. Only this company's profiles.
+- **find.** Adds `visitorProfiles:[{ profileId, propertyId, matchedBy:["visitor_id"|"consent_id"|"lead"|"linked"],
+  firstSeenAt, lastSeenAt, visits, pageviews, eventCount }]` (no ids) and `counts.profileCount`,
+  `counts.profileEventCount`.
+- **export.** Adds `visitorProfiles:[{ …the find fields, propertyDomain, visitorId, consentId, device, country, city,
+  firstSource, network, company, interests, score, scoreParts, createdAt, updatedAt, events:[{ occurredAt, kind, path,
+  name, data }] }]`, every event, oldest first.
+- **erase.** Deletes the profiles (their events cascade) under the visitor jobs' per-property lock, tombstones BOTH the
+  visitor id and the consent id (`reason:'erase'`, SHA-256 only) on every property of the company, strips `consentId`
+  from every lead snapshot that holds an erased consent id (the rest of the snapshot is kept as evidence), and sends
+  the collector `forget mode:"erase"`. `counts` gains `profileCount, profileEventCount, tombstoneCount,
+  collectorForget, collectorForgetCalls, collectorDeletedEvents`, and the response gains `collector` (the outcome in
+  words). `collectorForget`: `delivered` | `queued` (the collector was unreachable or refused: the ERP side is erased
+  and committed, the forget is retried by the visitor jobs; NOT confirmed) | `not_configured` | `id_not_held` (an id
+  known only by its hash: blocked in the ERP, the collector is told when its buffered events next arrive) |
+  `not_needed`. A replay returns the same stored counts and words.
+- **New refusal.** `503 { reason:"visitor_store_busy" }`: a visitor job held a property lock for over a minute;
+  nothing was read or changed and the approval is still unused, so the same call can be repeated.
+- **Ledger.** `agency_dsr_requests` gains `visitor_id_hash`, `consent_id_hash` (hex SHA-256 of the lower-case uuid,
+  i.e. the tombstone hash), the profile and tombstone counts and `collector_forget` (required on an executed erase).
+- **Hub filing.** The minimiser also reduces `visitorId` / `consentId` to `subject.visitorIdHash` / `consentIdHash`
+  (no hint), and `identifiers` may list `"visitor_id"`, `"consent_id"`. The MCP tools gain both optional inputs.
+
 ### Convert — what it spawns, and the one thing it must never do
 
 One transaction: `clients` → `client_contacts` (`capability='signer'`, because a viewer-only contact

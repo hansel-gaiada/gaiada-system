@@ -47,13 +47,28 @@
 //                   hold no personal data themselves (a hash and timestamps).
 //   suppression     the given identifiers, and the contact fields of the leads that matched directly, are
 //                   added (hashed) with scope 'all'.
+//   visitor link    (M5-V3-h) every erased lead's `visitor_consent.consentId` is REMOVED from the kept snapshot
+//                   (analytics/marketing/version/decided_at stay as the evidence): after the erase the ERP keeps
+//                   only the tombstone HASH of that pseudonym, never the id. G5's erase never deletes a lead row,
+//                   so this applies to every lead it scrubs.
 // A CONVERTED lead's client record (clients, client contacts, projects, the delivery run) is OUT OF SCOPE:
 // it follows client-record retention (addendum §5). The lead row itself is still scrubbed, and every
 // result lists those leads under `outOfScope` so the operator handles the client record by its own process.
 //
+// ── M5-V3-h: CONSENTED WEBSITE-VISITOR PROFILES ─────────────────────────────────────────────────────
+// A request may also name the person by the visitor id (shown on the site's privacy page) or the consent id, and an
+// email/phone request follows the consent id snapshotted on every lead it matched DIRECTLY. find lists the profiles,
+// export returns them with every event, erase deletes them (events cascade) under V3-e's per-property lock,
+// tombstones the visitor AND consent ids ('erase') on every property of the company, and tells the collector
+// (forget mode:"erase"). The collector is told LAST, inside this transaction; when it is unreachable the ERP side
+// still commits and the ledger says `queued`, never `delivered`. All of it: modules/search/visitor-erase.ts (read
+// its header for the lock, the direction and the backstops). Visitor keys never reach leads: a lead is found by
+// email or phone only (a visitor id proves no right to a lead's contact data).
+//
 // ── PRIVACY OF THIS FILE ────────────────────────────────────────────────────────────────────────────
 // No identifier is logged, put in an error, an event or an activity row. Activities carry ids and counts.
-// Plain tenant wall: `withTenants([tenantId])` with NO `{ modules }` (agency tables are not module-walled).
+// Plain tenant wall: `withTenants([tenantId])` with NO `{ modules }` (agency tables are not module-walled); the
+// visitor half declares the `search` scope inside the same transaction when (and only when) it has ids to look for.
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
@@ -63,8 +78,14 @@ import {
   recoverIdentifiersFromText, scrubAnswers, subjectHash, type Subject,
 } from "./agency-privacy.subject";
 import {
-  approvalReasonFor, identifierKinds as identifierKindsOf, insertLedgerRow, minimisedArgsForSubject,
+  approvalReasonFor, emptyPrivacyCounts, identifierKinds as identifierKindsOf, insertLedgerRow, minimisedArgsForSubject,
+  type IdentifierKind,
 } from "./agency-privacy.filing";
+import {
+  VisitorStoreBusyError, emptySeeds, eraseVisitorRows, exportVisitorProfiles, findVisitorProfiles, forgetErasedAtCollector,
+  leadConsentId, resolvePseudonyms, visitorEraseDeps,
+  type CollectorForgetStatus, type ExportedVisitorProfile, type FoundVisitorProfile, type VisitorEraseDeps, type VisitorSeeds,
+} from "../modules/search/visitor-erase";
 
 export const PRIVACY_KINDS = ["find", "export", "erase"] as const;
 export type PrivacyKind = (typeof PRIVACY_KINDS)[number];
@@ -171,8 +192,10 @@ function phoneCandidates(phone: string | null): string[] | null {
 }
 
 /** Every lead in this tenant connected to the subject: its own contact matches, or an AD-1 submission's
- *  contact does. Soft-deleted leads are included: they still hold data. */
+ *  contact does. Soft-deleted leads are included: they still hold data. A subject with neither email nor phone
+ *  (visitor keys only) matches no lead. */
 export async function matchLeads(c: PoolClient, tenantId: string, subject: Pick<Subject, "email" | "phone">): Promise<MatchedLead[]> {
+  if (!subject.email && !subject.phone) return [];
   const { rows } = await c.query<LeadRow>(
     `SELECT l.id, l.status, l.stage, l.source, l.converted_client_id, l.org_name, l.contact_name, l.contact_email,
             l.contact_phone, l.origin_form, l.submission_ref, l.web_site_slug, l.attribution, l.visitor_consent,
@@ -253,12 +276,42 @@ export interface PrivacyCounts {
   tokenCount: number;
   outOfScopeCount: number;
   suppressionCount: number;
+  /** M5-V3-h: consented visitor profiles in scope (find/export) or deleted (erase), and their events. */
+  profileCount: number;
+  profileEventCount: number;
+  /** Erase: tombstone rows written or upgraded to 'erase' (both kinds of id x every property). */
+  tombstoneCount: number;
+  /** Erase: what the collector was told (null for find/export). `queued` is never reported as delivered. */
+  collectorForget: CollectorForgetStatus | null;
+  collectorForgetCalls: number;
+  collectorDeletedEvents: number;
 }
 
+export type { CollectorForgetStatus, ExportedVisitorProfile, FoundVisitorProfile };
+
 export type PrivacyEffectResult =
-  | { kind: "find"; leads: FoundLead[]; outOfScope: OutOfScopeItem[]; counts: PrivacyCounts }
-  | { kind: "export"; leads: ExportedLead[]; outOfScope: OutOfScopeItem[]; counts: PrivacyCounts }
+  | { kind: "find"; leads: FoundLead[]; visitorProfiles: FoundVisitorProfile[]; outOfScope: OutOfScopeItem[]; counts: PrivacyCounts }
+  | { kind: "export"; leads: ExportedLead[]; visitorProfiles: ExportedVisitorProfile[]; outOfScope: OutOfScopeItem[]; counts: PrivacyCounts }
   | { kind: "erase"; erasedAt: string; outOfScope: OutOfScopeItem[]; counts: PrivacyCounts };
+
+/**
+ * The visitor half's seeds: the subject's own visitor keys (plaintext when known, else the ledger hash), plus the
+ * consent id of every lead that matched DIRECTLY (its own contact is the subject's; a lead matched only through an
+ * AD-1 answer carries the consent of whoever sent the web form, who may be someone else: the suppression rule).
+ */
+function visitorSeedsOf(subject: Subject, matched: MatchedLead[]): VisitorSeeds {
+  const s = emptySeeds();
+  if (subject.visitorId) s.visitorIds.push(subject.visitorId);
+  else if (subject.visitorIdHash) s.visitorIdHashes.push(subject.visitorIdHash);
+  if (subject.consentId) s.consentIds.push(subject.consentId);
+  else if (subject.consentIdHash) s.consentIdHashes.push(subject.consentIdHash);
+  for (const m of matched) {
+    if (!m.direct) continue;
+    const k = leadConsentId(m.row.visitor_consent);
+    if (k && !s.leadConsentIds.includes(k)) s.leadConsentIds.push(k);
+  }
+  return s;
+}
 
 const iso = (d: Date | null): string | null => (d ? new Date(d).toISOString() : null);
 
@@ -309,11 +362,17 @@ async function runFind(c: PoolClient, tenantId: string, subject: Subject): Promi
   const matched = await matchLeads(c, tenantId, subject);
   const { subs, tokens } = await readChildren(c, tenantId, matched.map((m) => m.row.id));
   const outOfScope = outOfScopeOf(matched);
+  const visitorProfiles = await findVisitorProfiles(c, tenantId, visitorSeedsOf(subject, matched));
   return {
     kind: "find",
     leads: matched.map((m) => foundLead(m, subs, tokens)),
+    visitorProfiles,
     outOfScope,
-    counts: { leadCount: matched.length, submissionCount: subs.length, tokenCount: tokens.length, outOfScopeCount: outOfScope.length, suppressionCount: 0 },
+    counts: {
+      ...emptyPrivacyCounts(),
+      leadCount: matched.length, submissionCount: subs.length, tokenCount: tokens.length, outOfScopeCount: outOfScope.length,
+      profileCount: visitorProfiles.length, profileEventCount: visitorProfiles.reduce((n, p) => n + p.eventCount, 0),
+    },
   };
 }
 
@@ -321,6 +380,7 @@ async function runExport(c: PoolClient, tenantId: string, subject: Subject): Pro
   const matched = await matchLeads(c, tenantId, subject);
   const { subs, tokens } = await readChildren(c, tenantId, matched.map((m) => m.row.id));
   const outOfScope = outOfScopeOf(matched);
+  const visitorProfiles = await exportVisitorProfiles(c, tenantId, visitorSeedsOf(subject, matched));
   const leads: ExportedLead[] = matched.map((m) => {
     const r = m.row;
     return {
@@ -346,16 +406,24 @@ async function runExport(c: PoolClient, tenantId: string, subject: Subject): Pro
   return {
     kind: "export",
     leads,
+    visitorProfiles,
     outOfScope,
-    counts: { leadCount: matched.length, submissionCount: subs.length, tokenCount: tokens.length, outOfScopeCount: outOfScope.length, suppressionCount: 0 },
+    counts: {
+      ...emptyPrivacyCounts(),
+      leadCount: matched.length, submissionCount: subs.length, tokenCount: tokens.length, outOfScopeCount: outOfScope.length,
+      profileCount: visitorProfiles.length, profileEventCount: visitorProfiles.reduce((n, p) => n + p.events.length, 0),
+    },
   };
 }
 
 async function runErase(
-  c: PoolClient, tenantId: string, subject: Subject, requestId: string, actorId: string,
+  c: PoolClient, tenantId: string, subject: Subject, requestId: string, actorId: string, visitorDeps: VisitorEraseDeps,
 ): Promise<PrivacyEffectResult> {
   const matched = await matchLeads(c, tenantId, subject);
   const leadIds = matched.map((m) => m.row.id);
+  // M5-V3-h, FIRST: the visitor rows, under the property locks (which throw VisitorStoreBusyError, rolling back the
+  // whole erase, before anything is written). Deletion + tombstones now; the collector is told last, below.
+  const visitorPlan = await eraseVisitorRows(c, tenantId, visitorSeedsOf(subject, matched), visitorDeps);
   if (leadIds.length > 0) {
     // Lock the rows before rewriting them, in a stable order (the match is ordered).
     await c.query(`SELECT id FROM agency_leads WHERE tenant_id = $1 AND id = ANY($2::uuid[]) ORDER BY id FOR UPDATE`, [tenantId, leadIds]);
@@ -398,9 +466,12 @@ async function runErase(
   // (and the status clock does not move: an erase is not a status change).
   if (leadIds.length > 0) {
     await c.query(
+      // M5-V3-h: the consent snapshot is kept as evidence, but WITHOUT its consentId (the visitor link).
       `UPDATE agency_leads
           SET org_name = $3, contact_name = NULL, contact_email = NULL, contact_phone = NULL, attribution = NULL,
               declined_reason = CASE WHEN declined_reason IS NULL THEN NULL ELSE $4 END,
+              visitor_consent = CASE WHEN jsonb_typeof(visitor_consent) = 'object' THEN visitor_consent - 'consentId'
+                                     ELSE visitor_consent END,
               erased_at = now(), updated_at = now()
         WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
       [tenantId, leadIds, ERASED_ORG, ERASED_REASON],
@@ -418,6 +489,21 @@ async function runErase(
     scope: "all", reason: "erasure", dsrRequestId: requestId, createdBy: actorId,
   });
 
+  // M5-V3-h: any OTHER lead of this company still holding one of the erased consent ids in its snapshot (an erase by
+  // visitor id or consent id reaches no lead's contact data, but the pseudonym itself is what was erased) loses the
+  // id; the rest of its snapshot and the lead itself are untouched.
+  if (visitorPlan.consentIds.length > 0) {
+    await c.query(
+      `UPDATE agency_leads SET visitor_consent = visitor_consent - 'consentId'
+        WHERE tenant_id = $1 AND jsonb_typeof(visitor_consent) = 'object'
+          AND lower(visitor_consent->>'consentId') = ANY($2::text[])`,
+      [tenantId, visitorPlan.consentIds],
+    );
+  }
+
+  // M5-V3-h, LAST: the collector. Never throws for a collector failure (queued + recorded as such).
+  const visitor = await forgetErasedAtCollector(visitorPlan, visitorDeps);
+
   const outOfScope = outOfScopeOf(matched);
   return {
     kind: "erase",
@@ -429,18 +515,24 @@ async function runErase(
       tokenCount: revoked.rowCount ?? 0,
       outOfScopeCount: outOfScope.length,
       suppressionCount,
+      profileCount: visitor.profileCount,
+      profileEventCount: visitor.profileEventCount,
+      tombstoneCount: visitor.tombstoneCount,
+      collectorForget: visitor.collectorForget,
+      collectorForgetCalls: visitor.collectorForgetCalls,
+      collectorDeletedEvents: visitor.collectorDeletedEvents,
     },
   };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════ ledger + WS4
 /** Which keys were given, for the approval and the inbox. Never the values. */
-export function identifierKinds(subject: Pick<Subject, "email" | "phone">): ("email" | "phone")[] {
+export function identifierKinds(subject: Pick<Subject, "email" | "phone" | "visitorId" | "consentId">): IdentifierKind[] {
   return identifierKindsOf(subject);
 }
 
 /** The approval's inbox text. No identifier: it names the command and which keys identify the person. */
-export function approvalReason(kind: PrivacyKind, subject: Pick<Subject, "email" | "phone">): string {
+export function approvalReason(kind: PrivacyKind, subject: Pick<Subject, "email" | "phone" | "visitorId" | "consentId">): string {
   return approvalReasonFor(kind, identifierKindsOf(subject));
 }
 
@@ -483,7 +575,9 @@ export type ExecuteOutcome =
   | { outcome: "self_approved"; requestId: string }
   | { outcome: "already_used"; requestId: string }
   | { outcome: "replayed"; requestId: string; counts: PrivacyCounts }
-  | { outcome: "executed"; requestId: string; result: PrivacyEffectResult };
+  | { outcome: "executed"; requestId: string; result: PrivacyEffectResult }
+  /** M5-V3-h: a visitor job held a property lock past the deadline; NOTHING was changed and the approval is unused. */
+  | { outcome: "busy"; requestId: string | null };
 
 /**
  * M5-G5b: rebuild the plaintext of a subject known only by its hashes. The stored contact values that hash to
@@ -493,6 +587,21 @@ export type ExecuteOutcome =
  * transaction (tenant GUC set); call it only after every refusal has been decided from stored state.
  */
 export async function resolveSubjectByHashes(
+  c: PoolClient,
+  tenantId: string,
+  hashes: { emailHash: string | null; phoneHash: string | null; visitorIdHash?: string | null; consentIdHash?: string | null },
+): Promise<Subject> {
+  const base = await resolveContactByHashes(c, tenantId, hashes);
+  // M5-V3-h: the visitor keys, from what this company still holds (a profile, a lead's consent snapshot). An id no
+  // row holds stays hash-only: the erase tombstones it by hash and the ledger says `id_not_held`.
+  const visitorIdHash = hashes.visitorIdHash ?? null;
+  const consentIdHash = hashes.consentIdHash ?? null;
+  if (!visitorIdHash && !consentIdHash) return base;
+  const p = await resolvePseudonyms(c, tenantId, { visitorIdHash, consentIdHash });
+  return { ...base, visitorId: p.visitorId, consentId: p.consentId, visitorIdHash, consentIdHash };
+}
+
+async function resolveContactByHashes(
   c: PoolClient,
   tenantId: string,
   hashes: { emailHash: string | null; phoneHash: string | null },
@@ -538,74 +647,115 @@ export async function executeAgencyPrivacyRequest(input: {
   subject: Subject | null;
   approvalId: string;
   actorId: string;
+  /** M5-V3-h: the collector client and the property-lock wait (tests; default from the env). */
+  visitorDeps?: VisitorEraseDeps;
 }): Promise<ExecuteOutcome> {
-  const { tenantId, kind, subject, approvalId, actorId } = input;
-  return withTenants([tenantId], async (c): Promise<ExecuteOutcome> => {
-    await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`agency-privacy:${approvalId}`]);
-
-    const filed = await c.query<{ request_id: string; kind: string; email_hash: string | null; phone_hash: string | null; actor_id: string | null }>(
-      `SELECT request_id, kind, email_hash, phone_hash, actor_id FROM agency_dsr_requests
-        WHERE tenant_id = $1 AND approval_id = $2 AND phase = 'filed'`,
-      [tenantId, approvalId],
-    );
-    const f = filed.rows[0];
-    if (!f) return { outcome: "not_found" };
-    // Content binding: the same command for the same person, recomputed from THIS body. Null-equal on purpose:
-    // a request filed for email-only does not execute for email+phone (that would widen what was approved).
-    if (f.kind !== kind) return { outcome: "mismatch" };
-    if (subject && (f.email_hash !== subject.emailHash || f.phone_hash !== subject.phoneHash)) return { outcome: "mismatch" };
-    if (f.actor_id !== actorId) return { outcome: "not_requester" };
-    const requestId = f.request_id;
-
-    const done = await c.query<{ lead_count: number; submission_count: number; token_count: number; out_of_scope_count: number; suppression_count: number }>(
-      `SELECT lead_count, submission_count, token_count, out_of_scope_count, suppression_count FROM agency_dsr_requests
-        WHERE tenant_id = $1 AND approval_id = $2 AND phase = 'executed'`,
-      [tenantId, approvalId],
-    );
-    if (done.rows[0]) {
-      // An erase replay is answered with its stored counts (no personal data in them). A find/export replay
-      // is refused: its response IS personal data, which is never stored, and reading it again needs a new
-      // approval (WSK-38's "withheld").
-      if (kind !== "erase") return { outcome: "already_used", requestId };
-      const d = done.rows[0];
-      return {
-        outcome: "replayed", requestId,
-        counts: {
-          leadCount: d.lead_count, submissionCount: d.submission_count, tokenCount: d.token_count,
-          outOfScopeCount: d.out_of_scope_count, suppressionCount: d.suppression_count,
-        },
-      };
-    }
-
-    const appr = await c.query<{ status: string; decided_by: string | null; tool_name: string }>(
-      `SELECT status, decided_by, tool_name FROM automation_approvals WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
-      [tenantId, approvalId],
-    );
-    const a = appr.rows[0];
-    if (!a) return { outcome: "not_found" };
-    if (a.tool_name !== PRIVACY_TOOL[kind]) return { outcome: "mismatch" };
-    if (a.status === "pending") return { outcome: "awaiting_approval", requestId };
-    if (a.status !== "approved") return { outcome: "rejected", requestId };
-    // Maker != checker. Checked here, from the stored decision, because the generic `decide` permission says
-    // nothing about who filed the row.
-    if (!a.decided_by || a.decided_by === actorId) return { outcome: "self_approved", requestId };
-
-    // Every refusal above came from stored state; only now is personal data read. A run-by-approval call rebuilds
-    // the subject from the filed row's hashes (the typed one, when given, was already proven equal to them).
-    const who = subject ?? await resolveSubjectByHashes(c, tenantId, { emailHash: f.email_hash, phoneHash: f.phone_hash });
-    const result =
-      kind === "find" ? await runFind(c, tenantId, who)
-      : kind === "export" ? await runExport(c, tenantId, who)
-      : await runErase(c, tenantId, who, requestId, actorId);
-
-    // The claim. The partial UNIQUE (approval_id) WHERE phase='executed' makes a second execution impossible
-    // even past the advisory lock; a violation rolls this whole transaction (and the erase) back.
-    await insertLedgerRow(c, {
-      tenantId, requestId, kind, phase: "executed", emailHash: f.email_hash, phoneHash: f.phone_hash, approvalId, actorId,
-      counts: result.counts,
+  const visitorDeps = visitorEraseDeps(input.visitorDeps);
+  let requestIdSeen: string | null = null;
+  try {
+    return await withTenants([input.tenantId], async (c) => {
+      const r = await executeInTransaction(c, input, visitorDeps, (id) => { requestIdSeen = id; });
+      return r;
     });
-    return { outcome: "executed", requestId, result };
+  } catch (err) {
+    // The property locks stayed busy: the transaction rolled back whole (no erase, no ledger row), so the approval
+    // is still unused and the same call can simply be made again.
+    if (err instanceof VisitorStoreBusyError) return { outcome: "busy", requestId: requestIdSeen };
+    throw err;
+  }
+}
+
+async function executeInTransaction(
+  c: PoolClient,
+  input: { tenantId: string; kind: PrivacyKind; subject: Subject | null; approvalId: string; actorId: string },
+  visitorDeps: VisitorEraseDeps,
+  seen: (requestId: string) => void,
+): Promise<ExecuteOutcome> {
+  const { tenantId, kind, subject, approvalId, actorId } = input;
+  await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`agency-privacy:${approvalId}`]);
+
+  const filed = await c.query<{
+    request_id: string; kind: string; email_hash: string | null; phone_hash: string | null;
+    visitor_id_hash: string | null; consent_id_hash: string | null; actor_id: string | null;
+  }>(
+    `SELECT request_id, kind, email_hash, phone_hash, visitor_id_hash, consent_id_hash, actor_id FROM agency_dsr_requests
+      WHERE tenant_id = $1 AND approval_id = $2 AND phase = 'filed'`,
+    [tenantId, approvalId],
+  );
+  const f = filed.rows[0];
+  if (!f) return { outcome: "not_found" };
+  // Content binding: the same command for the same person, recomputed from THIS body. Null-equal on purpose:
+  // a request filed for email-only does not execute for email+phone (that would widen what was approved), and
+  // (M5-V3-h) the visitor keys are bound the same way.
+  if (f.kind !== kind) return { outcome: "mismatch" };
+  if (subject && (
+    f.email_hash !== subject.emailHash || f.phone_hash !== subject.phoneHash
+    || f.visitor_id_hash !== (subject.visitorIdHash ?? null) || f.consent_id_hash !== (subject.consentIdHash ?? null)
+  )) return { outcome: "mismatch" };
+  if (f.actor_id !== actorId) return { outcome: "not_requester" };
+  const requestId = f.request_id;
+  seen(requestId);
+
+  const done = await c.query<{
+    lead_count: number; submission_count: number; token_count: number; out_of_scope_count: number; suppression_count: number;
+    profile_count: number; profile_event_count: number; tombstone_count: number; collector_forget: CollectorForgetStatus | null;
+    collector_forget_calls: number; collector_deleted_events: number;
+  }>(
+    `SELECT lead_count, submission_count, token_count, out_of_scope_count, suppression_count,
+            profile_count, profile_event_count, tombstone_count, collector_forget, collector_forget_calls, collector_deleted_events
+       FROM agency_dsr_requests
+      WHERE tenant_id = $1 AND approval_id = $2 AND phase = 'executed'`,
+    [tenantId, approvalId],
+  );
+  if (done.rows[0]) {
+    // An erase replay is answered with its stored counts (no personal data in them). A find/export replay
+    // is refused: its response IS personal data, which is never stored, and reading it again needs a new
+    // approval (WSK-38's "withheld").
+    if (kind !== "erase") return { outcome: "already_used", requestId };
+    const d = done.rows[0];
+    return {
+      outcome: "replayed", requestId,
+      counts: {
+        leadCount: d.lead_count, submissionCount: d.submission_count, tokenCount: d.token_count,
+        outOfScopeCount: d.out_of_scope_count, suppressionCount: d.suppression_count,
+        profileCount: d.profile_count, profileEventCount: d.profile_event_count, tombstoneCount: d.tombstone_count,
+        collectorForget: d.collector_forget, collectorForgetCalls: d.collector_forget_calls,
+        collectorDeletedEvents: d.collector_deleted_events,
+      },
+    };
+  }
+
+  const appr = await c.query<{ status: string; decided_by: string | null; tool_name: string }>(
+    `SELECT status, decided_by, tool_name FROM automation_approvals WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, approvalId],
+  );
+  const a = appr.rows[0];
+  if (!a) return { outcome: "not_found" };
+  if (a.tool_name !== PRIVACY_TOOL[kind]) return { outcome: "mismatch" };
+  if (a.status === "pending") return { outcome: "awaiting_approval", requestId };
+  if (a.status !== "approved") return { outcome: "rejected", requestId };
+  // Maker != checker. Checked here, from the stored decision, because the generic `decide` permission says
+  // nothing about who filed the row.
+  if (!a.decided_by || a.decided_by === actorId) return { outcome: "self_approved", requestId };
+
+  // Every refusal above came from stored state; only now is personal data read. A run-by-approval call rebuilds
+  // the subject from the filed row's hashes (the typed one, when given, was already proven equal to them).
+  const who = subject ?? await resolveSubjectByHashes(c, tenantId, {
+    emailHash: f.email_hash, phoneHash: f.phone_hash, visitorIdHash: f.visitor_id_hash, consentIdHash: f.consent_id_hash,
   });
+  const result =
+    kind === "find" ? await runFind(c, tenantId, who)
+    : kind === "export" ? await runExport(c, tenantId, who)
+    : await runErase(c, tenantId, who, requestId, actorId, visitorDeps);
+
+  // The claim. The partial UNIQUE (approval_id) WHERE phase='executed' makes a second execution impossible
+  // even past the advisory lock; a violation rolls this whole transaction (and the erase) back.
+  await insertLedgerRow(c, {
+    tenantId, requestId, kind, phase: "executed", emailHash: f.email_hash, phoneHash: f.phone_hash,
+    visitorIdHash: f.visitor_id_hash, consentIdHash: f.consent_id_hash, approvalId, actorId,
+    counts: result.counts,
+  });
+  return { outcome: "executed", requestId, result };
 }
 
 // Re-exported for the intake and P2, so they import one module for "is this person suppressed".

@@ -4,8 +4,10 @@ import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import {
   AD1_PERSON_FIELDS, ERASED_MARKER, SUBJECT_HASH_DOMAIN, collectStrings, contactHashes, contactMatches, findNormalisedByHash,
-  normalizeEmail, normalizePhone, parseSubject, recoverIdentifiersFromText, scrubAnswers, subjectHash,
+  NO_SUBJECT_MESSAGE, isUuid, normalizeEmail, normalizePhone, parseSubject, pseudonymHash, recoverIdentifiersFromText, scrubAnswers,
+  subjectHash,
 } from "./agency-privacy.subject";
+import { idHash } from "../modules/search/visitor-jobs";
 import { QUESTIONNAIRE_SECTIONS } from "./agency-discovery-questionnaire";
 
 describe("normalizePhone — byte-for-byte WebDesk parity (webdesk/api/src/forms/subject-refs.ts)", () => {
@@ -206,5 +208,46 @@ describe("collectStrings", () => {
   it("walks arrays and objects and ignores non-strings", () => {
     expect(collectStrings({ a: "x", b: ["y", { c: "z", d: 4 }], e: null })).toEqual(["x", "y", "z"]);
     expect(collectStrings(7)).toEqual([]);
+  });
+});
+
+// M5-V3-h — the consented visitor's own keys.
+describe("parseSubject — visitorId / consentId (M5-V3-h)", () => {
+  const V = "AAAAAAAA-1111-4111-8111-111111111111";
+  const K = "bbbbbbbb-2222-4222-8222-222222222222";
+
+  it("accepts a visitor id or a consent id alone, lower-cases it and hashes it with the tombstone contract", () => {
+    const v = parseSubject({ visitorId: V });
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.subject).toEqual({
+      email: null, phone: null, emailHash: null, phoneHash: null,
+      visitorId: V.toLowerCase(), visitorIdHash: createHash("sha256").update(V.toLowerCase(), "utf8").digest("hex"),
+    });
+    const k = parseSubject({ consentId: K, email: "a@b.example" });
+    expect(k.ok && k.subject.consentId).toBe(K);
+    expect(k.ok && k.subject.consentIdHash).toBe(pseudonymHash(K));
+    expect(k.ok && k.subject.emailHash).toBe(subjectHash("a@b.example"));
+  });
+
+  it("an email/phone subject keeps its exact pre-V3-h shape (no visitor keys at all)", () => {
+    const r = parseSubject({ email: "a@b.example" });
+    expect(r.ok && Object.keys(r.subject).sort()).toEqual(["email", "emailHash", "phone", "phoneHash"]);
+  });
+
+  it("a present-but-malformed visitor key refuses the WHOLE request; an empty body names nobody", () => {
+    for (const b of [{ visitorId: "x" }, { visitorId: 7 }, { consentId: `${K} ` }, { email: "a@b.example", consentId: "nope" }, { visitorId: "" }]) {
+      expect(parseSubject(b)).toMatchObject({ ok: false, reason: "subject_invalid" });
+    }
+    expect(parseSubject({})).toEqual({ ok: false, reason: "subject_invalid", message: NO_SUBJECT_MESSAGE });
+    expect(parseSubject({ visitorId: null, consentId: undefined })).toMatchObject({ ok: false });
+  });
+
+  it("pseudonymHash IS V3-d's tombstone hash, hex-encoded (search/visitor-jobs.ts idHash), for any input case", () => {
+    expect(pseudonymHash(V)).toBe(idHash(V).toString("hex"));
+    expect(pseudonymHash(V)).toBe(pseudonymHash(V.toLowerCase()));
+    expect(pseudonymHash(V)).not.toBe(subjectHash(V.toLowerCase())); // not the domain-prefixed contact hash
+    expect(isUuid(V)).toBe(true);
+    expect(isUuid(`${V}x`)).toBe(false);
   });
 });
