@@ -78,6 +78,16 @@ export default async function ClientOverviewPage({ params }: { params: Promise<{
           value={`${o.projects.percent}%`}
           hint="Mean of each project's own progress — not all tasks pooled, so a large project cannot drown out a small one."
         />
+        {/* PV4-09: from the backend's own count (BFF §29d). Absent on an older server, and then nothing is shown. */}
+        {typeof o.conversationsAwaitingReply === "number" && (
+          <KpiTile
+            label="Awaiting our reply"
+            value={String(o.conversationsAwaitingReply)}
+            foot={o.conversationsAwaitingReply === 1 ? "conversation with this client" : "conversations with this client"}
+            deltaUp={false}
+            hint="Open conversations whose last message is the client's. Each one is also listed under Waiting on us."
+          />
+        )}
         <KpiTile
           label="Open tasks"
           value={String(o.tasks.open)}

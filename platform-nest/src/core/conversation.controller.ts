@@ -15,6 +15,10 @@
 // pressed Send) with `drafted_by` recording the agent (decision 4), and stamps the draft `sent` in the
 // SAME transaction.
 //
+// PV4-07 makes that refusal TYPED: the post/send/manage routes call `authorizeOrRefuseAgent`, so a `bot`/`automation`
+// principal's 403 carries `reason: "agents_draft_staff_send"` (or `agents_cannot_manage_conversation`) and a message
+// that names the tool to use instead (`conversation.draftReply`). Cerbos still decides; only the error's shape changes.
+//
 // ── "CLIENT SEES THIS" COMES FROM THE BACKEND ─────────────────────────────────────────────────────
 // Every thread and message row returned here carries `clientVisible` computed in SQL from the
 // portal-visibility.ts builders (true for every live message: every message reaches the client), and
@@ -32,6 +36,7 @@ import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
+import { REFUSALS, authorizeOrRefuseAgent } from "./agent-refusal";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import {
@@ -75,8 +80,14 @@ const DRAFT_COLUMNS = `
   d.status, d.decided_by AS "decidedBy", d.decided_at AS "decidedAt", d.sent_message_id AS "sentMessageId",
   d.created_at AS "createdAt", ${staffConversationDraftClientVisible("d")} AS "clientVisible"`;
 
+/** PV4-07: the literal `all` means "no filter" on a list query. mcp-hub fills EVERY `:token` of a tool's path from its args
+ *  (a missing one is an error), so the `conversation.listThreads` tool cannot leave a filter out; it sends `all` (the
+ *  schema default) instead. A person's query string may use it too. */
+const ALL = "all";
+const noFilter = (v: string | undefined): string | undefined => (v === ALL ? undefined : v);
+
 function boolQuery(v: unknown): boolean | null {
-  if (v === undefined || v === null || v === "") return null;
+  if (v === undefined || v === null || v === "" || v === ALL) return null;
   if (v === "true" || v === "1") return true;
   if (v === "false" || v === "0") return false;
   throw new BadRequestException("awaitingReply must be true or false");
@@ -99,6 +110,9 @@ export class ConversationController {
     @Query("status") status?: string,
   ) {
     await authorize(req.principal, { kind: "conversation", tenantId }, "read");
+    clientId = noFilter(clientId);
+    projectId = noFilter(projectId);
+    status = noFilter(status);
     if (clientId && !isUuid(clientId)) throw new BadRequestException("clientId must be a uuid");
     if (projectId && !isUuid(projectId)) throw new BadRequestException("projectId must be a uuid");
     if (status && !THREAD_STATUSES.has(status)) throw new BadRequestException("status must be open|closed");
@@ -141,7 +155,17 @@ export class ConversationController {
       );
       const vis = new Map(flags.rows.map((f) => [f.id, f.client_visible]));
       await markRead(c, tenantId, threadId, req.principal.userId as string);
-      return { thread, messages: messages.map((m) => ({ ...m, clientVisible: vis.get(m.id) === true })) };
+      // PV4-07: the PENDING drafts ride along (this route is staff-only and `read` already covers `/drafts`), so the
+      // `conversation.getThread` tool answers "what is said, and what is waiting to be sent" in one call.
+      const drafts = await c.query(
+        `SELECT ${DRAFT_COLUMNS}
+           FROM conversation_drafts d LEFT JOIN users du ON du.id = d.drafted_by
+          WHERE d.thread_id = $1 AND d.status = 'pending'
+          ORDER BY d.created_at ASC
+          LIMIT 200`,
+        [threadId],
+      );
+      return { thread, messages: messages.map((m) => ({ ...m, clientVisible: vis.get(m.id) === true })), drafts: drafts.rows };
     });
   }
 
@@ -181,7 +205,7 @@ export class ConversationController {
     @Body() body: { clientId?: unknown; projectId?: unknown; subject?: unknown; body?: unknown; attachments?: unknown },
   ) {
     const b = body ?? {};
-    await authorize(req.principal, { kind: "conversation", tenantId }, "post");
+    await authorizeOrRefuseAgent(req.principal, { kind: "conversation", tenantId }, "post", REFUSALS.post);
     if (!isUuid(b.clientId)) throw new BadRequestException("clientId is required");
     const projectId = b.projectId === undefined || b.projectId === null || b.projectId === "" ? null : b.projectId;
     if (projectId !== null && !isUuid(projectId)) throw new BadRequestException("projectId must be a uuid");
@@ -226,7 +250,10 @@ export class ConversationController {
       });
       return { threadId, messageId: msg.id, created, attachmentIds: msg.attachmentIds };
     });
-    await writeActivity(tenantId, userId, "posted", "conversation", out.threadId, { messageId: out.messageId, via: "staff" });
+    // PV4-07 (criterion 6): these staff `posted` / `sent_draft` activities used to carry `via: "staff"` (meaning the SIDE), and a
+    // caller-supplied `metadata.via` WINS over the ambient one (core/http.ts writeActivity), so the agent or MCP client that
+    // drove the call was erased from the row. The side is now `channel`, and `via` is left to the ambient stamp.
+    await writeActivity(tenantId, userId, "posted", "conversation", out.threadId, { messageId: out.messageId, channel: "staff" });
     // PV4-06: tell the in-scope contacts, AFTER the commit; best-effort, never throws.
     await notifyStaffPosted(tenantId, userId, out.threadId);
     return out;
@@ -242,7 +269,7 @@ export class ConversationController {
     @Body() body: { body?: unknown; attachments?: unknown },
   ) {
     const b = body ?? {};
-    await authorize(req.principal, { kind: "conversation", tenantId }, "post");
+    await authorizeOrRefuseAgent(req.principal, { kind: "conversation", tenantId }, "post", REFUSALS.post);
     const text = validateBody(b.body);
     const files = prepareAttachments(b.attachments);
     const userId = req.principal.userId as string;
@@ -255,7 +282,7 @@ export class ConversationController {
       });
       return { id: msg.id, threadId, createdAt: msg.createdAt, attachmentIds: msg.attachmentIds, clientVisible: true };
     });
-    await writeActivity(tenantId, userId, "posted", "conversation", threadId, { messageId: out.id, via: "staff" });
+    await writeActivity(tenantId, userId, "posted", "conversation", threadId, { messageId: out.id, channel: "staff" });
     await notifyStaffPosted(tenantId, userId, threadId);
     return out;
   }
@@ -269,13 +296,14 @@ export class ConversationController {
     @Body() body: { status?: unknown; subject?: unknown },
   ) {
     const b = body ?? {};
-    await authorize(req.principal, { kind: "conversation", tenantId }, "manage");
+    await authorizeOrRefuseAgent(req.principal, { kind: "conversation", tenantId }, "manage", REFUSALS.manage);
     if (b.status !== undefined && (typeof b.status !== "string" || !THREAD_STATUSES.has(b.status))) {
       throw new BadRequestException("status must be open|closed");
     }
     if (b.status === undefined && b.subject === undefined) throw new BadRequestException("nothing to change");
     const subject = b.subject === undefined ? undefined : validateSubject(b.subject);
-    return withTenants([tenantId], async (c) => {
+    const userId = req.principal.userId as string;
+    const out = await withTenants([tenantId], async (c) => {
       const t = await this.thread(c, threadId, true);
       const r = await c.query<{ status: string; subject: string | null; updated_at: string }>(
         `UPDATE conversation_threads
@@ -289,8 +317,18 @@ export class ConversationController {
       await emitEvent(c, tenantId, "conversation", threadId, "conversation.thread.updated", {
         clientId: t.client_id, projectId: t.project_id, threadId, status: r.rows[0].status, via: "staff",
       });
-      return { id: threadId, status: r.rows[0].status, subject: r.rows[0].subject, updatedAt: r.rows[0].updated_at };
+      return {
+        id: threadId, status: r.rows[0].status, subject: r.rows[0].subject, updatedAt: r.rows[0].updated_at,
+        previousStatus: t.status,
+      };
     });
+    // PV4-07 (criterion 6): who closed, reopened or renamed a thread is recorded, with the actor (which may be an agent's
+    // human, or the human behind an MCP client). A status that did not change (closing a closed thread) writes nothing.
+    if (b.status !== undefined && out.status !== out.previousStatus) {
+      await writeActivity(tenantId, userId, out.status === "closed" ? "closed" : "reopened", "conversation", threadId, { from: out.previousStatus });
+    }
+    if (subject !== undefined) await writeActivity(tenantId, userId, "renamed", "conversation", threadId, {});
+    return { id: out.id, status: out.status, subject: out.subject, updatedAt: out.updatedAt };
   }
 
   /** Edit one's own message within 15 minutes (`post`: editing one's words is posting them). Someone
@@ -376,6 +414,9 @@ export class ConversationController {
       });
       return { id, threadId, status: "pending", replayed: false, clientVisible: false };
     });
+    // PV4-07 (criterion 6): a draft is attributed. The actor is the drafter, which is a bot when an agent drafted it. A
+    // replay writes no second row: the first one already says who drafted and when.
+    if (!out.replayed) await writeActivity(tenantId, userId, "drafted_reply", "conversation", threadId, { draftId: out.id });
     // PV4-06: a NEW draft tells the staff recipients one is waiting (a replay of the same key does not repeat it).
     if (!out.replayed) await notifyDraftCreated(tenantId, userId, threadId);
     return out;
@@ -406,7 +447,7 @@ export class ConversationController {
   @Post(":tenantId/conversation/drafts/:draftId/send")
   @HttpCode(201)
   async sendDraft(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("draftId") draftId: string) {
-    await authorize(req.principal, { kind: "conversation", tenantId }, "post");
+    await authorizeOrRefuseAgent(req.principal, { kind: "conversation", tenantId }, "post", REFUSALS.sendDraft);
     const userId = req.principal.userId as string;
     const out = await withTenants([tenantId], async (c) => {
       const d = await this.draftForUpdate(c, draftId);
@@ -428,7 +469,9 @@ export class ConversationController {
       });
       return { id: msg.id, threadId: d.thread_id, draftId, draftedBy: d.drafted_by, createdAt: msg.createdAt, clientVisible: true };
     });
-    await writeActivity(tenantId, userId, "sent_draft", "conversation", out.threadId, { messageId: out.id, draftId, via: "staff" });
+    await writeActivity(tenantId, userId, "sent_draft", "conversation", out.threadId, {
+      messageId: out.id, draftId, draftedBy: out.draftedBy, channel: "staff",
+    });
     await notifyStaffPosted(tenantId, userId, out.threadId);
     return out;
   }

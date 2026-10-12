@@ -59,7 +59,7 @@ export interface RemoteToolDef {
   // only these two type declarations were narrower than reality. A def arriving over the wire is
   // JSON.parse'd, so the old type never rejected anything at runtime — it just described it wrongly,
   // which is the kind of lie that survives until someone trusts it.
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   pathTemplate?: string;
   write?: boolean;
   impact?: Impact;

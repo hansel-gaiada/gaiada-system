@@ -236,3 +236,108 @@ describe("ChangeRequestsPanel — PV4-04b: does this change the price?", () => {
     expect(payload).not.toHaveProperty("priceImpact");
   });
 });
+
+describe("ChangeRequestsPanel — PV4-09: the Amends picker", () => {
+  const signed = [
+    { id: "ct-master", title: "Master services agreement", reference: "MSA-2026" },
+    { id: "ct-site", title: "Site redesign agreement", reference: null },
+  ];
+  async function open(listSignedContracts: ChangeRequestsPanelActions["listSignedContracts"], triage = vi.fn().mockResolvedValue({ ok: true, status: "new", route: null, blocked: true })) {
+    render(<ChangeRequestsPanel rows={[row({ id: "cr-1", status: "new", kind: "design" })]} canTriage actions={actionsStub({ triage, listSignedContracts })} />);
+    fireEvent.click(screen.getByText("A request"));
+    await waitFor(() => screen.getByText("Convert"));
+    return triage;
+  }
+
+  it("is not offered until the answer is Yes", async () => {
+    await open(vi.fn().mockResolvedValue({ ok: true, contracts: signed }));
+    expect(screen.queryByLabelText(/Amends/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("No"));
+    expect(screen.queryByLabelText(/Amends/)).not.toBeInTheDocument();
+  });
+
+  it("on Yes, lists the client's signed contracts and defaults to 'Let the system choose'", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, contracts: signed });
+    await open(list);
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    const picker = (await screen.findByLabelText(/Amends/)) as HTMLSelectElement;
+    await waitFor(() => expect(picker).toBeEnabled());
+    expect(list).toHaveBeenCalledWith("cl-1");
+    expect(picker.value).toBe("");
+    expect(Array.from(picker.options).map((o) => o.textContent)).toEqual([
+      "Let the system choose", "Master services agreement \u00b7 MSA-2026", "Site redesign agreement",
+    ]);
+  });
+
+  it("leaving the default sends no amendsId", async () => {
+    const triage = await open(vi.fn().mockResolvedValue({ ok: true, contracts: signed }));
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    await waitFor(() => expect(screen.getByLabelText(/Amends/)).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /^Convert$/ }));
+    await waitFor(() => expect(triage).toHaveBeenCalledTimes(1));
+    expect(triage).toHaveBeenCalledWith("cr-1", { action: "convert", route: "mini_run", kindOverride: "design", priceImpact: "changes_price" });
+  });
+
+  it("choosing a contract sends it as amendsId", async () => {
+    const triage = await open(vi.fn().mockResolvedValue({ ok: true, contracts: signed }));
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    await waitFor(() => expect(screen.getByLabelText(/Amends/)).toBeEnabled());
+    fireEvent.change(screen.getByLabelText(/Amends/), { target: { value: "ct-site" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Convert$/ }));
+    await waitFor(() => expect(triage).toHaveBeenCalledWith("cr-1", { action: "convert", route: "mini_run", kindOverride: "design", priceImpact: "changes_price", amendsId: "ct-site" }));
+  });
+
+  it("a chosen contract is never sent with a No answer", async () => {
+    const triage = await open(vi.fn().mockResolvedValue({ ok: true, contracts: signed }));
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    await waitFor(() => expect(screen.getByLabelText(/Amends/)).toBeEnabled());
+    fireEvent.change(screen.getByLabelText(/Amends/), { target: { value: "ct-site" } });
+    fireEvent.click(screen.getByLabelText("No"));
+    fireEvent.click(screen.getByRole("button", { name: /^Convert$/ }));
+    await waitFor(() => expect(triage).toHaveBeenCalledTimes(1));
+    expect((triage.mock.calls[0] as unknown[])[1]).not.toHaveProperty("amendsId");
+  });
+
+  it("a failed contracts read says so and keeps the system default", async () => {
+    await open(vi.fn().mockResolvedValue({ ok: false, error: "platform 500" }));
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    expect(await screen.findByText(/could not be listed, so the system will choose/)).toBeInTheDocument();
+  });
+
+  it("is not offered when the request has no client, or the action is not wired", async () => {
+    render(<ChangeRequestsPanel rows={[row({ id: "cr-1", status: "new", clientId: null, clientName: null })]} canTriage actions={actionsStub({ listSignedContracts: vi.fn() })} />);
+    fireEvent.click(screen.getByText("A request"));
+    await waitFor(() => screen.getByText("Convert"));
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    expect(screen.queryByLabelText(/Amends/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ChangeRequestsPanel — PV4-09: the price and amendment columns", () => {
+  it("shows the price impact and the amendment status, linked to the client's billing", () => {
+    render(
+      <ChangeRequestsPanel
+        rows={[row({ id: "a", title: "Wishlist", priceImpact: "changes_price", amendmentContractId: "ct-9", amendmentStatus: "draft" })]}
+        canTriage
+        actions={actionsStub()}
+      />,
+    );
+    expect(screen.getByText("Price")).toBeInTheDocument();
+    expect(screen.getByText("Amendment")).toBeInTheDocument();
+    expect(screen.getByText("Changes the price")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Draft amendment" })).toHaveAttribute("href", "/clients/cl-1/billing");
+  });
+
+  it("says nothing for a field an older server omits, and a dash when no amendment is linked", () => {
+    render(<ChangeRequestsPanel rows={[row({ id: "a", title: "Old row" }), row({ id: "b", title: "None", priceImpact: "none", amendmentStatus: null })]} canTriage actions={actionsStub()} />);
+    expect(screen.queryByText("Not assessed")).not.toBeInTheDocument();
+    expect(screen.getByText("No price change")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /amendment/i })).not.toBeInTheDocument();
+  });
+
+  it("a request with no client shows the amendment status without a link", () => {
+    render(<ChangeRequestsPanel rows={[row({ id: "a", clientId: null, clientName: null, priceImpact: "changes_price", amendmentStatus: "signed" })]} canTriage actions={actionsStub()} />);
+    expect(screen.getByText("Amendment signed")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Amendment signed" })).not.toBeInTheDocument();
+  });
+});

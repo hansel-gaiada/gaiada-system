@@ -238,6 +238,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
+| `/api` | `platform-nest/src/modules/invoice/billing-profile-agent.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/billing-profile.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/invoice.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
@@ -520,9 +521,12 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/portal/company/[[...section]]`
 - `/portal/contracts`
 - `/portal/contracts/[contractId]`
+- `/portal/conversation`
+- `/portal/conversation/[threadId]`
 - `/portal/deliverables`
 - `/portal/invoices`
 - `/portal/invoices/[invoiceId]`
+- `/portal/meetings/[minutesId]`
 - `/portal/profile`
 - `/portal/projects`
 - `/portal/projects/[projectId]`

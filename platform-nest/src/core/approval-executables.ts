@@ -50,6 +50,8 @@ import { declareSocialModuleScope } from "../modules/social/module-scope";
 // SMM-22 — the config-gated bar lift for social.publishPostMetered. See this file's own SMM-22
 // section for the full reasoning; `resolveXPricing` is the money guard the boot check verifies.
 import { config } from "../config";
+import { readIssueReadiness } from "../modules/invoice/issue";
+import { NotFoundException } from "@nestjs/common";
 import { resolveXPricing } from "../modules/social/usage-ledger";
 import { EditorialScopeError, isEditorialRole, normaliseEditorialScope } from "../rbac/editorial-roles";
 
@@ -2244,6 +2246,127 @@ export function registerContractBillingExecutableApprovals(): void {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
+// PV5-12 — `invoices.issue` and `invoices.voidIssued` (HIGH, D14)
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Same doctrine as the PV3-06 section above. The re-drive runs as the ORIGINAL FILING PRINCIPAL (approval-execute.ts,
+// invariant 1), so the route's own Cerbos check (`invoice` `issue` / `void_issued`) runs against the human the agent
+// acted for, and a `bot` or `automation` principal is refused there (PV5-02). The preconditions do NOT re-derive
+// authorization; they answer "is the invoice still in the state the approval was filed against?".
+//
+//   issue : the invoice is still `approved` and not yet issued, AND it is still READY. Readiness is re-read here from
+//           the same function the readiness GET and the issue transaction use, so a profile, period or bank detail
+//           that went missing while the approval sat in the inbox refuses the run (`invoice_not_ready:<codes>`)
+//           instead of surfacing as a 409 from the route. The issue transaction re-checks it again under the row lock.
+//   void  : the invoice is still ISSUED (`sent`) and unpaid. A paid, void or never-issued invoice is refused, and
+//           so is a missing or too-short reason (the route needs one; an approval without it could only fail).
+//
+// Tenant and invoice come from the approval's args and every query pins the tenant as well as relying on RLS.
+// Both are core `invoices` reads (plain tenant wall), so no `preconditionModules`; `readIssueReadiness` opens its
+// own finance-scoped session.
+
+function invoiceArgs(args: Record<string, unknown>) {
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  const id = typeof args?.invoiceId === "string" ? args.invoiceId : "";
+  return { tenantId, id };
+}
+
+async function invoiceIssuePrecondition(client: PoolClient, args: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const { tenantId, id } = invoiceArgs(args);
+  if (!tenantId || !id) return { ok: false, reason: "missing_invoice_args" };
+  const { rows } = await client.query<{ status: string; issued_at: string | null }>(
+    `SELECT status, issued_at FROM invoices WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, id],
+  );
+  const inv = rows[0];
+  if (!inv) return { ok: false, reason: "invoice_not_found" };
+  // Already issued (a lost-response retry, or a human issued it while the approval waited).
+  if (inv.issued_at) return { ok: false, reason: "invoice_already_issued" };
+  if (inv.status !== "approved") return { ok: false, reason: "invoice_not_approved" };
+  let readiness;
+  try {
+    readiness = await readIssueReadiness(tenantId, id);
+  } catch (e) {
+    if (e instanceof NotFoundException) return { ok: false, reason: "invoice_not_found" };
+    throw e;
+  }
+  if (!readiness.ready) {
+    return { ok: false, reason: `invoice_not_ready: ${readiness.blockers.map((b) => b.code).join(",")}` };
+  }
+  return { ok: true };
+}
+
+async function invoiceVoidPrecondition(client: PoolClient, args: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const { tenantId, id } = invoiceArgs(args);
+  if (!tenantId || !id) return { ok: false, reason: "missing_invoice_args" };
+  const reason = typeof args?.reason === "string" ? args.reason.trim() : "";
+  if (reason.length < 4) return { ok: false, reason: "void_reason_required" };
+  const { rows } = await client.query<{ status: string; issued_at: string | null }>(
+    `SELECT status, issued_at FROM invoices WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, id],
+  );
+  const inv = rows[0];
+  if (!inv) return { ok: false, reason: "invoice_not_found" };
+  if (!inv.issued_at) return { ok: false, reason: "invoice_not_issued" };
+  // Void already, or paid in the meantime: only an issued, unpaid (`sent`) invoice can be voided.
+  if (inv.status !== "sent") return { ok: false, reason: "invoice_not_voidable" };
+  return { ok: true };
+}
+
+/** Registers the two PV5-12 entries. Exported for the same reason the other bootstraps are. */
+export function registerInvoiceIssueExecutableApprovals(): void {
+  const key = (ns: string) => (args: Record<string, unknown>): string => {
+    const id = typeof args?.invoiceId === "string" && args.invoiceId ? args.invoiceId : null;
+    return id ? `${ns}:${id}` : `${ns}:malformed:${JSON.stringify(args ?? {})}`;
+  };
+  registerExecutableApproval({
+    toolName: "invoices.issue",
+    lockKey: key("invoice:issue"),
+    precondition: invoiceIssuePrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "invoices.voidIssued",
+    lockKey: key("invoice:void"),
+    precondition: invoiceVoidPrecondition,
+  });
+}
+
+// PV4-07 — the client-reaching conversation and minutes tools: BARRED, because agents draft and staff send (PV-D23).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `conversation.post` / `conversation.open` (a message to a client), `conversation.sendDraft` (a drafted message to a client)
+// and `meetings.shareMinutes` (minutes to a client) are `impact: "medium"` (core-tools.ts), so an unattended caller's call
+// is SUSPENDED for a human to approve. Without a bar, that approval would be the one path by which an agent's words reach a
+// client with a human only clicking "approve" on a card. The ruling is stricter: a message is the sender's, and the sender
+// is a named person who read it, so it is sent by that person from the conversation screen (or their own MCP client), never
+// by a re-drive that runs as the agent's filing principal.
+//
+// A bar adds nothing to the absence that already fails closed (no entry means the executor marks the row `not_executable`
+// and never calls the hub): it makes the decision a fact in code. `registerExecutableApproval` throws for these names, so a
+// later ticket cannot make one executable without deleting this registration and saying why in the same change. Cerbos
+// independently denies the same actions to `bot`/`automation` principals, and the endpoints answer them with the typed
+// `agents_draft_staff_send` refusal (core/agent-refusal.ts).
+export const CONVERSATION_BARRED_TOOLS = [
+  "conversation.post",
+  "conversation.open",
+  "conversation.sendDraft",
+  "meetings.shareMinutes",
+] as const;
+
+/** The reason TOKEN of the bars, the same code the endpoints answer an agent with. */
+export const CONVERSATION_BAR_REASON = "agents_draft_staff_send";
+
+export function registerConversationBars(): void {
+  for (const toolName of CONVERSATION_BARRED_TOOLS) {
+    registerBarredExecutable({
+      toolName,
+      reason: CONVERSATION_BAR_REASON,
+      note: "PV-D23: agents draft, staff send — nothing an agent writes reaches a client until a staff member approves it",
+    });
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
 // THE production bootstrap — one list, so it cannot go stale
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 //
@@ -2281,6 +2404,8 @@ export function registerAllExecutableApprovals(): void {
   registerAgencyPrivacyBars();
   registerSearchConversionBars();
   registerContractBillingExecutableApprovals();
+  registerInvoiceIssueExecutableApprovals();
+  registerConversationBars();
 }
 
 registerAllExecutableApprovals();

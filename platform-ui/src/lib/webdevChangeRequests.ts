@@ -12,6 +12,8 @@ export type CrKind = "content" | "design" | "feature" | "bug";
 export type CrStatus = "new" | "triaged" | "in_progress" | "done" | "declined";
 export type CrRoute = "control_plane" | "mini_run" | "pm_task";
 export type CrSource = "portal" | "internal";
+/** PV4-04 (BFF 16f-iii). `unassessed` is every request that predates PV4 (grandfathered, never blocked). */
+export type CrPriceImpact = "unassessed" | "none" | "changes_price";
 
 export const KINDS: CrKind[] = ["content", "design", "feature", "bug"];
 export const ROUTES: CrRoute[] = ["control_plane", "mini_run", "pm_task"];
@@ -73,6 +75,12 @@ export interface ChangeRequestRow {
    *  this row's client can read it in the portal; a project-scoped contact may see less. Optional because
    *  an older server omits it. Never derive it in the browser (BFF §22d). */
   clientVisible?: boolean;
+  /** PV4-04: the triager's answer to "does this change the price?". Optional: an older server omits it. */
+  priceImpact?: CrPriceImpact;
+  /** The amendment contract this request waits on, and its status (draft, sent, signed, ...). Both come
+   *  from the backend's read (BFF 16f-ii); null when there is none. */
+  amendmentContractId?: string | null;
+  amendmentStatus?: string | null;
 }
 
 /** The detail read additionally joins body + the linked run/task's live status (§2.2: "the CR
@@ -121,4 +129,26 @@ export function linkedArtifactHref(row: Pick<ChangeRequestRow, "route" | "pipeli
   if (row.route === "mini_run" && row.pipelineRunId) return `/pipeline/${row.pipelineRunId}`;
   if (row.route === "pm_task" && row.pmTaskId) return `/tasks/${row.pmTaskId}`;
   return null;
+}
+
+export const PRICE_IMPACT_LABEL: Record<CrPriceImpact, string> = {
+  unassessed: "Not assessed",
+  none: "No price change",
+  changes_price: "Changes the price",
+};
+
+/** The price column. A missing field (an older server) says nothing: it is never rendered as "Not assessed". */
+export function priceImpactText(row: Pick<ChangeRequestRow, "priceImpact">): string {
+  return row.priceImpact ? PRICE_IMPACT_LABEL[row.priceImpact] ?? "" : "";
+}
+
+const AMENDMENT_STATUS_LABEL: Record<string, string> = {
+  draft: "Draft amendment", sent: "Amendment sent", signed: "Amendment signed",
+  declined: "Amendment declined", void: "Amendment void", expired: "Amendment expired",
+};
+
+/** The amendment column: the linked contract's status in words, or "" when none is linked. */
+export function amendmentText(row: Pick<ChangeRequestRow, "amendmentStatus">): string {
+  if (!row.amendmentStatus) return "";
+  return AMENDMENT_STATUS_LABEL[row.amendmentStatus] ?? `Amendment ${row.amendmentStatus}`;
 }
