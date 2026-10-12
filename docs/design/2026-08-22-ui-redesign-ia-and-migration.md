@@ -212,6 +212,10 @@ computes a second one.**
 
 ### 2.4 HR and IT: resolve the double path
 
+> **Superseded 2026-10-13 (Department workspaces plan §2.1, DW-D6):** HR, IT and Finance are **not** moved under
+> `/departments/[id]`. They keep their route trees and become workspaces by being listed in the workspace registry.
+> They are also added to each company's org tree, so their staff get a placement and land on their console.
+
 Per §1.1, HR/IT are reachable both as dedicated route segments (`(app)/hr`, `(app)/it`, each
 with their own `layout.tsx` + `SectionTabs`) and as `Departments` entries pointing at
 `/departments/[deptId]`. The target IA picks **one**: HR and IT become ordinary department

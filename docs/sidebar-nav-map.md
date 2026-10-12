@@ -11,6 +11,16 @@ changes `nav.ts`** — a nav move with no entry here is treated as an accident, 
 
 ## 1. How the sidebar renders
 
+> **Coming change: the workspace model (PLANNED; every decision ruled 2026-10-13).** The
+> [Department workspaces plan](plans/2026-10-13-department-workspaces.md) replaces the 12-group map below.
+> - A workspace switcher sits at the top.
+> - Below it come four short blocks: Overview + AI Assistant, Work, Performance, and You.
+> - Company, Admin and + New sit at the foot.
+>
+> The collapsed rail becomes flat icons, and an `areaFor(path)` map gives every page exactly one home.
+> Until it ships (DW-2, behind a per-person pilot switch), sections 1 and 2 describe the live sidebar. Each DW change to
+> `nav.ts` gets its own entry in §3, as the rule below requires.
+
 Two modes, one nav model. `navFor(me, tenantId, departments)` returns `NavGroup[]`; the renderer
 decides how each group is drawn.
 
