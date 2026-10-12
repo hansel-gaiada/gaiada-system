@@ -134,7 +134,16 @@ describe.skipIf(!TEST_URL)("M5-V6-b · session recording routes", () => {
   const q = <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => adminPool().query(sql, params).then((r) => r.rows as T[]);
   const base = () => `/api/${A}/modules/search/properties/${propA}`;
   const listUrl = (visitor: string) => `${base()}/visitors/${visitor}/recordings`;
-  const chunksUrl = (rec: string, from?: string) => `${base()}/recordings/${rec}/chunks${from === undefined ? "" : `?from=${from}`}`;
+  const chunksUrl = (rec: string, from?: string, opening?: string) => {
+    const qs = [from === undefined ? null : `from=${from}`, opening === undefined ? null : `opening=${opening}`].filter(Boolean).join("&");
+    return `${base()}/recordings/${rec}/chunks${qs ? `?${qs}` : ""}`;
+  };
+  /** Opens a recording (page 1) as `user` and returns the opening id that later pages must carry. */
+  const open = async (rec: string, user = u): Promise<string> => {
+    const res = await get(chunksUrl(rec), user);
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json().openingId as string;
+  };
   const get = (url: string, user = u) => app.inject({ method: "GET", url, headers: asUser(user) });
   const openings = (rec: string) => q<{ actor_id: string; verb: string; target_entity_type: string; target_entity_id: string; metadata: Record<string, unknown> }>(
     `SELECT actor_id, verb, target_entity_type, target_entity_id, metadata FROM activities WHERE tenant_id = $1 AND target_entity_type = 'search_replay_recording' AND target_entity_id = $2`, [A, rec]);
@@ -204,10 +213,13 @@ describe.skipIf(!TEST_URL)("M5-V6-b · session recording routes", () => {
   describe("authorization (view_replay; authorize before validate)", () => {
     it("positive control: both routes ask view_replay on the property kind, with module search and the tenant, and answer 200", async () => {
       const rec = coll.add(live.visitor, live.consent);
-      for (const url of [listUrl(live.visitor), chunksUrl(rec), chunksUrl(rec, "1")]) {
+      let opening = "";
+      for (const url of [listUrl(live.visitor), chunksUrl(rec), () => chunksUrl(rec, "1", opening)]) {
         calls.length = 0;
-        const res = await get(url);
-        expect(res.statusCode, `${url}: ${res.body}`).toBe(200);
+        const target = typeof url === "function" ? url() : url;
+        const res = await get(target);
+        expect(res.statusCode, `${target}: ${res.body}`).toBe(200);
+        if (target === chunksUrl(rec)) opening = res.json().openingId;
         expect(calls[0]).toMatchObject({ kind: "resource_search_property", action: "view_replay", id: propA, tenantId: A });
       }
     });
@@ -336,18 +348,20 @@ describe.skipIf(!TEST_URL)("M5-V6-b · session recording routes", () => {
       expect(first.headers["cache-control"]).toBe("no-store");
       expect(await openings(rec)).toHaveLength(1);
 
-      const second = (await get(chunksUrl(rec, String(p1.nextFrom)))).json();
-      expect(second).toMatchObject({ from: 20, more: false, nextFrom: null, opened: false });
+      expect(p1.openingId).toEqual(expect.any(String));
+      expect((await openings(rec))[0]!.target_entity_id).toBe(rec);
+      const second = (await get(chunksUrl(rec, String(p1.nextFrom), p1.openingId))).json();
+      expect(second).toMatchObject({ from: 20, more: false, nextFrom: null, opened: false, openingId: null });
       expect(second.chunks.map((c: { seq: number }) => c.seq)).toEqual([20, 21, 22, 23, 24]);
       expect(await openings(rec)).toHaveLength(1); // still one: paging is not another opening
     });
     it("the collector is asked for `after = from - 1`, so `from` is the first seq returned (no off-by-one, chunk 0 is not skipped)", async () => {
       const rec = coll.add(live.visitor, live.consent, 6);
-      await get(chunksUrl(rec, "3"));
+      const opening = await open(rec);
+      await get(chunksUrl(rec, "3", opening));
       await get(chunksUrl(rec, "0"));
-      await get(chunksUrl(rec));
       const afters = coll.requests.filter((r) => r.path === "/ops/v1/replay/chunks").map((r) => r.params.after);
-      expect(afters).toEqual(["2", "-1", "-1"]);
+      expect(afters).toEqual(["-1", "2", "-1"]);
     });
     it("`from` absent and `from=0` are each an opening: one row each, and each row says who, which recording and which property, with no content", async () => {
       const rec = coll.add(live.visitor, live.consent, 2);
@@ -365,6 +379,86 @@ describe.skipIf(!TEST_URL)("M5-V6-b · session recording routes", () => {
         expect(text).not.toContain(live.consent);
         expect(text).not.toContain("events");
       }
+    });
+    describe("later pages need the opening (409 not_opened)", () => {
+      const expectNotOpened = (res: { statusCode: number; json: () => Record<string, unknown>; body: string }) => {
+        expect(res.statusCode, res.body).toBe(409);
+        const b = res.json();
+        expect(b.reason).toBe("not_opened");
+        expect(String(b.error).length).toBeGreaterThan(40);
+        expect(b).not.toHaveProperty("chunks");
+        expect(res.body).not.toContain(SECRET);
+      };
+      it("from > 0 without `opening` is 409 and no content; nothing is written", async () => {
+        const rec = coll.add(live.visitor, live.consent, 25);
+        expectNotOpened(await get(chunksUrl(rec, "1")));
+        expect(await openings(rec)).toHaveLength(0);
+      });
+      it("a malformed opening id, and a well-formed one that matches no row, are the same 409", async () => {
+        const rec = coll.add(live.visitor, live.consent, 25);
+        expectNotOpened(await get(chunksUrl(rec, "1", "not-a-uuid")));
+        expectNotOpened(await get(chunksUrl(rec, "1", newId())));
+      });
+      it("another user's opening id is 409", async () => {
+        const u2 = await createUser("v6b-b@a.test");
+        await addMembership(A, u2);
+        const rec = coll.add(live.visitor, live.consent, 25);
+        const theirs = await open(rec, u2);
+        expectNotOpened(await get(chunksUrl(rec, "1", theirs)));
+        expect(await openings(rec)).toHaveLength(1); // only u2's opening exists
+      });
+      it("an opening of a DIFFERENT recording is 409", async () => {
+        const rec1 = coll.add(live.visitor, live.consent, 25);
+        const rec2 = coll.add(live.visitor, live.consent, 25);
+        const opening2 = await open(rec2);
+        expectNotOpened(await get(chunksUrl(rec1, "1", opening2)));
+      });
+      it("an activity row that is not an opening (another verb or entity type) is 409", async () => {
+        const rec = coll.add(live.visitor, live.consent, 25);
+        const opening = await open(rec);
+        await q(`UPDATE activities SET verb = 'viewed' WHERE id = $1`, [opening]);
+        expectNotOpened(await get(chunksUrl(rec, "1", opening)));
+        await q(`UPDATE activities SET verb = 'opened', target_entity_type = 'search_property' WHERE id = $1`, [opening]);
+        expectNotOpened(await get(chunksUrl(rec, "1", opening)));
+      });
+      it("an opening older than 60 minutes is 409; one inside the hour is 200 (occurred_at is backdated)", async () => {
+        const rec = coll.add(live.visitor, live.consent, 25);
+        const opening = await open(rec);
+        await q(`UPDATE activities SET occurred_at = now() - interval '59 minutes' WHERE id = $1`, [opening]);
+        expect((await get(chunksUrl(rec, "20", opening))).statusCode).toBe(200);
+        await q(`UPDATE activities SET occurred_at = now() - interval '61 minutes' WHERE id = $1`, [opening]);
+        expectNotOpened(await get(chunksUrl(rec, "20", opening)));
+      });
+      it("the right opening is 200, and the whole sequence leaves exactly ONE activity row", async () => {
+        const rec = coll.add(live.visitor, live.consent, 45);
+        const opening = await open(rec);
+        const p2 = await get(chunksUrl(rec, "20", opening));
+        expect(p2.statusCode, p2.body).toBe(200);
+        expect(p2.json()).toMatchObject({ from: 20, more: true, nextFrom: 40, opened: false, openingId: null });
+        const p3 = await get(chunksUrl(rec, "40", opening));
+        expect(p3.json()).toMatchObject({ from: 40, more: false, nextFrom: null });
+        expect(await openings(rec)).toHaveLength(1);
+      });
+      it("the order is authorize, validate, live profile, THEN the opening: denied is 403, a bad `from` is 400, no live profile is 404 (never 409)", async () => {
+        const rec = coll.add(live.visitor, live.consent, 25);
+        const orphan = coll.add(newId(), newId());
+        denied.add("resource_search_property:view_replay");
+        expect((await get(chunksUrl(rec, "1"))).statusCode).toBe(403);
+        denied.clear();
+        expect((await get(chunksUrl(rec, "abc"))).statusCode).toBe(400);
+        expect((await get(chunksUrl(orphan, "1"))).statusCode).toBe(404);
+        expect((await get(chunksUrl(rec, "1"))).statusCode).toBe(409);
+      });
+      it("a withdrawal mid-replay turns a valid later page into 404, not content", async () => {
+        const ghost = { visitor: "", consent: "" };
+        await profile(A, propA, ghost);
+        const rec = coll.add(ghost.visitor, ghost.consent, 25);
+        const opening = await open(rec);
+        await q(`DELETE FROM search_visitor_profiles WHERE tenant_id = $1 AND visitor_id = $2`, [A, ghost.visitor]);
+        const res = await get(chunksUrl(rec, "20", opening));
+        expect(res.statusCode).toBe(404);
+        expect(res.body).not.toContain(SECRET);
+      });
     });
     it("a refused request (404, 503, 400) writes no activity row", async () => {
       const rec = coll.add(live.visitor, live.consent);

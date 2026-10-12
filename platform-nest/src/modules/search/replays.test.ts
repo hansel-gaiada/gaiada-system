@@ -8,7 +8,7 @@ import {
   InsightsBadResponseError, InsightsNotConfiguredError, InsightsNotFoundError, InsightsAuthError, InsightsUnreachableError,
   readReplayChunks, readReplaySessions, type InsightsSettings,
 } from "./insights-client";
-import { REPLAY_WORDS, unavailableFrom } from "./replays.service";
+import { NOT_OPENED_WORDS, OPENING_VALID_MINUTES, REPLAY_WORDS, unavailableFrom } from "./replays.service";
 import { REPLAY_FROM_MAX, parseFrom } from "./replays.controller";
 import { REPLAY_MCP_TOOLS } from "./replays-mcp-tools";
 import { searchModule } from "./index";
@@ -117,6 +117,14 @@ describe("the 503 in words", () => {
     expect(unavailableFrom(new InsightsNotFoundError()).reason).toBe("collector_rejected");
     for (const w of Object.values(REPLAY_WORDS)) expect(w.length).toBeGreaterThan(40);
     expect(REPLAY_WORDS.collector_unreachable).toMatch(/not an empty list/);
+  });
+});
+
+describe("the opening", () => {
+  it("is valid for 60 minutes and its refusal is a sentence that says how to recover", () => {
+    expect(OPENING_VALID_MINUTES).toBe(60);
+    expect(NOT_OPENED_WORDS.length).toBeGreaterThan(40);
+    expect(NOT_OPENED_WORDS).toMatch(/Open it from the start/);
   });
 });
 

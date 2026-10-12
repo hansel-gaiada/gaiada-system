@@ -85,7 +85,14 @@ export interface ChunksPage {
   nextFrom: number | null;
   /** True when this page opened the recording (and an activity row was written). */
   opened: boolean;
+  /** The id of the opening's activity row on an opening page; null on a later page. Every later page must send it back as `opening`. */
+  openingId: string | null;
 }
+
+/** How long an opening stays valid for paging on (a recording is at most 30 minutes long; the viewer may pause). */
+export const OPENING_VALID_MINUTES = 60;
+export const NOT_OPENED_WORDS =
+  "This recording was not opened by you in the last hour, so no content is returned. Open it from the start (the first page, without `from` or with from=0) and page on with the opening id that call returns.";
 
 export const RECORDING_ACTIVITY_ENTITY = "search_replay_recording";
 export const RECORDING_ACTIVITY_VERB = "opened";
@@ -161,8 +168,8 @@ export async function listRecordings(
  * `actorId` is written to the activity row on an opening.
  */
 export async function readRecordingChunks(
-  tenantId: string, propertyId: string, recordingId: string, from: number, actorId: string | null, deps: ReplayDeps = {},
-): Promise<{ propertyFound: false } | { propertyFound: true; page: ChunksPage | null }> {
+  tenantId: string, propertyId: string, recordingId: string, from: number, actorId: string | null, openingId: string | null, deps: ReplayDeps = {},
+): Promise<{ propertyFound: false } | { propertyFound: true; page: ChunksPage | null } | { propertyFound: true; notOpened: true }> {
   const prop = await readProperty(tenantId, propertyId);
   if (!prop) return { propertyFound: false };
   const website = websiteOrThrow(prop, deps);
@@ -177,23 +184,37 @@ export async function readRecordingChunks(
     throw e;
   }
   // The content is in memory but not released until the recording's visitor is proven to have a live profile with this very consent id.
-  const live = await withTenants([tenantId], async (c) => {
+  // Then, for a later page (from > 0), the caller must hold a recent opening of THIS recording: an activity row with exactly the id they sent, verb
+  // `opened`, this entity type and recording, their own actor id, this tenant, within OPENING_VALID_MINUTES. Same transaction as the profile check.
+  // The order is fixed: the live-profile check first (a recording without one is 404 whatever the caller sent), the opening check second.
+  const checked = await withTenants([tenantId], async (c) => {
     const r = await c.query(
       `SELECT 1 FROM search_visitor_profiles WHERE tenant_id = $1 AND property_id = $2 AND visitor_id = $3 AND consent_id = $4`,
       [tenantId, propertyId, rec.visitorId, rec.consentId],
     );
-    return r.rows.length > 0;
+    if (r.rows.length === 0) return "no_profile" as const;
+    if (from === 0) return "ok" as const;
+    if (!openingId || !UUID_RE.test(openingId)) return "not_opened" as const;
+    const o = await c.query(
+      `SELECT 1 FROM activities
+        WHERE id = $1 AND tenant_id = $2 AND verb = $3 AND target_entity_type = $4 AND target_entity_id = $5
+          AND actor_id IS NOT DISTINCT FROM $6 AND occurred_at > now() - make_interval(mins => $7::int)`,
+      [openingId.toLowerCase(), tenantId, RECORDING_ACTIVITY_VERB, RECORDING_ACTIVITY_ENTITY, rec.recordingId, actorId, OPENING_VALID_MINUTES],
+    );
+    return o.rows.length > 0 ? ("ok" as const) : ("not_opened" as const);
   }, SEARCH);
-  if (!live) return { propertyFound: true, page: null };
+  if (checked === "no_profile") return { propertyFound: true, page: null };
+  if (checked === "not_opened") return { propertyFound: true, notOpened: true };
   const opened = from === 0;
+  let newOpeningId: string | null = null;
   if (opened) {
     // Metadata carries the recording and property ids only: no visitor id, no consent id, no content, no page paths.
-    await writeActivity(tenantId, actorId, RECORDING_ACTIVITY_VERB, RECORDING_ACTIVITY_ENTITY, rec.recordingId, { propertyId, recordingId: rec.recordingId });
+    newOpeningId = await writeActivity(tenantId, actorId, RECORDING_ACTIVITY_VERB, RECORDING_ACTIVITY_ENTITY, rec.recordingId, { propertyId, recordingId: rec.recordingId });
   }
   const chunks = rec.chunks.map((c: ReplayChunk) => ({ seq: c.seq, receivedAt: c.receivedAt, events: c.events }));
   const last = chunks.length > 0 ? chunks[chunks.length - 1]!.seq : from - 1;
   return {
     propertyFound: true,
-    page: { propertyId, recordingId: rec.recordingId, from, chunks, more: rec.more, nextFrom: rec.more ? last + 1 : null, opened },
+    page: { propertyId, recordingId: rec.recordingId, from, chunks, more: rec.more, nextFrom: rec.more ? last + 1 : null, opened, openingId: newOpeningId },
   };
 }

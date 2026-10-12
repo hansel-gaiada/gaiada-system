@@ -1,6 +1,8 @@
 // M5-V6-b — the session-recording routes (design 2026-10-12 §6.3, §4.8). Under api/:tenantId/modules/search/properties/:propertyId/:
 //   GET  visitors/:visitorId/recordings        Cerbos resource_search_property · view_replay   METADATA ONLY (MCP: search.replays.list)
-//   GET  recordings/:recordingId/chunks?from   Cerbos resource_search_property · view_replay   the content, 20 chunks a page, through the BFF
+//   GET  recordings/:recordingId/chunks?from&opening   Cerbos resource_search_property · view_replay   the content, 20 chunks a page, through the BFF
+//        The first page (`from` absent or 0) writes the opening activity row and returns its id as `openingId`; every later page (from > 0) must send it
+//        back as `opening`, or it is 409 not_opened (no content). Order: authorize, validate, live-profile check, opening check.
 // There is NO download route and NO MCP tool for the content (O7: in v1 no tool returns recording content). The player (V6-c) calls the chunk
 // route; the browser never talks to the collector.
 //
@@ -9,14 +11,14 @@
 // this company's, or has no live verified profile) are distinct. A collector that cannot answer is a typed 503 {error, reason}, never an empty
 // list. Opening a recording (the first page, `from` absent or 0) writes ONE activity row, before any content leaves; see replays.service.ts.
 import {
-  BadRequestException, Controller, Get, Header, NotFoundException, Param, Query, Req, ServiceUnavailableException, UseGuards,
+  BadRequestException, ConflictException, Controller, Get, Header, NotFoundException, Param, Query, Req, ServiceUnavailableException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
-  ReplayRequestError, ReplayUnavailableError, listRecordings, readRecordingChunks, type ChunksPage, type RecordingsList,
+  NOT_OPENED_WORDS, ReplayRequestError, ReplayUnavailableError, listRecordings, readRecordingChunks, type ChunksPage, type RecordingsList,
 } from "./replays.service";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,15 +64,16 @@ export class SearchReplaysController {
   @Header("Cache-Control", "no-store")
   async chunks(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("propertyId") propertyId: string, @Param("recordingId") recordingId: string,
-    @Query("from") from?: string,
+    @Query("from") from?: string, @Query("opening") opening?: string,
   ): Promise<ChunksPage> {
     await this.gate(req, tenantId, propertyId);
     if (!UUID_RE.test(recordingId)) throw new BadRequestException({ message: "recordingId must be a valid id", reason: "recording_id_invalid" });
     let out;
     try {
-      out = await readRecordingChunks(tenantId, propertyId, recordingId.toLowerCase(), parseFrom(from), req.principal.userId ?? null);
+      out = await readRecordingChunks(tenantId, propertyId, recordingId.toLowerCase(), parseFrom(from), req.principal.userId ?? null, typeof opening === "string" ? opening : null);
     } catch (e) { throw asHttp(e); }
     if (!out.propertyFound) throw new NotFoundException("property not found");
+    if ("notOpened" in out) throw new ConflictException({ message: NOT_OPENED_WORDS, reason: "not_opened" });
     if (!out.page) throw new NotFoundException({ message: "no recording with this id for a consented visitor on this property", reason: "recording_not_found" });
     return out.page;
   }
