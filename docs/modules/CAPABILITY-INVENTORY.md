@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **169** capabilities across **16** owners
-- **87** writes · 82 reads
+- **170** capabilities across **16** owners
+- **87** writes · 83 reads
 - Writes by impact: **high 18** · medium 28 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -39,11 +39,11 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 11 |
+| agency | `agency` | 12 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 13 |
-| core | `agency` · `positions` · `role-grants` | 15 |
+| clients | `clients` | 12 |
+| core | `agency` · `positions` · `role-grants` | 16 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 4 |
@@ -72,6 +72,7 @@ unfalsifiable after.
 | core | `agency_intake.invite` | `POST` | `/api/:tenantId/agency/leads/:leadId/invite` | write | `low` |
 | core | `agency_intake.listLeads` | `GET` | `/api/:tenantId/agency/leads` | read | — |
 | core | `agency_intake.listSubmissions` | `GET` | `/api/:tenantId/agency/leads/:leadId/submissions` | read | — |
+| core | `agency_intake.listWebLeads` | `GET` | `/api/:tenantId/agency/web-leads/:siteSlug` | read | — |
 | core | `agency_intake.nurture` | `POST` | `/api/:tenantId/agency/leads/:leadId/nurture` | write | `low` |
 | core | `agency_intake.open` | `POST` | `/api/:tenantId/agency/leads/:leadId/open` | write | `low` |
 | core | `agency_pipeline.moveStage` | `POST` | `/api/:tenantId/agency/leads/:leadId/stage` | write | `low` |

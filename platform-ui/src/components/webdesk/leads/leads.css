@@ -1,0 +1,10 @@
+/* Website -> Leads (M5-L6). Prefix `wl-`. Tokens only (styles/tokens.test.ts bans colour literals). */
+@import "../../forms/forms.css";
+
+.wl-page { display: flex; flex-direction: column; gap: var(--space-20); }
+.wl-table { width: 100%; border-collapse: collapse; font: 400 13px var(--font-body); }
+.wl-table th { text-align: left; font: 700 10px var(--font-body); letter-spacing: 0.1em; color: var(--ink-subtle); padding: 8px 10px; border-bottom: 1px solid var(--line-strong); }
+.wl-table td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; overflow-wrap: anywhere; }
+.wl-name { font-weight: 600; color: var(--ink-strong); }
+.wl-nowrap { white-space: nowrap; }
+.wl-ids { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

@@ -39,6 +39,8 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "agency_intake.nurture",
       // M5-L4: a gaiada.com form submission becomes a lead (medium impact; executor in approval-executables.ts).
       "agency_intake.createFromWebSubmission",
+      // M5-L6: the Website -> Leads read (agency_lead:read, no new kind).
+      "agency_intake.listWebLeads",
       "agency_intake.convert",
       // M5-P1-c: the lead pipeline's agent surface (WSK-D69). Two reads, two LOW writes. There is no tool
       // for won or lost on purpose: won is agency_intake.convert, lost is agency_intake.decline.
