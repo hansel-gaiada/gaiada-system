@@ -19,7 +19,7 @@
 // company. That difference is why the two live in different files under different policies: a change
 // to the staff surface must not be able to widen the client's.
 import {
-  BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException,
+  BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException,
   Param, Patch, Post, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
@@ -158,8 +158,16 @@ export class ContractsController {
       throw new BadRequestException("endsOn cannot be before startsOn");
     }
     await authorize(req.principal, { kind: "contract", tenantId }, "create");
-    const id = newId();
-    await withTenants([tenantId], async (c) => {
+    // PV3-06 / agentic-native criterion 3 (idempotent writes). The natural dedupe key is the partial
+    // unique index `ix_contracts_reference_uniq` on (tenant_id, reference, version) WHERE reference IS NOT
+    // NULL: the insert below is `ON CONFLICT … DO NOTHING`, and a conflict returns the contract that is
+    // already there (`deduped: true`) instead of a second row or a constraint-violation 500. The tool
+    // `contracts.createDraft` makes `reference` required, so an agent or n8n retry is always covered;
+    // a human draft with no reference has no natural key and still inserts every time (SQL NULLs are
+    // distinct), exactly as before.
+    const reference = b.reference ? scrubText(b.reference).text.slice(0, 100) : null;
+    const newContractId = newId();
+    const { id, existing } = await withTenants([tenantId], async (c) => {
       const client = await c.query(`SELECT 1 FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]);
       if (!client.rows[0]) throw new NotFoundException("client not found");
       if (b.projectId) {
@@ -183,14 +191,15 @@ export class ContractsController {
         if (prev.rows[0].client_id !== clientId) throw new BadRequestException("cannot supersede another client's contract");
         version = prev.rows[0].version + 1;
       }
-      await c.query(
+      const ins = await c.query(
         `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, version, supersedes_id,
                                 status, file_id, body_md, value, currency, starts_on, ends_on, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', $9, $10, $11, $12, $13::date, $14::date, $15, $16)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', $9, $10, $11, $12, $13::date, $14::date, $15, $16)
+         ON CONFLICT (tenant_id, reference, version) WHERE reference IS NOT NULL AND deleted_at IS NULL DO NOTHING`,
         [
-          id, tenantId, clientId, b.projectId ?? null,
+          newContractId, tenantId, clientId, b.projectId ?? null,
           scrubText(title).text.slice(0, 300),
-          b.reference ? scrubText(b.reference).text.slice(0, 100) : null,
+          reference,
           version, b.supersedesId ?? null,
           b.fileId ?? null, b.bodyMd ?? null,
           b.value ?? null, (b.currency || "IDR").slice(0, 8),
@@ -198,7 +207,22 @@ export class ContractsController {
           req.principal.userId, config.originSite,
         ],
       );
+      if (ins.rowCount) return { id: newContractId, existing: null };
+      // A replay (or a concurrent twin: ON CONFLICT waits for the other insert to commit). Hand back the
+      // contract that holds this key, but only for the SAME client: the same reference under another
+      // client is a different request that happens to collide, and answering it with that client's
+      // contract id would leak it across clients.
+      const dup = await c.query<{ id: string; client_id: string; status: string }>(
+        `SELECT id, client_id, status FROM contracts
+          WHERE reference = $1 AND version = $2 AND deleted_at IS NULL`,
+        [reference, version],
+      );
+      const hit = dup.rows[0];
+      if (!hit) throw new ConflictException("contract reference is in use");
+      if (hit.client_id !== clientId) throw new ConflictException("that reference is already used by another contract");
+      return { id: hit.id, existing: { status: hit.status } };
     });
+    if (existing) return { id, status: existing.status, deduped: true };
     await writeActivity(tenantId, req.principal.userId, "created", "contract", id, { title });
     return { id, status: "draft" };
   }
@@ -304,9 +328,12 @@ export class ContractsController {
     @Param("contractId") contractId: string,
     @Body() b: { signerName?: string; signerTitle?: string },
   ) {
+    // PV3-06: AUTHORIZE BEFORE VALIDATING. This used to read the body first, so a caller who may not
+    // countersign got a 400 about `signerName` instead of a 403 (validation pre-empting authz), and any
+    // denial test that sent an empty body silently stopped testing authorization.
+    await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "countersign");
     const signerName = (b?.signerName ?? "").trim();
     if (signerName.length < 2) throw new BadRequestException("signerName required");
-    await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "countersign");
     const out = await withTenants([tenantId], async (c) => {
       const cur = await c.query<{ status: string; client_id: string; project_id: string | null; title: string }>(
         `SELECT status, client_id, project_id, title FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
@@ -418,6 +445,9 @@ export class ContractsController {
     @Param("paymentId") paymentId: string,
     @Body() b: { decision?: string; reason?: string },
   ) {
+    // PV3-06: authorize BEFORE validating the body (see `countersign`), so a caller who may not decide a
+    // payment gets 403 whatever they sent.
+    await authorize(req.principal, { kind: "invoice", id: paymentId, tenantId }, "update");
     const decision = b?.decision;
     if (decision !== "confirm" && decision !== "reject") throw new BadRequestException("decision must be confirm|reject");
     if (decision === "reject" && !(b?.reason ?? "").trim()) {
@@ -425,7 +455,6 @@ export class ContractsController {
       // query the reference. The portal renders this string in the payment row.
       throw new BadRequestException("a reason is required when rejecting a payment");
     }
-    await authorize(req.principal, { kind: "invoice", id: paymentId, tenantId }, "update");
 
     const out = await withTenants([tenantId], async (c) => {
       const cur = await c.query<{ status: string; invoice_id: string; client_id: string | null; amount: string; currency: string; recorded_by: string | null }>(

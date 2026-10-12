@@ -637,6 +637,233 @@ export function registerAgencyIntakeCoreTools(): void {
   registerCoreTools(AGENCY_INTAKE_CORE_TOOLS);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// PV3-06 — `contracts.*` and `invoicePayments.*`: the billing tools, readiness-bar criterion 1 for the
+// staff "Contracts & billing" page (PV3-08).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Plan: docs/plans/2026-10-11-pv3-hub-symmetry-tickets.md (PV3-06). Routes: core/contracts.controller.ts.
+// The agentic-native plan called invoicing "the one GM loop with zero automation surface"; staff UI for
+// legal and money writes without these tools would have widened that gap.
+//
+// Every tool is a thin front over ONE existing endpoint, so it carries exactly that endpoint's Cerbos
+// authorization (`contract` read/create/update/send/countersign, `invoice` read/update) and nothing
+// more. The hub fills `:param` tokens from the args and sends the rest as the JSON body; on a GET the
+// remaining args are DROPPED, which is why the two list tools carry `clientId` as a `?clientId=:clientId`
+// token in the path (the reports tools' pattern) and therefore REQUIRE it. A listing is per client by
+// design: the staff page is per client, and an unscoped 300-row dump is not something an agent should
+// ask for.
+//
+// ── IMPACT ──────────────────────────────────────────────────────────────────────────────────────
+//   createDraft / updateDraft  LOW     a draft reaches nobody: it is created `draft`, and `send` is a
+//                                       separate, separately authorized act. Editing is refused by the
+//                                       route once the contract is no longer a draft.
+//   send                       MEDIUM  it issues terms to a client and notifies their portal contacts.
+//   countersign                HIGH    it binds the company to the contract. Only a company owner or
+//                                       platform_admin passes Cerbos (PV3-01); company_admin and custom
+//                                       roles are refused by the route, so an agent acting for one is
+//                                       refused with the same 403 (a delegated call must pass for the
+//                                       human behind it as well).
+//   invoicePayments.decide     HIGH    it makes money real: only a `confirmed` payment counts toward a
+//                                       balance and this is the only place an invoice moves to `paid`.
+//
+// ── MAKER-CHECKER ───────────────────────────────────────────────────────────────────────────────
+// The person who recorded a payment cannot confirm it. The D14 re-drive runs as the ORIGINAL FILING
+// PRINCIPAL (approval-execute.ts, invariant 1), so `decidePayment`'s own recorder check applies to an
+// approved agent call exactly as to a human click: a recorder whose agent files `decide` is refused
+// (403) at execution. The tools add no bypass because they call the route.
+//
+// ── IDEMPOTENCY (criterion 3) ──────────────────────────────────────────────────────────────────
+// `contracts.createDraft` REQUIRES `reference`, the contract's natural dedupe key: the route inserts with
+// `ON CONFLICT (tenant_id, reference, version) DO NOTHING` against `ix_contracts_reference_uniq`, and a
+// retry returns the existing contract with `deduped: true`. `send`, `countersign` and `decide` are state
+// transitions that refuse a repeat (already sent; `alreadySigned`; already decided), so a retry cannot
+// double-apply, and each is also guarded by its D14 precondition.
+//
+// ── OBSERVABILITY (criterion 6) ────────────────────────────────────────────────────────────────
+// `created`, `sent`, `countersigned`, and `confirmed`/`rejected` each write an `activities` row with the
+// actor, and `writeActivity` stamps `metadata.via` (the agent or workflow that drove the call) and the
+// approval behind it, so the actor may be non-human and is never assumed human.
+const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
+  // ── reads ──────────────────────────────────────────────────────────────────────────────────────
+  {
+    name: "contracts.list",
+    description:
+      "One client's contracts, newest first (max 300), each with status (draft|sent|signed|declined|expired|void), " +
+      "who has signed (`clientSigned`, `providerSigned`) and `canCountersign` (true only when the caller may " +
+      "countersign this company's contracts AND the row is `sent` and awaiting our signature). `clientId` is a " +
+      "client uuid; a malformed id is a 400. A 403 is a refusal, never an empty list (criterion 5).",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/contracts?clientId=:clientId",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, clientId: { type: "string", description: "the client's uuid" } },
+      required: ["tenantId", "clientId"],
+    },
+  },
+  {
+    name: "contracts.get",
+    description:
+      "One contract with its terms (`bodyMd`, `fileId`), value, term dates, `canCountersign` and its signatures " +
+      "(party, signer, signer name and title, signedAt). 404 if it does not exist; a 403 is a distinct refusal.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/contracts/:contractId",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, contractId: { type: "string" } },
+      required: ["tenantId", "contractId"],
+    },
+  },
+  {
+    name: "invoicePayments.list",
+    description:
+      "One client's payment claims (max 300), pending first: amount, method, reference, status, `recordedBy`, " +
+      "`proofFileId` and the invoice's total and status. Deciding one is `invoicePayments.decide`. A 403 is a " +
+      "refusal, never an empty list.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/invoice-payments?clientId=:clientId",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, clientId: { type: "string", description: "the client's uuid" } },
+      required: ["tenantId", "clientId"],
+    },
+  },
+
+  // ── low: drafts reach nobody ───────────────────────────────────────────────────────────────────
+  {
+    name: "contracts.createDraft",
+    description:
+      "Draft a contract for a client. Always created `draft`: sending it is `contracts.send`. IDEMPOTENT on " +
+      "`reference` (the dedupe key): a retry with the same reference returns the existing contract's id with " +
+      "`deduped:true` instead of a second draft, and the same reference under a different client is a 409. " +
+      "`projectId` must belong to that client. `supersedesId` re-issues an earlier contract as the next version.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/contracts",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        clientId: { type: "string" },
+        title: { type: "string" },
+        reference: { type: "string", description: "REQUIRED here: the contract's own number (e.g. GDA-2026-014). It is the idempotency key." },
+        projectId: { type: "string", description: "optional; must be a project of this client" },
+        bodyMd: { type: "string", description: "the terms, in markdown. A contract needs this or a file before it can be sent." },
+        fileId: { type: "string", description: "an uploaded document (files target `contract`)" },
+        value: { type: "number", description: "non-negative" },
+        currency: { type: "string", description: "defaults to IDR" },
+        startsOn: { type: "string", description: "YYYY-MM-DD" },
+        endsOn: { type: "string", description: "YYYY-MM-DD, not before startsOn" },
+        supersedesId: { type: "string" },
+      },
+      required: ["tenantId", "clientId", "title", "reference"],
+    },
+  },
+  {
+    name: "contracts.updateDraft",
+    description:
+      "Edit a DRAFT contract's title, reference, terms, file, value, currency or term dates (only the fields sent " +
+      "change). Refused (400) once the contract is no longer a draft: a signed contract is never edited in place, " +
+      "re-issue it with `contracts.createDraft` and `supersedesId`. Voiding is a staff action in the UI, not this tool.",
+    minAssurance: "verified",
+    method: "PATCH",
+    pathTemplate: "/api/:tenantId/contracts/:contractId",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        contractId: { type: "string" },
+        title: { type: "string" },
+        reference: { type: "string" },
+        bodyMd: { type: "string" },
+        fileId: { type: "string" },
+        value: { type: "number" },
+        currency: { type: "string" },
+        startsOn: { type: "string", description: "YYYY-MM-DD" },
+        endsOn: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["tenantId", "contractId"],
+    },
+  },
+
+  // ── medium / high: D14, each with an executor entry in approval-executables.ts ─────────────────
+  {
+    name: "contracts.send",
+    description:
+      "Issue a DRAFT contract to the client: draft -> sent, and notify their portal contacts. Refused (400) when it is " +
+      "not a draft or has neither terms nor a file. impact:'medium': an unattended caller SUSPENDS for human approval, " +
+      "and approving it runs the send.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/contracts/:contractId/send",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, contractId: { type: "string" } },
+      required: ["tenantId", "contractId"],
+    },
+  },
+  {
+    name: "contracts.countersign",
+    description:
+      "Sign for OUR company. Only a company owner or platform_admin may; a company_admin is refused (403). The contract " +
+      "becomes `signed` only when BOTH parties have signed, in either order, so this alone may leave it `sent`. A repeat " +
+      "returns `alreadySigned:true`. impact:'high': an unattended caller SUSPENDS for human approval, and approving it " +
+      "runs the signature as the original filing principal.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/contracts/:contractId/countersign",
+    write: true,
+    impact: "high",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        contractId: { type: "string" },
+        signerName: { type: "string", description: "the signer's full name (at least 2 characters)" },
+        signerTitle: { type: "string", description: "the signer's title" },
+      },
+      required: ["tenantId", "contractId", "signerName"],
+    },
+  },
+  {
+    name: "invoicePayments.decide",
+    description:
+      "Confirm or reject a payment a client recorded. `reject` needs a `reason` (shown to the client). Refused (403) for " +
+      "whoever recorded the payment (maker-checker) and (400) when it is no longer pending. Confirming is what makes the " +
+      "money count toward the balance and can mark the invoice paid. impact:'high': an unattended caller SUSPENDS for human " +
+      "approval, and approving it runs the decision as the original filing principal.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/invoice-payments/:paymentId/decide",
+    write: true,
+    impact: "high",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        paymentId: { type: "string" },
+        decision: { type: "string", enum: ["confirm", "reject"] },
+        reason: { type: "string", description: "required when decision is reject" },
+      },
+      required: ["tenantId", "paymentId", "decision"],
+    },
+  },
+];
+
+/** PV3-06: the eight billing tools; exported so a suite can restore exactly this area. */
+export function registerContractBillingCoreTools(): void {
+  registerCoreTools(CONTRACT_BILLING_CORE_TOOLS);
+}
+
 /**
  * The ONE aggregate, mirroring `approval-executables.ts`'s `registerAllExecutableApprovals()` doctrine
  * — that file's own header names the exact failure mode a hand-maintained list of "call these to
@@ -650,6 +877,7 @@ export function registerAllCoreTools(): void {
   registerIamCoreTools();
   registerAgencyIntakeCoreTools();
   registerAgencyPipelineCoreTools();
+  registerContractBillingCoreTools();
 }
 
 /** M5-P1-c: the four `agency_pipeline.*` tools; exported so a suite can restore exactly this area. */

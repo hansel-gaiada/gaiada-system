@@ -46,6 +46,17 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "agency_pipeline.stageHistory",
       "agency_pipeline.moveStage",
       "agency_pipeline.setDealValue",
+      // PV3-06: the staff Contracts & billing page's tool parity. Three reads, two LOW draft writes,
+      // `contracts.send` MEDIUM and `contracts.countersign` / `invoicePayments.decide` HIGH (each D14,
+      // each with an executor in approval-executables.ts). Pinned in contracts-billing-tools.test.ts.
+      "contracts.list",
+      "contracts.get",
+      "invoicePayments.list",
+      "contracts.createDraft",
+      "contracts.updateDraft",
+      "contracts.send",
+      "contracts.countersign",
+      "invoicePayments.decide",
     ]);
   });
 

@@ -1875,6 +1875,117 @@ export function registerAgencyIntakeExecutableApprovals(): void {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
+// PV3-06 — `contracts.send`, `contracts.countersign` and `invoicePayments.decide` become agent-reachable
+// through the D14 gate.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `core/core-tools.ts`'s PV3-06 section declares all three as writes with impact medium (send) or high
+// (countersign, decide), which is what makes mcp-hub SUSPEND an unattended call. An entry HERE is the other
+// half: without it an approved row would sit at `execution_status='not_applicable'` forever, a human
+// believing they authorized a signature that never happens (this file's doctrine, above).
+//
+// ── WHAT THE PRECONDITIONS ARE, AND ARE NOT ───────────────────────────────────────────────────────
+// Each answers one question: "is the row still in the state the approval was filed against?" That is the
+// guard against a retry re-applying a landed action (a re-run after a lost response) or acting on a row a
+// human already moved while the approval sat in the inbox (sent, voided, signed, decided).
+//
+// They deliberately do NOT re-derive authorization. Cerbos is the authority and runs for real when the
+// executor's hub call lands on the route: the re-drive runs as the ORIGINAL FILING PRINCIPAL (see
+// approval-execute.ts, invariant 1), so `countersign` is still refused for a `company_admin` and
+// `decide` is still refused for the person who recorded the payment (maker-checker). Copying either rule
+// here would be a second, driftable implementation. That means an approval can be filed and approved for a
+// call the route will then refuse; the row lands `failed` with the route's typed 403, loudly, which is the
+// correct outcome.
+//
+// ── LOCK SCOPE: THE ROW ───────────────────────────────────────────────────────────────────────────
+// One unit of consistency per contract (send, countersign are separate keys: a send and a countersign of
+// the same contract cannot both be valid, but they are different acts) and per payment. Core tables with
+// a plain tenant wall (0075): no `preconditionModules`.
+//
+// Every query pins the tenant explicitly as well as relying on RLS, because the tenant comes from the
+// approval's args and the RLS context is the one the executor opened for the approval's own tenant.
+
+function billingArgs(args: Record<string, unknown>, idKey: "contractId" | "paymentId") {
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  const id = typeof args?.[idKey] === "string" ? (args[idKey] as string) : "";
+  return { tenantId, id };
+}
+
+async function contractSendPrecondition(client: PoolClient, args: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const { tenantId, id } = billingArgs(args, "contractId");
+  if (!tenantId || !id) return { ok: false, reason: "missing_contract_args" };
+  const { rows } = await client.query<{ status: string; file_id: string | null; body_md: string | null }>(
+    `SELECT status, file_id, body_md FROM contracts WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, id],
+  );
+  const k = rows[0];
+  if (!k) return { ok: false, reason: "contract_not_found" };
+  // Already sent (a lost-response retry), signed, or voided while the approval waited.
+  if (k.status !== "draft") return { ok: false, reason: "contract_not_draft" };
+  if (!k.file_id && !k.body_md) return { ok: false, reason: "contract_has_no_document" };
+  return { ok: true };
+}
+
+async function contractCountersignPrecondition(client: PoolClient, args: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const { tenantId, id } = billingArgs(args, "contractId");
+  if (!tenantId || !id) return { ok: false, reason: "missing_contract_args" };
+  const { rows } = await client.query<{ status: string; provider_signed: boolean }>(
+    `SELECT k.status,
+            EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'provider') AS provider_signed
+       FROM contracts k WHERE k.tenant_id = $1 AND k.id = $2 AND k.deleted_at IS NULL`,
+    [tenantId, id],
+  );
+  const k = rows[0];
+  if (!k) return { ok: false, reason: "contract_not_found" };
+  // Our signature already landed (the route would answer `alreadySigned`); refuse rather than re-drive.
+  if (k.provider_signed) return { ok: false, reason: "contract_already_countersigned" };
+  if (k.status !== "sent") return { ok: false, reason: "contract_not_sent" };
+  return { ok: true };
+}
+
+async function paymentDecidePrecondition(client: PoolClient, args: Record<string, unknown>): Promise<PreconditionVerdict> {
+  const { tenantId, id } = billingArgs(args, "paymentId");
+  if (!tenantId || !id) return { ok: false, reason: "missing_payment_args" };
+  const decision = args?.decision;
+  if (decision !== "confirm" && decision !== "reject") return { ok: false, reason: "payment_decision_invalid" };
+  if (decision === "reject" && !(typeof args?.reason === "string" && args.reason.trim())) {
+    return { ok: false, reason: "payment_reject_reason_required" };
+  }
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM invoice_payments WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, id],
+  );
+  const p = rows[0];
+  if (!p) return { ok: false, reason: "payment_not_found" };
+  // Already confirmed or rejected: a lost-response retry, or a human decided it first.
+  if (p.status !== "pending") return { ok: false, reason: "payment_not_pending" };
+  return { ok: true };
+}
+
+/** Registers the three PV3-06 entries. Exported for the same reason the other bootstraps are. */
+export function registerContractBillingExecutableApprovals(): void {
+  const key = (ns: string, idKey: "contractId" | "paymentId") => (args: Record<string, unknown>): string => {
+    const id = typeof args?.[idKey] === "string" && args[idKey] ? (args[idKey] as string) : null;
+    return id ? `${ns}:${id}` : `${ns}:malformed:${JSON.stringify(args ?? {})}`;
+  };
+  registerExecutableApproval({
+    toolName: "contracts.send",
+    lockKey: key("contract:send", "contractId"),
+    precondition: contractSendPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "contracts.countersign",
+    lockKey: key("contract:countersign", "contractId"),
+    precondition: contractCountersignPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "invoicePayments.decide",
+    lockKey: key("invoice-payment:decide", "paymentId"),
+    precondition: paymentDecidePrecondition,
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
 // THE production bootstrap — one list, so it cannot go stale
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 //
@@ -1909,6 +2020,7 @@ export function registerAllExecutableApprovals(): void {
   registerJmlExecutableApprovals();
   registerIamExecutableApprovals();
   registerAgencyIntakeExecutableApprovals();
+  registerContractBillingExecutableApprovals();
 }
 
 registerAllExecutableApprovals();
