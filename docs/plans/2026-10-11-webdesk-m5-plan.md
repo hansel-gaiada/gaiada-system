@@ -124,3 +124,23 @@ same day, O-1 is settled, and O-11 plus the addendum's R-V18 cover the personall
 **2026-10-12.** Waves 1–3 went live in 360, W1c/W3c/G5b/P1-g in 361, and L1d + W2d in 362; W2e (the writers' room UI) is on main. The owner ruled **WSK-D75: no Web3Forms**, which settles O-10. The site switch of L1 (the transport, the consent notice, the field ids already matched) becomes the launch path for the forms, with nothing in between.
 
 **2026-10-12, later.** Phase 5 design (V2, V3, V5, V6), PLANNED: [`2026-10-12-m5-phase5-design.md`](./2026-10-12-m5-phase5-design.md). V5 needs no WebDesk migration (vocabulary 1.5.0 only); two D66/D32 amendments and O-5/O-12 defaults are open there.
+
+**2026-10-13.** Phases 4–5 built.
+- **ERP side, on main and LIVE in 367–369:**
+  - P2, and P3/P4 (simulate only);
+  - P5a, P5b;
+  - the collector: V2-a/b/c, V3-b, V6-a, with 0.3.2 on main for 370;
+  - V3-a, V3-c, V3-d, V3-e, V3-f, V3-g, V3-h, V3-i;
+  - V5-a, V5-b, V5-c, V5-d;
+  - V6-b, V6-c.
+- **Replay stays OFF.**
+- **The live Cerbos probe of V3-f passed 11/11 on 368.**
+- **V2-d passed on sumopod in a throwaway project, after it found and fixed one real defect.** Umami 3.4.0 treats the `fd…` pseudonym as localhost and stores no location, so the pseudonym moved to 2001:db8::/32 (collector 0.3.1). The re-proof with 368's image stored the country, ignored a spoofed `cf-ipcountry`, and kept the test IPs out of every dump and log.
+- **The site tickets are built LOCALLY in gaiada-web-revamp, not pushed:** V3-j, V5-e, V6-d, combined in `m5/phase5-site`.
+- **V3-j** confirmed the site's 13 consented event names. The collector default had `language_switch` for the site's `switch_language`; fixed in 0.3.2.
+- **V5-e** found that counting once per visitor needs a consented local-storage record. The addendum F9 is corrected, and open item 23 goes to counsel.
+- **Left:**
+  - the owner's OK to push the site;
+  - QA V3-k, V5-f, V6-e against the sumopod test stack;
+  - V2-e live, after G2 and O-11;
+  - the go-live gates G2, O-6, O-11, O-5.
