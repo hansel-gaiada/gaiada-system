@@ -23,10 +23,14 @@
 //           metadata only: no stored value changes, the envelope did not change by a byte. The classifier
 //           COMPUTES the bump from test/fixtures/vocabulary-1.1.0.snapshot.json (the two `ui` key sets
 //           are snapshot dimensions since 1.2.0).
+//   1.3.0 — M5-W3c, MINOR: `lint.content` on the composition (per-collection settings of the advisory editorial content
+//           checks: `enabled`, per-rule `enabled` + thresholds). Advisory only, no stored item value changes, the
+//           envelope did not change by a byte. The classifier COMPUTES the bump from
+//           test/fixtures/vocabulary-1.2.0.snapshot.json (the `lint` key set is a snapshot dimension since 1.3.0).
 import { PRIMITIVE_NAMES } from './primitives.ts'
 import { BLOCK_TYPE_NAMES } from './blocks.ts'
 
-export const VOCABULARY_VERSION = '1.2.0'
+export const VOCABULARY_VERSION = '1.3.0'
 
 /** The frozen path segment (design §05 hard rule 1). Never mutated — evolution is a new /v2. */
 export const ENVELOPE_VERSION = 'v1'

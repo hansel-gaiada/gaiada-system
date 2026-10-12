@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.12.0` - M5-W3c: content-check settings per collection; vocabulary 1.3.0 (2026-10-12) - DEV-VERIFIED
+
+- A collection composition may carry an optional `lint.content` member. It holds:
+  - a master switch;
+  - per-rule `enabled`;
+  - the knobs the rules actually have: meta lengths, internal-link minimum, answer-first word range, question-heading share and starters, banned phrases per language, the ID twin map, AEO paragraph length, and the h1, keyword and alt field names.
+- **Defaults:** an absent member or key gives today's constants. 11 fixtures produce byte-identical reports through 5 equivalent compositions.
+- **Validation:** unknown keys and out-of-range values are refused at `schema.apply`. A stored row that fails validation falls back to the defaults and never throws.
+- The save path and `item.get` share one resolution (W3b's read == save holds). The checks stay advisory.
+- **Vocabulary 1.3.0 (MINOR):** the breaking-change classifier gains a `lintKeys` dimension and pins the bump as minor. It is re-vendored into the api, the blocks package and platform-nest (`src/modules/webdev/vocabulary`). The new `w3c-lint-content` suite now runs in CI and in the Linux gate.
+- Verified on GitHub Actions 38199176963: webdesk-api 1605 passed / 2 skipped, blocks 32/0, every vocabulary suite green.
+
 ### platform-nest `0.73.0` - M5-P1-g and M5-G5b: a race-safe lead convert with no name on the bus; privacy approvals store no identifiers (2026-10-12) - DEV-VERIFIED
 
 Two defects found by the M5-P1-f end-to-end QA, and the G5 privacy tools made safe to file unattended (built by the M5 session).
