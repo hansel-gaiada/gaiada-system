@@ -285,6 +285,16 @@ describe.skipIf(!live)("M6-P4b2 — scaffold commit (real Postgres, faked GitHub
         [half.id, "a".repeat(64), half.snapshot.id, "b".repeat(40)],
       ),
     ).rejects.toMatchObject({ code: "23514" });
+    // A NULL completion (never started) is not 'complete' either. Before 202610130110 the CHECK passed on NULL here.
+    await expect(
+      adminPool().query(
+        `UPDATE webdev_provisioned_sites
+            SET completion_state = NULL, scaffold_state = 'pending', scaffold_manifest_sha256 = $2, scaffold_snapshot_id = $3,
+                scaffold_branch = 'main', scaffold_base_sha = $4
+          WHERE id = $1`,
+        [half.id, "a".repeat(64), half.snapshot.id, "b".repeat(40)],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
     await expect(adminPool().query(`UPDATE webdev_provisioned_sites SET scaffold_base_sha = 'not-a-sha' WHERE id = $1`, [s.id]))
       .rejects.toMatchObject({ code: "23514" });
     await expect(
