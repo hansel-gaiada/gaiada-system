@@ -465,7 +465,7 @@ export class ClientsController {
       overdue: string; open: string;
     }>(
       `WITH inv AS (
-         SELECT i.id, i.currency, i.total, i.status, i.period_end
+         SELECT i.id, i.currency, i.total, i.status, i.period_end, i.due_date
            FROM invoices i WHERE i.client_id = $1 AND i.deleted_at IS NULL
        )
        SELECT inv.currency,
@@ -473,7 +473,9 @@ export class ClientsController {
               COALESCE(sum(inv.total) FILTER (WHERE inv.status = 'draft'), 0)::float8 AS drafted,
               COALESCE(sum(pay.confirmed), 0)::float8 AS paid,
               COALESCE(sum(pay.pending), 0)::float8 AS pending,
-              count(*) FILTER (WHERE inv.status = 'sent' AND inv.period_end < current_date) AS overdue,
+              -- PV5-04 (decision 10): overdue = past the DUE date and not fully paid; a legacy invoice has no due date,
+              -- so its period end stands in. Same rule as the portal's invoice list.
+              count(*) FILTER (WHERE inv.status = 'sent' AND COALESCE(inv.due_date, inv.period_end) < current_date) AS overdue,
               count(*) FILTER (WHERE inv.status = 'sent') AS open
          FROM inv
          LEFT JOIN LATERAL (

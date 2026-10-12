@@ -174,7 +174,29 @@ export interface PortalInvoice {
   paid: number;
   pendingConfirmation: number;
   balance: number;
+  /** PV5-04: past its DUE date and not fully paid (a legacy invoice with no due date: its period end). */
   overdue: boolean;
+  /** PV5-04: the invoice of record. Null on an invoice issued before PV-5; optional for an older server. */
+  invoiceNo?: string | null;
+  issueDate?: string | null;
+  dueDate?: string | null;
+  subtotal?: number | null;
+  taxTotal?: number | null;
+  taxCode?: string | null;
+  issuer?: PortalInvoiceIssuer | null;
+  /** What is still owed per the ledger. */
+  outstanding?: number;
+  /** The invoice accepts a payment claim now. When false, the "Tell us you've paid" form is not offered. */
+  payable?: boolean;
+}
+
+/** PV5-04: the issuer as frozen on the invoice when it was issued (the bank block is where to pay). */
+export interface PortalInvoiceIssuer {
+  legalName: string | null;
+  address: string | null;
+  npwp: string | null;
+  isPkp: boolean | null;
+  bank: { name: string | null; accountName: string | null; accountNo: string | null } | null;
 }
 
 export interface PortalPayment {
@@ -206,6 +228,18 @@ export interface PortalInvoiceDetail {
   payments: PortalPayment[];
   paid: number;
   balance: number;
+  // PV5-04 (see PortalInvoice): optional for an older server.
+  invoiceNo?: string | null;
+  issueDate?: string | null;
+  dueDate?: string | null;
+  subtotal?: number | null;
+  taxTotal?: number | null;
+  taxCode?: string | null;
+  taxLines?: Array<{ code: string; rate: number | null; base: number; amount: number }>;
+  issuer?: PortalInvoiceIssuer | null;
+  outstanding?: number;
+  payable?: boolean;
+  overdue?: boolean;
 }
 
 export interface PortalContract {
