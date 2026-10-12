@@ -39,6 +39,8 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "agency_intake.nurture",
       // M5-L4: a gaiada.com form submission becomes a lead (medium impact; executor in approval-executables.ts).
       "agency_intake.createFromWebSubmission",
+      // M5-L6: the Website -> Leads read (agency_lead:read, no new kind).
+      "agency_intake.listWebLeads",
       "agency_intake.convert",
       // M5-P1-c: the lead pipeline's agent surface (WSK-D69). Two reads, two LOW writes. There is no tool
       // for won or lost on purpose: won is agency_intake.convert, lost is agency_intake.decline.
@@ -46,6 +48,11 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "agency_pipeline.stageHistory",
       "agency_pipeline.moveStage",
       "agency_pipeline.setDealValue",
+      // M5-G5: data-subject requests over the agency intake data. All three HIGH and route-WS4-gated; barred
+      // from D14 auto-execution (approval-executables.ts registerAgencyPrivacyBars).
+      "agency_privacy.find",
+      "agency_privacy.export",
+      "agency_privacy.erase",
     ]);
   });
 

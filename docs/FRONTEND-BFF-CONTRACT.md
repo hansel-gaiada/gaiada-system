@@ -4712,6 +4712,18 @@ no Cerbos policy at all, which is deliberate and preserves the `0072:32-36` inva
 | GET | `/api/:tenantId/agency/pipeline/reference` | M5-P1. `{ stages: [{ key, position, kind: open\|won\|lost, label }], currencies: [{ code, symbol, minorUnit }] }` — the six stages in order and the ACTIVE currencies | `agency_lead:read` |
 | POST | `/api/:tenantId/agency/leads/:leadId/stage` | M5-P1. Body `{ stage, deal? }` → `{ id, stage, changed, stageEventId? }`. Open stages only; same-stage move is `200 changed:false` and writes nothing | `agency_lead:triage`, plus `agency_lead:update` when `deal` is sent |
 | POST | `/api/:tenantId/agency/leads/:leadId/deal` | M5-P1. Body `{ value, currency }` or `{ value: null, currency: null }` (clear) → `{ id, changed, dealValue, dealCurrency }`. Any status; emits no stage event | `agency_lead:update` |
+| GET | `/api/:tenantId/agency/web-leads/:siteSlug` | M5-L6. `{ leadIntakeEnabled, truncated, leads: [{ id, orgName, contactName, originForm, createdAt, status, stage, attribution: { landing, formPage, referrer, utmSource, utmMedium, utmCampaign, clickIds }, marketingConsent }] }`. **PROTOTYPED.** See "Website leads" below | `agency_lead:read` (tenant-wide, no new kind) |
+
+### Website leads (M5-L6, 2026-10-12) — the Website workspace's Leads tab
+
+`GET /api/:t/agency/web-leads/:siteSlug` lists the leads filed from a WebDesk site: `source = 'web' AND web_site_slug = :siteSlug`, `deleted_at IS NULL`, newest first, at most 200 (`truncated: true` when more exist). `:siteSlug` is the WebDesk **tenant** slug (the one `form.received` carries as `siteSlug` and `web_site_slug` stores), so a tenant with several sites lists them together. It is a path segment rather than a `?webSiteSlug=` filter on the queue route because the MCP hub forwards only path parameters on a GET; the queue route and its shape are unchanged.
+
+- **Authz:** `agency_lead:read` on the path's tenant, checked BEFORE the slug is looked at (an over-long slug is a 400 for an authorised caller only). The read runs under `withTenants([t])` with no `{ modules }` option, so another company's leads never appear even for an identical slug; a caller outside the company gets 403.
+- **`leadIntakeEnabled`** is `AGENCY_WEB_LEADS_ENABLED === "1"` as a boolean. The env value itself is never exposed. `false` with an empty list means intake is off, not that nobody submitted.
+- **Privacy projection** (`summarizeAttribution`): an allow-list. `attribution` carries the landing and form-page paths, the referrer host and the three UTM columns; `clickIds` is the list of click-id NAMES that are present (`gclid`, `gbraid`, `wbraid`, `fbclid`, `msclkid`, `li_fat_id`), never a value. `fbp`/`fbc`, `utm_term`/`utm_content`, `sections_seen` and anything unknown are not returned. `marketingConsent` is `true` / `false` from `visitor_consent.marketing`, or `null` = unknown, which a consumer must treat as no consent and show as its own state.
+- **Contact PII** (`orgName`, `contactName`) is returned under the existing `agency_lead:read`, as the queue already does. No email or phone is returned here.
+- **MCP tool:** `agency_intake.listWebLeads` (read, no impact class), `GET /api/:tenantId/agency/web-leads/:siteSlug` with `tenantId, siteSlug`.
+- **platform-ui:** Website tab **Leads** (`/departments/:deptId/website/leads[/:tenant/:site]`), `lib/websiteLeads.ts` -> `lib/websiteLeadsModel.ts#parseWebLeads` (STRICT: a click-id entry that is not one of the six names, or an off-shape body, is `contract_drift`, never rendered). Read-only; each row links to `/agency/leads/:leadId`. States: refusal notice (never an empty table), the empty-state sentence, and an "intake is off" hint when `leadIntakeEnabled` is false.
 
 ### The invite token is shown once and never again
 
@@ -4793,6 +4805,43 @@ ends: `status` (the intake lifecycle above) and `stage` (the sales position, fro
 - **MCP.** `agency_pipeline.reference` and `agency_pipeline.stageHistory` (reads); `agency_pipeline.moveStage`
   and `agency_pipeline.setDealValue` (impact `low`). `agency_intake.convert` gains the optional `deal`.
   `agency_intake.decline` now works from every open status.
+
+### Data-subject requests and lead retention (M5-G5) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
+
+Addendum: `legal/website-visitor-addendum.md` §5 and §9.3 items 3, 7, 8, 9. Code: `core/agency-privacy.*`,
+`core/agency-lead-retention.ts`, migration `202610121835_agency_lead_privacy_retention.sql`. No UI consumes these yet;
+they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored for the ERP's lead data).
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| POST | `/api/:tenantId/agency/privacy/find` | Body `{ email?, phone?, approvalId? }`. Executed: `{ outcome:"executed", requestId, counts, outOfScope, leads:[{ leadId, status, stage, source, createdAt, statusChangedAt, erasedAt, deleted, directMatch, submissionCount, tokenCount, convertedClientId }] }`, no contact data | `agency_lead:convert` |
+| POST | `/api/:tenantId/agency/privacy/export` | Same body. Executed: the `find` fields plus `orgName`, `contactName`, `contactEmail`, `contactPhone`, `originForm`, `submissionRef`, `webSiteSlug`, `attribution`, `visitorConsent`, `declinedReason`, `submissions:[{ submissionId, schemaVersion, createdAt, erasedAt, answers }]`, `intakeTokens:[{ tokenId, kind, createdAt, expiresAt, usedAt, revokedAt }]` | `agency_lead:convert` |
+| POST | `/api/:tenantId/agency/privacy/erase` | Same body. Executed: `{ outcome:"executed", replayed, requestId, erasedAt, counts:{ leadCount, submissionCount, tokenCount, outOfScopeCount, suppressionCount }, outOfScope:[{ leadId, convertedClientId, reason:"client_record_retention" }] }` | `agency_lead:convert` |
+
+- **WS4 per call, for every principal (the SM-21 shape).** Without `approvalId` the route files a HIGH approval and
+  returns `202 { outcome:"suspended", requestId, approvalId }`, reading nothing. A DIFFERENT company admin decides it
+  in the approvals inbox. The requester then repeats the call with the SAME identifiers and the `approvalId`: it runs
+  exactly once. Typed refusals: `202 awaiting_approval`, `400 subject_invalid | approval_id_invalid |
+  privacy_request_mismatch` (other identifiers or another command than were approved), `403 privacy_request_not_requester
+  | self_approved | user_required`, `404 privacy_request_not_found`, `409 approval_rejected | approval_already_used`.
+  An erase called again with its used approval returns the stored counts with `replayed:true`; a find/export re-use is
+  409 (its response is personal data and is never stored).
+- **Identifiers.** Email is trimmed and lower-cased; phone keeps 7-15 digits with a leading `+`/`00` dropped and a
+  national leading 0 NOT rewritten (WebDesk's normalisation, byte for byte). Never put them in a URL: POST only.
+- **Erase scrubs, never deletes.** Lead: `orgName` `(erased)`, contact fields and attribution null, a decline reason
+  `(erased)`; status, stage, client link, value and the consent snapshot are kept. AD-1: the person answers become
+  `"[erased]"`, business answers stay. Unused intake tokens are revoked. A converted lead's CLIENT record is out of
+  scope and is listed under `outOfScope`. The contact is added, hashed, to the suppression list: the web intake then
+  answers `422 { reason:"subject_suppressed" }` and stores nothing.
+- **Ledger.** `agency_dsr_requests` is append-only and holds SHA-256 hashes only (the same hash WebDesk's
+  `dsr_requests` computes, so one person's two ledgers correlate). The approval row holds the command and which keys
+  were given, never the values.
+- **Retention.** A scheduled purge (dark until `AGENCY_LEAD_RETENTION_PURGE_ENABLED=1`) hard-deletes an UNCONVERTED lead
+  with its AD-1 submissions, tokens and stage history `AGENCY_LEAD_RETENTION_MONTHS` (default 24) after its last status
+  or stage change (`status_changed_at`, kept by a DB trigger), unless a token or submission arrived after the cutoff.
+- **MCP.** `agency_privacy.find`, `agency_privacy.export`, `agency_privacy.erase`: impact `high`, barred from D14
+  auto-execution (the route is its own WS4 gate). Use them from an attended session: an unattended agent is suspended
+  by the hub first, and that hub approval would carry the identifier in its `tool_args`.
 
 ### Convert — what it spawns, and the one thing it must never do
 
@@ -5243,6 +5292,36 @@ The other `control/*` routes remain honest 501s.
 UI consumer: `platform-ui/src/lib/webdeskContentActions.ts#requestKeyAction` → `lib/webdeskContent.ts#parseKeyRequest` (STRICT: a body with any key other than `approvalId`/`alreadyPending`, or an `alreadyPending` that is not exactly `true`, is `contract_drift`, never "filed"). `environment-not-found` joins the not-found slugs in `resultFromError`; every existing shape is unchanged. The control renders on the site overview (`…/website/content/:tenant/:site`) only for a user holding the UI capability **`webdev.promote`** (the mirror of `promote`, company_admin + manager, in `lib/rbac.ts` / `rbac-capability-map.ts`, permission key `webdev.provisioned_site.promote`); everyone else sees nothing, not a disabled button. Environments come from the existing `GET …/content/sites` read (`environments[{envId,name,domain,status}]`), no second read.
 
 The approver's side is the **existing** `POST /api/:t/approvals/:id/decide {origin:"webdesk", decision}` façade, which already answers `{ok:true, webdesk:{command:"key.mint", executionStatus:"executed"\|"failed", apiKeyId, envId, scope, plaintextOnce, error?}}` (see the automation-approvals row). **`plaintextOnce` is the API key in plaintext and this response is the ONLY place it ever exists** (WebDesk keeps a hash; never in the approval row, activities, outbox or logs). The UI parses it with `parseKeyMintDecision` (names a bad field by path and type, never by value) and holds it only in the approver's component state; `executed` with `plaintextOnce: null` is "created, not returned" and shows no key.
+
+### Writers' room grants (M5-W1b, 2026-10-11 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suites are written and need the Linux gate; UI: M5-W2e `writers/people`)
+
+Design: `docs/plans/2026-10-11-m5-writers-room-design.md` §2.6; PERMISSION-CONTRACT §27.1. Code: `webdesk-editorial-grants.{controller,service}.ts`, the
+writes in `admin/grant-write.service.ts` (`grantEditorialRole` / `revokeEditorialRole`). Grants one of the four writers' room roles on ONE site, with its
+collections and locales. Same guards as the content routes (`AuthGuard` + `ModuleEnabledGuard("webdev")`); **the first statement of every handler is
+Cerbos `webdesk_collection` · `manage_editorial`** (company_admin, owner, webdev_manager, platform_admin): everyone else, including a scoped
+`webdesk_editor`, gets **403 for any body**, and nothing is read from WebDesk or the database for them.
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | → `{tenantSlug, siteId, grants: [{grantId, userId, name, email, role, tenantSlug, siteId, allCollections, collections, allLocales, locales, expiresAt, grantedBy, updatedAt}]}`: every UNEXPIRED grant with a scope row on this site in this company. ERP rows only (no WebDesk call). An empty `grants` means none. |
+| POST | same | `{userId (uuid), role: "webdesk_writer"\|"webdesk_translator"\|"webdesk_seo_reviewer"\|"webdesk_editor", collections: string[] \| allCollections: true, locales: string[] \| allLocales: true, expiresAt?: ISO\|null}` (strict: an unknown key is 400 `invalid_request`, after authorization) → **200** `{userId, role, tenantSlug, siteId, grantId, allCollections, collections, allLocales, locales, expiresAt, changed, createdGrant}`. Granting the same role on the same site again REPLACES that site's scope; identical = `changed:false` (no audit row, no session bump). One grant per (person, role, company) carries every site. |
+| DELETE | `…/editorial/grants/:userId/:role` | no body (the hub's `{}` is accepted) → **200** `{userId, role, siteId, changed, removedGrant}`. Removes this site's scope; `removedGrant:true` when that was the grant's last site. Revoking what is not held is `changed:false`. **No WebDesk call**: works while WebDesk is down and for a site WebDesk no longer lists. |
+
+**Rules a consumer must not "simplify".** An empty list never means "all": send `allCollections: true` / `allLocales: true`. Lists are de-duplicated and
+sorted in the answer. `collections` must exist on the site (WebDesk `collection.list`) and `locales` must be the tenant's (`tenant.list`), else
+**400 `unknown_collection`** / **`unknown_locale`**. The target must be an active **employee** with an active membership of THIS company (**400
+`editorial_target_not_eligible`**; freelance contributors are not built yet). **400 `self_grant_forbidden`** for yourself. The expiry belongs to the
+person's grant across all sites: a different `expiresAt` for an existing grant is **409 `editorial_grant_expiry_mismatch`** (revoke, then grant again).
+A site that is not this company's is the uniform **404 problem `…/errors/site-not-found`**. WebDesk unavailable on a POST: the typed **503
+`editorial_unavailable` / `webdesk_not_configured`** of this section. Every change bumps the target's session (they re-authenticate) and writes one
+`activities` row (`webdesk.editorial.role_granted` / `role_revoked`, `target_entity_type user_role`, identifiers only).
+
+**The generic grant surfaces refuse these four roles** with **400 `editorial_role_dedicated_path`**: `POST /api/:t/users/:u/roles` (legacy admin),
+`POST /api/:t/role-grants` (and its overrides), `POST /api/:t/positions` role sets (the composer lists them `attachable:false, reason:"editorial_role_dedicated_path"`).
+
+**MCP tools** (`modules/webdev/index.ts`, same routes): `webdesk.editorial.listGrants` (read) · `webdesk.editorial.grantRole` (`write:true, impact:"high"`) ·
+`webdesk.editorial.revokeRole` (`write:true, impact:"medium"`), `minAssurance: "verified"`. An unattended caller suspends for approval; both writes are D14
+executables and re-drive as the original requester.
 
 ## 28. Website analytics from Umami (M5-A4, 2026-10-11) — `platform-nest/src/modules/search/search-analytics.controller.ts`, `umami-client.ts`, `umami-reads.ts`; `platform-ui/src/lib/websiteAnalytics*.ts` — **STATUS: PROTOTYPED (typechecked + unit-tested locally; the DB-backed route test is written but needs the Linux gate; no live Umami exists yet)**
 

@@ -25,8 +25,8 @@ export const SITEMAP_SEGMENT = "sitemap.xml";
  */
 export const PREVIEW_SEGMENT = "preview";
 
-/** Static first segments owned by other controllers under `v1/t/:tenantSlug/`. */
-export const API_ROUTE_SEGMENTS = ["forms", "media"] as const;
+/** Static first segments owned by other controllers under `v1/t/:tenantSlug/` (`consent`: M5-G6's consent log). */
+export const API_ROUTE_SEGMENTS = ["forms", "media", "consent"] as const;
 
 export const RESERVED_COLLECTION_KEYS: readonly string[] = [...API_ROUTE_SEGMENTS, SEARCH_SEGMENT, SITEMAP_SEGMENT, PREVIEW_SEGMENT];
 

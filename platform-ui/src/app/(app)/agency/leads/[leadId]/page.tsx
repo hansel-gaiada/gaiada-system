@@ -4,12 +4,13 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { listMembers } from "@/lib/entities";
-import { getAgencyLeadDetail, listAgencyLeadSubmissions } from "@/lib/agencyLeads-data";
+import { getAgencyLeadDetail, getLeadStageHistory, getPipelineReference, listAgencyLeadSubmissions, listAgencyLeadsQueue } from "@/lib/agencyLeads-data";
+import { mostRecentCurrency } from "@/lib/agencyLeads";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { PageHeader } from "@/components/PageHeader";
 import { AgencyLeadDetail } from "@/components/agency/AgencyLeadDetail";
 import {
-  convertLeadAction, declineLeadAction, inviteLeadAction, nurtureLeadAction, openLeadAction, revokeInviteAction,
+  convertLeadAction, declineLeadAction, inviteLeadAction, moveStageAction, nurtureLeadAction, openLeadAction, revokeInviteAction, setDealAction,
 } from "../actions";
 
 type Params = Promise<{ leadId: string }>;
@@ -54,6 +55,16 @@ export default async function AgencyLeadDetailPage({ params }: { params: Params 
   // rendered inline (never silently merged into the lead detail, which already succeeded above).
   const submissionsResult = await listAgencyLeadSubmissions(userId, tenant, leadId);
 
+  // M5-P1: the pipeline card's two reads. Each keeps its own refusal (never folded into "no history").
+  // The queue read only feeds the currency pre-select ("most recently used on this tenant's leads"); if it
+  // fails the picker simply starts empty, since there is no default currency to fall back to.
+  const [reference, history, queue] = await Promise.all([
+    getPipelineReference(userId, tenant),
+    getLeadStageHistory(userId, tenant, leadId),
+    listAgencyLeadsQueue(userId, tenant),
+  ]);
+  const recentCurrency = queue.kind === "ok" ? mostRecentCurrency(queue.data) : null;
+
   const canWrite = can(me, "agency.lead.write", tenant);
   const canTriage = can(me, "agency.lead.triage", tenant);
   // Contract rule 2, verbatim: convert is gated on ITS OWN capability, never on triage.
@@ -74,7 +85,12 @@ export default async function AgencyLeadDetailPage({ params }: { params: Params 
         canWrite={canWrite}
         canTriage={canTriage}
         canConvert={canConvert}
+        reference={reference}
+        history={history}
+        recentCurrency={recentCurrency}
         actions={{
+          moveStage: moveStageAction,
+          setDeal: setDealAction,
           invite: inviteLeadAction,
           revoke: revokeInviteAction,
           open: openLeadAction,

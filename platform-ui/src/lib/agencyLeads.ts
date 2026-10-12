@@ -10,7 +10,20 @@
 //   agency-lead-convert.{controller,service}.ts (AD-6), agency-discovery-questionnaire.ts (AD-3).
 
 export type LeadStatus = "new" | "invited" | "submitted" | "in_review" | "nurturing" | "declined" | "converted";
-export type LeadSource = "staff" | "invite" | "open";
+/** `web` (M5-L4): a gaiada.com form submission that became a lead. */
+export type LeadSource = "staff" | "invite" | "open" | "web";
+
+export const SOURCE_LABEL: Record<LeadSource, string> = {
+  staff: "Staff entry",
+  invite: "Invite link",
+  open: "Open form",
+  web: "Website form",
+};
+
+/** Label for a source; an unknown future source renders its raw key rather than nothing. */
+export function sourceLabel(source: LeadSource | string): string {
+  return (SOURCE_LABEL as Record<string, string>)[source] ?? source;
+}
 
 export const STATUS_LABEL: Record<LeadStatus, string> = {
   new: "New",
@@ -64,6 +77,14 @@ export interface LeadQueueRow {
   updatedAt: string;
   ageSeconds: number;
   hasSubmission: boolean;
+  /** M5-P1. A key of `agency_lead_stages` (enquiry|contacted|qualified|proposal|won|lost today, but the
+   *  list is DATA: never switch on it exhaustively — look it up in the pipeline reference). */
+  stage: string;
+  /** M5-P1. Postgres `numeric(20,4)` as a decimal STRING ("15000000.0000"), never a number. Do no float
+   *  arithmetic on it. Null together with `dealCurrency`. */
+  dealValue: string | null;
+  dealCurrency: string | null;
+  stageEnteredAt: string;
 }
 
 /** `GET /:t/agency/leads/:leadId` (agency-leads.service.ts::getLeadDetail). The latest submission is
@@ -100,6 +121,11 @@ export interface LeadDetail {
   latestRedactions: number | null;
   latestSupersedesId: string | null;
   latestSubmittedAt: string | null;
+  /** M5-P1 — see `LeadQueueRow`. */
+  stage: string;
+  dealValue: string | null;
+  dealCurrency: string | null;
+  stageEnteredAt: string;
 }
 
 /** `GET /:t/agency/leads/:leadId/submissions` (agency-leads.service.ts::listLeadSubmissions) —
@@ -564,6 +590,8 @@ export interface ConvertSuccess {
   projectId: string;
   runId: string;
   delegations?: DelegationReportEntry[];
+  dealValue?: string | null;
+  dealCurrency?: string | null;
 }
 
 export const DELEGATION_SOURCE_LABEL: Record<DelegationSource, string> = {
@@ -581,4 +609,164 @@ export interface ExistingConvertArtifact {
   clientId: string | null;
   projectId: string | null;
   runId: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────── the lead pipeline (M5-P1, WSK-D69)
+// Contract: docs/FRONTEND-BFF-CONTRACT.md, "The lead pipeline (M5-P1)". Design: docs/plans/2026-10-11-m5-lead-pipeline-design.md
+// §2-§3 and §6 (UI). Everything below is pure and client-safe. The stage list and the currencies are DATA
+// served by `GET …/agency/pipeline/reference`; nothing here hard-wires a stage key or a default currency
+// (the "internal now, SaaS later" ruling), except the two terminal KINDS, which are structural.
+
+export type StageKind = "open" | "won" | "lost";
+
+/** `GET /:t/agency/pipeline/reference` → `stages`, in position order. */
+export interface PipelineStage { key: string; position: number; kind: StageKind; label: string }
+/** `GET /:t/agency/pipeline/reference` → `currencies`: the ACTIVE ones. `minorUnit` is the number of
+ *  decimals a value in that currency may carry (IDR 0, USD 2). */
+export interface PipelineCurrency { code: string; symbol: string; minorUnit: number }
+export interface PipelineReference { stages: PipelineStage[]; currencies: PipelineCurrency[] }
+
+/** `GET /:t/agency/leads/:leadId/stage-history` — newest first. Holds no personal data; `actorName` is
+ *  the staff member (null for the system), `viaAgent` names the agent that drove the move, if any. */
+export interface StageEvent {
+  id: string;
+  fromStage: string;
+  toStage: string;
+  dealValue: string | null;
+  dealCurrency: string | null;
+  actorId: string | null;
+  actorName: string | null;
+  viaAgent: string | null;
+  occurredAt: string;
+}
+
+/** Stage label from the reference; falls back to the raw key so a stage added later still renders. */
+export function stageLabel(stages: PipelineStage[] | null | undefined, key: string): string {
+  const hit = stages?.find((s) => s.key === key);
+  if (hit) return hit.label;
+  return key ? key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ") : "—";
+}
+
+/** A stage is closed when its kind is won or lost. Without the reference the two structural keys are
+ *  used, which is the only fallback that cannot mark an open stage closed. */
+export function isClosedStage(stages: PipelineStage[] | null | undefined, key: string): boolean {
+  const hit = stages?.find((s) => s.key === key);
+  if (hit) return hit.kind !== "open";
+  return key === "won" || key === "lost";
+}
+
+/** The stages a lead may be MOVED to: the open stages other than the current one. Won is reachable only
+ *  through Convert and lost only through Decline (the backend answers 400 `stage_terminal` otherwise), so
+ *  they are never offered. A converted or declined lead has no moves (409 `lead_closed`). */
+export function allowedMoves(stages: PipelineStage[], currentStage: string, status: LeadStatus | string): PipelineStage[] {
+  if (status === "converted" || status === "declined") return [];
+  return stages.filter((s) => s.kind === "open" && s.key !== currentStage).sort((a, b) => a.position - b.position);
+}
+
+// ── money: exact decimal strings, never floats ──
+const DEAL_VALUE_RE = /^\d{1,16}(\.\d{1,4})?$/;
+
+/** The same shape rule the API applies (`^\d{1,16}(\.\d{1,4})?$`) plus the currency's minor unit.
+ *  Returns the backend's `reason` code a refusal would carry, or null when the input is acceptable. The
+ *  backend stays the authority; this only saves a round trip and keeps the words identical. */
+export function checkDealInput(value: string, minorUnit: number | null): "deal_value_invalid" | "deal_value_precision" | null {
+  const v = value.trim();
+  if (!DEAL_VALUE_RE.test(v)) return "deal_value_invalid";
+  const decimals = v.includes(".") ? v.length - v.indexOf(".") - 1 : 0;
+  if (minorUnit !== null && decimals > minorUnit) return "deal_value_precision";
+  return null;
+}
+
+/** Render a stored decimal string at the currency's minor unit with thousands separators, as text only.
+ *  "15000000.0000" + IDR(0) → "IDR 15,000,000"; "10.2500" + USD(2) → "USD 10.25". Digits beyond the minor
+ *  unit are dropped only when they are all zero (the DB pads to four places); a non-zero digit is kept so a
+ *  value is never silently rounded. ICU-free on purpose (hydration). */
+export function formatDeal(value: string | null | undefined, currency: string | null | undefined, currencies?: PipelineCurrency[] | null): string {
+  if (value == null || currency == null) return "—";
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!m) return `${currency} ${value}`;
+  const minor = currencies?.find((c) => c.code === currency)?.minorUnit;
+  let frac = m[2] ?? "";
+  if (minor !== undefined) {
+    const kept = frac.slice(0, minor).padEnd(minor, "0");
+    frac = /^0*$/.test(frac.slice(minor)) ? kept : frac.replace(/0+$/, "").padEnd(minor, "0");
+  } else {
+    frac = frac.replace(/0+$/, "");
+  }
+  const whole = m[1].replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${currency} ${whole}${frac ? `.${frac}` : ""}`;
+}
+
+/** The stored decimal string as an editable plain number: no separators, the DB's trailing zero padding
+ *  removed ("15000000.0000" → "15000000", "10.2500" → "10.25"). Nothing is rounded. */
+export function dealInputValue(value: string | null | undefined): string {
+  if (value == null) return "";
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!m) return value;
+  const frac = (m[2] ?? "").replace(/0+$/, "");
+  return frac ? `${m[1]}.${frac}` : m[1];
+}
+
+/** "Most recently used on this tenant's leads" (design §3): the currency of the row with the latest
+ *  `updatedAt` that carries one. Null when nothing has a value yet: there is NO default currency. */
+export function mostRecentCurrency(rows: Pick<LeadQueueRow, "dealCurrency" | "updatedAt">[]): string | null {
+  let best: { at: string; code: string } | null = null;
+  for (const r of rows) {
+    if (r.dealCurrency && (!best || r.updatedAt > best.at)) best = { at: r.updatedAt, code: r.dealCurrency };
+  }
+  return best?.code ?? null;
+}
+
+// ── the queue: FILTER ONLY (contract rule 1) ──
+/** Narrow the queue by stage and/or hide closed leads. The result is a subsequence of `rows` in the
+ *  order received: this function must never sort (see `queueRank`'s header). */
+export function filterQueue(
+  rows: LeadQueueRow[],
+  opts: { stage: string | null; hideClosed: boolean },
+  stages?: PipelineStage[] | null,
+): LeadQueueRow[] {
+  return rows.filter((r) => (opts.stage === null || r.stage === opts.stage) && !(opts.hideClosed && isClosedStage(stages, r.stage)));
+}
+
+/** Count per stage key over ALL rows (not the filtered ones), so a chip's number does not change
+ *  as the filter does. */
+export function stageCounts(rows: LeadQueueRow[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.stage] = (out[r.stage] ?? 0) + 1;
+  return out;
+}
+
+/** History newest first. The backend already sends it that way; this makes the card true to its caption
+ *  even if that changed, and is stable for equal timestamps. */
+export function historyNewestFirst(events: StageEvent[]): StageEvent[] {
+  return events
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (a.e.occurredAt < b.e.occurredAt ? 1 : a.e.occurredAt > b.e.occurredAt ? -1 : a.i - b.i))
+    .map((x) => x.e);
+}
+
+// ── refusals in plain words (contract rule 5: branch on `reason`, never on `error` text) ──
+export const PIPELINE_REFUSAL_TEXT: Record<string, string> = {
+  stage_unknown: "That stage does not exist. Reload the page and try again.",
+  stage_terminal: "Won and Lost can't be picked here. Use Convert to mark a lead won, or Decline to mark it lost.",
+  lead_closed: "This lead is already converted or declined, so its stage can't change.",
+  deal_incomplete: "Enter both a value and a currency, or clear both.",
+  deal_value_invalid: "The value must be a plain number, such as 15000000 or 10.25, with no letters, signs or separators.",
+  deal_currency_unknown: "That currency isn't available. Pick one from the list.",
+  deal_value_precision: "That value has more decimal places than the currency allows.",
+};
+
+/** One sentence for a failed pipeline action. A known `reason` wins; then a 403 gets a plain permission
+ *  message; otherwise the backend's own words. */
+export function pipelineRefusalMessage(reason: string | undefined, status: number | undefined, fallback: string): string {
+  if (reason && PIPELINE_REFUSAL_TEXT[reason]) return PIPELINE_REFUSAL_TEXT[reason];
+  if (status === 403) return "You don't have permission to do that.";
+  return fallback;
+}
+
+/** The precision sentence, made concrete for the picked currency ("USD allows up to 2 decimals."). */
+export function precisionHint(currency: PipelineCurrency | null | undefined): string {
+  if (!currency) return "";
+  if (currency.minorUnit === 0) return `${currency.code} has no decimals: enter a whole number.`;
+  return `${currency.code} allows up to ${currency.minorUnit} decimal${currency.minorUnit === 1 ? "" : "s"}.`;
 }

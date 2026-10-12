@@ -3,7 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
-import { listAgencyLeadsQueue } from "@/lib/agencyLeads-data";
+import { getPipelineReference, listAgencyLeadsQueue } from "@/lib/agencyLeads-data";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { PageHeader } from "@/components/PageHeader";
 import { AgencyLeadsQueue } from "@/components/agency/AgencyLeadsQueue";
@@ -21,7 +21,7 @@ export default async function AgencyLeadsPage() {
   const tenant = await getActiveTenant(me);
   if (!tenant) redirect("/agency");
 
-  const result = await listAgencyLeadsQueue(userId, tenant);
+  const [result, reference] = await Promise.all([listAgencyLeadsQueue(userId, tenant), getPipelineReference(userId, tenant)]);
 
   // Contract rule 3: a denial must never render as an empty queue. `forbidden`/`unavailable` get
   // their own explicit page, not a "no leads yet" teach-state that would be a lie for this viewer.
@@ -47,7 +47,12 @@ export default async function AgencyLeadsPage() {
   return (
     <>
       <PageHeader title="Discovery leads" breadcrumbs={[{ label: "Agency", href: "/agency" }, { label: "Discovery leads" }]} />
-      <AgencyLeadsQueue rows={result.data} canCreate={canCreate} createAction={createLeadAction} />
+      <AgencyLeadsQueue
+        rows={result.data}
+        stages={reference.kind === "ok" ? reference.data.stages : null}
+        currencies={reference.kind === "ok" ? reference.data.currencies : null}
+        canCreate={canCreate} createAction={createLeadAction}
+      />
     </>
   );
 }

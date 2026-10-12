@@ -18,6 +18,7 @@ import { EventsModule } from "../events/events.module";
 import { AuditModule } from "../audit/audit.module";
 import { TenantWebhooksModule } from "../tenant-webhooks/tenant-webhooks.module";
 import { SubmissionsPurgeService } from "../forms/submissions-purge.service";
+import { ConsentPurgeService } from "../consent/consent-purge.service";
 import { PgIdempotencyStore } from "../control/idempotency/pg-idempotency-store";
 import { ContentTickService } from "./content-tick.service";
 import { MaintenanceJobsService } from "./maintenance-jobs.service";
@@ -26,7 +27,7 @@ import { SchedulerService } from "./scheduler.service";
 
 @Module({
   imports: [AuditModule, EventsModule, TenantWebhooksModule],
-  providers: [ContentTickService, MaintenanceJobsService, MediaPurgeService, SchedulerService, PgIdempotencyStore, SubmissionsPurgeService],
+  providers: [ContentTickService, MaintenanceJobsService, MediaPurgeService, SchedulerService, PgIdempotencyStore, SubmissionsPurgeService, ConsentPurgeService],
   exports: [ContentTickService, MaintenanceJobsService, MediaPurgeService, SchedulerService],
 })
 export class SchedulerModule {}

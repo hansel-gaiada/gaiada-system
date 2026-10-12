@@ -44,7 +44,7 @@ describe("agency_intake.convert is declared WITH an executor", () => {
     // A LOW-impact write runs unattended (mcp-hub's gate never suspends it), so there is nothing for
     // this registry to make resumable — registering one would be a no-op at best and a false signal
     // ("this can be approved") at worst, for a call that was never blocked.
-    for (const name of ["agency_intake.listLeads", "agency_intake.getLead", "agency_intake.listSubmissions",
+    for (const name of ["agency_intake.listLeads", "agency_intake.getLead", "agency_intake.listSubmissions", "agency_intake.listWebLeads",
                           "agency_intake.invite", "agency_intake.open", "agency_intake.decline", "agency_intake.nurture"]) {
       expect(getExecutable(name), name).toBeUndefined();
     }

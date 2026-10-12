@@ -7,6 +7,7 @@
 //   'low'     — unverified link or unknown external identity: no company data at all.
 import { withGlobal, withTenants } from "../db";
 import { isGrantScopeReachable } from "./scope-constrained-roles";
+import { attachEditorialScopes, isEditorialRole, type EditorialScopeRow } from "./editorial-roles";
 
 /** Local copy (2 lines, zero deps) rather than importing `isUuidShaped` from `core/dept-resolution.ts`:
  *  this file is the authz substrate and must not gain a dependency on a domain module. See
@@ -286,7 +287,9 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // so a (key, scope) pair is dropped only if EVERY grant that would have produced it was mis-scoped,
   // and kept if any OTHER, validly-scoped grant also reaches it.
   const { roles, perms } = await withGlobal(async (c) => {
-    const rolesRes = await c.query<RoleGrant>(
+    // M5-W1b: `grantId` is selected so a writers' room grant can be matched to ITS scope rows below; it is
+    // stripped again by attachEditorialScopes() and never reaches `Principal.roles` or Cerbos.
+    const rolesRes = await c.query<RoleGrant & { grantId: string }>(
       // P2-09/§12.4 — EXPIRY IS ENFORCED AT RESOLUTION, not only by the nightly sweep.
       // `user_roles.expires_at` shipped in 0109; P2-08 became its first writer (time-boxed grants and
       // §6.5 overrides) and P2-09 added the sweep that revokes on it. A sweep alone means an expired
@@ -295,7 +298,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
       // moment the timestamp passes, the grant stops resolving into the principal, so Cerbos never
       // sees it and the sweep's job is reduced to tidying the row and auditing it.
       // NULL = permanent, which is every pre-P2-08 row, so this is a no-op for existing grants.
-      `SELECT r.name AS role, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId"
+      `SELECT r.name AS role, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId", ur.id AS "grantId"
        FROM user_roles ur JOIN roles r ON r.id = ur.role_id
        WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
       [userId],
@@ -358,7 +361,7 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // Fixing it here is not a scope departure: MON-00i's own new client_contacts anchor (below) reads
   // the identical FORCE-RLS/`principal_lookup` shape, so it would have shipped with the exact same
   // defect if the two queries stayed apart.
-  const { companies, rootCompanies, clientContacts } = await withGlobal(async (c) => {
+  const { companies, rootCompanies, clientContacts, scopeRows } = await withGlobal(async (c) => {
     await c.query("BEGIN");
     try {
       await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
@@ -431,11 +434,35 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
         [userId],
       );
 
+      // M5-W1b. The scope rows of the principal's writers' room grants (design §2.2), read under the SAME
+      // `principal_lookup` GUC: `user_role_editorial_scopes` is FORCE RLS, and its principal_lookup policy exposes
+      // only the rows of grants HELD BY this user. Outside this transaction (a plain withGlobal, no GUC) the read
+      // would return ZERO rows and no error, and every writer would silently be denied everything: the zero-row
+      // trap. Skipped entirely when the principal holds none of the four roles (the common case costs nothing).
+      // `ANY($2)` narrows to the grants resolved above (unexpired), so an expired grant's rows never attach.
+      const editorialGrantIds = roles
+        .filter((g) => isEditorialRole(g.role) && g.scopeType === "company")
+        .map((g) => g.grantId);
+      const scopeRows = editorialGrantIds.length === 0
+        ? []
+        : (
+            await c.query<EditorialScopeRow>(
+              `SELECT s.user_role_id AS "userRoleId", s.tenant_id AS "tenantId", s.site_id AS "siteId",
+                      s.all_collections AS "allCollections", s.collections, s.all_locales AS "allLocales", s.locales
+                 FROM user_role_editorial_scopes s
+                 JOIN user_roles ur ON ur.id = s.user_role_id
+                WHERE ur.user_id = $1 AND s.user_role_id = ANY($2::uuid[])
+                ORDER BY s.site_id`,
+              [userId, editorialGrantIds],
+            )
+          ).rows;
+
       await c.query("COMMIT");
       return {
         companies: companiesRes,
         rootCompanies: rootRes.rows.map((r) => r.id),
         clientContacts: contactRes.rows,
+        scopeRows,
       };
     } catch (err) {
       await c.query("ROLLBACK");
@@ -445,11 +472,14 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
 
   // WSK-49f: resolve client-scoped grants against the principal's own contact rows (see the query above).
   const tenantOfClient = new Map(clientContacts.map((r) => [r.client_id, r.tenant_id] as const));
-  const resolvedRoles = roles.flatMap((g): RoleGrant[] => {
+  const clientResolved = roles.flatMap((g): Array<RoleGrant & { grantId: string }> => {
     if (g.scopeType !== "client") return [g];
     const tenantId = g.scopeId ? tenantOfClient.get(g.scopeId) : undefined;
     return tenantId ? [{ ...g, scopeTenantId: tenantId }] : []; // no active client-wide contact row => inert
   });
+  // M5-W1b: each writers' room grant gets ITS scope rows as `editorialScopes`; one with none gets nothing (fail
+  // closed). Strips the internal `grantId` from every grant. See attachEditorialScopes().
+  const resolvedRoles = attachEditorialScopes(clientResolved, scopeRows);
   const clientAdminOf = clientContacts
     .filter((r) => r.capability === "admin")
     .map((r) => ({ tenantId: r.tenant_id, clientId: r.client_id }));

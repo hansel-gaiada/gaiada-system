@@ -45,7 +45,57 @@ interface DemoLead {
   createdAt: string;
   updatedAt: string;
   submissions: DemoSubmission[]; // newest first
+  // M5-P1 pipeline. `stage` defaults from `status` (see `stageFor`); history is newest first.
+  stage?: string;
+  dealValue?: string | null;
+  dealCurrency?: string | null;
+  stageEnteredAt?: string;
+  history?: DemoStageEvent[];
 }
+
+interface DemoStageEvent {
+  id: string; fromStage: string; toStage: string; dealValue: string | null; dealCurrency: string | null;
+  actorId: string | null; actorName: string | null; viaAgent: string | null; occurredAt: string;
+}
+
+const DEMO_STAGES = [
+  { key: "enquiry", position: 10, kind: "open", label: "Enquiry" },
+  { key: "contacted", position: 20, kind: "open", label: "Contacted" },
+  { key: "qualified", position: 30, kind: "open", label: "Qualified" },
+  { key: "proposal", position: 40, kind: "open", label: "Proposal sent" },
+  { key: "won", position: 90, kind: "won", label: "Won" },
+  { key: "lost", position: 99, kind: "lost", label: "Lost" },
+];
+const DEMO_CURRENCIES = [
+  { code: "IDR", symbol: "Rp", minorUnit: 0 },
+  { code: "USD", symbol: "$", minorUnit: 2 },
+  { code: "SGD", symbol: "S$", minorUnit: 2 },
+];
+const DEAL_RE = /^\d{1,16}(\.\d{1,4})?$/;
+
+/** won iff converted, lost iff declined (the DB CHECKs); every other lead is at `stage` or enquiry. */
+function stageFor(l: DemoLead): string {
+  if (l.status === "converted") return "won";
+  if (l.status === "declined") return "lost";
+  return l.stage ?? "enquiry";
+}
+
+/** Same validation order as the real routes: stage/deal refusals carry the typed `reason`. */
+function checkDeal(value: unknown, currency: unknown): { status: number; json: unknown } | null {
+  const bad = (reason: string, error: string) => ({ status: 400, json: { error, reason } });
+  if (value == null && currency == null) return null;
+  if (value == null || currency == null) return bad("deal_incomplete", "value and currency go together");
+  const cur = DEMO_CURRENCIES.find((c) => c.code === currency);
+  if (!cur) return bad("deal_currency_unknown", "unknown currency");
+  const v = String(value);
+  if (!DEAL_RE.test(v)) return bad("deal_value_invalid", "value must be a decimal number");
+  const decimals = v.includes(".") ? v.length - v.indexOf(".") - 1 : 0;
+  if (decimals > cur.minorUnit) return bad("deal_value_precision", `${cur.code} allows ${cur.minorUnit} decimals`);
+  return null;
+}
+
+/** The DB pads a numeric(20,4) to four places: "1500" is stored and read back as "1500.0000". */
+const padDeal = (v: unknown) => { const [w, f = ""] = String(v).split("."); return `${w}.${f.padEnd(4, "0")}`; };
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown, status = 200): DemoResult => ({ status, json });
@@ -206,6 +256,11 @@ const LEADS: DemoLead[] = [
     convertedClientId: null, convertedProjectId: null, pipelineRunId: null, declinedReason: null,
     triagedBy: null, triagedByName: null, triagedAt: null,
     createdAt: "2026-08-20T08:00:00Z", updatedAt: "2026-08-30T14:00:00Z",
+    stage: "qualified", dealValue: "15000000.0000", dealCurrency: "IDR", stageEnteredAt: "2026-08-28T09:30:00Z",
+    history: [
+      { id: "se-demo-2", fromStage: "contacted", toStage: "qualified", dealValue: "15000000.0000", dealCurrency: "IDR", actorId: "demo-hansel", actorName: "Clement Hansel", viaAgent: null, occurredAt: "2026-08-28T09:30:00Z" },
+      { id: "se-demo-1", fromStage: "enquiry", toStage: "contacted", dealValue: null, dealCurrency: null, actorId: "demo-hansel", actorName: "Clement Hansel", viaAgent: "Sales assistant", occurredAt: "2026-08-22T10:00:00Z" },
+    ],
     submissions: [
       submission("sub-demo-2", FULL_ANSWERS, "sub-demo-1", "2026-08-30T14:00:00Z", 2),
       submission("sub-demo-1", PARTIAL_ANSWERS, null, "2026-08-25T11:00:00Z", 1),
@@ -255,6 +310,7 @@ function toRow(l: DemoLead) {
     id: l.id, orgName: l.orgName, contactName: l.contactName, contactEmail: l.contactEmail, contactPhone: l.contactPhone,
     source: l.source, status: l.status, ownerId: l.ownerId, ownerName: l.ownerName,
     createdAt: l.createdAt, updatedAt: l.updatedAt, ageSeconds: ageSeconds(l.createdAt), hasSubmission: l.submissions.length > 0,
+    stage: stageFor(l), dealValue: l.dealValue ?? null, dealCurrency: l.dealCurrency ?? null, stageEnteredAt: l.stageEnteredAt ?? l.triagedAt ?? l.createdAt,
   };
 }
 
@@ -276,17 +332,33 @@ function toDetail(l: DemoLead) {
     latestRedactions: latest?.redactions ?? null,
     latestSupersedesId: latest?.supersedesId ?? null,
     latestSubmittedAt: latest?.createdAt ?? null,
+    stage: stageFor(l), dealValue: l.dealValue ?? null, dealCurrency: l.dealCurrency ?? null, stageEnteredAt: l.stageEnteredAt ?? l.triagedAt ?? l.createdAt,
   };
 }
 
 const REQUIRED_TENANT_RE = "[^/]+";
 const tokens = new Map<string, { leadId: string; revoked: boolean }>();
 
+/** One history row (newest first) plus the stage fields: the demo twin of `transitionStage()`. */
+function recordStage(lead: DemoLead, from: string, to: string, userId: string): DemoStageEvent {
+  const at = new Date().toISOString();
+  const ev: DemoStageEvent = {
+    id: nid("se"), fromStage: from, toStage: to, dealValue: lead.dealValue ?? null, dealCurrency: lead.dealCurrency ?? null,
+    actorId: userId, actorName: userId, viaAgent: null, occurredAt: at,
+  };
+  lead.history = [ev, ...(lead.history ?? [])];
+  lead.stage = to; lead.stageEnteredAt = at; lead.updatedAt = at;
+  return ev;
+}
+
 /** Returns a DemoResult for any /agency/leads route, or null if it doesn't match. Signature order
  *  matches `webdevChangeRequestsDemo`'s (method, path, searchParams, body, userId) even though this
  *  store doesn't read query params today — kept for consistency with its `demoFixtures.ts` sibling. */
 export function agencyLeadsDemo(method: string, p: string, _params: URLSearchParams, body: string | undefined, userId: string): DemoResult | null {
   const m = method.toUpperCase();
+  if (new RegExp(`^/api/${REQUIRED_TENANT_RE}/agency/pipeline/reference$`).test(p) && m === "GET") {
+    return ok({ stages: DEMO_STAGES, currencies: DEMO_CURRENCIES });
+  }
   const base = new RegExp(`^/api/${REQUIRED_TENANT_RE}/agency/leads`);
   if (!base.test(p)) return null;
 
@@ -349,9 +421,11 @@ export function agencyLeadsDemo(method: string, p: string, _params: URLSearchPar
     const b = JSON.parse(body || "{}") as { reason?: string };
     const reason = (b.reason ?? "").trim();
     if (!reason) return { status: 400, json: { error: "reason required when declining" } };
-    if (lead.status !== "in_review") return { status: 409, json: { error: `cannot decline a lead in status '${lead.status}' — expected 'in_review'` } };
+    if (lead.status === "converted" || lead.status === "declined") return { status: 409, json: { error: `cannot decline a lead in status '${lead.status}'`, reason: "lead_closed" } };
+    const declineFrom = stageFor(lead);
     lead.status = "declined"; lead.declinedReason = reason; lead.triagedBy = userId; lead.triagedByName = userId;
     lead.triagedAt = new Date().toISOString(); lead.updatedAt = lead.triagedAt;
+    recordStage(lead, declineFrom, "lost", userId);
     return ok({ id: lead.id, status: lead.status });
   }
 
@@ -381,10 +455,17 @@ export function agencyLeadsDemo(method: string, p: string, _params: URLSearchPar
     if (!["submitted", "in_review", "nurturing"].includes(lead.status)) {
       return { status: 409, json: { error: `cannot convert a lead in status '${lead.status}'` } };
     }
-    const b = JSON.parse(body || "{}") as { delegations?: { role?: string; assigneeId: string }[] };
+    const b = JSON.parse(body || "{}") as { delegations?: { role?: string; assigneeId: string }[]; deal?: { value?: unknown; currency?: unknown } };
+    if (b.deal !== undefined) {
+      const refused = checkDeal(b.deal?.value ?? null, b.deal?.currency ?? null);
+      if (refused) return refused;
+    }
+    const convertFrom = stageFor(lead);
     const clientId = nid("cl"); const projectId = nid("p"); const runId = "run-demo-2"; // reuse demoPipeline's fixture so the deep link resolves
     lead.status = "converted"; lead.convertedClientId = clientId; lead.convertedProjectId = projectId; lead.pipelineRunId = runId;
     lead.triagedBy = userId; lead.triagedByName = userId; lead.triagedAt = new Date().toISOString(); lead.updatedAt = lead.triagedAt;
+    if (b.deal?.value != null) { lead.dealValue = padDeal(b.deal.value); lead.dealCurrency = String(b.deal.currency); }
+    recordStage(lead, convertFrom, "won", userId);
 
     const overrides = new Map((b.delegations ?? []).filter((d) => d.role).map((d) => [d.role as string, d.assigneeId]));
     const canonical = [
@@ -402,7 +483,50 @@ export function agencyLeadsDemo(method: string, p: string, _params: URLSearchPar
       // for the position-resolution roles when nobody overrides them, rather than inventing a holder.
       return { role, title, assigneeId: null, source: "unresolved" as const, reason: "no tenant seat holder in this demo, and this role has no owner fallback" };
     });
-    return ok({ id: lead.id, status: "converted", clientId, projectId, runId, delegations });
+    return ok({ id: lead.id, status: "converted", clientId, projectId, runId, delegations, dealValue: lead.dealValue ?? null, dealCurrency: lead.dealCurrency ?? null });
+  }
+
+  const stageM = p.match(new RegExp(`^/api/${REQUIRED_TENANT_RE}/agency/leads/([^/]+)/stage$`));
+  if (stageM && m === "POST") {
+    const lead = LEADS.find((l) => l.id === stageM[1]);
+    if (!lead) return { status: 404, json: { error: "lead not found" } };
+    const b = JSON.parse(body || "{}") as { stage?: string; deal?: { value?: unknown; currency?: unknown } };
+    const target = DEMO_STAGES.find((s) => s.key === b.stage);
+    if (!target) return { status: 400, json: { error: "unknown stage", reason: "stage_unknown" } };
+    if (target.kind !== "open") return { status: 400, json: { error: "won and lost are reached through convert and decline", reason: "stage_terminal" } };
+    if (lead.status === "converted" || lead.status === "declined") return { status: 409, json: { error: "lead is closed", reason: "lead_closed" } };
+    if (b.deal !== undefined) {
+      const refused = checkDeal(b.deal?.value ?? null, b.deal?.currency ?? null);
+      if (refused) return refused;
+    }
+    const from = stageFor(lead);
+    if (from === target.key) return ok({ id: lead.id, stage: from, changed: false });
+    if (b.deal?.value != null) { lead.dealValue = padDeal(b.deal.value); lead.dealCurrency = String(b.deal.currency); }
+    const ev = recordStage(lead, from, target.key, userId);
+    return ok({ id: lead.id, stage: target.key, changed: true, stageEventId: ev.id });
+  }
+
+  const dealM = p.match(new RegExp(`^/api/${REQUIRED_TENANT_RE}/agency/leads/([^/]+)/deal$`));
+  if (dealM && m === "POST") {
+    const lead = LEADS.find((l) => l.id === dealM[1]);
+    if (!lead) return { status: 404, json: { error: "lead not found" } };
+    const b = JSON.parse(body || "{}") as { value?: unknown; currency?: unknown };
+    if (!("value" in b) || !("currency" in b)) return { status: 400, json: { error: "value and currency go together", reason: "deal_incomplete" } };
+    const refused = checkDeal(b.value, b.currency);
+    if (refused) return refused;
+    const next = b.value == null ? null : padDeal(b.value);
+    const nextCur = b.currency == null ? null : String(b.currency);
+    const changed = next !== (lead.dealValue ?? null) || nextCur !== (lead.dealCurrency ?? null);
+    lead.dealValue = next; lead.dealCurrency = nextCur;
+    if (changed) lead.updatedAt = new Date().toISOString();
+    return ok({ id: lead.id, changed, dealValue: lead.dealValue, dealCurrency: lead.dealCurrency });
+  }
+
+  const historyM = p.match(new RegExp(`^/api/${REQUIRED_TENANT_RE}/agency/leads/([^/]+)/stage-history$`));
+  if (historyM && m === "GET") {
+    const lead = LEADS.find((l) => l.id === historyM[1]);
+    if (!lead) return { status: 404, json: { error: "lead not found" } };
+    return ok(lead.history ?? []);
   }
 
   const submissionsM = p.match(new RegExp(`^/api/${REQUIRED_TENANT_RE}/agency/leads/([^/]+)/submissions$`));

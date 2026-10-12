@@ -12,7 +12,7 @@ import "server-only";
 // than silently emptying the queue.
 import { platformFetch } from "./platform";
 import { readResult, type ReadResult } from "./readResult";
-import type { LeadDetail, LeadQueueRow, LeadSubmission } from "./agencyLeads";
+import type { LeadDetail, LeadQueueRow, LeadSubmission, PipelineReference, StageEvent } from "./agencyLeads";
 
 export async function listAgencyLeadsQueue(userId: string, tenant: string): Promise<ReadResult<LeadQueueRow[]>> {
   return readResult(platformFetch<LeadQueueRow[]>(`/api/${tenant}/agency/leads`, userId));
@@ -38,4 +38,17 @@ export async function getAgencyLeadDetail(userId: string, tenant: string, leadId
  *  than folded into the generic wrapper. */
 export async function listAgencyLeadSubmissions(userId: string, tenant: string, leadId: string): Promise<ReadResult<LeadSubmission[] | null>> {
   return readResult(platformFetch<LeadSubmission[] | null>(`/api/${tenant}/agency/leads/${leadId}/submissions`, userId));
+}
+
+/** M5-P1 — the stage list and the ACTIVE currencies (global reference data, `agency_lead:read`). A
+ *  refusal stays a refusal: the Pipeline card renders it inline and withholds the controls that depend
+ *  on it, rather than guessing a stage list or a currency. */
+export async function getPipelineReference(userId: string, tenant: string): Promise<ReadResult<PipelineReference>> {
+  return readResult(platformFetch<PipelineReference>(`/api/${tenant}/agency/pipeline/reference`, userId));
+}
+
+/** M5-P1 — the lead's stage history, newest first, no personal data. 404 means the lead is invisible,
+ *  which the detail read has already answered, so here it reads as `unavailable`, never as "no history". */
+export async function getLeadStageHistory(userId: string, tenant: string, leadId: string): Promise<ReadResult<StageEvent[]>> {
+  return readResult(platformFetch<StageEvent[]>(`/api/${tenant}/agency/leads/${leadId}/stage-history`, userId));
 }

@@ -451,3 +451,43 @@ describe("resolveAuthorNames is COSMETIC, and the only read here that swallows a
     expect(await resolveAuthorNames("u", "c")).toEqual({});
   });
 });
+
+describe("parseLint: the advisory `content` member (M5-W3b)", () => {
+  const base = { placeholders: { unresolvedTokens: [], markers: {} } };
+  it("absent (older WebDesk): no `content` key at all, never an empty one", () => {
+    expect("content" in parseLint(base, "lint")).toBe(false);
+  });
+  it("not an object: treated as absent", () => {
+    expect("content" in parseLint({ ...base, content: "nope" }, "lint")).toBe(false);
+    expect("content" in parseLint({ ...base, content: null }, "lint")).toBe(false);
+  });
+  it("partial: missing members default, malformed entries are skipped, unknown severity reads as info, unknown codes are kept", () => {
+    const l = parseLint({ ...base, content: { findings: [
+      { code: "h1.missing", severity: "warn", path: "/blocks/0", message: "No H1" },
+      { code: "future.rule", severity: "loud", message: "x" },
+      { code: 5, message: "bad" }, "junk",
+    ] } }, "lint");
+    expect(l.content).toEqual({
+      findings: [
+        { code: "h1.missing", severity: "warn", path: "/blocks/0", message: "No H1" },
+        { code: "future.rule", severity: "info", path: "/", message: "x" },
+      ],
+      aeo: null, unavailable: [],
+    });
+  });
+  it("full: findings, aeo with factors, unavailable", () => {
+    const l = parseLint({ ...base, content: {
+      findings: [{ code: "meta.title.too-long", severity: "info", path: "/seo/title", message: "Title is long" }],
+      aeo: { score: 72, factors: [{ id: "faq", label: "FAQ", points: 5, max: 15, detail: "1 Q&A" }, { id: "bad" }] },
+      unavailable: [{ rule: "twin.missing", reason: "unreadable localization" }, { reason: "no rule" }],
+    } }, "lint");
+    expect(l.content?.aeo).toEqual({ score: 72, factors: [{ id: "faq", label: "FAQ", points: 5, max: 15, detail: "1 Q&A" }] });
+    expect(l.content?.unavailable).toEqual([{ rule: "twin.missing", reason: "unreadable localization" }]);
+    expect(l.content?.findings).toHaveLength(1);
+  });
+  it("aeo null stays null (no score, not 0); the placeholder part is unchanged", () => {
+    const l = parseLint({ placeholders: { unresolvedTokens: ["{{a}}"], markers: { CONFIRM: 1 } }, content: { findings: [], aeo: null, unavailable: [] } }, "lint");
+    expect(l.content?.aeo).toBeNull();
+    expect(l.unresolvedTokens).toEqual(["{{a}}"]);
+  });
+});
