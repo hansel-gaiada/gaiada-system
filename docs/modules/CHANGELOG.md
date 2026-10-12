@@ -58,6 +58,34 @@ local stack). None of these mean "production-done".
 - **`ContractReadService.readArtifact`** resolves the key with the same `artifactKey` rule it presigns with; the version must be plain semver, so nothing else reaches an object key.
 - **Tests:** a no-service spec for the service and handler (`contract-artifact-route.spec.ts`), and HTTP cases added to `codegen-contract-controller.spec.ts` (needs the DB and storage containers; server gate).
 
+### platform-nest `0.110.0` - M5-V6-b: the ERP replay backend, recordings list and chunk stream behind `view_replay` (2026-10-13) - PROTOTYPED
+
+- **Routes:** `GET …/visitors/:visitorId/recordings` (metadata only) and `GET …/recordings/:recordingId/chunks?from&opening`, streamed through the BFF.
+  - There is no download route, and responses are `no-store`.
+  - A recording is released only while its visitor and consent ids match a live profile, and every page re-checks this, so a withdrawal mid-replay cuts the player off.
+  - An unknown recording, another company's, or one with no live profile all give the same 404.
+- **Audit:**
+  - Opening a recording (`from` 0) writes ONE activity row (who, which recording, when, no content) before any content leaves, and returns its `openingId`.
+  - Every later page must carry it: the caller's own opening of that recording, under 60 minutes old, or 409 `not_opened`. No page reads unaudited.
+- **MCP:** `search.replays.list` only, metadata, a read. A test pins O7: no tool returns recording content.
+- **Forgetting:** withdrawn visitors' recordings go with V3-e's sweep forget. A recording under a live visitor with a foreign consent id is hidden and forgotten by consent id.
+- **Collector outage:** a typed 503 in words.
+- BFF §28g. The capability inventory is regenerated.
+- GitHub Actions 38288095210 green, including `replays.db.test.ts` (31 cases: the opening check, the live-profile re-check, the sweep forget).
+
+### platform-ui `0.106.0` - M5-V3-i: the Visitors tab, the "bot hits filtered" figure, and the visitor permission mirror (2026-10-13) - PROTOTYPED
+
+- **Website → Visitors** (a sixth tab):
+  - **List:** the 8-character id, last seen, visits, place, "Network" or "Company" with confidence, top interests, score, and a lead linked or none. It keeps server order, with filters and paging.
+  - **Detail:** score parts, interests, the timeline, and a linked lead. A restricted lead says "a lead you cannot open" and shows no id.
+  - **Interest-rules sub-page:** saves the complete set, and refusals show as sentences.
+  - The header line is the design's own sentence.
+  - Every non-ok pipeline state is a sentence, and stored rows stay visible beside it.
+- **The tab 404s and is hidden** (tab strip and command palette) without the toolkit or `read_visitors`, so plain search staff never see an empty list.
+- **Analytics** gains "bot hits filtered": the 30-day total, the window and the reasons; non-ok states are words.
+- **Permission mirror:** `lib/rbac.ts` / `rbac-capability-map.ts` mirror `search.property.read_visitors` and `search.property.view_replay` (V3-f) as `search.visitors.read` and `search.replay.view`.
+- **Tests:** vitest (6544 full, 841 after the merge), tsc and `next build` green locally; GitHub Actions 38287617124 green.
+
 ### platform-nest `0.109.0` - M5-V3-h: rights requests cover consented visitor profiles and the collector (2026-10-13) - DEV-VERIFIED
 
 - **Requests:** a rights request (G5) can now name `visitorId` and/or `consentId` as well as email and phone. Only `sha256(lower(uuid))` hashes are kept in the approval, the ledger, events and the hub minimiser, and the approval binding covers them, so an approval never widens.

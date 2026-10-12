@@ -41,6 +41,7 @@ import {
   WITHIN_EDIT_WINDOW_SQL, applyEdit, applyRetract, assertEditable, createProjectThread, findOrCreateGeneralThread,
   insertMessage, isUuid, markRead, prepareAttachments, readMessages, unreadCountSql, validateBody, validateSubject,
 } from "./conversation-core";
+import { notifyClientPosted } from "./conversation-notify";
 
 interface ThreadRow {
   id: string;
@@ -166,6 +167,8 @@ export class PortalConversationController {
       return { threadId, messageId: msg.id, created, attachmentIds: msg.attachmentIds };
     });
     await writeActivity(tenantId, userId, "posted", "conversation", out.threadId, { messageId: out.messageId, via: "portal" });
+    // PV4-06: tell the staff recipients, AFTER the commit; best-effort, never throws.
+    await notifyClientPosted(tenantId, userId, out.threadId);
     return out;
   }
 
@@ -194,6 +197,7 @@ export class PortalConversationController {
       return { id: msg.id, threadId, createdAt: msg.createdAt, attachmentIds: msg.attachmentIds };
     });
     await writeActivity(tenantId, userId, "posted", "conversation", threadId, { messageId: out.id, via: "portal" });
+    await notifyClientPosted(tenantId, userId, threadId);
     return out;
   }
 

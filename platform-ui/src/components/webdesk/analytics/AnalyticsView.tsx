@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Card, KpiTile } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import type { AnalyticsReads } from "@/lib/websiteAnalytics";
+import type { Read } from "@/lib/visitors";
+import { STATUS_TITLE, botFilterNote, statusWords, type VisitorStatus } from "@/lib/visitorsModel";
 import {
   barPct, fmtCount, fmtDuration, fmtPct, fmtReach, maxCount,
   type AnalyticsData, type AnalyticsKind, type AnalyticsRead, type Count, type MetricRow,
@@ -46,9 +48,33 @@ export interface AnalyticsViewProps {
   action: string;
   range: { from: string; to: string; error: string | null };
   reads: AnalyticsReads;
+  /** M5-V3-i: the collector's bot-hit count, read from the visitors status. Absent = the viewer may not read visitor data, so no figure is drawn. */
+  bots?: Read<VisitorStatus>;
+  /** The day the bot filter went live (`YYYY-MM-DD`), once known. */
+  botFilterLiveDate?: string | null;
 }
 
-export function AnalyticsView({ siteName, action, range, reads }: AnalyticsViewProps) {
+/** "Bot hits filtered": hits the collector dropped as bots (never forwarded to Umami), last 30 days. Words for anything that is not a count. */
+function BotFigure({ bots, liveDate }: { bots: Read<VisitorStatus>; liveDate?: string | null }) {
+  if (bots.state === "unavailable") {
+    return <p className="wa-note" role="status" data-testid="bot-hits-unavailable">Bot hits filtered: {bots.message}</p>;
+  }
+  const s = bots.data;
+  if (s.state !== "ok" || !s.bots) {
+    const title = s.state === "ok" ? "Bot counts are not available" : STATUS_TITLE[s.state];
+    return <p className="wa-note" role="status" data-testid={`bot-hits-${s.state}`}>Bot hits filtered: {title}. {statusWords(s)}</p>;
+  }
+  const reasons = Object.entries(s.bots.byReason);
+  return (
+    <div data-testid="bot-hits">
+      <KpiTile label="Bot hits filtered" value={s.bots.total.toLocaleString("en-US")} />
+      <p className="wa-foot">Hits the collector dropped as bots between {s.bots.from} and {s.bots.to} ({s.bots.days} days); they never reach Umami.{reasons.length ? ` By reason: ${reasons.map(([k, n]) => `${k} ${n.toLocaleString("en-US")}`).join(", ")}.` : ""}</p>
+      <p className="wa-foot" data-testid="bot-hits-note">{botFilterNote(liveDate)}</p>
+    </div>
+  );
+}
+
+export function AnalyticsView({ siteName, action, range, reads, bots, botFilterLiveDate }: AnalyticsViewProps) {
   const sum = reads.summary;
   return (
     <div className="wa-page" data-testid="website-analytics">
@@ -65,6 +91,8 @@ export function AnalyticsView({ siteName, action, range, reads }: AnalyticsViewP
         <button type="submit" className="lux-btn lux-btn--solid lux-btn--md">Show</button>
         {range.error ? <p className="wa-range__err" role="alert">{range.error} Showing {range.from} to {range.to}.</p> : null}
       </form>
+
+      {bots ? <BotFigure bots={bots} liveDate={botFilterLiveDate} /> : null}
 
       {sum.state !== "ok" ? (
         // Summary failed, so every read would say the same: one notice, no tables, no zeros.

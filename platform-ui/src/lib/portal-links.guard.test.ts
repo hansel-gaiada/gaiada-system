@@ -66,8 +66,11 @@ function routeExists(link: string): boolean {
 // the link (the entry is stale). It is a ledger of a known gap, not a way to skip the guard: nothing is exempt silently.
 //   PV4-05 sends `/portal/meetings/<minutesId>` in the "minutes shared" notification (a client's notice that staff shared a
 //   meeting's minutes); the page that renders it, and its place in a portal area, is PV4-08.
+//   PV4-06 sends `/portal/conversation/<threadId>` in the "you have a new message" notification (staff wrote to a client contact);
+//   the thread page, and its place in a portal area (Projects), is PV4-08.
 const AWAITING_PAGE: Record<string, string> = {
   "/portal/meetings/:id": "PV4-05 (sends the link) / PV4-08 (builds the page and gives it a portal area)",
+  "/portal/conversation/:id": "PV4-06 (sends the link) / PV4-08 (builds the page and gives it a portal area)",
 };
 
 describe("links the backend sends clients open a portal page in an area", () => {

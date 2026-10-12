@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **249** capabilities across **16** owners
-- **132** writes · 117 reads
+- **250** capabilities across **16** owners
+- **132** writes · 118 reads
 - Writes by impact: **high 24** · medium 37 · low 71
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -42,8 +42,8 @@ unfalsifiable after.
 | agency | `agency` | 17 |
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 14 |
-| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 34 |
+| clients | `clients` | 15 |
+| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 35 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 7 |
@@ -52,9 +52,9 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 26 |
+| search | `search` | 28 |
 | social | `social` | 13 |
-| webdev | `webdev` | 30 |
+| webdev | `webdev` | 31 |
 
 ## Capabilities
 
@@ -191,6 +191,7 @@ unfalsifiable after.
 | search | `search.pullBing` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/bing/pull` | write | `low` |
 | search | `search.pullRanks` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/rank-pull` | write | `medium` |
 | search | `search.rankSummary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/rank-snapshots` | read | — |
+| search | `search.replays.list` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/visitors/:visitorId/recordings` | read | — |
 | search | `search.runAudit` | — | — | write | `low` |
 | search | `search.setBudget` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.setConversionTarget` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | write | `low` |

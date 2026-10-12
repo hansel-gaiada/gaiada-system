@@ -261,6 +261,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/conversions.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/experiments.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/indexnow.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/replays.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-analytics.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
@@ -414,6 +415,10 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/leads/[tenant]/[site]`
 - `/departments/[deptId]/website/media`
 - `/departments/[deptId]/website/media/[tenant]/[site]`
+- `/departments/[deptId]/website/visitors`
+- `/departments/[deptId]/website/visitors/[tenant]/[site]`
+- `/departments/[deptId]/website/visitors/[tenant]/[site]/[visitorId]`
+- `/departments/[deptId]/website/visitors/[tenant]/[site]/interest-rules`
 - `/departments/[deptId]/website/writers`
 - `/departments/[deptId]/website/writers/[tenant]/[site]`
 - `/departments/[deptId]/website/writers/briefs/[tenant]/[site]/[briefId]`

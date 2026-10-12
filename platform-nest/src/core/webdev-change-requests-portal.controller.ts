@@ -27,7 +27,7 @@ import { scrubText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
 import { resolvePortalScope, type PortalScope } from "./portal-scope";
 // PV3-02: the row-visibility predicate below comes from portal-visibility.ts.
-import { changeRequestInPortalScope } from "./portal-visibility";
+import { changeRequestInPortalScope, contractInPortalScope } from "./portal-visibility";
 import type { PoolClient } from "pg";
 
 const KINDS = new Set(["content", "design", "feature", "bug"]);
@@ -60,7 +60,17 @@ const SELECT_COLUMNS = `
   -- severity IS included and is READ-ONLY here — the client may see how their bug was ranked at
   -- triage, but create never accepts it.
   wcr.severity, wcr.repro_steps AS "reproSteps", wcr.environment,
-  wcr.seen_on_version AS "seenOnVersion", wcr.affected_url AS "affectedUrl"`;
+  wcr.seen_on_version AS "seenOnVersion", wcr.affected_url AS "affectedUrl",
+  -- PV4-04: does this request wait on a price amendment? priceImpact is the triage answer
+  -- (unassessed | none | changes_price). amendmentContractId comes from the SCOPED join below, so it is
+  -- the id only once the amendment is something the caller may read in the portal (not a draft, and in
+  -- the caller's client/project scope): a draft the agency has not issued is never disclosed here.
+  wcr.price_impact AS "priceImpact", ac.id AS "amendmentContractId"`;
+
+/** The join that SELECT_COLUMNS' ac alias needs. Parameter slots are the caller's, like every portal
+ *  predicate: the contract is admitted by the same client/project scope that admits the request. */
+const amendmentJoin = (params: { clients: number; projects: number }) =>
+  `LEFT JOIN contracts ac ON ac.id = wcr.amendment_contract_id AND ${contractInPortalScope("ac", params)}`;
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -76,6 +86,7 @@ export class WebdevChangeRequestsPortalController {
         `SELECT ${SELECT_COLUMNS}
            FROM webdev_change_requests wcr
            LEFT JOIN projects p ON p.id = wcr.project_id
+           ${amendmentJoin({ clients: 1, projects: 2 })}
           WHERE ${changeRequestInPortalScope("wcr", { clients: 1, projects: 2 })}
           ORDER BY wcr.created_at DESC LIMIT 200`,
         [scope.clientIds, scope.projectIds],
@@ -228,6 +239,7 @@ export class WebdevChangeRequestsPortalController {
       `SELECT ${SELECT_COLUMNS}
          FROM webdev_change_requests wcr
          LEFT JOIN projects p ON p.id = wcr.project_id
+         ${amendmentJoin({ clients: 2, projects: 3 })}
         WHERE wcr.id = $1 AND ${changeRequestInPortalScope("wcr", { clients: 2, projects: 3 })}`,
       [id, scope.clientIds, scope.projectIds],
     );

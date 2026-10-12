@@ -158,6 +158,7 @@ import { startContentDecayLoop } from "./modules/search/content-decay-job";
 import { startVisitorJobs } from "./modules/search/visitor-jobs";
 import { startIndexNowRetryLoop } from "./modules/search/indexnow-service";
 import { registerIndexNowEventHandlers } from "./modules/search/indexnow-webdesk";
+import { registerAmendmentEventHandlers } from "./core/amendment-signed-handler";
 // MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
 // master gate): starting it unconditionally would still send nothing today (resolveAdapter falls
 // back to dev-log when disabled, provider.ts), but not starting it at all is the honest "module is
@@ -568,6 +569,10 @@ async function bootstrap(): Promise<void> {
     // M5-P5a: an approved WebDesk `content.publish` pings IndexNow. A CORE handler on purpose (the search module registers NO
     // automation_approval.decided handler: search-sem-apply.test.ts). Flag-gated inside (SEARCH_INDEXNOW_ENABLED === "1"): off, it reads nothing.
     registerIndexNowEventHandlers();
+    // PV4-04: a signed amendment tells the triager their change request can start (core/amendment-signed-handler.ts).
+    // The `contract` stream is added to the consumer list below in the same change, or this handler would be
+    // registered and never invoked.
+    registerAmendmentEventHandlers();
     // P2-05: the position reconciler's outbox triggers. The HANDLERS are flag-gated (they also
     // re-check `positionSyncEnabled` internally, and every reconciler entry point returns null when
     // it is off) but the STREAMS below are listed unconditionally — an always-drained stream can
@@ -629,6 +634,9 @@ async function bootstrap(): Promise<void> {
       // "agency_lead"). searchModule.eventHandlers["agency.lead.stage_changed"] plans ad-platform conversion uploads from it.
       // Without this entry that handler is registered and NEVER invoked (the SMM-14 trap above); conversions.test.ts pins it.
       "agency_lead",
+      // PV4-04 — the stream `contract.signed` is emitted on (core/contracts.controller.ts countersign, portal-commerce.controller.ts sign).
+      // registerAmendmentEventHandlers() hangs the "amendment signed: the request can start" notice off it.
+      "contract",
       // P2-05 — see registerPositionEventHandlers' header for why these are unconditional.
       ...POSITION_STREAMS,
     ]);

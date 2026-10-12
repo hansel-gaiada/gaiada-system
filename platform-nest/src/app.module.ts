@@ -138,6 +138,7 @@ import { SearchVisitorsController } from "./modules/search/visitors.controller";
 import { SearchAiCrawlerController } from "./modules/search/ai-crawler.controller";
 import { SearchExperimentsController } from "./modules/search/experiments.controller";
 import { SearchIndexNowController } from "./modules/search/indexnow.controller";
+import { SearchReplaysController } from "./modules/search/replays.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
 // PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
@@ -241,6 +242,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SearchAiCrawlerController,
     SearchExperimentsController,
     SearchIndexNowController,
+    SearchReplaysController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
     ZoneBEventsController,

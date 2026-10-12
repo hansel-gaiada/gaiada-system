@@ -111,8 +111,12 @@ describe.skipIf(!TEST_URL)("MI-03 — change-request triage idempotency under a 
     return { id, title: stored.rows[0].title };
   }
 
+  // PV4-04: a convert must answer `priceImpact`; these races are about the lock, so the helper says `none`.
   const triage = (crId: string, payload: Record<string, unknown>) =>
-    app.inject({ method: "POST", url: `/api/${co}/webdev/change-requests/${crId}/triage`, headers: asUser(admin), payload });
+    app.inject({
+      method: "POST", url: `/api/${co}/webdev/change-requests/${crId}/triage`, headers: asUser(admin),
+      payload: payload.action === "convert" && !("priceImpact" in payload) ? { priceImpact: "none", ...payload } : payload,
+    });
 
   /** Hold the CR's advisory lock on a dedicated OWNER connection; returns a release fn. While held,
    *  every triage handler for this CR is parked at `lockChangeRequest`. */

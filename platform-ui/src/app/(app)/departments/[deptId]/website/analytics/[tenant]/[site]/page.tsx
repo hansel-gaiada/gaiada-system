@@ -1,5 +1,8 @@
 import { listSites } from "@/lib/webdeskContent";
 import { readSiteAnalytics } from "@/lib/websiteAnalytics";
+import { readStatus } from "@/lib/visitors";
+import { can } from "@/lib/rbac";
+import { BOT_FILTER_LIVE_DATE } from "@/lib/visitorsModel";
 import { resolveRange } from "@/lib/websiteAnalyticsModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -39,10 +42,13 @@ export default async function WebsiteAnalyticsPage({ params, searchParams }: { p
   }
   if (res.kind !== "ok") return <WdRefusal result={res} subject="the analytics" retryHref={here} />;
 
+  // M5-V3-i: "bot hits filtered" comes from the collector through the visitors status, which needs `read_visitors`. A viewer without it gets no
+  // figure (not a zero, not a refusal): Analytics stays open to plain search staff.
+  const bots = can(c.me, "search.visitors.read", c.company) ? await readStatus(c.userId, c.company, res.property.id) : undefined;
   return (
     <div className="wc-page">
       <Breadcrumbs items={[{ label: "Website" }, { label: "Analytics", href: c.analyticsBase }, { label: s.name }]} />
-      <AnalyticsView siteName={s.name} action={here} range={range} reads={res.reads} />
+      <AnalyticsView siteName={s.name} action={here} range={range} reads={res.reads} bots={bots} botFilterLiveDate={BOT_FILTER_LIVE_DATE} />
     </div>
   );
 }

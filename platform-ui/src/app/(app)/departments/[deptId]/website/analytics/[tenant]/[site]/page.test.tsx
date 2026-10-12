@@ -7,15 +7,20 @@ import { render, screen } from "@testing-library/react";
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/webdeskContent", () => ({ listSites: vi.fn() }));
 vi.mock("@/lib/websiteAnalytics", () => ({ readSiteAnalytics: vi.fn() }));
+vi.mock("@/lib/visitors", () => ({ readStatus: vi.fn() }));
 vi.mock("@/components/webdesk/content/serverCtx", () => ({ requireWebsiteCtx: vi.fn() }));
 
 import { listSites } from "@/lib/webdeskContent";
 import { readSiteAnalytics } from "@/lib/websiteAnalytics";
+import { readStatus } from "@/lib/visitors";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 import Page from "./page";
 
 const sitesMock = vi.mocked(listSites);
 const readMock = vi.mocked(readSiteAnalytics);
+const statusMock = vi.mocked(readStatus);
+const meOf = (role: string) => ({ userId: "u", name: "U", email: "u@x.com", title: null, assurance: "high", companies: [], roles: [{ role, scopeType: "company", scopeId: "co-1" }] });
+const botsOk = (total: number) => ({ state: "ok" as const, data: { state: "ok" as const, message: null, configured: true, enabled: true, lastOkIngestAt: null, lastRunAt: null, lastOutcome: null, bots: { from: "2026-09-14", to: "2026-10-13", days: 30, total, byReason: { ua: total - 2, asn: 2 } } } });
 const ctxMock = vi.mocked(requireWebsiteCtx);
 
 const sites = () => ({ kind: "ok" as const, data: { tenants: [{ slug: "gaiada", status: "active", defaultLocale: "en", locales: ["en"], sites: [{ siteId: "site-1", name: "gaiada.com", kind: "static", environments: [{ envId: "e", name: "live", domain: "gaiada.com", status: "active" }] }] }] } });
@@ -34,8 +39,9 @@ const mount = async (search: { from?: string; to?: string } = {}) =>
   render(await Page({ params: Promise.resolve({ deptId: "dept-1", tenant: "gaiada", site: "site-1" }), searchParams: Promise.resolve(search) }));
 
 beforeEach(() => {
-  ctxMock.mockReset(); sitesMock.mockReset(); readMock.mockReset();
-  ctxMock.mockResolvedValue({ userId: "u", me: {}, company: "co-1", deptId: "dept-1", contentBase: "c", mediaBase: "m", analyticsBase: "/departments/dept-1/website/analytics" } as never);
+  ctxMock.mockReset(); sitesMock.mockReset(); readMock.mockReset(); statusMock.mockReset();
+  statusMock.mockResolvedValue(botsOk(1234));
+  ctxMock.mockResolvedValue({ userId: "u", me: meOf("search_manager"), company: "co-1", deptId: "dept-1", contentBase: "c", mediaBase: "m", analyticsBase: "/departments/dept-1/website/analytics" } as never);
   sitesMock.mockResolvedValue(sites());
 });
 
@@ -109,5 +115,55 @@ describe("Website -> Analytics -> site", () => {
     sitesMock.mockResolvedValue({ kind: "ok", data: { tenants: [] } });
     await mount();
     expect(readMock).not.toHaveBeenCalled();
+  });
+
+  // M5-V3-i: "bot hits filtered" from the collector, with the go-live note. Needs read_visitors; never a zero for an error.
+  describe("bot hits filtered", () => {
+    it("shows the count, the window, the reasons and the go-live note for a holder of read_visitors", async () => {
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(statusMock).toHaveBeenCalledWith("u", "co-1", "p1");
+      const fig = screen.getByTestId("bot-hits");
+      expect(fig.textContent).toContain("Bot hits filtered");
+      expect(fig.textContent).toContain("1,234");
+      expect(fig.textContent).toContain("30 days");
+      expect(fig.textContent).toContain("ua 1,232");
+      expect(screen.getByTestId("bot-hits-note").textContent).toContain("drop from the day the bot filter went live");
+    });
+
+    it("plain search staff gets no figure and no read (Analytics itself stays open)", async () => {
+      ctxMock.mockResolvedValue({ userId: "u", me: meOf("search_staff"), company: "co-1", deptId: "dept-1", contentBase: "c", mediaBase: "m", analyticsBase: "/departments/dept-1/website/analytics" } as never);
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(statusMock).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("bot-hits")).toBeNull();
+      expect(screen.getByTestId("website-analytics")).toBeTruthy();
+    });
+
+    it.each([
+      ["unreachable", "The visitor collector could not be reached just now. Profiles already stored are shown; bot counts are unavailable."],
+      ["not_configured", "The visitor collector is not set up on this server yet (its address and keys are missing), so no visitor has been read."],
+      ["disabled", "Visitor profiles are switched off on this server, so nothing is being collected into profiles."],
+    ] as const)("status %s is words and not a zero", async (state, message) => {
+      statusMock.mockResolvedValue({ state: "ok", data: { state, message, configured: false, enabled: false, lastOkIngestAt: null, lastRunAt: null, lastOutcome: null, bots: null } } as never);
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(screen.getByTestId(`bot-hits-${state}`).textContent).toContain(message);
+      expect(screen.queryByTestId("bot-hits")).toBeNull();
+    });
+
+    it("a status that could not be read is words", async () => {
+      statusMock.mockResolvedValue({ state: "unavailable", message: "The visitor status could not be read. Try again in a moment." });
+      readMock.mockResolvedValue({ kind: "ok", property, reads: okReads() } as never);
+      await mount();
+      expect(screen.getByTestId("bot-hits-unavailable").textContent).toContain("could not be read");
+    });
+
+    it("is drawn even when Umami's own summary failed (it comes from the collector)", async () => {
+      const s = down("unreachable", "Umami could not be reached. Try again in a moment.");
+      readMock.mockResolvedValue({ kind: "ok", property, reads: { summary: s, pages: s, sources: s, sections: s, ctas: s, forms: s, vitals: s } } as never);
+      await mount();
+      expect(screen.getByTestId("bot-hits").textContent).toContain("1,234");
+    });
   });
 });

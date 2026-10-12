@@ -25,6 +25,7 @@ import { VISITOR_MCP_TOOLS } from "./visitors-mcp-tools";
 // startContentDecayLoop. The routes and MCP tools are V3-g (visitors.controller.ts, visitors-mcp-tools.ts).
 export { startVisitorJobs } from "./visitor-jobs";
 import { EXPERIMENT_MCP_TOOLS } from "./experiments-mcp-tools";
+import { REPLAY_MCP_TOOLS } from "./replays-mcp-tools";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -287,6 +288,8 @@ export const searchModule: ModuleContract = {
     ...EXPERIMENT_MCP_TOOLS,
     // M5-V3-g: consented visitor profiles — list/get/rules.list/status reads, rules.set LOW write. Cerbos read_visitors / update.
     ...VISITOR_MCP_TOOLS,
+    // M5-V6-b: session recordings — ONE read, metadata only (O7: no tool returns recording content). Cerbos view_replay.
+    ...REPLAY_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",
