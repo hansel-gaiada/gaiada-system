@@ -52,7 +52,7 @@ describe.skipIf(!live)("M6-P4b2 — scaffold commit (real Postgres, faked GitHub
 
   /** A provisioned row whose §08 completion is `complete`, with its GH-12 approval, run, registry row and pin. */
   async function completeSite(opts: { approvalStatus?: string; repoUrl?: (slug: string) => string; completion?: "complete" | "tenant_ready" } = {}): Promise<Site> {
-    const slug = `p4b2-${newId().slice(0, 8)}`;
+    const slug = `p4b2-${newId().slice(-12)}`; // uuidv7: the first 8 hex are a timestamp prefix (shared for ~65 s), the tail is random
     const runId = newId();
     const db = adminPool();
     await db.query(`INSERT INTO pipeline_runs (id, tenant_id, status, origin_site) VALUES ($1, $2, 'delivery_active', 'main')`, [runId, T]);

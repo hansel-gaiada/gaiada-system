@@ -51,7 +51,7 @@ describe.skipIf(!TEST_URL)("M6-P4b2 · scaffold-commit route (HTTP, isolated app
   const saved = { org: config.githubOrg, orgTenant: config.githubOrgTenantId };
 
   async function completeSite() {
-    const slug = `p4b2h-${newId().slice(0, 8)}`;
+    const slug = `p4b2h-${newId().slice(-12)}`; // uuidv7: the first 8 hex are a timestamp prefix (shared for ~65 s), the tail is random
     const runId = newId();
     const db = adminPool();
     await db.query(`INSERT INTO pipeline_runs (id, tenant_id, status, origin_site) VALUES ($1, $2, 'delivery_active', 'main')`, [runId, tenant]);
