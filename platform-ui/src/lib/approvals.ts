@@ -45,7 +45,7 @@ export interface AutomationApprovalDetail {
   impact: string;
   reason: string | null;
   status: string;
-  origin: "automation" | "agent" | "hr" | "webdesk";
+  origin: "automation" | "agent" | "hr" | "webdesk" | "github";
   agentName: string | null;
   requestedBy: string | null;
   requestedByName: string | null;
@@ -77,7 +77,7 @@ export interface AgencyApprovalDetail {
 }
 
 export type ApprovalDetail =
-  | { kind: "automation_approval"; origin: "automation" | "agent" | "hr" | "webdesk"; data: AutomationApprovalDetail }
+  | { kind: "automation_approval"; origin: "automation" | "agent" | "hr" | "webdesk" | "github"; data: AutomationApprovalDetail }
   | { kind: "agency_approval"; origin: "agency"; data: AgencyApprovalDetail };
 
 // `isRowShaped` guards against DEMO_MODE's catch-all GET fallback (`demoFixtures.ts`'s final

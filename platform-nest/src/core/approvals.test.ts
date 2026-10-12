@@ -255,6 +255,34 @@ describe.skipIf(!TEST_URL)("GET /api/approvals — unified cross-origin + cross-
     expect((admin.json() as EnvelopeBody).items.find((i) => i.id === filedId)).toBeDefined();
   });
 
+  it("github-origin (GH-12): a repo-creation request is LISTED with its reason as the subject, decidable for the admin, hidden from a plain member", async () => {
+    const id = newId();
+    await withTenants([coA], (c) =>
+      c.query(
+        `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, origin_site)
+         VALUES ($1,$2,'github:create_repo','github.createRepo',$3,'high',$4,$5,'github',$6)`,
+        [id, coA, JSON.stringify({ name: "inbox-repo", private: true }), "Web Dev: provision repo 'inbox-repo' (marketing, template o/t)", manager, config.originSite],
+      ),
+    );
+    const all = await app.inject({ method: "GET", url: `/api/approvals?scope=${coA}`, headers: asUser(manager) });
+    expect(all.statusCode).toBe(200);
+    const row = (all.json() as EnvelopeBody).items.find((i) => i.id === id);
+    expect(row).toBeDefined();
+    expect(row?.origin).toBe("github");
+    expect(row?.subject).toBe("Web Dev: provision repo 'inbox-repo' (marketing, template o/t)");
+    expect(row?.decidable).toBe(true);
+    expect(row?.status).toBe("pending");
+
+    const only = await app.inject({ method: "GET", url: `/api/approvals?scope=${coA}&origin=github`, headers: asUser(manager) });
+    expect(only.statusCode).toBe(200);
+    const onlyItems = (only.json() as EnvelopeBody).items;
+    expect(onlyItems.length).toBeGreaterThan(0);
+    expect(onlyItems.every((i) => i.origin === "github")).toBe(true);
+
+    const asMember = await app.inject({ method: "GET", url: `/api/approvals?scope=${coA}&origin=github`, headers: asUser(member) });
+    expect((asMember.json() as EnvelopeBody).items.find((i) => i.id === id)).toBeUndefined();
+  });
+
   it("hr-origin: a served company's hr_manager (module_manager) sees ONLY hr-origin rows, never automation/agent rows, in the same tenant", async () => {
     registerModule({
       key: "hr", migrations: [], permissions: [], customFieldTargets: [], mcpTools: [], rollupProviders: [], uiManifest: [],
