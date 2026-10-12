@@ -12,7 +12,7 @@ mimi, `infra/sumopod/erp-edge/mimi/erp-passthrough.yml`. Umami's side is `infra/
 visitor -> mimi-tls-le :443 --(TCP passthrough: SNI = <one label>.erp.gaiada.com, PROXY v2)--> 172.17.0.1:18443
         -> erp-edge Traefik (:8443 in the container; TLS ends here; certificates by TLS-ALPN-01)
              status.erp.gaiada.com   -> 172.17.0.1:18480  (status page, another session's compose project)
-             insights.erp.gaiada.com -> 172.17.0.1:18742  (Umami edge; exactly two paths, the rest 404)
+             insights.erp.gaiada.com -> 172.17.0.1:18742  (Umami edge; exactly two paths for the collector, plus /lib/kestrel/v and /f from V3-c; the rest 404)
 ```
 
 * mimi gets **one** file and nothing else changes in it. Later ERP names add a file to `erp-edge/dynamic/` only.

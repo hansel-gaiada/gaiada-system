@@ -98,8 +98,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // PV4-02 (2026-10-12): +5 grantable / +5 total: core.conversation.{read,post,draft,manage} (NEW kind,
     // uiGrantable:true) and portal.converse (EXISTING portal kind, uiGrantable:FALSE like every portal.*). 434 -> 439 / 419 -> 424.
     // PV5-02 (2026-10-12): +4 grantable / +4 total on 3 EXISTING kinds (invoice: issue, void_issued; contract: mark_certified; finance_config: set_bank_details). On top of PV4-02: 439 -> 443 / 424 -> 428. uiGrantable true for the first three, FALSE for set_bank_details.
-    expect(permissions.length).toBe(443);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(428);
+    // M5-V3-f (2026-10-12): +2 grantable / +2 total on the EXISTING resource_search_property kind (read_visitors, view_replay), both uiGrantable TRUE. 443 -> 445 / 428 -> 430.
+    // PV4-05 (2026-10-12): +1 grantable / +1 total on the EXISTING meeting_recording kind (`share_minutes`, uiGrantable true). On top of M5-V3-f: 445 -> 446 / 430 -> 431.
+    expect(permissions.length).toBe(446);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(431);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

@@ -80,6 +80,10 @@ const TOPIC_BY_EVENT: Record<string, PortalTopic> = {
   "conversation.thread.updated": "conversation",
   "conversation.message.posted": "conversation",
   "conversation.message.edited": "conversation",
+  // PV4-05: a staff member shared a meeting's minutes. Entity type `meeting_minutes`; the producer puts the MEETING's
+  // `clientId` in the payload so the frame is narrowed to that client's connections. Rides the existing `projects` topic
+  // (the portal's meetings list refetches with it), so no new topic and no change to the UI's hand-copied union.
+  "meeting.minutes.shared": "projects",
 };
 
 /** The `events:<entityType>` streams worth tailing — derived from the map above rather than listed
@@ -91,6 +95,7 @@ const TAILED_ENTITY_TYPES = [
   "deliverable", "invoice", "invoice_payment", "contract", "client_contact",
   "webdev_change_request",
   "conversation",
+  "meeting_minutes",
 ] as const;
 
 export interface PortalFrame {

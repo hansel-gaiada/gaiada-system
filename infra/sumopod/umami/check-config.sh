@@ -14,7 +14,8 @@
 #   5. the collector's environment: lists every variable insights-collector reads (the passthrough trap)
 #   6. every ${VAR} the compose file uses is documented in .env.example
 #   7. the three nginx templates render in the PINNED nginx image on a read-only root fs and pass `nginx -t`;
-#      the rendered edge sends the collect path to the collector and still 404s everything else
+#      the rendered edge sends the collect path, /v (16k cap) and /f (2k cap) to the collector, keeps /r off and 404s
+#      everything else; the rendered read-gate has the three /ops/v1 locations (GET, GET, POST only) and no others
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE" || exit 2
@@ -40,6 +41,7 @@ ERP_EDGE_SOURCE=10.211.91.1
 VDB_PASSWORD=dummy
 INSIGHTS_WEBSITES=00000000-0000-0000-0000-000000000000
 OPS_READ_KEY_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+OPS_FORGET_KEY_SHA256=1111111111111111111111111111111111111111111111111111111111111111
 EOF
 DC=(docker compose --env-file "$TMP/dummy.env")
 
@@ -92,7 +94,8 @@ for name in ("collector", "vdb"):
 # 5. the collector's environment lists every variable insights-collector reads (insights-collector/CLAUDE.md table)
 needed = ["COLLECT_API_ENDPOINT","INSIGHTS_WEBSITES","DATABASE_URL","OPS_READ_KEY_SHA256","LISTEN_ADDR","OPS_ADDR","UMAMI_URL",
           "UMAMI_TIMEOUT_MS","MAX_BODY_BYTES","BOT_FLUSH_SECONDS","GEO_DIR","GEO_CITY_FILE","GEO_ASN_FILE","GEO_REQUIRED",
-          "FORWARD_IP_MODE","COMPANY_RESOLVER","LOG_LEVEL"]
+          "FORWARD_IP_MODE","COMPANY_RESOLVER","LOG_LEVEL",
+          "OPS_FORGET_KEY_SHA256","CONSENT_EVENT_NAMES","CONSENT_RATE_PER_SECOND","BUFFER_RETENTION_HOURS","PURGE_INTERVAL_MINUTES"]
 env = svc["collector"].get("environment", {})
 missing = [k for k in needed if k not in env]
 say(not missing, "collector environment: lists every variable the binary reads" + (f" (MISSING {missing})" if missing else ""))
@@ -131,12 +134,33 @@ else
     if render "$T" > "$TMP/render.$T" && grep -q 'test is successful' "$TMP/render.$T"; then pass "nginx -t: $T"
     else fail "nginx -t: $T -- $(tail -n 5 "$TMP/render.$T" | tr '\n' ' ' | head -c 300)"; fi
   done
+  # read-gate: the Umami GET subset plus the collector's ops API (V3-c), nothing else
+  R="$TMP/render.read.conf.template"
+  rblock() { awk -v p="$1" '$0 ~ "^[[:space:]]*location = " p " [{]" {on=1} on {print} on && /^[[:space:]]*}[[:space:]]*$/ {exit}' "$R"; }
+  for SPEC in "/ops/v1/events:GET" "/ops/v1/bots:GET" "/ops/v1/forget:POST"; do
+    P="${SPEC%%:*}"; M="${SPEC##*:}"; B="$(rblock "$P")"
+    if [ -n "$B" ] && grep -q "limit_except $M { deny all; }" <<<"$B" && grep -q 'set \$collector_ops "collector:8081";' <<<"$B" && ! grep -qi 'proxy_set_header Authorization' <<<"$B"; then pass "read-gate renders: $P exact, $M only, collector:8081, Authorization passed through"
+    else fail "read-gate render: $P block missing or wrong (needs exact path, limit_except $M, collector:8081, no Authorization override)"; fi
+  done
+  grep -qE '^\s*resolver 127\.0\.0\.11' "$R" && pass "read-gate renders: per-request DNS resolver (starts with the collector down)" || fail "read-gate render: no resolver for the collector"
+  [ "$(grep -cE '^\s*location = /ops/' "$R")" = 3 ] && pass "read-gate renders: exactly three /ops/ locations" || fail "read-gate render: the /ops/ location set is not exactly events, bots, forget"
+  grep -q 'location / { return 404; }' "$R" && pass "read-gate renders: everything else 404s" || fail "read-gate render: the catch-all 404 is missing"
   # edge, collector mode: the collect path goes to the collector; the collector must not appear for any other path
   if grep -qE '^\s*set \$collect_upstream "collector:8080";' "$TMP/render.edge.conf.template"; then pass "edge renders: collect path -> collector:8080"
   else fail "edge render: collect location does not point at collector:8080"; fi
   grep -qE 'location = /lib/kestrel/e ' "$TMP/render.edge.conf.template" && pass "edge renders: exact location for the collect path" || fail "edge render: no exact collect location"
-  # /v /f /r stay OFF (404 through `location /`) until V3-b / V6-a
-  if grep -qE '^\s*location = /lib/kestrel/[vfr]' "$TMP/render.edge.conf.template"; then fail "edge render: /v /f /r is enabled before its ticket"; else pass "edge renders: /lib/kestrel/v|f|r are templated but off (404)"; fi
+  # V3-c: /v and /f are ON (exact, POST/OPTIONS only, collector:8080, own body cap); /r stays OFF until V6-a
+  E="$TMP/render.edge.conf.template"
+  # block_of: print one `location = PATH {` block (from its opening line to the first line that is only `}`)
+  block_of() { awk -v p="$1" '$0 ~ "^[[:space:]]*location = " p " [{]" {on=1} on {print} on && /^[[:space:]]*}[[:space:]]*$/ {exit}' "$E"; }
+  for SPEC in "/lib/kestrel/v:16k" "/lib/kestrel/f:2k"; do
+    P="${SPEC%%:*}"; CAP="${SPEC##*:}"; B="$(block_of "$P")"
+    if [ -n "$B" ] && grep -q 'limit_except POST OPTIONS { deny all; }' <<<"$B" && grep -q 'set \$collect_upstream "collector:8080";' <<<"$B"        && grep -q "client_max_body_size $CAP;" <<<"$B" && grep -q 'proxy-common.inc' <<<"$B"; then pass "edge renders: $P exact, POST/OPTIONS only, collector:8080, body cap $CAP"
+    else fail "edge render: $P block missing or wrong (needs exact path, limit_except POST OPTIONS, collector:8080, client_max_body_size $CAP)"; fi
+  done
+  if grep -qE '^\s*location = /lib/kestrel/r' "$E"; then fail "edge render: /lib/kestrel/r is enabled before V6-a"; else pass "edge renders: /lib/kestrel/r is templated but off (404)"; fi
+  if grep -qE '^\s*location (~|\^~|/lib|/ops)' "$E"; then fail "edge render: a prefix or regex location exists (only exact paths and the catch-all are allowed)"; else pass "edge renders: no prefix or regex locations"; fi
+  if grep -q '/ops/' "$E"; then fail "edge render: /ops/ appears on the public edge"; else pass "edge renders: no /ops/ path on the public edge (404)"; fi
   grep -q 'location / { return 404; }' "$TMP/render.edge.conf.template" && pass "edge renders: everything else 404s" || fail "edge render: the catch-all 404 is missing"
   # rollback mode renders too
   if render edge.conf.template -e EDGE_COLLECT_UPSTREAM=app:3000 2>&1 | grep -qE '^\s*set \$collect_upstream "app:3000";'; then pass "edge renders in rollback mode (EDGE_COLLECT_UPSTREAM=app:3000)"

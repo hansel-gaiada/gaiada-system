@@ -125,7 +125,9 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // portal.converse on the EXISTING portal kind); +2 authoring groups (`client_conversation`, `portal_conversation`),
     // none advancedOnly. 419 -> 424.
     // PV5-02 (2026-10-12): +4 grantable on 3 EXISTING kinds, 424 -> 428 (invoice.issue, invoice.void_issued, core.contract.mark_certified in 3 NEW authoring groups [invoices_issue, invoices_void_issued, client_contracts_certify]; finance.config.set_bank_details advancedOnly).
-    expect(grantable.length).toBe(428);
+    // M5-V3-f (2026-10-12): +2 grantable (search.property.read_visitors, search.property.view_replay), 428 -> 430, each in its own NEW authoring group (search_read_visitors, search_view_replay); none advancedOnly.
+    // PV4-05 (2026-10-12): +1 grantable on the EXISTING meeting_recording kind, 430 -> 431 (core.meeting_recording.share_minutes in 1 NEW authoring group, `meeting_minutes_share`, not advancedOnly).
+    expect(grantable.length).toBe(431);
     expect(relationshipKeys.size).toBe(15);
   });
 

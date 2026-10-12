@@ -211,6 +211,8 @@ services:
       INSIGHTS_WEBSITES: ${INSIGHTS_WEBSITES:?set INSIGHTS_WEBSITES in .env (comma-separated Umami website ids; runbook step C2)}
       DATABASE_URL: postgresql://vdb:${VDB_PASSWORD:?set VDB_PASSWORD in .env}@vdb:5432/vdb?sslmode=disable
       OPS_READ_KEY_SHA256: ${OPS_READ_KEY_SHA256:?set OPS_READ_KEY_SHA256 in .env (sha256 of the ERP read key, runbook step C2)}
+      # M5-V3-b: the forget key's hash. Required (the collector refuses to start without it) and must differ from the read hash.
+      OPS_FORGET_KEY_SHA256: ${OPS_FORGET_KEY_SHA256:?set OPS_FORGET_KEY_SHA256 in .env (sha256 of the ERP forget key, a different key, runbook step C2)}
       LISTEN_ADDR: ":8080"
       OPS_ADDR: ":8081"
       UMAMI_URL: http://app:3000
@@ -226,6 +228,11 @@ services:
       FORWARD_IP_MODE: ${COLLECTOR_FORWARD_IP_MODE:-}
       COMPANY_RESOLVER: ${COLLECTOR_COMPANY_RESOLVER:-}
       LOG_LEVEL: ${COLLECTOR_LOG_LEVEL:-}
+      # M5-V3-b, the consented channel. Empty = the collector's default; BUFFER_RETENTION_HOURS 0 or over 72 refuses to start.
+      CONSENT_EVENT_NAMES: ${COLLECTOR_CONSENT_EVENT_NAMES:-}
+      CONSENT_RATE_PER_SECOND: ${COLLECTOR_CONSENT_RATE_PER_SECOND:-}
+      BUFFER_RETENTION_HOURS: ${COLLECTOR_BUFFER_RETENTION_HOURS:-}
+      PURGE_INTERVAL_MINUTES: ${COLLECTOR_PURGE_INTERVAL_MINUTES:-}
     volumes:
       # Same directory the app mounts: city + ASN files, refreshed by geo-refresh.sh (which restarts the collector).
       - ./geo:/geo:ro

@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.105.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
+### platform-nest `0.106.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
 
 - **Migration `202610131800_search_experiments`** adds `search_experiments` (the pre-registration and lifecycle) and the append-only `search_experiment_results`. Both are FORCE RLS in the `search` scope.
   - A trigger locks the pre-registration fields once a test has started.
@@ -30,7 +30,78 @@ local stack). None of these mean "production-done".
   - A Umami outage → `unavailable` with a reason, never zeros.
   - Cells under 5 show as `"<5"`.
 - `started_at` is approximate, because WebDesk's `item.get` has no publish time. It errs late. Follow-up: expose `lastPublishedAt`.
-- Unit tests 69/69. The DB and HTTP suite runs on the Linux gate (CI).
+- Unit tests 69/69; GitHub Actions 38280136413 green (DB and HTTP suite included, after a test-isolation fix: drafts on the shared property were exhausting the 10-test cap).
+
+### infra `0.13.12` - M5-V3-c: routes and keys for the collector's consented channel and ops API (files only, not deployed) (2026-10-13) - PROTOTYPED
+
+- **erp-edge:** a separate router `erp-insights-consented` for exactly `/lib/kestrel/v` and `/lib/kestrel/f`. It uses the same service and middlewares as the collect path, so it can be removed on its own.
+- **Umami edge:** the `/v` (16 KB cap) and `/f` (2 KB) locations are on: exact path, POST/OPTIONS only, to `collector:8080`. `/r` stays off until V6-a.
+- **Read-gate** (WireGuard only):
+  - GET `/ops/v1/events` and `/ops/v1/bots`, and POST `/ops/v1/forget` (16 KB), to `collector:8081`;
+  - the Authorization header passes through untouched;
+  - every other method or path is refused.
+  - `/ops/v1/*` is not on the public edge.
+- **ERP:** `INSIGHTS_BASE_URL`, `INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY` and `SEARCH_VISITORS_ENABLED` are passed through to platform-nest (`${VAR:-}`, empty = off).
+- **`check-config.sh`** checks the new locations.
+- **Runbook C7:** deploy order, post-deploy checks run from aicenter with the keys read from files, and rollback.
+- Static checks only. `check-config.sh --deploy` runs on sumopod.
+
+### infra `0.13.11` - the live AI gateway reaches OpenRouter (2026-10-13) - DEV-VERIFIED
+
+- **Found while running the M6 P4 gate:** every LLM call on the live ERP had been returning the echo fallback (`[echo — no provider key configured]`) since the Ollama Cloud key died on 2026-09-30. Gemini and Claude have no keys; the OpenAI-compatible slot pointed at Ollama Cloud. So meeting summaries, PRD/report/scope extraction and design prototypes were placeholders.
+- **The owner chose** the company OpenRouter key with GLM 5.3 Flash. The box `.env` now sets `OPENAI_BASE_URL=https://openrouter.ai/api/v1`, `OPENAI_MODEL=z-ai/glm-5.3-flash` and the key (backup kept).
+- `docker-compose.vps.yml` adds `openrouter.ai` to the gateway's `EGRESS_ALLOWLIST`; without it the gateway logged `egress blocked (not on allowlist): openrouter.ai` and fell back to the echo again. `ollama.com` stays listed for a switch back.
+- Verified live 2026-10-13 on gda-aicenter: the box compose received the same allow-list line (hotfix, backup kept) and only the gateway was recreated; `POST /complete` from the platform container answered HTTP 200 with a real reply ("the live gateway is working"), provider `openai` (OpenRouter), no echo fallback.
+
+### platform-nest `0.105.0` / mcp-hub `0.15.0` / automation `0.6.0` - `wf:billing-chaser`: a daily read-and-remind job for contracts and payment claims (2026-10-13) - PROTOTYPED
+
+Owner ruling PV-D28 (the owner delegated the naming).
+
+- **automation:** `automation/workflows/billing-chaser.json`, declared id `wspv3billchase01`, cron `0 9 * * *` Asia/Makassar.
+  - It reads `clients.list`, then `contracts.list` and `invoicePayments.list` per client.
+  - It raises ONE in-app `notify` digest when there is: a payment claim pending for more than 2 days; a client-signed contract waiting for our countersignature for more than 1 day; or a sent contract unsigned by the client for more than 7 days.
+  - It stays silent when nothing qualifies, and fails loudly on a refused read.
+  - Recipients come from `BILLING_NOTIFY_USER_IDS`, falling back to the ops lead (`NOTIFY_USER_ID`). PV-D28's routing to each client's account owner needs an allowlisted owner read, and is a follow-up.
+- **mcp-hub:** `AUTOMATION_ALLOWLIST["wf:billing-chaser"]` = `clients.list`, `contracts.list`, `invoicePayments.list` and `notify` only. Tests prove send, countersign, decide, createDraft and updateDraft are refused for it.
+- **platform-nest:**
+  - `contracts.list` and `invoicePayments.list` drop to `minAssurance: "low"`, because an n8n principal is always low. Cerbos still requires `notLow` on every non-`platform_admin` contract and invoice read rule, and every write and `contracts.get` stay `verified`.
+  - `seed:automation` adds the `wf:billing-chaser` manager service account, which reads but gets 403 on countersign, send and decide.
+- **After deploy:** run `npm run seed:automation` once, then a CLI import of the workflow (`n8n import:workflow`, so the declared id is kept), then activate it.
+- Verified on sumopod: mcp-hub 29 files (400 passed); platform-nest 665 files, with only the capability inventory to regenerate (done on Linux); and 16 workflow tests that run its Code nodes on fixtures. Teeth: `contracts.send` added to the scope fails the scope tests.
+
+### insights-collector `0.2.0` + infra `0.13.10` - M5-V3-b: the consented channel, forget, the ops events read and the 72-hour purge (not deployed) (2026-10-13) - PROTOTYPED
+
+- **`POST /lib/kestrel/v`** (consented events):
+  - A missing or invalid `consentId` is a 400, and a tombstoned visitor or consent id is a 410; nothing is stored in either case.
+  - Only allow-listed data keys with id-like values are kept.
+  - At most 50 events and 16 KB per request.
+  - Geo, network and company come from the same single lookup as the aggregate channel.
+- **`POST /lib/kestrel/f`** (withdrawal) deletes that visitor and consent pair and tombstones the visitor id.
+- **Ops API** (port 8081):
+  - `GET /ops/v1/events` (read key) pages by id with a cursor and never returns a row younger than 15 s. It takes the insert lock exclusively for one page, so a batch that commits late with a lower id is never skipped.
+  - `POST /ops/v1/forget` needs a separate forget key: the read key gets 403. It tombstones and is idempotent.
+- **Tombstones** use the ERP's hash contract, `sha256(utf8(lower-case uuid))`, pinned by a known-vector test.
+- **Inserts and forgets** serialise on one advisory lock, so a batch cannot land after its forget.
+- **Purge:** buffered events go after 72 h at most (`BUFFER_RETENTION_HOURS` is 1–72, and 0 refuses to start); tombstones go after 14 months.
+- **Migration `0002_consented_events`:** no IP or user-agent column; a schema test pins the column list.
+- **Sumopod compose:** `OPS_FORGET_KEY_SHA256` is now required. `CONSENT_EVENT_NAMES`, `CONSENT_RATE_PER_SECOND`, `BUFFER_RETENTION_HOURS` and `PURGE_INTERVAL_MINUTES` are passed through. `check-config.sh` and runbook C2 are updated.
+- `/v` and `/f` stay unrouted at the edge until V3-c.
+- `go test -race` is green locally. The Postgres contract test runs in CI.
+
+### platform-nest `0.104.0` - M5-V3-f: two sensitive Cerbos actions for visitor data, `read_visitors` and `view_replay` (2026-10-13) - PROTOTYPED
+
+- Both are new actions on the existing `resource_search_property` kind (design §4.8, §6.3, O5).
+- **Who holds them:**
+  - The role arm gives both to the search manager and the served company's admin, in tenant.
+  - Plain search staff keep aggregate `read` only.
+  - No member, client or webdev role gets them.
+- **Permission keys:** `search.property.read_visitors` and `search.property.view_replay`. Both are sensitive and UI-grantable, each in its own group, and each mirror grants exactly its own action.
+  - Neither implies the other, and `read` implies neither.
+- **Migration `202610131730_iam_m5_v3f_visitor_actions`** seeds the catalog rows and the bundles for `platform_admin`, `company_admin`, `search_manager` and `owner`, and checks the exact holder set in both directions.
+- **Pinned counts:** catalog 443→445, bundle pairs 1934→1942.
+- **Tests:** a Cerbos YAML matrix (23 principals × 4 resources × 7 actions), a live Cerbos test and a DB catalog test. PERMISSION-CONTRACT §33.
+- **Deploy:** restart Cerbos, then probe that staff are denied and a manager is allowed.
+- No routes yet (V3-g, V6-b).
 
 ### infra `0.13.9` - M5-V2-c: the insights-collector in the Umami compose project on sumopod (files only, not deployed) (2026-10-13) - PROTOTYPED
 

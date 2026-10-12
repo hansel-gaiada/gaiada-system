@@ -161,10 +161,15 @@ describe.skipIf(!TEST_URL)("M5-V5-c · experiments", () => {
     await app?.close();
     await teardownTestDb();
   });
-  beforeEach(() => {
+  beforeEach(async () => {
     calls.length = 0; denyAll = false; useRealCerbos = false;
     umami.sectionViews = 8400; umami.goalEvents = 252; umami.exposure = []; umami.convert = []; umami.fail = false; umami.requested = [];
     wd.clock = T0;
+    // Every test registers on the shared property, and drafts count toward its 10-test cap: abort what earlier tests left
+    // (the same UPDATE the abort route runs) so each test starts with free slots. The cap test uses its own property.
+    await withTenants([A], (c) => c.query(
+      `UPDATE search_experiments SET status = 'aborted', stopped_at = COALESCE(stopped_at, GREATEST(now(), COALESCE(started_at, now()))), updated_at = now()
+        WHERE property_id = $1 AND status IN ('draft', 'running', 'stopped')`, [prop]), S);
   });
 
   // ── register ────────────────────────────────────────────────────────────────────────────────

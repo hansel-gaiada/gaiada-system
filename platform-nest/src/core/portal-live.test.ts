@@ -133,6 +133,16 @@ describe("portal live bus (CP-5)", () => {
     a.off(); b.off(); both.off(); otherTenant.off();
   });
 
+  it("PV4-05: meeting.minutes.shared reaches only the named client's subscribers, on the existing 'projects' topic, with no payload content", () => {
+    const a = collector("t1", ["c1"]);
+    const b = collector("t1", ["c2"]);
+    dispatchPortalFrame("t1", "meeting.minutes.shared", { clientId: "c1", minutesId: "mm", meetingId: "m", body: "SECRET-MINUTES" }, AT);
+    expect(a.frames).toEqual([{ topic: "projects", at: AT }]);
+    expect(b.frames).toEqual([]);
+    expect(JSON.stringify(a.frames)).not.toContain("SECRET-MINUTES");
+    a.off(); b.off();
+  });
+
   it("PV4-03: staff-only draft events never produce a portal frame", () => {
     const a = collector("t1", ["c1"]);
     for (const t of ["conversation.draft.created", "conversation.draft.updated", "conversation.draft.sent"]) {

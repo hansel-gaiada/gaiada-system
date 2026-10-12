@@ -46,23 +46,26 @@ server {
     include /etc/nginx/proxy-common.inc;
   }
 
-  # The consented, forget and replay channels (V3-b: /v and /f, V6-a: /r) are TEMPLATED BUT OFF: they 404 through
-  # `location /` below until their ticket enables them. To enable one, uncomment its block IN THAT TICKET (it
-  # also needs its erp-edge route, V3-c) and keep the shape: exact path, POST/OPTIONS only, the collector's
-  # 8080, its own body cap where the design sets one.
+  # The consented channel (V3-b collector, V3-c routes): /v consented events and /f forget. Exact paths,
+  # POST/OPTIONS only, the collector's 8080 (it trusts the X-Real-IP set by proxy-common.inc), each with its own body
+  # cap. They need the collector: with EDGE_COLLECT_UPSTREAM=app:3000 (collector rollback) these two still point at
+  # the collector, which is down then, so nginx answers 502: comment both (runbook V3-c rollback) and they 404.
+  # /r (V6-a replay chunks) stays templated but OFF: it 404s through `location /` until its ticket.
+  location = /lib/kestrel/v {          # V3-b consented events (design 4.4: body <= 16 KB, the collector enforces it too)
+    limit_except POST OPTIONS { deny all; }
+    client_max_body_size 16k;
+    set $collect_upstream "collector:8080";
+    proxy_pass http://$collect_upstream;
+    include /etc/nginx/proxy-common.inc;
+  }
+  location = /lib/kestrel/f {          # V3-b forget (always 204): {website, visitorId, consentId} is a few hundred bytes
+    limit_except POST OPTIONS { deny all; }
+    client_max_body_size 2k;
+    set $collect_upstream "collector:8080";
+    proxy_pass http://$collect_upstream;
+    include /etc/nginx/proxy-common.inc;
+  }
   #
-  # location = /lib/kestrel/v {          # V3-b consented events
-  #   limit_except POST OPTIONS { deny all; }
-  #   set $collect_upstream "collector:8080";
-  #   proxy_pass http://$collect_upstream;
-  #   include /etc/nginx/proxy-common.inc;
-  # }
-  # location = /lib/kestrel/f {          # V3-b forget (always 204)
-  #   limit_except POST OPTIONS { deny all; }
-  #   set $collect_upstream "collector:8080";
-  #   proxy_pass http://$collect_upstream;
-  #   include /etc/nginx/proxy-common.inc;
-  # }
   # location = /lib/kestrel/r {          # V6-a replay chunks (design 6.2: 320 KB cap on this location only)
   #   limit_except POST OPTIONS { deny all; }
   #   client_max_body_size 320k;
