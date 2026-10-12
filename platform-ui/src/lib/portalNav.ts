@@ -24,6 +24,9 @@ export const PORTAL_AREAS: PortalArea[] = [
       { href: "/portal/approvals", label: "Approvals" },
       { href: "/portal/deliverables", label: "Deliverables" },
       { href: "/portal/requests", label: "Requests" },
+      // PV4-08: threads with our team, one per project plus a General one. `/portal/meetings/:id` (shared meeting
+      // notes) has no tab of its own: see PORTAL_PATH_ALIASES.
+      { href: "/portal/conversation", label: "Conversation" },
       { href: "/portal/social-reviews", label: "Post reviews" },
       { href: "/portal/timeline", label: "Timeline" },
     ],
@@ -49,6 +52,12 @@ export const PORTAL_AREAS: PortalArea[] = [
   { key: "people", label: "People", tabs: [{ href: "/portal/profile", label: "People" }] },
 ];
 
+/** Paths that belong to an area without being a tab of it. Meeting notes are reached from a project's page and from
+ *  the "minutes shared" notice (`/portal/meetings/<id>`); they sit in Projects and light that area's first tab. */
+const PORTAL_PATH_ALIASES: Array<{ prefix: string; areaKey: string; tabHref: string }> = [
+  { prefix: "/portal/meetings", areaKey: "projects", tabHref: "/portal/projects" },
+];
+
 export function activePortalNav(pathname: string): { areaKey: string | null; tabHref: string | null } {
   const path = (pathname ?? "").split(/[?#]/)[0].replace(/\/+$/, "") || "/";
   if (path === "/portal") return { areaKey: "overview", tabHref: "/portal" };
@@ -61,17 +70,22 @@ export function activePortalNav(pathname: string): { areaKey: string | null; tab
       }
     }
   }
+  if (!best) {
+    const alias = PORTAL_PATH_ALIASES.find((a) => path === a.prefix || path.startsWith(a.prefix + "/"));
+    if (alias) return { areaKey: alias.areaKey, tabHref: alias.tabHref };
+  }
   return best ?? { areaKey: null, tabHref: null };
 }
 
-/** Badge counts for the two areas that can have something waiting on the client. */
+/** Badge counts for the two areas that can have something waiting on the client. Projects = gates waiting on the
+ *  client + threads with unread messages from our team (`conversationUnread`, PV4-06). */
 export function portalBadges(
-  overview: Pick<PortalOverview, "needsYou" | "finance"> | null | undefined,
+  overview: Pick<PortalOverview, "needsYou" | "finance" | "conversationUnread"> | null | undefined,
 ): { projectsBadge: number; billingBadge: number } {
   const needs = overview?.needsYou ?? [];
   const overdue = (overview?.finance?.byCurrency ?? []).reduce((sum, c) => sum + (c.overdueCount ?? 0), 0);
   return {
-    projectsBadge: needs.filter((n) => n.kind === "gate").length,
+    projectsBadge: needs.filter((n) => n.kind === "gate").length + Math.max(0, overview?.conversationUnread ?? 0),
     billingBadge: needs.filter((n) => n.kind === "contract").length + overdue,
   };
 }

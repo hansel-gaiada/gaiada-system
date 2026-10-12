@@ -609,16 +609,27 @@ export class PipelineController {
       // decides the older twin the newer one stays pending and the run STALLS at that beat forever.
       // Identity is (run, stage, kind, actor_side) among PENDING rows only — `IS NOT DISTINCT FROM`
       // because stage_id is legitimately NULL for run-level gates (prd_sign, scope_signoff), and NULL
-      // = NULL must count as the same gate there. A DECIDED gate never suppresses a new one: the
-      // revise loop reopens `pm_review` on each new revision, which is a different stage_id anyway.
-      const dup = await c.query<{ id: string }>(
-        `SELECT id FROM pipeline_gates
+      // = NULL must count as the same gate there. The revise loop reopens `pm_review` on each new
+      // revision, which is a different stage_id, so it is never suppressed.
+      //
+      // M6-P4m: a STAGE-scoped twin already decided positively (`approved`/`signed`) suppresses too.
+      // The n8n bridge is at-least-once: a delivery execution that outlived N8N_BRIDGE_TIMEOUT_MS was
+      // redelivered, and its twin reopened `pm_review` 13 s AFTER a human had approved the first one
+      // (M6 P4 gate run 1, 2026-10-13: n8n executions 2692/2693). Nothing in the delivery flow reopens
+      // an approved beat on the same stage, so a second one is always a redelivery. Kept narrow on
+      // purpose:
+      // - a run-level gate (stage_id NULL: prd_sign, scope_signoff) may legitimately be opened again;
+      // - a `changes_requested` or `rejected` twin may be re-requested by a human.
+      const dup = await c.query<{ id: string; status: string }>(
+        `SELECT id, status FROM pipeline_gates
          WHERE run_id = $1 AND stage_id IS NOT DISTINCT FROM $2 AND kind = $3 AND actor_side = $4
-           AND status = 'pending' AND deleted_at IS NULL
-         ORDER BY created_at ASC, id ASC LIMIT 1`,
-        [runId, stageId ?? null, kind, actorSide],
+           AND deleted_at IS NULL
+           AND (status = 'pending'
+                OR ($5::boolean AND status = 'decided' AND decision IN ('approved', 'signed')))
+         ORDER BY (status = 'pending') DESC, created_at ASC, id ASC LIMIT 1`,
+        [runId, stageId ?? null, kind, actorSide, stageId != null],
       );
-      if (dup.rows[0]) return { id: dup.rows[0].id, deduped: true as const, recipients: [] as string[] };
+      if (dup.rows[0]) return { id: dup.rows[0].id, status: dup.rows[0].status, deduped: true as const, recipients: [] as string[] };
       await c.query(
         `INSERT INTO pipeline_gates (id, tenant_id, run_id, stage_id, kind, actor_side, note, opened_by, origin_site)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -632,12 +643,12 @@ export class PipelineController {
       const recipients = actorSide === "client"
         ? await resolveClientRecipients(c, { clientId: run.rows[0].client_id, projectId: run.rows[0].project_id, kind: clientNotifyKindForGate(kind) })
         : [];
-      return { id, deduped: false as const, recipients };
+      return { id, status: "pending", deduped: false as const, recipients };
     });
     // No activity row (and no event, above) for a suppressed duplicate — nothing was opened, and a
     // phantom "opened" would misreport the audit trail as if a second beat had really been created; the
     // client was already told about the original gate, so notifying again here would be a duplicate.
-    if (opened.deduped) return { id: opened.id, status: "pending", deduped: true };
+    if (opened.deduped) return { id: opened.id, status: opened.status, deduped: true };
     await writeActivity(tenantId, req.principal.userId, "opened", "pipeline_gate", id, { runId, kind, actorSide });
     // Best-effort, AFTER the write stands: a notify() failure here must not turn a real gate-open into
     // a 500 the caller (an n8n workflow) might retry into a duplicate.

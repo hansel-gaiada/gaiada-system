@@ -57,6 +57,7 @@ test.describe("client portal", () => {
       ["/portal/timeline", /Timeline/],
       ["/portal/deliverables", /Deliverables/],
       ["/portal/requests", /Requests/],
+      ["/portal/conversation", /Conversation/],
       ["/portal/approvals", /Approvals/],
       ["/portal/invoices", /Invoices/],
       ["/portal/contracts", /Contracts/],
@@ -181,6 +182,74 @@ test.describe("client portal", () => {
 
     await expect(page.getByText(/we've received your request/i)).toBeVisible();
     await expect(page.getByText("The pricing page 404s on mobile Safari")).toBeVisible();
+  });
+
+  // PV4-08 — Conversation, in DEMO_MODE (the demo store enforces the BFF's limits and the 15-minute window).
+  // The staff-reply-arrives flow needs a second party and runs against the stub BFF: e2e/portal-conversation.spec.ts.
+  test("conversation: threads by project, General pinned, a reply, an edit and a removal @portal", async ({ page }) => {
+    test.setTimeout(120_000);
+    await signInAsClient(page);
+    await page.goto("/portal/conversation");
+    await expect(page.getByRole("heading", { level: 3, name: "General" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 3, name: "Website relaunch" })).toBeVisible();
+    // The Projects area has a Conversation sub-tab.
+    await expect(page.getByRole("navigation", { name: /Projects pages/ }).getByRole("link", { name: "Conversation" })).toBeVisible();
+
+    await page.getByRole("link", { name: /Homepage copy/ }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Homepage copy");
+    const messages = page.getByRole("list", { name: /messages/i });
+    await expect(messages.getByRole("listitem").first()).toBeVisible();
+    // Counted, not assumed: a retry of this test runs against the same in-memory demo store.
+    const before = await messages.getByRole("listitem").count();
+    await expect(page.getByRole("link", { name: /headline-options\.pdf/ })).toHaveAttribute("href", /\/portal\/files\//);
+    // The hint, verbatim, and the history is not a live region.
+    await expect(page.getByText("Prices and terms change only through a signed contract or amendment.")).toBeVisible();
+    await expect(page.locator('[role="log"]')).toHaveCount(0);
+
+    await page.getByLabel("Your reply").fill("Here is the wording: https://example.com/copy <b>not bold</b>");
+    await page.getByRole("button", { name: "Send reply" }).click();
+    await expect(messages.getByRole("listitem")).toHaveCount(before + 1);
+    // Plain text: the markup shows as characters, the URL is a link.
+    await expect(messages.getByText("<b>not bold</b>", { exact: false })).toBeVisible();
+    await expect(messages.getByRole("link", { name: "https://example.com/copy" })).toBeVisible();
+    // Focus returned to the box so the client can keep typing.
+    await expect(page.getByLabel("Your reply")).toBeFocused();
+
+    // Own, new message: editable inside the window.
+    await page.getByRole("button", { name: /edit your message/i }).click();
+    await page.getByLabel("Edit your message").fill("Updated wording");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(messages.getByText("Updated wording")).toBeVisible();
+    await expect(messages.getByText("edited")).toBeVisible();
+
+    await page.getByRole("button", { name: /remove your message/i }).click();
+    await page.getByRole("button", { name: "Yes, remove it" }).click();
+    await expect(messages.getByText("Message removed")).toBeVisible();
+  });
+
+  test("conversation: a closed thread has no composer, and the project page lists threads and meeting notes @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/conversation/th-brand");
+    await expect(page.getByText("This conversation is closed")).toBeVisible();
+    await expect(page.getByRole("textbox")).toHaveCount(0);
+    await expect(page.getByText("Message removed")).toBeVisible();
+
+    await page.goto("/portal/projects/proj-nw-site");
+    await expect(page.getByRole("heading", { name: "Conversation" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Homepage copy/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Meeting notes" })).toBeVisible();
+    await page.getByRole("link", { name: /Website relaunch kickoff/ }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Website relaunch kickoff");
+    await expect(page.getByText(/Shared on .* by Made Prabowo/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Decisions" })).toBeVisible();
+  });
+
+  test("an amendment says what it amends and where it came from @portal", async ({ page }) => {
+    await signInAsClient(page);
+    await page.goto("/portal/contracts/ctr-amd-msa-1");
+    await expect(page.getByText(/Amendment to/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "GDA-2026-004" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "From your request" })).toHaveAttribute("href", "/portal/requests");
   });
 
   test("a staff member sees the teach-state, not a client dashboard @portal", async ({ page }) => {

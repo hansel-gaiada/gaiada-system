@@ -27,6 +27,13 @@ const PAGES = [
   "/portal/approvals",
   "/portal/deliverables",
   "/portal/requests",
+  // PV4-08: the list, an open thread (messages, attachment, reply box), a closed thread (a removed message, no box),
+  // shared meeting notes, and an amendment (the banner).
+  "/portal/conversation",
+  "/portal/conversation/th-site",
+  "/portal/conversation/th-brand",
+  "/portal/meetings/min-kickoff",
+  "/portal/contracts/ctr-amd-msa-1",
   "/portal/social-reviews",
   "/portal/timeline",
   "/portal/company",
