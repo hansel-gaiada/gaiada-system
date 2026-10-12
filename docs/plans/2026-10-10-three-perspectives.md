@@ -5,15 +5,17 @@ proposed model, and the decisions the owner needs to make before anything is tic
 
 **Scope (owner, 2026-10-10): Gaiada first.**
 
-- **Ruled:** PV-D1, PV-D2, PV-D3, PV-D4, PV-D10, PV-D11, PV-D12, PV-D13 and PV-D14 to PV-D20. See the
-  decision log at the end, and §11 for how D1, D4 and D10 were worked through.
+- **Ruled:** PV-D1 to PV-D5, PV-D10 to PV-D20 and PV-D22 to PV-D24. See the decision log at the end,
+  and §11 for how D1, D4 and D10 were worked through.
   - Viceroy is a Gaiada client today, and its own hotel and F&B system is deferred.
   - Each of our companies gets a vertical that selects its modules, and each client keeps a business
     type.
   - The portal and the staff client page share five areas.
   - A client's record belongs to exactly one of our companies.
   - The product is an internal tool now, to be sold much later as a subscription product.
-- **Open:** D5–D9 and D11.
+  - Clients and the staff serving them talk in Conversation, and anything with a money or legal
+    effect lands in Contracts & billing.
+- **Open:** D6–D9 and D21.
 
 **Owner ask (2026-10-10):** a clean separation between **Client**, **group-company Employee** and
 **the Syrowatka company itself** (Gaiada, Viceroy). The goal is a UI that can be shown from each
@@ -578,7 +580,7 @@ code comments.
 | **D2** | Agency work for Viceroy: a Gaiada **client relationship** (with `group_company_id` and intercompany invoices) or a **shared-service** assignment into Viceroy's tenant? | **RULED: PV-D2.** Client relationship. Viceroy also gets its own modules and interface later |
 | **D3** | The hotel system: integrate Viceroy's PMS/POS, or build one? | **RULED: PV-D3.** Built much later. Gaiada first |
 | **D4** | Same five area names on the client portal and the staff hub? | **RULED: PV-D4.** Overview · Projects · Business · Contracts & billing · People, with every existing URL kept (§3.1, §4.2, §11.2) |
-| **D5** | A Conversation channel per project, separate from Contracts & billing, with the "money or legal effect must land in Contracts & billing" rule? | **Yes.** It is new tables and a new Cerbos kind |
+| **D5** | A Conversation channel per project, separate from Contracts & billing, with the "money or legal effect must land in Contracts & billing" rule? | **RULED: PV-D5.** Yes, with a client-wide thread too (PV-D22); agents draft and staff send (PV-D23); every contact who sees the project takes part (PV-D24) |
 | **D6** | Client Business boundary: Business areas = Setup · Connections · Services & results; never a system of record for the client's internal operations; rename "departments" to **Business areas**; remove the 103 placeholder pages? | **Yes** |
 | **D7** | Which invoice the client sees: make the ledger AR invoice the record (number, due date, tax, issuer legal details) and retire the `invoices` tracker, or extend the tracker? | **Ledger AR as the record**, so there is one invoice and no reconciliation drift. Sequence it with Finance |
 | **D8** | Signature tiers: keep the typed-name attestation for routine approvals and use a certified e-signature provider for agreements above a threshold? | **Yes, with counsel setting the threshold.** Indonesian law treats certified and uncertified e-signatures differently. The provider needs a vendor-exit row |
@@ -618,7 +620,7 @@ sumopod. MAP is regenerated from a clean worktree.
 | 1 | **PV-2: Client portal re-cut** (tickets: `2026-10-10-pv2-portal-recut-tickets.md`) | fix the "completed project shows as active" bug; 5 areas with sub-tabs, **every existing URL kept** (§3.1); badges split by area; "Agreements" → "Contracts"; Active/Past projects (`projects.status` CHECK); a "your team" read; the provider company's brand in the header (§2.7); the D10 groundwork: a company tag on portal payloads, a per-company fetch in the BFF, and an explicit company choice replacing the "first company" fallback (§3.2); the Workspace ⇄ Client view switch, so Viceroy's own staff can reach Gaiada's portal | PV-D4, PV-D10 (ruled) |
 | 1 | **PV-1: Company context** *(alongside)* | `companies.vertical` plus backfill; the pack registry (PN and UI) with the **agency pack only**; `/me` returns the vertical; nav built from the pack; disabled-module rows hidden; toolkits keyed by (vertical, department); Group and Platform areas; scope markers. Side effect: Viceroy stops seeing agency rows | PV-D1 (ruled), D11 |
 | 2 | **PV-3: Hub symmetry and staff Contracts & billing** (tickets: `2026-10-11-pv3-hub-symmetry-tickets.md`) | hub labels renamed with paths kept (§4.2); the new **Contracts & billing** area at `/clients/[id]/billing` (contract draft, send and countersign; payment confirm queue); backend-computed `clientVisible` markers; the client-filter facets from the client-centric design, slice 2; **`clients.group_company_id`**, so Viceroy shows as a group client (PV-D2); business type required on client create and edit, plus a review list (§3.3) | PV-D4 (ruled) |
-| 3 | **PV-4: Conversation** | threads and messages tables; the new Cerbos kind (six artifacts); portal and hub UI; SSE topic; notifications; MCP tool; the billing-landing rule enforced on price-changing change requests | D5, PV-2, PV-3 |
+| 3 | **PV-4: Conversation** (tickets: `2026-10-12-pv4-conversation-tickets.md`) | threads and messages tables; the new Cerbos kind (six artifacts); portal and hub UI; SSE topic; notifications; MCP tool; the billing-landing rule enforced on price-changing change requests | D5, PV-2, PV-3 |
 | 4 | **PV-5: Contracts & billing depth** | invoice of record (number, issue and due dates, tax, issuer legal details from company settings); **intercompany tagging** of invoices to group clients (F9-04); a client document library; signature tiers; gateway | D7, D8, D9; Finance |
 | 5 | **PV-6: Client Business re-cut** | Business areas with Setup · Connections · Services & results; service KPIs by `client_id`; placeholder leaves removed; reconcile with AD-3 (CC-D6) | D6 |
 | 6 | **PV-7: Performance surfaces** | the client grain; the agency client health board; the client Overview KPIs; client report publication; My performance for employees | PV-6, the reports program |
@@ -793,3 +795,7 @@ is optional and defaults to `other`. Making it required is a PV-3 detail, not a 
 | PV-D18 | 2026-10-11 (owner) | **Owners of the root get FULL platform and system controls in the Platform area** (bots, AI gateway, MCP hub, automation, observability), the same as `platform_admin`. The server gate for those surfaces becomes "`platform_admin` at global scope, or the `owner` role on a root company". **Consequence, recorded:** owner and `platform_admin` stop being disjoint for system surfaces, which D-9's "one platform_admin + one owner" appointment pair leaned on. Owner grants already need that two-person appointment (`owner` is in `ELEVATED_TIER`, `grant-write.service.ts`), so system power still has no single-step path | **D-8 / IAM-14's "owner: NO platform/system controls"**, for the system surfaces only (`PN/src/admin/elevated.ts`); owner's business scope is unchanged |
 | PV-D19 | 2026-10-11 (owner) | **A cross-company group report is built in PV-1.** Owners of the root may read group rollups, each owned company's Company Report, and a new group report: per-company cards plus Sum of companies. Consolidated figures wait for F9 eliminations | Rollups and the Company Report being `platform_admin`-only |
 | PV-D20 | 2026-10-11 (owner) | **"Owner of the root" means holding the IAM `owner` role on the root company** (a `user_roles` grant scoped to the company whose id equals its own `root_company_id`). Not the Finance ownership register | — |
+| PV-D5 | 2026-10-12 (owner) | **Conversation is its own channel between a client and the staff serving them, kept apart from Contracts & billing** (§2.4). It gets its own tables, never the staff-only `comments` table, and a new Cerbos kind. **Binding rule:** anything agreed in Conversation that has a money or legal effect lands in Contracts & billing before it takes effect. A change request that changes the price creates a contract amendment for signature; a chat message alone never changes a price or a term | — |
+| PV-D22 | 2026-10-12 (owner) | **Threads live on each project, plus one client-wide thread per client** (`project_id` NULL, §3.5) for anything not tied to a project, such as new work or account questions | D5's "per project" wording, widened |
+| PV-D23 | 2026-10-12 (owner) | **Agents draft, staff send.** An agent may read threads and draft a reply, but nothing an agent writes reaches a client until a staff member approves it. The posting capability still has a tool (agentic-native tool parity); the PV-4 tickets name the gate | — |
+| PV-D24 | 2026-10-12 (owner) | **Every client contact who can see a project takes part in its conversation, signers and viewers alike.** Posting is not signing; the `viewer` capability keeps a contact from signing, not from talking | — |
