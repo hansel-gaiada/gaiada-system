@@ -31,6 +31,7 @@ import {
 } from "./webdesk-content.service";
 import { webdeskMedia } from "./webdesk-media.service";
 import { webdeskEditorial } from "./webdesk-editorial.service";
+import { webdeskAssist } from "./webdesk-assist.service";
 import { defineFormDefinition, getFormDefinition, listFormDefinitions } from "./webdesk-forms.service";
 
 /** Writes a Zone B problem exactly as Zone B sent it. */
@@ -268,6 +269,22 @@ export class WebdeskContentController {
   ) {
     const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "update");
     send(reply, await webdeskContent.previewItem(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
+  }
+
+  /**
+   * M5-W6: AI assist. Suggestions for one item through ai-gateway-go; WRITES NOTHING (a human applies a suggestion and saves it
+   * through `content.update`). Authorised as the item's `update`, so a writer may ask only on an item they may edit. 200 on success
+   * (a POST that creates nothing), and a typed 422 / 429 / 503 / 502 otherwise (webdesk-assist.service.ts).
+   */
+  @Post("sites/:tenantSlug/:siteId/items/:itemId/assist")
+  @HttpCode(200)
+  async assist(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Param("itemId") itemId: string, @Body() body: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "update");
+    send(reply, await webdeskAssist.assist(gate, { tenantSlug, siteId }, itemId, body));
   }
 
   /** Files ONE approval. 202, never 200: nothing is published yet. */
