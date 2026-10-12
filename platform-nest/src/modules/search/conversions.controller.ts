@@ -17,6 +17,8 @@ import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
   isPlatform, SUPPORTED_PLATFORMS, type ConversionPlatform, type UploadStatus,
 } from "./conversions";
+import { isMetaEventName } from "./conversions-meta";
+import { isLinkedInConversionRef } from "./conversions-linkedin";
 import {
   listConversionTargets, listConversionUploads, upsertConversionTarget,
   type ConversionTargetDto, type ConversionUploadDto, type UpsertTargetInput,
@@ -27,6 +29,19 @@ const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,198}[a-z0-9])?$/;
 const KEY_RE = /^[a-z][a-z0-9_]{0,63}$/;
 const STAGE_RE = /^[a-z][a-z_]{1,31}$/;
 const GOOGLE_ACTION_RE = /^(customers\/\d+\/conversionActions\/\d+|\d{1,20})$/;
+/** What `conversionAction` must be, per platform: a Google Ads conversion action, a Meta event name (P3), a LinkedIn conversion rule (P4). */
+function conversionActionValid(platform: ConversionPlatform, v: string): boolean {
+  switch (platform) {
+    case "google_ads": return GOOGLE_ACTION_RE.test(v);
+    case "meta_capi": return isMetaEventName(v);
+    case "linkedin_capi": return isLinkedInConversionRef(v);
+  }
+}
+const CONVERSION_ACTION_HINT: Record<ConversionPlatform, string> = {
+  google_ads: "a Google Ads conversion action id or its customers/{id}/conversionActions/{id} resource name",
+  meta_capi: "a Meta event name (letters, digits and underscores, starting with a letter, at most 50), for example Lead",
+  linkedin_capi: "a LinkedIn conversion rule id or its urn:lla:llaPartnerConversion:{id} URN",
+};
 const STATUSES: readonly UploadStatus[] = ["pending_approval", "executing", "simulated", "uploaded", "failed", "rejected", "skipped"];
 
 /** A typed 400: HttpErrorFilter forwards `reason`. */
@@ -40,11 +55,11 @@ export function parseTargetBody(body: unknown): { ok: true; input: UpsertTargetI
   const bad = (reason: string, message: string) => ({ ok: false as const, reason, message });
   if (typeof b.webSiteSlug !== "string" || !SLUG_RE.test(b.webSiteSlug)) return bad("web_site_slug_invalid", "webSiteSlug must be a WebDesk site slug (lower-case letters, digits and dashes)");
   if (!isPlatform(b.platform)) return bad("platform_unknown", "platform must be google_ads, meta_capi or linkedin_capi");
-  if (!(SUPPORTED_PLATFORMS as readonly string[]).includes(b.platform)) return bad("platform_unsupported", `platform ${b.platform} has no uploader yet`);
+  if (!(SUPPORTED_PLATFORMS as readonly string[]).includes(b.platform)) return bad("platform_unsupported", `platform ${b.platform} has no adapter`);
   if (typeof b.stage !== "string" || !STAGE_RE.test(b.stage)) return bad("stage_unknown", "stage must be a pipeline stage key");
   if (typeof b.conversionKey !== "string" || !KEY_RE.test(b.conversionKey)) return bad("conversion_key_invalid", "conversionKey must be lower-case letters, digits and underscores, starting with a letter (max 64)");
-  if (typeof b.conversionAction !== "string" || !GOOGLE_ACTION_RE.test(b.conversionAction.trim())) {
-    return bad("conversion_action_invalid", "conversionAction must be a Google Ads conversion action id or its customers/{id}/conversionActions/{id} resource name");
+  if (typeof b.conversionAction !== "string" || !conversionActionValid(b.platform, b.conversionAction.trim())) {
+    return bad("conversion_action_invalid", `conversionAction for ${b.platform} must be ${CONVERSION_ACTION_HINT[b.platform]}`);
   }
   if (b.sendValue !== undefined && typeof b.sendValue !== "boolean") return bad("send_value_invalid", "sendValue must be true or false");
   if (b.enabled !== undefined && typeof b.enabled !== "boolean") return bad("enabled_invalid", "enabled must be true or false");
