@@ -11,6 +11,31 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.106.0` - M5-V3-e: consented visitor profiles, the ingest, withdrawal sweep and purge jobs (dark until `SEARCH_VISITORS_ENABLED=1`) (2026-10-13) - PROTOTYPED
+
+- **New files:**
+  - `insights-client.ts`, the collector ops client (paged events, forget with its own key);
+  - `visitor-consent-client.ts`, the WebDesk `consent.status` client;
+  - `visitor-scoring.ts`, pure interests and score;
+  - `visitor-jobs.ts`.
+- **Ingest** (every 10 min) holds one lock per property for the whole run. For each page it:
+  1. asks WebDesk about every consent id;
+  2. **transaction A:** deletes and tombstones the visitors whose consent is withdrawn or absent;
+  3. sends forget to the collector;
+  4. **transaction B:** re-reads the tombstones, then writes events and profiles and moves the cursor.
+  A repeated batch changes nothing.
+- **Sweep** (hourly) waits for the lock, so it runs after any ingest in flight. It re-asks WebDesk and deletes, tombstones and forgets withdrawn visitors.
+- **Purge** (daily) removes profiles 14 months after their last visit, and old tombstones.
+- **Outages fail safe:**
+  - A WebDesk outage proves neither consent nor withdrawal, so nothing is written or forgotten.
+  - A collector outage in the sweep still commits the ERP delete, and the forget is queued for retry.
+- **`main.ts`** starts the jobs only when `SEARCH_VISITORS_ENABLED` is exactly `1`.
+- **Env:**
+  - `INSIGHTS_BASE_URL`, `INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY`;
+  - `SEARCH_VISITORS_{INGEST,SWEEP,PURGE}_INTERVAL_MS` and `SEARCH_VISITORS_TIMEOUT_MS`: empty or `0` means the default.
+- **Restore runbook:** replay erasures before turning the jobs on.
+- **Tests:** 49 unit tests locally. The DB acceptance suite (20 cases with fakes for both remotes, including the sweep-during-ingest race) runs on the Linux gate.
+
 ### insights-collector `0.2.0` + infra `0.13.10` - M5-V3-b: the consented channel, forget, the ops events read and the 72-hour purge (not deployed) (2026-10-13) - PROTOTYPED
 
 - **`POST /lib/kestrel/v`** (consented events):
