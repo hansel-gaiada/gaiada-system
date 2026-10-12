@@ -58,6 +58,9 @@ ALTER TABLE search_content_briefs
     (webdesk_site_id IS NOT NULL AND webdesk_tenant_slug IS NOT NULL AND collection_key IS NOT NULL AND locale IS NOT NULL)
   ),
   ADD CONSTRAINT chk_scb_item_needs_stamp CHECK ((webdesk_item_id IS NULL) = (linked_at IS NULL)),
+  -- property_id is now nullable: a brief must still belong to SOMETHING, a search property or a WebDesk site
+  -- (orchestrator review). Existing rows all have a property_id, so this validates on live.
+  ADD CONSTRAINT chk_scb_has_owner CHECK (property_id IS NOT NULL OR webdesk_site_id IS NOT NULL),
   ADD CONSTRAINT chk_scb_webdesk_slug CHECK (webdesk_tenant_slug IS NULL OR webdesk_tenant_slug ~ '^[a-z0-9]([a-z0-9-]{0,198}[a-z0-9])?$'),
   ADD CONSTRAINT chk_scb_collection_key CHECK (collection_key IS NULL OR char_length(collection_key) BETWEEN 1 AND 200),
   ADD CONSTRAINT chk_scb_locale CHECK (locale IS NULL OR char_length(locale) BETWEEN 1 AND 35),
