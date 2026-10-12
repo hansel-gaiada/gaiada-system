@@ -16,6 +16,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { staffNeverClientVisible } from "./portal-visibility";
 import { storage } from "./storage";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
@@ -680,8 +681,11 @@ export class MeetingRecordingsController {
     const orderBy = scheduled === "upcoming" ? "scheduled_at ASC" : "created_at DESC";
     const rows = await withTenants([tenantId], (c) =>
       c.query(
+        // PV3-07: no portal read of meetings exists, so `clientVisible` is the constant from
+        // NEVER_CLIENT_VISIBLE (portal-visibility.ts), not a predicate.
         `SELECT id, meeting_id, client_id, project_id, department_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
-                duration_sec, size_bytes, drive_status, drive_link, pipeline_run_id, created_by, created_at, updated_at
+                duration_sec, size_bytes, drive_status, drive_link, pipeline_run_id, created_by, created_at, updated_at,
+                ${staffNeverClientVisible("meeting")} AS "clientVisible"
          FROM meeting_recordings WHERE ${clauses.join(" AND ")} ORDER BY ${orderBy} LIMIT 200`,
         args,
       ),

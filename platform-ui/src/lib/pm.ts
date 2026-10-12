@@ -309,6 +309,8 @@ export interface PmTask {
   displayCode: string | null;
   // TR-02: additive, optional so existing fixtures/demo data/older backends need no changes.
   contributors?: Contributor[];
+  /** PV3-07: always false on `GET pm/tasks` (the portal lists no tasks). Absent on other task reads. */
+  clientVisible?: boolean;
 }
 
 // Boundary guarantee for the fields above that every render site reads WITHOUT a null-check

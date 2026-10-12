@@ -13,6 +13,7 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { recordInvoiceRevision, snapshotInvoice } from "./invoice-revisions";
 import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
+import { invoiceClientVisible, staffClientVisible } from "../../core/portal-visibility";
 
 // IAM-GAP-01: `approved` is a real status (migration 0107 widened the CHECK) but is DELIBERATELY
 // NOT in this set — the only way INTO 'approved' is the dedicated /approve endpoint below, which
@@ -26,12 +27,15 @@ const STATUSES = new Set(["draft", "sent", "paid", "void"]);
 // checker seam actually exists to gate.
 const REQUIRES_APPROVED_STATUS = new Set(["sent", "paid"]);
 
+// PV3-07: `clientVisible` (a client-wide contact of the invoice's client can read it in the portal) is
+// composed from the portal's own predicate: anything but a draft. Shared by the list and the detail.
 const INVOICE_SELECT = `
   SELECT i.id, i.client_id AS "clientId", COALESCE(cl.name, '(no client)') AS "clientName",
          to_char(i.period_start, 'YYYY-MM-DD') AS "periodStart", to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
          i.status, i.currency, i.lines, i.total::float8 AS total, i.created_at AS "createdAt",
          i.created_by AS "createdBy", i.approved_by AS "approvedBy", i.approved_at AS "approvedAt",
-         i.updated_by AS "updatedBy"
+         i.updated_by AS "updatedBy",
+         ${staffClientVisible("i", invoiceClientVisible("i"))} AS "clientVisible"
   FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
   WHERE i.deleted_at IS NULL`;
 

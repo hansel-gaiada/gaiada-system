@@ -37,7 +37,7 @@ import { requireSigner, resolvePortalScope, type PortalScope } from "./portal-sc
 // PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
 import {
   contractInPortalScope, deliverableClientVisible, invoiceInPortalScope, invoicePaymentClientVisible,
-  invoicePaymentInPortalScope, projectInPortalScope, projectReach,
+  projectInPortalScope,
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
 
@@ -497,20 +497,26 @@ export class PortalCommerceController {
     const q = {
       // Ownership travels through the project, because `deliverables.client_id` is nullable and a
       // deliverable on the client's project with a NULL client_id is the common case.
+      // PV3-02c: the project must itself be visible (not soft-deleted), as on every deliverable list.
       deliverable: `SELECT 1 FROM deliverables d JOIN projects p ON p.id = d.project_id
                      WHERE d.id = $1 AND ${deliverableClientVisible("d")}
-                       AND ${projectReach("p", { clients: 2, projects: 3 })}`,
+                       AND ${projectInPortalScope("p", { clients: 2, projects: 3 })}`,
       project: `SELECT 1 FROM projects p WHERE p.id = $1
                   AND ${projectInPortalScope("p", { clients: 2, projects: 3 })}`,
       contract: `SELECT 1 FROM contracts k WHERE k.id = $1
                    AND ${contractInPortalScope("k", { clients: 2, projects: 3 })}`,
-      // Their own receipt. Scoped on client_id (denormalised onto the row for exactly this reason)
-      // and NOT on recorded_by: a colleague at the same client legitimately reads it, and a
-      // staff-recorded payment has no client recorder at all.
-      invoice_payment: `SELECT 1 FROM invoice_payments pp WHERE pp.id = $1
-                          AND ${invoicePaymentInPortalScope("pp", "detail", { clients: 2 })}`,
+      // Their own receipt, reached THROUGH its invoice (PV3-02c): the invoice must be one the portal
+      // shows (not deleted, not a draft) and one of the caller's clients, so a payment on a deleted
+      // invoice has no receipt. Scoped on the invoice's client, NOT on recorded_by: a colleague at the
+      // same client legitimately reads it, and a staff-recorded payment has no client recorder at all.
+      invoice_payment: `SELECT 1 FROM invoice_payments pp JOIN invoices i ON i.id = pp.invoice_id
+                         WHERE pp.id = $1 AND ${invoicePaymentClientVisible("pp", "detail")}
+                           AND ${invoiceInPortalScope("i", { clients: 2 })}`,
     }[kind];
-    const r = await c.query(q, [id, scope.clientIds, scope.projectIds]);
+    // A receipt has no project reach, so its query binds only $1/$2. Passing an unreferenced $3 makes
+    // Postgres refuse the statement ("could not determine data type of parameter $3"), which 500s the
+    // download for EVERY caller: no test had exercised the receipt route before PV3-02c.
+    const r = await c.query(q, kind === "invoice_payment" ? [id, scope.clientIds] : [id, scope.clientIds, scope.projectIds]);
     return r.rows.length > 0;
   }
 

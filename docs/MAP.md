@@ -325,6 +325,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/client-centre/[clientId]/[[...section]]`
 - `/clients`
 - `/clients/[clientId]`
+- `/clients/[clientId]/billing`
 - `/clients/[clientId]/contacts`
 - `/clients/[clientId]/details`
 - `/clients/[clientId]/edit`
