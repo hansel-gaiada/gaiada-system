@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.13.15` - M6-P4p: the hub can reach the agent runner (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate after 369. Six pinned gate sites reached `code.scaffold` and stopped: the hub answered "agent runner not configured (AGENT_RUNNER_URL empty)" (n8n executions 2753-2759).
+  - The runner (`agent-runner`, port 3006) has been deployed and healthy all along, and the platform reaches it as `AGENTS_URL`.
+  - mcp-hub's compose block never got `AGENT_RUNNER_URL`, so every runner tool (`agents.invoke`, `agents.status`, `agents.runs`, `code.scaffold` v2) refused, fail-closed by design.
+- **The fix:** mcp-hub gains `AGENT_RUNNER_URL: http://agent-runner:3006` and `AGENT_RUNNER_TOKEN`, the same token the runner checks.
+  - The tools stay gated as before: each caller's allow-list and Cerbos policy, with the D14 write gate at the act.
+- **Applied to the live box** the same day as a matching compose hotfix (mcp-hub recreated on 369).
+
 ### insights-collector `0.3.2` - the consented channel's default event names are the site's real list (2026-10-13) - PROTOTYPED
 
 - **New default `CONSENT_EVENT_NAMES`:** the 13 names M5-V3-j confirmed from the site (`section_view`, `cta_click`, `click_whatsapp`, `click_phone`, `click_email`, `click_directions`, `save_contact`, `switch_language`, `lead_form_start`, `lead_form_step`, `lead_form_send`, `generate_lead`, `page_not_found`).

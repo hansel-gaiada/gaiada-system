@@ -1512,6 +1512,12 @@ services:
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       KNOWLEDGE_URL: http://knowledge:3005
       KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?}
+      # M6-P4p (2026-10-13): the hub's runner tools (`agents.invoke/status/runs` and `code.scaffold` v2, M6-P4b1) POST
+      # goals to the agent runner. Without this the hub refuses every one ("agent runner not configured", by design:
+      # fail-closed), which is how the M6 P4 gate found it: six pinned sites reached `code.scaffold` and stopped. The
+      # platform already reaches the same runner as AGENTS_URL (above); the runner checks the same AGENT_RUNNER_TOKEN.
+      AGENT_RUNNER_URL: http://agent-runner:3006
+      AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:-}
       # WS2 §5: make the versioned `mcp_tool` Cerbos policy authoritative (in-code stays as fallback).
       CERBOS_URL: http://cerbos:3592
       # WS2 §7: site hub (fronts this platform). The central hub runs as mcp-hub-central below.
