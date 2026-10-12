@@ -94,6 +94,13 @@ const COUNTERSIGN = new Set(["demo-hansel", "demo-owner"]);
 const INVOICE_READ = new Set(["demo-hansel", "demo-owner", "dept-manager"]);
 const INVOICE_UPDATE = new Set(["demo-hansel", "demo-owner"]);
 
+// PV3-09 — `clientVisible`, by the backend's rule (BFF §22d; `portal-visibility.ts`): a contract is visible to
+// the client when it has a client and is not a draft; a payment through its INVOICE (a draft invoice is not
+// visible, anything else is, and a pending or rejected claim shows in the invoice's history too). Overview
+// items use the same two functions, so the list, the detail and the Overview cannot disagree.
+const contractVisible = (k: { clientId: string | null; status: string }): boolean => k.clientId != null && k.status !== "draft";
+const paymentVisible = (x: { clientId: string | null; invoiceStatus: string }): boolean => x.clientId != null && x.invoiceStatus !== "draft";
+
 /** The contract as the list serves it: no `signatures`, plus the derived flags. */
 function row(k: DemoContract, userId: string) {
   const { signatures, ...rest } = k;
@@ -102,30 +109,31 @@ function row(k: DemoContract, userId: string) {
   return {
     ...rest, supersedesId: null, createdBy: "demo-hansel", clientSigned, providerSigned,
     termEnded: Boolean(k.endsOn && k.endsOn < dayOnly(0)),
+    clientVisible: contractVisible(k),
     // PV3-01: one decision per caller, true only for a sent row still waiting on us.
     canCountersign: COUNTERSIGN.has(userId) && k.status === "sent" && !providerSigned,
   };
 }
 
 /** Hub Overview, "waiting on us": drafts we have not sent, and payments nobody has confirmed. */
-export function demoBillingNeedsUs(clientId: string): { kind: "payment" | "contract"; id: string; label: string; context: string; href: string; since: string }[] {
+export function demoBillingNeedsUs(clientId: string): { kind: "payment" | "contract"; id: string; label: string; context: string; href: string; since: string; clientVisible: boolean }[] {
   const s = store();
   const href = `/clients/${clientId}/billing`;
   return [
     ...s.payments.filter((p) => p.clientId === clientId && p.status === "pending").map((p) => ({
-      kind: "payment" as const, id: p.id, label: "Confirm a client-recorded payment", context: `${p.currency} ${p.amount.toLocaleString("en-US")}`, href, since: p.recordedAt,
+      kind: "payment" as const, id: p.id, label: "Confirm a client-recorded payment", context: `${p.currency} ${p.amount.toLocaleString("en-US")}`, href, since: p.recordedAt, clientVisible: paymentVisible(p),
     })),
     ...s.contracts.filter((k) => k.clientId === clientId && k.status === "draft").map((k) => ({
-      kind: "contract" as const, id: k.id, label: "Send a drafted agreement", context: k.title, href, since: k.createdAt,
+      kind: "contract" as const, id: k.id, label: "Send a drafted agreement", context: k.title, href, since: k.createdAt, clientVisible: contractVisible(k),
     })),
   ];
 }
 
 /** Hub Overview, "waiting on the client": contracts sent and not yet signed by them. */
-export function demoBillingNeedsClient(clientId: string): { kind: "contract"; id: string; label: string; context: string; href: string; since: string }[] {
+export function demoBillingNeedsClient(clientId: string): { kind: "contract"; id: string; label: string; context: string; href: string; since: string; clientVisible: boolean }[] {
   return store().contracts
     .filter((k) => k.clientId === clientId && k.status === "sent" && !k.signatures.some((s) => s.party === "client"))
-    .map((k) => ({ kind: "contract" as const, id: k.id, label: "Awaiting client signature", context: k.title, href: `/clients/${clientId}/billing`, since: k.sentAt ?? k.createdAt }));
+    .map((k) => ({ kind: "contract" as const, id: k.id, label: "Awaiting client signature", context: k.title, href: `/clients/${clientId}/billing`, since: k.sentAt ?? k.createdAt, clientVisible: contractVisible(k) }));
 }
 
 export function demoBillingPendingTotal(clientId: string): number {
@@ -143,7 +151,7 @@ export function billingDemo(method: string, p: string, params: URLSearchParams, 
     const cid = params.get("clientId"), st = params.get("status");
     let rows = s.payments.filter((x) => (!st || x.status === st));
     if (cid) rows = cid.toLowerCase() === "internal" ? [] : rows.filter((x) => x.clientId === cid);
-    return ok([...rows].sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending")));
+    return ok([...rows].sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending")).map((x) => ({ ...x, clientVisible: paymentVisible(x) })));
   }
   if ((hit = p.match(/^\/api\/[^/]+\/invoice-payments\/([^/]+)\/decide$/)) && m === "POST") {
     // Authorize BEFORE validating (PV3-06): a caller who may not decide gets 403 whatever they sent.

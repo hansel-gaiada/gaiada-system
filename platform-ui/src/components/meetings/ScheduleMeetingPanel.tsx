@@ -3,6 +3,7 @@ import { useActionState, useState } from "react";
 import Link from "next/link";
 import { scheduleMeetingAction, type ScheduleResult } from "@/lib/schedulingActions";
 import { defaultSlotValue, formatScheduled, isOverdue } from "@/lib/schedulingView";
+import { ClientVisibilityMarker } from "@/components/clients/ClientVisibilityMarker";
 import "@/components/departments/departments.css";
 
 // W1 — the SCHEDULE step of engagement setup (owner decision D-3).
@@ -23,6 +24,9 @@ export interface UpcomingMeeting {
    *  `string | null` here would force every caller to launder the registry type. */
   scheduled_at?: string | null;
   kind: string;
+  /** PV3-09: the backend's "the client sees this" flag (always false for a meeting). Optional: a missing
+   *  value renders no marker at all, never a default. */
+  clientVisible?: boolean;
 }
 
 export function ScheduleMeetingPanel({
@@ -65,6 +69,7 @@ export function ScheduleMeetingPanel({
               >
                 <span style={{ font: "500 13px var(--font-body)", color: "var(--ink)", flex: "1 1 160px" }}>
                   {m.title || "Untitled meeting"}
+                  <ClientVisibilityMarker clientVisible={m.clientVisible} />
                 </span>
                 <span style={{ font: "400 12px var(--font-body)", color: overdue ? "var(--erp-accent)" : "var(--ink-muted)" }}>
                   {formatScheduled(m.scheduled_at ?? null)}

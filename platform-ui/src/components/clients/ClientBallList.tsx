@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ClientBallItem } from "@/lib/clientHub";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ClientVisibilityMarker } from "./ClientVisibilityMarker";
 
 // CC-3 — one side of "who is holding the ball".
 //
@@ -47,6 +48,8 @@ export function ClientBallList({
               <Link href={item.href} className="ch-ball__label">{item.label}</Link>
               <br />
               <span className="ch-ball__ctx">{item.context}</span>
+              {/* PV3-09: the backend's `clientVisible`, on this item's own row (BFF §22d). */}
+              <ClientVisibilityMarker clientVisible={item.clientVisible} />
             </span>
             <span className="ch-ball__since">
               {age === null ? "" : age === 0 ? "today" : `${age}d`}

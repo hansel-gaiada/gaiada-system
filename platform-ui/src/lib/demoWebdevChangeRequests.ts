@@ -113,6 +113,9 @@ function toRow(cr: DemoCr) {
     requestedBy: cr.requestedBy, requestedByName: cr.requestedByName,
     triagedBy: cr.triagedBy, triagedByName: cr.triagedByName, triagedAt: cr.triagedAt,
     declinedReason: cr.declinedReason, createdAt: cr.createdAt, updatedAt: cr.updatedAt,
+    // PV3-09: the backend's rule (BFF §22d): a request with a client is in the portal's Requests area; one with
+    // no client (staff-logged, no client) is not.
+    clientVisible: cr.clientId != null,
   };
 }
 

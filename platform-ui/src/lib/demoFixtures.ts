@@ -737,11 +737,11 @@ const DEMO_ASSIGNMENTS: {
 }[] = [];
 
 const CLIENTS: Record<string, unknown>[] = [
-  { id: "cl-1", name: "Northwind Traders", contact: { email: "ops@northwind.example" }, status: "active", custom_fields: {} },
-  { id: "cl-2", name: "Cedar Group", contact: { email: "hello@cedar.example" }, status: "active", custom_fields: {} },
-  { id: "cl-3", name: "Lumen Studio", contact: {}, status: "prospect", custom_fields: {} },
+  { id: "cl-1", name: "Northwind Traders", contact: { email: "ops@northwind.example" }, status: "active", custom_fields: {}, isInternal: false },
+  { id: "cl-2", name: "Cedar Group", contact: { email: "hello@cedar.example" }, status: "active", custom_fields: {}, isInternal: false },
+  { id: "cl-3", name: "Lumen Studio", contact: {}, status: "prospect", custom_fields: {}, isInternal: false },
   // PV3-04 (PV-D2): a client that IS one of our own companies, linked to `co-resort`.
-  { id: "cl-4", name: "Viceroy", contact: { email: "accounts@viceroy.example" }, status: "active", custom_fields: {}, groupCompany: { id: "co-resort", name: "Viceroy" } },
+  { id: "cl-4", name: "Viceroy", contact: { email: "accounts@viceroy.example" }, status: "active", custom_fields: {}, isInternal: false, groupCompany: { id: "co-resort", name: "Viceroy" } },
 ];
 
 // PV3-04: the demo twins of the backend's platform-operator gate (admin/elevated.ts `isPlatformOperator`:
@@ -1912,6 +1912,20 @@ function demoProjectClient(projectId: string): string | null {
   return null;
 }
 
+/** The client a demo DELIVERABLE belongs to: its PROJECT's client, never its own `client_id` column. The real
+ *  controller (PV3-07 follow-up) filters `?clientId=` through `projects.client_id` (`dp.client_id`) because the
+ *  portal reads deliverables by project, so `internal` means "its project has no client", and a deliverable
+ *  with no project belongs to no client at all. The fixture's own `client_id` is kept on the row (the wire
+ *  still carries it) but decides nothing here. */
+function demoDeliverableClient(d: Record<string, unknown>): string | null {
+  const pid = d.project_id as string | null | undefined;
+  return pid ? demoProjectClient(pid) : null;
+}
+
+/** PV3-09 — `clientVisible` on a demo deliverable, by the backend's rule (BFF §22d, `staffDeliverableClientVisible`):
+ *  through the deliverable's project, which must have a client. Same function as the filter, so they agree. */
+const demoDeliverableVisible = (d: Record<string, unknown>): boolean => demoDeliverableClient(d) != null;
+
 /** Every task the PM demo store holds, flattened — used by the hub aggregate fixture. */
 function demoAllTasks(): { id: string; projectId: string; status: string; dueDate: string | null }[] {
   const res = pmDemo("GET", "/api/co-agency/pm/tasks", new URLSearchParams(), undefined);
@@ -1944,20 +1958,26 @@ function daysAgoIso(days: number): string {
 function applyDemoTaskClientFilter(res: DemoResult, path: string, url: URL): DemoResult {
   if (!/^\/api\/[^/]+\/pm\/tasks$/.test(path)) return res;
   const clientId = url.searchParams.get("clientId");
-  if (!clientId) return res;
   const json = res.json as { items?: unknown[]; nextCursor?: unknown } | unknown[];
   const items = (Array.isArray(json) ? json : json.items ?? []) as { projectId: string }[];
-  const wantInternal = clientId.toLowerCase() === "internal";
-  const kept = items.filter((t) => {
+  const wantInternal = (clientId ?? "").toLowerCase() === "internal";
+  const kept = !clientId ? items : items.filter((t) => {
     const owner = demoProjectClient(t.projectId);
     return wantInternal ? owner == null : owner === clientId;
   });
-  return { ...res, json: Array.isArray(json) ? kept : { ...json, items: kept } };
+  // PV3-09: `GET pm/tasks` carries `clientVisible: false` on every row (the portal lists no tasks; BFF §22d),
+  // with or without the client facet.
+  const marked = kept.map((t) => ({ ...(t as object), clientVisible: false }));
+  return { ...res, json: Array.isArray(json) ? marked : { ...json, items: marked } };
 }
 
 function ok(json: unknown): DemoResult {
   return { status: 200, json };
 }
+
+/** PV3-09 — `clientVisible` on a demo invoice, by the backend's rule (BFF §22d, `invoiceClientVisible`): it has a
+ *  client and is not a draft (so approved, sent, paid and void all read true, as the portal shows them). */
+const demoInvoiceVisible = (i: Record<string, unknown>): boolean => i.clientId != null && i.status !== "draft";
 
 // ---- MAIL-15 fixtures (design A12 — reserved-TLD addresses only, never a real production domain) ----
 // Shapes mirror `platform-nest/src/mail/admin-mail.controller.ts`'s `MailLogRow` and
@@ -2488,11 +2508,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     // CC-1: mirror the backend facet, including the `internal` sentinel. A fixture that ignored the
     // parameter would make the client hub's Work tab show EVERY project in demo mode — which is
     // exactly the "demo fixtures hide frontend-first drift" trap this file's own header warns about.
+    // PV3-09: `clientVisible` (BFF §22d) is "the project has a client"; a project with none is internal work.
     return ok(applyDemoClientFilter(
       (PROJECTS[projMatch[1]] ?? []) as Record<string, unknown>[],
       url.searchParams.get("clientId"),
       "client_id",
-    ));
+    ).map((pr) => ({ ...pr, clientVisible: pr.client_id != null })));
   }
   const projDetailMatch = p.match(/^\/api\/[^/]+\/projects\/([^/]+)$/);
   if (projDetailMatch) {
@@ -2682,7 +2703,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       inv.updatedBy = userId;
       return ok({ ok: true });
     }
-    return ok(inv);
+    return ok({ ...inv, clientVisible: demoInvoiceVisible(inv) });
   }
   const invMatch = p.match(/^\/api\/[^/]+\/invoices$/);
   if (invMatch) {
@@ -2707,7 +2728,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       INVOICES.push(inv);
       return { status: 201, json: { id: inv.id } };
     }
-    return ok(applyDemoClientFilter(INVOICES, url.searchParams.get("clientId"), "clientId"));
+    return ok(applyDemoClientFilter(INVOICES, url.searchParams.get("clientId"), "clientId").map((i) => ({ ...i, clientVisible: demoInvoiceVisible(i) })));
   }
 
   // Clients
@@ -2722,7 +2743,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const projects = (PROJECTS[tenantSlug] ?? []).filter((pr) => (pr as { client_id?: string }).client_id === cid) as Record<string, unknown>[];
     const projectIds = new Set(projects.map((pr) => pr.id as string));
     const tasks = demoAllTasks().filter((t) => projectIds.has(t.projectId));
-    const deliverables = DELIVERABLES.filter((d) => d.client_id === cid);
+    const deliverables = DELIVERABLES.filter((d) => demoDeliverableClient(d) === cid);
     const invoices = INVOICES.filter((i) => i.clientId === cid);
     const today = new Date().toISOString().slice(0, 10);
     const invoiced = invoices
@@ -2734,14 +2755,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const needsUs = [
       ...demoBillingNeedsUs(cid),
       ...(cid === "cl-1"
-        ? [{ kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work` }]
+        ? [{ kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work`, clientVisible: true }]
         : []),
     ];
     // PV3-05: the review item gives the Projects area's post-review list a reachable state in demo mode.
     const needsClient = [
       ...demoBillingNeedsClient(cid),
       ...(cid === "cl-1"
-        ? [{ kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3) }]
+        ? [{ kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3), clientVisible: true }]
         : []),
     ];
     const money = invoices.length
@@ -2887,7 +2908,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
         if ("error" in g) return { status: 400, json: { error: g.error, field: "groupCompanyId" } };
         groupCompany = g.company;
       }
-      const c = { id: demoId("cl"), name: String(b.name ?? "New client"), contact: b.contact ?? {}, status: (b.status as string) ?? "active", custom_fields: {}, groupCompany };
+      const c = { id: demoId("cl"), name: String(b.name ?? "New client"), contact: b.contact ?? {}, status: (b.status as string) ?? "active", custom_fields: {}, isInternal: false, groupCompany };
       CLIENTS.push(c);
       demoCentreRegisterClient(c.id, c.name, c.status, b.businessType, userId);
       return { status: 201, json: { id: c.id } };
@@ -2900,8 +2921,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     if (m === "POST") { const b = JSON.parse(body || "{}"); const d = { id: demoId("dl"), project_id: (b.projectId as string) ?? null, client_id: (b.clientId as string) ?? null, name: String(b.name ?? "New deliverable"), status: (b.status as string) ?? "todo", due_date: (b.dueDate as string) ?? null }; DELIVERABLES.push(d); return { status: 201, json: { id: d.id } }; }
     const pid = url.searchParams.get("projectId");
     // PV3-05: `?clientId=` is filtered here too, as the real controller does (a fixture that ignored it
-    // would show every client's deliverables on the hub and hide a broken facet).
-    return ok(applyDemoClientFilter(pid ? DELIVERABLES.filter((d) => d.project_id === pid) : DELIVERABLES, url.searchParams.get("clientId"), "client_id"));
+    // would show every client's deliverables on the hub and hide a broken facet). It goes by the deliverable's
+    // PROJECT's client, as the controller does since PV3-07's follow-up (`dp.client_id`): the portal reads
+    // deliverables by project, so `deliverables.client_id` decides nothing. `internal` = the project has no
+    // client. Every row then reads `clientVisible` by the same rule (BFF §22d).
+    const wantClient = url.searchParams.get("clientId");
+    const delivered = (pid ? DELIVERABLES.filter((d) => d.project_id === pid) : DELIVERABLES)
+      .filter((d) => !wantClient || (wantClient.toLowerCase() === "internal" ? demoDeliverableClient(d) == null : demoDeliverableClient(d) === wantClient));
+    return ok(delivered.map((d) => ({ ...d, clientVisible: demoDeliverableVisible(d) })));
   }
 
   const fieldsMatch = p.match(/^\/api\/[^/]+\/custom-fields$/);

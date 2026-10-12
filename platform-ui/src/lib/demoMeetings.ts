@@ -304,7 +304,8 @@ export function meetingsDemo(method: string, p: string, params: URLSearchParams,
     if (status) rows = rows.filter((r) => r.status === status);
     if (clientId) rows = rows.filter((r) => r.client_id === clientId);
     if (projectId) rows = rows.filter((r) => r.project_id === projectId);
-    return ok(rows.map(pub));
+    // PV3-09: always false on the list, as the backend sends it (no portal read of meetings exists).
+    return ok(rows.map((r) => ({ ...pub(r), clientVisible: false })));
   }
 
   return null;
