@@ -143,6 +143,9 @@ export class ContractsController {
       supersedesId?: string;
     },
   ) {
+    // PV3-06: AUTHORIZE BEFORE VALIDATING, as on `countersign` and `decide`: an unauthorized caller gets 403
+    // whatever the body holds. This used to validate first, so a denial test with a thin body saw a 400.
+    await authorize(req.principal, { kind: "contract", tenantId }, "create");
     // Pulled into locals before the guard: narrowing `b.title` does not survive into the async closure
     // below (TS re-widens an optional property read across an await), and `b.title!` would be a
     // non-null assertion standing in for a check that is right here.
@@ -157,7 +160,6 @@ export class ContractsController {
       // constraint-violation 500.
       throw new BadRequestException("endsOn cannot be before startsOn");
     }
-    await authorize(req.principal, { kind: "contract", tenantId }, "create");
     // PV3-06 / agentic-native criterion 3 (idempotent writes). The natural dedupe key is the partial
     // unique index `ix_contracts_reference_uniq` on (tenant_id, reference, version) WHERE reference IS NOT
     // NULL: the insert below is `ON CONFLICT … DO NOTHING`, and a conflict returns the contract that is

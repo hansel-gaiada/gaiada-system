@@ -404,6 +404,13 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       expect(await providerSigs(id)).toBe(0);
     });
 
+    it("🔴 create: a caller with no right to draft gets 403 for an empty body; an admin gets the 400", async () => {
+      const denied = await app.inject({ method: "POST", url: `/api/${tenant}/contracts`, headers: asUser(outsider), payload: {} });
+      expect(denied.statusCode, denied.body).toBe(403);
+      const bad = await app.inject({ method: "POST", url: `/api/${tenant}/contracts`, headers: asUser(admin), payload: {} });
+      expect(bad.statusCode, bad.body).toBe(400);
+    });
+
     it("🔴 decide: a caller with no right to decide gets 403 for an empty body; an admin gets the 400", async () => {
       const p = await insertPayment(invoiceA, clientA, 5, recorder);
       const denied = await app.inject({ method: "POST", url: `/api/${tenant}/invoice-payments/${p}/decide`, headers: asUser(outsider), payload: {} });
