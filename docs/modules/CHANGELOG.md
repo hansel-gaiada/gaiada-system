@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### insights-collector `0.3.2` - the consented channel's default event names are the site's real list (2026-10-13) - PROTOTYPED
+
+- **New default `CONSENT_EVENT_NAMES`:** the 13 names M5-V3-j confirmed from the site (`section_view`, `cta_click`, `click_whatsapp`, `click_phone`, `click_email`, `click_directions`, `save_contact`, `switch_language`, `lead_form_start`, `lead_form_step`, `lead_form_send`, `generate_lead`, `page_not_found`).
+- **Why:** the first guess said `language_switch`, but the site sends `switch_language`, so language switches would have been dropped silently.
+- **Docs:** `/lib/kestrel/f` is documented as 204, with 400/429/503 only for a malformed body, a full limiter or a store outage (it is not always 204).
+- `go test -race` is green.
+
 ### platform-ui `0.107.0` - M5-V6-c: the session-replay player and the recordings list (2026-10-13) - PROTOTYPED
 
 - **The visitor detail** shows recordings (date, length, pages) only to a holder of `search.replay.view`. Without it there is no card and no read.

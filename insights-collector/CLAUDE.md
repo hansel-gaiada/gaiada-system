@@ -39,12 +39,13 @@ when resolved. Umami's status and body come back to the tracker; 3 s timeout, th
   413; 429 (global bucket `CONSENT_RATE_PER_SECOND`, plus a per-visitor-id burst of 10 refilling 1 per 2 s; no address is kept for it); 503 vdb down.
   A bot (isbot UA, WebDesk's `bot` bucket, or a datacenter ASN) gets a silent 204 and is not stored.
 - Per event, an invalid one is DROPPED, not the batch: `kind` pageview|event; `path` starts with `/`, no query, hash, backslash or control character, <= 512; an
-  `event` needs a `name` from `CONSENT_EVENT_NAMES`; `data` keeps only `section_id link_location form_id language_to` (`[A-Za-z0-9_.:-]{1,64}`) and
+  `event` needs a `name` from `CONSENT_EVENT_NAMES`; `data` keeps only `section_id link_location form_id step_index language_to` (`[A-Za-z0-9_.:-]{1,64}`) and
   `step_index` (whole number 0..1000), everything else is dropped; `t` is epoch milliseconds (number) or RFC 3339, clamped to +-10 min of receipt (missing = receipt).
 - Stored per row (`migrations/0002_consented_events.sql`): website, visitor_id, consent_id, received_at, occurred_at, kind, path, name, data, device
   (WebDesk `classifyUserAgent` buckets, ported in `consent/device.go`), country, city, asn, network_name, company (the CompanyResolver result as JSON). The
   geo, ASN and resolver result all come from ONE lookup of the request's address. **No IP column, no user-agent column** (static test + live catalogue check).
-- `POST /lib/kestrel/f` `{website, visitorId, consentId}`: always 204 for a well-formed body (unknown pair or website: still 204, no oracle); deletes rows only
+- `POST /lib/kestrel/f` `{website, visitorId, consentId}`: 204 for a well-formed body (unknown pair or website: still 204, no oracle); 400 `bad-body`
+  for a malformed one, 429 when the global limiter is full, 503 when the store is down (the site clears its id whatever the answer); deletes rows only
   where BOTH ids match; tombstones the visitor id (`withdraw`).
 - `GET /ops/v1/events?website&after&limit<=1000` (read key) -> `{events:[{id, visitorId, consentId, receivedAt, occurredAt, kind, path, name|null, data|null,
   device, geo:{country, city}, network:{asn, name}|null, company:{kind,name,domain?,confidence,source,version?}|null}], next}`. `next` is the last id returned (or `after`
@@ -124,7 +125,7 @@ Our own sampled rrweb recording (design 6.1 is the site's rules, 6.2 this). **OF
 | `DATABASE_URL` | required | vdb. The pool is lazy: vdb down at start does not stop the aggregate channel |
 | `OPS_READ_KEY_SHA256` | required | 64 hex = SHA-256 of the ERP's read key; sent as `Authorization: Bearer <key>` |
 | `OPS_FORGET_KEY_SHA256` | required | SHA-256 of the SEPARATE forget key; must differ from the read hash (the read key cannot forget) |
-| `CONSENT_EVENT_NAMES` | the site's goal events + form steps + `language_switch` | comma list, `[a-z][a-z0-9_]{0,49}`. ASSUMPTION: the site's real list (`gaiada-web-revamp/.../events.ts`) is confirmed by V3-j |
+| `CONSENT_EVENT_NAMES` | the site's 13 event names (`config.DefaultConsentEventNames`) | comma list, `[a-z][a-z0-9_]{0,49}`. CONFIRMED by V3-j: the site's `EventName` union minus `web_vitals` |
 | `CONSENT_RATE_PER_SECOND` | `100` | 1-10000; global ceiling on `/v` and `/f` |
 | `BUFFER_RETENTION_HOURS` | `72` | 1-72 (a shorter buffer is allowed, a longer one is refused: 72 h is a promise in the notice) |
 | `PURGE_INTERVAL_MINUTES` | `15` | 1-1440 |

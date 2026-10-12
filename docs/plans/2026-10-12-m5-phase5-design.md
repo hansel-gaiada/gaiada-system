@@ -130,7 +130,7 @@ consented channel**. After O-12, a new resolver is one more local-file implement
 | Route | Caller | Contract |
 |---|---|---|
 | `POST /lib/kestrel/v` | browser | §4.2 step 2. 204, 400, 403 (unknown website), 410, 429, 503 |
-| `POST /lib/kestrel/f` | browser | `{website, visitorId, consentId}` → always 204 (no oracle); deletes buffer rows and recordings only where the pair matches; tombstones the visitor id |
+| `POST /lib/kestrel/f` | browser | `{website, visitorId, consentId}` → 204 (no oracle; 400/429/503 only for a malformed body, a full limiter or a store outage); deletes buffer rows and recordings only where the pair matches; tombstones the visitor id |
 | `GET /ops/v1/events` | ERP, read key | `?website&after&limit≤1000` → `{events:[{id, visitorId, consentId, receivedAt, occurredAt, kind, path, name, data, device, geo:{country, city}, network:{asn, name}, company}], next}`. Only rows with `received_at < now() − 15 s` (a bigserial can commit after a larger one) |
 | `GET /ops/v1/bots` | ERP, read key | `?website&from&to` → daily counts by reason |
 | `POST /ops/v1/forget` | ERP, forget key | `{website, visitorIds ≤ 100, consentIds ≤ 100, mode: "withdraw" or "erase"}` → deleted counts; tombstones the hashes; idempotent. The read key gets 403 |
