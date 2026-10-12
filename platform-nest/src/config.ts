@@ -505,6 +505,12 @@ const configBase = {
     // is sub-second and a typo'd `10` must not become a stampede.
     runnerIntervalMs: readIntervalMs(process.env.MONITORING_RUNNER_INTERVAL_MS, 60_000, 1_000),
   },
+  // M6-P3d: renders the MON-01 probe-target file for sumopod to pull. OFF unless the path is set (an
+  // empty `${VAR:-}` passthrough counts as unset). Reads only; it dials nothing.
+  clientTargets: {
+    path: (process.env.CLIENT_PROPERTY_TARGETS_PATH ?? "").trim(),
+    intervalMs: readIntervalMs(process.env.CLIENT_PROPERTY_TARGETS_INTERVAL_MS, 5 * 60_000, 30_000),
+  },
   observability: {
     prometheusUrl: process.env.PROMETHEUS_URL ?? "",
     // Display-only: an operator-facing hint about where the full dashboards live. Never fetched
