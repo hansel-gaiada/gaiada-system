@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.23.0` - `site.archive` is real: WS4-gated, irreversible, archived sites stop serving (2026-10-12) - DEV-VERIFIED
+
+Owner ruling WSK-D78 (2026-10-12): archiving a site takes an approval. It mirrors `tenant.archive` at site scope.
+
+- **Migration 0019_site_status**: `sites.status text NOT NULL DEFAULT 'active' CHECK (active|archived)`, additive. **Runs before the new api** (the code reads `sites.status`); the release's automatic deploy-webdesk applies it.
+- `POST /control/v1/tenants/:slug/sites/:siteId/archive` runs in the command envelope (WS4 claim, audit first, idempotent replay): `201 {site, replayed}`; already archived 409; unknown/other tenant 404. Terminal: nothing moves a site back to active.
+- An archived site's keys stop resolving (`/v1` 401, as for a revoked key: delivery, media, forms, consent), its preview tokens 404, its control-plane routes refuse `409 site-archived` (content, preview, media, editorial, forms, schema.apply, environment provision, promotion), the content tick skips its schedules, and the tenant listing shows `sites[].status`.
+- Tests: `site-archive.spec.ts` (refusals, archive, replay, 409/404/400, every effect, a sibling site untouched) and the 0019 migration test, both in CI.
+
+### platform-nest `0.94.1` - `site.archive` is filed as one WS4 approval (WSK-66 path) (2026-10-12) - DEV-VERIFIED
+
+- `POST /api/:t/modules/webdev/control/sites/:siteId/archive` `{tenantSlug}` answers `202 {approvalId[, alreadyPending]}` (was a 501 stub): `promote` on the site, the cross-company wall, one open request per site. decide() sends one WS4-asserted `site.archive` to Zone B; the requester can never decide it (403, row stays pending). No editorial assertion, no rebuild.
+- The MCP tool `webdesk.site.archive` keeps its D14 registry entry; its precondition is now structural and its input gained `tenantSlug`. No Cerbos policy change, no ERP migration.
+- Ship WebDesk first: an approval decided against an older WebDesk fails `webdesk_refused`.
+- Tests: `webdesk-site-archive.test.ts` (filing, de-dup, wall, tiers, self-approval refused with no Zone B call, a second admin executes once, ambiguous failure never resent). GitHub Actions run 38251086608 green.
+
+### platform-ui `0.99.1` - Archive site, with approval (2026-10-12) - DEV-VERIFIED
+
+- The site page gains "Archive this site" for users who may `promote`: a confirm that names the site and what archiving does, "This files a request. Nothing is archived until someone else approves it."; then "Archive requested — waiting for approval." An archived site says so and shows no control.
+- `/approvals/[id]` renders a "Site archive request" summary (site, the irreversible warning, the effects).
+
 ### platform-nest `0.94.0` - the deploy gate is the org secret grant: only a registered, locked repo can read deploy secrets (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6-P4g (design `docs/plans/2026-10-13-webdesk-m6-p4g-deploy-grant.md`). Built by the M6 session.
