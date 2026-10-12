@@ -7,6 +7,7 @@ import "server-only";
 
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
+import { conversationDemo, demoConversationNeedsUs } from "./demoConversation";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { clientCentreDemo, demoCentreRegisterClient, demoCentreSetBusinessType, demoIsBusinessType } from "./demoClientCentre";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
@@ -2185,6 +2186,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const finance = financeDemo(method, p, url.searchParams, userId, body);
   if (finance) return finance;
 
+  // PV4-09 — the staff conversation (`/conversation*`) and meeting minutes (`/meetings/:id/minutes*`). Stateful
+  // (lib/demoConversation.ts), and placed before the meetings registry so its `/meetings/...` matcher cannot
+  // answer a minutes path with a generic miss.
+  const conversation = conversationDemo(method, p, url.searchParams, body, userId);
+  if (conversation) return conversation;
+
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
   const meetings = meetingsDemo(method, p, url.searchParams, body);
   if (meetings) return meetings;
@@ -2771,7 +2778,10 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     // Payments and contracts come from the billing store (lib/demoBilling.ts), the same one the Contracts &
     // billing area reads and writes, so deciding a payment there clears its item here. One untriaged
     // request stays a literal on the first demo client, so "waiting on us" has a non-billing item too.
+    // PV4-09: threads waiting on us come from the conversation store, so the thread page and the Overview agree.
+    const convNeedsUs = demoConversationNeedsUs(cid);
     const needsUs = [
+      ...convNeedsUs.items,
       ...demoBillingNeedsUs(cid),
       ...(cid === "cl-1"
         ? [{ kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work`, clientVisible: true }]
@@ -2820,6 +2830,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       money: { byCurrency: money ? [money] : [], primary: money },
       needsUs,
       needsClient,
+      conversationsAwaitingReply: convNeedsUs.count,
     });
   }
   // CC-D10 — notes + history, mirroring clients.controller.ts: notes newest first, history built from

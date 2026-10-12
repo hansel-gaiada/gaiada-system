@@ -508,6 +508,76 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     expect(noTitle.statusCode).toBe(400);
   });
 
+  // ── PV4-09: sourceMessageId ("Turn into a change request" on a client's conversation message) ──────
+  /** A real message in a real thread, through the staff conversation endpoint. */
+  async function messageOf(clientId: string, body = "Please make the logo bigger."): Promise<string> {
+    const r = await app.inject({
+      method: "POST", url: `/api/${co}/conversation`, headers: asUser(admin), payload: { clientId, body },
+    });
+    expect(r.statusCode).toBe(201);
+    return (r.json() as { messageId: string }).messageId;
+  }
+
+  it("PV4-09: a sourceMessageId from the SAME client's thread is stored on the request", async () => {
+    const msg = await messageOf(clientA);
+    const { id, res } = await internalCr({ sourceMessageId: msg });
+    expect(res.statusCode).toBe(201);
+    const row = await adminPool().query<{ source_message_id: string | null }>(
+      `SELECT source_message_id FROM webdev_change_requests WHERE id = $1`, [id],
+    );
+    expect(row.rows[0].source_message_id).toBe(msg);
+  });
+
+  it("PV4-09: a request with no sourceMessageId keeps the column NULL", async () => {
+    const { id, res } = await internalCr();
+    expect(res.statusCode).toBe(201);
+    const row = await adminPool().query<{ source_message_id: string | null }>(
+      `SELECT source_message_id FROM webdev_change_requests WHERE id = $1`, [id],
+    );
+    expect(row.rows[0].source_message_id).toBeNull();
+  });
+
+  it("PV4-09: another client's message is refused 400 source_message_invalid, and no request is written", async () => {
+    const clientB = await createClient(co, "Someone Else Resort");
+    const foreign = await messageOf(clientB, "A message that belongs to a different client.");
+    const before = await adminPool().query<{ n: number }>(`SELECT count(*)::int AS n FROM webdev_change_requests WHERE tenant_id = $1`, [co]);
+    const { res } = await internalCr({ sourceMessageId: foreign });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toBe("source_message_invalid");
+    const after = await adminPool().query<{ n: number }>(`SELECT count(*)::int AS n FROM webdev_change_requests WHERE tenant_id = $1`, [co]);
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+
+  it("PV4-09: an unknown, malformed or client-less sourceMessageId is refused 400 source_message_invalid", async () => {
+    const real = await messageOf(clientA);
+    for (const payload of [
+      { sourceMessageId: newId() },                          // well-formed, no such row
+      { sourceMessageId: "not-a-uuid" },                     // not an id at all
+      { sourceMessageId: 42 },                               // not a string
+      { sourceMessageId: real, clientId: null, projectId: null }, // a request with no client cannot cite a message
+    ]) {
+      const { res } = await internalCr(payload);
+      expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+      expect((res.json() as { error: string }).error).toBe("source_message_invalid");
+    }
+  });
+
+  it("PV4-09: another tenant's message is refused 400 source_message_invalid", async () => {
+    const otherClient = await createClient(co2, "Cross Tenant Client");
+    const r = await app.inject({
+      method: "POST", url: `/api/${co2}/conversation`, headers: asUser(admin2), payload: { clientId: otherClient, body: "tenant two" },
+    });
+    expect(r.statusCode).toBe(201);
+    const { res } = await internalCr({ sourceMessageId: (r.json() as { messageId: string }).messageId });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toBe("source_message_invalid");
+  });
+
+  it("PV4-09: authorization runs before the sourceMessageId check (a plain member gets 403, not 400)", async () => {
+    const { res } = await internalCr({ sourceMessageId: "not-a-uuid" }, plainMember);
+    expect(res.statusCode).toBe(403);
+  });
+
   // ══════════════════════════════════════════════════════════════════════════════════════════════
   // Decline
   // ══════════════════════════════════════════════════════════════════════════════════════════════

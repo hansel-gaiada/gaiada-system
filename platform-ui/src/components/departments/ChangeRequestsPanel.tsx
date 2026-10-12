@@ -1,10 +1,10 @@
 "use client";
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { Card, HairlineTable, StatusBadge, Button } from "@/components/ui";
 import { TeachState } from "./TeachState";
 import {
-  KIND_LABEL, ROUTE_LABEL, ROUTES, STATUS_LABEL, sortQueue, suggestedRoute, linkedArtifactHref,
+  KIND_LABEL, ROUTE_LABEL, ROUTES, STATUS_LABEL, sortQueue, suggestedRoute, linkedArtifactHref, priceImpactText, amendmentText,
   type ChangeRequestDetail, type ChangeRequestRow, type CrKind, type CrRoute, type ExistingTriageArtifact,
 } from "@/lib/webdevChangeRequests";
 import { formatDateTime } from "@/lib/format";
@@ -26,8 +26,15 @@ type TriageResult =
       code?: TriageRefusalCode; amendment?: { amendmentContractId: string | null; amendmentStatus: string | null };
     };
 
+/** PV4-09: the client's signed contracts, for the optional "Amends" picker. */
+type SignedContractsResult =
+  | { ok: true; contracts: { id: string; title: string; reference: string | null }[] }
+  | { ok: false; error: string };
+
 export interface ChangeRequestsPanelActions {
   getDetail: (id: string) => Promise<DetailResult>;
+  /** Optional: without it the picker is not offered and the server default target applies. */
+  listSignedContracts?: (clientId: string) => Promise<SignedContractsResult>;
   triage: (
     id: string,
     payload: { action: "decline" | "convert"; route?: CrRoute; reason?: string; kindOverride?: CrKind; priceImpact?: PriceImpactAnswer; amendsId?: string },
@@ -114,10 +121,26 @@ function TriageDrawer({
   // No default on purpose: the binding rule needs a real answer, so Convert stays disabled until staff pick one.
   const [priceImpact, setPriceImpact] = useState<PriceImpactAnswer | null>(null);
   const priceName = useId();
+  const amendsId = useId();
+  // PV4-09: "" = "Let the system choose" (the server default target: the project latest signed agreement, else
+  // the client latest signed master agreement). Only sent on a Yes answer, and only when a contract is picked.
+  const [amends, setAmends] = useState("");
+  const [contracts, setContracts] = useState<{ id: string; title: string; reference: string | null }[] | null>(null);
+  const [contractsError, setContractsError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [outcome, setOutcome] = useState<TriageResult | null>(null);
 
   const canDispose = canTriage && row.status === "new";
+  const pickerWanted = canDispose && priceImpact === "changes_price" && !!row.clientId && !!actions.listSignedContracts;
+  useEffect(() => {
+    if (!pickerWanted || contracts !== null || contractsError !== null || !row.clientId || !actions.listSignedContracts) return;
+    let live = true;
+    void actions.listSignedContracts(row.clientId).then((r) => {
+      if (!live) return;
+      if (r.ok) setContracts(r.contracts); else setContractsError(r.error);
+    });
+    return () => { live = false; };
+  }, [pickerWanted, contracts, contractsError, row.clientId, actions]);
   const artifactHref = linkedArtifactHref(row);
 
   const decline = () => {
@@ -134,7 +157,10 @@ function TriageDrawer({
     if (priceImpact === null) return;
     setOutcome(null);
     startTransition(async () => {
-      const r = await actions.triage(row.id, { action: "convert", route, kindOverride, priceImpact });
+      const r = await actions.triage(row.id, {
+        action: "convert", route, kindOverride, priceImpact,
+        ...(priceImpact === "changes_price" && amends ? { amendsId: amends } : {}),
+      });
       setOutcome(r);
       if (r.ok || r.existing) onDisposed();
     });
@@ -148,6 +174,7 @@ function TriageDrawer({
       <div className="dept-teach" style={{ alignItems: "flex-start", textAlign: "left" }}>
         <p className="dept-teach__body"><strong>Kind:</strong> {KIND_LABEL[row.kind]}</p>
         <p className="dept-teach__body"><strong>Client:</strong> {row.clientName ?? "—"}{row.projectName ? ` / ${row.projectName}` : ""}</p>
+        {priceImpactText(row) && <p className="dept-teach__body"><strong>Price:</strong> {priceImpactText(row)}</p>}
         <p className="dept-teach__body"><strong>Requested by:</strong> {row.requestedByName ?? row.requestedBy ?? "—"} ({row.source})</p>
         {detail?.body && <p className="dept-teach__body">{detail.body}</p>}
         {row.status === "declined" && row.declinedReason && (
@@ -198,6 +225,25 @@ function TriageDrawer({
               </p>
             )}
           </fieldset>
+          {pickerWanted && (
+            <label style={{ display: "grid", gap: 4 }} htmlFor={amendsId}>
+              <span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.6 }}>Amends (optional)</span>
+              <select id={amendsId} value={amends} onChange={(e) => setAmends(e.target.value)} disabled={pending || contracts === null}>
+                <option value="">Let the system choose</option>
+                {(contracts ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>{c.title}{c.reference ? ` \u00b7 ${c.reference}` : ""}</option>
+                ))}
+              </select>
+              {contractsError && (
+                <span className="dept-teach__body" role="status" style={{ margin: 0 }}>
+                  This client&apos;s signed contracts could not be listed, so the system will choose. ({contractsError})
+                </span>
+              )}
+              {contracts !== null && contracts.length === 0 && (
+                <span className="dept-teach__body" style={{ margin: 0 }}>This client has no signed contract yet, so the amendment is drafted as a new agreement.</span>
+              )}
+            </label>
+          )}
           <Button onClick={convert} disabled={pending || priceImpact === null}>{pending ? "Working…" : "Convert"}</Button>
 
           <label style={{ display: "grid", gap: 4 }}>
@@ -246,8 +292,8 @@ export function ChangeRequestsPanel({ rows, canTriage, actions }: { rows: Change
       <Card title="Triage queue">
         <HairlineTable
           key={refreshKey}
-          columns={[{ label: "Request" }, { label: "Kind" }, { label: "Client" }, { label: "Status" }, { label: "Submitted", align: "right" }]}
-          tcols="2fr 0.8fr 1.2fr 1fr 1fr"
+          columns={[{ label: "Request" }, { label: "Kind" }, { label: "Client" }, { label: "Status" }, { label: "Price" }, { label: "Amendment" }, { label: "Submitted", align: "right" }]}
+          tcols="2fr 0.8fr 1.2fr 1fr 1.1fr 1.2fr 1fr"
           rows={queue.map((r) => [
             <button key="t" type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={() => select(r.id)} style={{ padding: 0, font: "inherit", textAlign: "left" }}>
               {r.title}
@@ -255,6 +301,13 @@ export function ChangeRequestsPanel({ rows, canTriage, actions }: { rows: Change
             KIND_LABEL[r.kind],
             r.clientName ?? "—",
             <StatusBadge key="s" label={r.status} />,
+            priceImpactText(r) || "\u2014",
+            // PV4-09: the linked amendment status, with a way to the contract. No client = nowhere to link.
+            amendmentText(r)
+              ? (r.clientId
+                  ? <Link key="a" href={`/clients/${r.clientId}/billing`}>{amendmentText(r)}</Link>
+                  : <span key="a">{amendmentText(r)}</span>)
+              : "\u2014",
             formatDateTime(r.createdAt),
           ])}
         />
