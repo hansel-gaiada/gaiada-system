@@ -6,6 +6,11 @@
 // non-empty string leaf (block `type` names are skipped: they are vocabulary, not content), joins
 // them with single spaces, and truncates to SEARCH_TEXT_MAX_BYTES of UTF-8 without splitting a
 // character.
+//
+// M5-V5-a (vocabulary 1.5.0): an `experiment` block (an A/B test) is skipped whole: its arms hold alternative
+// copy that is not what the page says by default, so /v1 search indexes only the control (arm "a", which is the
+// item's own fields and blocks). Only a top-level block of that type is skipped; the same word elsewhere in a
+// block's props is ordinary text.
 
 export const SEARCH_TEXT_MAX_BYTES = 64 * 1024;
 
@@ -41,7 +46,10 @@ export function truncateUtf8(text: string, maxBytes: number): string {
 export function extractSearchText(blocks: unknown): string {
   const out: string[] = [];
   if (Array.isArray(blocks)) {
-    for (const b of blocks) collect(b, out, true);
+    for (const b of blocks) {
+      if (b !== null && typeof b === "object" && (b as { type?: unknown }).type === "experiment") continue;
+      collect(b, out, true);
+    }
   } else {
     collect(blocks, out, false);
   }

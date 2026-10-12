@@ -44,7 +44,7 @@ const v100 = load(FIXTURE)
 const current = currentVocabularySnapshot()
 
 check('the fixture is the 1.0.0 snapshot', v100.vocabularyVersion === '1.0.0', v100.vocabularyVersion)
-check('VOCABULARY_VERSION is 1.4.0 (M5-W8b: a MINOR on top of 1.3.0; see wsk49-client-editable.test.mjs, w3c-lint-content.test.mjs and w8b-route-pattern.test.mjs)', VOCABULARY_VERSION === '1.4.0', VOCABULARY_VERSION)
+check('VOCABULARY_VERSION is 1.5.0 (M5-V5-a: a MINOR on top of 1.4.0; see wsk49-client-editable.test.mjs, w3c-lint-content.test.mjs, w8b-route-pattern.test.mjs and v5a-experiment.test.mjs)', VOCABULARY_VERSION === '1.5.0', VOCABULARY_VERSION)
 
 // Each expected reason, tagged with the §2.3 row it realises. Exact strings, exact order.
 const EXPECTED = [
@@ -52,6 +52,7 @@ const EXPECTED = [
   [3, 'primitive "boolean" added'],
   [4, 'primitive "markdown" added'],
   [6, 'block type "fields" added (the composition-typed block: its props are typed per collection, not by the vocabulary)'],
+  [6, 'block type "experiment" added (the A/B-test block: non-composable and non-visual, its props are checked per item)'],
   [5, '"multiple" now honoured for primitive(s) date, geo, number, richtext, select, text (new capability)'],
   [1, 'FieldDef key "fields" added (new optional key)'],
   [2, 'FieldDef key "itemKey" added (new optional key)'],

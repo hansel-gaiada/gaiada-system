@@ -9,16 +9,17 @@ import { resolveBlocks, partitionResolvedBlocks, isNonVisualBlockType, NON_VISUA
 import { BLOCK_TYPE_NAMES, COMPOSABLE_BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, validateBlock } from '../../src/vocabulary/blocks.ts'
 import { VOCABULARY_VERSION } from '../../src/vocabulary/version.ts'
 
-test('the vendored vocabulary is 1.4.0 (M5-W8b, a MINOR on 1.3.0) and knows the fields block', () => {
-  assert.equal(VOCABULARY_VERSION, '1.4.0')
+test('the vendored vocabulary is 1.5.0 (M5-V5-a, a MINOR on 1.4.0) and knows the fields block', () => {
+  assert.equal(VOCABULARY_VERSION, '1.5.0')
   assert.ok(BLOCK_TYPE_NAMES.includes(FIELDS_BLOCK_TYPE))
   assert.ok(!COMPOSABLE_BLOCK_TYPE_NAMES.includes(FIELDS_BLOCK_TYPE))
   assert.equal(COMPOSABLE_BLOCK_TYPE_NAMES.length, 9)
 })
 
-test('the fields block is the only non-visual type', () => {
-  assert.deepEqual([...NON_VISUAL_BLOCK_TYPES], ['fields'])
+test('the fields block and (1.5.0) the experiment block are the only non-visual types', () => {
+  assert.deepEqual([...NON_VISUAL_BLOCK_TYPES], ['fields', 'experiment'])
   assert.equal(isNonVisualBlockType('fields'), true)
+  assert.equal(isNonVisualBlockType('experiment'), true)
   for (const t of COMPOSABLE_BLOCK_TYPE_NAMES) assert.equal(isNonVisualBlockType(t), false, t)
 })
 
@@ -36,6 +37,33 @@ test('a page with blocks[0] = fields resolves every block known; nothing is repo
 
 test('validateBlock treats fields as known with no vocabulary props (props are typed per collection)', () => {
   const v = validateBlock({ type: 'fields', props: { anything: 1 } })
+  assert.equal(v.unknownType, false)
+  assert.equal(v.valid, true)
+})
+
+// M5-V5-a (vocabulary 1.5.0): the experiment block is known and non-visual, exactly like `fields`.
+test('an item carrying an experiment block resolves every block known; the experiment is not reported unknown', () => {
+  const resolved = resolveBlocks([
+    { type: 'fields', props: { heading: 'Websites that win work' } },
+    {
+      type: 'experiment',
+      props: {
+        key: 'home-hero-2026-11',
+        target: 'fields',
+        goal: { event: 'lead_form_start' },
+        arms: [{ key: 'a', weight: 50 }, { key: 'b', weight: 50, override: { heading: 'Your next client is searching now' } }],
+      },
+    },
+  ])
+  const { known, unknown } = partitionResolvedBlocks(resolved)
+  assert.equal(unknown.length, 0)
+  assert.deepEqual(known.map((b) => b.type), ['fields', 'experiment'])
+})
+
+test('the experiment block is a known, non-composable block type with no vocabulary props', () => {
+  assert.ok(BLOCK_TYPE_NAMES.includes('experiment'))
+  assert.ok(!COMPOSABLE_BLOCK_TYPE_NAMES.includes('experiment'))
+  const v = validateBlock({ type: 'experiment', props: { anything: 1 } })
   assert.equal(v.unknownType, false)
   assert.equal(v.valid, true)
 })

@@ -26,6 +26,14 @@ describe("buildSchemaDraftPrompt — vocabulary 1.1.0", () => {
     expect(prompt).toMatch(/Never put "fields" in "blocks"/);
   });
 
+  it("M5-V5-a: never offers `experiment` either, and says so in one line", () => {
+    expect(ALL_BLOCK_TYPE_NAMES).toContain("experiment");
+    expect(BLOCK_TYPE_NAMES).not.toContain("experiment");
+    const listed = blockListLine.split(": ")[1].split(". ")[0].split(", ").map((s) => s.trim());
+    expect(listed).not.toContain("experiment");
+    expect(prompt).toMatch(/Never put "experiment" in "blocks" either/);
+  });
+
   it("lists every primitive, including the 1.1.0 ones", () => {
     for (const p of PRIMITIVE_NAMES) expect(prompt).toContain(p);
     for (const p of ["group", "boolean", "markdown"]) expect(PRIMITIVE_NAMES).toContain(p);
@@ -62,7 +70,7 @@ describe("buildSchemaDraftPrompt — vocabulary 1.1.0", () => {
 // WSK-49a (vocabulary 1.2.0): `ui.clientEditable` is taught, with one line on what it means.
 describe("buildSchemaDraftPrompt — vocabulary 1.2.0 (ui.clientEditable)", () => {
   it("states the vendored vocabulary version it teaches", () => {
-    expect(VOCABULARY_VERSION).toBe("1.4.0"); // M5-W8b (the ui.clientEditable teaching below is from 1.2.0)
+    expect(VOCABULARY_VERSION).toBe("1.5.0"); // M5-V5-a (the ui.clientEditable teaching below is from 1.2.0)
     expect(prompt).toContain(`v${VOCABULARY_VERSION}`);
   });
 

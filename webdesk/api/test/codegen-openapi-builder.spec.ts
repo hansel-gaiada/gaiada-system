@@ -114,14 +114,16 @@ describe("openapi-builder — composition.ts's `blocks` interpretation, honoured
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { anything: {} } }) as any;
     const itemSchema = doc.components.schemas["ItemEnvelope_anything"];
     const anyOf = itemSchema.properties.blocks.items.anyOf;
-    // 9 known block types + 1 "unknown/future" branch.
-    expect(anyOf.length).toBe(10);
+    // 9 known block types + the experiment block (1.5.0, a $ref) + 1 "unknown/future" branch.
+    expect(anyOf.length).toBe(11);
+    expect(anyOf).toContainEqual({ $ref: "#/components/schemas/ExperimentBlock" });
   });
 
   it("blocks PRESENT (non-empty) -> a closed set: only those types + the unknown-type branch", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { article: { blocks: ["richText", "hero"] } } }) as any;
     const anyOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.anyOf;
-    expect(anyOf.length).toBe(3); // richText + hero + unknown-type branch
+    expect(anyOf.length).toBe(4); // richText + hero + experiment ($ref, 1.5.0) + unknown-type branch
+    expect(anyOf).toContainEqual({ $ref: "#/components/schemas/ExperimentBlock" });
     const constValues = anyOf.filter((b: any) => "properties" in b && b.properties.type.const).map((b: any) => b.properties.type.const);
     expect(constValues.sort()).toEqual(["hero", "richText"]);
   });
@@ -132,19 +134,22 @@ describe("openapi-builder — composition.ts's `blocks` interpretation, honoured
     expect(blocksSchema.maxItems).toBe(0);
   });
 
-  it("WSK-64: blocks PRESENT and EMPTY with fields -> exactly one block, the fields block (prefixItems)", () => {
+  it("WSK-64 + M5-V5-a: blocks PRESENT and EMPTY with fields -> exactly [fields] or [fields, experiment] (an anyOf of two exact tuples)", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { fixedstuff: { blocks: [], fields: [{ name: "toPath", primitive: "text", required: true }] } } }) as any;
     const blocksSchema = doc.components.schemas["ItemEnvelope_fixedstuff"].properties.blocks;
-    expect(blocksSchema.prefixItems).toEqual([{ $ref: "#/components/schemas/FieldsBlock_fixedstuff" }]);
-    expect(blocksSchema.minItems).toBe(1);
-    expect(blocksSchema.maxItems).toBe(1);
+    // Never one `[F, E]` tuple: that would make the experiment block REQUIRED in the generated SDK type.
+    expect(blocksSchema.anyOf).toEqual([
+      { type: "array", prefixItems: [{ $ref: "#/components/schemas/FieldsBlock_fixedstuff" }], minItems: 1, maxItems: 1 },
+      { type: "array", prefixItems: [{ $ref: "#/components/schemas/FieldsBlock_fixedstuff" }, { $ref: "#/components/schemas/ExperimentBlock" }], minItems: 2, maxItems: 2 },
+    ]);
+    expect(blocksSchema.prefixItems).toBeUndefined();
     expect(blocksSchema.items).toBeUndefined();
   });
 
   it("the unknown-type branch never restricts `type` to an enum (renderer invariant, §05 hard rule 2)", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { article: { blocks: ["hero"] } } }) as any;
     const anyOf = doc.components.schemas["ItemEnvelope_article"].properties.blocks.items.anyOf;
-    const unknownBranch = anyOf.find((b: any) => !("const" in (b.properties?.type ?? {})));
+    const unknownBranch = anyOf.find((b: any) => b.properties && !("const" in (b.properties.type ?? {})));
     expect(unknownBranch).toBeTruthy();
     expect(unknownBranch.properties.type.type).toBe("string");
   });
@@ -251,7 +256,7 @@ describe("openapi-builder — WSK-64 the fields block at blocks[0]", () => {
     expect(blocks.minItems).toBe(1);
     expect(blocks["x-webdesk-blocks-prefix"]).toBe("FieldsBlock_page");
     expect(blocks.items.anyOf[0]).toEqual({ $ref: "#/components/schemas/FieldsBlock_page" });
-    expect(blocks.items.anyOf.length).toBe(3); // fields + richText + unknown
+    expect(blocks.items.anyOf.length).toBe(4); // fields + richText + experiment + unknown
   });
 
   it("list items of a fields collection use ListItemEnvelope_<key>, which makes no positional claim", () => {
@@ -275,6 +280,62 @@ describe("openapi-builder — WSK-64 the fields block at blocks[0]", () => {
     const doc = buildOpenApiDocument({ ...BASE_INPUT, composition: { anything: {} } }) as any;
     const consts = doc.components.schemas["ItemEnvelope_anything"].properties.blocks.items.anyOf.map((b: any) => b.properties?.type?.const).filter(Boolean);
     expect(consts).not.toContain("fields");
+    expect(consts).not.toContain("experiment"); // it is a $ref branch, never a generic block
     expect(consts.length).toBe(9);
+  });
+});
+
+describe("openapi-builder: the experiment block (vocabulary 1.5.0, M5-V5-a)", () => {
+  const doc = buildOpenApiDocument({
+    ...BASE_INPUT,
+    composition: {
+      page: { fields: [{ name: "heading", primitive: "text", required: true }], blocks: ["richText"] },
+      closed: { fields: [{ name: "toPath", primitive: "text" }], blocks: [] },
+      nofields: { blocks: [] },
+      open: {},
+    },
+  }) as any;
+  const exp = doc.components.schemas["ExperimentBlock"];
+
+  it("one shared ExperimentBlock component schema: type const experiment, closed props", () => {
+    expect(exp.properties.type).toEqual({ const: "experiment" });
+    expect(exp.required).toEqual(["type", "props"]);
+    expect(exp.additionalProperties).toBe(false);
+    const props = exp.properties.props;
+    expect(props.required).toEqual(["key", "target", "goal", "arms"]);
+    expect(props.additionalProperties).toBe(false);
+    expect(Object.keys(props.properties).sort()).toEqual(["arms", "enrolment", "goal", "key", "target"]);
+  });
+
+  it("states the closed enums and limits the vocabulary enforces", () => {
+    const p = exp.properties.props.properties;
+    expect(p.key.pattern).toBe("^[a-z0-9][a-z0-9-]{2,47}$");
+    expect(p.enrolment.enum).toEqual(["consented", "all"]);
+    expect(p.goal.properties.event.enum).toEqual(["generate_lead", "lead_form_start", "cta_click", "click_whatsapp", "click_phone", "click_email", "section_view"]);
+    expect(Object.keys(p.goal.properties.match.properties)).toEqual(["form_id", "link_location", "section_id"]);
+    expect(p.goal.properties.match.maxProperties).toBe(1);
+    expect(p.arms.minItems).toBe(2);
+    expect(p.arms.maxItems).toBe(4);
+    expect(p.arms.items.properties.key.enum).toEqual(["a", "b", "c", "d"]);
+    expect(p.arms.items.properties.weight.minimum).toBe(10);
+  });
+
+  it("every collection's item schema allows it: a union branch, or the second tuple slot of a closed fields collection", () => {
+    const ref = { $ref: "#/components/schemas/ExperimentBlock" };
+    expect(doc.components.schemas["ItemEnvelope_page"].properties.blocks.items.anyOf).toContainEqual(ref);
+    expect(doc.components.schemas["ListItemEnvelope_page"].properties.blocks.items.anyOf).toContainEqual(ref);
+    expect(doc.components.schemas["ItemEnvelope_open"].properties.blocks.items.anyOf).toContainEqual(ref);
+    expect(doc.components.schemas["ItemEnvelope_closed"].properties.blocks.anyOf[1].prefixItems[1]).toEqual(ref);
+    expect(doc.components.schemas["ItemEnvelope_search"].properties.blocks.items.anyOf).toContainEqual(ref);
+  });
+
+  it("a collection with no fields and no allowed blocks still carries none (an experiment needs a block to test)", () => {
+    expect(doc.components.schemas["ItemEnvelope_nofields"].properties.blocks.maxItems).toBe(0);
+  });
+
+  it("the envelope itself is unchanged: same properties, same required list", () => {
+    const item = doc.components.schemas["ItemEnvelope_open"];
+    expect(Object.keys(item.properties)).toEqual(["collection", "slug", "locale", "localizations", "seo", "meta", "blocks"]);
+    expect(item.required).toEqual(["collection", "slug", "locale", "localizations", "seo", "meta", "blocks"]);
   });
 });

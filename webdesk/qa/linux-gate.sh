@@ -346,7 +346,7 @@ if selected vocabulary && [ "$DB_READY" = 1 ]; then
   RENV=()
   # cwd = webdesk/api so `--import tsx` resolves from its node_modules. No database or env needed.
   run_suite vocabulary webdesk/api 'rc=0
-for t in wsk64-classifier wsk64-item-fields vocabulary wsk49-client-editable w3c-lint-content w8b-route-pattern m5-w7-author; do
+for t in wsk64-classifier wsk64-item-fields vocabulary wsk49-client-editable w3c-lint-content w8b-route-pattern v5a-experiment m5-w7-author; do
   echo "##### $t"
   node --import tsx ../delivery/test/$t.test.mjs || { echo "FAIL  $t exited non-zero"; rc=1; }
 done

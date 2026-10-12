@@ -78,6 +78,19 @@ describe("search-text", () => {
     );
   });
 
+  it("M5-V5-a: skips an experiment block whole, so search indexes only the control", () => {
+    const blocks = [
+      { type: "fields", props: { heading: "Websites that win work" } },
+      { type: "experiment", props: { key: "home-hero", arms: [{ key: "a", weight: 50 }, { key: "b", weight: 50, override: { heading: "Your next client is searching now" } }] } },
+      { type: "richText", props: { content: "Body" } },
+    ];
+    expect(extractSearchText(blocks)).toBe("Websites that win work Body");
+  });
+
+  it("M5-V5-a: only a top-level experiment block is skipped; the word elsewhere is ordinary text", () => {
+    expect(extractSearchText([{ type: "richText", props: { content: "experiment" } }])).toBe("experiment");
+  });
+
   it("truncates to 64 KiB of UTF-8 without splitting a character", () => {
     const long = "é".repeat(SEARCH_TEXT_MAX_BYTES); // 2 bytes each
     const out = extractSearchText([{ type: "fields", props: { a: long } }]);

@@ -215,3 +215,16 @@ function gaiada_render_block_fields(array $props): string
 {
     return '';
 }
+
+/** The A/B-test `experiment` block (vocabulary 1.5.0, M5-V5-a). Like `fields` it is data, not presentation: it
+ *  draws NOTHING and is not an unknown block. The page shows the item's own content, which is arm `a` (the
+ *  control); a PHP theme does not run the variant swap (that is the site's script), so it stays on the control.
+ *  Mirrors webdesk/blocks/src/renderer/resolve-blocks.ts (NON_VISUAL_BLOCK_TYPES). Without this function the
+ *  dispatcher in block-renderer.php would throw for it, because `experiment` is in gaiada_known_block_types().
+ *
+ * @param array<string,mixed> $props
+ */
+function gaiada_render_block_experiment(array $props): string
+{
+    return '';
+}

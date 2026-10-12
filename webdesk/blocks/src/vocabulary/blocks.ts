@@ -23,6 +23,12 @@
 // vocabulary props. The composition-aware check lives in ./item-fields.ts. The 9 generic blocks
 // are unchanged. `fields` is never listed in a composition's `blocks` (see COMPOSABLE_BLOCK_TYPE_NAMES)
 // and is non-visual: a renderer resolves it as known and renders nothing for it.
+//
+// M5-V5-a (vocabulary 1.5.0) adds a second such block type, `experiment`: an A/B test over one other block of the
+// item (design docs/plans/2026-10-12-m5-phase5-design.md section 5.1). Like `fields` its props are not typed here (its
+// vocabulary `fields` list is empty): their shape is checked by ./item-fields.ts, where the item's own fields and
+// blocks are in reach. It is non-composable (allowed in any collection without being listed, at most one per item,
+// never at index 0), non-visual, and never client-editable (./client-editable.ts).
 import { type FieldDef, validateField } from './primitives.ts'
 
 export type BlockType =
@@ -36,6 +42,7 @@ export type BlockType =
   | 'faq'
   | 'logoCloud'
   | 'fields'
+  | 'experiment'
 
 export interface BlockDef {
   type: BlockType
@@ -113,13 +120,21 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
   },
   // 1.1.0: the composition-typed block. Empty on purpose: its props are typed per collection.
   fields: { type: 'fields', fields: [] },
+  // 1.5.0: the A/B-test block. Empty on purpose: its props are checked per item (item-fields.ts).
+  experiment: { type: 'experiment', fields: [] },
 }
 
 /** 1.1.0: the one composition-typed block type. */
 export const FIELDS_BLOCK_TYPE = 'fields' as const
 
-/** The block types a composition may list in `blocks`: every block type except `fields`. */
-export type ComposableBlockType = Exclude<BlockType, typeof FIELDS_BLOCK_TYPE>
+/** 1.5.0: the A/B-test block type. */
+export const EXPERIMENT_BLOCK_TYPE = 'experiment' as const
+
+/** The block types no composition lists in `blocks`: each is implied by something else (`fields` by declaring fields, `experiment` by being allowed everywhere). */
+export const NON_COMPOSABLE_BLOCK_TYPE_NAMES: readonly BlockType[] = [FIELDS_BLOCK_TYPE, EXPERIMENT_BLOCK_TYPE]
+
+/** The block types a composition may list in `blocks`: every block type except `fields` and `experiment`. */
+export type ComposableBlockType = Exclude<BlockType, typeof FIELDS_BLOCK_TYPE | typeof EXPERIMENT_BLOCK_TYPE>
 
 export const BLOCK_TYPE_NAMES: BlockType[] = Object.keys(BLOCKS) as BlockType[]
 
@@ -127,9 +142,9 @@ export function isBlockType(v: string): v is BlockType {
   return (BLOCK_TYPE_NAMES as string[]).includes(v)
 }
 
-/** 1.1.0: the 9 generic (visual) block types: what a composition's `blocks` may list. */
+/** 1.1.0: the 9 generic (visual) block types: what a composition's `blocks` may list (1.5.0 still 9: `experiment` is not one). */
 export const COMPOSABLE_BLOCK_TYPE_NAMES: ComposableBlockType[] = BLOCK_TYPE_NAMES.filter(
-  (t): t is ComposableBlockType => t !== FIELDS_BLOCK_TYPE,
+  (t): t is ComposableBlockType => t !== FIELDS_BLOCK_TYPE && t !== EXPERIMENT_BLOCK_TYPE,
 )
 
 export function isComposableBlockType(v: string): v is ComposableBlockType {
@@ -140,7 +155,7 @@ export interface BlockValidation {
   valid: boolean
   /** Empty when valid, or when the type is unknown (see the renderer-invariant note below). */
   errors: string[]
-  /** True when `type` is not one of the known block types (the 9 generic ones plus `fields`). */
+  /** True when `type` is not one of the known block types (the 9 generic ones plus `fields` and `experiment`). */
   unknownType: boolean
 }
 

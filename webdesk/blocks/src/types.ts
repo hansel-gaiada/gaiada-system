@@ -189,6 +189,8 @@ export const EXPECTED_FIELDS: Record<BlockType, ExpectedField[]> = {
   // WSK-64 (vocabulary 1.1.0): the composition-typed `fields` block has no vocabulary props (its
   // props are typed per collection) and no component — it is non-visual (see renderer/resolve-blocks.ts).
   fields: [],
+  // M5-V5-a (vocabulary 1.5.0): the A/B-test block is non-visual too; its props are checked per item (item-fields.ts).
+  experiment: [],
 }
 
 // Referenced only for the doc comment cross-checks above (`FieldDef` import keeps this file

@@ -72,7 +72,7 @@ check('routePattern is optional', validateCollectionComposition('c', { ui: { lab
 check('COLLECTION_UI_KEYS carries routePattern', COLLECTION_UI_KEYS.includes('routePattern'))
 check('an unknown ui key is still refused', validateCollectionComposition('c', { ui: { label: 'x', nope: 1 } }).issues.some((i) => i.path === 'c.ui.nope'))
 check('routePatternProblem is null for a good one', routePatternProblem('/blog/{slug}/') === null)
-check('a composition authored against 1.3.0 is still accepted; 1.5.0 is refused', isVocabularyVersionSupported('1.3.0') && isVocabularyVersionSupported('1.4.0') && !isVocabularyVersionSupported('1.5.0'))
+check('a composition authored against 1.3.0 is still accepted; 1.6.0 is refused', isVocabularyVersionSupported('1.3.0') && isVocabularyVersionSupported('1.4.0') && isVocabularyVersionSupported('1.5.0') && !isVocabularyVersionSupported('1.6.0'))
 
 console.log('\n[pagePathFor]')
 const A = { slug: 'my-post', locale: 'en', defaultLocale: 'en' }
@@ -89,13 +89,15 @@ check('a locale that cannot be a URL segment gives null', pagePathFor('/{locale}
 
 console.log('\n[classifier]')
 const v130 = load(path.join(HERE, 'fixtures', 'vocabulary-1.3.0.snapshot.json'))
-const current = currentVocabularySnapshot()
+// M5-V5-a moved the vocabulary on to 1.5.0, so the 1.4.0 release is rated against ITS OWN committed capture.
+const current = load(path.join(HERE, 'fixtures', 'vocabulary-1.4.0.snapshot.json'))
+check('the 1.4.0 fixture is the 1.4.0 snapshot', current.vocabularyVersion === '1.4.0', current.vocabularyVersion)
 check('the fixture is the 1.3.0 snapshot', v130.vocabularyVersion === '1.3.0' && !v130.collectionUiKeys.includes('routePattern'), JSON.stringify(v130.collectionUiKeys))
 const rated = classifyVocabularyChange(v130, current)
 console.log(JSON.stringify(rated, null, 2).replace(/^/gm, '      '))
 check('classifyVocabularyChange(1.3.0 snapshot, current) === "minor"', rated.bump === 'minor', JSON.stringify(rated))
 check('the reason is exactly the one new collection ui key', eq(rated.reasons, ['collection ui key "routePattern" added (new optional key)']), JSON.stringify(rated.reasons))
-check('the computed bump applied to 1.3.0 IS the shipped version', bumpVersion('1.3.0', rated.bump) === VOCABULARY_VERSION, bumpVersion('1.3.0', rated.bump))
+check('the computed bump applied to 1.3.0 IS the 1.4.0 release', bumpVersion('1.3.0', rated.bump) === current.vocabularyVersion, bumpVersion('1.3.0', rated.bump))
 check('the current snapshot carries routePattern', current.collectionUiKeys.includes('routePattern'), JSON.stringify(current.collectionUiKeys))
 check('the envelope did not change by a byte', eq(current.envelopeShape, v130.envelopeShape))
 {

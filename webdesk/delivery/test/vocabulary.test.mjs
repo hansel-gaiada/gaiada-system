@@ -33,20 +33,20 @@ check(
     JSON.stringify(['date', 'geo', 'media', 'number', 'relation', 'richtext', 'select', 'text', 'group', 'boolean', 'markdown'].sort()),
   PRIMITIVE_NAMES.join(','),
 )
-check('exactly 10 block types (9 generic + fields)', BLOCK_TYPE_NAMES.length === 10, `got ${BLOCK_TYPE_NAMES.length}`)
+check('exactly 11 block types (9 generic + fields + experiment)', BLOCK_TYPE_NAMES.length === 11, `got ${BLOCK_TYPE_NAMES.length}`)
 check(
-  '10 block types are exactly: hero, richText, gallery, cta, featureGrid, form, testimonial, faq, logoCloud, fields',
+  '11 block types are exactly: hero, richText, gallery, cta, featureGrid, form, testimonial, faq, logoCloud, fields, experiment',
   JSON.stringify([...BLOCK_TYPE_NAMES].sort()) ===
     JSON.stringify(
-      ['hero', 'richText', 'gallery', 'cta', 'featureGrid', 'form', 'testimonial', 'faq', 'logoCloud', 'fields'].sort(),
+      ['hero', 'richText', 'gallery', 'cta', 'featureGrid', 'form', 'testimonial', 'faq', 'logoCloud', 'fields', 'experiment'].sort(),
     ),
   BLOCK_TYPE_NAMES.join(','),
 )
-check('vocabulary version is set', VOCABULARY_VERSION === '1.4.0', VOCABULARY_VERSION)
+check('vocabulary version is set', VOCABULARY_VERSION === '1.5.0', VOCABULARY_VERSION)
 check('envelope path prefix is the frozen /v1', ENVELOPE_PATH_PREFIX === '/v1', ENVELOPE_PATH_PREFIX)
 check(
   'VOCABULARY_SUMMARY carries both counts (what payload.config.ts exposes via config.custom)',
-  VOCABULARY_SUMMARY.primitiveCount === 11 && VOCABULARY_SUMMARY.blockTypeCount === 10,
+  VOCABULARY_SUMMARY.primitiveCount === 11 && VOCABULARY_SUMMARY.blockTypeCount === 11,
   JSON.stringify(VOCABULARY_SUMMARY),
 )
 

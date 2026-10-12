@@ -313,3 +313,65 @@ export function staffRunStageClientVisible(stageAlias: string, runAlias: string)
 export function staffInvoicePaymentClientVisible(paymentAlias: string, invoiceAlias: string): string {
   return staffClientVisible(invoiceAlias, invoiceClientVisible(invoiceAlias), invoicePaymentClientVisible(paymentAlias, "detail"));
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Conversation (PV4-03): threads, messages, attachments — and drafts, which are never visible
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-03; design decisions 3 and 4; PV4-Q1).
+// Every `conversation_messages` row is client-visible by definition (§2.4: the table has no visibility
+// column). What a client may REACH is decided by the THREAD, so a message, its edit/retract and its
+// attachments are all admitted through `conversationThreadInPortalScope` on the parent thread.
+
+/** A thread is visible unless soft-deleted. Open and closed threads both show (a closed thread is
+ *  history the client took part in). */
+export function conversationThreadClientVisible(alias: string): string {
+  return `${col(alias, "deleted_at")} IS NULL`;
+}
+
+/** The full portal predicate for a conversation thread.
+ *
+ *  ⚠ NO NULL-PROJECT ADMISSION, UNLIKE CONTRACTS AND CHANGE REQUESTS. `project_id IS NULL` is the
+ *  client-wide ("general") thread (PV-D22), and PV4-Q1's default is that ONLY a client-wide contact may
+ *  see it: a contact limited to some projects may be someone outside the client's organisation (an
+ *  agency the client hired for one site), and the general thread is where the client's own people talk
+ *  about everything. A master contract admits a project-scoped contact because the agreement covers
+ *  their project too; a general conversation carries no such implication. So this is `allowNullProject =
+ *  false`, the same shape as runs. Changing it to `true` would show a project-scoped contact the whole
+ *  client-wide thread, history included. */
+export function conversationThreadInPortalScope(alias: string, params: PortalScopeParams): string {
+  return `${inCallerClients(alias, params.clients)} AND ${conversationThreadClientVisible(alias)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, false)}`;
+}
+
+/** A message is always visible once its thread is: the table has no visibility state (a retracted
+ *  message still shows, as "Message removed", with no body). Returned as `TRUE` after validating the
+ *  alias so the staff side composes it like any other row-state predicate. */
+export function conversationMessageClientVisible(alias: string): string {
+  col(alias, "id");
+  return `TRUE`;
+}
+
+/** A message's ATTACHMENTS are reachable only while the message is not retracted: retracting a
+ *  message withdraws what it carried, on the portal download route as well as in the listing. */
+export function conversationAttachmentClientVisible(messageAlias: string): string {
+  return `${col(messageAlias, "retracted_at")} IS NULL`;
+}
+
+/** Staff `clientVisible` for a thread: a live thread of a client (always true for a non-deleted row;
+ *  every thread has a client by the NOT NULL column). */
+export function staffConversationThreadClientVisible(threadAlias: string): string {
+  return staffClientVisible(threadAlias, conversationThreadClientVisible(threadAlias));
+}
+
+/** Staff `clientVisible` for a message, through its thread (`t` must be the message's own thread). */
+export function staffConversationMessageClientVisible(messageAlias: string, threadAlias: string): string {
+  return staffClientVisible(threadAlias, conversationThreadClientVisible(threadAlias), conversationMessageClientVisible(messageAlias));
+}
+
+/** Staff `clientVisible` for a DRAFT: the SQL constant FALSE. Drafts live in their own table,
+ *  `conversation_drafts`, which no portal route reads (design decision 3); a draft reaches a client
+ *  only by being SENT, which creates a new `conversation_messages` row authored by the sender. */
+export function staffConversationDraftClientVisible(draftAlias: string): string {
+  col(draftAlias, "id");
+  return "FALSE";
+}

@@ -13,6 +13,7 @@
 | `ai-gateway-go/` | go | `gaiada/ai-gateway-go` | `cmd/gateway` | yes | yes |
 | `capture-helper/` | node | `gaiada-capture-helper` | `start` | — | **missing** |
 | `hermes-gateway/` | node | `hermes-gateway` | `start` | — | **missing** |
+| `insights-collector/` | go | `gaiada/insights-collector` | `cmd/collector` | yes | yes |
 | `lab-runner/` | node | `gaiada-lab-runner` | `dev · start` | yes | **missing** |
 | `mcp-hub/` | node | `gaiada-mcp-hub` | `dev · start` | yes | yes |
 | `platform-nest/` | node | `gaiada-platform-nest` | `start` | yes | yes |
@@ -168,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610131500_search_ai_crawler_log.sql`
+- Head: `202610131600_search_visitor_profiles.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 266 (121 legacy `NNNN_`, 145 timestamped)
+- Applied files on disk: 269 (121 legacy `NNNN_`, 148 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -211,6 +212,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/client-work.controller.ts` |
 | `/api` | `platform-nest/src/core/collab.controller.ts` |
 | `/api` | `platform-nest/src/core/contracts.controller.ts` |
+| `/api` | `platform-nest/src/core/conversation.controller.ts` |
 | `/api` | `platform-nest/src/core/core.controller.ts` |
 | `/api` | `platform-nest/src/core/creative.controller.ts` |
 | `/api` | `platform-nest/src/core/custom-fields.controller.ts` |
@@ -221,6 +223,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/pipeline.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-centre.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-commerce.controller.ts` |
+| `/api` | `platform-nest/src/core/portal-conversation.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-profile.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-workspace.controller.ts` |
@@ -255,6 +258,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/ai-crawler.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/content-decay.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/conversions.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/indexnow.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-analytics.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
@@ -614,5 +618,5 @@ Runbooks (`infra/runbooks/`): `ai-crawler-log.md`, `alerting-wire-a-real-receive
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `client-targets-forced-command.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `pull-client-property-targets.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 
-Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `simulation/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
+Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `insights-collector/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `simulation/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
 

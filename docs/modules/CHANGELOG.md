@@ -11,6 +11,86 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.25.0` - M5-V5-a: the A/B `experiment` block and the publish lock (vocabulary 1.5.0) (2026-10-12) - DEV-VERIFIED
+
+- **The block:** a new block type `experiment`, with arms `a`–`d`, a test key, weights, and an override or replace per non-control arm.
+  - It is never client-editable: a client editor's create/update/publish involving it is a 422.
+  - It is non-visual in the blocks renderer and the WordPress theme, and `/v1` search skips it.
+  - `/v1` delivery stays additive: one more entry in `blocks`, with the envelope and read SQL unchanged.
+- **Vocabulary 1.4.0 → 1.5.0 (MINOR):** the classifier gives exactly that reason. Re-vendored into the api, blocks, platform-nest, the WordPress theme and ai-agents' generated theme copy.
+- **Codegen:** one shared `ExperimentBlock` schema. A closed fields-only collection becomes `anyOf [F] | [F,E]`, so existing SDK consumers still compile.
+- **The publish lock:**
+  - An item whose live version carries an experiment is "running".
+  - `content.publish` and a scheduled publish that change the experiment, or a control value it overrides, are refused with 409 `experiment-locked`, for every principal and the whole batch.
+  - Removing the block (with or without merging the winner) is always allowed.
+  - **Not covered yet:** promotion import and rollback (a follow-up).
+- **Verified:**
+  - GitHub Actions 38270368678 green (the new `v5a-experiment` suite of 100, every vocabulary suite, the codegen and SDK typecheck specs, the PHP probes, the DB-backed `experiment-block.spec.ts`).
+  - The templates' Linux check (`build-templates.sh`) 12/12 on sumopod, run by M6.
+- **After the deploy:** existing tenants' contracts change version on their next regenerate. Owner decision: an explicit `contract.regenerate` run (M6's recommendation).
+- `gaiadabali/template-wp` must be re-published (M6).
+
+### insights-collector `0.1.0` - M5-V2-a: the enrichment collector, a new Go component (not deployed) (2026-10-12) - PROTOTYPED
+
+- **What it is:** `insights-collector/`, which will sit between the public nginx edge and Umami on sumopod (internal network only, no egress).
+- **The aggregate channel** `/lib/kestrel/e`:
+  - resolves the visitor IP ONCE (DB-IP City Lite for country/region/city, ASN Lite for the network);
+  - forwards an `fd…` pseudonym from a daily in-memory key, plus geo headers, to Umami, so Umami never sees a raw IP (the documented fallback is `FORWARD_IP_MODE=real`);
+  - drops `identify` and `payload.id`, with an allow-listed payload;
+  - drops and counts bots (the isbot list on the UA, plus a PROPOSED datacenter-ASN list awaiting review).
+- **The ops port (8081)** serves `/healthz` and `/ops/v1/bots` behind a read key, and never reads `X-Real-IP`.
+- `CompanyResolver` defaults to "network name only" (O-12).
+- An empty env var takes its default; `0` refuses to start.
+- **Verified** on GitHub Actions 38270112061: `go test -race` green in every package, including the Postgres store test. A mutation check confirms a leaked IP fails the tests.
+- Deploy is V2-c/V2-e (orchestrator, sumopod). Live waits for G2 and O-11.
+
+### infra `0.13.7` - M5-V2-b: CI and the signed image for `insights-collector` (2026-10-12) - DEV-VERIFIED
+
+- A new CI job: `go build`, `go vet`, `go test -race` with a Postgres service.
+- `insights-collector` joins the release components (`scripts/ci/config.mjs`), so a tag builds, SBOMs, cosign-signs and attests `ghcr.io/<owner>/gaiada-insights-collector`.
+- The distroless runtime is pinned by digest.
+- It is not part of the ERP deploy; it runs on sumopod.
+- GitHub Actions 38270112061 green.
+
+### platform-nest `0.101.0` - M5-V3-d: the schema for consented visitor profiles (DDL only; nothing writes to it yet) (2026-10-12) - DEV-VERIFIED
+
+- **Migration `202610131600_search_visitor_profiles`** adds five tables, each FORCE RLS in the `search` scope:
+  - `search_visitor_profiles`;
+  - `search_visitor_events` (composite FK, cascades with its profile; data allow-listed and size-capped; path-only);
+  - `search_visitor_tombstones` (32-byte hashes only, outliving everything);
+  - `search_interest_rules`;
+  - `search_visitor_ingest_state`.
+- A trigger refuses to create or update a profile whose visitor id or consent id is tombstoned. Its error message carries no id.
+- `agency_leads` gains one index, `ix_lead_consent_id`, on `(visitor_consent->>'consentId')`.
+- No IP or user-agent column: a self-check refuses one.
+- No GRANT, SECURITY DEFINER or BYPASSRLS. No data changes.
+- **The tombstone hash contract:** `sha256(utf8(lower-case uuid text))`, which V3-e and V3-h must use.
+- **Verified** on GitHub Actions 38269863029: 15 tests (cross-tenant, unset-GUC and missing-scope reads are 0 rows and writes are refused; the cascade; the tombstone guard; applied as a NOBYPASSRLS role).
+
+### platform-nest `0.100.0` - M5-P5a: IndexNow on publish and a Bing Webmaster connector (both off by default) (2026-10-12) - DEV-VERIFIED
+
+- **Migrations:**
+  - `202610130200_search_indexnow_bing`: the IndexNow key and switch, plus Bing columns on `search_properties`, `search_indexnow_submissions` and `search_bing_performance`.
+  - `202610130210_integration_connections_bing_provider`: the provider CHECK, widened from its live definition.
+- **IndexNow:**
+  - An approved WebDesk `content.publish` pings IndexNow with the items' page URLs (`site_url` + W8b's `pagePathFor`). An item with no route pattern is skipped with a reason.
+  - The key is public by protocol, so it is stored as a plain column. Enabling first fetches `https://<host>/<key>.txt` (https, public host, no redirect).
+  - Batches of 500, 5000 a day per engine (the excess is deferred), backoff up to 6 attempts, idempotent per (url, version).
+  - ON only when `SEARCH_INDEXNOW_ENABLED=1`.
+  - Unpublish and `schedule.fired` are not wired yet; for those, use the manual notify route.
+- **Bing Webmaster:**
+  - The API key is sealed in the existing vault.
+  - Stats go into `search_bing_performance`, with URL Submission as the fallback.
+  - Simulate unless `SEARCH_BING_MODE=live`.
+- 11 routes and 11 MCP tools on `resource_search_property`; `connectBing` is medium.
+- Found and fixed: `UPDATE … RETURNING` ignores the subquery's sort order, so the posted URL list is now sorted.
+- **Verified** on GitHub Actions 38270184449: DB 20/20, unit 58/58.
+- The site build must serve the key file (FRONTEND-BFF-CONTRACT §28d).
+
+### infra `0.13.6` - compose passes `SEARCH_INDEXNOW_ENABLED` and `SEARCH_BING_MODE` through (empty = off / simulate) (2026-10-12) - PROTOTYPED
+
+- M5-P5a's two switches, with empty defaults.
+
 ### webdesk `0.24.1` - ClamAV runs on the live box, so media uploads work in production (2026-10-12) - DEV-VERIFIED
 
 WSK-D80 (owner-approved 2026-10-12).

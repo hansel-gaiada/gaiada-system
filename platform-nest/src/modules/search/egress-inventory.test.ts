@@ -92,6 +92,14 @@ const APPROVED_EGRESS: Record<string, string> = {
   // gate, with a view-only API key (UMAMI_BASE_URL / UMAMI_API_KEY, read from env inside the client).
   // Client-private, $0, no vendor dispatch, no search_data_cache. One file, listed by exact filename.
   "umami-client.ts": "Umami analytics READ (UMAMI_BASE_URL gate on WireGuard) — M5-A4, GET-only, view-only key",
+  // M5-P5a · FIFTH and SIXTH classes, one file each, listed by exact filename.
+  //   indexnow.ts: IndexNow (api.indexnow.org, POST a batch of the PROPERTY's own URLs with its public key) and the
+  //     key-file proof (GET https://<property host>/<key>.txt, https only, public host, no redirects). Dark unless
+  //     SEARCH_INDEXNOW_ENABLED is exactly "1". Client-private, $0, no vendor dispatch, no search_data_cache.
+  //   bing-client.ts: the Bing Webmaster API (ssl.bing.com), per-client API key from the credentials vault, $0.
+  //     Only used when SEARCH_BING_MODE is exactly "live"; the default (simulate) never reaches it.
+  "indexnow.ts": "IndexNow ping (api.indexnow.org) + the property's own key file — M5-P5a, flag SEARCH_INDEXNOW_ENABLED=1, https/public-host only",
+  "bing-client.ts": "Bing Webmaster API (ssl.bing.com) — M5-P5a, per-client vault key, live only when SEARCH_BING_MODE=live",
 };
 
 /** Each approved egress file's OWN config namespace, and the namespaces it must NEVER reference —
@@ -106,6 +114,8 @@ const CONFIG_NAMESPACES = [
   "config.search.ahrefs",
   "config.search.google",
   "UMAMI_BASE_URL",
+  "SEARCH_INDEXNOW_ENABLED",
+  "SEARCH_BING_MODE",
 ];
 // The two google/ files SHARE `config.search.google` — deliberate, and it does not weaken the guard:
 // the assertion is that each approved file references its own namespace and NONE of the others, so
@@ -123,6 +133,8 @@ const OWN_NAMESPACE: Record<string, string> = {
   // reference moved to core as `config.google` (the same object; config.ts aliases both names).
   "google/api-client.ts": "config.search.google",
   "umami-client.ts": "UMAMI_BASE_URL",
+  "indexnow.ts": "SEARCH_INDEXNOW_ENABLED",
+  "bing-client.ts": "SEARCH_BING_MODE",
 };
 
 interface Finding {

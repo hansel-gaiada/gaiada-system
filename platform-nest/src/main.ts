@@ -154,6 +154,8 @@ import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifi
 // have meant weakening two controls on the money path. Dark by default — see the config comment.
 import { startSearchPullSchedulerLoop } from "./modules/search/pull-scheduler";
 import { startContentDecayLoop } from "./modules/search/content-decay-job";
+import { startIndexNowRetryLoop } from "./modules/search/indexnow-service";
+import { registerIndexNowEventHandlers } from "./modules/search/indexnow-webdesk";
 // MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
 // master gate): starting it unconditionally would still send nothing today (resolveAdapter falls
 // back to dev-log when disabled, provider.ts), but not starting it at all is the honest "module is
@@ -540,6 +542,9 @@ async function bootstrap(): Promise<void> {
     // registerCoreEventHandler's header (consumer.service.ts) for why this runs with no
     // isModuleEnabled gate. The stream is already in the watched list below ("automation_approval").
     registerCoreEventHandler("automation_approval.decided", automationApprovalExecutorHandler);
+    // M5-P5a: an approved WebDesk `content.publish` pings IndexNow. A CORE handler on purpose (the search module registers NO
+    // automation_approval.decided handler: search-sem-apply.test.ts). Flag-gated inside (SEARCH_INDEXNOW_ENABLED === "1"): off, it reads nothing.
+    registerIndexNowEventHandlers();
     // P2-05: the position reconciler's outbox triggers. The HANDLERS are flag-gated (they also
     // re-check `positionSyncEnabled` internally, and every reconciler entry point returns null when
     // it is off) but the STREAMS below are listed unconditionally — an always-drained stream can
@@ -795,6 +800,12 @@ async function bootstrap(): Promise<void> {
   if (startContentDecayLoop()) {
     // eslint-disable-next-line no-console
     console.log("search content-decay job on (SEARCH_DECAY_ENABLED=1): detects falling pages daily; Umami reads only.");
+  }
+  // M5-P5a: the IndexNow / Bing URL-submission retry sweep. Dark by default: ON only when SEARCH_INDEXNOW_ENABLED is exactly "1"
+  // (an empty compose default is OFF); startIndexNowRetryLoop returns null without a timer, a query or a request otherwise.
+  if (startIndexNowRetryLoop()) {
+    // eslint-disable-next-line no-console
+    console.log("search IndexNow retry sweep on (SEARCH_INDEXNOW_ENABLED=1): re-sends failed or deferred URL submissions with backoff.");
   }
   // MAIL-04: dark by default (config.mail.enabled reads MAIL_ENABLED). When on, the loop still
   // resolves to the dev-log adapter per stream until real per-stream host/creds are configured

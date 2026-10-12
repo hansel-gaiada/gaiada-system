@@ -38,14 +38,16 @@ describe("schema-draft vocabulary vendor — drift check against the REAL source
     expect(names).toEqual([...PRIMITIVE_NAMES]);
   });
 
-  it("BLOCK_TYPE_NAMES matches blocks.ts's BlockType union minus the composition-typed `fields` block", () => {
+  it("BLOCK_TYPE_NAMES matches blocks.ts's BlockType union minus the non-composable `fields` and `experiment` blocks", () => {
     const source = readNormalized(join(VOCAB_DIR, "blocks.ts"));
     const match = source.match(/export type BlockType =\n([\s\S]*?)\n\n/);
     if (!match) throw new Error("BlockType union not found in blocks.ts");
     const names = [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
     expect(names).toContain("fields");
-    expect(names.filter((n) => n !== "fields")).toEqual([...BLOCK_TYPE_NAMES]);
+    expect(names).toContain("experiment");
+    expect(names.filter((n) => n !== "fields" && n !== "experiment")).toEqual([...BLOCK_TYPE_NAMES]);
     expect(BLOCK_TYPE_NAMES).not.toContain("fields");
+    expect(BLOCK_TYPE_NAMES).not.toContain("experiment");
   });
 
   it("VOCABULARY_VERSION matches version.ts", () => {
@@ -53,7 +55,7 @@ describe("schema-draft vocabulary vendor — drift check against the REAL source
     const match = source.match(/export const VOCABULARY_VERSION = '([^']+)'/);
     if (!match) throw new Error("VOCABULARY_VERSION not found in version.ts");
     expect(match[1]).toBe(VOCABULARY_VERSION);
-    expect(VOCABULARY_VERSION).toBe("1.4.0"); // M5-W8b (1.3.0 was M5-W3c, 1.2.0 was WSK-49a, 1.1.0 WSK-64)
+    expect(VOCABULARY_VERSION).toBe("1.5.0"); // M5-V5-a (1.4.0 was M5-W8b, 1.3.0 M5-W3c, 1.2.0 was WSK-49a, 1.1.0 WSK-64)
   });
 
   it("both vendored unions are non-empty (a marker-regex silently matching nothing must not read as a pass)", () => {

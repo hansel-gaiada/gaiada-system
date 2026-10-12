@@ -101,6 +101,7 @@ jobs:
       nest: ${{ steps.plan.outputs.nest }}
       ui: ${{ steps.plan.outputs.ui }}
       gateway: ${{ steps.plan.outputs.gateway }}
+      insights_collector: ${{ steps.plan.outputs.insights_collector }}
       sync: ${{ steps.plan.outputs.sync }}
       wa_chat_bot: ${{ steps.plan.outputs.wa_chat_bot }}
       mcp_hub: ${{ steps.plan.outputs.mcp_hub }}
@@ -507,6 +508,40 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  # insights-collector (M5-V2-b): the Go enrichment collector in front of Umami on sumopod. vet + the FULL
+  # suite with the race detector; the Postgres store test runs against a service container (it creates
+  # its own vdb schema, and self-skips without TEST_DATABASE_URL). The image is built and cosign-signed
+  # only by release.yml; its deploy lives on sumopod (compose project `umami`, V2-c runbook), NOT in
+  # deploy.yml, which only covers the ERP boxes.
+  insights-collector:
+    needs: plan
+    if: needs.plan.outputs.insights_collector == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: insights-collector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: insights-collector/go.mod # go 1.26.0; caches modules on go.sum
+          cache-dependency-path: insights-collector/go.sum
+      - run: go build ./...
+      - run: go vet ./...
+      - name: Test (race; Postgres store test included)
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+        run: go test -race -count=1 ./...
+
   # sync-engine-go (WS1 T2 cross-site reconciliation). Runs the FULL suite incl. the DB-backed
   # convergence/chaos tests, against two databases with the platform-nest migrations applied and
   # a NOBYPASSRLS role (superusers bypass RLS and would test nothing).
@@ -835,7 +870,7 @@ jobs:
       - name: Vocabulary tests — webdesk/delivery
         if: ${{ !cancelled() }}
         run: |
-          for t in wsk64-classifier wsk64-item-fields vocabulary wsk49-client-editable w3c-lint-content w8b-route-pattern m5-w7-author; do
+          for t in wsk64-classifier wsk64-item-fields vocabulary wsk49-client-editable w3c-lint-content w8b-route-pattern v5a-experiment m5-w7-author; do
             echo "##### $t"
             node --import tsx ../delivery/test/$t.test.mjs
           done

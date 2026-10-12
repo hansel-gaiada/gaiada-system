@@ -38,11 +38,28 @@
 // Schema validator rejected every valid known block. `anyOf` ("at least one") accepts it. The branches
 // overlap by design, so they are not disjoint and `oneOf` can never be right here. openapi-typescript
 // renders both keywords as the same TS union, so the generated SDK types are unchanged.
+//
+// M5-V5-a (vocabulary 1.5.0): every collection's item and list-item schema also allows ONE optional `experiment`
+// block (`ExperimentBlock`, a shared component schema; the A/B-test block of the phase-5 design, section 5.1): the
+// vocabulary allows it in every collection without listing it, never at index 0. In a union (`anyOf`) it is one more
+// branch. In the closed fields-only case the tuple becomes `[FieldsBlock]` or `[FieldsBlock, ExperimentBlock]`
+// (an `anyOf` of the two exact tuples: one tuple of two would make the experiment REQUIRED in the generated type). A collection without `fields` that allows no blocks stays
+// `maxItems: 0` (an experiment needs a block to test, and none is allowed). The envelope itself is unchanged.
 // List routes strip blocks to `[]` unless `?expand=blocks` (router.ts), so a fields collection's list
 // items use a separate `ListItemEnvelope_<key>` whose `blocks` makes no positional claim. A
 // collection without `fields` produces exactly the 1.0.0 document.
 import type { ComposableBlockType } from "../../../../delivery/vocabulary/blocks.ts";
-import { BLOCKS, COMPOSABLE_BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE } from "../../../../delivery/vocabulary/blocks.ts";
+import { BLOCKS, COMPOSABLE_BLOCK_TYPE_NAMES, EXPERIMENT_BLOCK_TYPE, FIELDS_BLOCK_TYPE } from "../../../../delivery/vocabulary/blocks.ts";
+import {
+  EXPERIMENT_ARM_KEYS,
+  EXPERIMENT_ENROLMENTS,
+  EXPERIMENT_GOAL_EVENTS,
+  EXPERIMENT_KEY_PATTERN,
+  EXPERIMENT_MATCH_KEYS,
+  EXPERIMENT_MATCH_PATTERN,
+  EXPERIMENT_MIN_ARMS,
+  EXPERIMENT_MIN_WEIGHT,
+} from "../../../../delivery/vocabulary/item-fields.ts";
 import { ENVELOPE_VERSION } from "../../../../delivery/vocabulary/version.ts";
 import type { TenantComposition } from "../../../../delivery/vocabulary/composition.ts";
 import { fieldsToObjectSchema, type JsonSchema } from "./vocabulary-field-schema.mts";
@@ -61,6 +78,8 @@ export interface OpenApiBuilderInput {
 }
 
 const PROBLEM_SCHEMA_NAME = "ProblemDetails";
+const EXPERIMENT_BLOCK_SCHEMA_NAME = "ExperimentBlock";
+const EXPERIMENT_BLOCK_REF = `#/components/schemas/${EXPERIMENT_BLOCK_SCHEMA_NAME}`;
 const ITEM_SCHEMA_NAME = "ItemEnvelope";
 const LIST_SCHEMA_NAME = "ListEnvelope";
 const LIST_ITEM_SCHEMA_NAME = "ListItemEnvelope";
@@ -71,6 +90,75 @@ function blockObjectSchema(type: ComposableBlockType): JsonSchema {
     properties: {
       type: { const: type },
       props: fieldsToObjectSchema(BLOCKS[type].fields),
+    },
+    required: ["type", "props"],
+    additionalProperties: false,
+  };
+}
+
+/** 1.5.0: the `experiment` block (design section 5.1). Shared by every collection; the write-time rules that cannot be
+ *  expressed here (weights summing to 100, overrides naming declared fields, the target being a generic block) are
+ *  enforced by `validateItemContent`, and the description says so. */
+function experimentBlockSchema(): JsonSchema {
+  return {
+    type: "object",
+    description:
+      "An A/B test over the item's own fields or one of its generic blocks (vocabulary 1.5.0). Non-visual: a renderer " +
+      "that predates it renders nothing for it and shows arm `a`, the control (the item's own content). Never at " +
+      "blocks[0]; at most one per item. Arm weights sum to 100 and are written by the CMS, never by a client editor.",
+    properties: {
+      type: { const: EXPERIMENT_BLOCK_TYPE },
+      props: {
+        type: "object",
+        properties: {
+          key: { type: "string", pattern: EXPERIMENT_KEY_PATTERN.source },
+          target: {
+            description: "\"fields\" = the item's own field values; { block: i } = the generic block at blocks[i].",
+            anyOf: [{ const: "fields" }, { type: "object", properties: { block: { type: "integer", minimum: 0 } }, required: ["block"], additionalProperties: false }],
+          },
+          enrolment: { type: "string", enum: [...EXPERIMENT_ENROLMENTS], description: 'Default "consented".' },
+          goal: {
+            type: "object",
+            properties: {
+              event: { type: "string", enum: [...EXPERIMENT_GOAL_EVENTS] },
+              match: {
+                type: "object",
+                description: "At most one of form_id, link_location, section_id.",
+                properties: Object.fromEntries(EXPERIMENT_MATCH_KEYS.map((k) => [k, { type: "string", pattern: EXPERIMENT_MATCH_PATTERN.source }])),
+                maxProperties: 1,
+                additionalProperties: false,
+              },
+            },
+            required: ["event"],
+            additionalProperties: false,
+          },
+          arms: {
+            type: "array",
+            minItems: EXPERIMENT_MIN_ARMS,
+            maxItems: EXPERIMENT_ARM_KEYS.length,
+            description: "Keyed a, b, c, d in order; `a` is the control and never overrides. Integer weights, each at least " + `${EXPERIMENT_MIN_WEIGHT}, summing to 100.`,
+            items: {
+              type: "object",
+              properties: {
+                key: { type: "string", enum: [...EXPERIMENT_ARM_KEYS] },
+                weight: { type: "integer", minimum: EXPERIMENT_MIN_WEIGHT, maximum: 100 - EXPERIMENT_MIN_WEIGHT * (EXPERIMENT_MIN_ARMS - 1) },
+                override: { type: "object", description: 'target "fields": the field values this arm replaces.', additionalProperties: true },
+                replace: {
+                  type: "object",
+                  description: "target { block }: the block this arm shows instead (same type as the block under test).",
+                  properties: { type: { type: "string" }, props: { type: "object", additionalProperties: true } },
+                  required: ["type"],
+                  additionalProperties: false,
+                },
+              },
+              required: ["key", "weight"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["key", "target", "goal", "arms"],
+        additionalProperties: false,
+      },
     },
     required: ["type", "props"],
     additionalProperties: false,
@@ -110,7 +198,7 @@ function collectionBlocksSchema(allowedBlocks: ComposableBlockType[] | undefined
   }
   return {
     type: "array",
-    items: { anyOf: [...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
+    items: { anyOf: [...types.map(blockObjectSchema), { $ref: EXPERIMENT_BLOCK_REF }, UNKNOWN_BLOCK_SCHEMA] },
   };
 }
 
@@ -125,11 +213,14 @@ function fieldsCollectionItemBlocksSchema(
   const lead = `blocks[0] is always the "${FIELDS_BLOCK_TYPE}" block carrying this collection's typed field values (vocabulary 1.1.0, ruling WSK-D44)`;
   if (closed) {
     return {
-      type: "array",
-      description: `${lead}; this collection allows no other blocks.`,
-      prefixItems: [{ $ref: fieldsBlockRef }],
-      minItems: 1,
-      maxItems: 1,
+      description: `${lead}; this collection allows no other blocks, besides one optional "${EXPERIMENT_BLOCK_TYPE}" block at blocks[1] (vocabulary 1.5.0).`,
+      // `anyOf` of two EXACT tuples, never one `[F, E]` tuple: a single prefixItems of two would make the experiment
+      // block REQUIRED in the generated type (an existing consumer's `[FieldsBlock]` page would stop compiling), so the
+      // addition would not be additive. openapi-typescript renders this as `[F] | [F, E]`.
+      anyOf: [
+        { type: "array", prefixItems: [{ $ref: fieldsBlockRef }], minItems: 1, maxItems: 1 },
+        { type: "array", prefixItems: [{ $ref: fieldsBlockRef }, { $ref: EXPERIMENT_BLOCK_REF }], minItems: 2, maxItems: 2 },
+      ],
     };
   }
   const types = allowedBlocks ?? COMPOSABLE_BLOCK_TYPE_NAMES;
@@ -138,7 +229,7 @@ function fieldsCollectionItemBlocksSchema(
     description: `${lead}; the collection's generic blocks may follow it. (Expressed as a union, not prefixItems: see openapi-builder.mts's header.)`,
     "x-webdesk-blocks-prefix": fieldsBlockName,
     minItems: 1,
-    items: { anyOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
+    items: { anyOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), { $ref: EXPERIMENT_BLOCK_REF }, UNKNOWN_BLOCK_SCHEMA] },
   };
 }
 
@@ -148,7 +239,7 @@ function fieldsCollectionListBlocksSchema(allowedBlocks: ComposableBlockType[] |
   return {
     type: "array",
     description: `[] unless ?expand=blocks (router.ts). When expanded, blocks[0] is the "${FIELDS_BLOCK_TYPE}" block, as on the item route.`,
-    items: { anyOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), UNKNOWN_BLOCK_SCHEMA] },
+    items: { anyOf: [{ $ref: fieldsBlockRef }, ...types.map(blockObjectSchema), { $ref: EXPERIMENT_BLOCK_REF }, UNKNOWN_BLOCK_SCHEMA] },
   };
 }
 
@@ -225,7 +316,7 @@ const EXPAND_PARAM: JsonSchema = { name: "expand", in: "query", required: false,
 export function buildOpenApiDocument(input: OpenApiBuilderInput): Record<string, unknown> {
   const collectionKeys = Object.keys(input.composition).sort();
 
-  const schemas: Record<string, unknown> = { [PROBLEM_SCHEMA_NAME]: PROBLEM_DETAILS_SCHEMA };
+  const schemas: Record<string, unknown> = { [PROBLEM_SCHEMA_NAME]: PROBLEM_DETAILS_SCHEMA, [EXPERIMENT_BLOCK_SCHEMA_NAME]: experimentBlockSchema() };
   const paths: Record<string, unknown> = {};
 
   for (const key of collectionKeys) {

@@ -1,0 +1,6 @@
+*_test.go
+**/*_test.go
+internal/geo/geotest
+.gitignore
+CLAUDE.md
+wsl.ps1
