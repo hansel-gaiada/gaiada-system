@@ -7,7 +7,7 @@ import { can } from "@/lib/rbac";
 import { listClients } from "@/lib/entities";
 import { listClientCentres } from "@/lib/clientCentre-data";
 import { registry, businessTypeLabel } from "@/lib/clientCentre";
-import { REVIEW_BUSINESS_TYPE, clientsHref, inBusinessTypeReview, readCentres } from "@/lib/clientBusinessType";
+import { INTERNAL_CLIENT_BADGE, REVIEW_BUSINESS_TYPE, clientsHref, inBusinessTypeReview, readCentres } from "@/lib/clientBusinessType";
 import { PageHeader } from "@/components/PageHeader";
 import { humanizeStatus } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -57,8 +57,10 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
     return {
       id: c.id,
       name: c.name,
-      // M5-G0b: the internal sentinel client (WSK-D36) is shown to staff, flagged.
-      badge: c.isInternal ? "Internal" : "",
+      // M5-G0b: the internal sentinel client (WSK-D36) is shown to staff, flagged "Internal (our own sites)"; it stays out of the business-type review filter (a type means nothing for it).
+      badge: c.isInternal ? INTERNAL_CLIENT_BADGE : "",
+      // Not a column: lets the review filter below leave the sentinel client out.
+      isInternal: c.isInternal === true,
       email: (c.contact as { email?: string })?.email ?? "—",
       owner: c.owner_name ?? "—",
       businessType: centre ? businessTypeLabel(registry, centre.businessType) : "—",
@@ -85,9 +87,9 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
     : showArchived ? allRows : allRows.filter((r) => r.status !== "archived");
   // PV3-04 (PV-D1): the review list, "Business type: Other or not set", over the profile list read above.
   // Withheld when that read failed (the banner below says so); never filtered through an empty stand-in.
-  const reviewCount = inView.filter((r) => inBusinessTypeReview(centreRead, r.id)).length;
+  const reviewCount = inView.filter((r) => inBusinessTypeReview(centreRead, r.id, r.isInternal)).length;
   const reviewActive = review === REVIEW_BUSINESS_TYPE && centreRead.ok;
-  const rows = reviewActive ? inView.filter((r) => inBusinessTypeReview(centreRead, r.id)) : inView;
+  const rows = reviewActive ? inView.filter((r) => inBusinessTypeReview(centreRead, r.id, r.isInternal)) : inView;
   const buildStatusHref = (next: string | undefined) => clientsHref({ status: next, review: reviewActive });
   const buildReviewHref = (next: string | undefined) => clientsHref({ status: activeStatus, archived: archived === "1", review: next === REVIEW_BUSINESS_TYPE });
 

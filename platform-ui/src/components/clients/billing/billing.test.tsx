@@ -52,6 +52,16 @@ afterEach(() => {
   for (const f of [send, voidIt, countersign, decide, create, update]) f.mockReset();
 });
 
+describe("ContractRow · the attached PDF", () => {
+  it("🔴 links 'PDF attached' to the staff file route, and shows no link when there is no file", () => {
+    const { unmount } = row(k({ fileId: "f/9 1" }));
+    expect(screen.getByRole("link", { name: /PDF attached/ })).toHaveAttribute("href", "/api/files/f%2F9%201");
+    unmount();
+    row(k({ fileId: null, bodyMd: "terms" }));
+    expect(screen.queryByRole("link", { name: /PDF attached/ })).toBeNull();
+  });
+});
+
 describe("ContractRow · Countersign", () => {
   it("🔴 shows Countersign only when the backend said canCountersign", () => {
     row(k({ id: "a", status: "sent", bodyMd: "x", canCountersign: true }));
@@ -161,6 +171,17 @@ describe("PaymentRow", () => {
     expect(screen.getByText(/Ref TRX-1/)).toBeInTheDocument();
     expect(screen.getByText(/Proof of payment attached/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Invoice/ })).toHaveAttribute("href", "/invoices/inv-1");
+  });
+
+  it("🔴 the proof of payment is a download link to the staff file route; no proof, no link", () => {
+    const { unmount } = render(<ul><PaymentRow payment={pay({ proofFileId: "f-2" })} clientId="cl-1" /></ul>);
+    const link = screen.getByRole("link", { name: /Proof of payment attached/ });
+    expect(link).toHaveAttribute("href", "/api/files/f-2");
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    unmount();
+    render(<ul><PaymentRow payment={pay({ proofFileId: null })} clientId="cl-1" /></ul>);
+    expect(screen.queryByRole("link", { name: /Proof of payment/ })).toBeNull();
+    expect(screen.getByText(/No proof attached/)).toBeInTheDocument();
   });
 
   it("🔴 the maker-checker refusal is shown in full: 'you recorded this payment'", async () => {

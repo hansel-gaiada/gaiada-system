@@ -35,6 +35,12 @@ describe("PV3-04 · business type on the staff side", () => {
     expect(inBusinessTypeReview(read, "z")).toBe(false);
   });
 
+  it("🔴 the internal sentinel client is never on the review list, whatever the profile list says", () => {
+    const read = readCentres(2, [item("a", "other"), item("int", "other")]);
+    expect(inBusinessTypeReview(read, "a", false)).toBe(true);
+    expect(inBusinessTypeReview(read, "int", true)).toBe(false);
+  });
+
   it("🔴 a failed read is a REFUSAL, never an empty list: thrown, null, or empty for a company that has clients", () => {
     const thrown = readCentres(3, null, new Error("503 upstream"));
     expect(thrown.ok).toBe(false);

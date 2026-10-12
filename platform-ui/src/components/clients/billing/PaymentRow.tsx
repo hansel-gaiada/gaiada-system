@@ -5,6 +5,7 @@ import { decidePaymentAction, type BillingActionState } from "@/lib/contractsAct
 import { paymentDecisionState, type InvoicePayment } from "@/lib/contracts";
 import { formatDate, money } from "@/lib/format";
 import { ClientVisibilityMarker } from "../ClientVisibilityMarker";
+import { FileLink } from "./FileLink";
 import "./billing.css";
 
 // PV3-08 — one payment the client says they made, with Confirm and Reject.
@@ -45,8 +46,10 @@ export function PaymentRow({ payment, clientId }: { payment: InvoicePayment; cli
         {[
           METHOD_LABEL[payment.method ?? ""] ?? payment.method,
           payment.reference ? `Ref ${payment.reference}` : "No reference given",
-          payment.proofFileId ? "Proof of payment attached" : "No proof attached",
+          payment.proofFileId ? null : "No proof attached",
         ].filter(Boolean).join(" · ")}
+        {/* The proof is a download through the UI's staff file route, which keeps it an attachment. */}
+        {payment.proofFileId && <>{" · "}<FileLink fileId={payment.proofFileId} label="Proof of payment attached" /></>}
         {" · "}
         <Link href={`/invoices/${payment.invoiceId}`}>Invoice ({money(payment.invoiceTotal, payment.currency)}, {payment.invoiceStatus})</Link>
       </p>

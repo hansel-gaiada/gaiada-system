@@ -59,9 +59,18 @@ export function clientsHref(f: { status?: string; archived?: boolean; review?: b
   return s ? `/clients?${s}` : "/clients";
 }
 
+/** The badge staff see on the internal sentinel client's row (`clients.is_internal`, WSK-D36): the client that
+ *  owns our own sites. It is shown, not hidden, because staff may need to open it. */
+export const INTERNAL_CLIENT_BADGE = "Internal (our own sites)";
+
 /** Is this client on the review list? Only when the profile list was READ and says Other: a client the list
- *  did not mention is unknown, never "not set". */
-export function inBusinessTypeReview(read: CentreRead, clientId: string): boolean {
+ *  did not mention is unknown, never "not set".
+ *
+ *  The internal sentinel client is NEVER on it (`isInternal`): a business type means nothing for the client
+ *  that owns our own sites, so it must not be nagged for one. Said here and not left to "the centre list
+ *  happens not to return it", which is a backend detail this rule should not depend on. */
+export function inBusinessTypeReview(read: CentreRead, clientId: string, isInternal = false): boolean {
+  if (isInternal) return false;
   if (!read.ok) return false;
   const c = read.byClientId.get(clientId);
   return c !== undefined && needsBusinessType(c.businessType);
