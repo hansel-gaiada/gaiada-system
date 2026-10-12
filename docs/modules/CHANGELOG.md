@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.13.8` - M5-V2-c: the insights-collector in the Umami compose project on sumopod (files only, not deployed) (2026-10-12) - PROTOTYPED
+
+- **`infra/sumopod/umami/docker-compose.yml`** gains two services, both on the `internal` network only (no egress):
+  - `collector`: read-only, every variable it reads listed under `environment:`, with resource limits and a healthcheck;
+  - `vdb`: its own Postgres.
+  - The image pin is a PLACEHOLDER until the first signed release; `check-config.sh --deploy` refuses it.
+- **The edge** sends the collect path to `${EDGE_COLLECT_UPSTREAM}`:
+  - it is `collector:8080` by default, and `app:3000` is the rollback;
+  - it is resolved per request, so a stopped collector never blocks the edge;
+  - `/lib/kestrel/v`, `/f` and `/r` are templated but off (404) until V3-b/V6-a.
+- **Umami's `SKIP_LOCATION_HEADERS`** stays `1` until V2-d proves the pseudonym and geo headers.
+- **`geo-refresh.sh`** also fetches DB-IP ASN Lite and restarts the collector.
+- **`backup.sh`** also dumps `vdb`, without the data of `consented_events` and `replay_*` (design O2), and refuses a dump that carries any. The aicenter receiver accepts `vdb-*` names.
+- **`check-config.sh`** (new) is the static gate for sumopod: compose config per profile, pins, networks, env passthrough, `nginx -t` on every template.
+- **Runbook** `infra/runbooks/umami-sumopod.md` §13, steps C0–C6:
+  - preflight;
+  - `cosign verify`, then the image pin;
+  - the keys;
+  - `check-config.sh`;
+  - first deploy;
+  - the V2-d proof steps;
+  - rollback.
+- **Not run:** `docker compose config` and `nginx -t`, because there is no Docker locally. They run on sumopod as V2-d's first step.
+
 ### webdesk `0.25.0` - M5-V5-a: the A/B `experiment` block and the publish lock (vocabulary 1.5.0) (2026-10-12) - DEV-VERIFIED
 
 - **The block:** a new block type `experiment`, with arms `a`–`d`, a test key, weights, and an override or replace per non-control arm.
