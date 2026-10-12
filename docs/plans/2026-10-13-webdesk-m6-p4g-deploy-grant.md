@@ -1,0 +1,176 @@
+# M6-P4g: the deploy gate is the org secret grant
+
+Status: PLANNED → IN PROGRESS (this ticket). Parent plan: `docs/plans/2026-10-11-webdesk-m6-plan.md` (row M6-P4g, and
+§2's "design call put to the owner with O-3"). Builds on M6-P4b2 (`docs/plans/2026-10-12-webdesk-m6-p4b2-scaffold-commit.md`).
+Design: `docs/blueprints/webdesk-design-v2.md` §08 (the two gates) and WSK-D29.
+
+## The rule in one paragraph
+
+A provisioned site's repo may READ the org's deploy secrets only once the ERP has proved that the repo is a registered,
+locked repo: it has a live `webdev_sites` row and its default branch carries a `CONTRACT.lock` that names the site's
+pinned contract snapshot. The ERP then adds the repo to each deploy secret's "selected repositories" list. A repo without
+the grant holds nothing to deploy with, and the templates' `site.yml` step "Require deploy grant" fails the run in plain
+sight when `secrets.WEBDESK_DEPLOY_GRANT` is empty. **The ERP never holds, reads or writes a secret value (D29)**: it only
+changes which repositories may read a secret the owner created.
+
+GitHub calls (all through `githubRequest()`, the §4.1 chokepoint, with the `erp` App, under the GitHub org tenant):
+
+```
+GET    /repos/{o}/{r}                                                 -> id, default_branch
+GET    /repos/{o}/{r}/git/ref/heads/{branch}                          -> the head commit
+GET    /repos/{o}/{r}/contents/CONTRACT.lock?ref={head}               -> the lock at that head
+GET    /orgs/{org}/actions/secrets/{name}                             -> exists? visibility == "selected"?
+PUT    /orgs/{org}/actions/secrets/{name}/repositories/{repo_id}      -> 204 (idempotent)
+DELETE /orgs/{org}/actions/secrets/{name}/repositories/{repo_id}      -> 204 (idempotent)
+```
+
+The org-secret calls need the App's **Organization permissions → Secrets: read and write** (`organization_secrets: write`,
+O-3). Measured 2026-10-12: the live installation has repository `secrets: write` only. Until the owner grants it, GitHub
+answers 403 "Resource not accessible by integration", which the ERP reports as
+`github_permission_missing: organization_secrets` (503), recorded on the site, never a generic 500.
+
+## Conditions, checked fresh at every grant
+
+All are re-derived at grant time; none is trusted from the caller. The first failure is the answer, as a typed token.
+
+| # | Condition | Token |
+|---|---|---|
+| 1 | The deploy secret names are configured and valid (`WEBDESK_DEPLOY_SECRET_NAMES`, default `WEBDESK_DEPLOY_GRANT`) | `deploy_grant_not_configured` (503) |
+| 2 | The provisioned site exists (RLS: the request tenant, `webdev` wall) | 404 |
+| 3 | It is an ERP repo control row (`provider = 'erp_repo'`) and the repo is the one GH-12 created for it (P4b2's `resolveRepo`: an approved `github:create_repo` approval, `config.githubOrg` / its name, `repo_url` naming exactly that repo) | `deploy_grant_repo_unresolved` (409) |
+| 4 | §08 completion is `complete` (pinned snapshot) and the repo step is `provisioned`/`live` | `deploy_grant_site_not_complete` (409) |
+| 5 | The linked `webdev_sites` row exists, is not deleted and is `origin = 'provisioned'` | `deploy_grant_no_registry_row` (409) |
+| 6 | That registry row's `repo_url` names the same repo | `deploy_grant_registry_mismatch` (409) |
+| 7 | P4b2's scaffold state is `committed` | `deploy_grant_not_committed` (409) |
+| 8 | The default branch exists and carries a root `CONTRACT.lock` at its head, read through the contents API at that exact commit | `deploy_grant_no_lock` (409) |
+| 9 | The lock parses as the five-key §06 object (P4b2's `parseContractLock`) | `deploy_grant_lock_invalid` (409) |
+| 10 | The lock names the site's PINNED snapshot, with the same contract version, vocabulary version and content hash (P4b2's `checkLockAgainstPin`) | `deploy_grant_lock_mismatch` (409) |
+
+Conditions 2 to 7 are read again under the site's provisioning lock immediately before any GitHub write.
+
+Per secret (reported per name, never a crash):
+
+| GitHub answer | Result |
+|---|---|
+| `GET` secret 404 | `missing`: the owner has not created it. The grant stays `pending`, error `deploy_grant_secret_missing: <names>` |
+| `GET` secret, visibility `all` or `private` | `not_selected`: NOT written. A secret visible to all private repos voids the gate, so this is reported loudly: `deploy_grant_secret_not_selected: <names>` |
+| `PUT` 204 | `granted` |
+| `PUT` 409 | `not_selected` (the visibility changed between the read and the write) |
+| any call 403 "not accessible by integration" | the whole grant stops: `github_permission_missing: organization_secrets` (503) |
+
+## State (`webdev_provisioned_sites.deploy_grant_*`, migration `202610130100_webdev_deploy_grant.sql`)
+
+```
+NULL ──[claim]──> pending ──[every secret granted]──> granted
+pending | granted ──[revoke]──> revoked
+revoked ──[operator POST only]──> pending ──> granted
+```
+
+- **claim** (one transaction under the provisioning lock, COMMITTED before any write to GitHub): the snapshot the lock
+  names, the GitHub repository id, the head commit the lock was read at, and the requesting principal. Committing the
+  claim first is what makes revoke safe after a crash: once a PUT may have landed, the row already says `pending`.
+- **grant** (a second transaction under the same lock, so a grant and a revoke never interleave): one `PUT` per secret,
+  each in its own `withGithubLedger` (`action: "secret_write"`, the acting principal, `approvalId` = the site's GH-12
+  approval, `basis: deploy-gate-grant / WSK-D29`, `secretName`). The names that landed are recorded even when a later
+  name fails, so a partial grant is visible and a re-run completes it (GitHub's PUT is idempotent). All names granted:
+  `granted`, `deploy_grant_granted_at`, error cleared, event `webdev.site.deploy_granted`.
+- `deploy_grant_secret_names` is the set the repo is known to hold. It only grows until a revoke: a name removed from the
+  configuration is NOT forgotten, so a revoke still removes it.
+- **revoke** (under the lock): one `DELETE` per secret in configured ∪ recorded (`deploy-gate-revoke / WSK-D29`, with the
+  reason). 404 means nothing to revoke. Then `revoked`, `deploy_grant_revoked_at`, `_revoked_by`, `_revoke_reason`, the
+  names cleared, event `webdev.site.deploy_revoked`. A 409 (the secret is visible to all repos) keeps the state and
+  records `deploy_grant_secret_not_selected`, because "revoked" would then be false. A site the ERP never granted
+  (`NULL`) is still swept defensively (the DELETEs run), but no state is recorded.
+- Schema invariants (`wps_deploy_grant_links`): a grant state only on a `committed` scaffold, with its claim facts;
+  `granted` with its time and at least one name; `revoked` with its time and reason. Repository id positive, head sha 40
+  hex, names valid GitHub secret names.
+- **A failed re-check does not revoke.** A granted repo whose lock was later removed keeps its grant until an operator (or
+  the archive path) revokes it; the template's own workflow also refuses without `CONTRACT.lock`. A scheduled re-check
+  that revokes is a follow-up.
+
+## Trigger
+
+**Inline, at the end of the scaffold commit, as a separate step after `committed` is recorded** (in
+`commitScaffoldForSite`, not inside P4b2's state machine).
+
+- The commit's own state machine is untouched and stays crash-safe: `committed` is written in its own transaction before
+  the grant starts, so a grant failure (for example O-3 not yet in effect) can neither undo nor block the first fill.
+  The commit route still answers 200 with the commit; the grant's result rides along as an additive `deployGrant`
+  object, and its error is recorded on the row.
+- Why not a next scaffold state: it would couple two state machines, and a GitHub permission gap would make a landed
+  scaffold read as unfinished. Why not an outbox consumer on `webdev.site.scaffold_committed`: consumers are
+  Redis-gated (dark by default) and run with no principal, while the ledger needs the acting one.
+- No new approval. The company admin's GH-12 approval (D14, HIGH) covers this provisioning; the grant adds no decision
+  (repo, snapshot and secret names are all facts the ERP re-derives) and only lets a provably registered, locked repo READ
+  secrets it is meant to deploy with. It is reversible (`DELETE`).
+- Resume paths: the scaffold job re-submitting the same tree (`already_committed`) re-runs the grant when it is not yet
+  `granted` with the same names and snapshot; and the explicit route below. **The automatic path never re-grants a
+  `revoked` site**: an operator's revoke is only undone by an operator's POST.
+
+## Routes
+
+- `POST /api/:t/modules/webdev/provisioned-sites/:id/deploy-grant`: re-check every condition and grant (idempotent).
+  Body ignored. 200 `{outcome: "granted"|"already_granted"|"partial", state, repo, repositoryId, snapshotId, headSha,
+  secrets: [{name, result}]}`.
+- `DELETE /api/:t/modules/webdev/provisioned-sites/:id/deploy-grant`: revoke. Body `{reason}` (required, 8 to 500
+  characters). 200 `{outcome: "revoked"|"not_granted"|"partial", state, secrets: [{name, result}]}`.
+- `GET …/provisioned-sites/:id` gains an additive `deployGrant` object.
+- No hub tool. The delivery flow gets the grant inline from `webdev.provisionedSites.commitScaffold`, so agents and n8n
+  never reach either route: an operator re-drive or revoke is a human action.
+
+## Authorization (no Cerbos change)
+
+Every entry point (the scaffold follow-on, POST and DELETE) calls the same two existing checks inside the service, so no
+rule lives only in the controller:
+
+1. `webdev_provisioned_site · provision` on the request tenant (company_admin, manager, the webdev module manager,
+   platform_admin; not low assurance). The grant is the last leg of §08's provisioning, exactly as the first fill is.
+2. `github_repo · push` on the GitHub ORG tenant (`resolveGithubOrgTenant`, GHT-1 order: resolve, then authorize against
+   the resolved tenant).
+
+These are the pair that authorized the first fill. The ledger still records the true verb (`github.secret_write`), the
+GH-12 approval and the basis (the WSK-D65 precedent for an action authorized by something other than its own D14 gate).
+`github_repo · secret_write` (D14-gated, company_admin or module_manager with an approval id) is deliberately NOT used: it
+means writing a credential, which this never does, and `wf:delivery` (a manager) could not pass it, so the automatic
+path would always be refused.
+
+**Revoke** is the fail-safe direction (it removes access) but it can stop a live site's deploys, so it is treated as at
+least a medium write: the same two checks as the grant, a human only (no hub tool, so no unattended caller), not at low
+assurance (both policies require `notLow`), a mandatory reason recorded on the row and in each ledger row, and it is
+validated only AFTER authorization (a denied caller learns nothing from a malformed body).
+
+## The exception path ("a bypass is recorded as an exception with a reason")
+
+**Not built; a follow-up.** A manual grant for a repo that fails the conditions needs a D14 approval kind, an
+executable-registry pairing and a company-admin-only gate. That is not small, and a half-built bypass is worse than none.
+Today a bypass can only be made by an org owner in GitHub's UI, outside the ERP, and the ERP's revoke still removes it.
+
+## The archive / registry-removal hook
+
+**No code path archives or deletes a `webdev_sites` row today** (no writer sets `deleted_at`; `webdesk.site.archive` is a
+501 stub). So there is nothing to hook into. What exists instead:
+
+- the explicit revoke route above, and `revokeDeployForSite()` (`deploy-grant.service.ts`), which **any future archive or
+  registry-removal path must call** before it soft-deletes the row;
+- condition 5: a deleted registry row can never be (re-)granted.
+
+## What the owner must do in GitHub for this to work live
+
+1. On the `gaiada-erp` App: Settings → Permissions → **Organization permissions → Secrets: Read and write**; then, as org
+   owner, **accept the updated permissions** on the org's installation (O-3).
+2. Create the org Actions secret **`WEBDESK_DEPLOY_GRANT`** (org Settings → Secrets and variables → Actions → New
+   organization secret), with **Repository access: "Selected repositories"** and no repository selected. Its value is
+   any non-empty marker; the template only checks that it is non-empty. Real deploy credentials (O-1, P6) are created
+   the same way, with "Selected repositories", and their names added to `WEBDESK_DEPLOY_SECRET_NAMES`
+   (comma-separated) in the platform's environment.
+3. Never set a deploy secret to "All repositories" or "Private repositories": that grants it to every repo and voids
+   the gate. The ERP refuses to grant through such a secret and reports `deploy_grant_secret_not_selected`.
+4. Then re-drive each site already scaffolded: `POST …/provisioned-sites/:id/deploy-grant`.
+
+## Out of scope / follow-ups
+
+- The exception path (above).
+- A scheduled re-check that revokes a repo which lost its lock or its registry row.
+- Wiring the grant into the hourly `reconcile` resume path, so pending grants heal on their own once O-3 is granted.
+- The archive path itself, which must call `revokeDeployForSite()`.
+- ai-agents' `ScaffoldCommitReply` type may name the additive `deployGrant` field (it already passes through untouched).
