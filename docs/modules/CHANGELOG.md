@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.84.0` - the scaffold reaches the provisioned repo: platform-nest commits it with the ERP App, first fill only (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4b2 (design `docs/plans/2026-10-12-webdesk-m6-p4b2-scaffold-commit.md`). Built by the M6 session.
+
+- **`POST /api/:t/modules/webdev/provisioned-sites/:id/scaffold-commit`** and hub tool **`webdev.provisionedSites.commitScaffold`** (write, low impact, `wf:delivery` only). The body carries every file by value (`path`, `base64`, `sha256`, `bytes`).
+- **Before any GitHub write:**
+  - every file is re-hashed;
+  - `CONTRACT.lock` must name the site's PINNED snapshot (ids, versions and content hash);
+  - refused: escaping paths, `.git`/`.gitmodules`, symlinks and other modes, duplicate and case-only-duplicate paths, paths that collide with the template's, any `.github/` change the template does not already hold byte for byte, and trees over 300 files / 512 KiB per file / 600 KiB total.
+- **Only the ERP App writes**, through the `githubRequest` chokepoint: blobs (each returned sha checked against the verified bytes), one tree on the template's tree, one commit on the template's commit, then a fast-forward of the default branch (`force: false`). Each write is ledgered as `github.push`, attributed to the acting principal.
+- **Scope:** first fill only. A head that is not the template's parentless commit is `scaffold_repo_not_pristine`; an identical re-submit returns the existing commit without calling GitHub.
+- **Crash-resumable:** NULL → `pending` → `commit_created` → `committed`. A crash between the commit and the ref move resumes from the recorded commit.
+- **Gates:** `webdev_provisioned_site · provision` on the company, then `github_repo · push` on the GitHub org tenant. No Cerbos change.
+- **Migration `202610122130_webdev_scaffold_commit.sql`**, additive: 14 `scaffold_*` columns on `webdev_provisioned_sites` plus a CHECK that every state has its links. `GET provisioned-sites/:id` adds a `scaffold` object.
+- No write credential exists anywhere but platform-nest; ai-agents and the hub only carry bytes.
+- Verified on the Linux gate (sumopod, `m6b6f`): 623 files / 9291 passed / 0 failed, incl. `scaffold-commit.db.test.ts` (real Postgres, faked GitHub: happy path, ledger, idempotent re-submit, crash resume, concurrent submissions, not pristine, other-company RLS) and `scaffold-commit-http.test.ts` (real Cerbos). Two test bugs were found and fixed on the way (uuidv7-prefix slugs; a `beforeEach` returning the mock). (0.82.0 stays reserved for M5.)
+
+### ai-agents `0.13.0` - the scaffold job hands its tree to platform-nest; it still never pushes (2026-10-12) - DEV-VERIFIED
+
+- M6-P4b2. A `code-scaffold-v2` goal that carries `commit: {provisionedSiteId}` beside the frozen §06 envelope makes one hub call (`webdev.provisionedSites.commitScaffold`) with the run's own OBO identity after a successful dry run. The file bytes travel only in that call: never in n8n, never in the blackboard.
+- The astro kind no longer emits `.github/workflows/qa-harness.yml`. The template owns `.github/`, and platform-nest refuses scaffold writes there; the QA harness moves into the static template with webdev P5.
+- Verified on the Linux gate (sumopod, `m6b6`): tsc clean, 52 files / 452 passed.
+
+### mcp-hub `0.14.0` - code.scaffold takes the provisioned site; wf:delivery may commit the scaffold (2026-10-12) - DEV-VERIFIED
+
+- `code.scaffold` accepts `provisionedSiteId` and passes it to the goal. `wf:delivery` gains `webdev.provisionedSites.commitScaffold`.
+- Verified on the Linux gate (sumopod, `m6b6`): tsc clean, 29 files / 393 passed (31 skipped).
+
+### automation (n8n) `0.5.1` - the delivery code stage hands the scaffold its provisioned site (2026-10-12) - PROTOTYPED
+
+- `pipeline-delivery.json`: `Provisioning complete?` forwards `siteId`, and `MCP code.scaffold` sends `provisionedSiteId`. No workflow node calls the commit tool; the scaffold job does.
+- `automation-prd-kind.test.ts` executes the changed nodes.
+- **Needs a CLI re-import of `ws11delivery0001` after deploy.**
+
 ### webdesk `0.17.0` - the site templates leave versions with critical advisories: Next 15.5 + React 19, vitest 4, Node 24 in site CI (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6-P4d2 (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`). Found by the M6 session through Dependabot on the published template repos.
