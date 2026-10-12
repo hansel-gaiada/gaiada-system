@@ -1613,3 +1613,23 @@ tenant in `companies`, with the other action's key only; manager keeps `manage_a
 `owner` assembled from the REAL migrated bundle grants/revokes the website editor and assigns/removes admin over HTTP, audited; an owner of
 another company and an owner on the portal route are refused), and the live probe matrix against Cerbos 0.54.0 (the new rows FAIL on the
 previous policy and pass on this one).
+
+---
+
+## 29. M5-G5b — `agency_privacy.*` may be called unattended; the approval holds hashes, never the identifier (2026-10-12, PROTOTYPED)
+
+No new Cerbos kind, action, role or permission key. Three facts about who may do what, stated so nobody re-derives them:
+
+| Step | Authority | Where |
+|---|---|---|
+| Call a privacy tool (attended, or an agent acting for a person) | `agency_lead:convert` on the tenant (company_admin; platform_admin), checked FIRST by the route | `core/agency-privacy.controller.ts` |
+| **File** the approval an unattended call is suspended into (`POST /automation-approvals`, tool name `agency_privacy.*`) | the generic `automation_approval:create` **and ALSO** `agency_lead:convert` (G5b). The generic `create` is held by manager and member, so without the second check any of them could plant a privacy approval the route would never have filed | `core/approval-arg-minimisers.ts` policy `authorizeFiling` |
+| Decide it | `automation_approval:decide` (company_admin), by someone other than the requester | unchanged |
+| Run it | the requester only, `convert` again, by `approvalId`; maker != checker is re-read from the stored decision | `core/agency-privacy.service.ts` |
+
+What changed in the data, not the permissions: for these three tools the filing path stores `tool_args` as the subject hashes (the G5
+ledger's own SHA-256 helper) plus a display hint, the filed `reason` is generated, the `automation_approval.decided` event carries the hashes
+without the hints, and the ledger's `filed` row is written in the approval's transaction. Still HIGH, still two-person, still never D14
+auto-run (the bar in `core/approval-executables.ts` stands; `execution_status` stays `not_applicable`). The earlier "attended-only" caveat on
+these tools is withdrawn. Proof: `core/agency-privacy.filing.test.ts`, `core/approval-filing-minimise.test.ts` (no service) and
+`core/agency-privacy-unattended.db.test.ts` (Linux gate).

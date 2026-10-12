@@ -486,14 +486,13 @@ describe.skipIf(!TEST_URL)("M5-P1-f — lead pipeline end to end: web lead -> wo
   });
 
   // ══════════════════════════════════════════════════════════════════════════════════════════
-  // FINDING (build differs from the design): personal data on the bus through convert's pipeline.run.created
+  // Personal data on the bus through convert's pipeline.run.created (found by M5-P1-f, fixed by M5-P1-g)
   // ══════════════════════════════════════════════════════════════════════════════════════════
-  // Design §5/§10 risk 6: "no personal data on the bus". agency-lead-convert.service.ts emits
-  // `pipeline.run.created` with `title: row.org_name`. For the /contact/ and /audit/ web forms there is no business
-  // name field, so mapSubmissionToLead falls back to the PERSON'S NAME as org_name (design table, agency-web-leads
-  // service). The person's full name then rides the outbox the moment such a lead is converted. Lead A above is on
-  // the `onboard` form (a real org name), which is why its grep is clean. Delete `.fails` when the title stops
-  // carrying the org name for web leads.
+  // Design §5/§10 risk 6: "no personal data on the bus". Convert used to emit `pipeline.run.created` with
+  // `title: row.org_name`. For the /contact/ and /audit/ web forms there is no business name field, so
+  // mapSubmissionToLead falls back to the PERSON'S NAME as org_name, and the full name rode the outbox the moment such
+  // a lead was converted. Lead A above is on the `onboard` form (a real org name), which is why its grep was clean.
+  // The title is no longer in the payload; this asserts no outbox row carries the person's name, email or phone.
   describe("lead C: a /contact/-form web lead is converted", () => {
     beforeAll(async () => {
       const r = await fromWeb(co, admin, SUB_C);
@@ -503,10 +502,13 @@ describe.skipIf(!TEST_URL)("M5-P1-f — lead pipeline end to end: web lead -> wo
       expect((await post(co, admin, `leads/${leadC}/convert`, { delegations: [] })).statusCode).toBe(200);
     });
 
-    it.fails("FINDING: the person's full name is on the outbox (pipeline.run.created title)", async () => {
+    it("the person's name, email and phone are NOT on the outbox (pipeline.run.created carries no title)", async () => {
       const rows = await allOutboxText();
-      const hits = rows.filter((x) => x.t.toLowerCase().includes("dewi anggraini")).map((x) => x.event_type);
-      expect(hits).toEqual([]);
+      expect(rows.length).toBeGreaterThan(0); // the convert did emit; the grep is not vacuous
+      for (const needle of ["dewi anggraini", "dewi.anggraini@contact-example.test", "813-7777-8888"]) {
+        const hits = rows.filter((x) => x.t.toLowerCase().includes(needle)).map((x) => x.event_type);
+        expect(hits, needle).toEqual([]);
+      }
     });
   });
 });

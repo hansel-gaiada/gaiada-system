@@ -113,6 +113,68 @@ export function contactHashes(stored: { email?: unknown; phone?: unknown }): { k
   return out;
 }
 
+// ─────────────────────────────────────────────────────────────────────── subjects known only by their hash
+// M5-G5b. An approval filed through the agent hub holds only the subject hashes (core/agency-privacy.filing.ts),
+// so the executor rebuilds the subject from the hashes: the stored contact values that hash to them are the
+// plaintext it needs, and they are already in this tenant's tables. Two pure helpers; the query is the service's.
+
+/** The stored value whose NORMALISED form hashes to `hash`, or null. First match wins (all matches normalise to
+ *  the same string, so the order does not matter). */
+export function findNormalisedByHash(
+  kind: "email" | "phone",
+  hash: string,
+  candidates: Iterable<string | null | undefined>,
+): string | null {
+  for (const raw of candidates) {
+    if (typeof raw !== "string") continue;
+    const n = kind === "email" ? normalizeEmail(raw) : normalizePhone(raw);
+    if (n !== null && subjectHash(n) === hash) return n;
+  }
+  return null;
+}
+
+const EMAIL_IN_TEXT = /[^\s@<>"'(),;:]+@[^\s@<>"'(),;]+/g;
+const PHONE_IN_TEXT = /\+?\d[\d\s().-]{4,}\d/g;
+
+/**
+ * The substrings of free text that are the subject's email or phone, found by hashing every email-shaped and
+ * phone-shaped token (BEST EFFORT: a phone written next to other digits without a separator can be missed).
+ * Used so an erase run from hashes scrubs the same free-text occurrences a run from typed identifiers would,
+ * when the identifier is not one of the lead's own contact fields. Returns the matched text as written.
+ */
+export function recoverIdentifiersFromText(
+  texts: Iterable<string>,
+  want: { emailHash?: string | null; phoneHash?: string | null },
+): { emails: string[]; phones: string[] } {
+  const emails = new Set<string>();
+  const phones = new Set<string>();
+  for (const text of texts) {
+    if (want.emailHash) {
+      for (const m of text.match(EMAIL_IN_TEXT) ?? []) {
+        const cand = m.replace(/[.\]]+$/, "");
+        const n = normalizeEmail(cand);
+        if (n && subjectHash(n) === want.emailHash) emails.add(cand);
+      }
+    }
+    if (want.phoneHash) {
+      for (const m of text.match(PHONE_IN_TEXT) ?? []) {
+        const cand = m.trim();
+        const n = normalizePhone(cand);
+        if (n && subjectHash(n) === want.phoneHash) phones.add(cand);
+      }
+    }
+  }
+  return { emails: [...emails], phones: [...phones] };
+}
+
+/** Every string inside a JSON value (arrays and objects walked). */
+export function collectStrings(v: unknown, out: string[] = []): string[] {
+  if (typeof v === "string") out.push(v);
+  else if (Array.isArray(v)) for (const x of v) collectStrings(x, out);
+  else if (v !== null && typeof v === "object") for (const x of Object.values(v as Record<string, unknown>)) collectStrings(x, out);
+  return out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────── AD-1 person fields
 /**
  * The AD-1 answers that hold personal data about a PERSON (agency-discovery-questionnaire.ts, schema

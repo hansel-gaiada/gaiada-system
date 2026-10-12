@@ -17,6 +17,9 @@ import { getExecutable } from "./approval-executables";
 import { EXECUTING_STALE_MS, executeApprovedAutomationWrite, isExecutionWedged, toolArgsOf } from "./approval-execute";
 import { computeArgsSha256 } from "./hub-client";
 import { fileAutomationApproval } from "./approval-filing";
+// M5-G5b: a tool whose args are personal data (agency_privacy.*) declares how its args are reduced before they are
+// stored or put on the outbox; see approval-arg-minimisers.ts. A tool with no policy is untouched.
+import { eventSafeToolArgs, getApprovalArgsPolicy, minimiseToolArgs } from "./approval-arg-minimisers";
 // The probe-consent discriminator, imported from the module that owns the flow rather than
 // re-declared here — core/approval-executables.ts sets the same precedent for module-owned rules.
 // Probe consent (2026-09-04): an approved request executes IN-BAND here, exactly like the IAM and
@@ -170,6 +173,10 @@ export class AutomationApprovalsController {
     if (!ORIGINS.has(origin)) throw new BadRequestException("origin must be automation|agent");
     await authorize(req.principal, { kind: "automation_approval", tenantId }, "create");
     if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    // M5-G5b: a tool with an args policy may need more than the generic `create` right to be FILED (privacy:
+    // `agency_lead:convert`, the route's own gate), so this door cannot plant an approval the tool's own route
+    // would never have filed. No policy, no extra check: every other tool is exactly as before.
+    await getApprovalArgsPolicy(toolName)?.authorizeFiling?.(req.principal, tenantId);
     // T3b: the INSERT + activity-log write + decider notification (MAIL-06) now live in
     // `core/approval-filing.ts`'s `fileAutomationApproval`, shared with the confirm-machinery's
     // atomic claim (`modules/assistant/write-intents.ts`). `origin` here is constrained to
@@ -476,7 +483,10 @@ export class AutomationApprovalsController {
       await emitEvent(c, tenantId, "automation_approval", id, "automation_approval.decided", {
         decision,
         origin: upd.rows[0].origin,
-        toolArgs: upd.rows[0].tool_args,
+        // M5-G5b: for a tool with an args policy the stored args are already minimised; `eventSafeToolArgs`
+        // additionally drops what must not leave the approval row (the approver's display hints). Any other
+        // tool: the stored args, byte for byte.
+        toolArgs: eventSafeToolArgs(upd.rows[0].tool_name, upd.rows[0].tool_args),
         workflowId: upd.rows[0].workflow_id,
         toolName: upd.rows[0].tool_name,
         decidedBy: req.principal.userId,
@@ -692,8 +702,13 @@ export class AutomationApprovalsController {
     // Normalized through the SAME coercion the executor applies before hashing and sending
     // (`toolArgsOf`), so the digest compared here is the digest of the args that would actually go on
     // the wire — not of a shape that only exists in this request body.
-    const toolArgs = toolArgsOf(body?.toolArgs);
+    const rawToolArgs = toolArgsOf(body?.toolArgs);
     await authorize(req.principal, { kind: "automation_approval", tenantId }, "create");
+    // M5-G5b: a tool with an args policy stores its args MINIMISED, so the request's args go through the same
+    // pure function before hashing (after authorize, so a denied caller learns nothing about the args' shape);
+    // otherwise a minimised tool's approval would never match its own re-run and the runner would re-file it
+    // forever. No policy: unchanged.
+    const toolArgs = minimiseToolArgs(toolName, rawToolArgs);
 
     const wanted = computeArgsSha256(toolArgs);
     // Candidate set: this tenant (RLS), this agent, this tool, DECIDED. Bounded — a single agent/tool

@@ -1959,6 +1959,11 @@ export function registerAgencyIntakeExecutableApprovals(): void {
 // row would reach that route WITHOUT an approvalId and only file a second approval, so registering an
 // executor would make an approved hub row look executed while nothing ran. The bar says so positively, and
 // keeps core-tools.test.ts's "no medium/high write without an executor or a bar" invariant honest.
+//
+// M5-G5b: a hub-filed approval now holds only the subject hashes (core/agency-privacy.filing.ts), and the
+// requester runs it through the route with just its `approvalId`. That is NOT a D14 execution and this bar stays:
+// no auto-run, no re-drive, `execution_status` stays 'not_applicable'; the ledger (`agency_dsr_requests`) is the
+// record that it ran.
 export const AGENCY_PRIVACY_BARRED_TOOLS = ["agency_privacy.find", "agency_privacy.export", "agency_privacy.erase"] as const;
 
 export function registerAgencyPrivacyBars(): void {
