@@ -11,6 +11,24 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.85.1` - the website-access contact list uses the portal People predicate (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-up (flagged by 9e, 2026-10-11).
+
+- `client-website-access.controller.ts` (WSK-49f) inlined `cc.deleted_at IS NULL AND cc.status <> 'revoked'`. It now calls `clientContactInPortalScope("cc", { clients: 1 })` with `[clientId]` and keeps its own `cc.project_id IS NULL` (client-wide contacts only, WSK-D60); invited contacts stay listed so staff can grant ahead of acceptance. Same rows as before.
+- The PV3-02 ratchet `NOT_YET_SWITCHED` is now empty, so the guard covers every portal-facing file.
+- GitHub Actions run 38227771269 green (all nest shards, incl. the WSK-49f DB suite).
+
+### platform-ui `0.96.1` - sign-out ends the Keycloak session; a refreshed cookie keeps its lifetime; success messages survive the refresh (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-ups (found by the B0 sweep and the Next 16.3 unmount sweep).
+
+- **Sign-out signs you out of Keycloak too.** It cleared only the ERP cookie, so `/auth/login` signed straight back in without a password. `logout()` now also POSTs `client_id` + `refresh_token` to the realm's `openid-connect/logout` (`gaiada-ui` is a public client: no secret, no browser round-trip). Fail-soft and bounded at 5 s: the ERP cookie is cleared whatever Keycloak answers. Staff and portal menus share the action.
+- **`/auth/refresh` keeps the cookie's lifetime.** It re-stamped the session cookie without a maxAge (a browser-session cookie); it now carries the session's remaining absolute lifetime, never a fresh 12 h.
+- **Success messages survive the refresh that removes their row or card** (Next 16.3 applies an action's refresh at once). New `OutcomeScope` (one persistent polite status region) for IAM actions (terminate, removing a seat's last holder, retiring a position) and knowledge quarantine review; the message lifted to the parent for field delete, role revoke and `SiteRepoCard` provisioning; finance sign-off/close/reopen, write-offs and depreciation keep their confirmation when the refreshed state disables the control.
+- Tests: logout + Keycloak call (6), refresh maxAge (2), unmount regressions (16 in 5 files); every new test fails on the old code. GitHub Actions run 38227771269 green (platform-ui job).
+- Not covered: the agency lead convert report (needs the report server-side), still open on the board.
+
 ### platform-nest `0.85.0` - M5-G5d: the assistant stores, shows and streams no raw identifiers from a privacy tool's suspended intent (2026-10-12) - DEV-VERIFIED
 
 The last gap of G5b/G5c (built by the M5 session). No schema change.
