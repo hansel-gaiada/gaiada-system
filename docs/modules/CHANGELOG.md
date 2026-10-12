@@ -11,6 +11,26 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.75.0` - M5-W1c: the writers' room two-phase gate on every content route (2026-10-12) - DEV-VERIFIED
+
+The transport that makes the W1a writers' room rules live (built by the M5 session). Until now those rules read `""` for `siteId` and `reviewState` and denied.
+
+- **Phase 1**, the controller's first statement on every `/content` route: `webdesk_collection:read` on `{tenantId, module, siteId}`, with the route's site.
+- **Phase 2**, before any body or query validation: the real action on attributes built only from a WebDesk read.
+  - The attributes: `item.get`, or `collection.get` for a create, gives `collectionKey`, `locale`, `ownerId` = the author, `reviewState`, `published` and `creatorId`.
+  - A branded `ItemAttrs`/`ItemGate` means a write cannot be reached without that read and that check.
+  - A body or query can never set those attributes.
+- Staff tiers are still asked their old company-level question, so nothing changes for them.
+- `GET …/content/sites` is filtered per site for a writers' room grant. When nothing is readable it is a 403, never `[]`.
+- `GET …/items/:id` gains `allowed: {…}` from one Cerbos batch. It is absent, never false, when Cerbos cannot answer.
+- A scoped `webdesk_editor` files publish requests: `fileWebdeskCommandApproval` re-checks on the item resources the caller already proved, instead of an attribute-free resource. Every other caller is unchanged.
+- PERMISSION-CONTRACT §27.2 (attribute provenance); FRONTEND-BFF-CONTRACT updated.
+- Verified on GitHub Actions 38199879858: the real-Cerbos HTTP suite 25/25 (a writer's PUT on another author's item is 403 with a valid body and no WebDesk write; forged attributes ignored; `allowed` equals Cerbos), unit 30/30, filer 6/6. platform-nest has 0 failures across all shards.
+
+### platform-ui `0.94.0` - M5-W1c: the item read's `allowed` member is typed and parsed (2026-10-12) - DEV-VERIFIED
+
+- `ItemAllowed` in `webdeskContentModel.ts`; `parseItemDetail` reads an optional `allowed`. No UI behaviour yet (W2e uses it). CI 38199879858: 5780 passed.
+
 ### webdesk `0.12.0` - M5-W3c: content-check settings per collection; vocabulary 1.3.0 (2026-10-12) - DEV-VERIFIED
 
 - A collection composition may carry an optional `lint.content` member. It holds:
