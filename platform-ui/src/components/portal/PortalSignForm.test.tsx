@@ -40,6 +40,23 @@ describe("PortalSignForm", () => {
     expect(fd.get("signerName")).toBe("Dana Whitfield");
   });
 
+  it("PV5-06: carries the agreement's hash as a hidden field, so the sign action can echo what the page showed", async () => {
+    signMock.mockResolvedValue({ ok: true, id: "k-1" });
+    const hash = "b".repeat(64);
+    render(<PortalSignForm contractId="k-1" title="Website retainer 2026" contentSha256={hash} />);
+    fillAndSubmit();
+    await screen.findByText(/signed — thank you/i);
+    expect((signMock.mock.calls[0][1] as FormData).get("contentSha256")).toBe(hash);
+  });
+
+  it("PV5-06: a contract sent before the hash existed sends no hash field", async () => {
+    signMock.mockResolvedValue({ ok: true, id: "k-1" });
+    render(<PortalSignForm contractId="k-1" title="Website retainer 2026" contentSha256={null} />);
+    fillAndSubmit();
+    await screen.findByText(/signed — thank you/i);
+    expect((signMock.mock.calls[0][1] as FormData).get("contentSha256")).toBeNull();
+  });
+
   it("on a refusal, keeps the form and shows the server's reason", async () => {
     signMock.mockResolvedValue({ ok: false, error: "Your access to this portal is view-only." });
     render(<PortalSignForm contractId="k-1" title="Website retainer 2026" />);

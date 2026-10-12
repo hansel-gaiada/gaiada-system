@@ -56,6 +56,7 @@ type ForgetRequest struct {
 // ForgetResult counts what a forget did. Deleted counts change on a repeat; the tombstoned counts do not.
 type ForgetResult struct {
 	DeletedEvents      int64
+	DeletedRecordings  int64 // session replay recordings (their chunks go with them)
 	TombstonedVisitors int
 	TombstonedConsents int
 }
@@ -76,10 +77,10 @@ type EventStore interface {
 	// old as the cutoff: a row with received_at >= cutoff, and every row after the first such row, is left out,
 	// so a row that commits late can never be skipped by a cursor that has moved past it.
 	EventsAfter(ctx context.Context, website string, after int64, limit int, cutoff time.Time) ([]ConsentedEvent, error)
-	// Forget deletes the rows of the given ids and tombstones the ids. Idempotent.
+	// Forget deletes the rows and the replay recordings of the given ids and tombstones the ids. Idempotent.
 	Forget(ctx context.Context, req ForgetRequest) (ForgetResult, error)
-	// ForgetPair is the browser's /lib/kestrel/f: rows are deleted only where BOTH ids match; the visitor id
-	// is tombstoned (reason withdraw).
+	// ForgetPair is the browser's /lib/kestrel/f: rows and recordings are deleted only where BOTH ids match; the
+	// visitor id is tombstoned (reason withdraw).
 	ForgetPair(ctx context.Context, website, visitorID, consentID string) (deleted int64, err error)
 	// Purge deletes rows received before eventsBefore and tombstones created before tombstonesBefore.
 	Purge(ctx context.Context, eventsBefore, tombstonesBefore time.Time) (events, tombstones int64, err error)

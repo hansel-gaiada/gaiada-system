@@ -275,11 +275,78 @@ func TestConsentEventNamesAndPathCollisions(t *testing.T) {
 	if c, err := load(env); err != nil || len(c.ConsentEventNames) != 2 {
 		t.Errorf("%v %v", c.ConsentEventNames, err)
 	}
-	for _, p := range []string{ConsentPath, ForgetPath} {
+	for _, p := range []string{ConsentPath, ForgetPath, ReplayPath} {
 		env := baseEnv()
 		env["COLLECT_API_ENDPOINT"] = p
 		if _, err := load(env); err == nil {
 			t.Errorf("COLLECT_API_ENDPOINT=%q collides with the consented channel and must refuse", p)
 		}
+	}
+}
+
+// V6-a: REPLAY_ENABLED is on only for exactly "1"; empty (and every near miss) is off.
+func TestReplayEnabledIsOnOnlyForExactlyOne(t *testing.T) {
+	for val, want := range map[string]bool{"1": true, "": false, "  ": false, "0": false, "true": false, "yes": false, "11": false, " 1": false, "on": false} {
+		env := baseEnv()
+		env["REPLAY_ENABLED"] = val
+		c, err := load(env)
+		if err != nil {
+			t.Fatalf("REPLAY_ENABLED=%q: %v", val, err)
+		}
+		if c.ReplayEnabled != want {
+			t.Errorf("REPLAY_ENABLED=%q: got %v want %v", val, c.ReplayEnabled, want)
+		}
+	}
+	c, err := load(baseEnv()) // absent
+	if err != nil || c.ReplayEnabled {
+		t.Errorf("absent REPLAY_ENABLED must be off: %v %v", c.ReplayEnabled, err)
+	}
+}
+
+func TestReplayDefaultsWhenEmptyOrBlank(t *testing.T) {
+	env := baseEnv()
+	for _, k := range []string{"REPLAY_ENABLED", "REPLAY_BUDGET_MB", "REPLAY_RETENTION_DAYS", "REPLAY_SITE_DAILY_RECORDINGS", "REPLAY_VISITOR_DAILY_RECORDINGS"} {
+		env[k] = ""
+	}
+	env["REPLAY_BUDGET_MB"] = "   "
+	c, err := load(env)
+	if err != nil {
+		t.Fatalf("empty replay env must load: %v", err)
+	}
+	if c.ReplayEnabled || c.ReplayBudgetBytes != 2048<<20 || c.ReplayRetention != 30*24*time.Hour ||
+		c.ReplaySiteDailyMax != 500 || c.ReplayVisitorDailyMax != 10 {
+		t.Errorf("defaults: %+v", c)
+	}
+}
+
+func TestReplayExplicitZeroAndOutOfRangeRefuseAndNameTheVariable(t *testing.T) {
+	for name, vals := range map[string][]string{
+		"REPLAY_BUDGET_MB":                {"0", "-1", "1048577", "x", "1.5"},
+		"REPLAY_RETENTION_DAYS":           {"0", "31", "-3", "x"}, // 30 days is a promise in the notice: never lengthened
+		"REPLAY_SITE_DAILY_RECORDINGS":    {"0", "100001", "x"},
+		"REPLAY_VISITOR_DAILY_RECORDINGS": {"0", "1001", "x"},
+	} {
+		for _, v := range vals {
+			env := baseEnv()
+			env[name] = v
+			_, err := load(env)
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s=%q must refuse and name the variable: %v", name, v, err)
+			}
+		}
+	}
+	env := baseEnv()
+	env["REPLAY_BUDGET_MB"] = "512"
+	env["REPLAY_RETENTION_DAYS"] = "7"
+	env["REPLAY_SITE_DAILY_RECORDINGS"] = "50"
+	env["REPLAY_VISITOR_DAILY_RECORDINGS"] = "3"
+	c, err := load(env)
+	if err != nil || c.ReplayBudgetBytes != 512<<20 || c.ReplayRetention != 7*24*time.Hour || c.ReplaySiteDailyMax != 50 || c.ReplayVisitorDailyMax != 3 {
+		t.Errorf("explicit values: %+v %v", c, err)
+	}
+	// An error message never echoes a value.
+	env["REPLAY_BUDGET_MB"] = "secret-looking-value"
+	if _, err := load(env); err == nil || strings.Contains(err.Error(), "secret-looking-value") {
+		t.Errorf("the error must name the variable and not its value: %v", err)
 	}
 }

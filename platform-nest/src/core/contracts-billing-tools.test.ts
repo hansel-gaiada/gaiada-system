@@ -26,12 +26,14 @@ import { config } from "../config";
 import { newId, withTenants } from "../db";
 import { buildApp } from "../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
+import { sha256Hex } from "./content-hash";
 import {
   createCompany, createUser, addMembership, createRole, grantRole, createClient, linkIdentity,
 } from "../testing/fixtures";
 import { allCoreTools } from "./core-tools";
 import { APPROVER_RECORDED_THIS_PAYMENT, getExecutable } from "./approval-executables";
 import { executeApprovedAutomationWrite } from "./approval-execute";
+import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
 const AGENT = "agent:billing";
@@ -55,6 +57,16 @@ describe("PV3-06 · the billing tool defs (no database)", () => {
       expect(defs.get(n)!.write, n).toBeUndefined();
       expect(defs.get(n)!.impact, n).toBeUndefined();
       expect(defs.get(n)!.method, n).toBe("GET");
+    }
+  });
+
+  // PV-D28: an n8n principal is capped at "low" assurance and never elevated, so the two lists the daily
+  // wf:billing-chaser reads must be "low" or the hub refuses it on assurance before its scope is consulted.
+  // Nothing else is lowered: every write, and `contracts.get`, stays "verified".
+  it("🔴 assurance: exactly the two list reads are \"low\" (the billing chaser's); every write and contracts.get stay \"verified\"", () => {
+    for (const n of ["contracts.list", "invoicePayments.list"]) expect(defs.get(n)!.minAssurance, n).toBe("low");
+    for (const n of names.filter((x) => !["contracts.list", "invoicePayments.list"].includes(x))) {
+      expect(defs.get(n)!.minAssurance, n).toBe("verified");
     }
   });
 
@@ -156,23 +168,18 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
     expect(r.statusCode, r.body).toBe(200);
     return id;
   }
+  // PV5-04: a `sent` invoice is an ISSUED one (PV5-01b): issued through the real path, in IDR (the books' currency).
   async function insertInvoice(clientId: string, total: number): Promise<string> {
-    const id = newId();
-    await withTenants([tenant], (c) =>
-      c.query(
-        `INSERT INTO invoices (id, tenant_id, client_id, status, currency, lines, total, origin_site, created_by, updated_by)
-         VALUES ($1, $2, $3, 'sent', 'USD', '[]', $4, 'test', $5, $5)`,
-        [id, tenant, clientId, total, admin],
-      ),
-    );
-    return id;
+    return (await createIssuedInvoice(tenant, {
+      clientId, actorId: admin, lines: [{ description: "Fixture work", amount: total }],
+    })).id;
   }
   async function insertPayment(invoiceId: string, clientId: string, amount: number, recordedBy: string): Promise<string> {
     const id = newId();
     await withTenants([tenant], (c) =>
       c.query(
         `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, 'USD', now()::date, 'pending', $6, 'test')`,
+         VALUES ($1, $2, $3, $4, $5, 'IDR', now()::date, 'pending', $6, 'test')`,
         [id, tenant, invoiceId, clientId, amount, recordedBy],
       ),
     );
@@ -217,6 +224,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
 
     clientA = await createClient(tenant, "PV306 Client A");
     clientB = await createClient(tenant, "PV306 Client B");
+    await ensureBillingSetup(tenant);
     invoiceA = await insertInvoice(clientA, 500);
     invoiceB = await insertInvoice(clientB, 500);
     app = await buildApp();
@@ -539,8 +547,16 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       const id = await sentViaTool(clientA, "PV306-D14-2");
       const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner", signerTitle: "Owner" }, owner, "high");
       expect(await executeApprovedAutomationWrite(tenant, a)).toEqual({ status: "executed" });
-      const sig = await adminPool().query<{ signer: string }>(`SELECT signer FROM contract_signatures WHERE contract_id = $1 AND party = 'provider'`, [id]);
+      const sig = await adminPool().query<{ signer: string; content_sha256: string | null; ip_hash: string | null; user_agent: string | null }>(
+        `SELECT signer, content_sha256, ip_hash, user_agent FROM contract_signatures WHERE contract_id = $1 AND party = 'provider'`, [id]);
       expect(sig.rows.map((r) => r.signer)).toEqual([owner]);
+      // PV5-06: the D14 re-drive runs the same route as the human the agent served, so it records the hash fixed at
+      // send (not whatever the agent saw), plus the IP hash and user agent of the hop, exactly like a direct call.
+      const fixed = (await adminPool().query<{ content_sha256: string }>(`SELECT content_sha256 FROM contracts WHERE id = $1`, [id])).rows[0].content_sha256;
+      expect(fixed).toBe(sha256Hex("Terms."));
+      expect(sig.rows[0].content_sha256).toBe(fixed);
+      expect(sig.rows[0].ip_hash).toMatch(/^[0-9a-f]{32}$/);
+      expect(typeof sig.rows[0].user_agent).toBe("string");
       // Landed: a retry is refused by the precondition, hub not called again.
       const calls = hubCalls;
       const b = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner" }, owner, "high");
@@ -670,7 +686,7 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       await withTenants([tenant], (c) =>
         c.query(
           `INSERT INTO invoice_payments (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, status, recorded_by, origin_site)
-           VALUES ($1, $2, $3, $4, 1, 'USD', now()::date, 'pending', NULL, 'test')`,
+           VALUES ($1, $2, $3, $4, 1, 'IDR', now()::date, 'pending', NULL, 'test')`,
           [unrecorded, tenant, invoiceA, clientA],
         ),
       );

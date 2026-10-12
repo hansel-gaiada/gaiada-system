@@ -23,6 +23,7 @@ import {
   Param, Patch, Post, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
+import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
@@ -34,8 +35,12 @@ import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
 import { recordInvoiceRevision, snapshotInvoice } from "../modules/invoice/invoice-revisions";
+import { mapLedgerErrors, postConfirmedPayment } from "../modules/invoice/issue";
 import { check, type Resource } from "../rbac/cerbos";
 import { assemblePrincipal, type Principal } from "../rbac/principal";
+import { contractContentSha256 } from "./content-hash";
+import { clientIpOf, hashForEvidence, userAgentOf } from "./evidence";
+import { certifiedSigningProvider, NO_CERTIFIED_PROVIDER } from "./signature-provider";
 
 // PV3-07: `clientVisible` (a client-wide contact of the contract's client can read it in the portal) is
 // composed from the portal's own predicate, so a draft reads `false` here for exactly the reason the
@@ -48,6 +53,8 @@ const CONTRACT_SELECT = `
          to_char(k.starts_on, 'YYYY-MM-DD') AS "startsOn",
          to_char(k.ends_on, 'YYYY-MM-DD') AS "endsOn",
          k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.decline_reason AS "declineReason",
+         k.content_sha256 AS "contentSha256", k.content_fixed_at AS "contentFixedAt",
+         k.signature_tier AS "signatureTier", k.certified_requested AS "certifiedRequested",
          k.created_by AS "createdBy", k.created_at AS "createdAt",
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client') AS "clientSigned",
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'provider') AS "providerSigned",
@@ -89,6 +96,46 @@ function withCountersign<T extends { status: string; providerSigned: boolean }>(
   return { ...row, canCountersign: may && row.status === "sent" && !row.providerSigned };
 }
 
+/** PV5-06 (plan decision 13) — the signature tier a contract takes when it is sent.
+ *
+ *  `certified` when staff marked it, when its value reaches the company's `signature_threshold`, or when it
+ *  amends a certified agreement (the default for PV5-Q1); otherwise `attested`. The threshold is NULL until counsel
+ *  sets one. Once one exists:
+ *    * an unvalued contract is refused (a missing value would silently escape the rule), and
+ *    * a value in a different currency than the threshold's is refused (it cannot be compared).
+ *  Both refusals are 400s that say what to fix. */
+async function signatureTierFor(
+  c: PoolClient, tenantId: string,
+  k: { value: string | null; currency: string; certified_requested: boolean; kind: string; amends_id: string | null },
+): Promise<"attested" | "certified"> {
+  const prof = await c.query<{ threshold: string | null; currency_code: string; over: boolean | null }>(
+    `SELECT signature_threshold::text AS threshold, currency_code,
+            CASE WHEN $2::numeric IS NULL OR signature_threshold IS NULL THEN NULL ELSE $2::numeric >= signature_threshold END AS over
+       FROM company_billing_profiles WHERE tenant_id = $1`,
+    [tenantId, k.value],
+  );
+  const p = prof.rows[0];
+  const threshold = p?.threshold ?? null;
+  let overThreshold = false;
+  if (threshold !== null) {
+    if (k.value === null) {
+      throw new BadRequestException("set the contract's value before sending: this company has a signature threshold, and an unvalued contract cannot be placed against it");
+    }
+    if (k.currency !== p.currency_code) {
+      throw new BadRequestException(`the contract is in ${k.currency} but the signature threshold is set in ${p.currency_code}; they cannot be compared, so set the contract's value in ${p.currency_code}`);
+    }
+    overThreshold = p.over === true;
+  }
+  let amendsCertified = false;
+  if (k.kind === "amendment" && k.amends_id) {
+    const base = await c.query<{ signature_tier: string | null }>(
+      `SELECT signature_tier FROM contracts WHERE id = $1 AND tenant_id = $2`, [k.amends_id, tenantId],
+    );
+    amendsCertified = base.rows[0]?.signature_tier === "certified";
+  }
+  return k.certified_requested || overThreshold || amendsCertified ? "certified" : "attested";
+}
+
 @Controller("api")
 @UseGuards(AuthGuard)
 export class ContractsController {
@@ -128,7 +175,8 @@ export class ContractsController {
       const rows = await c.query<{ status: string; providerSigned: boolean }>(`${CONTRACT_SELECT} AND k.id = $1`, [contractId]);
       if (!rows.rows[0]) throw new NotFoundException("contract not found");
       const sigs = await c.query(
-        `SELECT party, signer, signer_name AS "signerName", signer_title AS "signerTitle", signed_at AS "signedAt"
+        `SELECT party, signer, signer_name AS "signerName", signer_title AS "signerTitle", signed_at AS "signedAt",
+                content_sha256 AS "contentSha256"
            FROM contract_signatures WHERE contract_id = $1 ORDER BY signed_at ASC`,
         [contractId],
       );
@@ -302,28 +350,59 @@ export class ContractsController {
    *  Refuses a contract with NO document (neither an attached file nor in-app terms). A `sent` contract
    *  with nothing to read makes the portal ask a client to sign an empty page, and the portal already
    *  refuses to render a sign form in that state — so this stops the bad state at its source rather
-   *  than relying on the reader to hide it. */
+   *  than relying on the reader to hide it.
+   *
+   *  PV5-06 (PV-D8, plan decisions 11 and 13) — SENDING FIXES THE CONTENT AND CHOOSES THE TIER, in ONE UPDATE:
+   *    * `content_sha256` = SHA-256 of the attached file's STORED bytes, else of the exact UTF-8 `body_md`,
+   *      computed here from what the server holds (never from anything the caller supplied), with
+   *      `content_fixed_at`. From this statement on the database's freeze trigger refuses any change to the
+   *      file, the body, the hash, the stamp or the tier.
+   *    * `signature_tier` = `certified` when staff marked the contract, or its value reaches the company's
+   *      `signature_threshold`, or it amends a certified agreement; else `attested`. Never changes afterwards.
+   *    * Once a threshold exists an UNVALUED contract cannot be sent: a missing value would silently escape it.
+   *      A value in a currency other than the threshold's cannot be compared, so that is refused too (failing
+   *      closed: never an attested contract that should have been certified).
+   *    * A certified tier needs a certified provider (PV5-11, parked by PV-D25). With none set up the send is
+   *      refused 409 rather than producing a contract nobody can sign. */
   @Post(":tenantId/contracts/:contractId/send")
   @HttpCode(200)
   async send(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("contractId") contractId: string) {
     await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "send");
     const out = await withTenants([tenantId], async (c) => {
-      const cur = await c.query<{ status: string; client_id: string; project_id: string | null; title: string; file_id: string | null; body_md: string | null }>(
-        `SELECT status, client_id, project_id, title, file_id, body_md FROM contracts
-          WHERE id = $1 AND deleted_at IS NULL`,
+      // FOR UPDATE: two concurrent sends must not both fix content (the second sees `sent` and is refused).
+      const cur = await c.query<{
+        status: string; client_id: string; project_id: string | null; title: string; file_id: string | null; body_md: string | null;
+        value: string | null; currency: string; certified_requested: boolean; kind: string; amends_id: string | null;
+      }>(
+        `SELECT status, client_id, project_id, title, file_id, body_md, value::text AS value, currency,
+                certified_requested, kind, amends_id
+           FROM contracts WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
         [contractId],
       );
       const k = cur.rows[0];
       if (!k) throw new NotFoundException("contract not found");
       if (k.status !== "draft") throw new BadRequestException(`this contract is already ${k.status}`);
       if (!k.file_id && !k.body_md) throw new BadRequestException("attach a document or write the terms before sending");
-      await c.query(`UPDATE contracts SET status = 'sent', sent_at = now(), updated_at = now() WHERE id = $1`, [contractId]);
+
+      const tier = await signatureTierFor(c, tenantId, k);
+      if (tier === "certified" && !certifiedSigningProvider()) {
+        throw new ConflictException({ message: NO_CERTIFIED_PROVIDER, reason: "no_certified_provider" });
+      }
+      const sha = await contractContentSha256(c, tenantId, k);
+      const upd = await c.query(
+        `UPDATE contracts
+            SET status = 'sent', sent_at = now(), content_sha256 = $2, content_fixed_at = now(), signature_tier = $3,
+                updated_at = now()
+          WHERE id = $1 AND status = 'draft'`,
+        [contractId, sha, tier],
+      );
+      if (upd.rowCount === 0) throw new ConflictException("this contract was sent by someone else a moment ago");
       await emitEvent(c, tenantId, "contract", contractId, "contract.sent", { clientId: k.client_id, title: k.title });
       // Resolved inside the transaction; the notify() calls happen after it commits.
       const recipients = await resolveClientRecipients(c, { clientId: k.client_id, projectId: k.project_id, kind: "signature" });
-      return { title: k.title, recipients };
+      return { title: k.title, recipients, sha, tier };
     });
-    await writeActivity(tenantId, req.principal.userId, "sent", "contract", contractId, {});
+    await writeActivity(tenantId, req.principal.userId, "sent", "contract", contractId, { contentSha256: out.sha, signatureTier: out.tier });
     await notifyBestEffort(tenantId, req.principal.userId, out.recipients, "contract.sent", {
       title: `Please review and sign: ${out.title}`,
       href: `/portal/contracts/${contractId}`,
@@ -331,7 +410,41 @@ export class ContractsController {
       entityId: contractId,
       severity: "warning",
     });
-    return { ok: true, status: "sent", notified: out.recipients.length };
+    return { ok: true, status: "sent", notified: out.recipients.length, contentSha256: out.sha, signatureTier: out.tier };
+  }
+
+  /** PV5-06 — "Mark certified" (PV-D8): staff ask for the certified (PSrE) signature tier for a DRAFT contract.
+   *  It decides the tier `send` will set; it never changes content.
+   *
+   *  PV-D25 parks certified signing until counsel sets a threshold or a client asks, so with no provider set up
+   *  this answers 409 "no certified signing provider is set up" and writes nothing. AUTHORIZED FIRST (Cerbos
+   *  `contract` / `mark_certified`, PV5-02), so a denied caller gets 403 whatever the state. `{ certified: false }`
+   *  clears the mark. */
+  @Post(":tenantId/contracts/:contractId/mark-certified")
+  @HttpCode(200)
+  async markCertified(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("contractId") contractId: string,
+    @Body() b: { certified?: boolean },
+  ) {
+    await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "mark_certified");
+    const certified = b?.certified !== false;
+    if (certified && !certifiedSigningProvider()) {
+      throw new ConflictException({ message: NO_CERTIFIED_PROVIDER, reason: "no_certified_provider" });
+    }
+    await withTenants([tenantId], async (c) => {
+      const cur = await c.query<{ status: string }>(
+        `SELECT status FROM contracts WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [contractId],
+      );
+      if (!cur.rows[0]) throw new NotFoundException("contract not found");
+      if (cur.rows[0].status !== "draft") {
+        throw new BadRequestException("the signature tier is fixed when a contract is sent; only a draft can be marked");
+      }
+      await c.query(`UPDATE contracts SET certified_requested = $2, updated_at = now() WHERE id = $1`, [contractId, certified]);
+    });
+    await writeActivity(tenantId, req.principal.userId, certified ? "marked_certified" : "unmarked_certified", "contract", contractId, {});
+    return { ok: true, certifiedRequested: certified };
   }
 
   /** This company's signature. Mirrors the portal's client-side path exactly: one row per party, unique,
@@ -342,7 +455,7 @@ export class ContractsController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("contractId") contractId: string,
-    @Body() b: { signerName?: string; signerTitle?: string },
+    @Body() b: { signerName?: string; signerTitle?: string; contentSha256?: string },
   ) {
     // PV3-06: AUTHORIZE BEFORE VALIDATING. This used to read the body first, so a caller who may not
     // countersign got a 400 about `signerName` instead of a 403 (validation pre-empting authz), and any
@@ -351,8 +464,12 @@ export class ContractsController {
     const signerName = (b?.signerName ?? "").trim();
     if (signerName.length < 2) throw new BadRequestException("signerName required");
     const out = await withTenants([tenantId], async (c) => {
-      const cur = await c.query<{ status: string; client_id: string; project_id: string | null; title: string }>(
-        `SELECT status, client_id, project_id, title FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
+      const cur = await c.query<{
+        status: string; client_id: string; project_id: string | null; title: string;
+        content_sha256: string | null; signature_tier: string | null;
+      }>(
+        `SELECT status, client_id, project_id, title, content_sha256, signature_tier FROM contracts
+          WHERE id = $1 AND deleted_at IS NULL`,
         [contractId],
       );
       const k = cur.rows[0];
@@ -366,13 +483,38 @@ export class ContractsController {
       // agree and the caller does not have to narrow a union to read it.
       if (existing.rows[0]) return { alreadySigned: true, complete: k.status === "signed", recipients: [] as string[], ...k };
       if (k.status !== "sent") throw new BadRequestException(`a ${k.status} contract cannot be countersigned`);
+      // PV5-06: a certified-tier contract is signed through a certified provider, not by a typed name.
+      if (k.signature_tier === "certified") {
+        throw new BadRequestException({
+          message: "this agreement is signed through a certified signing provider, not by typed name",
+          reason: "certified_tier",
+        });
+      }
+      // PV5-06: our signature records the SAME hash the client signed (the one fixed at send), plus the IP hash
+      // and user agent exactly as the client side records them. An optional `contentSha256` is a "what I saw"
+      // echo (an agent files its approval against a hash it read); when present it must match, else nothing is
+      // written. When the call is a D14 re-drive (`contracts.countersign`, run as the human the agent served)
+      // the IP and agent are those of the hub's hop, which is what the request really was.
+      if (b?.contentSha256 !== undefined && k.content_sha256) {
+        const echoed = String(b.contentSha256).trim().toLowerCase();
+        if (echoed !== k.content_sha256) {
+          throw new ConflictException({
+            message: "this agreement changed since you read it; reload it and read it again before signing",
+            reason: "content_changed",
+          });
+        }
+      }
       await c.query(
-        `INSERT INTO contract_signatures (id, tenant_id, contract_id, party, signer, signer_name, signer_title, origin_site)
-         VALUES ($1, $2, $3, 'provider', $4, $5, $6, $7) ON CONFLICT (contract_id, party) DO NOTHING`,
+        `INSERT INTO contract_signatures
+           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256, origin_site)
+         VALUES ($1, $2, $3, 'provider', $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (contract_id, party) DO NOTHING`,
         [
           newId(), tenantId, contractId, req.principal.userId,
           scrubText(signerName).text.slice(0, 200),
           b?.signerTitle ? scrubText(b.signerTitle).text.slice(0, 200) : null,
+          hashForEvidence(clientIpOf(req), tenantId),
+          userAgentOf(req),
+          k.content_sha256,
           config.originSite,
         ],
       );
@@ -455,7 +597,14 @@ export class ContractsController {
    *  (see the portal's finance query). So this is also the ONLY place `invoices.status` moves to `paid`,
    *  and it does so by comparing the CONFIRMED total against the invoice — never by trusting the
    *  incoming request. A client cannot reach this route at all: `invoice`/`update` is not granted to the
-   *  `client` derived role. */
+   *  `client` derived role.
+   *
+   *  PV5-04 (PV-D7): on an ISSUED invoice, confirming POSTS the money in the same transaction — an AR receipt into the
+   *  billing profile's bank ledger account, allocated to the AR invoice (issue.ts postConfirmedPayment) — and the
+   *  invoice becomes `paid` exactly when the AR invoice does. A refusal from the ledger (closed period, overpayment, no
+   *  receipt account) rolls the confirmation back with it: a payment is confirmed AND booked, or neither. A rejected
+   *  claim posts nothing. A LEGACY invoice (sent/paid before PV-5, `pre_pv5_legacy`) keeps the old derivation, in SQL
+   *  numeric; any other unissued invoice cannot have a payment confirmed (409). */
   @Post(":tenantId/invoice-payments/:paymentId/decide")
   @HttpCode(200)
   async decidePayment(
@@ -475,10 +624,15 @@ export class ContractsController {
       throw new BadRequestException("a reason is required when rejecting a payment");
     }
 
-    const out = await withTenants([tenantId], async (c) => {
-      const cur = await c.query<{ status: string; invoice_id: string; client_id: string | null; amount: string; currency: string; recorded_by: string | null }>(
-        `SELECT status, invoice_id, client_id, amount, currency, recorded_by FROM invoice_payments
-          WHERE id = $1 AND deleted_at IS NULL`,
+    // PV5-04: the finance module scope is declared because an issued invoice's confirmation posts to finance_* tables
+    // (module walled: without it they read and write zero rows and raise nothing).
+    const out = await mapLedgerErrors(withTenants([tenantId], async (c) => {
+      const cur = await c.query<{ status: string; invoice_id: string; client_id: string | null; amount: string; currency: string; recorded_by: string | null; paid_on: string; reference: string | null }>(
+        `SELECT status, invoice_id, client_id, amount::text AS amount, currency, recorded_by,
+                to_char(paid_on, 'YYYY-MM-DD') AS paid_on, reference
+           FROM invoice_payments
+          WHERE id = $1 AND deleted_at IS NULL
+          FOR UPDATE`,
         [paymentId],
       );
       const pay = cur.rows[0];
@@ -503,24 +657,53 @@ export class ContractsController {
         return { decision, invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), currency: pay.currency, invoicePaid: false };
       }
 
+      // PV5-04: which kind of invoice is this? Locked, so a concurrent void or issue cannot interleave.
+      const invRow = await c.query<{ issued: boolean; legacy: boolean; status: string }>(
+        `SELECT (issued_at IS NOT NULL) AS issued, pre_pv5_legacy AS legacy, status
+           FROM invoices WHERE id = $1 FOR UPDATE`,
+        [pay.invoice_id],
+      );
+      const inv = invRow.rows[0];
+      if (!inv) throw new NotFoundException("invoice not found");
+      if (inv.status === "void") {
+        // Money cannot be confirmed against a cancelled invoice: there is nothing left to settle. Reject the claim.
+        throw new ConflictException({ message: "this invoice was voided; reject the payment claim instead", reason: "invoice_void" });
+      }
+      if (!inv.issued && !inv.legacy) {
+        throw new ConflictException({
+          message: "this invoice was never issued, so a payment against it cannot be confirmed; reject the claim, or issue the invoice first",
+          reason: "not_issued",
+        });
+      }
+
       await c.query(
         `UPDATE invoice_payments SET status = 'confirmed', confirmed_by = $2, confirmed_at = now(), updated_at = now()
           WHERE id = $1`,
         [paymentId, req.principal.userId],
       );
-      // Derive the invoice's status from the confirmed ledger. Compared with a small tolerance because
-      // `numeric` sums of client-entered amounts land a rupiah short of the total often enough that
-      // requiring exact equality would leave settled invoices showing as unpaid forever.
-      const totals = await c.query<{ total: string; confirmed: string }>(
-        `SELECT i.total::text AS total,
-                COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
-                           WHERE pp.invoice_id = i.id AND pp.status = 'confirmed' AND pp.deleted_at IS NULL), 0)::text AS confirmed
+
+      if (inv.issued) {
+        if (!req.principal.userId) throw new ForbiddenException("confirming a payment needs a known user");
+        const posted = await postConfirmedPayment(c, tenantId, {
+          paymentId, invoiceId: pay.invoice_id, amount: pay.amount, currency: pay.currency, paidOn: pay.paid_on,
+          reference: pay.reference, actorId: req.principal.userId,
+        });
+        await emitEvent(c, tenantId, "invoice_payment", paymentId, "invoice.payment.confirmed", {
+          invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), arReceiptId: posted.receiptId,
+        });
+        return { decision, invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), currency: pay.currency, invoicePaid: posted.invoicePaid };
+      }
+
+      // LEGACY invoice (pre-PV-5, never issued): the old derivation, kept for these rows only and compared in SQL
+      // numeric. The 1-unit tolerance is the old rule (client-entered amounts landing a rupiah short).
+      const totals = await c.query<{ fully_paid: boolean }>(
+        `SELECT COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
+                           WHERE pp.invoice_id = i.id AND pp.status = 'confirmed' AND pp.deleted_at IS NULL), 0)
+                  >= i.total - 1 AS fully_paid
            FROM invoices i WHERE i.id = $1`,
         [pay.invoice_id],
       );
-      const total = Number(totals.rows[0]?.total ?? 0);
-      const confirmed = Number(totals.rows[0]?.confirmed ?? 0);
-      const fullyPaid = confirmed >= total - 1;
+      const fullyPaid = totals.rows[0]?.fully_paid === true;
       if (fullyPaid) {
         // IAM-GAP-02: this is the THIRD (and last) place invoices.status ever moves — outside the
         // invoice module entirely. Snapshot before the conditional UPDATE; only record a revision
@@ -541,7 +724,7 @@ export class ContractsController {
         invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount),
       });
       return { decision, invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), currency: pay.currency, invoicePaid: fullyPaid };
-    });
+    }, { modules: ["finance"] }));
 
     await writeActivity(tenantId, req.principal.userId, out.decision === "confirm" ? "confirmed" : "rejected",
       "invoice_payment", paymentId, { invoiceId: out.invoiceId });

@@ -78,6 +78,13 @@ export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: stri
   // at all -> ANONYMOUS -> Cerbos denies everything -> every real call 403s. This is the exact
   // production gap this ticket exists to close (PROGRESS.md WSK-12 session log, 2026-08-27).
   { workflowId: "wf:webdesk-zoneb-intake", role: "manager", email: "automation+webdesk-zoneb-intake@gaiada.system", name: "Automation — WebDesk Zone B intake" },
+  // PV-D28 — the daily billing chaser: READS clients, contracts and payment claims, then raises an in-app
+  // notification. `manager` is the minimum tier that covers all four hub tools' Cerbos checks: `client` read
+  // (resource_client.yaml), `contract` read (resource_contract.yaml, the `manager` derived-role rule) and `invoice`
+  // read (resource_invoice.yaml, `manager`), plus `notification` create (manager+, like every notify flow above).
+  // It holds NO write on contract or invoice: send, countersign and payment decide are not manager actions, and
+  // the hub allow-list does not name those tools either, so the two layers agree.
+  { workflowId: "wf:billing-chaser", role: "manager", email: "automation+billing-chaser@gaiada.system", name: "Automation — Billing chaser" },
 ];
 
 async function existingLink(externalId: string): Promise<boolean> {

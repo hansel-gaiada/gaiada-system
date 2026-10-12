@@ -7,6 +7,7 @@ import { withTenants } from "../db";
 import { buildApp } from "../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject } from "../testing/fixtures";
+import { ensureBillingSetup } from "../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -58,6 +59,8 @@ describe.skipIf(!TEST_URL)("invoices (§4)", () => {
     await grantRole(groupExec, await createRole("company_admin"), "company", tenant);
     await addMembership(tenant, groupExec);
     app = await buildApp();
+    // PV5-04: the finance setup and a billing profile, so an approved invoice can be ISSUED (the only way to `sent`).
+    await ensureBillingSetup(tenant);
 
     // A client + project + billable time in the period to invoice against.
     clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme", businessType: "other" } })).json().id;
@@ -80,7 +83,7 @@ describe.skipIf(!TEST_URL)("invoices (§4)", () => {
   it("generates an invoice from billable in-period time (2h × rate), one line per project", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(admin),
-      payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 100, currency: "USD" },
+      payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 100, currency: "IDR" },
     });
     expect(r.statusCode).toBe(201);
     const { id } = r.json() as { id: string };
@@ -123,11 +126,16 @@ describe.skipIf(!TEST_URL)("invoices (§4)", () => {
     const bypass = await app.inject({ method: "PATCH", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin), payload: { status: "approved" } });
     expect(bypass.statusCode).toBe(400);
 
-    // Now that it is approved, the creator (or anyone else holding "update") can send it.
+    // PV5-04: even approved, PATCH can no longer set `sent`: an invoice is sent only by ISSUING it, which numbers it
+    // and posts it to the ledger (the 400 names the door).
     const patch = await app.inject({ method: "PATCH", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin), payload: { status: "sent" } });
-    expect(patch.statusCode).toBe(200);
-    const after = (await app.inject({ method: "GET", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin) })).json() as { status: string; approvedBy: string };
+    expect(patch.statusCode).toBe(400);
+    expect((patch.json() as { error: string }).error).toMatch(/\/issue/);
+    const issue = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/issue`, headers: asUser(admin) });
+    expect(issue.statusCode, issue.body).toBe(200);
+    const after = (await app.inject({ method: "GET", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin) })).json() as { status: string; approvedBy: string; invoiceNo: string | null };
     expect(after.status).toBe("sent");
+    expect(after.invoiceNo).toMatch(/^INV\/\d{4}\/0001$/);
     expect(after.approvedBy).toBe(admin2);
   });
 

@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610131730_iam_m5_v3f_visitor_actions.sql`
+- Head: `202610131850_pv5_enforce_invoice_issued.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 270 (121 legacy `NNNN_`, 149 timestamped)
+- Applied files on disk: 275 (121 legacy `NNNN_`, 154 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -238,6 +238,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
+| `/api` | `platform-nest/src/modules/invoice/billing-profile.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/invoice.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
@@ -258,11 +259,13 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/ai-crawler.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/content-decay.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/conversions.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/experiments.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/indexnow.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-analytics.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/visitors.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
@@ -399,6 +402,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/analytics`
 - `/departments/[deptId]/website/analytics/[tenant]/[site]`
 - `/departments/[deptId]/website/analytics/[tenant]/[site]/ai-visibility`
+- `/departments/[deptId]/website/analytics/[tenant]/[site]/experiments`
+- `/departments/[deptId]/website/analytics/[tenant]/[site]/experiments/[experimentId]`
 - `/departments/[deptId]/website/content`
 - `/departments/[deptId]/website/content/[tenant]/[site]`
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]`
@@ -588,6 +593,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 | File | Declared id | Name |
 |---|---|---|
+| `billing-chaser.json` | `wspv3billchase01` | billing-chaser (CRON) |
 | `compliance-gate-nag.json` | — | compliance-gate-nag (CRON) |
 | `digest-fanout.json` | — | digest-fanout (CRON) |
 | `mtg-dispatcher.json` | `ws11mtgdispatch0` | WS11 meeting dispatcher (transcript -> MOM -> 3 extractions -> pipeline run) |

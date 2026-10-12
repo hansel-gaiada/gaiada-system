@@ -61,6 +61,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("/ops/v1/bots", h.bots)
 	mux.HandleFunc("/ops/v1/events", h.events)
 	mux.HandleFunc("/ops/v1/forget", h.forget)
+	mux.HandleFunc("/ops/v1/replay/sessions", h.replaySessions)
+	mux.HandleFunc("/ops/v1/replay/chunks", h.replayChunks)
 	return mux
 }
 
@@ -115,7 +117,7 @@ type role int
 
 const (
 	roleNone   role = iota // no key, or a key that matches neither hash
-	roleRead               // the read key: GET /ops/v1/events and /ops/v1/bots
+	roleRead               // the read key: GET /ops/v1/events, /ops/v1/bots and /ops/v1/replay/*
 	roleForget             // the forget key: POST /ops/v1/forget, and nothing else
 )
 

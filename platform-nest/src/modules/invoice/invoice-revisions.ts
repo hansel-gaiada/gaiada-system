@@ -16,6 +16,9 @@
 //   - src/modules/invoice/invoice.controller.ts: create() / setStatus() / approve()
 //   - src/core/contracts.controller.ts: decidePayment() (the ONLY other place invoices.status
 //     moves — 'sent' -> 'paid' once the confirmed payment ledger covers the total)
+//   - src/modules/invoice/issue.ts (PV5-04): issueInvoice() ('approved' -> 'sent') and
+//     voidIssuedInvoice() ('sent' -> 'void'), both recorded as "status_changed" and postConfirmedPayment() ('sent' -> 'paid', called by
+//     decidePayment for an issued invoice)
 // `src/seed/agency.ts` and `src/seed/portal-workspace.ts` insert invoices directly with no
 // authenticated principal (dev/test bootstrap data, not a live mutation path) — deliberately NOT
 // wired here; see the IAM-GAP-02 report for why fabricating an actor for a seed row would be worse
@@ -43,11 +46,23 @@ export interface InvoiceSnapshot {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  // PV5-04: the invoice of record. NULL until issued; frozen afterwards (202610130400's trigger).
+  invoiceNo: string | null;
+  issuedAt: string | null;
+  issuedBy: string | null;
+  issueDate: string | null;
+  dueDate: string | null;
+  subtotal: string | null;
+  taxTotal: string | null;
+  taxCode: string | null;
+  issuer: unknown;
+  arInvoiceId: string | null;
 }
 
 const SNAPSHOT_KEYS: Array<keyof InvoiceSnapshot> = [
   "id", "tenantId", "clientId", "periodStart", "periodEnd", "status", "currency", "lines", "total",
   "originSite", "createdBy", "approvedBy", "approvedAt", "updatedBy", "createdAt", "updatedAt", "deletedAt",
+  "invoiceNo", "issuedAt", "issuedBy", "issueDate", "dueDate", "subtotal", "taxTotal", "taxCode", "issuer", "arInvoiceId",
 ];
 
 /** Reads the invoice's CURRENT full row state. Returns null if the row doesn't exist (the caller
@@ -60,9 +75,15 @@ export async function snapshotInvoice(c: PoolClient, invoiceId: string): Promise
     status: string; currency: string; lines: unknown; total: string; origin_site: string;
     created_by: string | null; approved_by: string | null; approved_at: string | null; updated_by: string | null;
     created_at: string; updated_at: string; deleted_at: string | null;
+    invoice_no: string | null; issued_at: string | null; issued_by: string | null; issue_date: string | null;
+    due_date: string | null; subtotal: string | null; tax_total: string | null; tax_code: string | null;
+    issuer: unknown; ar_invoice_id: string | null;
   }>(
     `SELECT id, tenant_id, client_id, period_start, period_end, status, currency, lines, total::text AS total,
-            origin_site, created_by, approved_by, approved_at, updated_by, created_at, updated_at, deleted_at
+            origin_site, created_by, approved_by, approved_at, updated_by, created_at, updated_at, deleted_at,
+            invoice_no, issued_at, issued_by, to_char(issue_date, 'YYYY-MM-DD') AS issue_date,
+            to_char(due_date, 'YYYY-MM-DD') AS due_date, subtotal::text AS subtotal, tax_total::text AS tax_total,
+            tax_code, issuer, ar_invoice_id
        FROM invoices WHERE id = $1`,
     [invoiceId],
   );
@@ -73,6 +94,9 @@ export async function snapshotInvoice(c: PoolClient, invoiceId: string): Promise
     periodEnd: row.period_end, status: row.status, currency: row.currency, lines: row.lines, total: row.total,
     originSite: row.origin_site, createdBy: row.created_by, approvedBy: row.approved_by, approvedAt: row.approved_at,
     updatedBy: row.updated_by, createdAt: row.created_at, updatedAt: row.updated_at, deletedAt: row.deleted_at,
+    invoiceNo: row.invoice_no, issuedAt: row.issued_at, issuedBy: row.issued_by, issueDate: row.issue_date,
+    dueDate: row.due_date, subtotal: row.subtotal, taxTotal: row.tax_total, taxCode: row.tax_code,
+    issuer: row.issuer, arInvoiceId: row.ar_invoice_id,
   };
 }
 

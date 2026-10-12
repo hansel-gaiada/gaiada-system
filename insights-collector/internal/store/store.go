@@ -29,6 +29,7 @@ type BotCount struct {
 // Store is what the rest of the collector needs from vdb.
 type Store interface {
 	EventStore
+	ReplayStore
 	// AddBotCounts adds the given counts to bot_counts, all or nothing.
 	AddBotCounts(ctx context.Context, rows []BotCount) error
 	// BotCounts returns daily counts for one website in [from, to] (UTC dates, inclusive), oldest first.

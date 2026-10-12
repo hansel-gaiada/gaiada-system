@@ -24,7 +24,7 @@ import (
 
 // IP modes for what Umami is told about the visitor's address.
 const (
-	// IPModePseudonym (default): Umami receives an fd00::/8 address derived with a daily in-memory key.
+	// IPModePseudonym (default): Umami receives a 2001:db8::/32 address derived with a daily in-memory key.
 	IPModePseudonym = "pseudonym"
 	// IPModeReal is the documented fallback if V2-d shows Umami 3.4.0 mishandles the pseudonym: the real
 	// address goes to Umami over the internal network, as before the collector existed. Never the default.
@@ -38,6 +38,8 @@ const DefaultCompanyResolver = "network-only"
 const (
 	ConsentPath = "/lib/kestrel/v"
 	ForgetPath  = "/lib/kestrel/f"
+	// ReplayPath is the session replay channel (V6-a, design 6.2). Off unless REPLAY_ENABLED is exactly 1.
+	ReplayPath = "/lib/kestrel/r"
 )
 
 // MaxBufferRetention is the longest the consented buffer may keep a row (design 4.7: 72 hours). It is a
@@ -46,6 +48,10 @@ const MaxBufferRetention = 72 * time.Hour
 
 // TombstoneRetention is how long a forgotten id's hash is kept (design 4.7: 14 months, like the ERP's).
 const TombstoneRetention = 14 // months
+
+// MaxReplayRetention is the longest a recording may be kept (design 6.2: 30 days from started_at). Like the buffer's 72 hours it
+// is a promise in the notice, so REPLAY_RETENTION_DAYS can shorten it but never lengthen it.
+const MaxReplayRetention = 30 * 24 * time.Hour
 
 // DefaultConsentEventNames are the event names the consented channel accepts when CONSENT_EVENT_NAMES is empty:
 // the site's goal events (design 5.1) plus the form steps and the language switch. ASSUMPTION: the site's own
@@ -73,11 +79,18 @@ type Config struct {
 	ConsentRatePerSec  int                 // global ceiling for /lib/kestrel/v and /f batches per second
 	BufferRetention    time.Duration       // age at which a consented row is purged (default and maximum 72 h)
 	PurgeInterval      time.Duration       // how often the purge loop runs
-	IPMode             string
-	CompanyResolver    string
-	BotFlushInterval   time.Duration
-	LogLevel           slog.Level
-	Version            string
+
+	// Session replay (V6-a). All off or at the design's values unless set.
+	ReplayEnabled         bool          // REPLAY_ENABLED exactly "1"
+	ReplayBudgetBytes     int64         // REPLAY_BUDGET_MB, per website, a hard cap on stored recording bytes
+	ReplayRetention       time.Duration // REPLAY_RETENTION_DAYS, from started_at (default and maximum 30 days)
+	ReplaySiteDailyMax    int           // new recordings per website per rolling 24 h
+	ReplayVisitorDailyMax int           // new recordings per visitor id per rolling 24 h
+	IPMode                string
+	CompanyResolver       string
+	BotFlushInterval      time.Duration
+	LogLevel              slog.Level
+	Version               string
 }
 
 type loader struct {
@@ -188,8 +201,8 @@ func Load(get func(string) string) (Config, error) {
 			l.fail("COLLECT_API_ENDPOINT", "must be one absolute path with no query, fragment or spaces")
 		case c.CollectPath == "/healthz", strings.HasPrefix(c.CollectPath, "/ops/"):
 			l.fail("COLLECT_API_ENDPOINT", "must not collide with /healthz or /ops/")
-		case c.CollectPath == ConsentPath || c.CollectPath == ForgetPath:
-			l.fail("COLLECT_API_ENDPOINT", "must not collide with the consented channel paths "+ConsentPath+" and "+ForgetPath)
+		case c.CollectPath == ConsentPath || c.CollectPath == ForgetPath || c.CollectPath == ReplayPath:
+			l.fail("COLLECT_API_ENDPOINT", "must not collide with the consented channel paths "+ConsentPath+", "+ForgetPath+" and "+ReplayPath)
 		}
 	}
 
@@ -257,6 +270,12 @@ func Load(get func(string) string) (Config, error) {
 	c.ConsentRatePerSec = int(l.intRange("CONSENT_RATE_PER_SECOND", 100, 1, 10000))
 	c.BufferRetention = time.Duration(l.intRange("BUFFER_RETENTION_HOURS", 72, 1, 72)) * time.Hour
 	c.PurgeInterval = time.Duration(l.intRange("PURGE_INTERVAL_MINUTES", 15, 1, 1440)) * time.Minute
+
+	c.ReplayEnabled = onlyOne(l.get("REPLAY_ENABLED"))
+	c.ReplayBudgetBytes = l.intRange("REPLAY_BUDGET_MB", 2048, 1, 1<<20) << 20 // up to 1 TB
+	c.ReplayRetention = time.Duration(l.intRange("REPLAY_RETENTION_DAYS", 30, 1, 30)) * 24 * time.Hour
+	c.ReplaySiteDailyMax = int(l.intRange("REPLAY_SITE_DAILY_RECORDINGS", 500, 1, 100000))
+	c.ReplayVisitorDailyMax = int(l.intRange("REPLAY_VISITOR_DAILY_RECORDINGS", 10, 1, 1000))
 
 	c.IPMode = l.str("FORWARD_IP_MODE", IPModePseudonym)
 	if c.IPMode != IPModePseudonym && c.IPMode != IPModeReal {

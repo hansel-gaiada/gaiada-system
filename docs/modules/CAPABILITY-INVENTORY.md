@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **240** capabilities across **16** owners
-- **126** writes · 114 reads
-- Writes by impact: **high 24** · medium 37 · low 65
+- **249** capabilities across **16** owners
+- **132** writes · 117 reads
+- Writes by impact: **high 24** · medium 37 · low 71
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -43,16 +43,16 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 14 |
-| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 30 |
+| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 33 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
-| invoice | `invoices` | 6 |
+| invoice | `invoices` | 7 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 25 |
+| search | `search` | 26 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
@@ -158,6 +158,15 @@ unfalsifiable after.
 | search | `search.draftBrief` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/briefs` | write | `low` |
 | search | `search.draftReport` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/reports` | write | `low` |
 | search | `search.editReport` | `PATCH` | `/api/:tenantId/modules/search/reports/:id` | write | `low` |
+| search | `search.experiments.abort` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/experiments/:experimentId/abort` | write | `low` |
+| search | `search.experiments.create` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/experiments` | write | `low` |
+| search | `search.experiments.decide` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/experiments/:experimentId/decide` | write | `low` |
+| search | `search.experiments.get` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/experiments/:experimentId` | read | — |
+| search | `search.experiments.list` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/experiments` | read | — |
+| search | `search.experiments.results` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/experiments/:experimentId/results` | read | — |
+| search | `search.experiments.stop` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/experiments/:experimentId/stop` | write | `low` |
+| search | `search.experiments.sync` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/experiments/:experimentId/sync` | write | `low` |
+| search | `search.experiments.update` | `PATCH` | `/api/:tenantId/modules/search/properties/:propertyId/experiments/:experimentId` | write | `low` |
 | search | `search.exportProposal` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/export` | write | `low` |
 | search | `search.fileRefreshBrief` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/decay/:findingId/refresh-brief` | write | `low` |
 | search | `search.generateIndexNowKey` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/key` | write | `low` |
