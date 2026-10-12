@@ -1,6 +1,7 @@
 ---
 // webdesk/blocks/src/components/Gallery.astro — vocabulary block type "gallery".
 import type { GalleryProps } from '../types.ts'
+import { safeImgSrc } from '../safety.ts'
 
 export interface Props extends GalleryProps {}
 
@@ -10,7 +11,7 @@ const { items, caption } = Astro.props
   <ul class="wd-gallery-items">
     {items.map((item) => (
       <li class="wd-gallery-item">
-        <img src={item.url} alt={item.alt ?? ''} width={item.width} height={item.height} />
+        <img src={safeImgSrc(item.url)} alt={item.alt ?? ''} width={item.width} height={item.height} />
       </li>
     ))}
   </ul>

@@ -35,20 +35,28 @@ export const CI_GROUPS = {
   webdesk_root: ["webdesk/migrations/", "webdesk/scripts/", "webdesk/package", "webdesk/docker-compose", "webdesk/postgres/", "infra/runbooks/webdesk"],
   // webdesk/api: migrations runner, storage-bootstrap, role bootstrap, and webdesk/delivery/ (the
   // vocabulary the api vendors, plus the vocabulary tests this job runs; WSK-48b renamed it from
-  // webdesk/payload/ when Payload was deleted).
-  webdesk_api: ["webdesk/api/", "webdesk/migrations/", "webdesk/scripts/", "webdesk/postgres/", "webdesk/package", "webdesk/delivery/", "contracts/"],
+  // webdesk/payload/ when Payload was deleted). M6-P4r-a: webdesk/blocks/ too, because the api image
+  // packs the block library into a tarball it ships (a blocks-only change changes the image).
+  webdesk_api: ["webdesk/api/", "webdesk/blocks/", "webdesk/migrations/", "webdesk/scripts/", "webdesk/postgres/", "webdesk/package", "webdesk/delivery/", "contracts/"],
   // blocks vendors delivery/vocabulary and fails on drift.
   webdesk_blocks: ["webdesk/blocks/", "webdesk/delivery/vocabulary/"],
   webdesk_deploy: ["webdesk/deploy/"],
+  // M6-P5b: the WordPress theme + its php-cli probes. The vendored block list derives from
+  // delivery/vocabulary, and sdk-php.mts generates the PHP SDK fixture the probes load.
+  webdesk_wordpress: ["webdesk/wordpress/", "webdesk/delivery/vocabulary/", "webdesk/api/src/codegen/generator/sdk-php.mts"],
   // + the compose file and the write-only auditor that gate the WebDesk OTLP receiver (WSK-D63 (2)).
   obs: ["infra/observability/", "infra/scripts/", "infra/compose/docker-compose.observability", "webdesk/ops/scripts/check-otlp-write-only"],
 };
 
 /**
- * Release components, in matrix order. `path` is the Docker build context. `image` is the GHCR
- * package suffix (gaiada-<image>); it differs from the matrix name for none today but is explicit.
- * deploy.yml's COMPONENTS list is a SUBSET of these (webdesk-* have no Zone B box); a unit test
- * asserts that.
+ * Release components, in matrix order. `path` is the component's own directory (for most, the Docker
+ * build context). `deps` (optional) lists further path prefixes that reach the image: a change under
+ * any of them rebuilds the component instead of re-tagging the previous image. webdesk-api builds
+ * from the ./webdesk context (M6-P4r-a) and bakes in the block-library tarball and the vocabulary
+ * the contract generator inlines, so webdesk/blocks/ and webdesk/delivery/vocabulary/ are deps.
+ * `image` is the GHCR package suffix (gaiada-<image>); it differs from the matrix name for none
+ * today but is explicit. deploy.yml's COMPONENTS list is a SUBSET of these (webdesk-* have no
+ * Zone B box); a unit test asserts that.
  */
 export const COMPONENTS = [
   { name: "wa-chat-bot", path: "wa-chat-bot/" },
@@ -60,14 +68,16 @@ export const COMPONENTS = [
   { name: "platform-nest", path: "platform-nest/" },
   { name: "platform-ui", path: "platform-ui/" },
   { name: "report-renderer", path: "report-renderer/" },
-  { name: "webdesk-api", path: "webdesk/api/" },
+  { name: "webdesk-api", path: "webdesk/api/", deps: ["webdesk/blocks/", "webdesk/delivery/vocabulary/"] },
   { name: "synthetic-prober", path: "infra/observability/synthetic-prober/" },
 ];
 
 /**
  * Changing these rebuilds EVERY component. Only the release workflow itself: every Dockerfile and
- * every file COPYed into an image lives inside its component's build context, and no Dockerfile
- * takes build-args, so nothing else is shared. (scripts/ci/ is deliberately NOT here: it never
+ * every file COPYed into an image lives inside its component's build context (webdesk-api's is
+ * ./webdesk; the parts of it outside webdesk/api/ are that component's `deps`), and the only
+ * build-args (webdesk-api's block-library sha256) are computed by release.yml from webdesk/blocks/,
+ * so nothing else is shared. (scripts/ci/ is deliberately NOT here: it never
  * reaches an image.)
  */
 export const RELEASE_SHARED = [".github/workflows/release.yml"];

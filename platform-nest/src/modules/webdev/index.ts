@@ -187,6 +187,47 @@ export const webdevModule: ModuleContract = {
         required: ["tenantId", "slug"],
       },
     },
+    // M6-P4a (additive): the scaffolder's read surface over an ALREADY-MIRRORED snapshot (design §06:
+    // "the scaffolder pins a snapshot id and reads snapshots ONLY"). Both are plain reads — `write`
+    // and `impact` omitted, exactly like `webdesk.listSites` below — so no D14 suspension and no
+    // executable-registry entry. The platform enforces Cerbos `webdev_contract_snapshot` `read`.
+    {
+      name: "webdev.contracts.get",
+      description:
+        "Read ONE already-mirrored WebDesk contract snapshot by id (versions, content hash and the "
+        + "artifact file pointers). Read-only; unknown or other-company ids are 404.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/contracts/:snapshotId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          snapshotId: { type: "string", description: "webdev_contract_snapshots.id (the scaffold run's pin)." },
+        },
+        required: ["tenantId", "snapshotId"],
+      },
+    },
+    {
+      name: "webdev.contracts.artifact",
+      description:
+        "Read the bytes of ONE stored artifact of a mirrored contract snapshot, base64-encoded with "
+        + "its sha256, content type and size. The file is resolved from the snapshot's own pointer "
+        + "(never a caller-supplied file id) and re-hashed against the mirror-time hash; a mismatch is "
+        + "refused as `artifact_hash_mismatch`, a null pointer (e.g. sdkPhp before P6) as `artifact_absent`.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          snapshotId: { type: "string", description: "webdev_contract_snapshots.id." },
+          artifact: { type: "string", enum: ["openapi", "sdkTs", "sdkPhp", "contractMd"], description: "Which stored artifact to read." },
+        },
+        required: ["tenantId", "snapshotId", "artifact"],
+      },
+    },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
     // WSK-31 — the §07 WebDesk control-plane MCP tool set (design docs/blueprints/webdesk-design.md
     // §07/§09), aggregated here per §09's own instruction ("§07 tool table, aggregated via

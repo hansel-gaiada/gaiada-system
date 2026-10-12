@@ -55,3 +55,6 @@ export { BLOCK_TYPE_NAMES, isBlockType, validateBlock, type BlockType, type Bloc
 export { PRIMITIVE_NAMES, isPrimitiveName, validateField, type PrimitiveName, type PrimitiveDef, type FieldDef } from './vocabulary/primitives.ts'
 export type { ItemEnvelope, ListEnvelope, LocalizationLink, SeoShape, MetaShape, PageInfo } from './vocabulary/envelope.ts'
 export { VOCABULARY_VERSION, ENVELOPE_VERSION, ENVELOPE_PATH_PREFIX } from './vocabulary/version.ts'
+
+// --- Render-time output safety (M6-P5c): link/image allow-lists, safe inline JSON, rich-text sanitiser
+export { safeHref, safeImgSrc, safeJsonForScript, sanitizeRichHtml, RICH_TEXT_SANITIZE_OPTIONS } from './safety.ts'

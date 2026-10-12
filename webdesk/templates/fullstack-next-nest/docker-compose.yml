@@ -1,0 +1,26 @@
+# LOCAL DEV ONLY. Never deployed from here.
+#
+# There is deliberately NO `postgres:` service. Whether client sites use the unified WebDesk Postgres
+# (Tension A, docs/blueprints/site-provisioning-templates.md) is an OPEN owner decision, and a private
+# per-site Postgres is NOT allowed. Do not "fix" the absence.
+services:
+  api:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: sh -c "npm install && npm run start:dev -w apps/api"
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:4000:4000"
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: sh -c "npm install && npm run dev -w apps/web"
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3000:3000"

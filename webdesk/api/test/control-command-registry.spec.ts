@@ -36,6 +36,8 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "job.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "job.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "contract.read": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M6-P4r-b -- queues contract-codegen runs (re-run + backfill); MEDIUM/operate like schema.apply.
+  "contract.regenerate": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // WSK-41 — write-plane design §3.1 and ruling WSK-D46: publish and schedule are HIGH for every
   // principal (always WS4); unpublish and delete are MEDIUM under promote (a takedown never waits
   // for a second person); draft writes are MEDIUM under operate.

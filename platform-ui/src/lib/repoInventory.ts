@@ -8,7 +8,7 @@
 // the top. Copy for failures and the reconcile rule come from `webdevProvisionedSites.ts` — one source.
 import type { PipelineRun } from "./pipeline";
 import {
-  FRAMEWORK_LABEL, canReconcile, failureCopy,
+  FRAMEWORK_LABEL, canReconcile, failureCopy, failureDetail, awaitingApprovalHref, siteStatusLabel,
   type FailureCopy, type ProvisionedSite, type SiteFramework, type SiteStatus,
 } from "./webdevProvisionedSites";
 
@@ -29,6 +29,12 @@ export interface RepoRow {
   lastCheckedAt: string | null;
   /** Plain-language failure, only when `status === "failed"`. */
   failure: FailureCopy | null;
+  /** The stored free-form failure reason, shown as text; null for a typed token or a non-failed row. */
+  failureDetail?: string | null;
+  /** Status text override ("Awaiting approval" for a pending repo-control row). */
+  statusLabel?: string;
+  /** `/approvals/<id>` while the repo waits on an admin's approval. */
+  approvalHref?: string | null;
   canReconcile: boolean;
 }
 
@@ -87,6 +93,9 @@ export function buildRepoInventory(
       requestedAt: s.createdAt,
       lastCheckedAt: s.lastReconciledAt,
       failure: s.status === "failed" ? failureCopy(s.failureReason) : null,
+      failureDetail: s.status === "failed" ? failureDetail(s.failureReason) : null,
+      statusLabel: siteStatusLabel(s, REPO_STATUS_LABEL[s.status]),
+      approvalHref: awaitingApprovalHref(s),
       canReconcile: canReconcile(s),
     });
   }

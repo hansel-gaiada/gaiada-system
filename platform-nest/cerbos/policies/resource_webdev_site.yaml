@@ -1,0 +1,81 @@
+# M6-P3c (docs/plans: WebDesk M6) — authz for the NEW `webdev_site` resource kind: the `webdev_sites`
+# PORTFOLIO registry (portfolio-reads.service.ts / site-registry.service.ts), "what exists", as opposed
+# to `webdev_provisioned_site` ("how it was born", the provisioning mirror). Until this file landed the
+# registry's routes borrowed `webdev_provisioned_site`'s `provision`/`operate`/`read` actions
+# (webdev.controller.ts and console-reads.controller.ts carried a comment calling that a flagged
+# trade-off). This kind ends the borrowing.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── BEHAVIOUR-PRESERVING BY CONSTRUCTION ─────────────────────────────────────────────────────────
+# Every rule below is the rule body of the `webdev_provisioned_site` action each route USED, copied
+# verbatim (roles, `inTenant && notLow`, the B12 permission-mirror arms) and renamed to the action that
+# says what the route does. The principals allowed per route are therefore exactly the principals
+# allowed before this change, and no others. `cerbos-webdev-site.test.ts` pins that, action by action,
+# against the old kind's own decisions.
+#
+#   old (kind · action)                       new (kind · action)                 route(s)
+#   webdev_provisioned_site · read       ->   webdev_site · read                  GET  sites/:id
+#                                                                                 GET  console/portfolio
+#   webdev_provisioned_site · provision  ->   webdev_site · create               POST sites
+#   webdev_provisioned_site · operate    ->   webdev_site · update               PATCH sites/:id  (vault_ref)
+#   webdev_provisioned_site · read       ->   webdev_site · request_probe_consent POST console/probe-consent-requests
+#
+# `request_probe_consent` is its OWN action (not folded into `read`) so a grant to read the registry and
+# a grant to ASK for probe consent can diverge later; today it carries `read`'s exact reach, because the
+# route's own header records that the requester must be exactly the audience that can already see the
+# row (filing a request grants nothing and mutates no domain state).
+#
+# `webdev_provisioned_site` is NOT touched: it still serves the provisioning routes (`provision`,
+# `reconcile`, read of the run workspace card) and the WebDesk control-plane stubs (`operate`/`promote`).
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ──────────────────────────────────────────────────────
+# The `client` derived role appears NOWHERE in this policy, deliberately — the registry carries hosting
+# topology and credential pointers (`vault_ref`), staff-only. A principal holding only the `client`
+# grant must DENY on every action here (same invariant as resource_webdev_provisioned_site.yaml).
+#
+# ── NO PERMISSION-MIRROR ARM FOR `update` (matches the old `operate`) ───────────────────────────
+# The old kind's `operate` had no B12 mirror (it was never registered in derived_roles.yaml), so a
+# permission holder could NOT reach the vault_ref write on role-arm-less grounds. Adding one here would
+# widen access, which this ticket forbids. `read`, `create` and `request_probe_consent` carry mirrors
+# because the old `read`/`provision` did.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: webdev_site
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "create", "update", "request_probe_consent"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers (derived_roles.yaml), string-composed from resource.attr.module — the webdev
+    # dept's own manager may create/update registry rows; its staff may only read (and ask for consent).
+    - actions: ["read", "create", "update", "request_probe_consent"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "request_probe_consent"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm, copied from the old kind's =========
+    # `read`/`provision` mirrors. Generic global-or-company mirror per action. `update` has none (see
+    # the header). Any platform_admin wildcard rule is deliberately NOT mirrored (IAM-04c).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_webdev_site_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_webdev_site_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["request_probe_consent"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_webdev_site_request_probe_consent"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

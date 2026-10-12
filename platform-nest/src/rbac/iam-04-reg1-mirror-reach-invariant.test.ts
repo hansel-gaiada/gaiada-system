@@ -574,6 +574,14 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "webdev_provisioned_site.read": ["webdev_manager", "webdev_staff"],
   "webdev_provisioned_site.provision": ["webdev_manager"],
   "webdev_provisioned_site.reconcile": ["webdev_manager"],
+  // M6-P3c (2026-10-12) — `webdev_site` (the webdev_sites portfolio registry) copies webdev_provisioned_site's
+  // read/provision mirrors verbatim (behaviour-preserving), so the same module-mediated flag appears for the
+  // actions that replaced them. CONFIRMED FALSE by the REG2 method: all five `authorize()` call sites for the kind
+  // (webdev.controller.ts x3, console-reads.controller.ts x2) hardcode `module: "webdev"`, so the module gate
+  // never excludes anyone in practice. `webdev_site.update` has no mirror (the old `operate` had none).
+  "webdev_site.read": ["webdev_manager", "webdev_staff"],
+  "webdev_site.create": ["webdev_manager"],
+  "webdev_site.request_probe_consent": ["webdev_manager", "webdev_staff"],
   // IAM-04-B6 (2026-08-13) — see the header comment above for the handler evidence.
   "social_engagement.read": ["social_manager", "social_staff"],
   "social_engagement.create": ["social_manager"],

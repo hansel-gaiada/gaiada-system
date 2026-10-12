@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   canReconcile, canStartNewProvision, activeSite, failureCopy, describeActionError,
   isValidSlugInput, PROVISION_SLUG_RE,
+  FRAMEWORKS, FRAMEWORK_LABEL, FRAMEWORK_UNAVAILABLE, ERP_REPO_PROVIDER,
+  awaitingApprovalHref, siteStatusLabel, failureDetail,
   type ProvisionedSite,
 } from "./webdevProvisionedSites";
 
@@ -135,5 +137,43 @@ describe("describeActionError", () => {
 
   it("falls back to the raw message for a status this function doesn't special-case", () => {
     expect(describeActionError(500, "boom")).toBe("boom");
+  });
+});
+
+describe("offered kinds and awaiting-approval state (M6-P4f)", () => {
+  it("offers Static / Full-stack / WordPress and disables none of them", () => {
+    expect(FRAMEWORKS).toEqual(["astro", "node", "wp"]);
+    expect(FRAMEWORKS.map((f) => FRAMEWORK_LABEL[f])).toEqual(["Static (Astro)", "Full-stack (Next.js + Nest)", "WordPress"]);
+    expect(FRAMEWORK_UNAVAILABLE.wp).toBeUndefined();
+    expect(Object.keys(FRAMEWORK_UNAVAILABLE)).toHaveLength(0);
+  });
+
+  it("a pending repo-control row is awaiting approval, linking to its approval", () => {
+    const s = site({ id: "a", status: "pending", provider: ERP_REPO_PROVIDER, providerRef: "appr-1" });
+    expect(ERP_REPO_PROVIDER).toBe("erp_repo");
+    expect(awaitingApprovalHref(s)).toBe("/approvals/appr-1");
+    expect(siteStatusLabel(s)).toBe("Awaiting approval");
+  });
+
+  it("any other pending row keeps the Provisioning label and has no approval link", () => {
+    const s = site({ id: "b", status: "pending", provider: "provision" });
+    expect(awaitingApprovalHref(s)).toBeNull();
+    expect(siteStatusLabel(s)).toBe("Provisioning");
+    expect(awaitingApprovalHref(site({ id: "c", status: "provisioned", provider: ERP_REPO_PROVIDER }))).toBeNull();
+    expect(awaitingApprovalHref(site({ id: "d", status: "pending", provider: ERP_REPO_PROVIDER, providerRef: null }))).toBeNull();
+  });
+
+  it("failureDetail surfaces a free-form reason but not a typed token", () => {
+    expect(failureDetail("template not configured")).toBe("template not configured");
+    expect(failureDetail("poll_timeout")).toBeNull();
+    expect(failureDetail(null)).toBeNull();
+  });
+});
+
+describe("known failure tokens are own keys only", () => {
+  it("an inherited name like toString is free-form text, not a typed token", () => {
+    expect(failureDetail("toString")).toBe("toString");
+    expect(failureDetail("constructor")).toBe("constructor");
+    expect(failureCopy("toString").title).toBe("Provisioning failed");
   });
 });

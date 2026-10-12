@@ -36,7 +36,7 @@ Node scripts per component:
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
-- `webdesk` — `check:rls`, `check:rls:selftest`, `lint:migrations`, `migrate`, `test`
+- `webdesk` — `check:rls`, `check:rls:selftest`, `check:wp-template`, `lint:migrations`, `migrate`, `test`
 
 ## Compose
 
@@ -172,7 +172,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 252 (121 legacy `NNNN_`, 131 timestamped)
+- Applied files on disk: 253 (121 legacy `NNNN_`, 132 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)

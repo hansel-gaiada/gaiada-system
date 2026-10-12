@@ -36,6 +36,8 @@ export type CommandName =
   | "job.get"
   | "job.list"
   | "contract.read"
+  // M6-P4r-b -- the re-run / backfill path of the live contract codegen: queues a run for one tenant or all.
+  | "contract.regenerate"
   // WSK-41 — the content authoring commands (write-plane design §3.1). Every one carries an
   // editorial principal (EDITORIAL_COMMANDS below).
   | "content.create"
@@ -147,6 +149,10 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "job.get": { command: "job.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "job.list": { command: "job.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "contract.read": { command: "contract.read", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M6-P4r-b: queues contract-codegen runs (the re-run path for a failed run and the backfill for tenants
+  // that predate the live trigger). MEDIUM/operate like schema.apply, which triggers the same runs: it
+  // changes no tenant content, only (re)publishes a contract derived from compositions already stored.
+  "contract.regenerate": { command: "contract.regenerate", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // WSK-41 (design §3.1, rulings WSK-D45/D46). Draft writes are MEDIUM/operate: a draft is never
   // live (content_items is the live projection; a version is the working copy). publish/schedule
   // are HIGH for EVERY principal class, so the PolicyDecisionPoint demands a WS4 assertion.

@@ -107,6 +107,12 @@ codegen() {
 }
 if need_db wsk15-codegen-gate; then step wsk15-codegen-gate codegen; fi
 
+# ---- 5b. M6-P4r-a: the COMPILED generator (dist/codegen/generator.mjs, the one the api image ships) ----
+# DB-free: bundles the generator, then generates the acme/globex fixtures twice with plain `node` (no tsx)
+# in two separate processes, byte-compares them, and byte-compares them with the tsx generator's output.
+codegen_dist() { ( cd "$WD/api" && npm run codegen:gate:dist ); }
+step m6-p4ra-codegen-gate-dist codegen_dist
+
 # ---- 6. webdesk/deploy (CI webdesk-light runs it; the gate did not) ----
 deploy() { ( cd "$WD/deploy" && npm ci && npm run typecheck && npm test ); }
 step deploy-typecheck-test deploy
