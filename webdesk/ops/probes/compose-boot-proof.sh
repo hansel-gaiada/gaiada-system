@@ -26,6 +26,10 @@
 #     running, no restarts, HostConfig.CapDrop == [ALL], HostConfig.CapAdd == expected, effective
 #     capabilities of PID 1 (/proc/1/status CapEff) == expected mask, plus functional checks.
 #   * ALWAYS tears down (trap): compose down -v --remove-orphans, leftover network, temp dir.
+#   * ROOTLESS (M4 F6): export DOCKER_HOST=unix:///run/user/<uid>/docker.sock first. The daemon user then has
+#     to reach the bind sources, so the temp dir becomes 0711 (searchable, not listable; the env file in it
+#     stays 0600) and the checkout must sit where that user can search (the proof uses /srv/wdproof). It
+#     also checks that every limit is ENFORCED by the container's cgroup, not only requested.
 set -uo pipefail
 
 RESOLVE_ONLY=0
@@ -41,6 +45,13 @@ command -v docker >/dev/null || { echo "FAIL  docker not found"; exit 1; }
 PROJECT="m4boot-$(date +%s)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/m4boot.XXXXXX")"
 chmod 700 "$TMP"
+ROOTLESS=0
+case "$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null)" in
+  *name=rootless*)
+    ROOTLESS=1
+    chmod 711 "$TMP" # the rootless daemon user resolves the bind sources below; it may search, never list
+    ;;
+esac
 STARTED=0
 FAILS=0
 PASSES=0
@@ -220,6 +231,21 @@ for s in $SERVICES; do
   eff="$(docker exec "$cid" sh -c "grep ^CapEff /proc/1/status | cut -f2" 2>/dev/null)"
   [ "$eff" = "${WANT_EFF[$s]}" ] && pass "$s PID1 effective caps = ${WANT_EFF[$s]}" || fail "$s PID1 effective caps = ${WANT_EFF[$s]}" "got '${eff:-unreadable}'"
 done
+
+# rootless: the limits must be ENFORCED by each container's own cgroup (an undelegated controller drops them
+# silently while HostConfig still shows the request). Read from the host by PID; cpu.max = <NanoCpus/10000> 100000.
+if [ "$ROOTLESS" = 1 ]; then
+  for s in $SERVICES; do
+    cid="${CID[$s]}"
+    [ -n "$cid" ] || continue
+    read -r n m p < <(docker inspect -f '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}} {{.HostConfig.PidsLimit}}' "$cid")
+    want="$((${n:-0} / 10000)) 100000|${m:-0}|${p:-0}"
+    pid="$(docker inspect -f '{{.State.Pid}}' "$cid")"
+    cg="$(sed -n 's/^0:://p' "/proc/$pid/cgroup" 2>/dev/null)"
+    got="$(cat "/sys/fs/cgroup$cg/cpu.max" 2>/dev/null)|$(cat "/sys/fs/cgroup$cg/memory.max" 2>/dev/null)|$(cat "/sys/fs/cgroup$cg/pids.max" 2>/dev/null)"
+    [ -n "$cg" ] && [ "$got" = "$want" ] && pass "$s limits enforced by its cgroup ($got)" || fail "$s limits enforced by its cgroup" "cgroup '$got', HostConfig '$want'"
+  done
+fi
 
 # privilege-drop evidence: the entrypoint-dropping services must end up non-root
 for s in postgres redis rustfs; do

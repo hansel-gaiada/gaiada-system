@@ -17,6 +17,8 @@
 #   WEBDESK_PG_CONTAINER   default webdesk-postgres-1
 #   WEBDESK_DB             default: the container's POSTGRES_DB
 #   WEBDESK_MIGRATOR_ROLE  default webdesk_migrator (the role whose future tables get SELECT for backup)
+#   WEBDESK_DOCKER_HOST    M4 F6: the daemon that runs WebDesk; unset = /etc/default/webdesk-docker (written by
+#                          the rootless cut-over), else the rootful daemon
 #
 # Connects as the cluster superuser, read from the container's own POSTGRES_USER (no credential
 # is passed or stored: the official image keeps `local all all trust` on the socket).
@@ -39,6 +41,30 @@ safe_ident() { # <what> <value>
     "" | *[!A-Za-z0-9_]*) die "$1 '$2' is not a plain identifier ([A-Za-z0-9_]+)" ;;
   esac
 }
+
+# M4 F6 (WSK-D73): the Docker daemon that runs WebDesk. Empty = the rootful daemon, exactly as before.
+# WEBDESK_DOCKER_HOST, when SET (even to ""), wins; else the host switch /etc/default/webdesk-docker, which
+# the rootless cut-over writes and its rollback deletes; else empty. Only a rootless socket path is accepted.
+# POSIX sh, and byte-identical in every script that resolves the daemon (test-rootless.sh compares them).
+wd_docker_host() {
+  _wdh_f="${WEBDESK_DOCKER_SWITCH:-/etc/default/webdesk-docker}"
+  if [ -n "${WEBDESK_DOCKER_HOST+set}" ]; then _wdh_v="$WEBDESK_DOCKER_HOST"
+  elif [ -r "$_wdh_f" ]; then _wdh_v="$(sed -n 's/^WEBDESK_DOCKER_HOST=//p' "$_wdh_f" | tail -n 1)"
+  else _wdh_v=""
+  fi
+  _wdh_v="${_wdh_v%\"}"; _wdh_v="${_wdh_v#\"}"
+  case "$_wdh_v" in
+    "") return 0 ;;
+    unix:///run/user/*/docker.sock)
+      _wdh_u="${_wdh_v#unix:///run/user/}"; _wdh_u="${_wdh_u%/docker.sock}"
+      case "$_wdh_u" in "" | 0* | *[!0-9]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$_wdh_v"
+}
+
+WD_DOCKER_HOST="$(wd_docker_host)" || die "WEBDESK_DOCKER_HOST (or /etc/default/webdesk-docker) must be unix:///run/user/<uid>/docker.sock"
+if [ -n "$WD_DOCKER_HOST" ]; then DOCKER_HOST="$WD_DOCKER_HOST"; export DOCKER_HOST; fi
 
 docker ps --format '{{.Names}}' | grep -qx "$CONTAINER" || die "container $CONTAINER is not running"
 

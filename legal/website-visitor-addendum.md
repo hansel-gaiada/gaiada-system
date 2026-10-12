@@ -38,7 +38,7 @@
 | Sites | `gaiada.com` (production) and its staging hosts, currently `24-pyevq.gaiada.com`. The site is a static Astro site. «ASSUMPTION: production hosting is undecided (CMS_PLAN decision 8); the hosting provider and region of the access logs must be confirmed» |
 | Staging | `PUBLIC_TRACKING=off` is the default outside production, so staging sends nothing to vendors. «ASSUMPTION: staging hosts accept no real personal data in forms and are not indexed; confirm» |
 | ERP systems touched | Umami (self-hosted on `sumopod`; owner ruling WSK-D66), the enrichment collector, profile store and replay (PLANNED, placed with Umami), WebDesk forms API, `agency_leads` and AD-1 Discovery Intake tables in platform-nest, the WhatsApp bot alert, the `search` module's conversion uploads (PLANNED) |
-| Third-party systems | Google (GA4, Google Ads), Meta (Pixel; Conversions API PLANNED), Microsoft (Clarity), LinkedIn (Conversions API PLANNED), Cloudflare (Turnstile on the forms API), Web3Forms (interim form transport), a geo/company dataset vendor (DB-IP Lite or MaxMind GeoLite2, not chosen) |
+| Third-party systems | Google (GA4, Google Ads), Meta (Pixel; Conversions API PLANNED), Microsoft (Clarity), LinkedIn (Conversions API PLANNED), Cloudflare (Turnstile on the forms API), a geo/company dataset vendor (DB-IP Lite or MaxMind GeoLite2, not chosen) |
 
 ### 1.2 Out of scope (needs its own controller analysis)
 
@@ -67,7 +67,7 @@
 2. The page sends cookieless counts to Umami, our first-party store. **PLANNED** (Umami is not yet deployed; the tracker module and event list are BUILT).
 3. A collector in front of Umami resolves the IP once to country/city and a bot flag, then discards the raw IP. For consented visitors only, it also resolves network and company and attaches them to a profile. **PLANNED (phase 5).**
 4. Third-party tags load according to consent: GA4 and Google Ads in Google's advanced Consent Mode, Meta Pixel after marketing consent, Clarity after analytics consent. **BUILT.**
-5. A visitor may submit a form (contact, audit, onboard) or click WhatsApp, phone or email. Today forms post to Web3Forms, which emails the submission. **BUILT (interim).** The target is the WebDesk forms API, then `agency_leads`, then a WhatsApp alert to staff. **PLANNED (phase 3).**
+5. A visitor may submit a form (contact, audit, onboard) or click WhatsApp, phone or email. Forms post ONLY to our own WebDesk forms API, then `agency_leads`, then a staff alert. **There is no third-party form relay, not even as an interim (WSK-D75, owner 2026-10-12): the forms go live only when the WebDesk path is live on the site.** The WebDesk side is BUILT (M5-L1d); the site switch is PLANNED (phase 3).
 6. After the first call, a token link to the 122-question AD-1 intake is sent. **BUILT in the ERP** (AD-1); the link from `/onboard/` is PLANNED.
 7. Phase 4 adds lead stages, deal value and server-side conversion uploads to Google Ads, Meta and LinkedIn. **PLANNED.**
 
@@ -88,7 +88,7 @@ Lawful basis codes: **LI** = legitimate interests (§3); **C** = consent; **C-an
 | F7 | Browser → **enrichment collector** (consented request) | IP (memory only) → network, company, country/city, bot flag; visitor id; pages and sections viewed; interest tags (industries/services) | Visitor profile; company identification; lead scoring | C-an for the profile; **company identification shown against a profile: C (and see R-V1)** | Us; ERP staff via the Website workspace (Visitors) | with Umami on `sumopod` «ASSUMPTION: placement fixed at design» | Derived attributes on the profile. «ASSUMPTION: profile retention 14 months from last visit» | PLANNED |
 | F8 | Browser → **our session replay** (sampled) | DOM mutations, clicks, scroll; form inputs masked by default; no recording of abandoned form input | UX and conversion analysis | C | Us | with Umami on `sumopod` «ASSUMPTION: placement fixed at design» | 30 days | PLANNED (phase 5, optional) |
 | F9 | Browser → **A/B test assignment** | Variant id on the visitor id | Block experiments | C for individual-level assignment; aggregate-only variant counts may fall under LI «ASSUMPTION: counsel to confirm» | Us | with Umami on `sumopod` «ASSUMPTION: placement fixed at design» | Same as profile | PLANNED |
-| F10 | **Form → Web3Forms → email** (interim) | All typed fields, hidden `attribution`, subject; sender IP seen by Web3Forms; honeypot field | Deliver the enquiry to a mailbox | LI (responding to a request) | Web3Forms «ASSUMPTION: processor role, DPA, region and retention are unknown; confirm»; the receiving mailbox (e.g. web@gaiada.com) | Web3Forms location unknown | Mailbox: unlimited today. «ASSUMPTION: set a mailbox retention rule» | BUILT (key not yet set per `HANDOVER.md`) |
+| F10 | ~~Form → Web3Forms → email (interim)~~ | — | — | — | — | — | — | **WITHDRAWN (WSK-D75, owner 2026-10-12): no Web3Forms, not even as an interim. No real lead data ever goes through it; F11 is the only form flow.** |
 | F11 | **Form → WebDesk forms API** | Typed fields, consent flag and notice text + version, attribution, Turnstile token; request IP | Receive the lead | LI (responding to a request) + consent record for the notice | Us; **Cloudflare Turnstile** receives token and `remoteip` | `gda-aicenter`; Cloudflare global | `submissions` per form `retention_days` (default 180 in schema; propose 90 once delivered to ERP) | WebDesk API BUILT; site not yet wired (phase 3) |
 | F12 | WebDesk → **`form.received` → n8n `wd-zoneb-intake` → `agency_leads`** | org_name, contact_name, contact_email, contact_phone, source, origin_site, status, and (PLANNED) attribution, first call notes | Lead handling | LI | Staff; n8n (ours) | `gda-aicenter` | Unconverted 24 months, then delete; converted follows client-record retention | Table BUILT; intake flow PLANNED; **no attribution, consent or retention columns exist yet** |
 | F13 | ERP bot → **WhatsApp alert to staff** | Lead alert text. «ASSUMPTION: contents are not defined; recommend lead id + first name + link, no message body» | Fast follow-up | LI | Staff in the group; WhatsApp (Meta) as transport | Meta global | Lives in WhatsApp group history for as long as the group keeps it | PLANNED |
@@ -214,7 +214,7 @@ We therefore put them behind consent and do not run an LIA for them. Counsel sho
 | Interest profile | Industries and services viewed, lead score | Profile (PLANNED) | Consent only; see R-V1 |
 | Session replay | Interaction recording | Clarity (BUILT); ours (PLANNED) | Consent only |
 | Raw IP and user agent | Access logs; rate-limit key; sent to every vendor by the nature of HTTP | Web host, Redis, vendors | 14 days in our logs |
-| Contact data | Name, email, phone/WhatsApp, business name | Web3Forms / WebDesk / `agency_leads` | |
+| Contact data | Name, email, phone/WhatsApp, business name | WebDesk / `agency_leads` | |
 | Enquiry content | Message, project trigger, current URL, audience, brand notes, reference site, "anything else" | Same | Free text; may include third-party data |
 | Business info | Business type, goals, budget and strategy in AD-1 | AD-1 tables | Commercially sensitive, not special-category |
 | Lead status | Stage, owner, decline reason, deal value (PLANNED), converted client id | `agency_leads` | Deal value is about a business, but attaches to a person |
@@ -248,7 +248,7 @@ All values are «ASSUMPTION: defaults for counsel and owner to confirm».
 | Raw-IP security and access logs | 14 days | Log time | Rotation; verify the rotation exists on every host | PLANNED |
 | Redis rate-limit counters | Window length (minutes) | Window | `PEXPIRE` | BUILT |
 | Form submissions in WebDesk (`submissions`) | Per form `retention_days`: propose 90 days once delivered to the ERP (schema default 180 today) | `created_at` | Scrub: payload set to `{}`, consent text tombstoned, status `purged`; row skeleton survives | BUILT: the purge runs hourly on WebDesk's scheduler (WSK-61, `forms-retention-purge`) |
-| Web3Forms and the receiving mailbox (interim) | Mailbox: propose 90 days; Web3Forms: unknown «ASSUMPTION: obtain their terms» | Receipt | Manual | Interim |
+| ~~Web3Forms and the receiving mailbox (interim)~~ | — | — | — | WITHDRAWN (WSK-D75): no Web3Forms |
 | `agency_leads` unconverted | 24 months, then delete | Last status change | Hard delete or scrub «ASSUMPTION: counsel to choose; deletion must reach AD-1 answers too» | **PLANNED: no retention exists today (AD-1 design §7 flags this gap)** |
 | AD-1 submissions of declined / unconverted leads | Same as the lead | Lead's clock | Same | PLANNED |
 | Converted leads | Follow client-record retention | Conversion | Per ERP retention schedule | n/a |
@@ -279,13 +279,13 @@ Scoring follows the pack: Likelihood and Severity are Low / Medium / High; Resid
 | **R-V8** | **Security of the public collector and forms API.** Exposed endpoint: spam, injection, DoS, poisoning of stats, data exfiltration | Medium | High | Turnstile, honeypot, per-IP and per-form rate limits, origin guard (BUILT in forms API); collector with strict schema, size cap, rate limit, no auth secrets in the page, read-only token for the ERP, separate DB role; tenant RLS (BUILT in WebDesk) | Low–Medium |
 | **R-V9** | **Children.** Under-age visitors cannot consent validly; UU PDP treats children's data specially | Low | Medium | Site is B2B, marketed to businesses «ASSUMPTION: confirm no content aimed at minors»; no age gate; if a child's data is found, delete on request | Low |
 | **R-V10** | **Over-retention across systems.** Umami, profile, logs, submissions, `agency_leads` (none today), mailbox, WhatsApp | High | Medium | Table in §5; purge jobs (WebDesk's submission purge runs hourly, BUILT); a retention column on `agency_leads` | Low–Medium |
-| **R-V11** | **Data-subject rights across 6+ systems.** Google, Meta, Microsoft, LinkedIn, Cloudflare, Web3Forms, Umami, profile store, WebDesk, `agency_leads`, AD-1, mailbox, WhatsApp | High | Medium | Single intake address; per-system runbook (§9); extend WSK-38 and ERP commands; visitor id lookup | Medium |
+| **R-V11** | **Data-subject rights across 6+ systems.** Google, Meta, Microsoft, LinkedIn, Cloudflare, Umami, profile store, WebDesk, `agency_leads`, AD-1, mailbox, WhatsApp | High | Medium | Single intake address; per-system runbook (§9); extend WSK-38 and ERP commands; visitor id lookup | Medium |
 | **R-V12** | **WSK-38 as built misses the main data.** Find/export/erase read `submissions` and `media_assets` only; matches by exact lower-case value; `data_subject_ref` is set only from a field named `email` (the site's ids are `email_address` and `contact_email`); phone matches only on the identical string | High | High | Extend before launch (§9.3) | Low once extended |
 | **R-V13** | **WhatsApp lead alerts spread personal data.** Alert text lands in group history; the existing work-summary bot may ingest it into its store (90 days) and send it to an AI processor | Medium | Medium | Minimal alert (id + first name + link); confirm the alert group is out of the bot's ingestion scope or covered by `dpia.md`; admin deletion rule | Low |
 | **R-V14** | **Vendor geo/company dataset licensing and quality.** DB-IP Lite is CC BY 4.0 (attribution required); MaxMind GeoLite2 has its own EULA, an account, update obligations and use limits; company identification data is not in either free set | Medium | Medium | Vendor review before phase 5; attribution on the privacy page; contractual use of any company dataset; record in vendor register | Low–Medium |
 | **R-V15** | **Dark patterns / banner parity over time.** Later redesigns could weaken Reject | Low | High | Parity rule recorded in the repo; `check_tracking.py` already checks banner behaviour in both languages | Low |
 | **R-V16** | **Past incident on the live WordPress site.** Name, message, email, phone sent to GA4 via a custom tag; ~50 unknown cross-domain linker domains; Meta and Clarity firing without consent | High (already occurred) | High | Assess as a possible incident (open item 13); remove the tags; audit GTM and Ads users; ask Google to delete the affected GA4 property data | Medium until assessed |
-| **R-V17** | **Interim Web3Forms transport.** Unknown role, region, retention | Medium | Medium | Review terms; DPA if processor; retire at phase 3 | Low once retired |
+| **R-V17** | **Interim Web3Forms transport.** Unknown role, region, retention | — | — | **CLOSED by WSK-D75 (owner 2026-10-12): Web3Forms is not used at all, not even as an interim** | None |
 | **R-V18** | **Visitor analytics on a personally contracted VPS.** Umami (and, as planned, the enrichment collector, profiles and replay) runs on `sumopod`, which an individual contracts, not [CONTROLLER ENTITY]. The host also runs other projects (77 containers when measured) and the company's test workloads. Risks: no processor terms between the controller and the hosting provider; access by whoever administers the box; continuity if that person leaves | Medium | Medium | Umami in its own compose project and network, no egress, its admin UI never public; data kept minimal (no raw IP, no typed input); nightly backup off the box; the contract moved to the controller entity, or a written arrangement between the controller and the contract holder (open item 20) | Medium until item 20 is settled; Low after |
 
 ### 6.1 Residual summary
@@ -327,7 +327,7 @@ Re-run when: client sites on WebDesk get the same analytics; a new vendor is add
 | Scrub of PAN/national IDs in the WebDesk forms path | R-V7 | **PLANNED** |
 | Retention columns and purge on `agency_leads` and AD-1 | R-V10 | **PLANNED** |
 | WSK-38 extension (§9.3) | R-V11, R-V12 | **PLANNED** |
-| Vendor review (geo dataset, Web3Forms, Cloudflare Turnstile terms) | R-V14, R-V17 | **PLANNED** |
+| Vendor review (geo dataset, Cloudflare Turnstile terms) | R-V14 | **PLANNED** |
 | Joint-controller and processor terms filed per vendor | R-V4, R-V5 | **PLANNED** |
 | Minimal WhatsApp alert | R-V13 | **PLANNED** |
 | Small-cell suppression in dashboards | R-V6 | **PLANNED** |
@@ -350,7 +350,7 @@ Format follows `ropa.md`: one block per processing activity, with the §1–§11
 | W5 | Visitor profile, company identification, lead scoring | Understand interests; prioritise follow-up | Consented visitors | Visitor id, interest tags, ASN/company, score | Consent (analytics) + extra notice «ASSUMPTION» | Staff (Website workspace) | With Umami (`sumopod`) «ASSUMPTION» | 14 months from last visit «ASSUMPTION» | Role-gated; consent flag required; no decisions with legal effect |
 | W6 | Sampled session replay (ours) | UX and conversion analysis | Consented visitors | Interaction recording, inputs masked | Consent | Staff | With Umami (`sumopod`) «ASSUMPTION» | 30 days «ASSUMPTION» | Mask all inputs; no abandoned-form text |
 | W7 | A/B tests on blocks | Improve conversion | Consented visitors | Variant id on visitor id | Consent | None | With Umami (`sumopod`) «ASSUMPTION» | As W5 | |
-| W8 | Website forms intake (interim: Web3Forms; target: WebDesk) | Receive enquiries | Leads, submitters, people named | Contact, enquiry text, attribution, consent record | LI | Web3Forms (interim), Cloudflare Turnstile, staff | `gda-aicenter`; vendors global | Submissions 90 days «ASSUMPTION»; mailbox per rule | Turnstile, rate limits, RLS, per-submission consent snapshot |
+| W8 | Website forms intake (WebDesk forms API only; no Web3Forms, WSK-D75) | Receive enquiries | Leads, submitters, people named | Contact, enquiry text, attribution, consent record | LI | Cloudflare Turnstile, staff | `gda-aicenter`; vendors global | Submissions 90 days «ASSUMPTION»; mailbox per rule | Turnstile, rate limits, RLS, per-submission consent snapshot |
 | W9 | Lead handling in `agency_leads` and AD-1 | Reply, scope, convert or decline | Leads | Contact, enquiry, business info, status | LI | Staff; WhatsApp (alert) | `gda-aicenter`; WhatsApp global | Unconverted 24 months «ASSUMPTION»; converted per client-record rule | Tenant RLS; Cerbos; scrub PAN/IDs (AD-1) |
 | W10 | Server-side conversion uploads (phase 4) | Teach ad platforms which clicks became clients | Leads whose visit had marketing consent | Hashed email/phone, click ids, event id, stage, deal value | Consent (marketing), rule §3.6 | Google, Meta, LinkedIn | US and global | Platform-side | Consent-snapshot gate; WS4-gated writes («`SEARCH_ADS_WRITE_MODE`») |
 | W11 | Consent records | Prove consent | Visitors, submitters | Choice, version, time | LI (accountability) | None | Browser; server log PLANNED | Data lifetime + 1 year «ASSUMPTION» | Append-only |
@@ -364,7 +364,7 @@ Format follows `ropa.md`: one block per processing activity, with the §1–§11
 | Microsoft (Clarity) | Processor «ASSUMPTION: confirm» | Recording, heatmaps | DPA; masking setting |
 | LinkedIn (CAPI, PLANNED) | «ASSUMPTION: joint controller» | Ads | Terms; consent gate |
 | Cloudflare (Turnstile) | Processor «ASSUMPTION» | Bot check; receives token and IP | DPA |
-| Web3Forms (interim) | «ASSUMPTION: processor, unknown terms» | Email transport | DPA or retire |
+| ~~Web3Forms (interim)~~ | — | — | WITHDRAWN (WSK-D75) |
 | Hosting provider(s) | Processor | Web host, access logs | DPA |
 | Geo/company dataset vendor | Licensor (no personal data sent to it) | Dataset | Licence and attribution |
 | WhatsApp / Meta | Transport for staff alerts (existing pack §2 "messaging transport") | Alerts | As existing pack |
@@ -373,7 +373,7 @@ Format follows `ropa.md`: one block per processing activity, with the §1–§11
 
 | Item | Detail |
 |---|---|
-| Trigger | Browser requests to Google, Meta, Microsoft, LinkedIn, Cloudflare, Web3Forms, and server-side uploads |
+| Trigger | Browser requests to Google, Meta, Microsoft, LinkedIn, Cloudflare, and server-side uploads |
 | Mechanism | «ASSUMPTION: DPF or SCCs for EU data; UU PDP cross-border basis to be confirmed per vendor» → open item 4 |
 | Mitigation | Consent gate; hashed identifiers; first-party Umami as the source of truth; GA4 as destination |
 
@@ -468,7 +468,6 @@ Format follows `ropa.md`: one block per processing activity, with the §1–§11
 | Microsoft (Clarity) | Recording and heatmaps | USA and elsewhere |
 | LinkedIn (Conversions API) | Adverts | USA and elsewhere |
 | Cloudflare (Turnstile) | Checking that a form is sent by a person | Global |
-| [Web3Forms, until forms move to our server] | Delivering your message by email | [location] |
 | Our hosting provider | Running the site | [location] |
 | Our staff, and our WhatsApp alert system | Handling your enquiry | [location] |
 
@@ -510,14 +509,14 @@ Google, Meta and LinkedIn decide for themselves how to use some of the data for 
 | 1 | **Controller entity** for gaiada.com, the Google, Meta and LinkedIn ad accounts, Umami and the lead records; whether more than one Gaiada entity is involved | Name the entity; instantiate the RoPA for it |
 | 2 | **Ad platforms: joint controllers?** Fashion ID exposure for Meta Pixel and CAPI; Google enhanced conversions and offline conversions; LinkedIn CAPI. What terms to accept and what notice to give | Counsel opinion; accept and file the terms |
 | 3 | **GA4 advanced vs basic Consent Mode.** Advanced sends cookieless pings to Google before consent, which conflicts with the "before consent only our own counts" ruling (R-V2). Basic means no Google contact until consent | Decide; if advanced stays, counsel to confirm the basis for pre-consent pings |
-| 4 | **UU PDP cross-border transfer basis** for Google, Meta, Microsoft, LinkedIn, Cloudflare and Web3Forms (adequacy, adequate safeguards, or consent); also the EU/SG equivalent for visitors there | Per-vendor mechanism; whether banner consent also covers transfer |
+| 4 | **UU PDP cross-border transfer basis** for Google, Meta, Microsoft, LinkedIn and Cloudflare (adequacy, adequate safeguards, or consent); also the EU/SG equivalent for visitors there | Per-vendor mechanism; whether banner consent also covers transfer |
 | 5 | **Company identification of consented B2B visitors:** is banner consent enough, or is a separate, more specific notice or control required? Does it matter that sole traders are individuals? | Counsel opinion; possibly a separate "company identification" toggle |
 | 6 | **DPO / contact:** appoint or designate; whether UU PDP requires a DPO here; publish the address | Name and email for [DPO NAME/EMAIL] |
 | 7 | **Phase-4 conversion consent:** may the banner's marketing category (given earlier, on a visit) support a server-side upload at a later lead stage? Or add a separate unticked form checkbox (§3.6 option 5)? Is storing a consent snapshot on the lead enough? | Pick rule A or B |
 | 8 | **Retention values** in §5, especially `agency_leads` 24 months, profile 14 months, replay 30 days, logs 14 days, submissions 90 days | Confirm or change |
 | 9 | **Pre-launch gaps in the ERP:** no retention on `agency_leads` or AD-1; no consent or attribution fields on `agency_leads`; WSK-38 does not cover them (R-V10, R-V12) | Owner to schedule the work (§9.3) before phase 3 |
 | 10 | **Clarity:** record sessions at all? If kept, confirm masking covers typed input and where it is stored; consider moving it behind the sampled-replay decision | Decide; confirm admin setting |
-| 11 | **Interim Web3Forms:** acceptable for any real lead data? Obtain terms, region and retention; or hold launch of forms until phase 3 | Decide |
+| 11 | ~~**Interim Web3Forms:** acceptable for any real lead data?~~ | **RESOLVED by WSK-D75 (owner 2026-10-12): no; the forms launch only on the WebDesk path** |
 | 12 | **WhatsApp alerts:** content of the alert; whether the alert group is inside the existing bot's ingestion scope and therefore in `dpia.md` | Define; confirm scope |
 | 13 | **Past incident on the live WordPress site (GTM `GTM-MC2BDNP`).** The old container scraped name, message, email and phone into GA4 parameters, sent Email and Phone in a *Leads* event, listed ~50 unrelated cross-domain linker domains (coupon sites, "adctracksystem", temu-store and similar), and loaded Meta and Clarity with no consent. Is this a personal-data incident to assess, document and possibly notify? Who had GTM and Ads access? Should the affected GA4 data be deleted? | Counsel to assess; owner to audit GTM and both Ads user lists; ask Google to delete affected data |
 | 14 | **Privacy page and its Indonesian version** are blockers to launch; confirm notice content, language and the link in the banner | Counsel to review §10; translate |

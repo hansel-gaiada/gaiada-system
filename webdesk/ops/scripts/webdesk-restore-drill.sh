@@ -18,7 +18,32 @@
 #   4. RLS came back with the schema: N tables enabled + forced, and webdesk_app with no tenant GUC
 #      reads 0 content items (the policies bite) while the restore superuser reads them all.
 # Optional: EXPECT_FORCED_TABLES=<n> (live: count of public tables with RLS enabled AND forced — not the checker's tenant-scoped count) and EXPECT_ITEMS=<n> make 3/4 exact.
+# M4 F6: the throwaway runs on WebDesk's own daemon: WEBDESK_DOCKER_HOST, else /etc/default/webdesk-docker (written
+# by the rootless cut-over), else the rootful daemon.
 set -euo pipefail
+
+# M4 F6 (WSK-D73): the Docker daemon that runs WebDesk. Empty = the rootful daemon, exactly as before.
+# WEBDESK_DOCKER_HOST, when SET (even to ""), wins; else the host switch /etc/default/webdesk-docker, which
+# the rootless cut-over writes and its rollback deletes; else empty. Only a rootless socket path is accepted.
+# POSIX sh, and byte-identical in every script that resolves the daemon (test-rootless.sh compares them).
+wd_docker_host() {
+  _wdh_f="${WEBDESK_DOCKER_SWITCH:-/etc/default/webdesk-docker}"
+  if [ -n "${WEBDESK_DOCKER_HOST+set}" ]; then _wdh_v="$WEBDESK_DOCKER_HOST"
+  elif [ -r "$_wdh_f" ]; then _wdh_v="$(sed -n 's/^WEBDESK_DOCKER_HOST=//p' "$_wdh_f" | tail -n 1)"
+  else _wdh_v=""
+  fi
+  _wdh_v="${_wdh_v%\"}"; _wdh_v="${_wdh_v#\"}"
+  case "$_wdh_v" in
+    "") return 0 ;;
+    unix:///run/user/*/docker.sock)
+      _wdh_u="${_wdh_v#unix:///run/user/}"; _wdh_u="${_wdh_u%/docker.sock}"
+      case "$_wdh_u" in "" | 0* | *[!0-9]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$_wdh_v"
+}
+WD_DOCKER_HOST="$(wd_docker_host)" || { echo "DRILL FAILED: WEBDESK_DOCKER_HOST (or /etc/default/webdesk-docker) is not unix:///run/user/<uid>/docker.sock" >&2; exit 1; }
+[ -z "$WD_DOCKER_HOST" ] || export DOCKER_HOST="$WD_DOCKER_HOST"
 IMG="${DRILL_IMAGE:-postgres:16-alpine}"
 NAME="m4drill-$(date +%s)"
 T0=$(date +%s.%N)

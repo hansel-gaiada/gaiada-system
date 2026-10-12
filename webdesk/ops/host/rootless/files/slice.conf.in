@@ -1,0 +1,10 @@
+# /etc/systemd/system/user-@UID@.slice.d/50-webdesk-rootless.conf (M4 F6, WSK-D73), rendered by
+# install-rootless.sh. The hard envelope around EVERYTHING @USER@ runs: dockerd, containerd, RootlessKit,
+# slirp4netns, every container and the deploy's tools container. WSK-D72 budgets WebDesk at 1.0 vCPU of the
+# 2-vCPU box; rootless mode lets that budget be enforced as one number for the whole stack, daemon included.
+# It is ROOT's limit: the daemon user owns the delegated subtree below user@@UID@.service and could raise its own
+# containers' cpu.max / memory.max / pids.max, but not this slice's.
+[Slice]
+CPUQuota=@CPU_QUOTA@
+MemoryMax=@MEMORY_MAX@
+TasksMax=@TASKS_MAX@

@@ -1,0 +1,20 @@
+# /etc/systemd/system/user@@UID@.service.d/50-webdesk-rootless.conf (M4 F6, WSK-D73), rendered by
+# install-rootless.sh. An INSTANCE drop-in: it changes user@@UID@.service (@USER@) and no other user's manager.
+[Unit]
+# The egress guard first. The daemon's own unit also refuses to start without the guard's marker, so a guard
+# that fails at boot leaves WebDesk down rather than unguarded.
+Wants=webdesk-rootless-guard@@USER@.service
+After=webdesk-rootless-guard@@USER@.service
+
+[Service]
+# Fail closed at (re)start of the user manager, and so of the daemon: run as ROOT by the system manager, the
+# guard's own `check` must pass (marker, current config, live chains undrifted, our jump first in OUTPUT). A flushed
+# or tampered table therefore blocks the daemon from coming up unguarded. (The daemon's own user unit can only test
+# the marker file: a user manager cannot run a root command.)
+# The leading `+` is load-bearing: user@.service runs as User=%i, so without it this check would run as the daemon
+# user, die "root only", and the user manager could never start (review N1, 2026-10-12).
+ExecStartPre=+/usr/local/sbin/webdesk-rootless-guard.sh check @USER@
+# Only what WSK-D72 needs. systemd 252's default is Delegate=pids memory cpu (measured on gda-aicenter,
+# 2026-10-12); pinned so a changed default can never silently drop one. io and cpuset are NOT delegated: a
+# delegated controller is enabled in user.slice for EVERY user, and nothing here uses io weights or cpusets.
+Delegate=cpu memory pids

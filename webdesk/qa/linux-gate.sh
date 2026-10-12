@@ -31,7 +31,8 @@
 #                   starts two containers itself); c4-artifact-url-expiry-selftest + c4-artifact-url-expiry (against
 #                   the gate's RustFS); wsk15-codegen-gate (seeds two throwaway tenants, runs `npm run codegen:gate`,
 #                   removes them); deploy-typecheck-test (webdesk/deploy); ops-check-cdn-bypass-selftest,
-#                   ops-check-otlp-write-only-selftest, ops-test-deploy-webdesk (T4 harness, fake docker).
+#                   ops-check-otlp-write-only-selftest, ops-test-deploy-webdesk (T4 harness, fake docker),
+#                   ops-test-rootless (M4 F6 rootless scripts, pure parts).
 #                   Needs Postgres + RustFS (no ClamAV/Mailpit). Runs after migrations.
 #
 # Design: no host paths, no host ports. The source tar is untarred into a per-run docker VOLUME that

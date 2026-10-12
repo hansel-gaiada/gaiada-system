@@ -101,7 +101,7 @@ Cerbos restart or a deploy. Release numbers are claimed one step at a time.
 | O-4 | Freelance writers get ERP logins (staff-side, writers' room only)? The plan assumes yes; it adds a new kind of external principal | **owner** | W1 |
 | O-5 | Does our own replay (V6) replace Clarity, or run beside it? Until then, Clarity is a session recorder filed under "analytics", so the banner must say so, and its masking must cover typed input (addendum §11.10) | **owner** | V6; the banner wording before launch |
 | O-9 | **GA4 advanced vs basic Consent Mode.** The site, as built, sends cookieless pings to Google before consent; D67 allows only our own counts before consent. Basic mode (no Google contact until consent) matches D67; advanced keeps Google's modelled conversions. Recommended: basic. Not live anywhere yet; the site session has the change ready (hold the gtag.js load in `vendors.ts` until consent, keep the inline denied defaults) | **owner** | the site's launch |
-| O-10 | Interim Web3Forms: acceptable for real lead data until L1, or hold the forms until L1? (terms, region and retention unknown) | **owner** | the site's launch |
+| ~~O-10~~ | **Settled 2026-10-12 (WSK-D75): no Web3Forms, not even as an interim.** The forms launch only on the WebDesk path (L1) | — | — |
 | O-11 | Sumopod is contracted personally: move the contract to the controller entity, or a written arrangement with the contract holder (addendum R-V18, item 20) | **owner**, counsel | A5 live |
 | O-6 | Production Turnstile keys for gaiada.com's forms | **owner** (Cloudflare) | L1 live |
 | O-7 | Meta Business Verification | SMM team | P3 |
@@ -120,3 +120,5 @@ became L1's two defects, L2's consent snapshot, G5, G6, O-9 and O-10. No server 
 `gda-aicenter` is `e2-highmem-2` (2 vCPU, 9 GiB of 15 free, 15-min load 4.2 just after the cut-over); `sumopod` is
 4 vCPU with a load of 21, 4 GiB free and its disk at 81%. Shown both, the owner chose `sumopod`, so D66 is amended the
 same day, O-1 is settled, and O-11 plus the addendum's R-V18 cover the personally contracted box.
+
+**2026-10-12.** Waves 1–3 went live in 360, W1c/W3c/G5b/P1-g in 361, and L1d + W2d in 362; W2e (the writers' room UI) is on main. The owner ruled **WSK-D75: no Web3Forms**, which settles O-10. The site switch of L1 (the transport, the consent notice, the field ids already matched) becomes the launch path for the forms, with nothing in between.

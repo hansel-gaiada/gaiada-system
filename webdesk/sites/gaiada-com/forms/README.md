@@ -132,3 +132,7 @@ These follow from how the submit route validates (`webdesk/api/src/forms/forms.s
 - `notify` is `{}`: WebDesk sends no notification mail for these forms. The lead and the staff alert are the ERP's (M5-L4 / L5). Setting a recipient is a later choice (it needs a mail template per tenant).
 - `attachments` is not declared: the forms accept the route's default (up to 5 files, scanned). The site's forms have no file input (the onboard form's `brand_files` is a text description).
 - `website_url` and `current_url` are `text`, not a URL type: WebDesk has no `url` field type, and the onboard form accepts "none".
+
+## No Web3Forms (WSK-D75, owner 2026-10-12)
+
+The site's forms post only to the WebDesk forms API. There is no interim Web3Forms transport for real leads: the site switch removes `WEB3FORMS_ENDPOINT`, the `access_key`/`subject`/`from_name`/`redirect` members and `PUBLIC_WEB3FORMS_KEY`/`PUBLIC_WEB3FORMS_CAPTCHA` from the build, and until the WebDesk forms are applied a form says it is not wired (the existing `formsAreLive` pattern), never falls back.

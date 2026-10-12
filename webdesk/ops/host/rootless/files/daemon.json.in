@@ -1,0 +1,11 @@
+{
+  "data-root": "@DATA_ROOT@",
+  "features": { "containerd-snapshotter": true },
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "bip": "172.29.255.1/24",
+  "default-address-pools": [ { "base": "172.30.0.0/16", "size": 24 } ],
+  "no-new-privileges": true,
+  "userland-proxy": true,
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "5" }
+}
