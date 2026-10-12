@@ -153,11 +153,12 @@ sudo /usr/local/sbin/webdesk-egress-guard.sh status          # the four rules ab
 
 **(d) Switch WebDesk's OTel on.** In `/etc/webdesk/.env`: `OTEL_ENABLED=true`, `WEBDESK_OTEL_ZONEA_PUSH_ENABLED=true`,
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4319`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, the headers line from (b).
-Then recreate the api without building:
+Then recreate the api without building, with ALL THREE files (since release 357 the api runs on the release
+overlay; the two-file form would swap it back to a stale local `webdesk-api:latest`):
 
 ```bash
 cd /home/Hansel/gaiada-webdesk/webdesk && sudo docker compose --env-file /etc/webdesk/.env -p webdesk \
-  -f docker-compose.yml -f docker-compose.aicenter.yml up -d --no-build --no-deps api
+  -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml up -d --no-build --no-deps api
 ```
 
 (The api's traces SDK, §7, is what this step turns on.)
@@ -258,3 +259,18 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <the token from step (b)>
 Recreate the api (step (d)). Expect `[webdesk:otel] tracing on (OTLP/HTTP protobuf, traces only)` in `docker logs`, then Tempo
 `{ resource.service.name = "webdesk-api" }` within ~20 s of a request. Every request is sampled (the collector's 500 spans/s tail limit is the cap; no head sampler is configured). Roll back with
 `OTEL_ENABLED=false` and a recreate. Cost: about 24 MB of node_modules (38 packages) in the image, roughly 30 MB RSS when on, nothing when off.
+
+## 8. Live (2026-10-12): turned on, owner-approved
+
+- (a) release 359 shipped the receiver: `172.17.0.1:4319`, 401 without a token.
+- (c) the guard exception was applied at 02:23 CST: the four rules, with 4319 open from `webdesk_default` and 5432/4318
+  still blocked.
+- (b) a token was minted into both env files, with backups `*.bak-otel-20261012T022357Z`. Only the collector was
+  recreated: a wrong token gives 401, the right one 200. The ERP `.env` is still shell-sourceable.
+- (d) the api was recreated on the release overlay: `[webdesk:otel] tracing on (OTLP/HTTP protobuf, traces only)`,
+  0 restarts.
+- (e) 12 `webdesk-api` traces were in sumopod's Tempo within minutes (`{ resource.service.namespace = "webdesk" }`).
+  A preview request with a fake 43-character token and a query-string secret is stored as
+  `/v1/t/gaiada/preview/[redacted]`: 0 occurrences of either secret in any trace.
+- Containment probes: 40/40 with `WEBDESK_OTLP_PORT=4319`. The OTLP exception is the only extra host port. Probe 6
+  lists the bearer as shared by design: write-only, telemetry only.
