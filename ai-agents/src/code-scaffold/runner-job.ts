@@ -18,6 +18,16 @@
 // never holds a credential; `mode` stays "dry_run" because it describes the composer, and the commit's outcome is
 // its own field. Without `commit` the job is exactly the M6-P4b1 dry run.
 //
+// ── AT MOST ONE GOAL PER SITE AND SNAPSHOT (M6-P4e3) ───────────────────────────────────────────────
+// The delivery workflow calls `code.scaffold` (which files this goal and returns at once) and only afterwards creates
+// the single-shot `claude_code` stage, so two near-simultaneous deliveries (a gate decision plus the
+// `ev/webdev.site.contract_pinned` resume, or an at-least-once redelivery after a first attempt died between the two
+// calls) could each queue a goal. `scaffoldDedupeKey` below derives the goal's idempotency key from its own text, and the
+// runner's `POST /goals` files a scaffold goal through `GoalStore.insertGoalOnce`: while a goal with that key is queued,
+// running or finished ok, a second call gets THAT goal's id and status back (`deduped: true`) and queues nothing; a
+// failed, cancelled or interrupted goal frees the key, so a retry is a new goal. The check is atomic (a partial unique
+// index in Postgres), not a read-then-write. The key is derived here, inside the runner, so no caller can skip it.
+//
 // ── THE RESULT IS DATA, NOT A PATH ─────────────────────────────────────────────────────────────────
 // The tree is composed in a temp dir (so the dry-run writer exercises the real write + local commit), and the
 // dir is removed before returning. What leaves this module is `ScaffoldJobResult`: the file list with sizes and
@@ -26,6 +36,7 @@
 // ── CONTRACT (goal text) ───────────────────────────────────────────────────────────────────────────
 // The goal text is the JSON of ScaffoldGoalPayload (the frozen §06 envelope, minus a target). The company is the
 // goal's own `tenantId`, authoritative and tenant-pinned by the runner, never read from the text.
+import { createHash } from "node:crypto";
 import type { Envelope } from "../agent";
 import type { ToolCaller } from "./hub-client";
 import type { ScaffoldFileEntry, ScaffoldJobEnvelope, ScaffoldOutcome, ContractLock, SiteKind, VocabularyGap } from "./envelope";
@@ -68,6 +79,27 @@ export interface ScaffoldJobResult {
   gaps?: VocabularyGap[];
   /** M6-P4b2 - present when the goal asked for a commit: platform-nest's reply, or the refusal token. */
   commit?: ScaffoldCommitRecord;
+}
+
+/** The idempotency key of a scaffold goal, or null when the goal text is not a valid scaffold envelope (such a goal
+ *  is not deduplicated: it files as before and the job fails it as `invalid_job`).
+ *  With `commit.provisionedSiteId`: one goal per provisioned site and pinned snapshot, whatever else differs (the
+ *  repo takes a first fill once, so a second goal for the same pair is wasted work).
+ *  Without it (a dry run, nothing to commit): the envelope's identifying fields, so only an identical request dedupes.
+ *  The company is NOT in the key: the store scopes it by the goal's own tenant. */
+export function scaffoldDedupeKey(goal: string): string | null {
+  let job: ScaffoldJobEnvelope;
+  let target: ScaffoldCommitTarget | null;
+  try {
+    job = parseScaffoldGoal(goal);
+    target = parseCommitTarget(goal);
+  } catch {
+    return null;
+  }
+  const snapshot = job.contractSnapshotId.trim();
+  if (target) return `scaffold:site=${target.provisionedSiteId}:snapshot=${snapshot}`;
+  const fields = [job.runId, job.repoUrl, job.siteKind, job.prdArtifact, job.prototypeArtifact, snapshot, job.constraints.blockLibraryVersion, job.constraints.maxRevise];
+  return `scaffold:dryrun=${createHash("sha256").update(JSON.stringify(fields)).digest("hex")}`;
 }
 
 const SITE_KINDS: readonly string[] = ["astro", "node", "wp"];
