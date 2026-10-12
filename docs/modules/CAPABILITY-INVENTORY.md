@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **215** capabilities across **16** owners
-- **116** writes · 99 reads
+- **216** capabilities across **16** owners
+- **116** writes · 100 reads
 - Writes by impact: **high 24** · medium 35 · low 57
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -235,6 +235,7 @@ unfalsifiable after.
 | webdev | `webdesk.editorial.approve` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/approve` | write | `medium` |
 | webdev | `webdesk.editorial.assign` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/assign` | write | `low` |
 | webdev | `webdesk.editorial.board` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/board` | read | — |
+| webdev | `webdesk.editorial.calendar` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/calendar` | read | — |
 | webdev | `webdesk.editorial.comment` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/comments` | write | `low` |
 | webdev | `webdesk.editorial.grantRole` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | write | `high` |
 | webdev | `webdesk.editorial.history` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial` | read | — |

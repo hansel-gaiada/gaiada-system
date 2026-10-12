@@ -164,6 +164,19 @@ export const WEBDESK_EDITORIAL_REVIEW_TOOLS: McpToolDef[] = [
     inputSchema: { type: "object", properties: { ...EDITORIAL_SITE_PROPS }, required: ["tenantId", "tenantSlug", "siteId"] },
   },
   {
+    name: "webdesk.editorial.calendar",
+    description:
+      "M5-W5. The editorial calendar and workflow board in one read: every item in the review flow plus every scheduled item, each with its review state, author, "
+      + "due and planned dates, `publish_at`, the pending publish/schedule requests on it (requested time, whether the caller filed it; never who) and its brief (title and "
+      + "assignee, only if the caller may read the brief), and one `placement` (publish_at, then the earliest requested publish time, then the planned date, then the due date). "
+      + "Rows are filtered by the caller's Cerbos read per (collection, locale); a scoped grant gets `countsWithheld: true` and no counts. Any part that cannot be read is a 503 "
+      + "naming it (`board`, `scheduled`, `briefs`, `requests`, `authorization`), never a shorter list; `truncated: true` means a cap cut a read. The hub drops a GET's query, so this "
+      + "returns every row with no date window (the UI passes `from`/`to` as UTC days).",
+    minAssurance: "low", method: "GET",
+    pathTemplate: `${CONTENT_BASE}/editorial/calendar`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_SITE_PROPS }, required: ["tenantId", "tenantSlug", "siteId"] },
+  },
+  {
     name: "webdesk.editorial.history",
     description: "One item's review record: its state, who submitted, signed off and approved which version, the event history and the comments.",
     minAssurance: "low", method: "GET",

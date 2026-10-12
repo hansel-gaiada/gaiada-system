@@ -31,6 +31,7 @@ import {
 } from "./webdesk-content.service";
 import { webdeskMedia } from "./webdesk-media.service";
 import { webdeskEditorial } from "./webdesk-editorial.service";
+import { webdeskCalendar } from "./webdesk-calendar.service";
 import { webdeskAssist } from "./webdesk-assist.service";
 import { defineFormDefinition, getFormDefinition, listFormDefinitions } from "./webdesk-forms.service";
 
@@ -357,6 +358,18 @@ export class WebdeskContentController {
   ) {
     const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
     send(reply, await webdeskEditorial.board(gate, { tenantSlug, siteId }, query));
+  }
+
+  // M5-W5: the calendar and workflow board — the review board joined with scheduled publish dates, pending publish requests and briefs.
+  // Same gate as the board (`authorizeSite` first; the service filters every row by Cerbos before it joins anything to it).
+  @Get("sites/:tenantSlug/:siteId/editorial/calendar")
+  async editorialCalendar(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
+    @Query() query: unknown, @Res() reply: FastifyReply,
+  ) {
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
+    send(reply, await webdeskCalendar.calendar(gate, { tenantSlug, siteId }, query));
   }
 
   @Get("sites/:tenantSlug/:siteId/items/:itemId/editorial")
