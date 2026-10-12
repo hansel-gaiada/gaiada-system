@@ -588,6 +588,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 | File | Declared id | Name |
 |---|---|---|
+| `billing-chaser.json` | `wspv3billchase01` | billing-chaser (CRON) |
 | `compliance-gate-nag.json` | — | compliance-gate-nag (CRON) |
 | `digest-fanout.json` | — | digest-fanout (CRON) |
 | `mtg-dispatcher.json` | `ws11mtgdispatch0` | WS11 meeting dispatcher (transcript -> MOM -> 3 extractions -> pipeline run) |
