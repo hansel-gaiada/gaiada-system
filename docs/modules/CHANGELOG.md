@@ -11,6 +11,28 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.97.0` - M5-P5b: the AI-crawler log (counts only, no IP or user agent kept) (2026-10-12) - DEV-VERIFIED
+
+- **Ingest:** `POST …/search/properties/:propertyId/ai-crawlers/ingest` and MCP `search.aiCrawlers.ingest` (medium).
+  - It parses nginx/Apache combined and Caddy JSON access-log chunks.
+  - It keeps only requests from 23 listed AI crawlers (GPTBot, ClaudeBot, PerplexityBot, …), each with its vendor source.
+  - Hits are aggregated per day, bot, path (query stripped), status and claimed/verified.
+  - Raw lines, IPs and user agents are never stored.
+  - Re-sending a chunk is a duplicate (SHA-256 per property).
+  - CIDR verification is opt-in via `AI_CRAWLER_RANGES_FILE` (needs a compose passthrough before use).
+- **Migration `202610131500_search_ai_crawler_log`:** daily aggregates and chunk hashes, FORCE RLS in the `search` scope.
+- **Reads:** `ai-crawlers/summary` and `ai-visibility-summary` (the stored SM-16 results), with MCP reads, on `resource_search_property`.
+- **No data flows yet:** that needs a host-side shipping job; the recipe is in `infra/runbooks/ai-crawler-log.md`.
+- **Verified** on GitHub Actions 38265057653: DB 10/10 (no human IP/UA/query in either table or the activity trail), parser 22/22.
+
+### platform-ui `0.102.0` - M5-P5b: an AI visibility tab in the Website workspace (2026-10-12) - DEV-VERIFIED
+
+- **Website › Analytics › AI visibility shows:**
+  - AI-crawler hits over time by bot, by bot with verified/unverified, top paths, and the status mix (served / redirected / blocked / 4xx / 5xx);
+  - the newest SM-16 result per engine and query.
+- Missing data is said in words. Zero appears only inside the log's coverage.
+- GitHub Actions 38265057653 green.
+
 ### platform-nest `0.96.0` - PV-3 follow-ups: a payment's recorder cannot approve an agent's decision on it; client visibility on detail reads (2026-10-12) - PROTOTYPED
 
 - **D14 maker-checker for `invoicePayments.decide`** (found by PV3-06). An agent's request to confirm or reject a client payment executes as the filer, so the route's "the recorder may not decide" rule never saw the approver; the payment's recorder could approve the request and decide their own payment one step removed. Now:
