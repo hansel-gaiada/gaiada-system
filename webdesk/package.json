@@ -6,7 +6,8 @@
   "scripts": {
     "migrate": "node migrations/migrate.mjs",
     "lint:migrations": "node scripts/lint-migration-rls.mjs",
-    "test": "npm run lint:migrations && npm run check:rls:selftest",
+    "test": "npm run lint:migrations && npm run check:rls:selftest && npm run check:wp-template",
+    "check:wp-template": "node templates/check-wp-theme.mjs",
     "check:rls": "node scripts/check-rls-integrity.mjs",
     "check:rls:selftest": "node scripts/check-rls-integrity.mjs --selftest"
   },
