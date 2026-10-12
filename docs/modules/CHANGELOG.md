@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.105.0` / mcp-hub `0.15.0` / automation `0.6.0` - `wf:billing-chaser`: a daily read-and-remind job for contracts and payment claims (2026-10-13) - PROTOTYPED
+
+Owner ruling PV-D28 (the owner delegated the naming).
+
+- **automation:** `automation/workflows/billing-chaser.json`, declared id `wspv3billchase01`, cron `0 9 * * *` Asia/Makassar.
+  - It reads `clients.list`, then `contracts.list` and `invoicePayments.list` per client.
+  - It raises ONE in-app `notify` digest when there is: a payment claim pending for more than 2 days; a client-signed contract waiting for our countersignature for more than 1 day; or a sent contract unsigned by the client for more than 7 days.
+  - It stays silent when nothing qualifies, and fails loudly on a refused read.
+  - Recipients come from `BILLING_NOTIFY_USER_IDS`, falling back to the ops lead (`NOTIFY_USER_ID`). PV-D28's routing to each client's account owner needs an allowlisted owner read, and is a follow-up.
+- **mcp-hub:** `AUTOMATION_ALLOWLIST["wf:billing-chaser"]` = `clients.list`, `contracts.list`, `invoicePayments.list` and `notify` only. Tests prove send, countersign, decide, createDraft and updateDraft are refused for it.
+- **platform-nest:**
+  - `contracts.list` and `invoicePayments.list` drop to `minAssurance: "low"`, because an n8n principal is always low. Cerbos still requires `notLow` on every non-`platform_admin` contract and invoice read rule, and every write and `contracts.get` stay `verified`.
+  - `seed:automation` adds the `wf:billing-chaser` manager service account, which reads but gets 403 on countersign, send and decide.
+- **After deploy:** run `npm run seed:automation` once, then a CLI import of the workflow (`n8n import:workflow`, so the declared id is kept), then activate it.
+- Verified on sumopod: mcp-hub 29 files (400 passed); platform-nest 665 files, with only the capability inventory to regenerate (done on Linux); and 16 workflow tests that run its Code nodes on fixtures. Teeth: `contracts.send` added to the scope fails the scope tests.
+
 ### insights-collector `0.2.0` + infra `0.13.10` - M5-V3-b: the consented channel, forget, the ops events read and the 72-hour purge (not deployed) (2026-10-13) - PROTOTYPED
 
 - **`POST /lib/kestrel/v`** (consented events):
