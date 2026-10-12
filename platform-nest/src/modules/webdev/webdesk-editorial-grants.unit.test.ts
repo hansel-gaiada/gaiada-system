@@ -80,7 +80,8 @@ describe("parseEditorialGrantBody (strict, after authorization)", () => {
 });
 
 describe("the MCP tools and their impact classes (agentic-native: every capability is an endpoint AND a tool)", () => {
-  const defs = () => webdevModule.mcpTools.filter((t) => t.name.startsWith("webdesk.editorial."));
+  // M5-W2d added the review-flow tools under the same prefix; this block is the W1b grant tools only.
+  const defs = () => webdevModule.mcpTools.filter((t) => /^webdesk.editorial.(listGrants|grantRole|revokeRole)$/.test(t.name));
   const BASE = "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants";
 
   it("three tools: listGrants (read), grantRole (HIGH write), revokeRole (MEDIUM write), on the BFF routes", () => {

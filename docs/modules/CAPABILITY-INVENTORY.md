@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **187** capabilities across **16** owners
-- **98** writes · 89 reads
-- Writes by impact: **high 24** · medium 31 · low 43
+- **201** capabilities across **16** owners
+- **108** writes · 93 reads
+- Writes by impact: **high 24** · medium 35 · low 49
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 21 |
+| webdev | `webdev` | 23 |
 
 ## Capabilities
 
@@ -221,9 +221,23 @@ unfalsifiable after.
 | webdev | `webdesk.content.update` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId` | write | `low` |
 | webdev | `webdesk.contract.regenerate` | `POST` | `/api/:tenantId/modules/webdev/control/contract/regenerate` | write | `medium` |
 | webdev | `webdesk.deploy.staging` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/deploy/staging` | write | `medium` |
+| webdev | `webdesk.editorial.approve` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/approve` | write | `medium` |
+| webdev | `webdesk.editorial.assign` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/assign` | write | `low` |
+| webdev | `webdesk.editorial.board` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/board` | read | — |
+| webdev | `webdesk.editorial.comment` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/comments` | write | `low` |
 | webdev | `webdesk.editorial.grantRole` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | write | `high` |
+| webdev | `webdesk.editorial.history` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial` | read | — |
 | webdev | `webdesk.editorial.listGrants` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | read | — |
+| webdev | `webdesk.editorial.requestChanges` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/request-changes` | write | `low` |
+| webdev | `webdesk.editorial.resolveComment` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/comments/:commentId/resolve` | write | `low` |
 | webdev | `webdesk.editorial.revokeRole` | `DELETE` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants/:userId/:role` | write | `medium` |
+| webdev | `webdesk.editorial.seoSignoff` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/seo-signoff` | write | `medium` |
+| webdev | `webdesk.editorial.setPolicy` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/collections/:collectionKey/editorial-policy` | write | `medium` |
+| webdev | `webdesk.editorial.submit` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/submit` | write | `low` |
+| webdev | `webdesk.editorial.withdraw` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/editorial/withdraw` | write | `low` |
+| webdev | `webdesk.forms.define` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey` | write | `medium` |
+| webdev | `webdesk.forms.get` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey` | read | — |
+| webdev | `webdesk.forms.list` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms` | read | — |
 | webdev | `webdesk.key.mint` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/keys` | write | `high` |
 | webdev | `webdesk.key.revoke` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/revoke` | write | `high` |
 | webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |

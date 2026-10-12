@@ -70,6 +70,10 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "media.usage": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-L1/L2 — the ERP reads one submission back after a form.received fact: read / webdesk:read.
   "forms.submission.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-L1d — a site's form definitions: forms.define is MEDIUM/operate (schema.apply's family, no WS4), the reads are read.
+  "forms.define": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "forms.def.list": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "forms.def.get": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-W2b — the writers' room review flow (design 4.3): the nine writes are MEDIUM/operate (none changes what a
   // production key sees; the publish gate that enforces approval is W2c on content.publish/schedule, still HIGH),
   // the board and the history are reads.

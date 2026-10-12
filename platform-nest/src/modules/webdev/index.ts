@@ -30,7 +30,147 @@
 //    reconcile flow's wake-ups); it reacts to none. The `prd_sign` -> propose beat is an n8n flow
 //    calling the hub tool (PRV-03), not an in-process handler — that indirection is what puts the WS4
 //    approval between the event and the write.
-import type { ModuleContract } from "../contract";
+import type { McpToolDef, ModuleContract } from "../contract";
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// M5-W2d — the writers' room review flow's MCP tools (docs/plans/2026-10-11-m5-writers-room-design.md §4.3, §8). Same BFF routes
+// as the UI (`webdesk-content.controller.ts` → `webdesk-editorial.service.ts`, FRONTEND-BFF-CONTRACT §27), so a review action
+// behaves identically under a human, n8n and an agent. The authority is the caller's Cerbos decision (the two-phase gate), not
+// the tool.
+//
+// IMPACT CLASSES (§4.3, exact): submit, withdraw, requestChanges, assign, comment, resolveComment are `low`; seoSignoff, approve and
+// setPolicy are `medium`; board and history are reads. None is `high`: none changes what a production key sees (publishing is
+// still `webdesk.content.requestPublish` -> a WS4 approval).
+//
+// Cerbos REFUSES automation and bot principals for approve and SEO sign-off (kind in [automation, bot]; approve also contributors),
+// and refuses an approver who created the version being approved, for every principal. These are human judgements: an agent
+// can ASK for one but never record one. `medium` write tools SUSPEND an unattended caller for a human approval; like
+// `webdesk.content.preview` they are NOT D14 executables (a recorded sign-off must be made by the human at the screen, not
+// re-driven), pending the owner's call, so approving the suspension re-drives nothing.
+//
+// `setPolicy` is a PATCH here because the hub's method union has no PUT; the BFF accepts both on the same path. The board
+// is a GET: the hub sends only PATH args for a GET, so it returns WebDesk's default first page with no filters (the hub
+// limitation recorded on the content tools above).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const EDITORIAL_SITE_PROPS = { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" } } as const;
+const EDITORIAL_ITEM_PROPS = { ...EDITORIAL_SITE_PROPS, itemId: { type: "string" } } as const;
+const EDITORIAL_ITEM_REQUIRED = ["tenantId", "tenantSlug", "siteId", "itemId"] as const;
+const CONTENT_BASE = "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId";
+const VERSION_PROP = { type: "integer", minimum: 1, description: "The version the action is about: it must equal the version submitted for review (else a typed 409 review-version-mismatch)." } as const;
+
+export const WEBDESK_EDITORIAL_REVIEW_TOOLS: McpToolDef[] = [
+  {
+    name: "webdesk.editorial.submit",
+    description:
+      "Submit an item's `version` (its head) for editorial review. The collection must have review turned on (typed 409 review-not-enabled otherwise). "
+      + "Tells the editors in scope and the publishers. LOW write: only the review state changes; nothing goes live.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/submit`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_ITEM_PROPS, version: VERSION_PROP }, required: [...EDITORIAL_ITEM_REQUIRED, "version"] },
+  },
+  {
+    name: "webdesk.editorial.withdraw",
+    description: "Withdraw an item from review, back to a draft. LOW write.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/withdraw`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_ITEM_PROPS }, required: [...EDITORIAL_ITEM_REQUIRED] },
+  },
+  {
+    name: "webdesk.editorial.requestChanges",
+    description:
+      "Send an item under review back to its author with a `note` (what to change). Tells the author. LOW write. Needs the editor or publisher role on the item's collection.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/request-changes`,
+    inputSchema: {
+      type: "object",
+      properties: { ...EDITORIAL_ITEM_PROPS, version: VERSION_PROP, note: { type: "string", minLength: 1, maxLength: 2000 } },
+      required: [...EDITORIAL_ITEM_REQUIRED, "version", "note"],
+    },
+  },
+  {
+    name: "webdesk.editorial.assign",
+    description:
+      "Assign an item: its author (`authorSub`, a user id), `dueAt`, `plannedPublishAt` (ISO-8601, null clears) and `briefRef`. At least one. LOW write.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/assign`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...EDITORIAL_ITEM_PROPS,
+        authorSub: { type: "string" },
+        dueAt: { type: ["string", "null"] }, plannedPublishAt: { type: ["string", "null"] }, briefRef: { type: ["string", "null"] },
+      },
+      required: [...EDITORIAL_ITEM_REQUIRED],
+    },
+  },
+  {
+    name: "webdesk.editorial.comment",
+    description:
+      "Comment on an item under review. `anchor` (optional) is a JSON pointer into the version's fields (\"\" = the whole item). LOW write.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/comments`,
+    inputSchema: {
+      type: "object",
+      properties: { ...EDITORIAL_ITEM_PROPS, version: VERSION_PROP, body: { type: "string", minLength: 1, maxLength: 4000 }, anchor: { type: "string", maxLength: 512 } },
+      required: [...EDITORIAL_ITEM_REQUIRED, "version", "body"],
+    },
+  },
+  {
+    name: "webdesk.editorial.resolveComment",
+    description: "Mark a review comment resolved. LOW write.",
+    minAssurance: "low", write: true, impact: "low", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/comments/:commentId/resolve`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_ITEM_PROPS, commentId: { type: "string" } }, required: [...EDITORIAL_ITEM_REQUIRED, "commentId"] },
+  },
+  {
+    name: "webdesk.editorial.seoSignoff",
+    description:
+      "Record the SEO/AEO sign-off of the submitted version (a recorded check; the approval after it is four-eyed). MEDIUM write. "
+      + "Cerbos refuses automation and bot principals: an agent cannot record a sign-off, only a human can; an unattended caller is suspended for human approval.",
+    minAssurance: "low", write: true, impact: "medium", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/seo-signoff`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_ITEM_PROPS, version: VERSION_PROP }, required: [...EDITORIAL_ITEM_REQUIRED, "version"] },
+  },
+  {
+    name: "webdesk.editorial.approve",
+    description:
+      "Approve the version submitted for review. MEDIUM write; tells the author. Maker != checker: Cerbos refuses an approver who created the version "
+      + "being approved (platform_admin included). Cerbos also refuses automation, bot and contributor principals: an agent cannot approve, only a human can; "
+      + "an unattended caller is suspended for human approval. Approving does not publish: that is `webdesk.content.requestPublish`.",
+    minAssurance: "low", write: true, impact: "medium", method: "POST",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial/approve`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_ITEM_PROPS, version: VERSION_PROP }, required: [...EDITORIAL_ITEM_REQUIRED, "version"] },
+  },
+  {
+    name: "webdesk.editorial.setPolicy",
+    description:
+      "Turn editorial review on or off for one collection (`reviewRequired`), and whether an SEO sign-off is also required (`seoSignoffRequired`, only with review on). "
+      + "MEDIUM write; needs `webdesk_collection:manage_editorial` (the publisher tier, company admins). With review off, content flows as before.",
+    minAssurance: "low", write: true, impact: "medium", method: "PATCH",
+    pathTemplate: `${CONTENT_BASE}/collections/:collectionKey/editorial-policy`,
+    inputSchema: {
+      type: "object",
+      properties: { ...EDITORIAL_SITE_PROPS, collectionKey: { type: "string" }, reviewRequired: { type: "boolean" }, seoSignoffRequired: { type: "boolean" } },
+      required: ["tenantId", "tenantSlug", "siteId", "collectionKey", "reviewRequired"],
+    },
+  },
+  {
+    name: "webdesk.editorial.board",
+    description:
+      "The site's review board: items in the editorial flow with their review state, per-state counts (staff only) and each collection's policy. "
+      + "A caller with a scoped writers' room grant sees only the collections and locales its grant reaches.",
+    minAssurance: "low", method: "GET",
+    pathTemplate: `${CONTENT_BASE}/editorial/board`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_SITE_PROPS }, required: ["tenantId", "tenantSlug", "siteId"] },
+  },
+  {
+    name: "webdesk.editorial.history",
+    description: "One item's review record: its state, who submitted, signed off and approved which version, the event history and the comments.",
+    minAssurance: "low", method: "GET",
+    pathTemplate: `${CONTENT_BASE}/items/:itemId/editorial`,
+    inputSchema: { type: "object", properties: { ...EDITORIAL_ITEM_PROPS }, required: [...EDITORIAL_ITEM_REQUIRED] },
+  },
+];
 
 export const webdevModule: ModuleContract = {
   key: "webdev",
@@ -885,6 +1025,74 @@ export const webdevModule: ModuleContract = {
       },
     },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // M5-L1d — WebDesk form definitions (docs/plans/2026-10-11-webdesk-m5-plan.md, M5-L1d). Before this a `form_defs` row
+    // could only be created by raw SQL. Same BFF routes as above (`webdesk-content.controller.ts` -> `webdesk-forms.service.ts`),
+    // authorised as the EXISTING Cerbos kind `webdesk_collection`: `apply_schema` for the write (company_admin,
+    // webdev_manager, platform_admin: the publisher tier that already guards a collection's composition) and `read` for the
+    // reads. No new kind.
+    //
+    // IMPACT. `define` is `medium`, WebDesk's own class for `forms.define`: it changes what a PUBLIC form accepts and which
+    // consent notice it records, but never touches /v1 delivery or published content. An unattended caller (n8n, an agent)
+    // SUSPENDS for a human decision; an attended human is not suspended. It is deliberately NOT yet a D14 executable (not in
+    // `core/approval-executables.ts` nor `resource_mcp_tool.yaml`'s list, which are outside this change's paths): approving
+    // an unattended suspension therefore re-drives nothing (`not_applicable`), so for now only an attended human can
+    // define a form. Pairing it is a one-line change in each of those two files.
+    //
+    // `define` is a PATCH here because the hub's method union has no PUT; the BFF accepts PUT and PATCH on the same path.
+    // The body is `{schema, notify?, retentionDays, consentNoticeVersion}`: the shape of webdesk/sites/gaiada-com/forms/*.json
+    // without its `key` (which is `formKey`). WebDesk's typed 422 `form-definition-invalid` and 409 `consent-version-unchanged`
+    // reach an HTTP caller untouched; the hub shows an agent only its generic "platform ... <status>" error.
+    {
+      name: "webdesk.forms.list",
+      description: "List the form definitions of one WebDesk site (key, form id, fields, consent notice and version, retention).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId"],
+      },
+    },
+    {
+      name: "webdesk.forms.get",
+      description: "Read one form definition of a WebDesk site by its key (the stored fields, honeypot, consent notice text and version, retention days, notify).",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, formKey: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId", "formKey"],
+      },
+    },
+    {
+      name: "webdesk.forms.define",
+      description:
+        "Create or replace one PUBLIC form's definition on a WebDesk site, by its key (an upsert; redefining keeps the form id the site posts to). "
+        + "`schema` is { fields: [{key,type,required?,maxLength?,options?}], honeypotField?, consentNotice: {text}, attachments? } with field types "
+        + "text, textarea, email, tel, number, boolean, date, select; an email/phone-looking field must be typed email/tel. `retentionDays` (1..3650) and "
+        + "`consentNoticeVersion` are required. Changing the consent notice text without a NEW version is refused (409 consent-version-unchanged). "
+        + "MEDIUM write: an unattended caller is suspended for human approval.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" },
+          formKey: { type: "string", description: "The form's stable key, e.g. contact. [a-z0-9][a-z0-9_-]{0,63}." },
+          schema: { type: "object", description: "{ fields, honeypotField?, consentNotice: { text }, attachments? }" },
+          notify: { type: "object", description: "Optional { to?: {email, name?}, templateKey?, autoresponder?, autoresponderTemplateKey? }." },
+          retentionDays: { type: "integer", minimum: 1, maximum: 3650 },
+          consentNoticeVersion: { type: "string", description: "Required. Must change whenever consentNotice.text changes." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "formKey", "schema", "retentionDays", "consentNoticeVersion"],
+      },
+    },
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
     // M5-W1b — the writers' room grant path (docs/plans/2026-10-11-m5-writers-room-design.md §2.6). Same BFF routes as
     // the UI (`webdesk-editorial-grants.controller.ts`), authorised as Cerbos `webdesk_collection:manage_editorial`.
     //
@@ -956,6 +1164,7 @@ export const webdevModule: ModuleContract = {
         required: ["tenantId", "tenantSlug", "siteId", "userId", "role"],
       },
     },
+    ...WEBDESK_EDITORIAL_REVIEW_TOOLS,
   ],
   rollupProviders: [],
   uiManifest: [

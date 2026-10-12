@@ -1610,6 +1610,38 @@ portal. `publish`/`schedule` are decide()-only and not listed.
 `allowed` equals the batch answer, `GET sites` filtering, twin provenance, the controller's first statement); `src/modules/webdev/webdesk-content-two-phase.test.ts` (real Cerbos + Postgres + the real principal assembly over `app.inject`, every denial
 beside a positive control, `allowed` against a direct `checkActions` for the same principal and resource; needs the Linux gate). The existing webdev suites (`webdesk-content.test.ts`, `webdesk-media.test.ts`, the client suites, the preview suite) pin the staff behaviour.
 
+### 27.3 M5-L1d — WebDesk form definitions reuse `webdesk_collection` (2026-10-12, PROTOTYPED)
+
+**No new kind, role, permission, bundle row or policy rule.** `forms.define` (WebDesk, MEDIUM / `webdesk:operate`) is authorised in the ERP as Cerbos
+`webdesk_collection` · **`apply_schema`** (company_admin, webdev_manager / module_manager, platform_admin; sensitive publisher tier), and `forms.def.list` / `forms.def.get` as
+`webdesk_collection` · **`read`**. Why `apply_schema`: a form definition is the composition of a PUBLIC intake (the fields it accepts, the consent notice it records, how long it keeps
+submissions), the same family as a collection's composition, which `apply_schema` already guards; WebDesk classifies both MEDIUM / operate. No `client` rule exists on this kind
+for either action, the BFF opens the STAFF gate (`authorizeSite`, never `openClient`), and WebDesk's `forms.define` carries no editorial assertion (like `schema.apply`), so a
+client-editor principal (`ce`) cannot be expressed on it. MCP: `webdesk.forms.define` (**medium**, PATCH alias), `webdesk.forms.list` / `webdesk.forms.get` (read), assurance `low`.
+**Two-phase (W1c, §27.2):** each handler's first statement is `authorizeSite(…, siteId, "webdesk_collection", action)` (phase 1: `read` on the route's site; for a principal with no writers' room grant also the old attribute-free question). The write then asks its REAL action, `webdesk_collection:apply_schema` with `siteId` set, for EVERY principal inside `defineFormDefinition`, before body validation and before any WebDesk call, so a writer or editor holding a grant on the site (who passes phase 1) is denied. The reads need nothing beyond phase 1.
+FRONTEND-BFF-CONTRACT §27 "WebDesk form definitions". **Open follow-up:** `webdesk.forms.define` is NOT a D14 executable (`core/approval-executables.ts` + `resource_mcp_tool.yaml`'s list are
+outside this change), so an unattended suspension, once approved, re-drives nothing: only an attended human can define a form until the pair is added.
+
+### 27.4 M5-W2d — the review routes: which action decides each (2026-10-12, PROTOTYPED)
+
+No policy change: W2d only adds the BFF and MCP surface over the W1a rules, through the W1c two-phase gate. Phase 1 is `webdesk_collection:read` on the route's site (`authorizeSite`) for every route; for the item commands the principal that holds no
+writers' room grant is also asked the attribute-free action (an earlier deny, never an allow). Phase 2 runs before any body validation, with `siteId` from the wall and `collectionKey`, `locale`, `ownerId`, `reviewState`, `published` from WebDesk's `item.get`.
+
+| Route | Phase-1 gate | Phase 2 (action · extra attributes) |
+|---|---|---|
+| `POST …/editorial/submit`, `/withdraw` | `webdesk_content_item:submit` | `submit` |
+| `POST …/editorial/request-changes` | `…:request_changes` | `request_changes` |
+| `POST …/editorial/seo-signoff` | `…:seo_signoff` | `seo_signoff` (DENY for automation, bot) |
+| `POST …/editorial/approve` | `webdesk_collection:read` only (an attribute-free `approve` is denied for everyone) | `approve` with `creatorId` = `created_by` of the submitted version (WebDesk), so the structural DENY (maker != checker, platform_admin included) and the unknown-creator DENY apply; DENY for automation, bot, contributor |
+| `POST …/editorial/assign` | `…:assign` | `assign` |
+| `POST …/editorial/comments`, `/comments/:id/resolve` | `…:comment` | `comment` |
+| `PUT/PATCH …/collections/:key/editorial-policy` | `webdesk_collection:manage_editorial` | `manage_editorial` on `{siteId, collectionKey}` |
+| `GET …/editorial/board` | `webdesk_content_item:read` | company-level `read`, else `read` per (collectionKey, locale) of the rows returned; unreadable rows, their policies and the site-wide counts are withheld |
+| `GET …/items/:id/editorial` | `…:read` | `read` |
+
+`creatorId` is never taken from a body: a body key naming one is refused by the strict allow-list, after authorization. MCP: `webdesk.editorial.*` impacts are in FRONTEND-BFF-CONTRACT §27 "Writers' room review flow". Proof: `webdesk-editorial.unit.test.ts` (registry, order) and
+`webdesk-editorial.test.ts` (real Cerbos + Postgres: 403 before validation per route with a positive control and no WebDesk write, self-approve DENY as platform_admin, bot and automation approve 403, notification recipients incl. another company's editor; Linux gate).
+
 ## 28. WSK-D60 follow-up — `owner` may grant a client's website access and the client `admin` capability (2026-10-12)
 
 **The gap.** WSK-49f catalogued `core.client_contact.manage_website_editor` / `manage_admin` and bundled them (company_admin, owner,

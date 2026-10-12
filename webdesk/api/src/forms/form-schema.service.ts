@@ -18,7 +18,11 @@ import { Injectable } from "@nestjs/common";
 import { z, ZodTypeAny } from "zod";
 import { formsConfig } from "./forms.config";
 
-export type FormFieldType = "text" | "textarea" | "email" | "number" | "boolean" | "date" | "select";
+// M5-L1d: the known field types, as DATA so the `forms.define` validator (control/forms/form-definition.ts) and
+// this type cannot drift. `tel` is new (additive): a phone field. It validates like short text; what makes it
+// matter is subject-refs.ts, which derives the phone correlator from the first `tel`-typed field.
+export const FORM_FIELD_TYPES = ["text", "textarea", "email", "tel", "number", "boolean", "date", "select"] as const;
+export type FormFieldType = (typeof FORM_FIELD_TYPES)[number];
 
 export type FormFieldDef = {
   key: string;
@@ -50,6 +54,7 @@ function zodForField(field: FormFieldDef): ZodTypeAny {
       break;
     case "text":
     case "textarea":
+    case "tel":
       base = z.string().trim().max(maxLength);
       break;
     case "number":
@@ -74,7 +79,32 @@ function zodForField(field: FormFieldDef): ZodTypeAny {
     default:
       base = z.string().trim().max(maxLength);
   }
-  return field.required ? base : base.optional();
+  if (field.required) {
+    // M5-L1d: required means non-blank. (An email, a date and an enum already refuse "".) A required text-like field used to
+    // accept "": with blank optionals now treated as absent, a required one must not be the one place "" gets through.
+    if (field.type === "text" || field.type === "textarea" || field.type === "tel" || (field.type === "select" && !(field.options && field.options.length > 0))) {
+      base = (base as z.ZodString).min(1);
+    }
+    return base;
+  }
+  return base.optional();
+}
+
+/**
+ * M5-L1d: a browser form submits an untouched optional input as `""`. For an OPTIONAL declared field a blank string (empty
+ * or whitespace only) means "not given": it is treated as absent, so an optional `email` / `select` / `tel` left blank is
+ * accepted and nothing is stored under its key. A REQUIRED field is untouched: `""` still reaches its validator and is
+ * refused (an `email` / `select` rejects it; a text field that accepts `""` keeps doing so, as before). Keys the schema does
+ * not declare are not looked at (they are dropped by the object schema anyway). Never mutates the input.
+ */
+function withoutBlankOptionals(schemaDef: FormSchemaDef, input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...input };
+  for (const field of schemaDef.fields ?? []) {
+    if (field.required) continue;
+    const v = out[field.key];
+    if (typeof v === "string" && v.trim() === "") delete out[field.key];
+  }
+  return out;
 }
 
 @Injectable()
@@ -114,7 +144,7 @@ export class FormSchemaService {
       shape[field.key] = zodForField(field);
     }
     const objectSchema = z.object(shape);
-    const input = rawFields && typeof rawFields === "object" ? rawFields : {};
+    const input = withoutBlankOptionals(schemaDef, rawFields && typeof rawFields === "object" ? (rawFields as Record<string, unknown>) : {});
     const result = objectSchema.safeParse(input);
     if (!result.success) {
       const issues = result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);

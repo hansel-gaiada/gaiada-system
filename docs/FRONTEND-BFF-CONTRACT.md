@@ -5489,6 +5489,59 @@ A site that is not this company's is the uniform **404 problem `…/errors/site-
 `webdesk.editorial.revokeRole` (`write:true, impact:"medium"`), `minAssurance: "verified"`. An unattended caller suspends for approval; both writes are D14
 executables and re-drive as the original requester.
 
+### WebDesk form definitions (M5-L1d, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suites are written and need the Linux gate; UI: none yet)
+
+Before this, a WebDesk `form_defs` row could only be created by raw SQL. Code: `webdesk-forms.service.ts` + three handlers in `webdesk-content.controller.ts`; WebDesk side:
+`webdesk/api/src/control/forms/*` (README "Form definitions"). Same guards as the content routes; **the first statement of every handler is `authorizeSite(…, siteId, "webdesk_collection", …)`**
+(M5-W1c phase 1: `read` on the route's site). The write then asks `webdesk_collection` · **`apply_schema`** with `siteId` set (company_admin, webdev_manager, platform_admin; a writers' room grant
+does not carry it) before any body validation, and the reads need `read` on the site, so a denied caller gets **403 for any
+body** and nothing reaches WebDesk. No new kind. The wall is the content routes' (a site that is not this company's is the uniform 404 `…/errors/site-not-found`).
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/forms` | → `{forms: [{formId, key, siteId, schema, notify, retentionDays, consentNoticeVersion, createdAt, updatedAt}]}` ordered by key (WebDesk `forms.def.list`) |
+| GET | `…/forms/:formKey` | → `{form: {…}}`; unknown key 404 problem `…/errors/form-not-found` (WebDesk `forms.def.get`) |
+| PUT | `…/forms/:formKey` | `{schema: {fields: [{key,type,required?,maxLength?,min?,max?,options?}], honeypotField?, consentNotice: {text}, attachments?}, notify?, retentionDays (1..3650), consentNoticeVersion}` (strict: an unknown or route-parameter member is 400) → **200** `{form, created, consentNoticeChanged, replayed}` (WebDesk `forms.define`, MEDIUM; an upsert by (site, key), **redefining keeps `form.formId`**). Optional `Idempotency-Key`. |
+| PATCH | `…/forms/:formKey` | alias of the PUT (the MCP hub's method union has no PUT) |
+
+Field types: `text`, `textarea`, `email`, `tel`, `number`, `boolean`, `date`, `select` (needs `options`). WebDesk's typed problems pass through untouched as
+`application/problem+json`: **422 `form-definition-invalid`** (`issues: [{path, message}]`, every problem at once: bad field key or type, an email- or phone-looking field typed
+`text`, a honeypot that is also a field key, an empty consent notice, retention outside 1..3650, an unknown member) and **409 `consent-version-unchanged`** (the notice text
+changed but `consentNoticeVersion` did not: every submission snapshots both). The write writes two `activities` rows (`webdesk.forms.define`: attempted, then the outcome;
+tenant slug, site id, form key and notice VERSION only, never the notice text); the reads write none. WebDesk unavailable: the typed 503s of this section.
+
+**MCP tools** (`modules/webdev/index.ts`, same routes): `webdesk.forms.list` (read) · `webdesk.forms.get` (read) · `webdesk.forms.define` (`write:true, impact:"medium"`, PATCH),
+`minAssurance: "low"`. An unattended caller suspends for approval; `forms.define` is **not yet a D14 executable** (see PERMISSION-CONTRACT §27.3), so approving that suspension re-drives nothing and
+only an attended human can define a form today. The three gaiada.com definitions are data: `webdesk/sites/gaiada-com/forms/{contact,audit,onboard}.json` (its README has the field-id table and how to apply them).
+
+### Writers' room review flow (M5-W2d, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suite `webdesk-editorial.test.ts` is written and needs the Linux gate; UI: M5-W2e)
+
+Design: `docs/plans/2026-10-11-m5-writers-room-design.md` §4.3, §4.4, §8; PERMISSION-CONTRACT §27.4. Code: routes in `webdesk-content.controller.ts`, logic in `webdesk-editorial.service.ts`. All under
+`/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/…`. **Order of every item command:** `authorizeSite` (phase 1) → the cross-company wall → WebDesk `item.get` → the REAL Cerbos action with the item's attributes (phase 2) →
+only then the body is validated → the command is forwarded with a signed editorial assertion (as the caller) and the `Idempotency-Key` (optional on the wire: one is generated when absent; a retry must reuse it) → notifications. A denied
+caller is **403 for any body** and WebDesk receives no write. WebDesk's typed problems (409 `review-not-enabled`, `review-state-conflict`, `review-version-mismatch`, …) pass through byte for byte as `application/problem+json`;
+403/401 from WebDesk are never forwarded (502 `webdesk_refused`). 503 `editorial_unavailable` / `webdesk_not_configured` as elsewhere in this section. A replayed key answers WebDesk's `replayed: true` and notifies nobody.
+
+| Method | Path | Body → Response | Cerbos action (phase 2) |
+|---|---|---|---|
+| POST | `…/items/:itemId/editorial/submit` | `{version}` → 200 `{itemId, editorial, replayed}` | `submit` on the item |
+| POST | `…/editorial/withdraw` | `{}` → 200 | `submit` (design §2.1) |
+| POST | `…/editorial/request-changes` | `{version, note (1..2000)}` → 200 | `request_changes` |
+| POST | `…/editorial/seo-signoff` | `{version}` → 200 | `seo_signoff` (automation and bots refused) |
+| POST | `…/editorial/approve` | `{version}` → 200 | `approve`, with `creatorId` = creator of the SUBMITTED version from WebDesk's read, never the body (maker != checker; automation, bots, contributors refused). An item not in review is 403 (no known creator). |
+| POST | `…/editorial/assign` | `{authorSub?, dueAt?, plannedPublishAt?, briefRef?}` (at least one; null clears the three optional ones) → 200 | `assign` |
+| POST | `…/editorial/comments` | `{version, body (1..4000), anchor? (JSON pointer)}` → WebDesk's 201 | `comment` |
+| POST | `…/editorial/comments/:commentId/resolve` | `{}` → 200 | `comment` |
+| PUT / PATCH | `…/collections/:collectionKey/editorial-policy` | `{reviewRequired: boolean, seoSignoffRequired?: boolean}` → 200. PATCH is the hub alias (no PUT in its method union). | `webdesk_collection:manage_editorial` on `{siteId, collectionKey}` |
+| GET | `…/editorial/board` | query `state, collection, authorSub, dueBefore, cursor, limit` → WebDesk's `{items, counts, policies, page}` | phase 1 `webdesk_content_item:read`, then per (collection, locale) `read`. A company-level reader (staff tier) gets the answer untouched. A caller with a scoped grant gets only the rows and policies it may read, **`counts` is omitted and `countsWithheld: true` is added**. |
+| GET | `…/items/:itemId/editorial` | → the item's state, events, comments, SEO snapshot | `read` on the item |
+
+Item commands take the item's phase-1 gate as `webdesk_content_item:<action>`; `approve` and the policy route are the exceptions (`webdesk_collection:read`, and `webdesk_collection:manage_editorial`), because an attribute-free `approve` is denied
+for everyone. **Notifications** (after WebDesk confirmed, fail-soft, `notifications` rows with ids and the item title only, never a note or comment text): `webdesk.editorial.submitted` → holders of an unexpired `webdesk_editor` grant whose
+scope rows cover the item's site, collection and locale, plus `webdev_manager` at company scope (read through the tenant wall, so no other company's editor); `webdesk.editorial.changes_requested` and `.approved` → the item's author
+(`ownerId`). The actor is never notified of their own action. **MCP tools** (`modules/webdev/index.ts`, same routes, `minAssurance: "low"`): `webdesk.editorial.submit / withdraw / requestChanges / assign / comment / resolveComment` (`write:true, impact:"low"`) ·
+`seoSignoff / approve / setPolicy` (`write:true, impact:"medium"`; not D14 executables, like `webdesk.content.preview`: an unattended caller suspends and approving the suspension re-drives nothing) · `board`, `history` (reads; the hub drops a GET's query, so `board` returns the default first page).
+
 ## 28. Website analytics from Umami (M5-A4, 2026-10-11) — `platform-nest/src/modules/search/search-analytics.controller.ts`, `umami-client.ts`, `umami-reads.ts`; `platform-ui/src/lib/websiteAnalytics*.ts` — **STATUS: PROTOTYPED (typechecked + unit-tested locally; the DB-backed route test is written but needs the Linux gate; no live Umami exists yet)**
 
 The ERP reads gaiada.com's analytics from Umami 3.4.0 over WireGuard through the GET-only read gate (`infra/runbooks/umami-sumopod.md`) with a team view-only user's API key. Two env vars, read by `umami-client.ts` on every call: `UMAMI_BASE_URL` (e.g. `http://10.88.0.2:18743`) and `UMAMI_API_KEY` (Bearer); optional `UMAMI_TIMEOUT_MS` (default 10000). Compose must pass both through `environment:`. A property is bound to its Umami website by `search_properties.umami_site_id` (migration 0034).

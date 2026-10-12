@@ -128,7 +128,17 @@ export type WebdeskBffEditorialCommand =
   | "content.previewToken"
   | "media.uploadToken"
   | "media.update"
-  | "media.delete";
+  | "media.delete"
+  // M5-W2d: the review flow (MEDIUM, editorial; WebDesk's EDITORIAL_COMMANDS, writers' room design 4.3).
+  | "editorial.submit"
+  | "editorial.withdraw"
+  | "editorial.requestChanges"
+  | "editorial.seoSignoff"
+  | "editorial.approve"
+  | "editorial.assign"
+  | "editorial.comment"
+  | "editorial.commentResolve"
+  | "editorial.policySet";
 
 /** `automation_approvals.origin` for these rows (migration 202610101500). */
 export const WEBDESK_APPROVAL_ORIGIN = "webdesk";

@@ -11,6 +11,45 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.78.0` - M5-W2d: the writers' room review flow over the ERP (routes, MCP tools, notifications) (2026-10-12) - DEV-VERIFIED
+
+- **Routes.** 11 routes under `…/content/sites/:tenantSlug/:siteId/`:
+  - item routes: `items/:itemId/editorial/{submit,withdraw,request-changes,seo-signoff,approve,assign}`, `…/editorial/comments` and `…/comments/:c/resolve`, `GET items/:itemId/editorial` (history);
+  - `PUT|PATCH collections/:key/editorial-policy`;
+  - `GET editorial/board`.
+- **Order of checks:** each route runs W1c's `authorizeSite`, then the real Cerbos action on attributes read from WebDesk, BEFORE the body is parsed. Writes forward with the signed editorial assertion and an Idempotency-Key, and WebDesk's typed 409s pass through.
+- **Approve:** `creatorId` is the creator of the submitted version, read from WebDesk and never taken from the body, so maker ≠ checker holds, even for `platform_admin`.
+- **MCP tools:** `webdesk.editorial.submit`, `.withdraw`, `.requestChanges`, `.assign`, `.comment` and `.resolveComment` (low); `.seoSignoff`, `.approve` and `.setPolicy` (medium; Cerbos refuses bots and automation for approve and SEO sign-off); `.board` and `.history` (read).
+- **Notifications** carry ids and titles only, never note text. A replay notifies nobody.
+  - A submit notifies the in-scope editors and the publisher tier.
+  - Changes requested and approved notify the author only.
+- **The board:** filtered per (collection, locale) for a scoped grant, with `countsWithheld`.
+- PERMISSION-CONTRACT §27.4; FRONTEND-BFF-CONTRACT §27 rows.
+- Verified on GitHub Actions 38201900188: the real-DB suite 24/24 (denials with valid bodies and no WebDesk write, bot and automation approve 403, self-approve 403, notification recipients incl. another tenant's editor), units 10/10, grants 17/17 + 31/31.
+
+### webdesk `0.14.0` - M5-L1d: form definitions get a write path; blank optional form values are absent (2026-10-12) - DEV-VERIFIED
+
+- **The write path.** `forms.define` (`PUT /control/v1/tenants/:tenantSlug/sites/:siteId/forms/:formKey`) is MEDIUM / `webdesk:operate`, needs an Idempotency-Key and writes its audit row first. The audit holds identifiers and counts, never the notice text.
+  - It upserts by (site, key), and a redefinition keeps the form id.
+  - A 422 `form-definition-invalid` lists every issue at once.
+  - A changed notice text under the same consent version is refused with 409 `consent-version-unchanged`.
+  - Reads: `forms.def.list` and `forms.def.get`.
+  - Until now a form could only be created by raw SQL.
+- The form schema gains a `tel` field type (phone subject refs come from `tel`-typed fields).
+- **Behaviour change on the public submit:**
+  - An OPTIONAL field sent as `""` or whitespace is treated as absent. It is accepted and stored without the key, and no subject ref is derived from it.
+  - A REQUIRED text, textarea or tel field now refuses `""` (it used to accept it).
+- gaiada.com's contact, audit and onboard definitions live as data in `webdesk/sites/gaiada-com/forms/*.json`. They use the site's field ids, honeypot `_hp`, consent version `site-2026-10-11` and 90-day retention, and the notice text is a DRAFT for counsel. CI validates them with the same parser the command uses. **Nothing is applied to any tenant**: that waits for G2 and the Turnstile keys.
+- Verified on GitHub Actions 38201574048: forms-define.spec 16/16 (define → public submit → consent snapshot and typed refs), the gaiada definitions 15/15, blank optionals 6/6.
+
+### platform-nest `0.77.0` - M5-L1d: website form definitions from the ERP (2026-10-12) - DEV-VERIFIED
+
+- `PUT|PATCH / GET /api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/forms[/:formKey]`, opened by W1c's `authorizeSite`.
+  - The write also needs `webdesk_collection:apply_schema` on the site, before the body is read (the publisher tier, like composition changes). The reads need phase 1 only.
+- MCP tools `webdesk.forms.define` (medium), `webdesk.forms.list` and `webdesk.forms.get`.
+- A contract test checks the L4 lead mapping against the gaiada.com definitions.
+- Verified on GitHub Actions 38201574048: webdesk-forms-define 14/14 (denials with valid bodies and positive controls; a scoped writer reads but cannot define), contract 11/11.
+
 ### webdesk `0.13.0` - contract codegen runs live (queued after tenant.provision and schema.apply), the headless WordPress theme, render-time XSS safety in both renderers, a PHP SDK timeout, the three site templates (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6 (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`). Built by the M6 session.
