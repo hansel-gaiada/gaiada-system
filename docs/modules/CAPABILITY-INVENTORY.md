@@ -52,7 +52,7 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 22 |
+| search | `search` | 23 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
