@@ -41,11 +41,12 @@ expectations are documented per tier.
 
 ## After a REAL restore: visitor profiles (M5-V3-e)
 
-A restore brings back the ERP's `search_visitor_tombstones` as of the backup, so a visitor who withdrew or was erased AFTER
-that backup has no tombstone in the restored ERP, and the collector's buffer may still hold their events. Before setting
-`SEARCH_VISITORS_ENABLED=1` again (keep it empty while restoring):
+A restored ERP holds visitor profiles and `search_visitor_tombstones` as of the backup. Two things changed since then:
 
-1. Re-apply the withdrawals since the backup: run the sweep once by hand (it asks WebDesk's `consent.status` afresh for every
-   profile and deletes, tombstones and forgets each withdrawn one), and replay any rights-request erasures logged since the backup.
-2. Only then turn ingest back on. The collector's own tombstones (on sumopod, not restored with the ERP) still refuse a
-   forgotten visitor's new events in the meantime.
+* **Erasures** (rights requests) done after the backup are undone by the restore: those profiles are back. Keep
+  `SEARCH_VISITORS_ENABLED` empty and replay every rights-request erasure completed since the backup FIRST (the rights-request
+  log lists them); each re-erase deletes, tombstones and sends the collector a forget again.
+* **Withdrawals** after the backup need no manual step: WebDesk holds the consent log (not restored with the ERP). With
+  `SEARCH_VISITORS_ENABLED=1` the sweep runs 3 minutes after start, asks `consent.status` afresh for every profile and deletes,
+  tombstones and forgets each withdrawn one; ingest refuses withdrawn consents page by page in the meantime. The collector's own
+  tombstones (on sumopod, not restored) keep refusing a forgotten visitor's new events throughout.
