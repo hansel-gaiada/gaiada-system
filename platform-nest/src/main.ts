@@ -74,6 +74,7 @@ import { registerLiveAdsExecutor } from "./modules/search/sem-apply";
 import {
   assertAdsWriteModeBootSafe, googleAdsLiveExecutor, resolveSearchAdsWriteMode,
 } from "./modules/search/sem-executor-google-ads";
+import { wireSearchConversionsWriteMode } from "./modules/search/conversions-uploaders";
 // SM-33's simulation tier (tracker §6), owned and landed by a concurrent agent this same wave —
 // SM-34 owns registering it here, not building it. isSimulatedProvider is the structural provenance
 // check (design addendum §A4.3) used below to make mode/driver mutual exclusion a BOOT ERROR.
@@ -421,6 +422,12 @@ export function wireSearchProviderModeAndAdsWriteMode(
   assertAdsWriteModeBootSafe(adsWriteMode, true);
   // eslint-disable-next-line no-console
   console.log(`[search] Ads write mode: ${adsWriteMode} (SEARCH_ADS_WRITE_MODE)`);
+
+  // M5-P2 (design §8.7): the conversion-upload write mode, a SEPARATE switch from the campaign one above. Same placement rule:
+  // function scope, unconditional, outside any mode branch. Registers the Google uploader (making live AVAILABLE, never reachable)
+  // and REFUSES to boot when SEARCH_CONVERSIONS_LIVE_PLATFORMS lists a platform with no uploader or an unknown token. Default empty:
+  // every platform simulates.
+  wireSearchConversionsWriteMode();
 }
 
 // D14-03 replaced D14-02's inert stub here. The real executor lives in `core/approval-execute.ts`
@@ -595,6 +602,10 @@ async function bootstrap(): Promise<void> {
       // a Redis stream is ever drained. event-handlers.test.ts stayed green throughout because it
       // calls the handlers directly -- the handlers were always fine; nothing reached them.
       "social_post_variant",
+      // M5-P2 -- the stream `agency.lead.stage_changed` is emitted on (core/agency-lead-pipeline.service.ts, entity type
+      // "agency_lead"). searchModule.eventHandlers["agency.lead.stage_changed"] plans ad-platform conversion uploads from it.
+      // Without this entry that handler is registered and NEVER invoked (the SMM-14 trap above); conversions.test.ts pins it.
+      "agency_lead",
       // P2-05 — see registerPositionEventHandlers' header for why these are unconditional.
       ...POSITION_STREAMS,
     ]);

@@ -2071,6 +2071,28 @@ export function registerAgencyPrivacyBars(): void {
   }
 }
 
+// M5-P2 - `search.conversions.upload`: BARRED, never re-driven through the hub.
+//
+// An ad-platform conversion upload (a lead's hashed contact data and click id leaving for Google) is planned by the search
+// module's `agency.lead.stage_changed` handler and files its OWN WS4 approval (origin `search`, workflow `search.conversions.upload`,
+// impact high). decide() executes it IN-BAND, as the decider, under the gate a second time (modules/search/conversions.service.ts):
+// the same shape as probe consent, GH-12 and WSK-66. The D14 registry re-drives tool calls through mcp-hub as the FILER, which would
+// put personal data on a hub path and let an approved row look executed with no human present. The bar says so positively and makes
+// it impossible for a later ticket to register the name. The conversions module is the only owner of the execution.
+export const SEARCH_CONVERSION_BARRED_TOOLS = ["search.conversions.upload"] as const;
+
+export function registerSearchConversionBars(): void {
+  for (const toolName of SEARCH_CONVERSION_BARRED_TOOLS) {
+    registerBarredExecutable({
+      toolName,
+      reason: "in_band_personal_data",
+      note:
+        "M5-P2: an ad-platform conversion upload executes in-band at decide(), as the decider, with a second consent and "
+        + "suppression gate. A hub re-drive would carry personal data and run with no human present.",
+    });
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // PV3-06 — `contracts.send`, `contracts.countersign` and `invoicePayments.decide` become agent-reachable
 // through the D14 gate.
@@ -2257,6 +2279,7 @@ export function registerAllExecutableApprovals(): void {
   registerIamExecutableApprovals();
   registerAgencyIntakeExecutableApprovals();
   registerAgencyPrivacyBars();
+  registerSearchConversionBars();
   registerContractBillingExecutableApprovals();
 }
 

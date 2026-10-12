@@ -129,6 +129,8 @@ import { SearchGoogleAdsController } from "./modules/search/search-google-ads.co
 import { SearchReportsController } from "./modules/search/search-reports.controller";
 import { SearchAnalyticsController } from "./modules/search/search-analytics.controller";
 import { SearchContentDecayController } from "./modules/search/content-decay.controller";
+import { SearchConversionsController } from "./modules/search/conversions.controller";
+import { SearchAiCrawlerController } from "./modules/search/ai-crawler.controller";
 import { SearchIndexNowController } from "./modules/search/indexnow.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
@@ -228,6 +230,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // M5-A4: Umami website-analytics reads for a property (own controller class; same prefix).
     SearchAnalyticsController,
     SearchContentDecayController,
+    SearchConversionsController,
+    SearchAiCrawlerController,
     SearchIndexNowController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,

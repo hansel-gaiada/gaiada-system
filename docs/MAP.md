@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610130110_webdev_scaffold_links_null_safe.sql`
+- Head: `202610131500_search_ai_crawler_log.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 260 (121 legacy `NNNN_`, 139 timestamped)
+- Applied files on disk: 267 (121 legacy `NNNN_`, 146 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -252,7 +252,10 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/recruitment.controller.ts` |
 | `/api/:tenantId/modules/lms` | `platform-nest/src/modules/lms/lms-catalogue.controller.ts` |
 | `/api/:tenantId/modules/lms` | `platform-nest/src/modules/lms/lms-learn.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/ai-crawler.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/content-decay.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/conversions.controller.ts` |
+| `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/indexnow.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-analytics.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
@@ -392,6 +395,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website`
 - `/departments/[deptId]/website/analytics`
 - `/departments/[deptId]/website/analytics/[tenant]/[site]`
+- `/departments/[deptId]/website/analytics/[tenant]/[site]/ai-visibility`
 - `/departments/[deptId]/website/content`
 - `/departments/[deptId]/website/content/[tenant]/[site]`
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]`
@@ -607,7 +611,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-edge-sumopod.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `m5-phase3-go-live.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `umami-sumopod.md`, `webdesk-control-channel.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-staging-rebuild.md`, `webdesk-ws4-keys.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
+Runbooks (`infra/runbooks/`): `ai-crawler-log.md`, `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-edge-sumopod.md`, `erp-name-cutover.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `m5-phase3-go-live.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `umami-sumopod.md`, `webdesk-control-channel.md`, `webdesk-editorial-keys.md`, `webdesk-live-swap.md`, `webdesk-staging-rebuild.md`, `webdesk-ws4-keys.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `client-targets-forced-command.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `pull-client-property-targets.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 

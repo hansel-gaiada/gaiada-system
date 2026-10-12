@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **228** capabilities across **16** owners
-- **123** writes · 105 reads
-- Writes by impact: **high 24** · medium 36 · low 63
+- **235** capabilities across **16** owners
+- **125** writes · 110 reads
+- Writes by impact: **high 24** · medium 37 · low 64
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -52,7 +52,7 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 21 |
+| search | `search` | 23 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
@@ -138,6 +138,9 @@ unfalsifiable after.
 | reports | `reports.getMetrics` | `GET` | `/api/:tenantId/reports/metrics?metricKey=:metricKey&grain=:grain&from=:from&to=:to` | read | — |
 | reports | `reports.listPeriods` | `GET` | `/api/:tenantId/reports/periods?kind=:kind&from=:from&to=:to` | read | — |
 | search | `search.acknowledgeDecayFinding` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/decay/:findingId/acknowledge` | write | `low` |
+| search | `search.aiCrawlers.ingest` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/ai-crawlers/ingest` | write | `medium` |
+| search | `search.aiCrawlers.summary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/ai-crawlers/summary/range/:from/:to` | read | — |
+| search | `search.aiVisibility.summary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/ai-visibility-summary` | read | — |
 | search | `search.analyticsCtas` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/ctas/range/:from/:to` | read | — |
 | search | `search.analyticsForms` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/forms/range/:from/:to` | read | — |
 | search | `search.analyticsPages` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/analytics/pages/range/:from/:to` | read | — |
@@ -165,8 +168,11 @@ unfalsifiable after.
 | search | `search.launchCampaign` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.ledgerSummary` | — | — | read | — |
 | search | `search.listBingPerformance` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/bing/performance/:kind/:from/:to` | read | — |
+| search | `search.listConversionTargets` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | read | — |
+| search | `search.listConversionUploads` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-uploads` | read | — |
 | search | `search.listDecayFindings` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/decay` | read | — |
 | search | `search.listEngagements` | `GET` | `/api/:tenantId/modules/search/engagements` | read | — |
+| search | `search.listLeadConversionUploads` | `GET` | `/api/:tenantId/modules/search/leads/:leadId/conversion-uploads` | read | — |
 | search | `search.notifyContentChange` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/notify` | write | `low` |
 | search | `search.previewReport` | `GET` | `/api/:tenantId/modules/search/reports/:id/preview` | read | — |
 | search | `search.proposeNegatives` | `POST` | `/api/:tenantId/modules/search/campaigns/:campaignId/negatives/propose` | write | `low` |
@@ -178,6 +184,7 @@ unfalsifiable after.
 | search | `search.rankSummary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/rank-snapshots` | read | — |
 | search | `search.runAudit` | — | — | write | `low` |
 | search | `search.setBudget` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
+| search | `search.setConversionTarget` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | write | `low` |
 | search | `search.setIndexNow` | `PATCH` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow` | write | `low` |
 | search | `search.submitUrls` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/submit` | write | `low` |
 | social | `social.addPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants` | write | `low` |

@@ -1,0 +1,90 @@
+# PV4-02 (docs/plans/2026-10-12-pv4-conversation-tickets.md; owner rulings PV-D22/D23/D24) — authz for the NEW
+# `conversation` resource kind: the STAFF side of the client conversation (threads and messages between a client's
+# contacts and our staff, PV4-01's `conversation_*` tables). Four actions:
+#   read    — see a client's threads and messages (staff screens, the thread list, unread counts)
+#   post    — send a message to the client AS a named staff member. Everything a client reads here is words a
+#             person is accountable for (§2.4), so this is the action the agent DENY below refuses.
+#   draft   — write a DRAFT reply that only staff ever see (`conversation_drafts`); an agent may hold this
+#             without `post` (PV-D23), and a human then reviews and sends.
+#   manage  — close/reopen a thread, retract a staff message, edit the thread subject.
+# Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
+#
+# ── THE ROLE SHAPE IS resource_client.yaml's, ON PURPOSE (design decision 2) ─────────────────────────────────────
+# A conversation is part of the client record, so it must never be wider or narrower than the client it belongs to:
+# `read` reaches exactly the roles that read clients (company_admin, manager, member, viewer); `post`, `draft` and
+# `manage` reach company_admin, manager and member. Every rule is `variables.inTenant && variables.notLow`. Row-level
+# reach (which client, which project) is the controller's job (PV4-03), as for every staff kind here; Cerbos sees the
+# tenant and the assurance tier, nothing finer.
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL EVER POSTS OR MANAGES (PV-D23, design decision 9) ─────────────────────────────
+# Nothing an agent writes reaches a client until a staff member approves it. `draft` stays ALLOWED (that IS the
+# agent's job); `post` and `manage` are DENIED to `principal.attr.kind in ["automation","bot"]`, shaped exactly like
+# resource_webdesk_content_item.yaml's T7 `publish`/`schedule` DENY: `roles: ["user"]`, which every principal carries,
+# so under deny-overrides it beats every ALLOW below, the platform_admin wildcard and the perm mirrors included.
+# It reads `principal.attr.kind` (users.kind, sent by principalPayload()); `has()` makes a raw caller that omits the
+# attribute evaluate to false (no deny) rather than raise a CEL error. DELEGATION: authorize() (core/http.ts) checks
+# the CALLER and, when `actFor` is set, the acting human too, and either denial refuses. A persona (kind=bot) acting
+# for a human is therefore denied here as the CALLER; the human's own principal is unaffected. An absent `kind` ("" — a
+# fixture, ANONYMOUS) matches nothing and falls back to the rules below.
+#
+# ── THE INVARIANTS THIS FILE MUST NOT BREAK ──────────────────────────────────────────────────────────────────────
+#  - The `client` derived role appears NOWHERE in this file (finding 4 of the PV-4 plan). A client reaches the
+#    conversation through the `portal` kind's `converse` action (resource_portal.yaml), whose row-level reach is
+#    src/core/portal-scope.ts, never through this kind. A principal holding only the `client` grant must DENY on
+#    every action here. `cerbos-conversation.test.ts` pins both halves, and its invariant test scans every
+#    resource_*.yaml so a `client` rule added here (or in any other file but resource_portal.yaml) fails CI.
+#  - No rule reads a client contact's `capability` (signer | viewer | admin). Under PV-D24 viewers post: posting is
+#    not signing. The capability is not a Cerbos attribute and must not become one.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: conversation
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["post", "draft", "manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ automation and bot principals never post or manage (PV-D23) ══════════════════════
+    # Same `roles: ["user"]` DENY shape as resource_webdesk_content_item.yaml's T7 block, so it beats the
+    # platform_admin wildcard and every ALLOW under deny-overrides. `draft` and `read` are deliberately NOT listed.
+    - actions: ["post", "manage"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm, one generic global-or-company mirror per ======
+    # action. SAFE to fold the role tiers into one mirror per action: every role-arm rule above carries the
+    # IDENTICAL `inTenant && notLow` condition (no resource-instance carve-out, nothing self-scoped), the same
+    # argument resource_client.yaml makes. The agent DENY above applies to the mirrors too (it is on `roles: ["user"]`).
+    # Any platform_admin wildcard rule is deliberately NOT mirrored (IAM-04c).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_conversation_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["post"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_conversation_post"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["draft"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_conversation_draft"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_conversation_manage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

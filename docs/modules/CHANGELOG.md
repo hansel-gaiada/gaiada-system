@@ -11,6 +11,49 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.98.0` - M5-P2: Google Ads conversion uploads on a lead stage change (simulate only; consent- and WS4-gated) (2026-10-12) - DEV-VERIFIED
+
+The lead-pipeline design's §8 interface (built by the M5 session).
+
+- **Migrations:**
+  - `202610131200_search_conversion_uploads`: the targets config and the uploads ledger, whose insert IS the claim, unique per (tenant, platform, submission, conversion key). It never stores hashes, a gclid or contact data.
+  - `202610131210_automation_approvals_origin_search`: widens the approvals origin CHECK, built from the LIVE definition so no earlier origin is lost. A test asserts every earlier origin and `search` pass and NULL is refused.
+  - This also fixes search's probe-consent filings, which use origin `search` and would have failed the old CHECK.
+- **Wiring:** `agency_lead` joins the consumer loop. A test reads `main.ts` and fails without it.
+- **The gate**, at plan time and again under the lock at execute: marketing consent exactly `true`, not on G5's suppression list, a usable identifier (gclid/gbraid/wbraid, or an email or phone for enhanced conversions).
+- **One WS4 approval per upload:** impact high, content-bound, origin `search`, executed in-band at `decide()` as the decider, never auto-retried.
+- **Mode:** simulate only. `SEARCH_CONVERSIONS_LIVE_PLATFORMS` is empty, and boot refuses unknown tokens. Live needs the Ads developer token and linked account, counsel (G2) and the access audit (O-8).
+- Targets routes and 4 MCP tools on `resource_search_property`. PERMISSION-CONTRACT §31.
+- **Verified** on GitHub Actions 38267194098:
+  - DB 23/23 (consent, suppression, de-dup, the in-band execution, no email/phone/gclid in approvals/outbox/logs/activities/notifications, the origin CHECK);
+  - unit 33/33, consumer wiring 3/3.
+
+### platform-ui `0.103.0` - M5-P2: the approvals inbox labels origin `search` "Consent & ad uploads" (2026-10-12) - DEV-VERIFIED
+
+- One label in `approvalsShared.ts`. GitHub Actions 38267194098 green.
+
+### platform-nest `0.97.0` - M5-P5b: the AI-crawler log (counts only, no IP or user agent kept) (2026-10-12) - DEV-VERIFIED
+
+- **Ingest:** `POST …/search/properties/:propertyId/ai-crawlers/ingest` and MCP `search.aiCrawlers.ingest` (medium).
+  - It parses nginx/Apache combined and Caddy JSON access-log chunks.
+  - It keeps only requests from 23 listed AI crawlers (GPTBot, ClaudeBot, PerplexityBot, …), each with its vendor source.
+  - Hits are aggregated per day, bot, path (query stripped), status and claimed/verified.
+  - Raw lines, IPs and user agents are never stored.
+  - Re-sending a chunk is a duplicate (SHA-256 per property).
+  - CIDR verification is opt-in via `AI_CRAWLER_RANGES_FILE` (needs a compose passthrough before use).
+- **Migration `202610131500_search_ai_crawler_log`:** daily aggregates and chunk hashes, FORCE RLS in the `search` scope.
+- **Reads:** `ai-crawlers/summary` and `ai-visibility-summary` (the stored SM-16 results), with MCP reads, on `resource_search_property`.
+- **No data flows yet:** that needs a host-side shipping job; the recipe is in `infra/runbooks/ai-crawler-log.md`.
+- **Verified** on GitHub Actions 38265057653: DB 10/10 (no human IP/UA/query in either table or the activity trail), parser 22/22.
+
+### platform-ui `0.102.0` - M5-P5b: an AI visibility tab in the Website workspace (2026-10-12) - DEV-VERIFIED
+
+- **Website › Analytics › AI visibility shows:**
+  - AI-crawler hits over time by bot, by bot with verified/unverified, top paths, and the status mix (served / redirected / blocked / 4xx / 5xx);
+  - the newest SM-16 result per engine and query.
+- Missing data is said in words. Zero appears only inside the log's coverage.
+- GitHub Actions 38265057653 green.
+
 ### platform-nest `0.96.0` - PV-3 follow-ups: a payment's recorder cannot approve an agent's decision on it; client visibility on detail reads (2026-10-12) - PROTOTYPED
 
 - **D14 maker-checker for `invoicePayments.decide`** (found by PV3-06). An agent's request to confirm or reject a client payment executes as the filer, so the route's "the recorder may not decide" rule never saw the approver; the payment's recorder could approve the request and decide their own payment one step removed. Now:

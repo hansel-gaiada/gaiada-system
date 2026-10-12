@@ -122,3 +122,5 @@ became L1's two defects, L2's consent snapshot, G5, G6, O-9 and O-10. No server 
 same day, O-1 is settled, and O-11 plus the addendum's R-V18 cover the personally contracted box.
 
 **2026-10-12.** Waves 1–3 went live in 360, W1c/W3c/G5b/P1-g in 361, and L1d + W2d in 362; W2e (the writers' room UI) is on main. The owner ruled **WSK-D75: no Web3Forms**, which settles O-10. The site switch of L1 (the transport, the consent notice, the field ids already matched) becomes the launch path for the forms, with nothing in between.
+
+**2026-10-12, later.** Phase 5 design (V2, V3, V5, V6), PLANNED: [`2026-10-12-m5-phase5-design.md`](./2026-10-12-m5-phase5-design.md). V5 needs no WebDesk migration (vocabulary 1.5.0 only); two D66/D32 amendments and O-5/O-12 defaults are open there.

@@ -15,6 +15,9 @@
     **VIDA, but only when first needed**: PV5-11 is parked until counsel sets a threshold or a client
     asks. Until then, every contract signs in our own tier, which gains a **company seal** on each
     signed PDF (PV5-07).
+  - PV-D26 (added 2026-10-12, after PV5-02): the platform administrator keeps access to bank details,
+    ours and suppliers', but **everyone needs high assurance** (a fresh second factor) to change them,
+    and every change to our bank details notifies all owners.
   - Also PV-D4 (the five areas, every URL kept), PV-D5 (money and legal effects land in Contracts &
     billing), PV-D10 (one client record per company), PV-D2 (Viceroy is a group client of Gaiada)
     and PV-D13 (no company names or ids in code).
@@ -141,7 +144,7 @@
 | 3 | The number comes from a **gapless series** per company, per calendar year, assigned inside the issue transaction under a row lock. Format `{prefix}/{yyyy}/{nnnn}`; the prefix is part of the billing profile. A rolled-back issue consumes no number | Auditors read gaps as deleted invoices. No company prefix in code (PV-D13) |
 | 4 | A **billing profile** per company holds the issuer's legal name and address, the invoice prefix, default payment terms, the clients' bank account, and the ledger codes (receipt bank account, default revenue account). NPWP and PKP stay in `finance_company_settings`: one source each | Finding 7. Finance owns tax identity, so it is not copied |
 | 5 | At issue, the issuer block (legal name, address, NPWP, bank details) is **frozen onto the invoice** as a snapshot. Later profile edits never change an issued invoice | An issued invoice is a legal document; what it said must stay what it said |
-| 6 | **Changing the bank account clients pay into** requires a separate action (`finance_config` `set_bank_details`). It is refused to `bot` and `automation` principals by `EFFECT_DENY`, writes an activity row, and notifies every owner of the company | The same reasoning as `vendor_master` in F5: editing these details redirects real money with no fake invoice needed |
+| 6 | **Changing the bank account clients pay into** requires a separate action (`finance_config` `set_bank_details`): an owner or finance manager of the company, plus the platform administrator, who keeps access (PV-D26). **Everyone needs high assurance** (a fresh second factor), enforced by an `EFFECT_DENY` that also beats the administrator's wildcard. The same DENY now guards supplier bank details (`vendor_master`). It is refused to `bot` and `automation` principals, writes an activity row, and notifies every owner of the company | The same reasoning as `vendor_master` in F5: editing these details redirects real money with no fake invoice needed |
 | 7 | **Issue readiness** is a function returning one row per blocker: no billing profile or prefix, finance module off, no AR control account, no open period, no revenue account, a taxed invoice while `is_pkp` is not `true`, a currency not in `finance_currencies`. The Issue button shows the list | The `finance_period_close_readiness()` idiom: say every reason at once |
 | 8 | Tax is computed by `finance_tax_compute()` from an effective-dated tax code, never by arithmetic in a handler. Finding 4's hard-coded line is replaced in the finance API too | One tax rule for every invoice the ledger holds |
 | 9 | A void after issue posts the AR reversal (credit note for the full amount) in the same transaction, and both rows show `void`. A part-paid invoice cannot be voided; it needs a credit note in Finance | Voiding a paid invoice is a refund question, not a status change |
@@ -163,8 +166,8 @@
 | Wave | Tickets | Why this order |
 |---|---|---|
 | 1 | PV5-01 (all PV-5 DDL), PV5-02 (authorization), PV5-03 (provider comparisons, docs only) | Disjoint files. 01 and 02 unblock everything; 03 has no code dependency |
-| 2 | PV5-04 (issue through the ledger), PV5-05 (intercompany posting), PV5-06 (fixed content and the signature tiers) | 04 and 05 need 01 and 02. 05 changes `finance_ar_issue_invoice`, which 04 calls, so 05 merges first or 04 rebases. 06 needs 01 |
-| 3 | PV5-07 (PDFs), PV5-08 (Documents and the staff file route), PV5-09 (screens), PV5-12 (agent tools) | 07 needs 04 and 06; 08 needs 07; 09 needs 04 and 06 |
+| 2 | PV5-04 (issue through the ledger), PV5-05 (intercompany posting), PV5-06 (fixed content and the signature tiers), **PV5-01b** (the two enforcement CHECKs) | 04 and 05 need 01a and 02. 05 changes `finance_ar_issue_invoice`, which 04 calls, so 05 merges first or 04 rebases. 06 needs 01a. **01b merges in the same change as 04 and 06**, because today's code, seeds and about 10 test fixtures violate its CHECKs (PATCH to `sent`/`paid`, a contract sent with no hash) |
+| 3 | PV5-07 (PDFs and the sealed copy), PV5-08 (Documents), PV5-09 (screens), PV5-12 (agent tools) | 07 needs 04 and 06; 08 needs 07; 09 needs 04 and 06 |
 | — | **Release A**: PV5-13 part A | invoice of record, attested signing, Documents, intercompany |
 | 4 | PV5-10 (Midtrans checkout) | needs the owner's Midtrans sandbox keys and Release A live |
 | — | **Release B**: PV5-13 part B | after the sandbox drive and the owner's switch to production keys |
@@ -205,6 +208,18 @@
 **Owner:** senior-db. **Wave 1.** Model: Sonnet·high.
 
 **Owned paths:** new migrations under `PN/migrations/` (timestamp names); their DB tests.
+
+**As built (2026-10-12), in two parts:**
+- **01a** (`202610130400_pv5_billing_data_model.sql`, branch `pv5/01-data-model`): everything
+  additive. It merges in wave 1.
+- **01b** (`202610130430_pv5_enforce_issue_and_fixed_content.sql`, branch `pv5/01b-enforcement`):
+  `invoices_sent_paid_issued`, `contracts_content_fixed_when_sent`, and the legacy exemption. Code on
+  main today violates both CHECKs, so 01b merges with PV5-04 and PV5-06 (see Waves).
+- The legacy exemption is a `pre_pv5_legacy` flag that only the migration sets. A guard trigger
+  refuses any INSERT or UPDATE that sets or changes it, because a dated `created_at` bound could be
+  backdated.
+- `provider_events.tenant_id` is NOT NULL, like `github_webhook_deliveries`; the receiver resolves
+  the tenant before the claim.
 
 **Change:**
 - `company_billing_profiles` (one row per company, `tenant_id` primary key):
@@ -289,7 +304,10 @@
   workflow, which is an `automation` principal, never can (PV5-12).
 - `invoice` `void_issued`: `company_admin` and `owner`, with the same agent refusal.
 - `finance_config` `set_bank_details`: `owner` and `finance_manager` only, the agent refusal, and no
-  perm mirror (so custom roles cannot reach it, as with PV3-01's countersign).
+  perm mirror (so custom roles cannot reach it, as with PV3-01's countersign). PV-D26: the platform
+  administrator's wildcard keeps its reach, but an `EFFECT_DENY` refuses everyone below high
+  assurance, the administrator included. The same DENY is added to `vendor_master` in
+  `resource_finance_ap.yaml`, where the wildcard used to bypass its high-assurance rule.
 - `contract` `mark_certified`: the roles that hold `send`.
 - The portal needs **no new action**. Documents reads use `portal` `read`, and online payment uses
   the existing `portal` `pay`, the action the manual claim already uses.
@@ -336,6 +354,10 @@ the inputs PV5-10 and PV5-11 wait for.
 ### PV5-04: issue an invoice through the ledger
 
 **Owner:** senior-be, with senior-db review of the SQL. **Wave 2.** Model: Opus·high (money path).
+
+**Merges with PV5-01b and PV5-06 in one change.** Rebase 01b's branch in, then fix every seed and
+test fixture that writes `sent` or `paid` without issuing; 01b's CI run lists the 12 files. Never
+weaken a CHECK to make a fixture pass.
 
 **Owned paths:** `PN/src/modules/invoice/*`, a new `PN/src/modules/invoice/issue.ts`, the
 invoice-payment decide path in `PN/src/core/contracts.controller.ts`, `PN/src/core/portal-commerce.controller.ts`
@@ -411,6 +433,9 @@ billing-profile controller, and their tests.
 
 **Owner:** senior-be. **Wave 2.** Model: Sonnet·high.
 
+**Merges with PV5-01b and PV5-04** (see PV5-04): the contract fixtures that send with no hash are
+fixed here.
+
 **Owned paths:** `PN/src/core/contracts.controller.ts` (send, countersign), the sign route in
 `PN/src/core/portal-commerce.controller.ts`, `PN/src/core/files.controller.ts` (`sha256` on upload),
 and their tests.
@@ -466,6 +491,8 @@ sealing key, and `report-renderer` only if its same-origin rule needs the new pa
     never ships unsealed.
 - Use maintained open-source libraries for joining and signing PDFs, check their licences, and add
   a vendor-exit row in the same change.
+- The sealed copy and every issued-invoice PDF get the same soft-delete guard as a contract's
+  `file_id` (PV5-01a's trigger, widened to the new file role).
 - The job is idempotent and retried. A failure leaves the document marked "being prepared", never
   missing silently.
 - `DOWNLOADABLE` gains `invoice`, and `ownsEntity` admits only an issued invoice in the caller's
@@ -480,7 +507,7 @@ sealing key, and `report-renderer` only if its same-origin rule needs the new pa
 - No key means no file, and the failure is reported.
 - Teeth: skip the content check and the mismatch test fails.
 
-### PV5-08: Documents (portal and staff), and the staff file route
+### PV5-08: Documents (portal and staff)
 
 **Owner:** medior. **Wave 3.** Model: Sonnet·medium.
 
@@ -494,9 +521,8 @@ route under `UI/app/api/` that proxies staff file content, and the UI pieces nam
   test's list.
 - The staff version on the client hub carries `clientVisible` from the same predicates. Add a parity
   test like PV3-07's.
-- A staff download route proxies `GET /api/:t/files/:id/content` under the session. This closes the
-  PV-3 follow-up "no UI route proxies `/files/:id/content`", and the billing page's "attached" text
-  becomes a link.
+- The staff download route already exists: `UI/app/api/files/[fileId]/route.ts` (PV-3 follow-up,
+  `9ced6b6d`, released in 366). Reuse it for staff Documents links; do not build another.
 - Portal: a **Documents** sub-tab under Contracts & billing at `/portal/documents`, a new path (every
   existing path is kept). Update `portalNav.ts` and its route test.
 - Staff: a Documents section on `/clients/[id]/billing`.
