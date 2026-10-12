@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { addAsset, handleMediaBff, mediaCfg, mediaState, seedMedia } from "./media.mjs";
 import { decorateItemDetail, decorateItemList, handleEditorial, seedReview } from "./editorial.mjs";
+import { handleAssist, noteWrite } from "./assist.mjs";
 
 export { addAsset, handlePublicMedia, mediaState } from "./media.mjs";
 
@@ -227,7 +228,7 @@ export function seed() {
     build: null,
     stagingStale: false,
     seq: 0,
-    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, reviewAllowedAbsent: false, reviewCountsWithheld: false, reviewOff: false, reviewRefuse: null, drift: null, forceIssues: null, unavailableOnce: 0, ...mediaCfg() },
+    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, reviewAllowedAbsent: false, reviewCountsWithheld: false, reviewOff: false, reviewRefuse: null, assistRefuse: null, drift: null, forceIssues: null, unavailableOnce: 0, ...mediaCfg() },
     log: [],
   };
 }
@@ -345,6 +346,11 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
   // M5-W2e: the writers' room routes (board, grants, an item's review record and its review commands).
   const editorial = handleEditorial(S, { method, rest, query, body, userId, role });
   if (editorial) return editorial;
+
+  // M5-W6: the AI assist route (suggestions only). Every OTHER write is counted, so a spec can prove that Apply saved nothing.
+  const assist = handleAssist(S, { method, rest, body });
+  if (assist) return assist;
+  noteWrite(S, method, rest);
 
   if (rest === "/collections" && method === "GET") return R(200, collectionsBody(S));
 

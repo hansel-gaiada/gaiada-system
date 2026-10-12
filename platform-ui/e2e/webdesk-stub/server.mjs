@@ -20,6 +20,7 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { addAsset, COMPANY, concurrentSave, decideApproval, handleKeyRequest, handlePublicMedia, handleWebdesk, listApprovals, mediaState, seed, setBuild } from "./wd.mjs";
 import { reviewSnapshot } from "./editorial.mjs";
+import { assistSnapshot, resetAssist } from "./assist.mjs";
 import { handlePortalWebsite, isPortalWebsitePath, PORTAL_USERS, portalMe, portalOverview, portalUserIdFor, seedPortal } from "./portal.mjs";
 
 let heldGate = null;
@@ -44,6 +45,7 @@ const { getDemoResponse } = await import(pathToFileURL(path.join(out, "demoFixtu
 const { demoIdentityFor } = await import(pathToFileURL(path.join(out, "demoIdentity.mjs")).href);
 
 let S = seedPortal(seed());
+resetAssist(S); // the seed itself writes items through the same handlers; only writes AFTER it are the ledger's
 
 function send(res, status, json) {
   const body = JSON.stringify(json);
@@ -90,7 +92,7 @@ const server = http.createServer(async (req, res) => {
       // asserts the loading state, THEN releases). Replaces racing a fixed delay against the router.
       if (cmd === "hold") { holdOn(); return send(res, 200, { ok: true }); }
       if (cmd === "release") { holdOff(); return send(res, 200, { ok: true }); }
-      if (cmd === "reset") { holdOff(); S = seedPortal(seed()); return send(res, 200, { ok: true }); }
+      if (cmd === "reset") { holdOff(); S = seedPortal(seed()); resetAssist(S); return send(res, 200, { ok: true }); }
       if (cmd === "config") { Object.assign(S.cfg, body ?? {}); return send(res, 200, S.cfg); }
       // Put an asset straight into the library (no upload): { title?, alt?, tags?, mime?, originalFilename?, width?, height?, createdBy?, createdAt? }
       if (cmd === "seed-media") return send(res, 200, { assetId: addAsset(S, body ?? {}) });
@@ -98,7 +100,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, {
           ...mediaState(S),
           items: [...S.items.values()].map((i) => ({ itemId: i.itemId, slug: i.slug, locale: i.locale, headVersion: i.versions.at(-1).n, publishedVersion: i.publishedVersion, publishState: i.publishState, deletedAt: i.deletedAt, versions: i.versions.map((v) => ({ n: v.n, createdBy: v.createdBy, note: v.note, props: v.blocks[0]?.props, seo: v.seo })) })),
-          approvals: [...S.approvals.values()], build: S.build, stagingStale: S.stagingStale, review: reviewSnapshot(S),
+          approvals: [...S.approvals.values()], build: S.build, stagingStale: S.stagingStale, review: reviewSnapshot(S), assist: assistSnapshot(S),
         });
       }
       if (cmd === "decide") { const r = decideApproval(S, body.id, body.outcome, body.by); return send(res, r.status, r.json); }

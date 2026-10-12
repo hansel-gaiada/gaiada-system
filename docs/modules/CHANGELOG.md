@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.97.1` - the assistant FAB always opens the drawer, never the full page (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-up (the last flaky e2e from the full-suite sweep).
+
+- The FAB links to `/assistant`, which the `@drawer` intercepting route turns into a drawer. With the default prefetch the router could hold the FULL `/assistant` payload: on a hard-loaded `/tasks/t-4` the click opened the full page (1 in 6) or Escape's `back()` landed there (1 in 6), leaving no FAB to return focus to. The FAB now has `prefetch={false}`, so the click fetches the intercepted variant.
+- `assistant-drawer.spec.ts` clicks the FAB only once React has hydrated it (the `hydrated()` helper from `portal-website.spec.ts`).
+- Verified on sumopod (full Playwright, CI mode): the drawer spec repeated 8x, 33 passed, 0 failed (before: the Escape test failed 2 of 5). GitHub Actions run 38243752143 green (one unrelated wa-chat-bot timing flake re-run).
+
+### platform-ui `0.97.0` - M5-W6 UI: the AI assist drawer in the item editor (2026-10-12) - DEV-VERIFIED
+
+- **Where it shows:** an "Assist" card in the editor's side rail, only when the item read's `allowed.update` is true. It is hidden when `allowed` is absent, in client mode, for a deleted item and in create mode.
+- **Five kinds:** outline, meta description, FAQ, EN→ID first draft and alt text.
+- **Apply** puts a suggestion into the editor as an UNSAVED edit, and is disabled with the editor's own reason when the form is read-only or stale. The drawer never saves or publishes; the human saves through the normal save.
+- **Copy** always works.
+- The EN→ID draft is labelled "first draft — needs a human" and is Copy-only from an English item.
+- Every BFF refusal is in plain words: the budget says when it resets; unavailable, invalid output, a deleted item and permission errors each have their own words.
+- Cancel drops a late answer and says the call may still have counted.
+- No suggestion text goes to telemetry.
+- **Verified** on GitHub Actions 38236191276:
+  - the WebDesk Playwright suite against the built app, 114 passed, incl. 5 new assist specs (Apply changes the field and makes no write; the normal Save is the only write);
+  - vitest 1029 passed locally.
+  - The run's one red job was an unrelated wa-chat-bot time-window test; it went green on re-run.
+
 ### webdesk `0.21.0` - codegen stops asking for bucket versioning it may not change (2026-10-12) - DEV-VERIFIED
 
 - `S3StorageAdapter.ensureBucket` sets versioning only on a bucket the call itself created, exactly like object lock. A pre-existing bucket's versioning and lock belong to `scripts/storage-bootstrap.mjs`, and the api key is refused `PutBucketVersioning` by design. Before this, codegen logged `versioning enable failed: AccessDenied` on every artifact write (4× in the 2026-10-12 `contract.regenerate` backfill, seen by M4).
