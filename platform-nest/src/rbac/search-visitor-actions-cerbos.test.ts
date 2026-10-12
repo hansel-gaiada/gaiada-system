@@ -103,7 +103,9 @@ describe.skipIf(!live)("M5-V3-f · resource_search_property read_visitors + view
     for (const a of BOTH) {
       expect(await allow(mgr, property(T1, ""), a), `${a} module ""`).toBe(false);
       expect(await allow(mgr, property(T1, "webdev"), a), `${a} module webdev`).toBe(false);
-      expect(await allow(mgr, property(T1, undefined), a), `${a} module absent`).toBe(false);
+      // Built by hand: `property(T1, undefined)` would take the default parameter ("search"), not drop the attribute.
+      const noModule: Resource = { kind: "resource_search_property", id: "p-1", tenantId: T1 };
+      expect(await allow(mgr, noModule, a), `${a} module absent`).toBe(false);
     }
   });
 
