@@ -11,6 +11,28 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### insights-collector `0.1.0` - M5-V2-a: the enrichment collector, a new Go component (not deployed) (2026-10-12) - PROTOTYPED
+
+- **What it is:** `insights-collector/`, which will sit between the public nginx edge and Umami on sumopod (internal network only, no egress).
+- **The aggregate channel** `/lib/kestrel/e`:
+  - resolves the visitor IP ONCE (DB-IP City Lite for country/region/city, ASN Lite for the network);
+  - forwards an `fd…` pseudonym from a daily in-memory key, plus geo headers, to Umami, so Umami never sees a raw IP (the documented fallback is `FORWARD_IP_MODE=real`);
+  - drops `identify` and `payload.id`, with an allow-listed payload;
+  - drops and counts bots (the isbot list on the UA, plus a PROPOSED datacenter-ASN list awaiting review).
+- **The ops port (8081)** serves `/healthz` and `/ops/v1/bots` behind a read key, and never reads `X-Real-IP`.
+- `CompanyResolver` defaults to "network name only" (O-12).
+- An empty env var takes its default; `0` refuses to start.
+- **Verified** on GitHub Actions 38270112061: `go test -race` green in every package, including the Postgres store test. A mutation check confirms a leaked IP fails the tests.
+- Deploy is V2-c/V2-e (orchestrator, sumopod). Live waits for G2 and O-11.
+
+### infra `0.13.7` - M5-V2-b: CI and the signed image for `insights-collector` (2026-10-12) - DEV-VERIFIED
+
+- A new CI job: `go build`, `go vet`, `go test -race` with a Postgres service.
+- `insights-collector` joins the release components (`scripts/ci/config.mjs`), so a tag builds, SBOMs, cosign-signs and attests `ghcr.io/<owner>/gaiada-insights-collector`.
+- The distroless runtime is pinned by digest.
+- It is not part of the ERP deploy; it runs on sumopod.
+- GitHub Actions 38270112061 green.
+
 ### platform-nest `0.101.0` - M5-V3-d: the schema for consented visitor profiles (DDL only; nothing writes to it yet) (2026-10-12) - DEV-VERIFIED
 
 - **Migration `202610131600_search_visitor_profiles`** adds five tables, each FORCE RLS in the `search` scope:
