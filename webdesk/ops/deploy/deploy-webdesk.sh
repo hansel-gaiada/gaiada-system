@@ -559,8 +559,9 @@ main() {
   if [ -n "$WD_DOCKER_HOST" ]; then
     # Every plain `docker` call below now talks to the rootless daemon; compose gets it through sudo explicitly.
     export DOCKER_HOST="$WD_DOCKER_HOST"
-    docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q 'name=rootless' \
-      || die "$WD_DOCKER_HOST does not answer as a rootless Docker daemon"
+    local so
+    so="$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)"
+    case "$so" in *name=rootless*) ;; *) die "$WD_DOCKER_HOST does not answer as a rootless Docker daemon" ;; esac
   fi
   WORK="$(mktemp -d)"
   trap on_exit EXIT

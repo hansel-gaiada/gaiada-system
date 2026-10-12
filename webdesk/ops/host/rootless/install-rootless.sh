@@ -97,7 +97,9 @@ render_template() {
     expr+=(-e "s|@$k@|$v|g")
   done
   out="$(sed "${expr[@]}" "$t")" || return 1
-  if printf '%s\n' "$out" | grep -Eq '@[A-Z_]+@'; then return 1; fi
+  # No `printf | grep -q` anywhere in these scripts: under pipefail an early grep exit can SIGPIPE the writer and
+  # turn a match into a failure. Match on a here-string (or a file) instead.
+  if grep -Eq '@[A-Z_]+@' <<<"$out"; then return 1; fi
   printf '%s\n' "$out"
 }
 
@@ -277,7 +279,7 @@ do_packages() {
   say "== 2 packages"
   local p missing=""
   for p in uidmap slirp4netns dbus-user-session acl; do
-    dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || missing="$missing $p"
+    case "$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null || true)" in *'ok installed'*) ;; *) missing="$missing $p" ;; esac
   done
   if [ -z "$missing" ]; then say "  OK    uidmap slirp4netns dbus-user-session acl installed"; return 0; fi
   step "apt-get update" env DEBIAN_FRONTEND=noninteractive apt-get update -q
@@ -360,7 +362,7 @@ do_home() {
   step "data root $DATA_ROOT" install -d -m 0700 -o "$RL_USER" -g "$RL_USER" "$DATA_ROOT"
 }
 
-acl_has_x() { getfacl -cp "$1" 2>/dev/null | grep -qx "user:$2:--x"; } # exact entry, not masked
+acl_has_x() { grep -qx "user:$2:--x" <<<"$(getfacl -cp "$1" 2>/dev/null)"; } # exact entry, not masked
 
 do_bind_access() {
   say "== 7 bind sources"
@@ -432,7 +434,11 @@ envelope_ok() { # the slice's own cgroup files carry the envelope
   [ "$(cat "$d/cpu.max")" = "$want_cpu" ] && [ "$(cat "$d/memory.max")" = "$want_mem" ] && [ "$(cat "$d/pids.max")" = "$TASKS_MAX" ]
 }
 # A missing cgroup controller shows as a `docker info` WARNING naming it; other warnings are not this check's.
-no_warnings() { ! rl_docker info 2>&1 >/dev/null | grep -Eiq 'WARNING:.*(cgroup|cpu|memory|pids|io\.|cpuset|swap)'; }
+no_warnings() {
+  local w
+  w="$(rl_docker info 2>&1 >/dev/null)"
+  ! grep -Eiq 'WARNING:.*(cgroup|cpu|memory|pids|io\.|cpuset|swap)' <<<"$w"
+}
 only_operator() { # nobody but the owner and the operator can reach the socket
   [ $((8#$(stat -c %a "$SOCK") & 7)) = 0 ] && [ $((8#$(stat -c %a "$RUNTIME") & 7)) = 0 ] &&
     [ "$(getfacl -cp "$SOCK" 2>/dev/null | grep -E '^user:[^:]+:' | cut -d: -f2 | tr '\n' ' ')" = "$OPERATOR " ]
@@ -506,12 +512,14 @@ do_remove() {
   done
   step "stop + disable the guard (remove refuses while any process of the range runs)" systemctl disable --now "$GUARD_UNIT_INSTANCE"
   for d in $ETC_DIRS; do
-    if getfacl -cp "$d" 2>/dev/null | grep -q "^user:$RL_USER:"; then step "drop $RL_USER's ACL entry on $d" setfacl -x "u:$RL_USER" "$d"; fi
+    if grep -q "^user:$RL_USER:" <<<"$(getfacl -cp "$d" 2>/dev/null)"; then step "drop $RL_USER's ACL entry on $d" setfacl -x "u:$RL_USER" "$d"; fi
   done
   step "drop-ins and config" rm -rf "$(dirname "$USER_AT_DROPIN")" "$(dirname "$SLICE_DROPIN")" "$CONF_FILE" "$OTLP_ENV"
   step "systemd daemon-reload" systemctl daemon-reload
   step "subuid/subgid $SUB_START-$SUB_END" usermod --del-subuids "$SUB_START-$SUB_END" --del-subgids "$SUB_START-$SUB_END" "$RL_USER"
-  if findmnt -rno TARGET | grep -q "^$HOME_DIR"; then die "mounts remain under $HOME_DIR: not deleting the user"; fi
+  local mounts
+  mounts="$(findmnt -rno TARGET)" || die "findmnt failed: not deleting the user"
+  if grep -q "^$HOME_DIR" <<<"$mounts"; then die "mounts remain under $HOME_DIR: not deleting the user"; fi
   step "delete $RL_USER and its home (images, volumes, state)" userdel -r "$RL_USER"
   say "removed. Shared files stay ($GUARD_BIN, $GUARD_UNIT, $GRANT_BIN, packages): the live install uses them."
 }

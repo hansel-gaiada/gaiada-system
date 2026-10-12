@@ -5,7 +5,7 @@ v2.3 §03 **AC 7** ("Rootless Docker for the public surface's project") and is f
 `docs/plans/2026-10-11-webdesk-m4-plan.md`.
 
 **Status: PLANNED.** Design, scripts and pure-part tests are in the repo. Nothing has run on any server. The
-tests are `webdesk/ops/host/rootless/test-rootless.sh` (164 checks) and `webdesk/ops/deploy/test-deploy-webdesk.sh`
+tests are `webdesk/ops/host/rootless/test-rootless.sh` (167 checks) and `webdesk/ops/deploy/test-deploy-webdesk.sh`
 (60 checks). Both run with plain bash, with no root and no docker.
 
 **This repo is public.** Host addresses other than the docker0 address, the account names on the box, and raw
@@ -58,7 +58,8 @@ measurements:
 | `/etc/webdesk` | 0700 webdesk-svc. `certs/` **0700**; `editorial/`, `ws4/` 0750 webdesk-svc. `ca-cert.pem` 0644 webdesk-svc; both JWKS files 0444 root. `.env`, `.env.control` 0600. `guard.env` 0644 root. | D8: uid 940 needs search access through four directories, and nothing more. |
 | Project tree | `/home/Hansel` is 0755. The tree is 0755/0644. `~/.docker` is 0700. The ERP compose `.env` is 0600. | The daemon can already reach `./proxy/Caddyfile` and `./postgres/init-roles.sh`. No move is needed. |
 | Volumes | `webdesk_webdesk_pgdata` 87 MB (1512 entries, uid 70); `webdesk_webdesk_rustfsdata` 416 KB (102 entries, uid 10001); `webdesk_webdesk_redisdata` 168 KB (`dump.rdb`, uid 999). Also unused: `webdesk_webdesk_miniodata`, `webdesk_webdesk_status`. | The names carry the project prefix twice. The data has no special files, no hardlinks and no xattrs (checked on all 1616 entries). |
-| uid 999 on the host | three `redis-server` processes: WebDesk's redis and two ERP redis containers | uid 999 is `webdesk-svc`, the owner of `/etc/webdesk` (§11, F6-R1). |
+| uid 999 on the host | three `redis-server` processes: WebDesk's redis and two ERP redis containers | uid 999 is `webdesk-svc`, the owner of `/etc/webdesk` (§11 item 6; §14, F6-R1). |
+| Nightly WebDesk dump | the first **scheduled** run (cron as Hansel) at 03:05:07Z on 2026-10-12: `tables=29 tenants=2` | The baseline for P4 and P5. The first nightly through the rootless daemon must report the same table count (or the count after any migration since) and at least 2 tenants. |
 
 ---
 
@@ -161,7 +162,7 @@ that user, including the ERP's deploy.
   after the move the same subnet inside the netns.
 - The real client address is carried at L7 by nginx (`X-Real-IP`, `X-Forwarded-For`) and is unaffected.
 - *Found on the way:* the per-IP form and consent limits are therefore one global bucket. This is pre-existing and
-  not F6 (§12, F6-R4).
+  not F6 (§14, F6-R4).
 
 **Inside the netns.**
 - `daemon.json` moves the default bridge to `172.29.255.1/24` and the address pools to `172.30.0.0/16`. Docker's
@@ -375,6 +376,11 @@ to rootful. No ERP tool reads the file.
 | GHCR login for pulls | Unchanged. The workflow's `docker login` stores the credential in Hansel's `~/.docker/config.json` (that call still talks to the rootful daemon). Any later `docker pull` by Hansel sends it to whichever daemon `DOCKER_HOST` names. cosign stays on the runner. | No change |
 | `scripts/phaseb/erp-name-cutover.sh` | One-off, already run | No change |
 
+For example, the WS4 keys runbook's **"Restart api"** becomes this, run from `/home/Hansel/gaiada-webdesk/webdesk`:
+`sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml --env-file /etc/webdesk/.env up -d --no-deps --no-build --force-recreate api`.
+The live-swap runbook's manual steps change the same way. Its `docker save | ssh … docker load` must load into the
+rootless daemon (`DOCKER_HOST=… docker load`) and keep its check that the image id equals the signed digest.
+
 **Minimum release after the cut-over.** The containment probe that `deploy-webdesk.sh` runs comes from the
 *release tree*. After the move, dispatching a release **older than the first one that contains this branch** fails
 its health probe; it fails safe, by re-pinning. `deploy-webdesk.sh rollback`, which re-pins images, is unaffected.
@@ -416,7 +422,7 @@ The only lasting change is the two packages (uidmap, slirp4netns), which the liv
 **A2 in detail (T1).** From throwaway containers on the proof daemon, with controls:
 - Must work: the own-bridge peer, DNS, and `1.1.1.1:443`.
 - Must be dropped (timeout): metadata `:80`; every host address `:22`; `172.17.0.1:{5432,6379,4310,9443}`; a
-  WireGuard peer; `10.0.2.2:22`.
+  WireGuard peer; `10.0.2.2:22` (no rootful control exists for that one: the address exists only inside slirp).
 - Controls: the same host targets answer from the **rootful** default bridge.
 - Published ports: the declared one (`127.0.0.1:18380`) answers from the host. An **undeclared** one
   (`127.0.0.1:18381`, and one on `0.0.0.0`) times out, which proves the REPLY mute.
@@ -502,6 +508,8 @@ Verify immediately. Each item must pass; if not, roll back with R1 (§7).
 - `DOCKER_HOST=$RL docker exec webdesk-postgres-1 psql -U "$SU" -d webdesk -XAtc "$COUNTS" | diff "$B/counts.before" -`
   shows no difference.
 - `sh $WD/ops/scripts/ensure-backup-role.sh` prints `unchanged`.
+- `bash $WD/ops/scripts/webdesk-backup-nightly.sh`, which now goes through the switch, prints
+  `webdesk-backup ok … tables=29 tenants=2`. That is the §1 baseline; after a migration, use its new table count.
 - `sudo WS4_HMAC_RETIRED=1 WEBDESK_OTLP_PORT=4319 bash $WD/ops/probes/containment-probe.sh` passes all six probes
   (rebased). Probe 6 shows "OTLP exception: 172.17.0.1:4319 answers".
 - `sudo bash $WD/ops/host/rootless/install-rootless.sh check --profile live` gives `VERIFY OK`.
@@ -511,9 +519,20 @@ Verify immediately. Each item must pass; if not, roll back with R1 (§7).
 - Dispatch `deploy-webdesk.yml` with the live tag: `mode=plan`, then `mode=apply`. Both read the switch, and the
   result must be `RESULT: apply OK`.
 
+Rollback R1, exactly. It takes about 1 minute; the rootless volumes stay for the post-mortem.
+
+```bash
+wdc down                                   # rootless containers + network go; its volumes stay
+sudo rm /etc/default/webdesk-docker        # every WebDesk script is rootful again
+wdc_rootful up -d --no-build
+sudo systemctl restart webdesk-host-deny.service
+sudo WS4_HMAC_RETIRED=1 WEBDESK_OTLP_PORT=4319 bash $WD/ops/probes/containment-probe.sh   # the rootful count again
+```
+
 **P5. Soak and decommission** (7 days; ≈0.5 session).
-- Each day, the nightly dump through rootless is pulled offsite (`OffsiteBackupOneSourceStale` stays quiet). The
-  automatic release path (`skip_if_current`) stays green. Run one restore drill, and the containment probe.
+- Each day, the 03:05 nightly runs through rootless (`tables=29 tenants=2` or more) and is pulled offsite
+  (`OffsiteBackupOneSourceStale` stays quiet). The automatic release path (`skip_if_current`) stays green. Run one
+  restore drill, and the containment probe.
 - Then decommission the rootful copy:
   1. `sudo systemctl disable --now webdesk-host-deny.service`, then remove its unit and
      `/usr/local/sbin/webdesk-egress-guard.sh`.
@@ -573,7 +592,7 @@ P4 execution) stays with the orchestrator, per the estate rule.
 
 | ID | Tier · model | What | Acceptance ("done when") | Depends |
 |---|---|---|---|---|
-| T0 | qa · seat default | Review and gate this branch | On the Linux gate, `bash webdesk/ops/host/rootless/test-rootless.sh` (164/0) and `bash webdesk/ops/deploy/test-deploy-webdesk.sh` (60/0) pass. shellcheck is clean or each warning is justified. Every blob is LF with mode 100755 on the scripts. With no switch, `deploy-webdesk.sh`, the probe and the backup scripts issue the same docker and compose calls as `main` (diff review, plus the harness's compose test). | — |
+| T0 | qa · seat default | Review and gate this branch | On the Linux gate, `bash webdesk/ops/host/rootless/test-rootless.sh` (167/0) and `bash webdesk/ops/deploy/test-deploy-webdesk.sh` (60/0) pass. shellcheck is clean or each warning is justified. Every blob is LF with mode 100755 on the scripts. With no switch, `deploy-webdesk.sh`, the probe and the backup scripts issue the same docker and compose calls as `main` (diff review, plus the harness's compose test). | — |
 | T1 | devops · seat default | `webdesk/ops/host/rootless/test-rootless-guard.sh`: the live packet harness of §9 (A2) | It runs on the proof host and exits 0 only when every check **and its control** passes. It cleans up after itself, even on failure. It never touches uid 940 or the live guard. | T0 |
 | T2 | orchestrator (server) | Execute P2 (A1–A10). Evidence goes to `docs/plans/…rootless-proof.local.md`. | Every A-row is met. Defects found become tickets. | T1, Q1, Q2 |
 | T3 | devops · seat default | Fix whatever P2 finds in the scripts | The failing A-row passes on a re-run | T2 |

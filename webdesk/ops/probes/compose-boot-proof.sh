@@ -46,10 +46,12 @@ PROJECT="m4boot-$(date +%s)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/m4boot.XXXXXX")"
 chmod 700 "$TMP"
 ROOTLESS=0
-if docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q 'name=rootless'; then
-  ROOTLESS=1
-  chmod 711 "$TMP" # the rootless daemon user resolves the bind sources below; it may search, never list
-fi
+case "$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null)" in
+  *name=rootless*)
+    ROOTLESS=1
+    chmod 711 "$TMP" # the rootless daemon user resolves the bind sources below; it may search, never list
+    ;;
+esac
 STARTED=0
 FAILS=0
 PASSES=0

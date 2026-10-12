@@ -258,7 +258,8 @@ cmd_apply() {
 }
 
 processes_in_set() { # prints the first pid whose uid is the daemon's or in its range
-  ps -e -o pid= -o uid= | awk -v u="$RL_UID" -v s="$SUB_FIRST" -v e="$SUB_LAST" '$2 == u || ($2 >= s && $2 <= e) { print $1; exit }'
+  # awk reads to the end on purpose: an early `exit` could SIGPIPE ps, and under pipefail that kills the caller.
+  ps -e -o pid= -o uid= | awk -v u="$RL_UID" -v s="$SUB_FIRST" -v e="$SUB_LAST" '!f && ($2 == u || ($2 >= s && $2 <= e)) { print $1; f = 1 }'
 }
 
 cmd_remove() {

@@ -56,6 +56,11 @@ map_manifest() {
   done
 }
 
+# has_unmapped <mapped-manifest>...: true if any entry's owner column holds "?<id>". It reads the files itself:
+# `cut | grep -q` on a manifest larger than a pipe buffer could SIGPIPE cut, and under pipefail a match would then
+# read as "nothing unmapped".
+has_unmapped() { awk -F'\t' '$2 ~ /\?/ { f = 1 } END { exit f ? 0 : 1 }' "$@"; }
+
 # manifest <dir>: one line per entry, LC_ALL=C sorted: <%q path> TAB <type> <mode> <uid> <gid> <size|-> <sha256|->
 # Directory sizes are filesystem history, not content: "-". A symlink's "sha" is the sha256 of its target.
 manifest() {
@@ -188,7 +193,7 @@ cmd_verify() {
   ids="$(rl_ids "$TO")"
   # shellcheck disable=SC2086
   if [ -n "$ids" ]; then map_manifest $ids <"$w/$TOVOL.to.host" >"$w/$TOVOL.to"; else cp "$w/$TOVOL.to.host" "$w/$TOVOL.to"; fi
-  if cut -f2 "$w/$VOL.from" "$w/$TOVOL.to" | grep -q '?'; then
+  if has_unmapped "$w/$VOL.from" "$w/$TOVOL.to"; then
     die "an entry's owner is outside a namespace's mapping (shown as ?<id>; manifests in $w)"
   fi
   n="$(wc -l <"$w/$VOL.from")"

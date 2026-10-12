@@ -353,6 +353,12 @@ section_copy() {
   printf './PG_VERSION\tf 600 700000069 700000069 3 abc\n.\td 700 700000069 700000069 - -\n' >"$T/c.host"
   assert "map_manifest rewrites both owner columns" \
     test "$(map_manifest 940 940 700000000 65536 700000000 65536 <"$T/c.host" | tr '\t' '|' | tr '\n' ';')" = "./PG_VERSION|f 600 70 70 3 abc;.|d 700 70 70 - -;"
+  { printf './unmapped\tf 600 ?999 70 1 x\n'; for n in $(seq 1 3000); do printf './f%05d\tf 600 70 70 3 %064d\n' "$n" "$n"; done; } >"$T/c.big"
+  assert "has_unmapped finds a ?<id> owner at the top of a >64 KiB manifest (no SIGPIPE blind spot)" has_unmapped "$T/c.big"
+  sed 1d "$T/c.big" >"$T/c.clean"
+  refute "has_unmapped: a fully mapped manifest passes" has_unmapped "$T/c.clean"
+  printf './what?\tf 600 70 70 1 x\n' >"$T/c.q"
+  refute "has_unmapped: a ? in the PATH is not an owner" has_unmapped "$T/c.q"
   printf 'u:1:2\nwdproof-rootless:700065536:65536\n' >"$T/c.sub"
   assert "subid_of: one entry" test "$(subid_of "$T/c.sub" wdproof-rootless 941)" = "700065536 65536"
   printf 'x:1:2\nx:3:4\n' >"$T/c.sub2"
