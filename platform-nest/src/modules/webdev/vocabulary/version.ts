@@ -36,10 +36,16 @@
 //           tokens {slug} and {locale}; the writers dashboard maps an item to its page with it). Editor/ops metadata
 //           only: no stored value changes, the envelope did not change by a byte. The classifier COMPUTES the bump
 //           from test/fixtures/vocabulary-1.3.0.snapshot.json (the collection `ui` key set is a snapshot dimension).
+//   1.5.0 — M5-V5-a, MINOR: the `experiment` block type (an A/B test over one block or the item's fields: arms with
+//           their overrides, a goal, weights; design docs/plans/2026-10-12-m5-phase5-design.md section 5.1). Like `fields`
+//           it is non-composable and non-visual (an older renderer shows arm `a`, the control, and reports nothing),
+//           never client-editable, and a publish that changes a RUNNING experiment or its control is refused by the write
+//           plane. The envelope did not change by a byte and /v1 serves the block as any other. The classifier COMPUTES
+//           the bump from test/fixtures/vocabulary-1.4.0.snapshot.json (`block type "experiment" added`).
 import { PRIMITIVE_NAMES } from './primitives'
 import { BLOCK_TYPE_NAMES } from './blocks'
 
-export const VOCABULARY_VERSION = '1.4.0'
+export const VOCABULARY_VERSION = '1.5.0'
 
 /** The frozen path segment (design §05 hard rule 1). Never mutated — evolution is a new /v2. */
 export const ENVELOPE_VERSION = 'v1'

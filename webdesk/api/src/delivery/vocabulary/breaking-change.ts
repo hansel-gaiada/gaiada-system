@@ -40,8 +40,11 @@
 //
 // M5-W8b (vocabulary 1.4.0): `ui.routePattern` needed no new dimension: the collection `ui` key set already is one, so the
 // new key is rated MINOR from the 1.3.0 snapshot; a VALUE change inside a tenant contract is a `ui` edit, so PATCH.
+//
+// M5-V5-a (vocabulary 1.5.0): the `experiment` block type needed no new dimension either: a new block type is already
+// rated MINOR from the 1.4.0 snapshot (`blocks` is a dimension), with the reason below.
 import { MULTIPLE_CAPABLE_PRIMITIVES, PRIMITIVE_NAMES, FIELD_DEF_KEYS, FIELD_UI_KEYS, type FieldDef, type PrimitiveName } from './primitives'
-import { BLOCKS, BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, type BlockDef, type BlockType } from './blocks'
+import { BLOCKS, BLOCK_TYPE_NAMES, EXPERIMENT_BLOCK_TYPE, FIELDS_BLOCK_TYPE, type BlockDef, type BlockType } from './blocks'
 import { COLLECTION_UI_KEYS, COMPOSITION_KEYS, LINT_KEYS, type CollectionUi, type ContentLintSettings, type PlaceholderRule } from './composition'
 import { buildItemEnvelope, buildListEnvelope } from './envelope'
 import { problemDetails } from './problem-details'
@@ -367,7 +370,9 @@ export function classifyVocabularyChange(before: VocabularySnapshot, after: Voca
       reason:
         t === FIELDS_BLOCK_TYPE
           ? `block type "${t}" added (the composition-typed block: its props are typed per collection, not by the vocabulary)`
-          : `block type "${t}" added`,
+          : t === EXPERIMENT_BLOCK_TYPE
+            ? `block type "${t}" added (the A/B-test block: non-composable and non-visual, its props are checked per item)`
+            : `block type "${t}" added`,
     })
   }
   for (const t of beforeBlockTypes) {

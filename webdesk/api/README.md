@@ -2624,3 +2624,47 @@ Search Console figures. **Vocabulary 1.4.0 is a MINOR** (an optional key in the 
   tenant's DEFAULT language the `/{locale}` segment is left out (the site serves its default language at the root); a pattern without
   `{locale}` gives every language the same address.
 - Tests: `webdesk/delivery/test/w8b-route-pattern.test.mjs` (`cd webdesk/api && node --import tsx ../delivery/test/w8b-route-pattern.test.mjs`).
+
+## A/B variants: the `experiment` block (M5-V5-a, PROTOTYPED) — vocabulary 1.5.0
+
+Design: `docs/plans/2026-10-12-m5-phase5-design.md` §5.1/§5.2. A new **block type**, `experiment`, lets an item carry an A/B test over its own fields or over one
+of its generic blocks. **Vocabulary 1.5.0 is a MINOR** (`block type "experiment" added`; the classifier computes it from
+`webdesk/delivery/test/fixtures/vocabulary-1.4.0.snapshot.json`). No migration (`blocks` is `jsonb` with no type CHECK), no new route, **the `/v1` envelope and the read SQL
+do not change by a byte**: `/v1` serves the block as one more entry of `blocks`; an older consumer renders nothing for it (renderer invariant) and shows arm `a`, the control.
+
+```jsonc
+[ { "type": "fields", "props": { "heading": "Websites that win work" } },
+  { "type": "experiment", "props": {
+      "key": "home-hero-2026-11",                     // ^[a-z0-9][a-z0-9-]{2,47}$ (unique per property: the ERP enforces that, V5-c)
+      "target": "fields",                             // or { "block": 2 }: a generic block by index
+      "enrolment": "consented",                       // "consented" (default) | "all"
+      "goal": { "event": "lead_form_start", "match": { "form_id": "contact" } },
+      "arms": [ { "key": "a", "weight": 50 },         // arms a-d in order, 2 to 4; a is the control and never overrides
+                { "key": "b", "weight": 50, "override": { "heading": "Your next client is searching now" } } ] } } ]
+```
+
+- **Write-time rules** (`validateItemContent` -> `validateExperimentBlock`, `delivery/vocabulary/item-fields.ts`): allowed in every collection without being listed (a composition
+  that lists it in `blocks` is refused), at most one per item, never at index 0; props closed; integer weights >= 10 summing to 100; `goal.event` one of
+  `generate_lead, lead_form_start, cta_click, click_whatsapp, click_phone, click_email, section_view`, `goal.match` at most one of `form_id, link_location, section_id`
+  (`[A-Za-z0-9_.:-]{1,64}`); `target:"fields"` needs a collection that declares fields, every other arm's `override` names declared fields only and `{...fields, ...override}`
+  passes the field rules (an issue is reported at the arm's own path, never on the control); `target:{block:i}` needs `blocks[i]` to be a generic block and every other arm's `replace`
+  to be a block of the same type that passes `validateBlock`.
+- **The publish lock: 409 `experiment-locked`.** An item whose **live** version carries an experiment has a running test (the test starts when the version carrying the block is
+  published, so the live version IS the running state: no ERP flag is needed, and V5-c's `started_at` is just that publish). `content.publish`, and `content.schedule` with a `publishAt`,
+  refuse (for every principal, the whole batch, before any effect) a version that changes the experiment, or changes a control value it overrides: the values of every field any
+  arm overrides (`target:"fields"`), or the whole block under test (`target:{block}`). Everything else may change. **Removing the block (the stop), with or without the winner merged into `fields`,
+  is always allowed**, and drafts may be edited freely (only a publish is locked). The comparison is the vocabulary's own `experimentLockViolations`; the guard is `assertExperimentNotLocked` in
+  `control/content/content-commands.service.ts`. NOT covered: a due version swap executed by the scheduler (it was checked at schedule time and any publish cancels it) and `promotion import`.
+- **Never client-editable.** An experiment block is refused to a client editor whatever the collection's `ui.clientEditable`: `isClientEditable(composition, pointer, [blocksBefore, blocksAfter])`
+  answers false for any pointer into a block that is an experiment in either version, and `clientEditViolations` / `clientCreateViolations` always pass both sides, so adding, changing or
+  removing it is 422 `field-not-client-editable` (create and publish by a client likewise). A caller without the content (a UI deciding whether to draw an input) gets the structural answer, as before.
+- **Search**: `search-text.ts` skips a top-level `experiment` block, so `/v1` search indexes only the control.
+- **Contract codegen** (`codegen/generator/openapi-builder.mts`): one shared `ExperimentBlock` component schema; every collection's item and list-item `blocks` allow it (a union branch; for a closed
+  fields-only collection an `anyOf` of the two EXACT tuples `[FieldsBlock]` / `[FieldsBlock, ExperimentBlock]`, never one `[F, E]` tuple, which would make the block REQUIRED in the generated SDK type).
+  `CONTENT-CONTRACT.md` gains a short section. Tenant contracts regenerate as MINOR (the SDK type is a superset).
+- **Schema drafting**: the prompt tells the model never to put `experiment` in `blocks` (`schema-draft/prompt.ts`).
+- **Renderers**: `webdesk/blocks` registers it as known and non-visual (`NON_VISUAL_BLOCK_TYPES`); the PHP theme (`webdesk/wordpress`, `webdesk/templates/wp`, and the generated copy in `ai-agents`)
+  lists it and draws nothing.
+- Tests: `webdesk/delivery/test/v5a-experiment.test.mjs` (100 checks, no database: `cd webdesk/api && node --import tsx ../delivery/test/v5a-experiment.test.mjs`); `test/codegen-openapi-builder.spec.ts`
+  and `test/codegen-sdk-typecheck.spec.ts` (the generated SDK compiles, additive); `test/content-helpers.spec.ts` (search text); and the DB-backed `test/experiment-block.spec.ts` (publish lock, client editors,
+  `/v1` serving; **needs the Linux gate**).

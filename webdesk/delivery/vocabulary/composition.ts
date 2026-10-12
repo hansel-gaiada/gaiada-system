@@ -42,7 +42,7 @@ import {
   isPrimitiveName,
   type FieldDef,
 } from './primitives.ts'
-import { COMPOSABLE_BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, isComposableBlockType, type ComposableBlockType } from './blocks.ts'
+import { COMPOSABLE_BLOCK_TYPE_NAMES, EXPERIMENT_BLOCK_TYPE, FIELDS_BLOCK_TYPE, isComposableBlockType, type ComposableBlockType } from './blocks.ts'
 import { VOCABULARY_VERSION } from './version.ts'
 
 /** 1.1.0, advisory lint: a literal-delimited placeholder syntax. No regex, so a tenant pattern cannot cause ReDoS. */
@@ -569,6 +569,14 @@ export function validateCollectionComposition(collectionKey: string, raw: unknow
             issue(
               path,
               `"${FIELDS_BLOCK_TYPE}" is the composition-typed block: it is implied by declaring "fields" and may never be listed in "blocks"`,
+              COMPOSABLE_BLOCK_TYPE_NAMES.join(' | '),
+            ),
+          )
+        } else if (b === EXPERIMENT_BLOCK_TYPE) {
+          issues.push(
+            issue(
+              path,
+              `"${EXPERIMENT_BLOCK_TYPE}" is the A/B-test block (1.5.0): it is allowed in every collection without being listed (at most one per item) and may never be listed in "blocks"`,
               COMPOSABLE_BLOCK_TYPE_NAMES.join(' | '),
             ),
           )

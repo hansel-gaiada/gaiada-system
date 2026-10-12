@@ -91,7 +91,7 @@ function gaiada_resolve_blocks_with_empty_vocabulary(array $blocks): array
 }
 $forcedUnknown = gaiada_resolve_blocks_with_empty_vocabulary([['type' => 'hero', 'props' => []]]);
 check($forcedUnknown[0]['known'] === false, 'NEGATIVE CONTROL: with the vocabulary list forced empty, a normally-known type ("hero") IS classified unknown — proves the known/unknown branch is a real vocabulary lookup, not a hardcoded true');
-check(count(gaiada_known_block_types()) === 10, 'sanity: the vendored vocabulary has all 10 known block types (the 9 generic ones plus the composition-typed `fields`; the drift check is a separate gate, this just confirms the fixture used here matches it)');
+check(count(gaiada_known_block_types()) === 11, 'sanity: the vendored vocabulary has all 11 known block types (the 9 generic ones plus the composition-typed `fields` and, since 1.5.0, `experiment`; the drift check is a separate gate, this just confirms the fixture used here matches it)');
 
 // ---------------------------------------------------------------------------------------------
 // 4. THE `fields` BLOCK (vocabulary 1.1.0, WSK-64) — KNOWN but NON-VISUAL, as in webdesk/blocks'

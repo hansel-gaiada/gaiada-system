@@ -34,6 +34,14 @@
 //     may widen it by a new ruling; until then nothing in a composition can open it.
 //   * The `fields` block itself (blocks[0]: its type, its props object, its slot) is STRUCTURE, never
 //     editable; only the values of its declared fields are.
+//   * The `experiment` block (1.5.0, M5-V5-a: an A/B test, section 5.1 of the phase-5 design) is NEVER
+//     client-editable, whatever the collection's flag says: without this rule a block after `blocks[0]` would
+//     follow the collection's flag and let a client editor add, change or remove an experiment. The rule needs
+//     the item's blocks (a pointer alone cannot say which index holds the experiment), so a caller that has the
+//     content passes it: `isClientEditable(composition, pointer, [blocksBefore, blocksAfter])` answers false for
+//     any pointer into a block that is an experiment in EITHER version (it is being added, changed or removed).
+//     `clientEditViolations` and `clientCreateViolations` always pass both sides. A caller without the content
+//     (a UI deciding whether to draw an input) gets the structural answer, as before.
 //   * Anything that does not resolve (an unknown field name, a malformed pointer, an index that is not a
 //     canonical non-negative integer, a composition that is not an object) is NOT editable. Every doubt
 //     answers false: this is the least-trusted write path in the system.
@@ -44,6 +52,7 @@
 // seo }` (the same coordinates `validateItemContent` reports its issues in): `/blocks/0/props/title`,
 // `/blocks/0/props/faq/2/answer`, `/blocks/1/props/html`, `/seo/title`.
 import type { FieldDef } from './primitives'
+import { EXPERIMENT_BLOCK_TYPE } from './blocks'
 import type { CollectionComposition } from './composition'
 
 /** An item's stored content: what a version holds. */
@@ -117,11 +126,17 @@ function resolveFieldChain(composition: CollectionComposition, segments: string[
   }
 }
 
+function isExperimentAt(blocks: unknown, index: number): boolean {
+  if (!Array.isArray(blocks)) return false
+  const b = blocks[index]
+  return isPlainObject(b) && b.type === EXPERIMENT_BLOCK_TYPE
+}
+
 /**
  * THE rule. Is the part of an item that `pointer` names client-editable under `composition`?
  * Pure, synchronous, never throws.
  */
-export function isClientEditable(composition: CollectionComposition, pointer: string): boolean {
+export function isClientEditable(composition: CollectionComposition, pointer: string, blockSets?: readonly unknown[]): boolean {
   if (!isPlainObject(composition) || typeof pointer !== 'string' || !pointer.startsWith('/')) return false
   const segments = pointer.slice(1).split('/').map(unescapeSegment)
   const root = segments[0]
@@ -130,6 +145,8 @@ export function isClientEditable(composition: CollectionComposition, pointer: st
   if (root !== 'blocks') return false
   if (!isIndex(segments[1])) return false
   const index = Number(segments[1])
+  // 1.5.0: an experiment block is never client-editable (see the header). A block set is one version's `blocks`.
+  if (blockSets && blockSets.some((blocks) => isExperimentAt(blocks, index))) return false
   const declaresFields = Array.isArray(composition.fields)
   if (declaresFields && index === 0) {
     // The composition-typed fields block: only `/blocks/0/props/<field>...` can be editable.
@@ -256,7 +273,7 @@ export function changedContentPointers(before: ItemContent, after: ItemContent):
  * change is allowed. Every changed path must be editable; one non-editable path refuses the whole write.
  */
 export function clientEditViolations(composition: CollectionComposition, before: ItemContent, after: ItemContent): string[] {
-  return changedContentPointers(before, after).filter((p) => !isClientEditable(composition, p))
+  return changedContentPointers(before, after).filter((p) => !isClientEditable(composition, p, [before.blocks, after.blocks]))
 }
 
 /** Drops `null`/`undefined` object members recursively: "absent" and "null" both mean "its default". */
@@ -286,5 +303,5 @@ export function clientCreateViolations(composition: CollectionComposition, conte
     seo: {},
   }
   const given: ItemContent = { blocks: withoutNulls(content.blocks, 0), seo: withoutNulls(content.seo, 0) }
-  return changedContentPointers(blank, given).filter((p) => !isClientEditable(composition, p))
+  return changedContentPointers(blank, given).filter((p) => !isClientEditable(composition, p, [blank.blocks, given.blocks]))
 }

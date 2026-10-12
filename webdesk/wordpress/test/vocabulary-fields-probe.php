@@ -106,7 +106,7 @@ $cases = [
 // --- 1. every vocabulary block type is covered, and nothing else is ------------------------------
 // `fields` is the composition-typed block: its vocabulary field list is empty, it is data not
 // presentation, and it draws nothing (checked in section 3), so it has no sample values.
-$nonVisual = ['fields'];
+$nonVisual = ['fields', 'experiment']; // `experiment` (1.5.0, M5-V5-a) is the second known non-visual block
 $vendored = gaiada_known_block_types();
 $covered = array_merge(array_keys($cases), $nonVisual);
 sort($vendored);
@@ -147,6 +147,9 @@ check(!str_contains($heroNoHref, 'LONELY-LABEL') && !str_contains($heroNoHref, '
 // `fields` draws nothing.
 check(gaiada_render_blocks([['type' => 'fields', 'props' => ['heading' => 'FIELDS-LEAK']]]) === '', 'fields: a known non-visual block renders nothing');
 gaiada_drain_unknown_block_reports();
+// `experiment` (1.5.0) draws nothing either, and is not reported unknown.
+check(gaiada_render_blocks([['type' => 'experiment', 'props' => ['key' => 'EXPERIMENT-LEAK', 'arms' => [['key' => 'a', 'weight' => 50]]]]]) === '', 'experiment: a known non-visual block renders nothing');
+check(count(gaiada_drain_unknown_block_reports()) === 0, 'experiment: not reported as an unknown block');
 
 echo "\n{$checksRun} checks, {$failures} failure(s)\n";
 exit($failures === 0 ? 0 : 1);

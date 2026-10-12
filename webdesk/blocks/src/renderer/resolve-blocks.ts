@@ -11,10 +11,15 @@
 // but NON-VISUAL: it carries an item's typed field values for the site's own code to read, so the
 // renderer draws nothing for it and does NOT report it as unknown. A renderer pinned to 1.0.0
 // treats it as unknown instead, which is exactly the MINOR forward-compatibility path.
-import { FIELDS_BLOCK_TYPE, isBlockType, type BlockType } from '../vocabulary/blocks.ts'
+//
+// M5-V5-a (vocabulary 1.5.0): the `experiment` block (an A/B test, phase-5 design 5.1) is the second known,
+// non-visual type. A renderer that knows it draws nothing and does not report it; one that predates it reports it as
+// unknown and draws nothing. Either way the page shows the item's own content, which is arm `a`, the control; the
+// site's own code picks another arm from the block's data.
+import { EXPERIMENT_BLOCK_TYPE, FIELDS_BLOCK_TYPE, isBlockType, type BlockType } from '../vocabulary/blocks.ts'
 
-/** Block types the vocabulary knows that never render markup (1.1.0: only `fields`). */
-export const NON_VISUAL_BLOCK_TYPES: readonly BlockType[] = [FIELDS_BLOCK_TYPE]
+/** Block types the vocabulary knows that never render markup (`fields` since 1.1.0, `experiment` since 1.5.0). */
+export const NON_VISUAL_BLOCK_TYPES: readonly BlockType[] = [FIELDS_BLOCK_TYPE, EXPERIMENT_BLOCK_TYPE]
 
 export function isNonVisualBlockType(type: string): boolean {
   return (NON_VISUAL_BLOCK_TYPES as readonly string[]).includes(type)

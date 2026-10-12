@@ -50,6 +50,13 @@
 // review-not-approved for the whole batch, for every principal class. It runs inside the transaction, after the WS4
 // claim and D62's client check and before any effect, so a refusal rolls the claim back with everything else. Review
 // OFF (the default) is a no-op. See ../editorial/review-gate.ts for the rule and why it is the version, not the head.
+//
+// THE EXPERIMENT LOCK (M5-V5-a, vocabulary 1.5.0, phase-5 design 5.1). An item whose LIVE version carries an
+// `experiment` block has a RUNNING A/B test (the test starts when the version carrying the block is published, so
+// the live version IS the running state: this guard needs no ERP flag). Publishing (or scheduling a publish of) a
+// version that changes that experiment, or the control values it overrides, is refused 409 experiment-locked for
+// every principal class, for the whole batch, inside the transaction and before any effect. Dropping the block (the
+// stop) is always allowed. The comparison is the vocabulary's own (experimentLockViolations, item-fields.ts).
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -65,7 +72,7 @@ import type {
   TenantWebhookContentItemRef,
 } from "../../tenant-webhooks/tenant-webhook-event.types";
 import { validateCollectionComposition, type CollectionComposition } from "../../delivery/vocabulary/composition";
-import { fieldsBlockOf } from "../../delivery/vocabulary/item-fields";
+import { experimentLockViolations, fieldsBlockOf, type ExperimentLockViolation } from "../../delivery/vocabulary/item-fields";
 import { clientCreateViolations, clientEditViolations, collectionAcceptsClientCreate } from "../../delivery/vocabulary/client-editable";
 import { assertClientMayRun, fieldNotClientEditable, isClientEditor, publishNotClientEditable } from "../auth/client-editor";
 import {
@@ -587,6 +594,49 @@ export class ContentCommandsService {
     await assertReviewApproved(client, ctx.siteId, gate);
   }
 
+  /**
+   * M5-V5-a — the experiment lock as a pre-pass over the WHOLE batch (one locked item refuses all of them, 409
+   * experiment-locked), run under the item locks and before any effect. Only an item that is LIVE right now has a
+   * running test: its baseline is the published version (a pre-0009 row's projection is its live content). An item
+   * that is not live, is deleted or names a missing version is left to the ordinary loop. A no-op when the live
+   * version carries no experiment.
+   */
+  private async assertExperimentNotLocked(
+    client: PoolClient,
+    rows: Map<string, ItemRow>,
+    items: { itemId: string; version: number }[],
+  ): Promise<void> {
+    const found: { itemIndex: number; itemId: string; violations: ExperimentLockViolation[] }[] = [];
+    for (const [index, req] of items.entries()) {
+      const item = rows.get(req.itemId) as ItemRow;
+      if (item.deleted_at || !item.is_live) continue;
+      const source = await this.loadVersion(client, item.id, req.version);
+      if (!source) continue;
+      let liveBlocks: unknown;
+      if (item.published_version !== null) {
+        const live = await this.loadVersion(client, item.id, item.published_version);
+        if (!live) throw new Error(`content item ${item.id} has published_version ${item.published_version} but no such version row`);
+        liveBlocks = live.blocks;
+      } else if (item.head_version === 0) {
+        liveBlocks = item.blocks; // a pre-0009 row: its projection IS what is live
+      } else {
+        continue;
+      }
+      const violations = experimentLockViolations(liveBlocks, source.blocks);
+      if (violations.length > 0) found.push({ itemIndex: index, itemId: item.id, violations });
+    }
+    if (found.length === 0) return;
+    const MAX_LISTED = 50;
+    const listed = found.flatMap((f) => f.violations.map((v) => ({ path: `/items/${f.itemIndex}${v.pointer}`, message: v.reason })));
+    throw problems.conflict(
+      "experiment-locked",
+      "Experiment locked",
+      "An item in this request has a running A/B test (its live version carries an experiment block), and the version to publish changes the experiment or the control values it overrides. " +
+        "Stop the test first (publish a version without the experiment block), then change the content. Nothing was published.",
+      { issues: listed.slice(0, MAX_LISTED), total: listed.length },
+    );
+  }
+
   private versionConflict(item: ItemRow, head: VersionRef): ControlProblem {
     return problems.conflict(
       "version-conflict",
@@ -825,6 +875,7 @@ export class ContentCommandsService {
         const rows = await this.lockAll(client, ctx.siteId, input.items.map((i) => i.itemId));
         await this.assertClientPublish(client, ctx, rows, input.items);
         await this.assertReviewGate(client, ctx, rows, input.items);
+        await this.assertExperimentNotLocked(client, rows, input.items);
         const published: PublishResult["published"] = [];
         const refs: TenantWebhookContentItemRef[] = [];
         for (const [index, req] of input.items.entries()) {
@@ -894,6 +945,8 @@ export class ContentCommandsService {
         const rows = await this.lockAll(client, ctx.siteId, input.items.map((i) => i.itemId));
         // A schedule that publishes puts a version live at publishAt: gated now (a takedown-only schedule is not).
         if (input.publishAt !== null) await this.assertReviewGate(client, ctx, rows, input.items);
+        // M5-V5-a: the same for the experiment lock (a swap scheduled onto a live item with a running test).
+        if (input.publishAt !== null) await this.assertExperimentNotLocked(client, rows, input.items);
         const scheduled: ScheduleResult["scheduled"] = [];
         const refs: TenantWebhookContentItemRef[] = [];
         for (const [index, req] of input.items.entries()) {

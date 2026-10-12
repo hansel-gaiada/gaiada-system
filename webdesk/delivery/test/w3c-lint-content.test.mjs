@@ -43,7 +43,7 @@ check('an unknown knob is refused', v({ rules: { meta: { nope: 1 } } }).issues.s
 check('an out-of-range value is refused', v({ rules: { meta: { titleMax: 0 } } }).issues.some((i) => i.path === 'c.lint.content.rules.meta.titleMax'))
 check('a non-object lint.content is refused', !v('x').valid)
 check('the rule ids are the eleven documented ones', CONTENT_LINT_RULE_IDS.length === 11, CONTENT_LINT_RULE_IDS.join(','))
-check('a composition authored against 1.2.0 is still accepted (a MINOR is a superset); 1.5.0 is refused', isVocabularyVersionSupported('1.2.0') && isVocabularyVersionSupported('1.3.0') && !isVocabularyVersionSupported('1.5.0'))
+check('a composition authored against 1.2.0 is still accepted (a MINOR is a superset); 1.6.0 is refused', isVocabularyVersionSupported('1.2.0') && isVocabularyVersionSupported('1.3.0') && !isVocabularyVersionSupported('1.6.0'))
 
 console.log('\n[classifier]')
 const v120 = load(path.join(HERE, 'fixtures', 'vocabulary-1.2.0.snapshot.json'))

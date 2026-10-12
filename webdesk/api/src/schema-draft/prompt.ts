@@ -5,7 +5,7 @@
 // is giving the model the best chance of proposing something valid; it does not change what gets
 // accepted.
 //
-// T2 (D-b): teaches vocabulary 1.1.0; WSK-49a (1.2.0) adds the `ui.clientEditable` line. Every list the prompt states (primitives, composable block
+// T2 (D-b): teaches vocabulary 1.1.0; WSK-49a (1.2.0) adds the `ui.clientEditable` line; M5-V5-a (1.5.0) the `experiment` line. Every list the prompt states (primitives, composable block
 // types, composition keys, widgets, the group depth) is read from the vendored vocabulary constants,
 // never typed here, so a vocabulary change cannot leave the prompt teaching a stale rule. The block
 // list is COMPOSABLE_BLOCK_TYPE_NAMES (BLOCK_TYPE_NAMES in ./vocabulary-vendor.ts): the composition-typed
@@ -56,7 +56,8 @@ export function buildSchemaDraftPrompt(input: { collectionKey: string; prd: stri
     `You MUST use ONLY these ${PRIMITIVE_NAMES.length} field primitives: ${PRIMITIVE_NAMES.join(", ")}.\n` +
     `You MUST use ONLY these ${BLOCK_TYPE_NAMES.length} block types in "blocks" (if the collection carries page blocks at all): ${BLOCK_TYPE_NAMES.join(", ")}. ` +
     `Never put "fields" in "blocks": the collection's own typed values are carried by an implicit block that exists as soon as you ` +
-    `declare "fields", and listing it yourself is REJECTED.\n` +
+    `declare "fields", and listing it yourself is REJECTED. Never put "experiment" in "blocks" either: it is the A/B-test block, which ` +
+    `editors add to an item themselves (allowed in every collection), never part of a composition.\n` +
     `Inventing any other primitive, block type or key will cause the proposal to be REJECTED before a human ever sees it.\n\n` +
     `${currentBlock}\n\n` +
     `PRD:\n${input.prd}\n\n` +

@@ -83,6 +83,13 @@ export function renderContentContractMd(input: OpenApiBuilderInput): string {
     lines.push("");
   }
 
+  lines.push("## The experiment block (vocabulary 1.5.0)");
+  lines.push("");
+  lines.push(
+    "An item of any collection may carry ONE `{ \"type\": \"experiment\", \"props\": { key, target, enrolment?, goal, arms } }` block, never as `blocks[0]`: an A/B test over the item's `fields` (`target: \"fields\"`, each non-control arm `override`s some field values) or over one generic block (`target: { block: i }`, each non-control arm `replace`s it with a block of the same type). Arms are keyed `a`..`d`; `a` is the control and is the item's own content. It is non-visual: render the item as usual and let the site's own code pick an arm; a renderer that predates the block renders nothing for it (the unknown-block rule) and shows the control. `/v1` serves the block as any other block, and `/v1` search indexes only the control.",
+  );
+  lines.push("");
+
   lines.push("## Other routes");
   lines.push("");
   lines.push(`- \`GET /v1/t/${input.tenantSlug}/search?q=...\` — full-text search across every collection (Postgres tsvector, per-locale config)`);
