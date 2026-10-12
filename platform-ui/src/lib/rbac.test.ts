@@ -617,3 +617,29 @@ describe("client.write / client.delete (CC-D10) — exact role sets", () => {
     for (const who of [memberA, viewerA, clientA]) expect(can(who, "client.delete", "co-a")).toBe(false);
   });
 });
+
+// M5-V3-f / V3-i: the mirror of Cerbos `read_visitors` and `view_replay` on resource_search_property. Personal data: held by the search
+// manager, the company admin, the owner and the global superadmin, and NOT by plain search staff (who keep aggregate `search.view`).
+describe("search.visitors.read / search.replay.view", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId } as Me["roles"][number]]);
+
+  it.each(["search_manager", "company_admin", "owner"])("%s holds both in its own company", (role) => {
+    expect(can(as(role), "search.visitors.read", "co-a")).toBe(true);
+    expect(can(as(role), "search.replay.view", "co-a")).toBe(true);
+  });
+  it("the global superadmin holds both", () => {
+    const a = as("platform_admin", "global", null);
+    expect(can(a, "search.visitors.read", "co-a")).toBe(true);
+    expect(can(a, "search.replay.view", "co-a")).toBe(true);
+  });
+  it("plain search staff does not (it keeps aggregate read only), and a manager of another company does not", () => {
+    expect(can(as("search_staff"), "search.view", "co-a")).toBe(true);
+    expect(can(as("search_staff"), "search.visitors.read", "co-a")).toBe(false);
+    expect(can(as("search_staff"), "search.replay.view", "co-a")).toBe(false);
+    expect(can(as("search_manager", "company", "co-b"), "search.visitors.read", "co-a")).toBe(false);
+  });
+  it("maps to the catalog keys, one each", () => {
+    expect(CAPABILITY_MAP["search.visitors.read"].permissions).toEqual(["search.property.read_visitors"]);
+    expect(CAPABILITY_MAP["search.replay.view"].permissions).toEqual(["search.property.view_replay"]);
+  });
+});

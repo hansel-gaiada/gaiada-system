@@ -1,0 +1,27 @@
+/* Website -> Visitors (M5-V3-i). Prefix `wv-`. Tokens only (styles/tokens.test.ts bans colour literals). */
+@import "../../forms/forms.css";
+
+.wv-page { display: flex; flex-direction: column; gap: var(--space-20); }
+.wv-filters { display: flex; flex-wrap: wrap; gap: var(--space-12); align-items: flex-end; }
+.wv-filters .lux-field { width: 150px; }
+.wv-table { width: 100%; border-collapse: collapse; font: 400 13px var(--font-body); }
+.wv-table th { text-align: left; font: 700 10px var(--font-body); letter-spacing: 0.1em; color: var(--ink-subtle); padding: 8px 10px; border-bottom: 1px solid var(--line-strong); }
+.wv-table td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; overflow-wrap: anywhere; }
+.wv-id { font: 600 13px var(--font-mono, monospace); color: var(--ink-strong); }
+.wv-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wv-nowrap { white-space: nowrap; }
+.wv-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.wv-grid { display: grid; gap: var(--space-16); grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.wv-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px var(--space-16); margin: 0; font: 400 13px/1.5 var(--font-body); }
+.wv-facts dt { color: var(--ink-subtle); }
+.wv-facts dd { margin: 0; color: var(--ink-body); overflow-wrap: anywhere; }
+.wv-note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.wv-err { color: var(--status-critical); font: 400 13px var(--font-body); margin: 0; }
+.wv-ok { color: var(--status-ok-fg); font: 400 13px var(--font-body); margin: 0; }
+.wv-rules { display: flex; flex-direction: column; gap: var(--space-12); }
+.wv-rule { display: flex; flex-wrap: wrap; gap: var(--space-8); align-items: flex-end; padding-bottom: var(--space-12); border-bottom: 1px solid var(--line-soft); }
+.wv-rule .lux-field { width: 150px; }
+.wv-rule .wv-rule__pattern { width: 260px; }
+.wv-rule .wv-rule__weight { width: 80px; }
+.wv-actions { display: flex; gap: var(--space-8); flex-wrap: wrap; align-items: center; }
+.wv-bots { font: 600 13px var(--font-body); color: var(--ink-strong); margin: 0 0 8px; }

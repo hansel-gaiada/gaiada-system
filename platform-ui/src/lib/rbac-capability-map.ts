@@ -600,6 +600,18 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // M5-V3-f: the two SENSITIVE actions on resource_search_property (read_visitors, view_replay). Each is its own key on purpose
+  // (a recording is more intrusive than a profile); the bundles hold both for exactly platform_admin, company_admin,
+  // search_manager and owner (role-permission-bundles.json). Neither is implied by `search.property.read`.
+  "search.visitors.read": {
+    permissions: ["search.property.read_visitors"],
+    semantics: "all",
+  },
+  "search.replay.view": {
+    permissions: ["search.property.view_replay"],
+    semantics: "all",
+  },
+
   // ────────────────────────────── social-media (SMM-11) ──────────────────────────────────────────
   // Every set below was checked directly against role-permission-bundles.json's generated bundles
   // for company_admin/manager/social_staff/social_manager BEFORE being written (not inferred from a

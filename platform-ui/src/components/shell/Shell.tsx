@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Me } from "@/lib/platform";
 import type { Prefs } from "@/lib/prefs";
 import { DEFAULT_PREFS } from "@/lib/prefs";
-import { canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
+import { can, canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
 import { navFor } from "./nav";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -21,7 +21,7 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   // Command palette tiers 1+2 (§4.1/§4.2) — computed here, in the same request that renders the
   // sidebar, so typing in the palette costs zero network round-trips for anything but tier 3 (live
   // records, fetched client-side from CommandPalette itself). Both builders are pure/client-safe.
-  const paletteEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments, activeCompany(me, tenantId)?.vertical)];
+  const paletteEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments, activeCompany(me, tenantId)?.vertical, (t) => !t.requires || can(me, t.requires, tenantId))];
 
   return (
     <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>

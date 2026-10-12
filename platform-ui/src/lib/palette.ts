@@ -9,7 +9,7 @@
 // through `/api/search/palette` (the single-egress route handler) straight from CommandPalette.tsx.
 import type { NavGroup } from "@/components/shell/nav";
 import type { IconName } from "@/components/shell/icons";
-import { toolkitFor, deptTabs, tabHref } from "./deptToolkits";
+import { toolkitFor, deptTabs, tabHref, type DeptTab } from "./deptToolkits";
 
 export interface PaletteEntry {
   id: string;
@@ -35,12 +35,16 @@ export function buildNavEntries(groups: NavGroup[]): PaletteEntry[] {
  *  `toolkitFor()`/`tabHref()` DeptTabs.tsx itself uses. The department's OWN root ("Home", `path:
  *  ""`) is skipped — navFor() already lists it once as the department's row in the Departments
  *  group, so this only adds what nav does NOT already surface (Board, Timeline, Connections, …). */
-export function buildDeptEntries(departments: { id: string; name: string }[], vertical: string | null | undefined): PaletteEntry[] {
+export function buildDeptEntries(
+  departments: { id: string; name: string }[], vertical: string | null | undefined,
+  /** M5-V3-i: false hides a tab the viewer may not open (a tab with `requires`); absent = every tab is offered. */
+  allow: (tab: DeptTab) => boolean = () => true,
+): PaletteEntry[] {
   const out: PaletteEntry[] = [];
   for (const d of departments) {
     const toolkit = toolkitFor(vertical, d.name);
     for (const tab of deptTabs(toolkit)) {
-      if (tab.path === "") continue;
+      if (tab.path === "" || !allow(tab)) continue;
       out.push({ id: `dept:${d.id}:${tab.key}`, label: `${d.name} · ${tab.label}`, href: tabHref(d.id, tab), section: "Departments", icon: tab.icon });
     }
   }

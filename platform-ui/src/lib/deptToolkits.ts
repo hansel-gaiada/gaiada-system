@@ -25,6 +25,7 @@ import type { IconName } from "@/components/shell/icons";
 import type { ToolIconName } from "@/components/departments/toolIcons";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import { packFor } from "@/lib/packs";
+import type { Capability } from "@/lib/rbac";
 
 export interface DeptTab {
   key: string;
@@ -36,6 +37,9 @@ export interface DeptTab {
   /** Structurally wide surfaces (board/timeline/projects) render full-bleed —
    *  no `MyWorkRail`, independent of the user's global width pref. */
   fullBleed?: boolean;
+  /** M5-V3-i: a capability the viewer must hold for this tab to be offered at all. The console layout hides the tab without it
+   *  and `requireWebsiteCtx` 404s a hand-typed URL (never an empty list). Absent = every member of the department sees it. */
+  requires?: Capability;
 }
 
 /** A primary-strip group holding one or more related tabs. A single-tab group
@@ -190,6 +194,8 @@ const WEB_DEV: DeptToolkit = {
         { key: "leads", label: "Leads", path: "website/leads", icon: "user", blurb: "The enquiries the website's forms have produced: which form, when, where the visitor came from (landing page, campaign, whether an ad click id was present), the pipeline stage, and whether they agreed to marketing. Open a row to work the lead." },
         // M5-W2e — the writers' room: the site's review board (what is in review, by state) and, for publishers, who holds which writers' room role. The `path` carries the whole sub-tree (`website/writers[/people][/:tenant/:site]`).
         { key: "writers", label: "Writers' room", path: "website/writers", icon: "award", blurb: "The review board for a site's content: what is a draft, in review, waiting on changes or approved. Publishers also give and remove writers' room roles (writer, translator, SEO reviewer, editor) per site, collection and language." },
+        // M5-V3-i — consented visitor profiles (V3). Personal data: only holders of `read_visitors` (search manager, company admin) are offered it; plain search staff never see the tab.
+        { key: "visitors", label: "Visitors", path: "website/visitors", icon: "user", requires: "search.visitors.read", blurb: "Visitors who accepted analytics on the site: when they were last seen, how often they came, where from, what they looked at, and a score to guide follow-up. A score never decides anything about a person. Interest rules are edited here too." },
       ],
     },
     CONNECTIONS_GROUP,
@@ -437,6 +443,11 @@ export function hasBespokeToolkit(vertical: string | null | undefined, deptName:
 /** Every tab across all of a toolkit's groups, flattened (order preserved). */
 export function deptTabs(toolkit: DeptToolkit): DeptTab[] {
   return toolkit.groups.flatMap((g) => g.tabs);
+}
+
+/** The groups a viewer may see: a tab with `requires` is dropped unless `allow` says the viewer holds it, and a group left with no tab goes too. */
+export function visibleGroups(groups: DeptGroup[], allow: (tab: DeptTab) => boolean): DeptGroup[] {
+  return groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => !t.requires || allow(t)) })).filter((g) => g.tabs.length > 0);
 }
 
 /** Absolute href for a tab within a department console. */
