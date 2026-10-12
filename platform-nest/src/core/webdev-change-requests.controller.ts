@@ -37,10 +37,17 @@ import { scrubText } from "./scrub";
 import { lockChangeRequest } from "./webdev-cr-lock";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
 import { createPmTaskInTx, normalizePmTaskInput } from "../modules/pm/pm.controller";
+import {
+  CR_AMENDMENT_COLUMNS, CR_AMENDMENT_JOIN, UUID_RE, assertAmendable, assertAmendmentSigned, defaultAmendTarget,
+  insertAmendmentDraft, isDeadContractStatus,
+} from "./webdev-amendment";
 
 const KINDS = new Set(["content", "design", "feature", "bug"]);
 const ROUTES = new Set(["control_plane", "mini_run", "pm_task"]);
 const TRIAGE_ACTIONS = new Set(["decline", "convert"]);
+// PV4-04 (PV-D5's binding rule): a convert must answer whether the change moves the price. `unassessed`
+// is the column default every pre-PV4 row carries (grandfathered); it is NOT a valid answer to give.
+const PRICE_IMPACTS = new Set(["none", "changes_price"]);
 // B.3. `unverify` is a first-class action rather than a separate endpoint so both transitions share
 // one lock, one authz check and one audit shape — a reversal that took a different path from the
 // thing it reverses is how the two drift.
@@ -87,6 +94,10 @@ interface CrRow {
   pm_task_id: string | null;
   requested_by: string | null;
   requester_name: string | null;
+  // PV4-04: the price-impact gate (see webdev-amendment.ts). `amendment_status` is the LINKED contract's.
+  price_impact: string;
+  amendment_contract_id: string | null;
+  amendment_status: string | null;
 }
 
 /** The columns the triage transition reads UNDER THE LOCK. Kept as one constant so the re-read and
@@ -94,7 +105,7 @@ interface CrRow {
  *  as trustworthy as the row it evaluates. */
 const CR_TRIAGE_COLUMNS = `cr.id, cr.client_id, cr.project_id, cr.source, cr.kind, cr.title, cr.body,
         cr.status, cr.route, cr.pipeline_run_id, cr.pm_task_id, cr.requested_by,
-        ru.name AS requester_name`;
+        ru.name AS requester_name, ${CR_AMENDMENT_COLUMNS}`;
 
 /** The requirement doc the mini-run's `delivery/prd_extract` stage carries (§3.1 step 2). Rendered
  *  from the CR so the run is self-describing in the workspace AND in the portal, and carries a link
@@ -173,8 +184,12 @@ export class WebdevChangeRequestsController {
                 cr.requested_by AS "requestedBy", ru.name AS "requestedByName",
                 cr.triaged_by AS "triagedBy", tu.name AS "triagedByName", cr.triaged_at AS "triagedAt",
                 cr.declined_reason AS "declinedReason", cr.created_at AS "createdAt", cr.updated_at AS "updatedAt",
+                -- PV4-04: the price-impact answer and the amendment the request waits on.
+                cr.price_impact AS "priceImpact", cr.amendment_contract_id AS "amendmentContractId",
+                ac.status AS "amendmentStatus",
                 ${staffClientVisible("cr", changeRequestClientVisible("cr"))} AS "clientVisible"
            FROM webdev_change_requests cr
+           ${CR_AMENDMENT_JOIN}
            LEFT JOIN clients cl ON cl.id = cr.client_id
            LEFT JOIN projects p ON p.id = cr.project_id
            LEFT JOIN users ru ON ru.id = cr.requested_by
@@ -207,8 +222,12 @@ export class WebdevChangeRequestsController {
                 -- "run complete => request done" mapping, which has judgment in it).
                 run.status AS "runStatus", run.title AS "runTitle",
                 t.title AS "taskTitle", t.status AS "taskStatus",
+                -- PV4-04: the price-impact answer and the amendment the request waits on.
+                cr.price_impact AS "priceImpact", cr.amendment_contract_id AS "amendmentContractId",
+                ac.status AS "amendmentStatus",
                 ${staffClientVisible("cr", changeRequestClientVisible("cr"))} AS "clientVisible"
            FROM webdev_change_requests cr
+           ${CR_AMENDMENT_JOIN}
            LEFT JOIN clients cl ON cl.id = cr.client_id
            LEFT JOIN projects p ON p.id = cr.project_id
            LEFT JOIN users ru ON ru.id = cr.requested_by
@@ -307,9 +326,12 @@ export class WebdevChangeRequestsController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-    @Body() body: { action?: string; route?: string; reason?: string; kindOverride?: string; severity?: string },
+    @Body() body: {
+      action?: string; route?: string; reason?: string; kindOverride?: string; severity?: string;
+      priceImpact?: string; amendsId?: string;
+    },
   ) {
-    const { action, route: requestedRoute, kindOverride, severity } = body ?? {};
+    const { action, route: requestedRoute, kindOverride, severity, priceImpact, amendsId } = body ?? {};
     // AUTHORIZE BEFORE VALIDATE — see core.controller's createProject for the same fix and why.
     // A caller who may not triage learns only that; and no future required field can quietly demote
     // a denial test here to a payload 400 (which is exactly what the `severity` gate below did to
@@ -329,6 +351,26 @@ export class WebdevChangeRequestsController {
     // reason into the state machine, so it is required rather than optional.
     const reason = action === "decline" ? scrubText(String(body?.reason ?? "")).text.trim().slice(0, REASON_CAP) : null;
     if (action === "decline" && !reason) throw new BadRequestException("reason required when declining");
+    // PV4-04 (PV-D5): a CONVERT must say whether the change moves the price. A decline starts nothing and
+    // prices nothing, so it is not asked (the row stays `unassessed`). Typed codes, not prose
+    // (agentic-native criterion 2): `price_impact_required` when missing, `price_impact_invalid` for any
+    // other value, including the column default `unassessed`, which is a state and not an answer.
+    if (action === "convert") {
+      if (priceImpact === undefined || priceImpact === null || priceImpact === "") {
+        throw new BadRequestException({ message: "price_impact_required", field: "priceImpact" });
+      }
+      if (typeof priceImpact !== "string" || !PRICE_IMPACTS.has(priceImpact)) {
+        throw new BadRequestException({ message: "price_impact_invalid", field: "priceImpact" });
+      }
+      if (amendsId !== undefined && amendsId !== null) {
+        if (priceImpact !== "changes_price") {
+          throw new BadRequestException({ message: "amends_id_requires_changes_price", field: "amendsId" });
+        }
+        if (typeof amendsId !== "string" || !UUID_RE.test(amendsId)) {
+          throw new BadRequestException({ message: "amends_id_invalid", field: "amendsId" });
+        }
+      }
+    }
 
     const result = await withTenants([tenantId], async (c) => {
       // 1 · SERIALIZE on the change request. First statement in the transaction, before any read whose
@@ -342,6 +384,7 @@ export class WebdevChangeRequestsController {
         `SELECT ${CR_TRIAGE_COLUMNS}
            FROM webdev_change_requests cr
            LEFT JOIN users ru ON ru.id = cr.requested_by
+           ${CR_AMENDMENT_JOIN}
           WHERE cr.id = $1 AND cr.deleted_at IS NULL`,
         [id],
       );
@@ -400,6 +443,72 @@ export class WebdevChangeRequestsController {
       }
 
       // ---- convert ----
+      // PV4-04 · THE PRICE GATE. Runs BEFORE any route is acted on (the control_plane 501 and the pm_task
+      // project check included), because every route below STARTS work: it writes `in_progress`, a
+      // `route`, and a `pipeline_run_id` or `pm_task_id`. So one gate here covers all of them.
+      //   none          -> as today. A request that still points at a LIVE or signed amendment is refused
+      //                    (409 amendment_exists): voiding or declining the amendment is the way out, and
+      //                    it happens in Contracts & billing, not by quietly dropping the pointer.
+      //   changes_price -> no live amendment yet (never made, or the last one was declined / voided /
+      //                    expired): create a FRESH draft in this transaction, link it both ways, and
+      //                    STOP. The request stays `new` (no route, no run, no task): a draft can never
+      //                    already be signed, so there is nothing to start. A live unsigned amendment is
+      //                    409 amendment_not_signed. A signed one lets the conversion continue.
+      const linkedLive = cr.amendment_contract_id !== null && !isDeadContractStatus(cr.amendment_status);
+      let amendmentToWrite: string | null = cr.amendment_contract_id;
+      if (priceImpact === "none") {
+        if (linkedLive) {
+          throw new ConflictException({
+            message: "amendment_exists",
+            existing: { amendmentContractId: cr.amendment_contract_id, amendmentStatus: cr.amendment_status },
+          });
+        }
+        amendmentToWrite = null;
+      } else if (!linkedLive) {
+        if (!cr.client_id) {
+          // An internal request that names no client has no contract to land in.
+          throw new BadRequestException({ message: "client_required_for_price_change", field: "priceImpact" });
+        }
+        if (cr.project_id) {
+          // Internal rows are not cross-checked at intake, so the project must really be the client's
+          // before it is copied onto a contract (the portal admits contracts by project id).
+          const proj = await c.query(
+            `SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL`, [cr.project_id, cr.client_id],
+          );
+          if (!proj.rows[0]) throw new BadRequestException({ message: "project_client_mismatch" });
+        }
+        let amendsTarget: string | null;
+        if (amendsId) {
+          await assertAmendable(c, cr.client_id, amendsId);
+          amendsTarget = amendsId;
+        } else {
+          amendsTarget = await defaultAmendTarget(c, cr.client_id, cr.project_id);
+        }
+        const contractId = await insertAmendmentDraft(c, {
+          tenantId, clientId: cr.client_id, projectId: cr.project_id, changeRequestId: id,
+          requestTitle: cr.title, amendsId: amendsTarget, createdBy: req.principal.userId,
+        });
+        await c.query(
+          `UPDATE webdev_change_requests
+              SET price_impact = 'changes_price', amendment_contract_id = $2, kind = $4, severity = $5,
+                  triaged_by = $3, triaged_at = now(), updated_at = now()
+            WHERE id = $1 AND status = 'new' AND deleted_at IS NULL`,
+          [id, contractId, req.principal.userId, kind, severityToWrite],
+        );
+        await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.updated", {
+          status: "new", route: null, kind, priceImpact: "changes_price", amendmentContractId: contractId,
+          actorId: req.principal.userId,
+        });
+        return {
+          outcome: "awaiting_amendment" as const, kind, contractId,
+          contractKind: amendsTarget ? ("amendment" as const) : ("agreement" as const), amendsId: amendsTarget,
+        };
+      } else {
+        assertAmendmentSigned({
+          price_impact: "changes_price", amendment_contract_id: cr.amendment_contract_id, amendment_status: cr.amendment_status,
+        });
+      }
+
       const routeChoice = requestedRoute ?? DEFAULT_ROUTE_BY_KIND[kind];
       if (routeChoice === "control_plane") {
         // Schema-admitted (so no migration is needed the day webdesk lands) but not implementable:
@@ -430,10 +539,10 @@ export class WebdevChangeRequestsController {
         await c.query(
           `UPDATE webdev_change_requests
               SET status = 'in_progress', route = 'pm_task', pm_task_id = $2, kind = $4,
-                  severity = $5,
+                  severity = $5, price_impact = $6, amendment_contract_id = $7,
                   triaged_by = $3, triaged_at = now(), updated_at = now()
             WHERE id = $1 AND status = 'new' AND deleted_at IS NULL`,
-          [id, task.id, req.principal.userId, kind, severityToWrite],
+          [id, task.id, req.principal.userId, kind, severityToWrite, priceImpact, amendmentToWrite],
         );
         await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.updated", {
           status: "in_progress", route: "pm_task", pmTaskId: task.id, kind, actorId: req.principal.userId,
@@ -494,10 +603,10 @@ export class WebdevChangeRequestsController {
       await c.query(
         `UPDATE webdev_change_requests
             SET status = 'in_progress', route = 'mini_run', pipeline_run_id = $2, kind = $4,
-                severity = $5,
+                severity = $5, price_impact = $6, amendment_contract_id = $7,
                 triaged_by = $3, triaged_at = now(), updated_at = now()
           WHERE id = $1 AND status = 'new' AND deleted_at IS NULL`,
-        [id, runId, req.principal.userId, kind, severityToWrite],
+        [id, runId, req.principal.userId, kind, severityToWrite, priceImpact, amendmentToWrite],
       );
       // ⚠ THE ZERO-SPECIAL-CASING LINE (§3.1 step 5). The shipped `pipeline-fanout` n8n workflow
       // triggers on exactly this event (automation/workflows/pipeline-fanout.json:11) and opens the
@@ -559,6 +668,21 @@ export class WebdevChangeRequestsController {
         severity: "warning",
       });
       return { id, status: "declined", route: null };
+    }
+
+    if (result.outcome === "awaiting_amendment") {
+      // PV4-04: nothing was started. The request stays `new`, now flagged `changes_price`, and waits on the
+      // draft amendment. The client is NOT told: a draft is the agency's working copy until staff send it.
+      await writeActivity(tenantId, req.principal.userId, "created", "contract", result.contractId, {
+        kind: result.contractKind, amendsId: result.amendsId, changeRequestId: id,
+      });
+      await writeActivity(tenantId, req.principal.userId, "triaged", "webdev_change_request", id, {
+        kind: result.kind, priceImpact: "changes_price", amendmentContractId: result.contractId,
+      });
+      return {
+        id, status: "new", route: null, priceImpact: "changes_price", blocked: true,
+        amendmentContractId: result.contractId, amendmentKind: result.contractKind, amendsId: result.amendsId,
+      };
     }
 
     // ---- converted ----
@@ -633,6 +757,7 @@ export class WebdevChangeRequestsController {
         `SELECT ${CR_TRIAGE_COLUMNS}, cr.severity
            FROM webdev_change_requests cr
            LEFT JOIN users ru ON ru.id = cr.requested_by
+           ${CR_AMENDMENT_JOIN}
           WHERE cr.id = $1 AND cr.deleted_at IS NULL`,
         [id],
       );
@@ -641,6 +766,10 @@ export class WebdevChangeRequestsController {
 
       if (action === "unverify") {
         if (cr.status !== "verified") return { outcome: "wrong_state" as const, status: cr.status };
+        // PV4-04: un-verifying puts the row back to `in_progress`, which is a work-starting transition,
+        // so it takes the same gate as triage does: a request waiting on an unsigned amendment cannot
+        // re-enter `in_progress` by this door either.
+        assertAmendmentSigned(cr);
         // Attribution is cleared in the SAME statement that leaves 'verified' — split across two and
         // `wcr_verified_has_attribution` would reject the intermediate row, which is the constraint
         // doing its job rather than an obstacle to work around.
