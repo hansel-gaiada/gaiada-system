@@ -47,19 +47,19 @@ export function nodePackageJson(): GeneratedFile {
     },
     dependencies: {
       "@gaiada/webdesk-sdk": "file:./vendor/webdesk-sdk",
-      next: "^14.2.15",
-      react: "^18.3.1",
-      "react-dom": "^18.3.1",
+      next: "^15.5.27",
+      react: "^19.3.0",
+      "react-dom": "^19.3.0",
     },
     devDependencies: {
       "@types/node": "^20.16.0",
-      "@types/react": "^18.3.11",
-      "@types/react-dom": "^18.3.0",
+      "@types/react": "^19.3.0",
+      "@types/react-dom": "^19.3.0",
       autoprefixer: "^10.4.20",
       postcss: "^8.4.47",
       tailwindcss: "^3.4.14",
       typescript: "^5.6.3",
-      vitest: "^2.1.5",
+      vitest: "^4.1.11",
     },
   };
   return { path: `${NODE_WEB_ROOT}/package.json`, content: JSON.stringify(pkg, null, 2) + "\n" };
@@ -127,7 +127,7 @@ export function reactBlocksModule(): GeneratedFile {
 //    shown as inert plain text);
 //  - the draft banner and the locale-fallback notice.
 // Not rendered yet (they resolve relations): featureGrid, form, faq, logoCloud. They are reported.
-import { Fragment } from "react";
+import { Fragment, type ReactElement } from "react";
 import { isBlockType } from "./block-types";
 
 export { BLOCK_TYPE_NAMES, isBlockType } from "./block-types";
@@ -147,7 +147,7 @@ export interface ItemEnvelope {
 }
 
 type Props = Record<string, unknown>;
-type Out = JSX.Element | null;
+type Out = ReactElement | null;
 
 // ---- output safety (mirrors webdesk/blocks/src/safety.ts) ----
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
@@ -348,7 +348,7 @@ function report(message: string, collection?: string, slug?: string): void {
   console.warn("[webdesk] " + message + (collection ? " (" + collection + "/" + (slug ?? "") + ")" : ""));
 }
 
-export function BlockRenderer(props: { blocks: RawBlock[]; collection?: string; slug?: string }): JSX.Element {
+export function BlockRenderer(props: { blocks: RawBlock[]; collection?: string; slug?: string }): ReactElement {
   const blocks = Array.isArray(props.blocks) ? props.blocks : [];
   return (
     <>
@@ -377,7 +377,7 @@ function readLocaleFallback(x: unknown): { requested: string; served: string } |
   return typeof f.requested === "string" && typeof f.served === "string" ? { requested: f.requested, served: f.served } : null;
 }
 
-export function ItemRenderer(props: { envelope: ItemEnvelope }): JSX.Element {
+export function ItemRenderer(props: { envelope: ItemEnvelope }): ReactElement {
   const { envelope } = props;
   const fallback = readLocaleFallback(envelope.meta?.x);
   return (

@@ -48,6 +48,14 @@ describe("composeNextPages", () => {
     expect(files.get("apps/web/src/app/blog/[slug]/page.tsx")).toContain("notFound()");
   });
 
+  it("the item page awaits params (Next 15: params is a Promise)", () => {
+    const files = byPath(composeNextPages({ pages: [{ slug: "blog", title: "B", collection: "article", isListing: true }, { slug: "blog", title: "P", collection: "article" }] }, index));
+    const page = files.get("apps/web/src/app/blog/[slug]/page.tsx")!;
+    expect(page).toContain("params: Promise<{ slug: string }>");
+    expect(page).toContain("await params");
+    expect(page).not.toContain("params.slug");
+  });
+
   it("an unknown collection becomes a TODO page and a proposal draft inside apps/web, never a fetch", () => {
     const r = composeNextPages({ pages: [{ slug: "team", title: "Team", collection: "team-member" }] }, index);
     expect(r.gaps).toHaveLength(1);

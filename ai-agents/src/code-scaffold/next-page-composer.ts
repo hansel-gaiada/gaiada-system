@@ -96,13 +96,18 @@ async function load(slug: string): Promise<ItemEnvelope> {
   }
 }
 
-export async function generateMetadata({ params }: { params: { slug: string } }) {
-  const envelope = await load(params.slug);
+// Next 15: route params are a Promise.
+type PageProps = { params: Promise<{ slug: string }> };
+
+export async function generateMetadata({ params }: PageProps) {
+  const { slug } = await params;
+  const envelope = await load(slug);
   return { title: envelope.seo?.title ?? FALLBACK_TITLE };
 }
 
-export default async function Page({ params }: { params: { slug: string } }) {
-  const envelope = await load(params.slug);
+export default async function Page({ params }: PageProps) {
+  const { slug } = await params;
+  const envelope = await load(slug);
   return (
     <main className="p-8">
       <ItemRenderer envelope={envelope} />
