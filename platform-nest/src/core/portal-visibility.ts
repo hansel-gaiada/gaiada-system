@@ -154,10 +154,11 @@ export function contractInPortalScope(alias: string, params: PortalScopeParams):
   return `${inCallerClients(alias, params.clients)} AND ${contractClientVisible(alias)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, true)}`;
 }
 
-/** An invoice is visible unless soft-deleted or still a `draft` (a number the agency has not
- *  committed to). */
+/** An invoice is visible unless soft-deleted, still a `draft` (a number the agency has not committed to),
+ *  or `approved` (PV3-02d: the internal maker/checker step BEFORE the invoice is sent; the client must not
+ *  see an invoice the agency has not yet issued). Visible: `sent`, `paid`, `void`. */
 export function invoiceClientVisible(alias: string): string {
-  return `${col(alias, "deleted_at")} IS NULL AND ${col(alias, "status")} <> 'draft'`;
+  return `${col(alias, "deleted_at")} IS NULL AND ${col(alias, "status")} NOT IN ('draft','approved')`;
 }
 
 /** The full portal predicate for an invoice. Invoices carry no project, so reach is the client only. */
