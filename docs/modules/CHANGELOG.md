@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.88.0` - M5-W4: writers' room briefs from `search`, linked to a WebDesk draft (2026-10-12) - DEV-VERIFIED
+
+- **Migration `202610122300_search_content_briefs_webdesk_link`.**
+  - It reuses `search_content_briefs`; there is no second brief table.
+  - It adds the WebDesk link (tenant slug, site, collection, locale; all-or-none), `webdesk_item_id` with one live brief per item, the assignee, target query, intent, AI questions, content gaps and a source brief.
+  - `property_id` becomes nullable, but a brief must still belong to a search property or a WebDesk site (`chk_scb_has_owner`).
+  - FORCE RLS stays and is self-asserted.
+- **No new Cerbos kind.**
+  - Managing a brief is `webdesk_content_item:assign` on the brief's own site, collection and locale (the scoped editor, `webdev_manager`, `company_admin`).
+  - Reading a linked brief is `comment` on the linked item, with the item's author, state and scope read from WebDesk. A writer therefore reads only the brief of their own item, and only while WebDesk's `briefRef` still matches.
+  - `search` access is never widened.
+- **Routes:** 7 routes under `…/content/sites/:tenantSlug/:siteId/briefs` and `…/items/:itemId/brief`, with 7 MCP tools `webdesk.briefs.*` (writes low).
+- **Create draft from a brief:** `content.create`, then `editorial.assign` with `briefRef`, then the link.
+- The assignee gets a bell (ids and title only).
+- PERMISSION-CONTRACT §27.5 records when to promote this to a real `webdesk_brief` kind.
+- **Verified** on GitHub Actions 38234877286 (main + W4 + W6): the DB/Cerbos/HTTP suite 45/45, unit 31/31.
+
 ### webdesk `0.20.0` - M5-W7: gaiada.com's author collection and the post → author relation, as data (2026-10-12) - PROTOTYPED
 
 - `webdesk/sites/gaiada-com/collections/author.json`: a localized (EN/ID) `author` collection with public E-E-A-T fields only:
