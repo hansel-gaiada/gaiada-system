@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.107.0` - M5-V6-c: the session-replay player and the recordings list (2026-10-13) - PROTOTYPED
+
+- **The visitor detail** shows recordings (date, length, pages) only to a holder of `search.replay.view`. Without it there is no card and no read.
+- **The player page** 404s without the capability. Each Play is one audited opening:
+  - page 1 is sent without `from`;
+  - later pages send `from` + `opening`;
+  - a 409 offers "start again", a 404 stops with "no longer available", and a 503 is shown in words.
+  - All pages load before playback.
+  - There is no download or export.
+- **`rrweb-player` 2.1.6** is pinned exactly, with an `overrides` block pinning every rrweb package to 2.1.6. Recorded pages cannot run scripts: the iframe sandbox is `allow-same-origin` only, with `UNSAFE_replayCanvas` off. A test against the real player asserts the sandbox, with a control that can fail.
+- **CSP for the player page only:**
+  - The page redirects once to a URL whose site-domain list is HMAC-signed, with a key derived from `SESSION_SECRET` and bound to tenant and site.
+  - `proxy.ts` verifies the signature, makes no network call, and sets `img-src`/`media-src` to `'self' data:` plus those domains.
+  - An unsigned or forged URL gets the floor (`'self' data:` only).
+  - Every other route is unchanged.
+- **Vendor-exit register:** rrweb 🟡 (2–4 weeks: the event format locks site, collector and player together) and rrweb-player 🟢.
+- **Tests:** vitest 6745, tsc and `next build` green locally (the CSP was also checked on a running `next start`). GitHub Actions 38295212967 green.
+- **Not yet driven:** playback end to end. It needs the site recorder (V6-d) and a real browser.
+
 ### automation `0.6.1` - M6-P4k: the delivery flow's repo check passes `tenantId` (2026-10-13) - PROTOTYPED
 
 - **The bug:** found live by the M6 P4 gate.
