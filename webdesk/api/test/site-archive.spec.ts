@@ -33,7 +33,7 @@ import { Client } from "pg";
 import { ApiKeysService } from "../src/api-keys/api-keys.service";
 import { TenantReadsService } from "../src/control/tenants/tenant-reads.service";
 import { ContentTickService } from "../src/scheduler/content-tick.service";
-import { computeCommandHash, mintWs4Assertion } from "../src/control/auth/ws4-assertion";
+import { computeCommandHash, mintWs4Assertion, peekWs4Assertion } from "../src/control/auth/ws4-assertion";
 
 const PROBLEM = "https://webdesk.gaiada.online/errors/";
 const HOUR = 3_600_000;
@@ -52,7 +52,16 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     await app?.close();
   });
 
-  const promoteHdr = (ws4?: string, idem: string | null = `idem-${randomUUID()}`) => hdr({ scopes: ["webdesk:promote"], ws4, idem, editorial: null });
+  // The NODE_ENV=test control channel is the dev-mode stub: it fills ControlContext.ws4ApprovalId ONLY from this header (the real
+  // authenticator peeks it out of x-ws4-assertion). The lifecycle controller hands that value to the envelope, which refuses a HIGH
+  // command without one (403 ws4-approval-required). The content controllers read it from the assertion themselves, so the content
+  // specs never needed the header. The PDP still verifies the assertion itself; this header is only the claim id.
+  const promoteHdr = (ws4?: string, idem: string | null = `idem-${randomUUID()}`) => {
+    const h = hdr({ scopes: ["webdesk:promote"], ws4, idem, editorial: null });
+    const approvalId = ws4 ? peekWs4Assertion(ws4)?.approvalId : undefined;
+    if (approvalId) h["x-webdesk-ws4-approval-id"] = approvalId;
+    return h;
+  };
   const archiveWs4 = (fx: ContentFixture, siteId = fx.siteId, approvalId = `apr-${randomUUID()}`) =>
     ws4For("site.archive", { tenantSlug: fx.slug, siteId }, {}, approvalId);
 
@@ -101,7 +110,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
   it("REFUSES without a WS4 assertion (403) and changes nothing", async () => {
     const fx = await createContentFixture("sa-nows4");
     const res = await post(fx, undefined);
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode, res.body).toBe(403);
     expect(res.json().message).toMatch(/HIGH-impact and always requires a WS4 assertion/);
     expect(await siteStatus(fx)).toBe("active");
   });
@@ -113,7 +122,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
       process.env.WEBDESK_APPROVAL_ASSERTION_KEY as string,
     );
     const res = await post(fx, wrong);
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode, res.body).toBe(403);
     expect(res.json().message).toMatch(/commandHash does not match/);
     expect(await siteStatus(fx)).toBe("active");
   });
@@ -132,14 +141,14 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
   it("REFUSES a caller without the webdesk:promote scope (403)", async () => {
     const fx = await createContentFixture("sa-scope");
     const res = await app.inject({ method: "POST", url: archiveUrl(fx), headers: hdr({ scopes: ["webdesk:read", "webdesk:operate"], ws4: archiveWs4(fx), editorial: null }), payload: {} });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode, res.body).toBe(403);
     expect(await siteStatus(fx)).toBe("active");
   });
 
   it("REFUSES a missing Idempotency-Key (400)", async () => {
     const fx = await createContentFixture("sa-nokey");
     const res = await post(fx, archiveWs4(fx), null);
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode, res.body).toBe(400);
     expect(await siteStatus(fx)).toBe("active");
   });
 
@@ -150,7 +159,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     const fx = await createContentFixture("sa-ok");
     const approvalId = `apr-${randomUUID()}`;
     const res = await post(fx, archiveWs4(fx, fx.siteId, approvalId));
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode, res.body).toBe(201);
     expect(res.json()).toMatchObject({ site: { id: fx.siteId, status: "archived" }, replayed: false });
     expect(await siteStatus(fx)).toBe("archived");
     expect(await auditActions(fx, approvalId)).toEqual(["control.site.archive"]);
@@ -158,7 +167,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     // The same approval cannot archive anything again (single use): a second site of the tenant, same assertion id.
     const sibling = await addSibling(fx);
     const reuse = await post(fx, archiveWs4(fx, sibling.siteId, approvalId), undefined, sibling.siteId);
-    expect(reuse.statusCode).toBe(403);
+    expect(reuse.statusCode, reuse.body).toBe(403);
     expect(await siteStatus(fx, sibling.siteId)).toBe("active");
   });
 
@@ -166,10 +175,10 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     const fx = await createContentFixture("sa-replay");
     const idem = `idem-${randomUUID()}`;
     const first = await post(fx, archiveWs4(fx), idem);
-    expect(first.statusCode).toBe(201);
+    expect(first.statusCode, first.body).toBe(201);
     // The real PDP refuses a re-used approval id, so the retry carries a fresh assertion for the same arguments.
     const replay = await post(fx, archiveWs4(fx), idem);
-    expect(replay.statusCode).toBe(201);
+    expect(replay.statusCode, replay.body).toBe(201);
     expect(replay.json().replayed).toBe(true);
     const { replayed: _a, ...a } = first.json();
     const { replayed: _b, ...b } = replay.json();
@@ -182,7 +191,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     expect((await post(fx, archiveWs4(fx))).statusCode).toBe(201);
     const approvalId = `apr-${randomUUID()}`;
     const again = await post(fx, archiveWs4(fx, fx.siteId, approvalId));
-    expect(again.statusCode).toBe(409);
+    expect(again.statusCode, again.body).toBe(409);
     expect(await auditActions(fx, approvalId)).toEqual([]);
   });
 
@@ -191,15 +200,15 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     const b = await createContentFixture("sa-tb");
     // b's slug + a's site id: the site is not b's.
     const cross = await app.inject({ method: "POST", url: archiveUrl(b, a.siteId), headers: promoteHdr(ws4For("site.archive", { tenantSlug: b.slug, siteId: a.siteId }, {})), payload: {} });
-    expect(cross.statusCode).toBe(404);
+    expect(cross.statusCode, cross.body).toBe(404);
     expect(await siteStatus(a)).toBe("active");
 
     const ghost = randomUUID();
     const unknown = await app.inject({ method: "POST", url: archiveUrl(a, ghost), headers: promoteHdr(ws4For("site.archive", { tenantSlug: a.slug, siteId: ghost }, {})), payload: {} });
-    expect(unknown.statusCode).toBe(404);
+    expect(unknown.statusCode, unknown.body).toBe(404);
 
     const malformed = await app.inject({ method: "POST", url: archiveUrl(a, "not-a-uuid"), headers: promoteHdr(ws4For("site.archive", { tenantSlug: a.slug, siteId: "not-a-uuid" }, {})), payload: {} });
-    expect(malformed.statusCode).toBe(400);
+    expect(malformed.statusCode, malformed.body).toBe(400);
 
     expect(await siteStatus(a)).toBe("active");
   });
@@ -214,10 +223,10 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
 
     // A live item (served), and a second one scheduled to go live in an hour.
     const liveRes = await createItem(app, fx, { collectionKey: "service", locale: "en", slug: "service.live", fields: serviceFields() });
-    expect(liveRes.statusCode).toBe(201);
+    expect(liveRes.statusCode, liveRes.body).toBe(201);
     expect((await publishItems(app, fx, [{ itemId: liveRes.json().item.itemId, version: 1 }])).statusCode).toBe(200);
     const dueRes = await createItem(app, fx, { collectionKey: "service", locale: "en", slug: "service.due", fields: serviceFields({ h1: "Due" }) });
-    expect(dueRes.statusCode).toBe(201);
+    expect(dueRes.statusCode, dueRes.body).toBe(201);
     const dueId = dueRes.json().item.itemId as string;
     const schedBody = { items: [{ itemId: dueId, version: 1 }], publishAt: new Date(Date.now() + HOUR).toISOString() };
     const sched = await app.inject({
@@ -226,7 +235,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
       headers: hdr({ ws4: ws4For("content.schedule", { tenantSlug: fx.slug, siteId: fx.siteId }, schedBody) }),
       payload: schedBody,
     });
-    expect(sched.statusCode).toBe(200);
+    expect(sched.statusCode, sched.body).toBe(200);
 
     expect((await v1Get(app, fx, keys.production, "service", "service.live")).statusCode).toBe(200); // before
 
@@ -234,16 +243,16 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
 
     // Public reads: the key no longer resolves — the same answer as a revoked key.
     const afterRead = await v1Get(app, fx, keys.production, "service", "service.live");
-    expect(afterRead.statusCode).toBe(401);
+    expect(afterRead.statusCode, afterRead.body).toBe(401);
     expect(afterRead.json().type).toBe(`${PROBLEM}invalid-credentials`);
     expect((await v1Get(app, fx, keys.staging, "service", "service.live")).statusCode).toBe(401);
 
     // Control-plane writes and publishes: a typed 409.
     const create = await createItem(app, fx, { collectionKey: "service", locale: "en", slug: "service.new", fields: serviceFields() });
-    expect(create.statusCode).toBe(409);
+    expect(create.statusCode, create.body).toBe(409);
     expect(create.json().type).toBe(`${PROBLEM}site-archived`);
     const publish = await publishItems(app, fx, [{ itemId: dueId, version: 1 }]);
-    expect(publish.statusCode).toBe(409);
+    expect(publish.statusCode, publish.body).toBe(409);
     expect(publish.json().type).toBe(`${PROBLEM}site-archived`);
     const env = await app.inject({
       method: "POST",
@@ -251,11 +260,11 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
       headers: hdr({ scopes: ["webdesk:operate"], editorial: null }),
       payload: { name: "staging" },
     });
-    expect(env.statusCode).toBe(409);
+    expect(env.statusCode, env.body).toBe(409);
 
     // Control reads of the site refuse too (the mirror of an archived tenant's 404, typed).
     const read = await app.inject({ method: "GET", url: `/control/v1/tenants/${fx.slug}/sites/${fx.siteId}/collections`, headers: hdr({ scopes: ["webdesk:read"], editorial: null, idem: null }) });
-    expect(read.statusCode).toBe(409);
+    expect(read.statusCode, read.body).toBe(409);
     expect(read.json().type).toBe(`${PROBLEM}site-archived`);
 
     // Schedules: the tick skips the archived site's due item (it stays 'scheduled', never goes live).
