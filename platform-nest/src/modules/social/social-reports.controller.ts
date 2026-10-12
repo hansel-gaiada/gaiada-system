@@ -48,6 +48,7 @@ import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
 import { storage } from "../../core/storage";
+import { sha256Hex } from "../../core/content-hash";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
@@ -451,9 +452,9 @@ export class SocialReportsController {
       [tenantId],
       async (c) => {
         await c.query(
-          `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
-           VALUES ($1,$2,$3,'social_report',$4,$5,'application/pdf',$6,$7,false,$8)`,
-          [fileId, tenantId, req.principal.userId, id, filename, bytes.byteLength, storageKey, config.originSite],
+          `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+           VALUES ($1,$2,$3,'social_report',$4,$5,'application/pdf',$6,$7,$8,false,$9)`,
+          [fileId, tenantId, req.principal.userId, id, filename, bytes.byteLength, storageKey, sha256Hex(bytes), config.originSite],
         );
 
         // Best-effort deliverable link — `deliverables.project_id` is NOT NULL, so an engagement

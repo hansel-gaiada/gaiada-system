@@ -233,6 +233,12 @@ export interface PortalContractDetail extends Omit<PortalContract, "hasDocument"
   declineReason: string | null;
   canSign: boolean;
   viewOnly: boolean;
+  /** PV5-06: the SHA-256 the server fixed when the contract was sent. The sign call echoes it back ("what I saw");
+   *  the server refuses (409) when the content changed since. Null on a contract sent before PV5-06. Optional so
+   *  demo fixtures need not carry one. */
+  contentSha256?: string | null;
+  /** PV5-06: `attested` (typed name) or `certified` (signed through a certified provider; never by typed name). */
+  signatureTier?: "attested" | "certified" | null;
   signatures: Array<{ party: "provider" | "client"; signerName: string | null; signerTitle: string | null; signedAt: string }>;
   document: { id: string; filename: string; contentType: string; byteSize: number; url: string | null } | null;
 }
@@ -561,7 +567,7 @@ export type ContractSigningState =
   | { kind: "closed"; reason: string };
 
 export function contractSigningState(
-  k: Pick<PortalContractDetail, "canSign" | "viewOnly" | "termEnded" | "status" | "signatures" | "document" | "bodyMd">,
+  k: Pick<PortalContractDetail, "canSign" | "viewOnly" | "termEnded" | "status" | "signatures" | "document" | "bodyMd"> & { signatureTier?: PortalContractDetail["signatureTier"] },
 ): ContractSigningState {
   const clientSig = k.signatures.find((s) => s.party === "client");
   if (clientSig) {
@@ -578,7 +584,9 @@ export function contractSigningState(
         ? "This agreement's term has ended. Ask your account manager to re-issue it."
         : k.status !== "sent"
           ? `This agreement is ${clientStatus(k.status).toLowerCase()} and can't be signed here.`
-          : "The document needs to be attached before this can be signed.",
+          : k.signatureTier === "certified"
+            ? "This agreement is signed through a certified signing provider, not by typed name. Your account manager will send you the signing link."
+            : "The document needs to be attached before this can be signed.",
   };
 }
 

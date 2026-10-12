@@ -26,8 +26,34 @@ local stack). None of these mean "production-done".
 - **Migration `0003_replay`** adds `replay_sessions` and `replay_chunks`, with no IP or UA column. `backup.sh` already excludes both, and a static test checks the names.
 - **Sumopod compose:** the five `REPLAY_*` variables are listed under `environment:` (empty = default).
 - The edge `/lib/kestrel/r` location stays off.
-- `go test -race` is green locally. The Postgres replay test runs in CI.
+- `go test -race` green locally and on GitHub Actions 38283161570, including the Postgres replay test.
 - **For the site (V6-d):** chunks are sent as base64 gzip strings, and input elements must be blocked in rrweb, or chunks carrying them are refused.
+
+### platform-nest `0.107.0` - M5-V3-e: consented visitor profiles, the ingest, withdrawal sweep and purge jobs (dark until `SEARCH_VISITORS_ENABLED=1`) (2026-10-13) - PROTOTYPED
+
+- **New files:**
+  - `insights-client.ts`, the collector ops client (paged events, forget with its own key);
+  - `visitor-consent-client.ts`, the WebDesk `consent.status` client;
+  - `visitor-scoring.ts`, pure interests and score;
+  - `visitor-jobs.ts`.
+- **Ingest** (every 10 min) holds one lock per property for the whole run. For each page it:
+  1. asks WebDesk about every consent id;
+  2. **transaction A:** deletes and tombstones the visitors whose consent is withdrawn or absent;
+  3. sends forget to the collector;
+  4. **transaction B:** re-reads the tombstones, then writes events and profiles and moves the cursor.
+  A repeated batch changes nothing.
+- **Sweep** (hourly) waits for the lock, so it runs after any ingest in flight. It re-asks WebDesk and deletes, tombstones and forgets withdrawn visitors.
+- **Purge** (daily) removes profiles 14 months after their last visit, and old tombstones.
+- **Outages fail safe:**
+  - A WebDesk outage proves neither consent nor withdrawal, so nothing is written or forgotten.
+  - A collector outage in the sweep still commits the ERP delete, and the forget is queued for retry.
+- **`main.ts`** starts the jobs only when `SEARCH_VISITORS_ENABLED` is exactly `1`.
+- **Env:**
+  - `INSIGHTS_BASE_URL`, `INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY`;
+  - `SEARCH_VISITORS_{INGEST,SWEEP,PURGE}_INTERVAL_MS` and `SEARCH_VISITORS_TIMEOUT_MS`: empty or `0` means the default.
+- **Restore runbook:** replay erasures before turning the jobs on.
+- **Tests:** 49 unit tests. GitHub Actions 38280483315 green, including the 20-case DB acceptance suite with fakes for both remotes and the sweep-during-ingest race.
+- **ERP compose:** passes through `SEARCH_VISITORS_{INGEST,SWEEP,PURGE}_INTERVAL_MS` and `SEARCH_VISITORS_TIMEOUT_MS`.
 
 ### platform-nest `0.106.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
 
