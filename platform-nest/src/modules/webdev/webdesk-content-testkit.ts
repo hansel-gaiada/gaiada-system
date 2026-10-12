@@ -385,6 +385,13 @@ export class FakeZoneB {
         );
         return ok({ assets: rows.map((a) => this.assetJson(a)), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
       }
+      // M5-L1d: reads are answered by THIS switch; only writes reach apply().
+      case "forms.def.list":
+        return ok({ forms: [...this.forms.values()].filter((f) => f.siteId === p.siteId).sort((x, y) => x.key.localeCompare(y.key)) });
+      case "forms.def.get": {
+        const f = this.forms.get(`${p.siteId}:${p.formKey}`);
+        return f ? ok({ form: f }) : problem(404, "form-not-found");
+      }
       case "media.usage": {
         const a = this.media.get(p.assetId);
         if (!a || a.siteId !== p.siteId) return problem(404, "media-asset-not-found");
@@ -555,12 +562,6 @@ export class FakeZoneB {
         const form = { formId: prev?.formId ?? randomUUID(), key: String(p.formKey), siteId: String(p.siteId), schema, notify: b.notify ?? {}, retentionDays: Number(b.retentionDays), consentNoticeVersion: String(b.consentNoticeVersion), createdAt: prev?.createdAt ?? t, updatedAt: t };
         this.forms.set(key, form);
         return ok({ form, created: !prev, consentNoticeChanged: !!prev && prevText !== text, replayed: false });
-      }
-      case "forms.def.list":
-        return ok({ forms: [...this.forms.values()].filter((f) => f.siteId === p.siteId).sort((x, y) => x.key.localeCompare(y.key)) });
-      case "forms.def.get": {
-        const f = this.forms.get(`${p.siteId}:${p.formKey}`);
-        return f ? ok({ form: f }) : problem(404, "form-not-found");
       }
       case "schema.apply":
         return ok({ collectionKey: p.collectionKey, bump: "minor", reasons: [], persisted: true, replayed: false }, 201);
