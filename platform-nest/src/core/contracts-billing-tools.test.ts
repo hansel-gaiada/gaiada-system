@@ -26,6 +26,7 @@ import { config } from "../config";
 import { newId, withTenants } from "../db";
 import { buildApp } from "../main";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
+import { sha256Hex } from "./content-hash";
 import {
   createCompany, createUser, addMembership, createRole, grantRole, createClient, linkIdentity,
 } from "../testing/fixtures";
@@ -549,8 +550,16 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       const id = await sentViaTool(clientA, "PV306-D14-2");
       const a = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner", signerTitle: "Owner" }, owner, "high");
       expect(await executeApprovedAutomationWrite(tenant, a)).toEqual({ status: "executed" });
-      const sig = await adminPool().query<{ signer: string }>(`SELECT signer FROM contract_signatures WHERE contract_id = $1 AND party = 'provider'`, [id]);
+      const sig = await adminPool().query<{ signer: string; content_sha256: string | null; ip_hash: string | null; user_agent: string | null }>(
+        `SELECT signer, content_sha256, ip_hash, user_agent FROM contract_signatures WHERE contract_id = $1 AND party = 'provider'`, [id]);
       expect(sig.rows.map((r) => r.signer)).toEqual([owner]);
+      // PV5-06: the D14 re-drive runs the same route as the human the agent served, so it records the hash fixed at
+      // send (not whatever the agent saw), plus the IP hash and user agent of the hop, exactly like a direct call.
+      const fixed = (await adminPool().query<{ content_sha256: string }>(`SELECT content_sha256 FROM contracts WHERE id = $1`, [id])).rows[0].content_sha256;
+      expect(fixed).toBe(sha256Hex("Terms."));
+      expect(sig.rows[0].content_sha256).toBe(fixed);
+      expect(sig.rows[0].ip_hash).toMatch(/^[0-9a-f]{32}$/);
+      expect(typeof sig.rows[0].user_agent).toBe("string");
       // Landed: a retry is refused by the precondition, hub not called again.
       const calls = hubCalls;
       const b = await fileApproved("contracts.countersign", { tenantId: tenant, contractId: id, signerName: "Olive Owner" }, owner, "high");

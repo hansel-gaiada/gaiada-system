@@ -79,6 +79,7 @@ import {
   type LaunchKeywordFact, type NegativeFact,
 } from "./sem-export";
 import { storage } from "../../core/storage";
+import { sha256Hex } from "../../core/content-hash";
 // SM-25a — the HTTP surface over google/oauth.ts's service layer (design addendum §A12; tracker
 // §6ao "owed"). Every function imported here returns a MASKED view (GoogleConnectionView / the
 // { connection, issuerRevoked, issuerStatus } revoke shape) — token material is structurally absent
@@ -3961,9 +3962,9 @@ export class SearchController {
       [tenantId],
       async (c) => {
         await c.query(
-          `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
-           VALUES ($1,$2,$3,'search_change_proposal',$4,$5,$6,$7,$8,false,$9)`,
-          [fileId, tenantId, req.principal.userId, id, result.filename, result.contentType, bytes.byteLength, storageKey, config.originSite],
+          `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+           VALUES ($1,$2,$3,'search_change_proposal',$4,$5,$6,$7,$8,$9,false,$10)`,
+          [fileId, tenantId, req.principal.userId, id, result.filename, result.contentType, bytes.byteLength, storageKey, sha256Hex(bytes), config.originSite],
         );
         await c.query(
           `UPDATE search_change_proposals SET export_file_id = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,

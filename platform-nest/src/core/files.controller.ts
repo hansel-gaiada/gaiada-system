@@ -7,6 +7,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { storage } from "./storage";
+import { sha256Hex } from "./content-hash";
 import { scrubText, isScrubbableText } from "./scrub";
 import { AuthGuard } from "../auth/guards";
 
@@ -93,9 +94,9 @@ export class FilesController {
     await storage().put(storageKey, bytes);
     await withTenants([tenantId], (c) =>
       c.query(
-        `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [id, tenantId, req.principal.userId, targetType, targetId, cleanName, contentType, bytes.byteLength, storageKey, scrubbed, config.originSite],
+        `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [id, tenantId, req.principal.userId, targetType, targetId, cleanName, contentType, bytes.byteLength, storageKey, sha256Hex(bytes), scrubbed, config.originSite],
       ),
     );
     await writeActivity(tenantId, req.principal.userId, "uploaded", targetType, targetId, { fileId: id, filename: cleanName });

@@ -17,7 +17,10 @@ import { PortalSignedNote } from "./PortalSignedNote";
 //
 // `useActionState` (not a void form action) because the server refuses for reasons the client must see:
 // their access is view-only, the agreement has already been signed, its term has ended.
-export function PortalSignForm({ contractId, title }: { contractId: string; title: string }) {
+// PV5-06: `contentSha256` is the hash of the agreement the server handed this page. It rides along as a hidden field and
+// the server compares it with the hash it fixed when the agreement was sent: if the agreement changed after this page was
+// opened, the signature is refused and the page reloads (see `portalSignContract`).
+export function PortalSignForm({ contractId, title, contentSha256 }: { contractId: string; title: string; contentSha256?: string | null }) {
   const [state, formAction, pending] = useActionState<PortalActionResult | null, FormData>(
     portalSignContract,
     null,
@@ -32,6 +35,7 @@ export function PortalSignForm({ contractId, title }: { contractId: string; titl
   return (
     <form action={formAction} className="cp-form">
       <input type="hidden" name="contractId" value={contractId} />
+      {contentSha256 ? <input type="hidden" name="contentSha256" value={contentSha256} /> : null}
       {state?.error && <div className="cp-form__error" role="alert">{state.error}</div>}
 
       <div className="cp-field">
