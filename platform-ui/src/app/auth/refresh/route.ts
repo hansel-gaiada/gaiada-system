@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/session-server";
-import { sealSession, encodeSession } from "@/lib/session";
+import { sealSession, encodeSession, SESSION_TTL_SECONDS } from "@/lib/session";
 import { clearHostCookie, setHostCookie, HOST_COOKIES } from "@/lib/cookieNames";
 import { sanitizeReturnTo } from "@/lib/returnTo";
 
@@ -113,7 +113,11 @@ export async function GET(req: NextRequest) {
   );
 
   const res = NextResponse.redirect(new URL(returnTo, req.nextUrl.origin));
-  setHostCookie(res.cookies, HOST_COOKIES.session, sealed);
+  // The cookie keeps the session's REMAINING absolute lifetime (callback and magic set the full 12h). Without a
+  // maxAge the re-stamped cookie became a browser-session cookie, so a refreshed user lost it on the next browser
+  // restart well inside the 12h (B0 sweep).
+  const endsAt = session.exp ?? (session.iat ?? Date.now()) + SESSION_TTL_SECONDS * 1000;
+  setHostCookie(res.cookies, HOST_COOKIES.session, sealed, { maxAge: Math.max(0, Math.floor((endsAt - Date.now()) / 1000)) });
   res.headers.set("x-gaiada-refresh", "ok");
   return res;
 }
