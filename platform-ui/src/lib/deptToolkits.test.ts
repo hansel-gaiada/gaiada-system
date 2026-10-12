@@ -20,7 +20,7 @@ describe("toolkitFor", () => {
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "build", "website", "connections"]);
     // Flattened tabs preserve the full route set (paths unchanged from the flat model).
     expect(deptTabs(tk).map((t) => t.key)).toEqual([
-      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "content", "media", "analytics", "leads", "connections",
+      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "content", "media", "analytics", "leads", "writers", "connections",
     ]);
     expect(tk.launchers.some((l) => l.key === "claude-code")).toBe(true);
   });
@@ -104,13 +104,14 @@ describe("Website group (WSK-44)", () => {
     expect(keys.indexOf("website")).toBe(keys.indexOf("connections") - 1);
   });
 
-  it("holds four tabs: Content (the whole /website/content sub-tree), Media (WSK-43c), Analytics (M5-A4) and Leads (M5-L6)", () => {
+  it("holds five tabs: Content (the whole /website/content sub-tree), Media (WSK-43c), Analytics (M5-A4), Leads (M5-L6) and the Writers' room (M5-W2e)", () => {
     expect(website()?.label).toBe("Website");
-    expect(website()?.tabs.map((t) => [t.key, t.label, t.path])).toEqual([["content", "Content", "website/content"], ["media", "Media", "website/media"], ["analytics", "Analytics", "website/analytics"], ["leads", "Leads", "website/leads"]]);
+    expect(website()?.tabs.map((t) => [t.key, t.label, t.path])).toEqual([["content", "Content", "website/content"], ["media", "Media", "website/media"], ["analytics", "Analytics", "website/analytics"], ["leads", "Leads", "website/leads"], ["writers", "Writers' room", "website/writers"]]);
     expect(tabHref("dept-1", website()!.tabs[0])).toBe("/departments/dept-1/website/content");
     expect(tabHref("dept-1", website()!.tabs[1])).toBe("/departments/dept-1/website/media");
     expect(tabHref("dept-1", website()!.tabs[2])).toBe("/departments/dept-1/website/analytics");
     expect(tabHref("dept-1", website()!.tabs[3])).toBe("/departments/dept-1/website/leads");
+    expect(tabHref("dept-1", website()!.tabs[4])).toBe("/departments/dept-1/website/writers");
   });
 
   it("is a Web Dev craft group only: no other department's toolkit advertises it", () => {
@@ -124,7 +125,7 @@ describe("Website group (WSK-44)", () => {
     const paths = deptTabs(toolkitFor("agency", "Web Dev")).map((t) => t.path);
     expect(new Set(paths).size).toBe(paths.length);
     const web = paths.filter((p) => p.startsWith("website"));
-    expect(web.length).toBe(4);
+    expect(web.length).toBe(5);
     expect(web.some((a) => web.some((b) => a !== b && b.startsWith(`${a}/`)))).toBe(false);
   });
 
@@ -145,6 +146,10 @@ describe("Website group (WSK-44)", () => {
       "analytics/[tenant]/[site]/page.tsx",
       "leads/page.tsx",
       "leads/[tenant]/[site]/page.tsx",
+      "writers/page.tsx",
+      "writers/[tenant]/[site]/page.tsx",
+      "writers/people/page.tsx",
+      "writers/people/[tenant]/[site]/page.tsx",
     ]) {
       expect(existsSync(resolve(root, rel)), rel).toBe(true);
     }

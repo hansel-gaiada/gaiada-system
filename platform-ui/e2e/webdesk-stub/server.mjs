@@ -19,6 +19,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { addAsset, COMPANY, concurrentSave, decideApproval, handleKeyRequest, handlePublicMedia, handleWebdesk, listApprovals, mediaState, seed, setBuild } from "./wd.mjs";
+import { reviewSnapshot } from "./editorial.mjs";
 import { handlePortalWebsite, isPortalWebsitePath, PORTAL_USERS, portalMe, portalOverview, portalUserIdFor, seedPortal } from "./portal.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
@@ -87,7 +88,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, {
           ...mediaState(S),
           items: [...S.items.values()].map((i) => ({ itemId: i.itemId, slug: i.slug, locale: i.locale, headVersion: i.versions.at(-1).n, publishedVersion: i.publishedVersion, publishState: i.publishState, deletedAt: i.deletedAt, versions: i.versions.map((v) => ({ n: v.n, createdBy: v.createdBy, note: v.note, props: v.blocks[0]?.props, seo: v.seo })) })),
-          approvals: [...S.approvals.values()], build: S.build, stagingStale: S.stagingStale,
+          approvals: [...S.approvals.values()], build: S.build, stagingStale: S.stagingStale, review: reviewSnapshot(S),
         });
       }
       if (cmd === "decide") { const r = decideApproval(S, body.id, body.outcome, body.by); return send(res, r.status, r.json); }

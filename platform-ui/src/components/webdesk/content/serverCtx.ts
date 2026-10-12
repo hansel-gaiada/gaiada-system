@@ -27,10 +27,12 @@ export interface WebsiteCtx {
   analyticsBase: string;
   /** `/departments/:deptId/website/leads` (M5-L6) */
   leadsBase: string;
+  /** `/departments/:deptId/website/writers` (M5-W2e) */
+  writersBase: string;
 }
 
 /** `tab` is the Website tab the page lives under: a page behind a tab 404s for a department whose toolkit does not have it. */
-export async function requireWebsiteCtx(deptId: string, tab: "content" | "media" | "analytics" | "leads" = "content"): Promise<WebsiteCtx> {
+export async function requireWebsiteCtx(deptId: string, tab: "content" | "media" | "analytics" | "leads" | "writers" = "content"): Promise<WebsiteCtx> {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -39,5 +41,5 @@ export async function requireWebsiteCtx(deptId: string, tab: "content" | "media"
   const dept = await getDepartment(userId, company, deptId);
   if (!dept) notFound();
   if (!deptTabs(toolkitFor(activeCompany(me, company)?.vertical, dept.name)).some((t) => t.key === tab)) notFound();
-  return { userId, me, company, deptId, contentBase: `/departments/${deptId}/website/content`, mediaBase: `/departments/${deptId}/website/media`, analyticsBase: `/departments/${deptId}/website/analytics`, leadsBase: `/departments/${deptId}/website/leads` };
+  return { userId, me, company, deptId, contentBase: `/departments/${deptId}/website/content`, mediaBase: `/departments/${deptId}/website/media`, analyticsBase: `/departments/${deptId}/website/analytics`, leadsBase: `/departments/${deptId}/website/leads`, writersBase: `/departments/${deptId}/website/writers` };
 }
