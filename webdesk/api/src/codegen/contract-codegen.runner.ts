@@ -58,6 +58,16 @@ export function isContractCurrent(
 
 const nativeImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<unknown>;
 
+export type CodegenBundleImporter = (specifier: string) => Promise<unknown>;
+let importBundle: CodegenBundleImporter = nativeImport;
+
+/** Test seam, never set in production: vitest runs modules in a VM context where a Function-constructor
+ *  `import()` has no host callback ("A dynamic import callback was not specified"), so a live spec passes
+ *  its own `(s) => import(s)`. The bundle loaded is the same real one; only the loading mechanism differs. */
+export function setCodegenBundleImporterForTests(importer: CodegenBundleImporter | null): void {
+  importBundle = importer ?? nativeImport;
+}
+
 /**
  * Where the bundle is. In the image (the Dockerfile compiles only src/) this file is dist/codegen/ and the bundle
  * sits beside it. From a checkout it is <api>/dist/codegen/: reached from the ts source (vitest, src/codegen/) or
@@ -91,7 +101,7 @@ export class CompiledContractCodegenRunner implements ContractCodegenRunner {
 
   private load(): Promise<GeneratorBundle> {
     // A failed load is not cached: a missing bundle is fixed by a deploy, but a transient read error should retry.
-    this.bundle ??= nativeImport(pathToFileURL(resolveBundlePath()).href).then(
+    this.bundle ??= importBundle(pathToFileURL(resolveBundlePath()).href).then(
       (m) => m as GeneratorBundle,
       (err) => {
         this.bundle = undefined;

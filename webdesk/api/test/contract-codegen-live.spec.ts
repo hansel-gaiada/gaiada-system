@@ -25,7 +25,7 @@ import { ControlModule } from "../src/control/control.module";
 import { DbService } from "../src/db/db.service";
 import { ContractCodegenQueue } from "../src/codegen/contract-codegen.queue";
 import { PgContractCodegenLock } from "../src/codegen/contract-codegen.lock";
-import { resolveBundlePath } from "../src/codegen/contract-codegen.runner";
+import { resolveBundlePath, setCodegenBundleImporterForTests } from "../src/codegen/contract-codegen.runner";
 import { CONTRACT_CODEGEN_RUNNER, ContractCodegenLockBusyError, type ContractCodegenRunner, type ContractCodegenRunResult } from "../src/codegen/contract-codegen.types";
 import { latestPointerKey } from "../src/codegen/artifact-keys";
 import type { LatestContractPointer } from "../src/codegen/contract-manifest.types";
@@ -38,6 +38,9 @@ import { join } from "node:path";
  *  bundle here when it is missing (esbuild, seconds) instead of depending on a step outside the suite; a build
  *  that still yields no bundle fails HERE, loudly, not as a mysterious timeout. */
 function ensureBundle(): string {
+  // vitest's VM context has no host callback for the runner's Function-constructor import(), so load the SAME
+  // real bundle through the module system instead (see setCodegenBundleImporterForTests).
+  setCodegenBundleImporterForTests((specifier) => import(/* @vite-ignore */ specifier));
   try {
     return resolveBundlePath();
   } catch {
