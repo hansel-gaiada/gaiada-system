@@ -92,8 +92,8 @@ INSIDE the leftover directory, and the api still reports "not a regular file". T
 The restart is also what loads the new key set: the api reads the JWKS once, at boot.
 
 **"Restart api" in this runbook always means a recreate.** On the box, run
-`sudo docker compose -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml --env-file /etc/webdesk/.env up -d --no-deps --no-build --force-recreate api`
-from `/home/Hansel/gaiada-webdesk/webdesk`.
+`sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml up -d --no-deps --no-build --force-recreate api`
+from `/home/Hansel/gaiada-webdesk/webdesk`. WebDesk runs on the rootless daemon since 2026-10-12, so `sudo` must be followed by `env DOCKER_HOST=...` (`sudo` resets the environment). The old `sudo docker compose ...` talks to the rootful daemon, which no longer runs WebDesk. Every other WebDesk `docker` command below takes the prefix `DOCKER_HOST=unix:///run/user/940/docker.sock`.
 
 - Without `--force-recreate`, a changed file under an unchanged compose config gives `Container webdesk-api-1 Running`.
   Nothing restarts, and the old key set stays loaded.
@@ -150,11 +150,12 @@ file is still in the mount; delete the file afterwards.
 HIGH command. Then **the owner** reads its audit row. Live DB reads are the owner's, so hand over this ready command:
 
 ```bash
-# <webdesk-postgres> = the webdesk project's postgres container (check with docker ps; the name is not pinned here).
+# <webdesk-postgres> = the webdesk project's postgres container (check with `DOCKER_HOST=unix:///run/user/940/docker.sock docker ps`; the name is not pinned here).
+# WebDesk's containers live on the rootless daemon, so the prefix below is required.
 # Platform-scope commands (tenant.archive, ...) need the platform GUC; a tenant-scope command needs
 # SET webdesk.tenant_ctx = '<tenant uuid>' instead. FORCE RLS: without the right GUC you see ZERO rows,
 # and zero rows is NOT a failure of the version.
-docker exec -i <webdesk-postgres> psql -U webdesk_owner -d webdesk -Atc \
+DOCKER_HOST=unix:///run/user/940/docker.sock docker exec -i <webdesk-postgres> psql -U webdesk_owner -d webdesk -Atc \
   "SET webdesk.platform_ctx = 'true'; SELECT action, ws4_assertion_version FROM audit_entries WHERE ws4_approval_id = '<approvalId>'"
 ```
 
@@ -240,7 +241,8 @@ any pre-0018 rows.
 **When the query is not needed.** The assertion is minted at send time, not stored, and lives 60 s. If no container
 holds a non-empty v1 key except the one platform you just switched, then no v1 assertion can be in flight once 60 s
 have passed since its recreate. Check that with
-`for c in $(docker ps --format '{{.Names}}'); do docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $c | grep -q '^WEBDESK_CONTROL_WS4_KEY=.' && echo $c; done`.
+`for h in '' unix:///run/user/940/docker.sock; do for c in $(DOCKER_HOST=$h docker ps --format '{{.Names}}'); do DOCKER_HOST=$h docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' $c | grep -q '^WEBDESK_CONTROL_WS4_KEY=.' && echo "$c ($h)"; done; done`
+(it walks both daemons: the ERP platform is on the rootful one, WebDesk on the rootless one; an empty `DOCKER_HOST` means the default rootful socket).
 That is how phase 3 ran on 2026-10-12, by the owner's decision ("phase 3 right after if v2 is proven"), about 2
 minutes after the switch.
 
@@ -252,7 +254,7 @@ minutes after the switch.
       `sudo sed -i '/^WEBDESK_APPROVAL_ASSERTION_KEY=/d' /etc/webdesk/.env`.
       It lives in `.env`, **not** in `.env.control` (see the variables table).
    2. Restart api (the recreate command above). Then check that
-      `docker exec webdesk-api-1 sh -c '[ -z "$WEBDESK_APPROVAL_ASSERTION_KEY" ] && echo absent'` prints `absent`.
+      `DOCKER_HOST=unix:///run/user/940/docker.sock docker exec webdesk-api-1 sh -c '[ -z "$WEBDESK_APPROVAL_ASSERTION_KEY" ] && echo absent'` prints `absent`.
    3. Expected log: `WS4 gate: v1 (HMAC) retired: WEBDESK_APPROVAL_ASSERTION_KEY is not set; v2 (EdDSA) accepted ...`.
 3. **Prove v1 is refused.** There is no v1 key left on the ERP to mint with, and that is the point. Check two things
    instead:

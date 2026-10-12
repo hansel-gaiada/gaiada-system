@@ -11,7 +11,8 @@ claim.
 | Path | What | Runbook |
 |---|---|---|
 | `secrets-layout.md` | Where every Zone B secret lives and how it's issued — no values | — |
-| `host/webdesk-egress-guard.sh`, `host/test-egress-guard.sh` | Default-deny for the webdesk network, plus the ONE exception (WebDesk's OTLP push to `172.17.0.1:<port>`, off unless `WEBDESK_OTLP_PORT` is set) and its throwaway-network harness | `../../infra/runbooks/webdesk-zoneb-otel.md` |
+| `host/rootless/webdesk-rootless-guard.sh`, `host/rootless/test-rootless-guard.sh` | The LIVE guard on `gda-aicenter` since 2026-10-12 (WebDesk runs on the rootless daemon, uid 940): default-deny in the OUTPUT path matched by socket owner, plus the ONE exception (WebDesk's OTLP push to `172.17.0.1:<port>`, off unless `WEBDESK_OTLP_PORT` is set in `/etc/webdesk/guard.env`), and its harness |
+| `host/webdesk-egress-guard.sh`, `host/test-egress-guard.sh` | HISTORICAL: the rootful guard (chains `WEBDESK-EGRESS` / `WEBDESK-HOST-IN`), removed from the box on 2026-10-12; do not install it | `../../infra/runbooks/webdesk-zoneb-otel.md` |
 | `scripts/check-otlp-write-only.mjs` | Static auditor, run in CI against the ERP collector's real config and compose file: the `otlp/webdesk` receiver is bearer-authenticated, write-only, published on docker0 alone, and refuses everything while its token is empty | `../../infra/runbooks/webdesk-zoneb-otel.md` |
 | `scripts/check-cdn-bypass.mjs` | Static + probe-capable auditor: would a request that skips the CDN edge reach Zone B media unauthenticated | (this file, §CDN-bypass) |
 | `scripts/webdesk-backup-local.sh` | Nightly PG dump + MinIO mirror into the local versioned/object-locked `backups` bucket | `../../infra/runbooks/webdesk-zoneb-backups.md` |
@@ -55,8 +56,8 @@ Every service in `docker-compose.aicenter.yml` runs `cap_drop: [ALL]` plus the m
 entrypoint needs, each reasoned in a comment next to it: postgres (chown + gosu) `CHOWN DAC_OVERRIDE FOWNER SETGID
 SETUID`, redis (chown + setpriv) `CHOWN SETGID SETUID`, caddy `NET_BIND_SERVICE` (the binary carries that file
 capability, so it fails to exec without it), and none for the api and RustFS. The default network is pinned to
-`172.19.0.0/16`, which the host egress guard (`ops/host/webdesk-egress-guard.sh`) reads at boot: after any
-`docker compose down`, run `systemctl restart webdesk-host-deny`. redis, postgres and caddy are pinned by digest
+`172.19.0.0/16` (the old rootful guard read it at boot; the live rootless guard matches by socket owner and needs no reload after a `docker compose down`).
+On `gda-aicenter` every WebDesk docker command targets the rootless daemon, `DOCKER_HOST=unix:///run/user/940/docker.sock docker ...`, and compose runs as `sudo -n env DOCKER_HOST=... docker compose ...`; check the guard with `sudo /usr/local/sbin/webdesk-rootless-guard.sh check webdesk-rootless`. redis, postgres and caddy are pinned by digest
 like RustFS (re-resolve with `docker buildx imagetools inspect <tag>`). `scripts/check-compose-hardening.mjs`
 audits the RESOLVED config in CI; `ops/probes/compose-boot-proof.sh` boots the real files on a throwaway project
 (own subnet, own port, temp-dir mounts) on a Linux host and checks `docker inspect` plus PID 1's effective caps.

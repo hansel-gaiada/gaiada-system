@@ -11,6 +11,13 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.96.2` - the agency lead convert report survives the refresh that converts the lead (2026-10-12) - DEV-VERIFIED
+
+The last case of the Next 16.3 unmount sweep (WebDesk M3 follow-up).
+
+- The convert action revalidates the lead page; the refreshed lead is `converted`, so ConvertCard unmounted with its "what was delegated" report and the page said "This lead is already converted." The report now lives in `AgencyLeadDetail`, which stays mounted: the Converted card shows "Converted.", the run link and the delegation report from the convert answer. A later visit still reads "already converted" (the report is not stored; the tasks are on the project). No server change.
+- Tests: the report survives a rerender with the converted lead (fails on the old component), plus a control. GitHub Actions run 38229574581 green.
+
 ### platform-nest `0.86.0` - the ERP renders the MON-01 probe-target file (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6-P3d (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`). Built by the M6 session.

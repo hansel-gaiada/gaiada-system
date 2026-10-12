@@ -70,11 +70,12 @@ The manual procedure below stays as the fallback (with the three files once auto
 
 | What | Where |
 |---|---|
-| Compose project | `/home/Hansel/gaiada-webdesk/webdesk` (`docker-compose.yml` + `docker-compose.aicenter.yml`) |
-| Env file | `/etc/webdesk/.env` (owner `webdesk-svc`, 600). Every compose call needs `--env-file /etc/webdesk/.env` and `sudo -n`. |
+| Compose project | `/home/Hansel/gaiada-webdesk/webdesk` (`docker-compose.yml` + `docker-compose.aicenter.yml` + `docker-compose.aicenter-release.yml`) |
+| Docker daemon | WebDesk runs on the **rootless** daemon since 2026-10-12 (user `webdesk-rootless`, socket `unix:///run/user/940/docker.sock`; `/etc/default/webdesk-docker` is the switch the deploy scripts read). Every WebDesk docker command below carries `DOCKER_HOST=unix:///run/user/940/docker.sock`. The compose form is `sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml <cmd>` from the project dir. Hand-typed bare `docker` / `sudo docker compose` hit the rootful daemon, which no longer runs WebDesk. |
+| Env file | `/etc/webdesk/.env` (owner `webdesk-svc`, 600). Every compose call needs `--env-file /etc/webdesk/.env` and `sudo -n env DOCKER_HOST=...`. |
 | Migrations | run as `webdesk_migrator` from a throwaway `node:22-bookworm` container on the project network |
-| Image | `ghcr.io/hansel-gaiada/gaiada-webdesk-api:v1.0.0-alpha.<N>`, run locally as `webdesk-api:latest` |
-| Box GHCR login | the deploy job's token, which EXPIRES after the job: a later `docker pull` on the box is `denied` |
+| Image | `ghcr.io/hansel-gaiada/gaiada-webdesk-api:v1.0.0-alpha.<N>`, run locally as `webdesk-api:latest` (in the rootless daemon's image store) |
+| Box GHCR login | the deploy job's token, which EXPIRES after the job: a later `docker pull` on the box is `denied` (the pull also goes to whichever daemon `DOCKER_HOST` names) |
 
 ## Steps
 
@@ -83,10 +84,12 @@ The manual procedure below stays as the fallback (with the three files once auto
    `cosign verify ghcr.io/hansel-gaiada/gaiada-webdesk-api:<tag> --certificate-identity-regexp "https://github.com/hansel-gaiada/.+/.github/workflows/release.yml@.+" --certificate-oidc-issuer https://token.actions.githubusercontent.com`
    and read `critical.image.docker-manifest-digest`.
 2. **Bring the image to the box by that digest**: pull `…@<digest>` on a machine that can read GHCR, then
-   `docker save | gzip -1 | ssh gda-aicenter 'gunzip | docker load'`. On the box the loaded image id must EQUAL the signed
-   digest; refuse otherwise.
-3. **Back up**: `pg_dump -Fc` of the webdesk DB (from `webdesk-postgres-1`) to `/home/Hansel/backups/webdesk-pre-<N>-<ts>/`,
-   the two compose files, the `migrations/` dir, and tag the running image `webdesk-api:pre-<N>`.
+   `docker save "$API" | gzip -1 | ssh gda-aicenter 'gunzip | DOCKER_HOST=unix:///run/user/940/docker.sock docker load'` (`$API` is the `name@digest` reference). Load it into the
+   **rootless** daemon, then tag it: a loaded digest reference is nameless, so compose's `name@digest` would say "No such image":
+   `DOCKER_HOST=unix:///run/user/940/docker.sock docker image tag "${API##*@}" "${API%@*}:staged"`. Then require `DOCKER_HOST=unix:///run/user/940/docker.sock docker image inspect "$API"` to return an id
+   EQUAL to the signed digest; refuse otherwise.
+3. **Back up**: `pg_dump -Fc` of the webdesk DB (from `webdesk-postgres-1`, via `DOCKER_HOST=unix:///run/user/940/docker.sock docker exec`) to `/home/Hansel/backups/webdesk-pre-<N>-<ts>/`,
+   the two compose files, the `migrations/` dir, and tag the running image `webdesk-api:pre-<N>` (`DOCKER_HOST=unix:///run/user/940/docker.sock docker image tag ...`, in the rootless daemon).
 4. **Install the release's webdesk tree pieces** into the project dir from `git -c core.autocrlf=false archive
    v1.0.0-alpha.<N>:webdesk migrations scripts package.json package-lock.json docker-compose.yml docker-compose.aicenter.yml`
    (refuse if any file has CR). Leave `proxy/Caddyfile` alone unless the release changed it (the proxy bind-mounts it and
@@ -97,15 +100,15 @@ The manual procedure below stays as the fallback (with the three files once auto
    - storage policy changes: re-run `scripts/storage-bootstrap.mjs` (idempotent; e.g. 43a's media-purge needs
      DeleteObjectVersion + ListBucketVersions on media/video);
    - new env: add to `/etc/webdesk/.env` (e.g. `WEBDESK_UPLOAD_CORS_ORIGINS=https://erp.gaiada.online` for 43a uploads).
-7. **Swap**: `docker tag webdesk-api:<N>-verified webdesk-api:latest`, then
-   `compose up -d --no-deps --no-build api`.
+7. **Swap**: `DOCKER_HOST=unix:///run/user/940/docker.sock docker tag webdesk-api:<N>-verified webdesk-api:latest`, then
+   the compose call above with `up -d --no-deps --no-build api`.
 8. **Verify**: `listening on :3000`; `editorial JWKS loaded … kid(s) wde-…`; proxy `GET /healthz` 200; editorial probes
    P1 `401 editorial-assertion-missing` and P2 `403 editorial-assertion-command-mismatch` (`webdesk-editorial-keys.md`);
    an importer dry run (`node dist/seed/webdesk-import.js … ` without `--apply`) reads the site back unchanged; with the
    scheduler on, the boot log lists its job schedulers and a first catch-up pass with 0 unexpected transitions.
 
-**Rollback**: `docker tag webdesk-api:pre-<N> webdesk-api:latest`, restore the compose files from the backup dir,
-`up -d --no-deps --no-build api`. A migration is never rolled back in place; restore the dump only for data loss.
+**Rollback**: `DOCKER_HOST=unix:///run/user/940/docker.sock docker tag webdesk-api:pre-<N> webdesk-api:latest`, restore the compose files from the backup dir,
+the compose call above with `up -d --no-deps --no-build api`. (Rolling back to the ROOTFUL daemon is not possible: its copy was decommissioned on 2026-10-12 and its volumes archived offsite as `webdesk-rootful-final-*-20261012-091051.tar.gz`. Recovery is restore-from-backup, see `webdesk/ops/scripts/webdesk-restore-drill.sh`, or a rootless re-install with `install-rootless.sh apply --profile live`.) A migration is never rolled back in place; restore the dump only for data loss.
 
 ## History
 
