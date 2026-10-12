@@ -51,7 +51,7 @@ import { listMembers } from "./entities";
 import {
   PRIMITIVE_NAMES,
   type ApprovalStatus, type BuildStatus, type CollectionComposition, type CollectionSummary,
-  type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemDetail, type ItemEditorial,
+  type EnvironmentRef, type ExecState, type FieldDef, type GroupMember, type Issue, type ItemAllowed, type ItemDetail, type ItemEditorial,
   type KeyMintOutcome, type KeyRequestFiled, type KeyScope, type PreviewLink,
   type ItemListBody, type ItemRef, type ItemSummary, type ItemWriteResult, type Lint, type ContentLint, type ContentFinding, type AeoScore, type AeoFactor, type ContentCheckUnavailable, type Page,
   type PrimitiveName, type PublishRequestRow, type SiteRef, type SitesBody, type TenantRef, type UnavailableCode,
@@ -337,15 +337,25 @@ function parseEditorial(v: unknown, path: string): ItemEditorial {
   };
 }
 
+/** M5-W1c's `allowed` member: OPTIONAL, validated when present (an object of booleans; anything else is wire drift). */
+function parseAllowed(v: unknown, path: string): ItemAllowed {
+  const o = obj(v, path);
+  const out: ItemAllowed = {};
+  for (const k of Object.keys(o)) out[k] = key(o, k, bool, path);
+  return out;
+}
+
 export function parseItemDetail(v: unknown): ItemDetail {
   const o = obj(v, "item.get");
   const editorial = opt(o, "editorial", parseEditorial, "item.get");
+  const allowed = opt(o, "allowed", parseAllowed, "item.get");
   return {
     item: key(o, "item", parseItemRef, "item.get"),
     version: key(o, "version", parseVersionContent, "item.get"),
     group: key(o, "group", arr(parseGroupMember), "item.get"),
     lint: key(o, "lint", parseLint, "item.get"),
     ...(editorial ? { editorial } : {}),
+    ...(allowed ? { allowed } : {}),
   };
 }
 

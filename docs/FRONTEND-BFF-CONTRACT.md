@@ -5157,16 +5157,16 @@ back. Response bodies are WebDesk's own (`webdesk/api/src/control/content/*`), s
 ones, not a restatement. The caller is identified by the BFF's normal auth (session / OBO); the **editorial
 assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `created_by`.
 
-### Routes (all `AuthGuard` + `ModuleEnabledGuard("webdev")`; `authorize()` is the first statement of every handler)
+### Routes (all `AuthGuard` + `ModuleEnabledGuard("webdev")`; the first statement of every handler is Cerbos, phase 1 of the two-phase gate since M5-W1c: see "The two-phase gate" below. The "Cerbos (as the caller)" column names the REAL action, which is phase 2)
 
 `:ts` = `:tenantSlug` (the WebDesk tenant slug), `:site` = `:siteId` (uuid). Both come from `GET …/content/sites`.
 
 | Method | Path (after `/api/:tenantId/modules/webdev/content`) | Cerbos (as the caller) | Success |
 |---|---|---|---|
-| GET | `/sites` | `webdesk_collection:read` | 200 `{tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,environments:[{envId,name,domain,status}]}]}]}`: only THIS company's tenants |
+| GET | `/sites` | `webdesk_collection:read` (M5-W1c: asked **per site** for a writers' room grant, see below) | 200 `{tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,environments:[{envId,name,domain,status}]}]}]}`: only THIS company's tenants, and for a writers' room grant only the sites Cerbos lets it read (a tenant with none left is dropped; none readable is 403, never `[]`). Staff tiers: unchanged, the whole list |
 | GET | `/sites/:ts/:site/collections` | `webdesk_collection:read` | 200 `{collections:[{key,composition,vocabularyVersion,counts:{items,byLocale,live,pendingChanges},updatedAt}]}` |
 | GET | `/sites/:ts/:site/collections/:collectionKey/items?locale&state&q&includeDeleted&cursor&limit&slug` | `webdesk_content_item:read` | 200 `{items:[ItemSummary],page:{cursor,hasMore,limit}}`, editor order (slug, locale, id). `state` = draft·live·scheduled·unpublished·deleted·pending; `limit` 1..100. **`slug=` (BFF-side)** returns only the EXACT-slug matches (all locales, or the one `locale` asks for): WebDesk has no slug filter, so the BFF asks for `q=<slug>` at limit 100 and keeps the exact matches, following the cursor up to 5 pages; `page.hasMore:true` with no match means *not found yet*, never *does not exist*. Not combinable with `q` |
-| GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint}` |
+| GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint,editorial?,allowed?}`. **`allowed`** (M5-W1c, BUILT): `{read,update,submit,comment,request_changes,seo_signoff,approve,assign,request_publish,unpublish,delete: boolean}`, what THIS caller may do with THIS item, from ONE Cerbos batch on the resource the real handlers ask with (see "The two-phase gate"). Advisory: every action is checked again. **Absent (never `false`) when Cerbos could not answer or the call is delegated (`actFor`)**, and never sent on the client portal route |
 | GET | `/sites/:ts/:site/items/:itemId/versions?cursor&limit` | `webdesk_content_item:read` | 200 `{versions:[{version,contentHash,createdAt,createdBy,attribution,note}],page}`, newest first |
 | GET | `/sites/:ts/:site/items/:itemId/versions/:n` | `webdesk_content_item:read` | 200 one full version (`blocks`, `seo`, …) |
 | GET | `/sites/:ts/:site/media?mime&q&tag&includeDeleted&cursor&limit` | `webdesk_media_asset:read` (**WSK-43b**: was `webdesk_content_item:read`; same tiers, see "The media library") | 200 `{assets:[MediaAsset],page:{cursor,hasMore,limit},capabilities?:{read,upload,update,delete}}`, newest first. **`capabilities`** (WSK-359): what the caller may do here, from ONE Cerbos `checkResources` request (one resource, the four actions); advisory, so the UI disables the matching control up front, and the per-action check stays the authority (a 403 is still handled). Absent when Cerbos could not answer the batch (unknown, never "denied": every control stays on). |
@@ -5257,6 +5257,26 @@ A takedown-only schedule (`unpublishAt` without `publishAt`) is not gated, and r
 The early check is advisory (the review state can move before `decide()`, and the M1 importer files without it); WebDesk's
 gate is the authority. The approvals detail page (`WebdeskPublishSummary`) shows per item whether the requested version is the
 approved one and warns before the approver decides; an `item.get` without the `editorial` member reads as "unknown".
+
+**The two-phase gate (M5-W1c, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked, and the service-free suite `webdesk-content-two-phase.unit.test.ts` run locally; the real-Cerbos HTTP suite `webdesk-content-two-phase.test.ts` is written and needs the Linux gate; UI: M5-W2e).**
+Design `docs/plans/2026-10-11-m5-writers-room-design.md` §2.3; attribute provenance: PERMISSION-CONTRACT §27.2. Every content and media route above:
+- **Phase 1, the handler's first statement:** Cerbos `webdesk_collection:read` on `{tenantId, module:"webdev", siteId}` (the route's `:siteId`). A caller no rule matches is 403 here, with no WebDesk call at all. A principal that holds no writers' room grant (and is not delegating) is ALSO asked the old attribute-free question for the real action, so a denied staff caller is refused exactly as before, before any egress. `GET sites` has no site: staff get the old company-level question; a writers' room grant is filtered site by site (`check`, no denial rows for the sites it may not read).
+- **Phase 2, before ANY body or query validation:** the real action, with `siteId` (the route's, after the cross-company wall), and `collectionKey`, `locale`, `ownerId` (WebDesk's `editorial.authorSub`), `reviewState` (`editorial.state`), `published` (`publishedVersion !== null`) from WebDesk's `item.get`. `create`: the route's collection (proven by `collection.get`), the body's `locale`, and for a locale twin the SOURCE item's state and `published`. A body or query that names any of these is a 400 AFTER the check and changes nothing the check saw. A denied caller is 403 for any body, and WebDesk receives no write. **A WebDesk that sends no `editorial` member reads as ownerId `""`, reviewState `""`: the writers' room rules fail closed, the staff tiers are unaffected.**
+- Read order changes you may see: `item.get` is read once for the head (the attribute source) and a second time, after the check, only when `?version=` is given; the preview route reads the item before it probes the site (a denied caller triggers no probe); `publish-requests` reads the items its body names before it validates the body.
+- A scoped `webdesk_editor` files publish requests (the filer re-checks `request_publish` on the same attribute-carrying resources, `itemResources`), and lists/withdraws its OWN requests under phase 1 plus the own-rows filter; no policy change.
+
+| Route group | Phase 1 | Phase 2 |
+|---|---|---|
+| `GET sites` | company-level `webdesk_collection:read`, or per site for a writers' room grant | — |
+| `GET …/collections` | `webdesk_collection:read`+siteId | the same question (phase 1 IS the action) |
+| `GET …/collections/:key/items` | `webdesk_collection:read`+siteId | `webdesk_content_item:read`+siteId+route `collectionKey` |
+| `GET …/items/:id`, `/versions`, `/versions/:n` | same | `webdesk_content_item:read` with the item's attributes (`item.get`); `item.get` also asks one `CheckResources` for `allowed` |
+| `GET …/media`, `/media/:a/usage`; `POST …/media/upload-token`; `PATCH`, `DELETE …/media/:a` | same | `webdesk_media_asset:read`/`upload`/`update`/`delete`+siteId |
+| `POST …/collections/:key/items` | same | `webdesk_content_item:create`+siteId+route key+body locale (+ twin source state) |
+| `PUT`/`PATCH …/items/:id`, `POST …/restore`, `POST …/preview` | same | `webdesk_content_item:update` with the item's attributes |
+| `POST …/publish-requests` | same | `request_publish` per distinct (collection, locale, author, state, live) tuple of the items the body names; a malformed body is asked at site level |
+| `GET …/publish-requests`, `POST …/publish-requests/:a/withdraw` | same | none beyond phase 1 (and, for staff tiers, the old `request_publish` question); own rows only |
+| `POST …/unpublish`, `POST …/delete` | same | `webdesk_content_item:unpublish`/`delete` with the item's attributes |
 
 ### Withdrawing a request, and the approvals façade
 

@@ -43,6 +43,7 @@
 // answers with the original instants), and an unspent upload token simply expires (ten minutes).
 import { BadGatewayException, Logger } from "@nestjs/common";
 import { config } from "../../config";
+import { authorize } from "../../core/http";
 import { checkActions } from "../../rbac/cerbos";
 import {
   UUID_RE,
@@ -87,13 +88,13 @@ const logger = new Logger("WebdeskMedia");
  * client mode `delete` is false whatever Cerbos says (WSK-49c: a client never deletes media). A Cerbos failure is `null`
  * (unknown, never "denied"): the UI then leaves the controls enabled and the 403 handling is the fallback.
  */
-export async function mediaCapabilities(gate: ContentGate): Promise<MediaCapabilities | null> {
+export async function mediaCapabilities(gate: ContentGate, siteId?: string): Promise<MediaCapabilities | null> {
   try {
     // Through rbac/cerbos.ts (the approved egress and the one resource-attribute allow-list), with exactly the resource
     // the real handlers authorize: kind, tenant, module, and the client on a client gate.
     const got = await checkActions(
       gate.principal,
-      { kind: "webdesk_media_asset", tenantId: gate.tenantId, module: "webdev", ...(gate.client ? { clientId: gate.client.clientId } : {}) },
+      { kind: "webdesk_media_asset", tenantId: gate.tenantId, module: "webdev", ...(siteId !== undefined ? { siteId } : {}), ...(gate.client ? { clientId: gate.client.clientId } : {}) },
       MEDIA_ACTIONS,
     );
     return { read: got.read === true, upload: got.upload === true, update: got.update === true, delete: gate.client ? false : got.delete === true };
@@ -136,6 +137,19 @@ export function webdeskPublicBase(): string {
 export class WebdeskMediaService {
   constructor(private readonly zoneB: WebdeskZoneB = webdeskZoneB) {}
 
+  /**
+   * M5-W1c PHASE 2 for a media route: the real `webdesk_media_asset` action with the wall's own site id (never a body's or
+   * a query's). Media carries no per-asset attribute any rule reads, so the site is the whole of it; a writers' room grant
+   * reads (only) the media of the sites it covers (resource_webdesk_media_asset.yaml, `webdesk_editorial_site`).
+   */
+  private async authorizeMedia(gate: ContentGate, siteId: string, action: "read" | "upload" | "update" | "delete"): Promise<void> {
+    await authorize(
+      gate.principal,
+      { kind: "webdesk_media_asset", tenantId: gate.tenantId, module: "webdev", siteId, ...(gate.client ? { clientId: gate.client.clientId } : {}) },
+      action,
+    );
+  }
+
   // ── reads ────────────────────────────────────────────────────────────────────────────────────
 
   /**
@@ -145,8 +159,9 @@ export class WebdeskMediaService {
    */
   async list(gate: ContentGate, site: SiteRef, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await this.authorizeMedia(gate, editable.site.siteId, "read"); // PHASE 2, before the query is validated
     const query = strictQuery(rawQuery, LIST_QUERY);
-    await gate.resolveSite(this.zoneB, site);
     const [res, capabilities] = await Promise.all([
       this.zoneB.read({
         command: "media.list",
@@ -154,7 +169,7 @@ export class WebdeskMediaService {
         params: { tenantSlug: site.tenantSlug, siteId: site.siteId },
         query,
       }),
-      mediaCapabilities(gate),
+      mediaCapabilities(gate, editable.site.siteId),
     ]);
     return capabilities && isPlainObject(res.body) ? { status: res.status, body: { ...res.body, capabilities } } : res;
   }
@@ -162,8 +177,9 @@ export class WebdeskMediaService {
   /** `GET …/media/:assetId/usage`: which items use the asset (at most 50), so the UI can say where before a delete. */
   async usage(gate: ContentGate, site: SiteRef, assetId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "read");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await this.authorizeMedia(gate, editable.site.siteId, "read"); // PHASE 2
     strictQuery(rawQuery, []);
-    await gate.resolveSite(this.zoneB, site);
     if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
     return this.zoneB.read({
       command: "media.usage",
@@ -181,7 +197,8 @@ export class WebdeskMediaService {
    */
   async mintUploadToken(gate: ContentGate, site: SiteRef, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "upload");
-    await gate.resolveSite(this.zoneB, site);
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await this.authorizeMedia(gate, editable.site.siteId, "upload"); // PHASE 2, before the body is validated
     const b = strictBody(rawBody, MINT_KEYS);
     if (typeof b.bucket !== "string" || b.bucket === "") throw invalidRequest("bucket is a required string");
     // Before anything is minted: a deployment that cannot say where the browser should upload mints nothing.
@@ -227,7 +244,8 @@ export class WebdeskMediaService {
   /** `PATCH …/media/:assetId` body `{title?, alt?, tags?}` (at least one) → 200 `{asset}`. Zone B validates the values. */
   async update(gate: ContentGate, site: SiteRef, assetId: string, rawBody: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "update");
-    await gate.resolveSite(this.zoneB, site);
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await this.authorizeMedia(gate, editable.site.siteId, "update"); // PHASE 2, before the body is validated
     const b = strictBody(rawBody, UPDATE_KEYS);
     if (Object.keys(b).length === 0) throw invalidRequest(`the body must carry at least one of: ${UPDATE_KEYS.join(", ")}`);
     if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
@@ -253,8 +271,9 @@ export class WebdeskMediaService {
    */
   async delete(gate: ContentGate, site: SiteRef, assetId: string, rawQuery: unknown, idempotencyKey: string): Promise<ZoneBResult> {
     gate.require("webdesk_media_asset", "delete");
+    const editable = await gate.resolveSite(this.zoneB, site);
+    await this.authorizeMedia(gate, editable.site.siteId, "delete"); // PHASE 2, before the query is validated
     strictQuery(rawQuery, []);
-    await gate.resolveSite(this.zoneB, site);
     if (!UUID_RE.test(assetId)) throw mediaAssetNotFound();
     return this.zoneB.write(gate.principal, gate.tenantId, {
       command: "media.delete",
