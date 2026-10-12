@@ -389,10 +389,14 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     try {
       await holder.query("BEGIN");
       await holder.query(`INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, 'Prospect Contact', 'test')`, [newId(), email]);
+      const holderPid = (await holder.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)).rows[0].pid;
       const flight = convert(lead.id);
       const deadline = Date.now() + 45000;
       for (;;) {
-        const w = await adminPool().query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted`);
+        // Only a backend blocked by THIS holder counts: other DB test files run in parallel and may have their own
+        // ungranted locks, which must not release the holder before the convert reaches its INSERT.
+        const w = await adminPool().query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))`, [holderPid]);
         if (w.rows[0].n >= 1) break; // the convert's INSERT is parked on the uncommitted key
         if (Date.now() > deadline) expect.fail("the convert never reached the contact INSERT");
         await new Promise((r) => setTimeout(r, 25));
