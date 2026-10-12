@@ -4852,6 +4852,15 @@ own answers → the open client `prd_sign` gate → `pm_tasks` for delegation �
 pipeline.run.created`, which is what the shipped `pipeline-fanout` n8n workflow triggers on
 (`automation/workflows/pipeline-fanout.json:11`, verified) to open `scope_signoff` and notify the PM.
 
+**Event payload (M5-P1-g, a removal recorded on purpose).** Convert's `pipeline.run.created` carries exactly
+`{ sourceMeetingId: null, actorId }`. It used to carry `title: <org_name>`, but for `/contact/` and `/audit/` web
+leads `org_name` is the person's full name, and no personal data goes on the bus (design 2026-10-11, §10 risk 6).
+`createRun` and the webdev mini-run still send `title` (a meeting or change-request title). The event's readers, all
+checked: the `pipeline-fanout` n8n workflow reads only `tenantId` and `entityId` off the envelope and fetches the run
+over the hub; the work-activity consumer used `title` and now looks it up from `pipeline_runs` when the payload has
+none; the knowledge-graph bridge labels the node `name ?? title ?? label ?? entityId`, so a convert-born run is
+labelled by its id there. Consumers must treat `title` as optional. No response shape changes.
+
 **It never pre-seeds a signed gate.** The hard build gate requires PRD-signed AND scope-dual-signed,
 and a converted run satisfies that the same way every run does — by real client signatures.
 Pre-seeding would forge what a client signed.
