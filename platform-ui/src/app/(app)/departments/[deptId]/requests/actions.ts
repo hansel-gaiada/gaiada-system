@@ -11,9 +11,30 @@ import { can } from "@/lib/rbac";
 import { getChangeRequest } from "@/lib/webdevChangeRequests-data";
 import type { ChangeRequestDetail, CrKind, CrRoute, ExistingTriageArtifact } from "@/lib/webdevChangeRequests";
 
+/** PV4-04 (PV-D5): every convert states whether it changes the price. `unassessed` is a stored state,
+ *  never an answer, so it is not offered here. */
+type PriceImpactAnswer = "none" | "changes_price";
+
+/** The typed refusals the amendment rule adds (BFF §16f-iii). They arrive as the response's `error`
+ *  string; the action turns them into a `code` so the panel branches on a value, not on prose. */
+type TriageRefusalCode =
+  | "amendment_not_signed" | "amendment_exists" | "client_required_for_price_change"
+  | "price_impact_required" | "price_impact_invalid";
+const REFUSAL_CODES: readonly string[] = [
+  "amendment_not_signed", "amendment_exists", "client_required_for_price_change",
+  "price_impact_required", "price_impact_invalid",
+];
+
 type TriageResult =
-  | { ok: true; status: string; route: CrRoute | null; pipelineRunId?: string; pmTaskId?: string }
-  | { ok: false; error: string; existing?: ExistingTriageArtifact; notImplemented?: boolean };
+  | {
+      ok: true; status: string; route: CrRoute | null; pipelineRunId?: string; pmTaskId?: string;
+      /** `blocked:true` = a `changes_price` convert made a draft amendment; nothing started (§16f-iii). */
+      blocked?: boolean; priceImpact?: PriceImpactAnswer; amendmentContractId?: string; amendmentKind?: string; amendsId?: string | null;
+    }
+  | {
+      ok: false; error: string; existing?: ExistingTriageArtifact; notImplemented?: boolean;
+      code?: TriageRefusalCode; amendment?: { amendmentContractId: string | null; amendmentStatus: string | null };
+    };
 
 async function requireSession(): Promise<{ userId: string; me: Awaited<ReturnType<typeof getMe>> } | { ok: false; error: string }> {
   const userId = await getSessionUserId();
@@ -57,21 +78,44 @@ export async function triageChangeRequestAction(
   tenant: string,
   deptId: string,
   id: string,
-  payload: { action: "decline" | "convert"; route?: CrRoute; reason?: string; kindOverride?: CrKind },
+  payload: { action: "decline" | "convert"; route?: CrRoute; reason?: string; kindOverride?: CrKind; priceImpact?: PriceImpactAnswer; amendsId?: string },
 ): Promise<TriageResult> {
   const ctx = await requireSession();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!can(ctx.me, "pm.manage", tenant)) return { ok: false, error: "You don't have permission to triage change requests." };
   try {
-    const r = await platformFetch<{ id: string; status: string; route: CrRoute | null; pipelineRunId?: string; pmTaskId?: string }>(
+    const r = await platformFetch<{
+      id: string; status: string; route: CrRoute | null; pipelineRunId?: string; pmTaskId?: string;
+      blocked?: boolean; priceImpact?: PriceImpactAnswer; amendmentContractId?: string; amendmentKind?: string; amendsId?: string | null;
+    }>(
       `/api/${tenant}/webdev/change-requests/${id}/triage`,
       ctx.userId,
       { method: "POST", body: JSON.stringify(payload) },
     );
     refresh(deptId);
-    return { ok: true, status: r.status, route: r.route, pipelineRunId: r.pipelineRunId, pmTaskId: r.pmTaskId };
+    return {
+      ok: true, status: r.status, route: r.route, pipelineRunId: r.pipelineRunId, pmTaskId: r.pmTaskId,
+      ...(r.blocked ? {
+        blocked: true, priceImpact: r.priceImpact, amendmentContractId: r.amendmentContractId,
+        amendmentKind: r.amendmentKind, amendsId: r.amendsId,
+      } : {}),
+    };
   } catch (e) {
     if (e instanceof PlatformError) {
+      // The amendment refusals come BEFORE the generic 409 branch on purpose: `amendment_not_signed` and
+      // `amendment_exists` also carry an `existing`, but it is the amendment ({amendmentContractId,
+      // amendmentStatus}), not a triaged artifact, so reading it as ExistingTriageArtifact would render
+      // "Already triaged (now undefined)".
+      if (REFUSAL_CODES.includes(e.message)) {
+        const a = e.existing as { amendmentContractId?: string | null; amendmentStatus?: string | null } | undefined;
+        if (e.status === 409 || e.status === 400) {
+          if (e.status === 409) refresh(deptId);
+          return {
+            ok: false, error: e.message, code: e.message as TriageRefusalCode,
+            ...(a ? { amendment: { amendmentContractId: a.amendmentContractId ?? null, amendmentStatus: a.amendmentStatus ?? null } } : {}),
+          };
+        }
+      }
       if (e.status === 409 && e.existing) {
         refresh(deptId);
         return { ok: false, error: e.message, existing: e.existing as unknown as ExistingTriageArtifact };

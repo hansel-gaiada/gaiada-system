@@ -84,6 +84,7 @@ describe("ChangeRequestsPanel — triage round-trip", () => {
     render(<ChangeRequestsPanel rows={[row({ id: "cr-1", status: "new", kind: "design" })]} canTriage actions={actionsStub({ triage })} />);
     fireEvent.click(screen.getByText("A request"));
     await waitFor(() => screen.getByText("Convert"));
+    fireEvent.click(screen.getByLabelText("No"));
     fireEvent.click(screen.getByText("Convert"));
     // design's suggested route is mini_run (§2.3) and the drawer pre-fills it without forcing it.
     await waitFor(() => expect(triage).toHaveBeenCalledWith("cr-1", expect.objectContaining({ action: "convert", route: "mini_run" })));
@@ -98,6 +99,7 @@ describe("ChangeRequestsPanel — triage round-trip", () => {
     render(<ChangeRequestsPanel rows={[row({ id: "cr-1", status: "new" })]} canTriage actions={actionsStub({ triage })} />);
     fireEvent.click(screen.getByText("A request"));
     await waitFor(() => screen.getByText("Convert"));
+    fireEvent.click(screen.getByLabelText("No"));
     fireEvent.click(screen.getByText("Convert"));
     expect(await screen.findByText(/Already triaged/i)).toBeInTheDocument();
     expect(screen.getByText(/Open the existing task/i)).toBeInTheDocument();
@@ -111,7 +113,126 @@ describe("ChangeRequestsPanel — triage round-trip", () => {
     render(<ChangeRequestsPanel rows={[row({ id: "cr-1", status: "new", kind: "content" })]} canTriage actions={actionsStub({ triage })} />);
     fireEvent.click(screen.getByText("A request"));
     await waitFor(() => screen.getByText("Convert"));
+    fireEvent.click(screen.getByLabelText("No"));
     fireEvent.click(screen.getByText("Convert"));
     expect(await screen.findByText(/webdesk phase 4/i)).toBeInTheDocument();
+  });
+});
+
+describe("ChangeRequestsPanel — PV4-04b: does this change the price?", () => {
+  async function openDrawer(triage: ChangeRequestsPanelActions["triage"], over: Partial<ChangeRequestRow> = {}) {
+    render(<ChangeRequestsPanel rows={[row({ id: "cr-1", status: "new", ...over })]} canTriage actions={actionsStub({ triage })} />);
+    fireEvent.click(screen.getByText("A request"));
+    await waitFor(() => screen.getByText("Convert"));
+  }
+  const convertBtn = () => screen.getByRole("button", { name: /^Convert$/ });
+
+  it("asks the question as a labelled radio group, with neither option preselected", async () => {
+    await openDrawer(vi.fn());
+    const group = screen.getByRole("group", { name: /Does this change the price\?/i });
+    expect(group).toBeInTheDocument();
+    const no = screen.getByLabelText("No") as HTMLInputElement;
+    const yes = screen.getByLabelText("Yes, the price changes") as HTMLInputElement;
+    expect(no.type).toBe("radio");
+    expect(yes.type).toBe("radio");
+    expect(no.checked).toBe(false);
+    expect(yes.checked).toBe(false);
+  });
+
+  it("Convert is disabled until a price answer is chosen, and a click before then calls nothing", async () => {
+    const triage = vi.fn();
+    await openDrawer(triage);
+    expect(convertBtn()).toBeDisabled();
+    fireEvent.click(convertBtn());
+    expect(triage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("No"));
+    expect(convertBtn()).toBeEnabled();
+  });
+
+  it("the Yes note appears only on Yes", async () => {
+    await openDrawer(vi.fn());
+    expect(screen.queryByText(/draft amendment is created/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("No"));
+    expect(screen.queryByText(/draft amendment is created/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    expect(screen.getByText(/A draft amendment is created in Contracts & billing\. Work can't start until it is signed\./)).toBeInTheDocument();
+  });
+
+  it("choosing No sends priceImpact 'none' (exact payload)", async () => {
+    const triage = vi.fn().mockResolvedValue({ ok: true, status: "in_progress", route: "mini_run", pipelineRunId: "run-9" });
+    await openDrawer(triage, { kind: "design" });
+    fireEvent.click(screen.getByLabelText("No"));
+    fireEvent.click(convertBtn());
+    await waitFor(() => expect(triage).toHaveBeenCalledTimes(1));
+    expect(triage).toHaveBeenCalledWith("cr-1", { action: "convert", route: "mini_run", kindOverride: "design", priceImpact: "none" });
+  });
+
+  it("choosing Yes sends priceImpact 'changes_price' (exact payload, no amendsId)", async () => {
+    const triage = vi.fn().mockResolvedValue({ ok: true, status: "new", route: null, priceImpact: "changes_price", blocked: true, amendmentContractId: "ct-1", amendmentKind: "amendment", amendsId: "ct-0" });
+    await openDrawer(triage, { kind: "bug" });
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    fireEvent.click(convertBtn());
+    await waitFor(() => expect(triage).toHaveBeenCalledTimes(1));
+    expect(triage).toHaveBeenCalledWith("cr-1", { action: "convert", route: "pm_task", kindOverride: "bug", priceImpact: "changes_price" });
+  });
+
+  it("a blocked response renders the waiting state with a link to the client's Contracts & billing", async () => {
+    const triage = vi.fn().mockResolvedValue({ ok: true, status: "new", route: null, priceImpact: "changes_price", blocked: true, amendmentContractId: "ct-1", amendmentKind: "amendment", amendsId: "ct-0" });
+    await openDrawer(triage);
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    fireEvent.click(convertBtn());
+    expect(await screen.findByText(/Waiting for the amendment to be signed/i)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Converted/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Contracts & billing/ })).toHaveAttribute("href", "/clients/cl-1/billing");
+  });
+
+  it("a blocked response with no client id shows the text without a link", async () => {
+    const triage = vi.fn().mockResolvedValue({ ok: true, status: "new", route: null, priceImpact: "changes_price", blocked: true, amendmentContractId: "ct-1", amendmentKind: "agreement", amendsId: null });
+    await openDrawer(triage, { clientId: null, clientName: null });
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    fireEvent.click(convertBtn());
+    expect(await screen.findByText(/Waiting for the amendment to be signed/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("a 409 amendment_not_signed is a normal state, not an error or an 'already triaged'", async () => {
+    const triage = vi.fn().mockResolvedValue({
+      ok: false, error: "amendment_not_signed", code: "amendment_not_signed",
+      amendment: { amendmentContractId: "ct-1", amendmentStatus: "draft" },
+    });
+    await openDrawer(triage);
+    fireEvent.click(screen.getByLabelText("No"));
+    fireEvent.click(convertBtn());
+    expect(await screen.findByText(/This request waits for its amendment to be signed/i)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Already triaged/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Contracts & billing/ })).toHaveAttribute("href", "/clients/cl-1/billing");
+  });
+
+  it("amendment_exists and client_required_for_price_change each get a plain-language message", async () => {
+    const triage = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: "amendment_exists", code: "amendment_exists", amendment: { amendmentContractId: "ct-1", amendmentStatus: "sent" } })
+      .mockResolvedValueOnce({ ok: false, error: "client_required_for_price_change", code: "client_required_for_price_change" });
+    await openDrawer(triage);
+    fireEvent.click(screen.getByLabelText("No"));
+    fireEvent.click(convertBtn());
+    expect(await screen.findByText(/already has an amendment in Contracts & billing/i)).toBeInTheDocument();
+    expect(screen.queryByText(/amendment_exists/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Yes, the price changes"));
+    fireEvent.click(convertBtn());
+    expect(await screen.findByText(/needs a client/i)).toBeInTheDocument();
+    expect(screen.queryByText(/client_required_for_price_change/)).not.toBeInTheDocument();
+  });
+
+  it("decline does not need the price answer and does not send one", async () => {
+    const triage = vi.fn().mockResolvedValue({ ok: true, status: "declined", route: null });
+    await openDrawer(triage);
+    fireEvent.change(screen.getByLabelText(/Decline reason/i), { target: { value: "Out of scope." } });
+    fireEvent.click(screen.getByText("Decline"));
+    await waitFor(() => expect(triage).toHaveBeenCalledTimes(1));
+    const payload = (triage.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(payload.action).toBe("decline");
+    expect(payload).not.toHaveProperty("priceImpact");
   });
 });

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { Card, HairlineTable, StatusBadge, Button } from "@/components/ui";
 import { TeachState } from "./TeachState";
@@ -10,19 +10,71 @@ import {
 import { formatDateTime } from "@/lib/format";
 
 type DetailResult = { ok: true; row: ChangeRequestDetail } | { ok: false; error: string };
+/** PV4-04 (PV-D5, BFF §16f-iii): the answer a convert must carry. No default; `unassessed` is a stored
+ *  state, not something staff can pick. */
+type PriceImpactAnswer = "none" | "changes_price";
+type TriageRefusalCode =
+  | "amendment_not_signed" | "amendment_exists" | "client_required_for_price_change"
+  | "price_impact_required" | "price_impact_invalid";
 type TriageResult =
-  | { ok: true; status: string; route: CrRoute | null; pipelineRunId?: string; pmTaskId?: string }
-  | { ok: false; error: string; existing?: ExistingTriageArtifact; notImplemented?: boolean };
+  | {
+      ok: true; status: string; route: CrRoute | null; pipelineRunId?: string; pmTaskId?: string;
+      blocked?: boolean; priceImpact?: PriceImpactAnswer; amendmentContractId?: string; amendmentKind?: string; amendsId?: string | null;
+    }
+  | {
+      ok: false; error: string; existing?: ExistingTriageArtifact; notImplemented?: boolean;
+      code?: TriageRefusalCode; amendment?: { amendmentContractId: string | null; amendmentStatus: string | null };
+    };
 
 export interface ChangeRequestsPanelActions {
   getDetail: (id: string) => Promise<DetailResult>;
-  triage: (id: string, payload: { action: "decline" | "convert"; route?: CrRoute; reason?: string; kindOverride?: CrKind }) => Promise<TriageResult>;
+  triage: (
+    id: string,
+    payload: { action: "decline" | "convert"; route?: CrRoute; reason?: string; kindOverride?: CrKind; priceImpact?: PriceImpactAnswer; amendsId?: string },
+  ) => Promise<TriageResult>;
 }
 
 /** The outcome banner shown after a triage POST resolves — success, the 409 "already triaged" race
  *  (NOT an error state: §2.2/MI-05's instruction is to show the existing artifact, not a toast), or
  *  the 501 control_plane refusal (the CR stays re-triageable, so this is informational too). */
-function OutcomeBanner({ outcome }: { outcome: TriageResult }) {
+function OutcomeBanner({ outcome, clientId }: { outcome: TriageResult; clientId: string | null }) {
+  // The amendment lives in the client's Contracts & billing hub. Without a client id there is nowhere to
+  // link, so the text stands alone rather than pointing at a broken route.
+  const billingLink = clientId ? <> <Link href={`/clients/${clientId}/billing`}>Open Contracts &amp; billing →</Link></> : null;
+  if (outcome.ok && outcome.blocked) {
+    // NOT an error: the server did what was asked. It made a draft amendment and started nothing.
+    return (
+      <p className="dept-teach__body" role="status">
+        <strong>Waiting for the amendment to be signed.</strong> A draft amendment was created in Contracts &amp; billing.
+        Work can&apos;t start until it is signed, then triage this request again.{billingLink}
+      </p>
+    );
+  }
+  if (!outcome.ok && outcome.code === "amendment_not_signed") {
+    return (
+      <p className="dept-teach__body" role="status">
+        <strong>This request waits for its amendment to be signed.</strong> Work can&apos;t start until it is.{billingLink}
+      </p>
+    );
+  }
+  if (!outcome.ok && outcome.code === "amendment_exists") {
+    return (
+      <p className="dept-teach__body" role="alert" style={{ color: "var(--status-critical-fg)" }}>
+        This request already has an amendment in Contracts &amp; billing, so it can&apos;t be marked as not changing the price.
+        Void or decline the amendment there first, or answer Yes.{billingLink}
+      </p>
+    );
+  }
+  if (!outcome.ok && outcome.code === "client_required_for_price_change") {
+    return (
+      <p className="dept-teach__body" role="alert" style={{ color: "var(--status-critical-fg)" }}>
+        A price change needs a client, and this request has none, so there is no contract to amend. Answer No, or give the request a client first.
+      </p>
+    );
+  }
+  if (!outcome.ok && (outcome.code === "price_impact_required" || outcome.code === "price_impact_invalid")) {
+    return <p className="dept-teach__body" role="alert" style={{ color: "var(--status-critical-fg)" }}>Answer &ldquo;Does this change the price?&rdquo; before converting.</p>;
+  }
   if (outcome.ok) {
     return (
       <p className="dept-teach__body" role="status" style={{ color: "var(--status-ok-fg)" }}>
@@ -59,6 +111,9 @@ function TriageDrawer({
   const [reason, setReason] = useState("");
   const [kindOverride, setKindOverride] = useState<CrKind>(row.kind);
   const [route, setRoute] = useState<CrRoute>(suggestedRoute(row.kind));
+  // No default on purpose: the binding rule needs a real answer, so Convert stays disabled until staff pick one.
+  const [priceImpact, setPriceImpact] = useState<PriceImpactAnswer | null>(null);
+  const priceName = useId();
   const [pending, startTransition] = useTransition();
   const [outcome, setOutcome] = useState<TriageResult | null>(null);
 
@@ -76,9 +131,10 @@ function TriageDrawer({
   };
 
   const convert = () => {
+    if (priceImpact === null) return;
     setOutcome(null);
     startTransition(async () => {
-      const r = await actions.triage(row.id, { action: "convert", route, kindOverride });
+      const r = await actions.triage(row.id, { action: "convert", route, kindOverride, priceImpact });
       setOutcome(r);
       if (r.ok || r.existing) onDisposed();
     });
@@ -125,7 +181,24 @@ function TriageDrawer({
               {ROUTES.map((r) => <option key={r} value={r}>{ROUTE_LABEL[r]}</option>)}
             </select>
           </label>
-          <Button onClick={convert} disabled={pending}>{pending ? "Working…" : "Convert"}</Button>
+
+          <fieldset style={{ border: 0, margin: 0, padding: 0, display: "grid", gap: 6 }} disabled={pending}>
+            <legend className="type-eyebrow" style={{ fontSize: 10, opacity: 0.6, padding: 0, marginBottom: 4 }}>Does this change the price?</legend>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="radio" name={priceName} value="none" checked={priceImpact === "none"} onChange={() => setPriceImpact("none")} />
+              <span>No</span>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="radio" name={priceName} value="changes_price" checked={priceImpact === "changes_price"} onChange={() => setPriceImpact("changes_price")} />
+              <span>Yes, the price changes</span>
+            </label>
+            {priceImpact === "changes_price" && (
+              <p className="dept-teach__body" style={{ margin: 0 }}>
+                A draft amendment is created in Contracts &amp; billing. Work can&apos;t start until it is signed.
+              </p>
+            )}
+          </fieldset>
+          <Button onClick={convert} disabled={pending || priceImpact === null}>{pending ? "Working…" : "Convert"}</Button>
 
           <label style={{ display: "grid", gap: 4 }}>
             <span className="type-eyebrow" style={{ fontSize: 10, opacity: 0.6 }}>Decline reason</span>
@@ -135,7 +208,7 @@ function TriageDrawer({
         </div>
       )}
 
-      {outcome && <OutcomeBanner outcome={outcome} />}
+      {outcome && <OutcomeBanner outcome={outcome} clientId={row.clientId} />}
     </Card>
   );
 }
