@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **220** capabilities across **16** owners
-- **117** writes · 103 reads
-- Writes by impact: **high 24** · medium 36 · low 57
+- **224** capabilities across **16** owners
+- **118** writes · 106 reads
+- Writes by impact: **high 24** · medium 36 · low 58
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -52,7 +52,7 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 21 |
+| search | `search` | 22 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
@@ -161,8 +161,11 @@ unfalsifiable after.
 | search | `search.keywordResearch` | — | — | write | `medium` |
 | search | `search.launchCampaign` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.ledgerSummary` | — | — | read | — |
+| search | `search.listConversionTargets` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | read | — |
+| search | `search.listConversionUploads` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-uploads` | read | — |
 | search | `search.listDecayFindings` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/decay` | read | — |
 | search | `search.listEngagements` | `GET` | `/api/:tenantId/modules/search/engagements` | read | — |
+| search | `search.listLeadConversionUploads` | `GET` | `/api/:tenantId/modules/search/leads/:leadId/conversion-uploads` | read | — |
 | search | `search.previewReport` | `GET` | `/api/:tenantId/modules/search/reports/:id/preview` | read | — |
 | search | `search.proposeNegatives` | `POST` | `/api/:tenantId/modules/search/campaigns/:campaignId/negatives/propose` | write | `low` |
 | search | `search.publishContent` | — | — | write | `high` |
@@ -172,6 +175,7 @@ unfalsifiable after.
 | search | `search.rankSummary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/rank-snapshots` | read | — |
 | search | `search.runAudit` | — | — | write | `low` |
 | search | `search.setBudget` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
+| search | `search.setConversionTarget` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | write | `low` |
 | social | `social.addPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants` | write | `low` |
 | social | `social.approvePostVariant` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/approve` | write | `high` |
 | social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |

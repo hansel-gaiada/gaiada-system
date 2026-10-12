@@ -84,3 +84,17 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_contract_send"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+
+    # ══════════ PV5-02 (2026-10-12) — `mark_certified` (PV-D8). A NEW ACTION on this existing kind.
+    # Staff mark a contract for the certified (PSrE) signature tier at send. It moves the signing
+    # route, not the content, so it is held by exactly the roles that hold `send` (company_admin on the
+    # role arm, platform_admin by the wildcard) and reached by the same permission-arm shape `send`
+    # uses, which is how `owner` reaches it. Every rule above is byte-for-byte unchanged.
+    - actions: ["mark_certified"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["mark_certified"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_contract_mark_certified"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
