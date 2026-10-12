@@ -4,6 +4,7 @@
 //   GET  /api/:tenantId/modules/webdev/provisioned-sites[?runId=]       -> 200 [site]
 //   GET  /api/:tenantId/modules/webdev/provisioned-sites/:id            -> 200 site (+ `completion`, M6-P4c)
 //   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/reconcile  -> 200 site (+ `completion`, M6-P4c)
+//   POST /api/:tenantId/modules/webdev/sites/:id/domain                 -> 200 registry site | 400 | 404 | 409 (M6-P4c2)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
 // authorizes, builds the driver, and maps a typed outcome onto a status code. Every decision that
@@ -56,7 +57,9 @@ import {
 import {
   completeAfterPoll, readProvisionCompletion, reconcileAndComplete, type ProvisionCompletionDto,
 } from "./provision-completion.service";
-import { createWebdevSite, getWebdevSite, patchWebdevSiteVaultRef, type WebdevSiteDto } from "./site-registry.service";
+import {
+  claimProvisionedSiteDomain, createWebdevSite, getWebdevSite, patchWebdevSiteVaultRef, type WebdevSiteDto,
+} from "./site-registry.service";
 
 /** Test seam: suites drive a fake `ProvisionProvider` (or, for PRV-02's own historical idempotency
  *  suite, the real `provision-http` driver against the PRV-00 mock over real sockets). Nothing in
@@ -244,6 +247,9 @@ export class WebdevController {
   // reach of the one it replaced (the policy's header holds the table), so no principal gained or lost
   // access. `webdev_provisioned_site` is untouched and still serves the provisioning routes above.
   // `id` passed for GET/PATCH is a `webdev_sites` row id, which is what `webdev_site` means.
+  // M6-P4c2 adds POST sites/:id/domain (below) under the SAME `update` action: it is the registry's
+  // other narrow write on an existing row, and it carries exactly `update`'s reach (manager tier, no
+  // permission-mirror arm). No new Cerbos action: a separate action would be six artifacts for no new reach.
   @Post("sites")
   @HttpCode(201)
   async createSite(
@@ -319,6 +325,35 @@ export class WebdevController {
     const site = await patchWebdevSiteVaultRef(tenantId, id, raw as string | null);
     await writeActivity(tenantId, req.principal.userId, "updated", "webdev_site", site.id, {
       vaultRefSet: site.vaultRef !== null,
+    });
+    return site;
+  }
+
+  /** M6-P4c2 — a provisioned site CLAIMS its real domain, once. The row M6-P4c registered carries the
+   *  placeholder `<slug>.provisioned.invalid`; this replaces it. Accepts EXACTLY `{ domain }` (same
+   *  closed-body discipline as the vaultRef PATCH). Only a `provisioned`-origin row still on its
+   *  placeholder can be claimed — anything else is 409 `domain_already_set` — so this is not a general
+   *  domain editor. Authorization comes first and is independent of the body: a caller who may not
+   *  update gets 403 whatever they send. */
+  @Post("sites/:id/domain")
+  @HttpCode(200)
+  async claimSiteDomain(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: Record<string, unknown>,
+  ): Promise<WebdevSiteDto> {
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "update");
+    const keys = Object.keys(body ?? {});
+    if (keys.length !== 1 || keys[0] !== "domain") {
+      throw new BadRequestException(
+        `this endpoint accepts exactly {"domain": string} — got field(s): ${keys.join(",") || "(none)"}`,
+      );
+    }
+    if (typeof body.domain !== "string") throw new BadRequestException("domain must be a string");
+    const site = await claimProvisionedSiteDomain(tenantId, id, body.domain, req.principal.userId);
+    await writeActivity(tenantId, req.principal.userId, "updated", "webdev_site", site.id, {
+      domainClaimed: true, domain: site.domain,
     });
     return site;
   }

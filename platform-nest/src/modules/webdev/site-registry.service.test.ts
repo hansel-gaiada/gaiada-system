@@ -7,7 +7,7 @@ import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../../testing/s
 import { createCompany } from "../../testing/fixtures";
 import { withTenants } from "../../db";
 import {
-  createWebdevSite, patchWebdevSiteVaultRef, validateVaultRef, getWebdevSite,
+  createWebdevSite, patchWebdevSiteVaultRef, validateVaultRef, getWebdevSite, claimProvisionedSiteDomain,
 } from "./site-registry.service";
 
 describe.skipIf(!TEST_URL)("webdev_sites registry write path (VLT-2)", () => {
@@ -156,6 +156,111 @@ describe.skipIf(!TEST_URL)("webdev_sites registry write path (VLT-2)", () => {
         { modules: ["webdev"] },
       );
       expect(withModules.rowCount).toBe(1);
+    });
+  });
+
+  // ── M6-P4c2: a provisioned site claims its real domain, once ─────────────────────────────────────
+  describe("claimProvisionedSiteDomain", () => {
+    const placeholder = (slug: string) => `${slug}.provisioned.invalid`;
+    const provisioned = (slug: string, t = tenantId) =>
+      createWebdevSite(t, { domain: placeholder(slug), origin: "provisioned", adoption: "mandated", environment: "staging" }, null);
+    const claimEvents = (siteId: string) =>
+      withTenants([tenantId], (c) =>
+        c.query<{ payload: { domain: string; previousDomain: string } }>(
+          `SELECT payload FROM outbox_events WHERE entity_id = $1 AND event_type = 'webdev.site.domain_claimed'`,
+          [siteId],
+        ),
+      );
+
+    it("replaces the placeholder with the real domain (trimmed, lowercased) and records an event", async () => {
+      const site = await provisioned("claim-happy");
+      const claimed = await claimProvisionedSiteDomain(tenantId, site.id, "  Claim-Happy.example.com ", null);
+      expect(claimed.domain).toBe("claim-happy.example.com");
+      expect(claimed.id).toBe(site.id);
+      expect(claimed.origin).toBe("provisioned");
+      expect(claimed.adoption).toBe("mandated");
+      expect((await getWebdevSite(tenantId, site.id))?.domain).toBe("claim-happy.example.com");
+      const ev = await claimEvents(site.id);
+      expect(ev.rows).toHaveLength(1);
+      expect(ev.rows[0].payload).toMatchObject({ domain: "claim-happy.example.com", previousDomain: placeholder("claim-happy") });
+    });
+
+    it("a second claim of the same site is 409 domain_already_set (once only), and the first domain stands", async () => {
+      const site = await provisioned("claim-twice");
+      await claimProvisionedSiteDomain(tenantId, site.id, "claim-twice.example.com", null);
+      await expect(claimProvisionedSiteDomain(tenantId, site.id, "claim-twice-other.example.com", null))
+        .rejects.toMatchObject({ status: 409, message: "domain_already_set" });
+      expect((await getWebdevSite(tenantId, site.id))?.domain).toBe("claim-twice.example.com");
+    });
+
+    it("two concurrent claims of one placeholder: exactly one wins, the other is 409", async () => {
+      const site = await provisioned("claim-race");
+      const results = await Promise.allSettled([
+        claimProvisionedSiteDomain(tenantId, site.id, "race-a.example.com", null),
+        claimProvisionedSiteDomain(tenantId, site.id, "race-b.example.com", null),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      const lost = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+      expect(lost.reason).toMatchObject({ status: 409 });
+      const won = results.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ domain: string }>;
+      expect((await getWebdevSite(tenantId, site.id))?.domain).toBe(won.value.domain);
+    });
+
+    it("a site that is not origin=provisioned is 409 domain_already_set, even on a placeholder-shaped domain", async () => {
+      const manual = await createWebdevSite(tenantId, { domain: placeholder("claim-manual"), origin: "manual" }, null);
+      await expect(claimProvisionedSiteDomain(tenantId, manual.id, "claim-manual.example.com", null))
+        .rejects.toMatchObject({ status: 409, message: "domain_already_set" });
+      const tracked = await createWebdevSite(tenantId, { domain: "claim-tracked.example.com", origin: "manual" }, null);
+      await expect(claimProvisionedSiteDomain(tenantId, tracked.id, "claim-tracked-new.example.com", null))
+        .rejects.toMatchObject({ status: 409, message: "domain_already_set" });
+      expect((await getWebdevSite(tenantId, tracked.id))?.domain).toBe("claim-tracked.example.com");
+    });
+
+    it("a provisioned site that already has a real domain is 409 domain_already_set", async () => {
+      const real = await createWebdevSite(tenantId, { domain: "claim-real.example.com", origin: "provisioned" }, null);
+      await expect(claimProvisionedSiteDomain(tenantId, real.id, "claim-real-new.example.com", null))
+        .rejects.toMatchObject({ status: 409, message: "domain_already_set" });
+    });
+
+    it("refuses a .invalid domain (400) and leaves the placeholder claimable", async () => {
+      const site = await provisioned("claim-invalid");
+      for (const bad of ["other.provisioned.invalid", "something.invalid", "invalid"]) {
+        await expect(claimProvisionedSiteDomain(tenantId, site.id, bad, null)).rejects.toMatchObject({ status: 400 });
+      }
+      expect((await getWebdevSite(tenantId, site.id))?.domain).toBe(placeholder("claim-invalid"));
+      expect((await claimProvisionedSiteDomain(tenantId, site.id, "claim-invalid.example.com", null)).domain)
+        .toBe("claim-invalid.example.com");
+    });
+
+    it("validates the format exactly like create (empty, whitespace inside, too short, too long) -> 400", async () => {
+      const site = await provisioned("claim-format");
+      const tooLong = `${"a".repeat(250)}.com`;
+      for (const bad of ["", "   ", "has a space.example.com", "ab", tooLong]) {
+        await expect(claimProvisionedSiteDomain(tenantId, site.id, bad, null)).rejects.toMatchObject({ status: 400 });
+        await expect(createWebdevSite(tenantId, { domain: bad }, null)).rejects.toMatchObject({ status: 400 });
+      }
+      expect((await getWebdevSite(tenantId, site.id))?.domain).toBe(placeholder("claim-format"));
+    });
+
+    it("a domain already tracked by another live row in this tenant is 409, and the placeholder stays claimable", async () => {
+      await createWebdevSite(tenantId, { domain: "claim-dupe.example.com" }, null);
+      const site = await provisioned("claim-dupe");
+      await expect(claimProvisionedSiteDomain(tenantId, site.id, "claim-dupe.example.com", null))
+        .rejects.toMatchObject({ status: 409 });
+      expect((await getWebdevSite(tenantId, site.id))?.domain).toBe(placeholder("claim-dupe"));
+      expect((await claimProvisionedSiteDomain(tenantId, site.id, "claim-dupe-free.example.com", null)).domain)
+        .toBe("claim-dupe-free.example.com");
+    });
+
+    it("404s on an unknown site, a malformed id, and a site that belongs to another tenant", async () => {
+      await expect(claimProvisionedSiteDomain(tenantId, "00000000-0000-0000-0000-000000000000", "nowhere.example.com", null))
+        .rejects.toMatchObject({ status: 404 });
+      await expect(claimProvisionedSiteDomain(tenantId, "not-a-uuid", "nowhere.example.com", null))
+        .rejects.toMatchObject({ status: 404 });
+      const rivals = await provisioned("claim-rival", otherTenantId);
+      await expect(claimProvisionedSiteDomain(tenantId, rivals.id, "claim-rival.example.com", null))
+        .rejects.toMatchObject({ status: 404 });
+      expect((await getWebdevSite(otherTenantId, rivals.id))?.domain).toBe(placeholder("claim-rival"));
     });
   });
 });
