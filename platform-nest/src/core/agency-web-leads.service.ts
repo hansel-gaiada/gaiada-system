@@ -32,6 +32,7 @@ import { config } from "../config";
 import { newId, withTenants } from "../db";
 import { emitEvent } from "../events/outbox.service";
 import { scrubText } from "./scrub";
+import { alertStaffOfWebLead, type WebLeadAlertSender } from "./agency-web-lead-alert";
 import { webdeskZoneB, WebdeskProblem } from "../modules/webdev/webdesk-content.service";
 
 const logger = new Logger("AgencyWebLeads");
@@ -133,6 +134,8 @@ export interface WebLeadsDeps {
   assertTenantOwnsSite(tenantId: string, siteSlug: string): Promise<void>;
   /** `forms.submission.get`; resolves the parsed body, or `"gone"` for a 410. Other failures throw. */
   fetchSubmission(siteSlug: string, submissionId: string): Promise<Record<string, unknown> | "gone">;
+  /** M5-L5 staff alert, swappable by a test. Defaults to the ERP's `notify()` path. */
+  alertSender?: WebLeadAlertSender;
 }
 
 export const defaultWebLeadsDeps: WebLeadsDeps = {
@@ -237,7 +240,10 @@ export async function createLeadFromWebSubmission(
     );
     return { created: false as const, leadId: again.rows[0].id };
   });
-  return result.created ? { outcome: "created", leadId: result.leadId } : { outcome: "existing", leadId: result.leadId };
+  if (!result.created) return { outcome: "existing", leadId: result.leadId };
+  // M5-L5: one alert per lead, only when THIS call created the row; never throws (fail-soft).
+  await alertStaffOfWebLead(tenantId, { leadId: result.leadId, contactName: mapped.contactName, originForm: formKey }, deps.alertSender);
+  return { outcome: "created", leadId: result.leadId };
 }
 
 // ───────────────────────────────────────────────────────────────────────── M5-L6: the Website → Leads read
