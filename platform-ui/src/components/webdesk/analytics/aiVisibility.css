@@ -1,0 +1,21 @@
+/* Website -> Analytics -> AI visibility (M5-P5b). Prefix `av-`. Tokens only (styles/tokens.test.ts bans colour literals).
+   The stacked day bars are plain proportional spans (no chart library); every number is also in a table. */
+.av-h { margin: var(--space-8) 0 0; font: 600 16px var(--font-body); color: var(--ink-strong); }
+.av-chart { display: flex; align-items: flex-end; gap: 2px; height: 140px; border-bottom: 1px solid var(--line-strong); }
+.av-col { flex: 1 1 0; min-width: 2px; height: 100%; display: flex; flex-direction: column-reverse; }
+.av-seg { display: block; width: 100%; }
+.av-s0 { background: var(--status-info); }
+.av-s1 { background: var(--status-ok); }
+.av-s2 { background: var(--status-warning); }
+.av-s3 { background: var(--status-progress); }
+.av-s4 { background: var(--status-idle); }
+.av-s5 { background: var(--status-critical); }
+.av-s6 { background: var(--status-neutral); }
+.av-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 0; padding: 0; list-style: none; font: 400 12px var(--font-body); color: var(--ink-muted); }
+.av-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.av-swatch { width: 10px; height: 10px; display: inline-block; }
+.av-details { margin-top: 10px; }
+.av-details > summary { cursor: pointer; font: 600 12px var(--font-body); color: var(--accent-fg); }
+.av-codes { color: var(--ink-subtle); font-size: 11px; }
+.av-warn td:first-child { color: var(--status-critical-fg); }
+.av-sim { color: var(--status-warning-fg); }
