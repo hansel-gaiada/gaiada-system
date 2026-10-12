@@ -31,11 +31,12 @@ import type { OutboxEvent } from "../../events/types";
 import type { Principal } from "../../rbac/principal";
 import {
   CONVERSION_APPROVAL_ORIGIN, CONVERSION_UPLOAD_TOOL, CONVERSION_UPLOAD_WORKFLOW, REASON, approvalReason, conversionContentHash,
-  conversionModeFor, evaluateGate, parseConversionToolArgs, type ConversionBinding, type ConversionPlatform, type ConversionToolArgs,
-  type UploadStatus,
+  conversionModeFor, evaluateGate, parseConversionToolArgs, type ConversionBinding, type ConversionPlan, type ConversionPlatform,
+  type ConversionToolArgs, type UploadStatus,
 } from "./conversions";
-import { buildGoogleUploadRequest, type GoogleUploadPlan, type UploadResult } from "./conversions-google";
-import { getLiveConversionUploader } from "./conversions-uploaders";
+import type { UploadResult } from "./conversions-google";
+import { metaEventSourceUrl } from "./conversions-meta";
+import { buildConversionPlan, getLiveConversionUploader } from "./conversions-uploaders";
 
 const SEARCH = { modules: ["search"] };
 
@@ -286,7 +287,7 @@ async function finishApproval(
 }
 
 type Phase2 =
-  | { kind: "go"; ledger: LedgerRow; plan: GoogleUploadPlan; mode: "simulate" | "live"; conversionAction: string }
+  | { kind: "go"; ledger: LedgerRow; plan: ConversionPlan; mode: "simulate" | "live"; conversionAction: string }
   | { kind: "stop"; ledgerId: string | null; platform: ConversionPlatform | null; status: "failed" | "skipped"; reason: string };
 
 /**
@@ -398,16 +399,26 @@ export async function executeApprovedConversionUpload(
       const verdict = evaluateGate(facts, led.platform, suppressed);
       if (!verdict.ok || !facts) return skip(verdict.ok ? REASON.leadNotFound : verdict.reason);
 
-      const plan = buildGoogleUploadRequest({
-        facts,
-        ledger: {
-          submissionRef: led.submission_ref, conversionKey: led.conversion_key, occurredAt: new Date(led.occurred_at).toISOString(),
-          dealValue: led.deal_value, dealCurrency: led.deal_currency,
-        },
-        conversionAction: target.conversion_action,
-        customerId: null,
-        sendValue: target.send_value,
-      });
+      // Meta wants an `event_source_url`: the property's site URL (origin) plus the form page PATH. Not personal data.
+      const siteUrl = led.platform === "meta_capi"
+        ? (await c.query<{ site_url: string | null }>(`SELECT site_url FROM search_properties WHERE id = $1 AND tenant_id = $2`, [led.property_id, tenantId])).rows[0]?.site_url ?? null
+        : null;
+      let plan: ConversionPlan;
+      try {
+        plan = buildConversionPlan(led.platform, {
+          facts,
+          ledger: {
+            submissionRef: led.submission_ref, conversionKey: led.conversion_key, occurredAt: new Date(led.occurred_at).toISOString(),
+            stage: led.stage, dealValue: led.deal_value, dealCurrency: led.deal_currency,
+          },
+          conversionAction: target.conversion_action,
+          sendValue: target.send_value,
+          eventSourceUrl: metaEventSourceUrl(siteUrl, facts.attribution),
+        });
+      } catch {
+        // The target's conversion action is not one this platform can take (a config error). Nothing was sent; the claim is released.
+        return skip(REASON.adapterRejected);
+      }
       const mode = conversionModeFor(led.platform, deps.env);
       // What WOULD be sent, minus every identifier value: the summary holds kinds and field names only.
       await c.query(

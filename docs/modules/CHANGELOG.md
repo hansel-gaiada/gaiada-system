@@ -11,6 +11,51 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.103.0` - M5-P3/P4: Meta and LinkedIn conversion adapters, SIMULATE-ONLY (2026-10-13) - DEV-VERIFIED (simulate)
+
+- **New files:** `conversions-meta.ts` (Meta Conversions API, `POST /{dataset_id}/events`) and `conversions-linkedin.ts` (LinkedIn Conversions API).
+- **What they do:** each builds the request the platform WOULD receive, plus a non-personal summary. They follow each platform's own normalisation:
+  - Meta: `em`/`ph` SHA-256, with no gmail dot-removal; `fbc`/`fbp` sent unhashed and only with marketing consent.
+  - Both: `event_id` dedup with the browser Pixel's `Lead`; value/currency only on `won`.
+- **Simulate only:**
+  - Neither has a live transport or reads a token.
+  - The boot guard refuses `meta_capi` or `linkedin_capi` in `SEARCH_CONVERSIONS_LIVE_PLATFORMS`.
+  - `conversion-targets` now accept both platforms.
+  - An unknown platform is a typed 400 `platform_unknown`.
+- **Docs:** BFF §28b.1 and the capability inventory are updated.
+- **Verified** on GitHub Actions 38273062655: unit tests and DB tests green.
+- **Open before any live upload:**
+  - where the credentials live;
+  - Meta's `client_user_agent` (Meta requires it for website events, and the system stores no user agent);
+  - the currency case;
+  - Meta Business Verification (O-7).
+
+### platform-nest `0.102.0` - GitHub repo requests reach the Approvals inbox; provisioned sites are reconciled on a schedule (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4h and M6-P4i, found while mapping the P4 gate. Built by the M6 session.
+
+- **M6-P4h: GH-12 repo-creation requests (`origin = github`) are listed and decidable in the Approvals inbox.**
+  - The bug: they were filed (by the Create-repository click and by `webdev.provisionSite`) and decidable by id on the native route, but `ALL_ORIGINS` and the decide façade lacked `github`. So they never appeared in `/api/approvals`, and approving from `/approvals/[id]` answered 400. The console's "Awaiting approval → Review the approval" link led to a page that could not approve.
+  - `github` now sits beside `webdesk` on the automation-approvals branch. `decide()` re-derives the real origin, the generic `automation_approval · decide` gate and the GH-12 executor's own `github_repo · create_repo` check are unchanged, and no Cerbos policy changed.
+  - Inbox weight 80 (with automation, agent and webdesk; below the pipeline and agency sign-off tiers).
+- **M6-P4i: a provisioning reconcile loop.**
+  - The bug: a site's §08 completion advanced only on the repo approval's decide hook, a 5-minute detached poll, or a human "Check status now". So a site whose WebDesk codegen published after the poll window waited at `contract_not_published` indefinitely, and the delivery code stage never resumed (`webdev.site.contract_pinned` is emitted only at `complete`). The `wd-provision-reconcile` flow the comments named never existed.
+  - The new loop (`provision-reconcile-loop.ts`, every `PROVISION_RECONCILE_INTERVAL_MS`, default 5 min, floor 30 s) advances stuck `erp_repo` rows through the SAME functions the manual route uses, under the same per-site lock.
+  - Batch and scope: at most 20 rows per tick, least-recently-attempted first, one tenant per transaction under the `webdev` RLS scope; webdev-disabled tenants are skipped.
+  - Identity: it acts as the row's own `requested_by` (else the approval's `decided_by`), used for attribution only.
+  - Back-off: every tick within 1 h of a transition, then 30 min, then 2 h, and after 24 h it stops and leaves the row to the manual button.
+  - No off switch on purpose: the loop only finishes work a company admin already approved.
+- Verified on the Linux gate (sumopod, `m6b8`): 665 files / 10238 passed / 0 failed, incl. the new `approvals-github-origin.test.ts`, the github cases in `approvals-decide.test.ts` and `approvals.test.ts` (real Postgres + Cerbos), and `provision-reconcile-loop.db.test.ts` (13 cases).
+
+### platform-ui `0.104.0` - the Approvals inbox shows and decides GitHub repo requests (2026-10-12) - DEV-VERIFIED
+
+- M6-P4h. `github` origin: a "GitHub" filter chip and label, and the detail page's "GitHub repository request" with a summary card (repo, visibility, template, description, a warning if public; an unparseable payload says "Unrecognised request"). Approve and reject post `origin: "github"` to the façade.
+- Verified on the Linux gate (sumopod, `m6b8`): 345 files / 6407 passed; `next build` exit 0, 0 compile failures.
+
+### infra `0.13.8` - the platform receives PROVISION_RECONCILE_INTERVAL_MS (2026-10-12) - PROTOTYPED
+
+- `docker-compose.vps.yml` passes `PROVISION_RECONCILE_INTERVAL_MS` through (empty = the 5-minute default).
+
 ### webdesk `0.25.0` - M5-V5-a: the A/B `experiment` block and the publish lock (vocabulary 1.5.0) (2026-10-12) - DEV-VERIFIED
 
 - **The block:** a new block type `experiment`, with arms `a`–`d`, a test key, weights, and an override or replace per non-control arm.

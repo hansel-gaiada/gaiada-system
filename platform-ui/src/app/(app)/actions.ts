@@ -66,7 +66,7 @@ export async function decideQueueItem(
 // automation_approvals controller as automation/agent/hr, which re-derives the row's real origin
 // from the DB before authorizing — so a caller cannot claim a softer origin to dodge the
 // probe-consent property gate.
-export type ApprovalDecideOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk";
+export type ApprovalDecideOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk" | "github";
 
 export async function decideApprovalItem(
   tenantId: string,

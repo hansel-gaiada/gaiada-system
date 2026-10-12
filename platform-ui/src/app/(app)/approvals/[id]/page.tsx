@@ -15,6 +15,8 @@ import { KeyMintDecide } from "@/components/webdesk/content/KeyMintDecide";
 import { findKeyTarget, findSiteName } from "@/lib/webdeskContent";
 import { isKeyMintApproval, isSiteArchiveApproval, parseKeyMintArgs, parseSiteArchiveArgs } from "@/lib/webdeskContentModel";
 import { formatDateTime } from "@/lib/format";
+import { GithubRepoRequestSummary } from "@/components/approvals/GithubRepoRequestSummary";
+import { isGithubRepoRequest } from "@/lib/githubRepoApproval";
 
 // APPR-01 — the per-approval detail route emailed approval links actually land on now. Before
 // this ticket, `entityHref()` mapped `automation_approval`/`agency_approval` to the bare
@@ -144,7 +146,7 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Approvals", href: "/approvals" }, { label: title }]} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <Eyebrow style={{ color: "var(--erp-accent)" }}>
-            {detail.kind === "automation_approval" ? (detail.origin === "webdesk" ? (isKeyMint ? "API key request" : isSiteArchive ? "Site archive request" : "Website publish") : detail.origin) : "Agency"}
+            {detail.kind === "automation_approval" ? (detail.origin === "webdesk" ? (isKeyMint ? "API key request" : isSiteArchive ? "Site archive request" : "Website publish") : detail.origin === "github" ? "GitHub repository request" : detail.origin) : "Agency"}
           </Eyebrow>
           <StatusBadge label={detail.data.status.replace(/_/g, " ")} />
         </div>
@@ -203,6 +205,11 @@ export default async function ApprovalDetailPage({ params }: { params: Promise<{
             target. `toolArgs` is validated inside the component — never trusted as typed. */}
         {detail.kind === "automation_approval" && detail.origin === "webdesk" && !isKeyMint && !isSiteArchive && (
           <WebdeskPublishSummary userId={userId} company={resolvedTenant} toolArgs={detail.data.toolArgs} workflowId={detail.data.workflowId} />
+        )}
+
+        {/* GH-12 — a repo-creation request: which repository, template and visibility, read from `toolArgs` (validated, never trusted). */}
+        {detail.kind === "automation_approval" && isGithubRepoRequest(detail.origin, detail.data.workflowId) && (
+          <GithubRepoRequestSummary toolArgs={detail.data.toolArgs} />
         )}
 
         {isSiteArchive && detail.kind === "automation_approval" && (

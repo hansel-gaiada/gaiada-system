@@ -10,11 +10,11 @@
 // `webdesk` (WSK-44) — a WebDesk publish/rebuild request (write-plane design §6: `fileAutomationApproval`
 // with `origin:'webdesk'`, executed in-band at `decide()`). Same rule as `search` above: an origin missing
 // here has no chip and no label.
-export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk";
+export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search" | "webdesk" | "github";
 export type ApprovalStatus = "pending" | "decided";
 export type ApprovalSort = "urgency" | "age";
 
-export const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search", "webdesk"];
+export const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search", "webdesk", "github"];
 export const ORIGIN_LABEL: Record<ApprovalOrigin, string> = {
   agency: "Agency",
   pipeline: "Pipeline",
@@ -27,6 +27,8 @@ export const ORIGIN_LABEL: Record<ApprovalOrigin, string> = {
   // owns the column is an implementation detail here. Each row's own reason says which it is.
   search: "Consent & ad uploads",
   webdesk: "Website publish",
+  // A request to create a GitHub repository (GH-12): the inbox chip names what the reader is asked to approve.
+  github: "GitHub",
 };
 
 // Matches the backend's UnifiedApprovalItem (approvals.controller.ts) exactly —
@@ -59,7 +61,7 @@ export interface ExecutionInfo {
 }
 
 export function originCounts(items: Pick<UnifiedApprovalItem, "origin">[]): Record<ApprovalOrigin, number> {
-  const counts = { agency: 0, pipeline: 0, hr: 0, automation: 0, agent: 0, search: 0, webdesk: 0 } as Record<ApprovalOrigin, number>;
+  const counts = { agency: 0, pipeline: 0, hr: 0, automation: 0, agent: 0, search: 0, webdesk: 0, github: 0 } as Record<ApprovalOrigin, number>;
   for (const item of items) counts[item.origin] += 1;
   return counts;
 }
