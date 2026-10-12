@@ -1,3 +1,8 @@
+// STALE — DO NOT RUN (noted 2026-10-12, M6-P4e). workflows/pipeline-delivery.json was edited directly by
+// 43a1555f, 1eb17987 and 3ebcfcd3 (M6-P4e: the code stage parks until a pinned contract exists); running this
+// file would overwrite the JSON and silently drop all three. Edit the JSON; see automation/CLAUDE.md.
+console.error("gen-delivery.mjs is stale and would overwrite pipeline-delivery.json; refusing. See automation/CLAUDE.md.");
+process.exit(1);
 // Generator for pipeline-delivery.json — full delivery state machine.
 // 2026-07-22: extended with WS11 tails — A) bounded revise loop on client changes_requested,
 // B) production deploy gate (staging sign-off -> prod approval -> deploy.production -> production stage).

@@ -4,10 +4,9 @@ Kind: `fullstack`. `apps/web` (Next + Tailwind) and `apps/api` (Nest, client bus
 workspace. Published from the monorepo (`webdesk/templates/fullstack-next-nest/`).
 
 `code.scaffold` fills this repo (pages, the vendored SDK and block library under `vendor/`,
-`CONTRACT.lock`). Known conflict, to be settled before wiring: `node-site.ts` currently emits an
-Astro SSR skeleton at the repo root (`astro.config.mjs`, root `package.json`, `tsconfig.json`), which
-would overwrite this workspace's root `package.json`. The scaffolder needs a Next/Nest kind before this
-template can be filled.
+`CONTRACT.lock`). Its `fullstack` kind (`ai-agents/src/code-scaffold/templates/node-site.ts`, M6-P4b1)
+writes into `apps/web` only, with a React block renderer, and leaves the workspace root and `apps/api`
+alone.
 
 ## OPEN owner decision: no database layer
 
