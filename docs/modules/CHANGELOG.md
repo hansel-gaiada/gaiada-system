@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.87.0` - M5-W6: AI assist for the writers' room (suggestions only; a human applies them) (2026-10-12) - DEV-VERIFIED
+
+- **The route:** `POST …/content/sites/:tenantSlug/:siteId/items/:itemId/assist {kind, version?}` for `outline`, `meta_description`, `faq`, `translate_draft` (EN→ID first draft) and `alt_text`. It goes through `ai-gateway-go`'s existing client; no provider key in platform-nest.
+- **Authorization:** W1c's gate, with `update` on the item, before any budget or gateway call. A writer may assist only on items they may edit.
+- **Writes nothing to WebDesk.** A human applies a suggestion and saves through the normal `content.update`; approval stays human-only.
+- **Budget:** per principal per day, counted in the activities ledger under an advisory lock, and refunded when the gateway never served. People get 40 calls / about 120k tokens; bots and agents 15 / about 40k. Env overrides `WEBDESK_ASSIST_DAILY_*`; an empty value means the default. Tokens are estimated, because the gateway reports no usage.
+- **Typed errors:**
+  - 503 `assist-unavailable` when the gateway can't serve, including its keyless echo provider. Never an empty suggestion as success.
+  - 422 `assist-not-applicable`, 429 `assist-budget-exceeded`, 502 `assist-output-invalid`.
+- No item text, prompt or completion in any log line.
+- Meta limits are pinned to W3's lint rules.
+- MCP `webdesk.content.assist`: low impact, a write only in the ledger sense.
+- **Verified** on GitHub Actions 38232009355 (the DB/Cerbos suite incl. 8 concurrent calls against a limit of 3 serving exactly 3; unit 49/49). The editor's assist drawer is not built; its contract is in FRONTEND-BFF-CONTRACT.
+
 ### webdesk `0.19.0` - compose passes the live Turnstile switch through (empty = stub); the M5 phase 3 go-live runbook (2026-10-12) - PROTOTYPED
 
 - `webdesk/docker-compose.yml` now passes `TURNSTILE_MODE` and `TURNSTILE_SECRET_KEY` to the api, with EMPTY defaults. Before this, turning live Turnstile on for gaiada.com's forms would have needed a code change.

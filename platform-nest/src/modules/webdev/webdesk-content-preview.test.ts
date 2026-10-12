@@ -614,8 +614,9 @@ describe.skipIf(!live)("WSK-46 · the preview route and its MCP tool", () => {
       expect(Object.keys(schema.properties).sort()).toEqual(["itemId", "siteId", "tenantId", "tenantSlug", "version"]);
       expect(schema.required).toEqual(["tenantId", "tenantSlug", "siteId", "itemId"]); // version is optional (head by default)
       // the content tools it joins: 7 reads + 4 low writes + 2 medium writes (unpublish, delete) + this medium write
+      // + M5-W6's `assist` (a LOW write)
       const content = webdevModule.mcpTools.filter((t) => t.name.startsWith("webdesk.content."));
-      expect(content).toHaveLength(14);
+      expect(content).toHaveLength(15);
       expect(content.filter((t) => t.write && t.impact === "medium").map((t) => t.name).sort()).toEqual([
         "webdesk.content.delete", "webdesk.content.preview", "webdesk.content.unpublish",
       ]);

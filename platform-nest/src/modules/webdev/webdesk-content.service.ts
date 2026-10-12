@@ -781,6 +781,19 @@ export class ItemGate {
   }
 }
 
+/** M5-W6: what `openItemForContent` hands back: the gate that proves phase 2, the head's `item.get` body, and the facts read from it. */
+export interface ItemContentRead {
+  itemGate: ItemGate;
+  /** `item.get`'s body for the head (`{item, version: {blocks, seo, ...}, ...}`). */
+  head: unknown;
+  collectionKey: string;
+  locale: string;
+  headVersion: number | null;
+  /** The version number `head` carries (`version.version`), when WebDesk named one. */
+  selectedVersion: number | null;
+  deleted: boolean;
+}
+
 /** `item.get`'s answer as the Cerbos attributes and the review facts the BFF reads. The ONLY constructor of `ItemAttrs`. */
 function parseItemAttrs(body: unknown): ItemAttrs {
   const root = isPlainObject(body) ? body : {};
@@ -982,6 +995,25 @@ export class WebdeskContentService {
     const { attrs } = await this.readItemRaw(site, itemId);
     const creatorId = action === "approve" ? await this.approvalCreatorId(site, itemId, attrs) : undefined;
     return ItemGate.forItem(gate, site, editable.site.siteId, itemId, action, attrs, creatorId);
+  }
+
+  /**
+   * M5-W6 PHASE 2 for a use of an item's CONTENT that writes nothing to WebDesk (AI assist): the cross-company wall, WebDesk's
+   * `item.get` for the head, then the REAL action (`update`: whoever may edit the item may ask for suggestions for it) with the
+   * item's own attributes. Runs before the caller's body is looked at. The head's answer is returned in hand so the caller need
+   * not read it twice; `readVersionBody` reads another version, and only with the `ItemGate` this returns.
+   */
+  async openItemForContent(gate: ContentGate, site: SiteRef, itemId: string, action: "update"): Promise<ItemContentRead> {
+    const editable = await gate.resolveSite(this.zoneB, site);
+    const { result, attrs } = await this.readItemRaw(site, itemId);
+    const itemGate = await ItemGate.forItem(gate, site, editable.site.siteId, itemId, action, attrs);
+    return { itemGate, head: result.body, collectionKey: attrs.collectionKey, locale: attrs.locale, headVersion: attrs.headVersion, selectedVersion: attrs.selectedVersion, deleted: attrs.deletedAt !== null };
+  }
+
+  /** M5-W6: one version of the item `g` was opened for (`item.get?version=`), a read. 404 `version-not-found` passes through. */
+  async readVersionBody(g: ItemGate, version: number): Promise<{ body: unknown; locale: string; collectionKey: string }> {
+    const { result, attrs } = await this.readItemRaw(g.site, g.itemId as string, String(version));
+    return { body: result.body, locale: attrs.locale, collectionKey: attrs.collectionKey };
   }
 
   async listVersions(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {

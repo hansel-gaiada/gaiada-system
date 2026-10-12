@@ -1000,6 +1000,41 @@ export const webdevModule: ModuleContract = {
         required: ["tenantId", "tenantSlug", "siteId", "itemId"],
       },
     },
+    // M5-W6 — AI assist. IMPACT: `low`, and it is a `write` ONLY because the registry's rule says a POST is one
+    // (`impact-registry.test.ts`: a mutating method implies `write: true`, and a write needs a class). What it really is: it
+    // changes NOTHING on the site and nothing WebDesk holds. It never reaches WebDesk's write plane (no `content.*` or
+    // `editorial.*` command, no editorial assertion), returns suggestions to the caller, and a human (or an agent through
+    // `webdesk.content.update`, itself a gated write) applies them. The one thing it writes is the ERP's own `activities` ledger
+    // (ids, kind, counts, latency: the budget's count), and the one thing it spends is a model call. `low` is the class for
+    // exactly that: nothing a production key can see changes, nothing is exposed (so not `medium`, which `preview` is for a
+    // link), nothing is irreversible. An unattended caller therefore runs it directly, and the control on its spend is the
+    // per-principal daily budget (smaller for bots and agents), not a human approval. It is authorised as the item's `update`
+    // (the caller must be allowed to edit the item) and reaches a model only through ai-gateway-go (no provider key in the ERP).
+    // Approval and sign-off stay human-only: nothing here touches them.
+    {
+      name: "webdesk.content.assist",
+      description:
+        "Ask for AI SUGGESTIONS for one item. `kind`: outline (section headings), meta_description (120-155 characters), faq (3-8 question/answer pairs "
+        + "drawn from the text), translate_draft (English to Indonesian first draft of the item's text fields; always marked \"First draft — needs a human\"), "
+        + "alt_text (for images that have none). LOW: it changes nothing on the site, it only returns `{suggestions}`; a human applies each one and saves it through "
+        + "`webdesk.content.update` (with `baseVersion` = the item's head). You may ask only for an item you may edit. Counts against a daily per-principal "
+        + "budget. Typed refusals: 422 `assist-not-applicable` (the item has nothing for that kind), 429 `assist-budget-exceeded`, 503 `assist-unavailable` "
+        + "(the AI service is down; nothing is suggested), 502 `assist-output-invalid`.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/assist",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, itemId: { type: "string" },
+          kind: { type: "string", enum: ["outline", "meta_description", "faq", "translate_draft", "alt_text"] },
+          version: { type: "integer", minimum: 1, description: "The version to read the content from; omit for the head." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "itemId", "kind"],
+      },
+    },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
     // WSK-43b — the media library's MCP tools (m3 plan "WSK-43 · The media library"; owner rulings WSK-D53/D54).
     // One tool per action, routed through the SAME BFF handlers as the HTTP routes
