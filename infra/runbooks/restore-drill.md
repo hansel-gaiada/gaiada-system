@@ -38,3 +38,14 @@ expectations are documented per tier.
 - The crypto-shred rule still holds: backups contain **databases only**, never the bot's key
   material — so a restored `gaiada_bot` has ciphertext whose keys were shredded on erasure, exactly
   as intended.
+
+## After a REAL restore: visitor profiles (M5-V3-e)
+
+A restore brings back the ERP's `search_visitor_tombstones` as of the backup, so a visitor who withdrew or was erased AFTER
+that backup has no tombstone in the restored ERP, and the collector's buffer may still hold their events. Before setting
+`SEARCH_VISITORS_ENABLED=1` again (keep it empty while restoring):
+
+1. Re-apply the withdrawals since the backup: run the sweep once by hand (it asks WebDesk's `consent.status` afresh for every
+   profile and deletes, tombstones and forgets each withdrawn one), and replay any rights-request erasures logged since the backup.
+2. Only then turn ingest back on. The collector's own tombstones (on sumopod, not restored with the ERP) still refuse a
+   forgotten visitor's new events in the meantime.

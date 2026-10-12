@@ -154,6 +154,7 @@ import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifi
 // have meant weakening two controls on the money path. Dark by default — see the config comment.
 import { startSearchPullSchedulerLoop } from "./modules/search/pull-scheduler";
 import { startContentDecayLoop } from "./modules/search/content-decay-job";
+import { startVisitorJobs } from "./modules/search/visitor-jobs";
 import { startIndexNowRetryLoop } from "./modules/search/indexnow-service";
 import { registerIndexNowEventHandlers } from "./modules/search/indexnow-webdesk";
 // MAIL-04 (design §7.7/§7.8) — the mail sender worker. Only started when MAIL_ENABLED=1 (the
@@ -800,6 +801,12 @@ async function bootstrap(): Promise<void> {
   if (startContentDecayLoop()) {
     // eslint-disable-next-line no-console
     console.log("search content-decay job on (SEARCH_DECAY_ENABLED=1): detects falling pages daily; Umami reads only.");
+  }
+  // M5-V3-e: consented visitor profiles (ingest from the collector, the withdrawal sweep, the 14-month purge). Dark by default:
+  // ON only when SEARCH_VISITORS_ENABLED is exactly "1"; startVisitorJobs returns null without a timer, a query or a request otherwise.
+  if (startVisitorJobs()) {
+    // eslint-disable-next-line no-console
+    console.log("search visitor jobs on (SEARCH_VISITORS_ENABLED=1): consent-gated ingest, the withdrawal sweep and the purge.");
   }
   // M5-P5a: the IndexNow / Bing URL-submission retry sweep. Dark by default: ON only when SEARCH_INDEXNOW_ENABLED is exactly "1"
   // (an empty compose default is OFF); startIndexNowRetryLoop returns null without a timer, a query or a request otherwise.
