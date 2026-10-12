@@ -769,7 +769,7 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
     description:
       "Edit a DRAFT contract's title, reference, terms, file, value, currency or term dates (only the fields sent " +
       "change). Refused (400) once the contract is no longer a draft: a signed contract is never edited in place, " +
-      "re-issue it with `contracts.createDraft` and `supersedesId`. Voiding is a staff action in the UI, not this tool.",
+      "re-issue it with `contracts.createDraft` and `supersedesId`. Voiding is a staff action in the UI, not this tool (a `status` sent through it is refused with `status_not_allowed_via_automation`).",
     minAssurance: "verified",
     method: "PATCH",
     pathTemplate: "/api/:tenantId/contracts/:contractId",

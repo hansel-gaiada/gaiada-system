@@ -26,6 +26,7 @@ import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
+import { currentVia } from "./request-context";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
@@ -242,6 +243,14 @@ export class ContractsController {
     },
   ) {
     await authorize(req.principal, { kind: "contract", id: contractId, tenantId }, "update");
+    // PV3-06: an agent or n8n call (anything that arrives through the hub's OBO envelope, which is what sets
+    // `currentVia()`; a staff browser session never does) may edit a draft but never change its status. The
+    // `contracts.updateDraft` tool is LOW impact and its schema omits `status`, but the hub does not enforce
+    // schemas, and void is allowed from ANY state here, so without this an unattended caller could void a sent
+    // or signed contract. Voiding stays a human act (the UI). Typed code, checked after authorize().
+    if (currentVia() && b?.status !== undefined) {
+      throw new BadRequestException("status_not_allowed_via_automation");
+    }
     await withTenants([tenantId], async (c) => {
       const cur = await c.query<{ status: string }>(
         `SELECT status FROM contracts WHERE id = $1 AND deleted_at IS NULL`, [contractId],

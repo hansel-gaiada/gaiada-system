@@ -411,6 +411,24 @@ describe.skipIf(!TEST_URL)("PV3-06 · billing tools through the real endpoints",
       expect(bad.statusCode, bad.body).toBe(400);
     });
 
+    it("🔴 an agent's contracts.updateDraft cannot void (or set any status): typed 400, contract unchanged; a human void still works", async () => {
+      const sent = await sentViaTool(clientA, "PV306-VOID-1");
+      const viaAgent = await callTool("contracts.updateDraft", { tenantId: tenant, contractId: sent, status: "void" }, ADMIN);
+      expect(viaAgent.statusCode, viaAgent.body).toBe(400);
+      expect(String(viaAgent.json().error ?? viaAgent.json().message)).toMatch(/status_not_allowed_via_automation/);
+      expect(await contractStatus(sent)).toBe("sent");
+      // Any status, on a draft too, and the guard sits after authorize: an unauthorized agent still gets 403.
+      const draft = await draftViaTool(clientA, "PV306-VOID-2");
+      expect((await callTool("contracts.updateDraft", { tenantId: tenant, contractId: draft, status: "draft" }, ADMIN)).statusCode).toBe(400);
+      await linkIdentity(outsider, "platform", "pv306-outsider-void", true);
+      expect((await callTool("contracts.updateDraft", { tenantId: tenant, contractId: draft, status: "void" }, as("pv306-outsider-void"))).statusCode).toBe(403);
+      // A plain edit through the same tool still works, and a human (no OBO envelope) can void as before.
+      expect((await callTool("contracts.updateDraft", { tenantId: tenant, contractId: draft, title: "Still editable" }, ADMIN)).statusCode).toBe(200);
+      const human = await app.inject({ method: "PATCH", url: `/api/${tenant}/contracts/${sent}`, headers: asUser(admin), payload: { status: "void" } });
+      expect(human.statusCode, human.body).toBe(200);
+      expect(await contractStatus(sent)).toBe("void");
+    });
+
     it("🔴 decide: a caller with no right to decide gets 403 for an empty body; an admin gets the 400", async () => {
       const p = await insertPayment(invoiceA, clientA, 5, recorder);
       const denied = await app.inject({ method: "POST", url: `/api/${tenant}/invoice-payments/${p}/decide`, headers: asUser(outsider), payload: {} });
