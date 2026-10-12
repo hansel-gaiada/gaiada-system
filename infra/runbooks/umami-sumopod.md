@@ -524,7 +524,10 @@ ops:     platform-nest (gda-aicenter) --wg--> read-gate 10.88.0.2:18743 --/ops/v
    `COLLECTOR_CONSENT_EVENT_NAMES` is set in `.env` (V3-j's list).
 2. sumopod: edge and read-gate (template changes); static gate first:
    ```bash
-   cd ~/umami && git pull --ff-only && ./check-config.sh --deploy        # ALL PASS (renders and nginx -t the /v, /f and /ops/v1 locations)
+   # ~/umami is a COPY, not a checkout: ship the new files from a workstation first (the section 1 recipe), e.g.
+   #   git -c core.autocrlf=false archive origin/main infra/sumopod/umami | ssh sumopod 'tar -x --strip-components=3 -C ~/umami'
+   # (keeps .env, geo/ and data untracked by git), then on sumopod:
+   cd ~/umami && chmod +x *.sh && ./check-config.sh --deploy             # ALL PASS (renders and nginx -t the /v, /f and /ops/v1 locations)
    docker compose up -d edge
    docker compose --profile erp-read up -d read-gate                      # recreates it with the new template (it only serves the ERP)
    docker exec umami-edge-1 nginx -T 2>/dev/null | grep -E 'location = /lib/kestrel/(v|f)'
@@ -532,7 +535,8 @@ ops:     platform-nest (gda-aicenter) --wg--> read-gate 10.88.0.2:18743 --/ops/v
    ```
 3. sumopod: the erp-edge router (Traefik watches `dynamic/`, no restart):
    ```bash
-   cd ~/erp-edge && git pull --ff-only && ls dynamic/ && docker logs --since 1m erp-edge-traefik-1 2>&1 | grep -i -E 'erp-insights|error' | tail
+   # ~/erp-edge is a COPY too: ship infra/sumopod/erp-edge/dynamic/erp-insights.yml the same way (git archive, never a CRLF copy), then:
+   cd ~/erp-edge && ls dynamic/ && docker logs --since 1m erp-edge-traefik-1 2>&1 | grep -i -E 'erp-insights|error' | tail
    ```
 4. aicenter: put the two keys in files the checks read (once; type or paste at the prompt, never on a command line, never into a ticket):
    ```bash
