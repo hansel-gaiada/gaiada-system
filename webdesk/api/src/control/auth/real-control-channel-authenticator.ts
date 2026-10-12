@@ -150,7 +150,7 @@ export class RealControlChannelAuthenticator implements ControlChannelAuthentica
 
   private readonly jwks = new OfflineJwksVerifier({
     // Comma-separated; during an issuer move list old,new. The JWKS URI (unless overridden) derives from the FIRST.
-    issuers: parseIssuerList(requireEnv("WEBDESK_CONTROL_OIDC_ISSUER", "https://erp.gaiada.online/idp/realms/gaiada")),
+    issuers: parseIssuerList(requireEnv("WEBDESK_CONTROL_OIDC_ISSUER", "https://erp.gaiada.com/idp/realms/gaiada")),
     jwksUri: process.env.WEBDESK_CONTROL_OIDC_JWKS_URI || undefined,
     audience: requireEnv("WEBDESK_CONTROL_OIDC_AUDIENCE", "webdesk-control-plane"),
   });
