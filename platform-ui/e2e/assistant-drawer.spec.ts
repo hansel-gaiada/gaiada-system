@@ -1,4 +1,12 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
+
+// The FAB is a link to /assistant that the @drawer intercepting route turns into a drawer. Clicked before React
+// hydrates, it is a plain link and does a full navigation to /assistant: the right no-JavaScript fallback, and the
+// cause of this spec's flakes on a loaded box (2026-10-12: "Escape closes the drawer" failed 5 runs on a hard-loaded
+// /tasks/t-4, then passed). Click it only once React owns it (same helper as portal-website.spec.ts).
+async function hydrated(loc: Locator) {
+  await expect.poll(() => loc.evaluate((el) => Object.keys(el).some((k) => k.startsWith("__reactProps$")))).toBe(true);
+}
 
 // ASST-22 — the `@drawer` mount end to end, driven under DEMO_MODE (per `demoAssistant.ts`'s
 // citation fixture, extended for this ticket with real demo ids: `p-web-1` -> "Client site
@@ -12,6 +20,7 @@ test("FAB opens the drawer pinned to the current page's entity, sends a message,
 
   const fab = page.locator("#asst-fab-trigger");
   await expect(fab).toBeVisible();
+  await hydrated(fab);
   await fab.click();
 
   const dialog = page.getByRole("dialog", { name: "Assistant" });
@@ -69,6 +78,7 @@ test("FAB opens the drawer pinned to the current page's entity, sends a message,
 test("Escape closes the drawer and returns focus to the FAB trigger", async ({ page }) => {
   await page.goto("/tasks/t-4");
   const fab = page.locator("#asst-fab-trigger");
+  await hydrated(fab);
   await fab.click();
   await expect(page.getByRole("dialog", { name: "Assistant" })).toBeVisible();
 
@@ -85,6 +95,7 @@ test("the FAB is hidden on the /assistant page itself", async ({ page }) => {
 test("a page with no resolvable entity opens the drawer with no context pin", async ({ page }) => {
   await page.goto("/reports/company");
   const fab = page.locator("#asst-fab-trigger");
+  await hydrated(fab);
   await fab.click();
   const dialog = page.getByRole("dialog", { name: "Assistant" });
   await expect(dialog).toBeVisible();

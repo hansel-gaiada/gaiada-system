@@ -27,6 +27,11 @@ export function AssistantFab({ tenantId }: { tenantId: string | null }) {
     <Link
       id="asst-fab-trigger"
       href={assistantDrawerHref(pathname, tenantId)}
+      // No prefetch: the drawer is an intercepted route, and a prefetched payload could be the FULL /assistant
+      // page instead of the drawer. On a hard-loaded /tasks/t-4 (itself an intercept target) the click then
+      // opened the full page (1 in 6 runs) or Escape's back() landed there (1 in 6). Fetching at click time
+      // gets the intercepted variant every time (2026-10-12, full Playwright in CI mode on sumopod).
+      prefetch={false}
       className="asst-fab"
       aria-label="Open assistant"
     >
