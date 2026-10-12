@@ -129,6 +129,27 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
     expect(seeded.statusCode).toBe(200);
   });
 
+  // PV-D28 — wf:billing-chaser. Its hub allow-list is read + notify; the service account must agree at the
+  // platform: it can READ a client's contracts and payment claims (and clients), and it holds no WRITE on either.
+  it("wf:billing-chaser (manager role) reads a client's contracts, payment claims and the client list", async () => {
+    const clientId = "019fb652-c68b-7000-8000-0000000000c1";
+    const h = asWorkflow("wf:billing-chaser");
+    expect((await app.inject({ method: "GET", url: `/api/${co}/clients`, headers: h })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/api/${co}/contracts?clientId=${clientId}`, headers: h })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/api/${co}/invoice-payments?clientId=${clientId}`, headers: h })).statusCode).toBe(200);
+  });
+
+  it("wf:billing-chaser can NOT countersign a contract or decide a payment (403 from Cerbos, whatever the hub allow-list says)", async () => {
+    const h = asWorkflow("wf:billing-chaser");
+    const id = "019fb652-c68b-7000-8000-0000000000c2";
+    const sign = await app.inject({ method: "POST", url: `/api/${co}/contracts/${id}/countersign`, headers: h, payload: { signerName: "Chaser Bot" } });
+    expect(sign.statusCode).toBe(403);
+    const send = await app.inject({ method: "POST", url: `/api/${co}/contracts/${id}/send`, headers: h, payload: {} });
+    expect(send.statusCode).toBe(403);
+    const decide = await app.inject({ method: "POST", url: `/api/${co}/invoice-payments/${id}/decide`, headers: h, payload: { decision: "confirm" } });
+    expect(decide.statusCode).toBe(403);
+  });
+
   it("wf:reports-monthly-seal (company_admin role) can list+seal report periods", async () => {
     const list = await app.inject({
       method: "GET", url: `/api/${co}/reports/periods?kind=month&from=2026-01-01&to=2026-01-01`,
