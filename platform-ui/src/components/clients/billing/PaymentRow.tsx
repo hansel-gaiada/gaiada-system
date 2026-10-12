@@ -4,6 +4,7 @@ import Link from "next/link";
 import { decidePaymentAction, type BillingActionState } from "@/lib/contractsActions";
 import { paymentDecisionState, type InvoicePayment } from "@/lib/contracts";
 import { formatDate, money } from "@/lib/format";
+import { ClientVisibilityMarker } from "../ClientVisibilityMarker";
 import "./billing.css";
 
 // PV3-08 — one payment the client says they made, with Confirm and Reject.
@@ -34,7 +35,11 @@ export function PaymentRow({ payment, clientId }: { payment: InvoicePayment; cli
     <li className="bl-payment" style={{ listStyle: "none" }}>
       <div className="bl-payment__head">
         <p className="bl-payment__amount">{money(payment.amount, payment.currency)}</p>
-        <span className="bl-payment__meta">Paid {formatDate(payment.paidOn)}</span>
+        <span className="bl-payment__meta">
+          Paid {formatDate(payment.paidOn)}
+          {/* PV3-09: through the payment's invoice (BFF §22d), from the backend's `clientVisible`. */}
+          <ClientVisibilityMarker clientVisible={payment.clientVisible} />
+        </span>
       </div>
       <p className="bl-payment__meta">
         {[

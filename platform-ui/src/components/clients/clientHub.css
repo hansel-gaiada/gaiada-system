@@ -140,3 +140,40 @@
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   margin: 0 0 20px;
 }
+
+/* ── Visibility markers (PV3-09) ───────────────────────────────────────────────────────────────── */
+/* "Client sees this" / "Internal", from the backend's `clientVisible` only (ClientVisibilityMarker.tsx).
+   Words always, and a different edge as well: solid for what the client sees (ok family), dashed for
+   Internal (warning family, the same grammar as the Internal tab). Text is --ink-strong in both, because the
+   -fg tiers fall below AA on their own tints; the family colour sits in the tint and the edge. Dark mode
+   needs no rule here: the status-*-bg and status tokens flip with the theme. */
+.ch-vis {
+  display: inline-block;
+  vertical-align: baseline;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font: 600 11px/1.5 var(--font-body);
+  white-space: nowrap;
+  color: var(--ink-strong);
+}
+.ch-vis--client {
+  background: var(--status-ok-bg);
+  border: 1px solid var(--status-ok);
+}
+.ch-vis--internal {
+  background: var(--status-warning-bg);
+  border: 1px dashed var(--status-warning);
+}
+
+/* An area-level note ("The client sees and edits this profile"): the same wording grammar as a row marker,
+   set as a sentence above the area. */
+.ch-area-note {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--status-ok);
+  background: var(--status-ok-bg);
+  border-radius: var(--radius-md);
+  color: var(--ink-strong);
+  font: 500 13px/1.5 var(--font-body);
+}

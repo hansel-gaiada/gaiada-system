@@ -6,6 +6,7 @@ import {
 import { awaitingText, contractActions, signatureLine, type Contract, type ContractSignature } from "@/lib/contracts";
 import { formatDate, money } from "@/lib/format";
 import { StatusBadge } from "@/components/ui";
+import { ClientVisibilityMarker } from "../ClientVisibilityMarker";
 import { ContractForm } from "./ContractForm";
 import "./billing.css";
 
@@ -57,7 +58,11 @@ export function ContractRow({
     <li className="bl-contract" style={{ listStyle: "none" }}>
       <div className="bl-contract__head">
         <h4 className="bl-contract__title">{contract.title}</h4>
-        <StatusBadge label={contract.status} />
+        <span>
+          <StatusBadge label={contract.status} />
+          {/* PV3-09: the backend's `clientVisible` (a draft is Internal until it is sent; BFF §22d). */}
+          <ClientVisibilityMarker clientVisible={contract.clientVisible} />
+        </span>
       </div>
       <p className="bl-contract__meta">
         {[

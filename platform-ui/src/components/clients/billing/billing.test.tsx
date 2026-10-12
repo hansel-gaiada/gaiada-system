@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import type { Contract, InvoicePayment } from "@/lib/contracts";
 
 // PV3-08 — the billing components render FROM the pure rules in lib/contracts.ts. These tests pin that:
@@ -209,5 +209,37 @@ describe("ContractForm", () => {
     expect(screen.queryByLabelText(/Project/)).toBeNull();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+  });
+});
+
+// PV3-09 — each billing row says who sees it, from the backend's `clientVisible` only.
+describe("billing rows · visibility markers", () => {
+  it("a draft contract the backend marked false reads Internal; a sent one marked true reads Client sees this", () => {
+    row(k({ id: "d", status: "draft", clientVisible: false }));
+    expect(screen.getByText("Internal")).toBeInTheDocument();
+    expect(screen.queryByText("Client sees this")).toBeNull();
+    cleanup();
+    row(k({ id: "s", status: "sent", bodyMd: "x", clientVisible: true }));
+    expect(screen.getByText("Client sees this")).toBeInTheDocument();
+    expect(screen.queryByText("Internal")).toBeNull();
+  });
+
+  it("🔴 a contract with NO clientVisible shows neither answer, whatever its status (never derived from the status)", () => {
+    row(k({ status: "draft" }));
+    expect(screen.queryByText("Internal")).toBeNull();
+    expect(screen.queryByText("Client sees this")).toBeNull();
+    cleanup();
+    row(k({ status: "sent", bodyMd: "x" }));
+    expect(screen.queryByText("Internal")).toBeNull();
+    expect(screen.queryByText("Client sees this")).toBeNull();
+  });
+
+  it("a payment row carries the marker too, and none when the field is missing", () => {
+    render(<ul><PaymentRow payment={pay({ clientVisible: true })} clientId="cl-1" /></ul>);
+    expect(screen.getByText("Client sees this")).toBeInTheDocument();
+    cleanup();
+    render(<ul><PaymentRow payment={pay()} clientId="cl-1" /></ul>);
+    expect(screen.queryByText("Client sees this")).toBeNull();
+    expect(screen.queryByText("Internal")).toBeNull();
   });
 });

@@ -170,6 +170,15 @@ const CLIENT_SIGN_GATE_KIND_BY_TRACK: Partial<Record<string, string[]>> = {
   scope: ["scope_signoff"],
 };
 
+// PV3-09 — `clientVisible` on the staff reads, by the same rule as the backend (`portal-visibility.ts`,
+// BFF §22d): a run is visible when it has a client; a gate when its run is AND it is a client-side gate; a
+// stage (detail only) when its run is AND it is not on the internal `report` track. Computed here from the
+// row, never hand-set per fixture, so a new demo run cannot disagree with the rule.
+const runVisible = (r: { client_id: string | null }): boolean => r.client_id != null;
+const withGateVis = (g: DemoGate, run: { client_id: string | null } | undefined) =>
+  ({ ...g, clientVisible: !!run && runVisible(run) && g.actor_side === "client" });
+const withRunVis = (r: DemoRun) => ({ ...r, clientVisible: runVisible(r) });
+
 /** Returns a DemoResult for any /pipeline route, or null if it doesn't match. */
 export function pipelineDemo(method: string, p: string, params: URLSearchParams, body?: string): DemoResult | null {
   const m = method.toUpperCase();
@@ -293,9 +302,9 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
     const run = RUNS.find((r) => r.id === detailM[1]);
     if (!run) return { status: 404, json: { error: "run not found" } };
     return ok({
-      ...run,
-      stages: STAGES.filter((s) => s.run_id === run.id),
-      gates: GATES.filter((g) => g.run_id === run.id),
+      ...withRunVis(run),
+      stages: STAGES.filter((s) => s.run_id === run.id).map((s) => ({ ...s, clientVisible: runVisible(run) && s.track !== "report" })),
+      gates: GATES.filter((g) => g.run_id === run.id).map((g) => withGateVis(g, run)),
       scopeSignoffs: SCOPE_SIGNOFFS[run.id] ?? [],
     });
   }
@@ -315,8 +324,8 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
     // the page had to cross-reference the recordings registry). Returned in full to match.
     // `?include=gates` (platform-nest 0.46.0): each run with its gates, [] when none.
     const include = (params.get("include") ?? "").split(",").map((x) => x.trim());
-    if (include.includes("gates")) return ok(rows.map((r) => ({ ...r, gates: GATES.filter((g) => g.run_id === r.id) })));
-    return ok(rows);
+    if (include.includes("gates")) return ok(rows.map((r) => ({ ...withRunVis(r), gates: GATES.filter((g) => g.run_id === r.id).map((g) => withGateVis(g, r)) })));
+    return ok(rows.map(withRunVis));
   }
 
   // B2 — start a run with no source meeting.

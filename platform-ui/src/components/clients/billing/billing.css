@@ -1,7 +1,7 @@
 /* PV3-08 — the staff Contracts & billing area. Tokens only, so it follows the ERP theme in light and
    dark. Own `bl-` namespace: it shares nothing with the client portal's `cp-` classes (the portal is a
-   separate interface and is free to diverge). The page deliberately carries no "who sees this" markers;
-   PV3-09 adds them from a field the backend computes. */
+   separate interface and is free to diverge). The "who sees this" markers (`.ch-vis`) live in clientHub.css and
+   read the backend's `clientVisible` only (PV3-09). */
 
 .bl-sections { display: grid; gap: 32px; }
 .bl-section__title {

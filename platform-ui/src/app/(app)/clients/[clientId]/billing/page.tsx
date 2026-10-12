@@ -11,6 +11,7 @@ import { groupContracts, type ContractDetail } from "@/lib/contracts";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { ClientVisibilityMarker } from "@/components/clients/ClientVisibilityMarker";
 import { ContractForm } from "@/components/clients/billing/ContractForm";
 import { ContractRow } from "@/components/clients/billing/ContractRow";
 import { PaymentRow } from "@/components/clients/billing/PaymentRow";
@@ -35,9 +36,10 @@ import "@/components/clients/billing/billing.css";
 // ── THE H1 IS THE LAYOUT'S ──────────────────────────────────────────────────────────────────────
 // The hub layout renders the client's name as the page's one `<h1>`; this page starts at `<h2>`.
 //
-// ── NO VISIBILITY MARKERS ───────────────────────────────────────────────────────────────────────
-// Which rows the client sees is PV3-09's, from a field the backend computes (trap 9). This page says
-// nothing about it.
+// ── VISIBILITY MARKERS (PV3-09) ─────────────────────────────────────────────────────────────────
+// Contracts, payments and invoices each say who sees them ("Client sees this" / "Internal"), from the
+// backend's `clientVisible` only (BFF §22d, trap 9). A draft contract reads Internal until it is sent. A row
+// whose payload lacks the field gets no marker, never a guess.
 export default async function ClientBillingPage({ params }: { params: Promise<{ clientId: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -139,9 +141,12 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
         <HairlineTable
           columns={[{ label: "Period" }, { label: "Status" }, { label: "Total", align: "right" }]}
           rows={invoices.map((i) => [
-            <Link key="p" href={`/invoices/${i.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
-              {i.periodStart && i.periodEnd ? `${formatDate(i.periodStart)} to ${formatDate(i.periodEnd)}` : `Invoice ${i.id}`}
-            </Link>,
+            <span key="p">
+              <Link href={`/invoices/${i.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
+                {i.periodStart && i.periodEnd ? `${formatDate(i.periodStart)} to ${formatDate(i.periodEnd)}` : `Invoice ${i.id}`}
+              </Link>
+              <ClientVisibilityMarker clientVisible={i.clientVisible} />
+            </span>,
             <StatusBadge key="s" label={i.status} />,
             money(i.total, i.currency),
           ])}

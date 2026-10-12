@@ -16,6 +16,7 @@ import { NO_PROJECT_LABEL, clientGatesOf, groupByProject, postReviewItems } from
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { ClientVisibilityMarker } from "@/components/clients/ClientVisibilityMarker";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { ScheduleMeetingPanel } from "@/components/meetings/ScheduleMeetingPanel";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -43,9 +44,11 @@ import { formatDate, formatDateTime } from "@/lib/format";
 // Projects, tasks, deliverables, runs, change requests and recordings all push `clientId` down to SQL.
 // Narrowing in the browser stops being a filter once a tenant has more rows than one page.
 //
-// ── NO VISIBILITY MARKERS HERE ──────────────────────────────────────────────────────────────────
-// Which rows the client sees is rendered by PV3-09, from a field the backend computes (trap 9). This
-// page deliberately says nothing about it.
+// ── VISIBILITY MARKERS (PV3-09) ─────────────────────────────────────────────────────────────────
+// Every row says who sees it ("Client sees this" / "Internal"), from the backend's `clientVisible` only
+// (BFF §22d, trap 9). A row whose payload lacks the field renders no marker, never a guess. Projects,
+// tasks, deliverables, runs and their gates, change requests, post reviews and meetings are all marked.
+// Tasks and meetings read Internal by the backend's own rule: the portal lists neither.
 export default async function ClientWorkPage({ params }: { params: Promise<{ clientId: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -133,6 +136,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
                 <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                   {overdue > 0 && <StatusBadge label={`${overdue} overdue`} />}
                   <StatusBadge label={p.status} />
+                  <ClientVisibilityMarker clientVisible={p.clientVisible} />
                 </span>
               }
             >
@@ -150,9 +154,12 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
                 <HairlineTable
                   columns={[{ label: "Task" }, { label: "Status" }, { label: "Ball" }, { label: "Due" }]}
                   rows={own.map((t) => [
-                    <Link key="t" href={`/tasks/${t.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
-                      {t.title}
-                    </Link>,
+                    <span key="t">
+                      <Link href={`/tasks/${t.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
+                        {t.title}
+                      </Link>
+                      <ClientVisibilityMarker clientVisible={t.clientVisible} />
+                    </span>,
                     <StatusBadge key="s" label={t.status} />,
                     t.assignee?.refName ?? "—",
                     t.dueDate ? formatDate(t.dueDate) : "—",
@@ -186,7 +193,11 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
         ) : (
           <HairlineTable
             columns={[{ label: "Post" }, { label: "Where it stands" }, { label: "Waiting on" }]}
-            rows={items.map((i) => [i.context, i.label, i.side === "us" ? "Us" : "The client"])}
+            rows={items.map((i) => [
+              <span key="p">{i.context}<ClientVisibilityMarker clientVisible={i.clientVisible} /></span>,
+              i.label,
+              i.side === "us" ? "Us" : "The client",
+            ])}
             tcols="2fr 2fr 1fr"
           />
         )}
@@ -211,7 +222,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
               <HairlineTable
                 columns={[{ label: "Deliverable" }, { label: "Project" }, { label: "Status" }, { label: "Due", align: "right" }]}
                 rows={deliverablesRes.data.map((d) => [
-                  d.name,
+                  <span key="n">{d.name}<ClientVisibilityMarker clientVisible={d.clientVisible} /></span>,
                   projectCell(d.project_id ?? null),
                   <StatusBadge key="s" label={d.status} />,
                   formatDate(d.due_date),
@@ -239,7 +250,10 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
                 rows={runsRes.data.map((r) => {
                   const gates = clientGatesOf(r.gates);
                   return [
-                    <Link key="t" href={`/pipeline/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>{r.title ?? r.id}</Link>,
+                    <span key="t">
+                      <Link href={`/pipeline/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>{r.title ?? r.id}</Link>
+                      <ClientVisibilityMarker clientVisible={r.clientVisible} />
+                    </span>,
                     projectCell(r.project_id),
                     <StatusBadge key="s" label={r.status} />,
                     gates === null ? (
@@ -252,6 +266,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
                           <span key={g.id} style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                             {GATE_LABEL[g.kind] ?? g.kind}
                             <StatusBadge label={g.status === "pending" ? "pending" : (g.decision ?? "decided")} />
+                            <ClientVisibilityMarker clientVisible={g.clientVisible} />
                           </span>
                         ))}
                       </span>
@@ -280,7 +295,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
                     <HairlineTable
                       columns={[{ label: "Request" }, { label: "Kind" }, { label: "Status" }, { label: "Filed", align: "right" }]}
                       rows={g.rows.map((cr) => [
-                        cr.title,
+                        <span key="n">{cr.title}<ClientVisibilityMarker clientVisible={cr.clientVisible} /></span>,
                         KIND_LABEL[cr.kind] ?? cr.kind,
                         <StatusBadge key="s" label={CR_STATUS_LABEL[cr.status] ?? cr.status} />,
                         formatDate(cr.createdAt),
@@ -334,7 +349,10 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
               <HairlineTable
                 columns={[{ label: "Meeting" }, { label: "Status" }, { label: "Length" }, { label: "Recorded", align: "right" }]}
                 rows={meetings.map((r) => [
-                  <Link key="t" href={`/meetings/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>{r.title ?? r.meeting_id}</Link>,
+                  <span key="t">
+                    <Link href={`/meetings/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>{r.title ?? r.meeting_id}</Link>
+                    <ClientVisibilityMarker clientVisible={r.clientVisible} />
+                  </span>,
                   <StatusBadge key="s" label={STATUS_LABEL[r.status] ?? r.status} />,
                   formatDuration(r.duration_sec),
                   formatDateTime(r.created_at),
