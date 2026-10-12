@@ -88,7 +88,8 @@
   color: var(--ink-strong);
   font: 400 13px/1.55 var(--font-body);
 }
-.ch-internal-banner strong { color: var(--status-warning-fg); font-weight: 700; }
+/* --ink-strong, not --status-warning-fg: the amber text fell below AA on the amber tint (hub axe, light). */
+.ch-internal-banner strong { color: var(--ink-strong); font-weight: 700; }
 
 /* ── Projects area sections (PV3-05) ───────────────────────────────────────────────────────────── */
 .ch-sections { display: grid; gap: 32px; }

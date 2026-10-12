@@ -82,12 +82,13 @@ test.describe("client billing", () => {
     await expect(group(page, /^Sent · 2/)).toBeVisible();
     await expect(group(page, /^Draft · 1/)).toBeVisible();
 
-    // Countersign is offered ONLY on the row the backend flagged: the sent contract the client already signed.
-    // The sent contract that was just issued shows no such button.
+    // Countersign follows the backend's `canCountersign` (sent, and no provider signature yet). The order of the two
+    // signatures is free (PV-3 finding 3), so the contract that was just issued offers it too, not only the one the
+    // client already signed.
     const retainer = row(page, "Retainer agreement");
     await expect(retainer.getByText(/The client has signed\. Waiting for our countersignature/)).toBeVisible();
     await expect(retainer.getByText(/Client: Lena Lumen, Director/)).toBeVisible();
-    await expect(row(page, "Onboarding agreement").getByRole("button", { name: "Countersign" })).toHaveCount(0);
+    await expect(row(page, "Onboarding agreement").getByRole("button", { name: "Countersign" })).toHaveCount(1);
     await retainer.getByRole("button", { name: "Countersign" }).click();
     await expect(retainer.getByText(/once\s+both parties have signed/)).toBeVisible();
     await retainer.getByLabel("Your full name").fill("Hansel Owner");

@@ -97,7 +97,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
     if (projects.length === 0) {
       return (
         <EmptyNote>
-          This client has no projects yet. Create one from <Link href="/projects">Projects</Link> and it
+          This client has no projects yet. Create one from <Link href="/projects" style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>Projects</Link> and it
           will appear here — along with its tasks and milestones.
         </EmptyNote>
       );
@@ -144,7 +144,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
                 {!tasksKnown ? "Tasks cannot be read right now" : own.length === 0 ? "No tasks yet" : `${done}/${own.length} tasks done`}
                 {p.due_date ? ` · due ${formatDate(p.due_date)}` : ""}
                 {" · "}
-                <Link href={`/projects/${p.id}`} style={{ color: "var(--erp-accent)", textDecoration: "none" }}>
+                <Link href={`/projects/${p.id}`} style={{ color: "var(--erp-accent)", textDecoration: "underline", textUnderlineOffset: 3 }}>
                   open project
                 </Link>
               </p>
