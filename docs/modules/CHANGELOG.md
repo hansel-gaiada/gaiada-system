@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.95.0` - M5-W8: the writer dashboard read (2026-10-12) - DEV-VERIFIED
+
+- **The read:** `GET …/content/sites/:tenantSlug/:siteId/writers/dashboard?period&collection&locale&mine&cursor&limit`. For each live item the caller may read, it returns:
+  - the page path, from W8b's `ui.routePattern` and `pagePathFor`;
+  - Umami views and average time;
+  - Search Console clicks, impressions and the top 3 queries;
+  - trends against the previous period;
+  - a COUNT of web leads whose landing or form page is that path (the SQL selects no identity: no id, name, email or phone);
+  - the open V4 decay finding.
+- **Who sees what:** writers (and translators and SEO reviewers) see their own items; editors (`assign` on the pair) and staff see everything in scope.
+- **Authorization:** W1c's gate, then Cerbos per pair, at most 50 in flight.
+- **Missing data:** any source failure is null with a reason, never 0. Only a WebDesk or Cerbos failure is a 503. Views under 5 show as "<5".
+- MCP read `webdesk.writers.dashboard`.
+- **Until gaiada.com's collections set `ui.routePattern`, each item says "no route pattern".**
+- **Verified** on GitHub Actions 38259107918: the DB/Cerbos/HTTP suite 12/12 (incl. a lead seeded with identity fields absent from the response, and 52 pairs across pages), unit 59/59.
+
+### platform-ui `0.100.0` - M5-W8: the writer dashboard (2026-10-12) - DEV-VERIFIED
+
+- **`writers/dashboard`:** cards per article with views, time, Search Console figures, lead count, trend arrows with words, and a decay badge.
+- "Unavailable" is said in words, never shown as 0.
+- Filters: period, collection, language, and my articles / all I can see.
+- A strict parser treats a wrong shape as contract drift.
+- **Verified** on GitHub Actions 38259107918: the WebDesk Playwright suite against the built app passed 132, incl. 6 dashboard specs with axe.
+
 ### webdesk `0.23.0` - `site.archive` is real: WS4-gated, irreversible, archived sites stop serving (2026-10-12) - DEV-VERIFIED
 
 Owner ruling WSK-D78 (2026-10-12): archiving a site takes an approval. It mirrors `tenant.archive` at site scope.
