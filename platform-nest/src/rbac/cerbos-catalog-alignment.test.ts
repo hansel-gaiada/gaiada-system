@@ -139,7 +139,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // PV3-01 (2026-10-11): +1 pair on the EXISTING contract kind (`core.contract.countersign`, uiGrantable false, owner-only by a Cerbos grant rule).
     // PV4-02 (2026-10-12): +5 pairs / +1 kind: `conversation` (read/post/draft/manage, NEW kind) and
     // `portal.converse` (the client's door to it, on the EXISTING portal kind). Pairs 434 -> 439, kinds 103 -> 104.
-    expect(catalog.length).toBe(439);
+    // PV5-02 (2026-10-12): +4 pairs, NO new kind (invoice: issue, void_issued; contract: mark_certified; finance_config: set_bank_details). On top of PV4-02: 439 -> 443, kinds 104 unchanged.
+    expect(catalog.length).toBe(443);
     expect(catalogKindSet.size).toBe(104);
   });
 

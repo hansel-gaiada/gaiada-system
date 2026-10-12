@@ -22,9 +22,10 @@ export const ORIGIN_LABEL: Record<ApprovalOrigin, string> = {
   automation: "Automation",
   agent: "Agent",
   // Not "Search": from the inbox's point of view what arrives under this origin is a request to
-  // record that we may probe a client's domain, and the chip has to say what the reader is being
-  // asked to decide. The module that owns the column is an implementation detail here.
-  search: "Probe consent",
+  // record that we may probe a client's domain, or (M5-P2) to upload a lead's conversion to an ad
+  // platform, and the chip has to say what the reader is being asked to decide. The module that
+  // owns the column is an implementation detail here. Each row's own reason says which it is.
+  search: "Consent & ad uploads",
   webdesk: "Website publish",
 };
 

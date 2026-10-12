@@ -83,3 +83,68 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager", "company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ PV5-02 (2026-10-12) — `set_bank_details`. A NEW ACTION on this existing kind.
+    # Changing the bank account clients pay an issued invoice into redirects real money, with no fake
+    # invoice needed (the `vendor_master` reasoning in F5, applied to the receiving side). So it is NOT
+    # part of the controller tier's `update` and not reachable by `company_admin`.
+    #
+    # WHO: an `owner` of this company, or its `finance_manager`, and nobody else. The rule reads the
+    # GRANT, never `attr.perms`, and is written inline under `roles: ["user"]` for the reason
+    # resource_contract.yaml's `countersign` rule gives:
+    #   * `owner` is permission-native (no derived role), so an inline grant check is how it is named;
+    #   * `finance_manager` is written inline too, not through `module_manager`, so the generator does
+    #     not bundle the key onto it. A bundled, `ui_grantable = false` key would make `finance_manager`
+    #     unattachable to positions (position_roles_guard); bundling it with `ui_grantable = true` would
+    #     advertise a key a UI-built role could hold. Same reach, no bundle row either way.
+    # COMPANY SCOPE ON THIS TENANT ONLY: no global grant matches, and an owner or finance_manager of
+    # another company gets nothing. `platform_admin` reaches it through the wildcard at the top of this
+    # file, and that is deliberate: owner ruling PV-D26 (2026-10-12) keeps the operator's reach, and
+    # instead requires high assurance of EVERYONE, platform_admin included (the DENY below). Every
+    # change also notifies all owners of the company (PV5-04).
+    #
+    # NO `perm_*` mirror and no `module_manager` rule: a custom role holding the catalogued key
+    # `finance.config.set_bank_details` reaches nothing. `inTenant && notLow` is the same gate every
+    # other rule on this kind uses; the high-assurance requirement is the separate DENY below (PV-D26).
+    - actions: ["set_bank_details"]
+      effect: EFFECT_ALLOW
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            request.principal.attr.grants.exists(g,
+              (g.role == "owner" || g.role == "finance_manager") &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+
+    # Bots and automation never change the bank details, for ANY grant (T7's `roles: ["user"]` DENY
+    # shape, resource_webdesk_content_item.yaml). Beats the platform_admin wildcard and the rule above
+    # under deny-overrides. No agent tool sets bank details (PV5-12): an agent-driven change cannot
+    # even be proposed. As on `invoice`, an agent under a human's own envelope assembles as that human
+    # and is not seen here; the missing tool is what closes that path.
+    - actions: ["set_bank_details"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # PV-D26 (owner ruling, 2026-10-12): changing the bank details clients pay into needs HIGH ASSURANCE
+    # (a fresh second factor) from EVERYONE, platform_admin included. The operator keeps its reach (the
+    # wildcard above is unchanged); this DENY is what stops it from going around the step-up. It is the
+    # same bar as `vendor_master` in resource_finance_ap.yaml, and it reads the same attribute,
+    # `request.principal.attr.assurance` (values "low" | "linked" | "high"; a plain SSO login is "linked").
+    # `roles: ["user"]` matches every principal, so under deny-overrides it beats the wildcard and the
+    # inline owner / finance_manager rule. FAIL-CLOSED: a principal that omits the attribute has no
+    # assurance, so it is denied (principalPayload() always sends it; the has() arm covers a raw caller).
+    # Every successful change also notifies all owners of the company (PV5-04).
+    - actions: ["set_bank_details"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.principal.attr.assurance) ||
+            request.principal.attr.assurance != "high"

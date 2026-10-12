@@ -27,6 +27,11 @@ import { eventSafeToolArgs, getApprovalArgsPolicy, minimiseToolArgs } from "./ap
 // asserts the search module registers no such handler, because its other approval path spends a
 // client's ad budget. See probe-consent.ts for the full reasoning.
 import { PROBE_CONSENT_WORKFLOW, executeApprovedProbeConsent } from "../modules/search/probe-consent";
+// M5-P2: an approved ad-platform conversion upload ALSO executes in-band (origin 'search', workflow 'search.conversions.upload'),
+// as the decider, under a second consent/suppression gate. One import per concern; every rule lives in the search module
+// (modules/search/conversions*.ts). NOT the D14 registry (it is barred there: approval-executables.ts registerSearchConversionBars).
+import { isConversionUploadRequest } from "../modules/search/conversions";
+import { conversionPropertyIdOf, executeApprovedConversionUpload, recordConversionUploadRejected } from "../modules/search/conversions.service";
 // P2-08 part B: an approved IAM request (override, or a dept head's assignment) executes in-band.
 // One import, one call — the IAM-specific knowledge lives in that module, not in this shared route.
 import { IAM_POSITION_ASSIGN_WORKFLOW, executeApprovedIamRequest, isIamRequest } from "../admin/iam-approval-execute";
@@ -428,6 +433,21 @@ export class AutomationApprovalsController {
         "update",
       );
     }
+    // ── M5-P2: an ad-platform conversion upload — the decider must hold `update` on the property it is about ───────
+    // Same shape as probe consent above: authorize against the write the approval will perform (the property's conversion
+    // configuration), fail CLOSED when the stored args name no property, and apply it to REJECTION too. The generic `decide` above
+    // stays the "may you decide approvals here" gate. Checked BEFORE the decide UPDATE, so a refusal leaves the row `pending`
+    // and nothing is sent.
+    const isConversionUpload = isConversionUploadRequest(rowOrigin, existing.rows[0].workflow_id);
+    if (isConversionUpload) {
+      const conversionPropertyId = conversionPropertyIdOf(existing.rows[0].tool_args);
+      if (!conversionPropertyId) throw new BadRequestException("this upload request names no property");
+      await authorize(
+        req.principal,
+        { kind: "resource_search_property", id: conversionPropertyId, tenantId, module: "search" },
+        "update",
+      );
+    }
     // ── WSK-66: a WebDesk HIGH command — the decider must hold the command's OWN authority ────────
     // Checked BEFORE the decide UPDATE, so a refusal (Cerbos DENY on maker = checker for a batch, a
     // decider without `publish`, an unconfigured channel or signer, malformed stored args) leaves the
@@ -496,7 +516,7 @@ export class AutomationApprovalsController {
     // WSK-66: an approved webdesk row also starts at 'pending' — the state its in-band executor
     // claims (pending → executing) below. The D14 handler never claims it (origin filter).
     const executionStatus: "pending" | "not_applicable" =
-      executable || ((isReveal || isWebdesk) && decision === "approved") ? "pending" : "not_applicable";
+      executable || ((isReveal || isWebdesk || isConversionUpload) && decision === "approved") ? "pending" : "not_applicable";
     const res = await withTenants([tenantId], async (c) => {
       const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
         `UPDATE automation_approvals
@@ -611,8 +631,18 @@ export class AutomationApprovalsController {
       );
     }
 
+    // ── M5-P2: an APPROVED upload executes IN-BAND, exactly once; a REJECTED one closes its ledger row ──────────
+    // Post-claim outcomes (simulated, uploaded, failed, skipped by the second gate) come back as data and are recorded on the
+    // row; the decision itself stands either way. The result carries kinds and typed tokens only, never an identifier.
+    let conversionResult: Awaited<ReturnType<typeof executeApprovedConversionUpload>> | null = null;
+    if (res && isConversionUpload) {
+      if (decision === "approved") conversionResult = await executeApprovedConversionUpload(tenantId, id, res.tool_args, req.principal);
+      else await recordConversionUploadRejected(tenantId, id);
+    }
+
     if (!res) throw new NotFoundException("approval not found or already decided");
     await writeActivity(tenantId, req.principal.userId, decision, "automation_approval", id);
+    if (conversionResult) return { id, status: decision, conversionUpload: conversionResult };
     if (webdeskResult) return { id, status: decision, webdesk: webdeskResult };
     // `override`/`github` are present ONLY for their own approved kind, so every existing consumer
     // of this response sees a byte-identical shape otherwise. They carry what the approval actually

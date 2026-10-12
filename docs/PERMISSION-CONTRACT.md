@@ -1776,3 +1776,92 @@ The shape is `resource_client.yaml`'s on purpose: a conversation is part of the 
 **The `client` role invariant is now a test.** `client` appears in no resource policy except `resource_portal.yaml`; it was a comment in each policy header until `client-role-only-in-portal.test.ts` scanned `cerbos/policies` for it. Adding `client` to `resource_conversation.yaml` fails that test.
 
 **The six artifacts** (the `webdev_site` template, commit `2c5ab99e`): policy + derived roles; `cerbos.ts` (no change); `permission-catalog.json` (+5 keys: 104 kinds, 439 pairs, 424 grantable, 15 relationship, 204 sensitive); `permission-groups.json` (+2 groups); migration `202610130120_iam_conversation_permissions.sql`; the bundle generator (no resolver change: the kind names only direct roles, which `DIRECT` already maps) and `role-permission-bundles.json`, regenerated. Pinned tests moved: `cerbos-catalog-alignment`, `iam-215-boundary-pin`, `permission-groups-catalog-parity`, `ui-grantable-catalog`, and the portal action-set pins (`iam-04-b7-portal.{test,db.test}.ts`, `mon00i-portal-root-anchor.db.test.ts`, `iam-04-b6-social-portal.test.ts`). Deploy: Cerbos needs a restart (nothing hot-reloads), then probe a staff `member` ALLOW `post`, a `bot` DENY `post`, and a client ALLOW `converse`.
+
+## 31. M5-P2 — ad-platform conversion uploads: no new permission; the approver needs `update` on the property (2026-10-13, PROTOTYPED)
+
+No new Cerbos kind, action, role or permission key, no policy change, no restart. What is stated so nobody re-derives it:
+
+| Step | Authority | Where |
+|---|---|---|
+| Plan an upload (consume `agency.lead.stage_changed`) | none: an event handler with no principal; it only runs for a tenant with the `search` module enabled, and files an approval | `modules/search/conversions.service.ts` |
+| Configure a target (site slug, platform, stage, conversion) | `resource_search_property · update` on the property (the existing `search.property.update` permission) | `POST .../properties/:id/conversion-targets` |
+| Read targets and the ledger | `resource_search_property · read` | the three GETs |
+| **Approve (or reject) an upload** | the generic `automation_approval · decide` (company_admin) **and** `resource_search_property · update` on the property named in the row's `tool_args`, checked before the decision is written | `core/automation-approvals.controller.ts` decide(), same shape as probe consent |
+| Execute | in-band at decide(), as the decider; the D14 hub registry is not used (the tool is barred there) | `executeApprovedConversionUpload` |
+
+Two properties of the data worth knowing: the consent gate is strictly `visitor_consent.marketing === true` and runs at planning and again at execution; and the lead's contact fields and click id are read at execution, hashed in memory and never written down (the ledger, the approval args, the outbox and the logs hold ids, stages, kinds and typed reasons). Stage moves stay `triage`-tier (manager and up) as P1 ruled; a move is LOW because it cannot send anything: the upload needs its own approval. Proof: `modules/search/conversions.test.ts`, `conversions-consumer-wiring.test.ts` (no services) and `conversions.db.test.ts` (Linux gate).
+
+---
+
+## 32. PV-5 billing actions (2026-10-12, PROTOTYPED)
+
+Ticket: `docs/plans/2026-10-12-pv5-contracts-billing-tickets.md`, PV5-02. Rulings PV-D7 (the ledger is the invoice of record),
+PV-D8 (two signature tiers). Seeded by `202610130500_iam_pv5_billing_actions.sql`. **Four new actions on three EXISTING kinds, no new kind,
+no new role.** The handlers arrive in PV5-04 and PV5-06; until then nothing calls these actions, so no behaviour changes.
+
+| Kind · action | Key | Who | Perm mirror | `uiGrantable` | Group |
+|---|---|---|---|---|---|
+| `invoice` · `issue` | `invoice.issue` | exactly the holders of `approve`: `company_admin`, `manager` (role arm, `inTenant && notLow`); `owner` by the permission arm; `platform_admin` by the wildcard. **Not maker/checker-bound** | yes, `perm_invoice_issue` | true | new `invoices_issue` |
+| `invoice` · `void_issued` | `invoice.void_issued` | `company_admin` (role arm); `owner` by the permission arm; `platform_admin` by the wildcard. **Not `manager`** | yes, `perm_invoice_void_issued` | true | new `invoices_void_issued` |
+| `finance_config` · `set_bank_details` | `finance.config.set_bank_details` | an `owner` or `finance_manager` grant at **company scope on this tenant** (inline `roles: ["user"]` rule, reads the grant, never `attr.perms`); `platform_admin` by the wildcard. **Not `company_admin`** | **none** | **false** | `advancedOnly` |
+| `contract` · `mark_certified` | `core.contract.mark_certified` | exactly the holders of `send`: `company_admin` (role arm); `owner` by the permission arm; `platform_admin` by the wildcard | yes, `perm_contract_mark_certified` | true | new `client_contracts_certify` |
+
+The portal gets **no new action**: Documents reads use `portal` `read`, and online payment uses the existing `portal` `pay`.
+
+**Bots and automation (T7's shape).** `issue` and `void_issued` on `invoice`, and `set_bank_details` on `finance_config`, carry a
+`roles: ["user"]` `EFFECT_DENY` when `principal.attr.kind in ["automation", "bot"]`. Under deny-overrides it beats every ALLOW: the
+`platform_admin` wildcard, the permission-arm mirrors and the inline grant rules. `mark_certified` carries no such DENY (the ticket does not
+ask for one). A **delegated** call by a bot is refused too, because `authorize()` checks the caller first; the acting human is only the
+second check (`core/http.ts`). **What the DENY cannot see:** an agent running under a human's own identity envelope assembles as that human
+(kind `employee`), so the DENY does not fire for it. `issue` and `void_issued` are held back on that path by the tool registry's D14
+impact tier (PV5-12), and no agent tool sets bank details or marks a contract certified.
+
+**Why `void_issued` has a mirror and `set_bank_details` does not.** `owner` is permission-native (section 28): it has no role rules, so it reaches
+an action only through a `perm_*` mirror or an inline grant rule. `void_issued` is held by `company_admin`, so the key lands in
+`company_admin`'s bundle and owner's (owner = company_admin's set); the standard mirror is then both the way owner reaches it and the shape of
+the sibling keys. A custom role holding the key would also reach it, which is the catalog's meaning of `grantable`; today only migrations
+write `role_permissions`, so the holders are exactly the three above. `set_bank_details` follows `countersign` (PV3-01) instead: it redirects
+real money, so it is reached only through a grant and a key holder gets nothing. It is also **not written through `module_manager`**:
+that derived role would bundle the key onto `finance_manager`, and a `ui_grantable = false` key in a bundle makes the role unattachable to
+positions (position_roles_guard clause (b)), while `ui_grantable = true` would advertise a key no UI-built role can use. The inline
+rule has the same reach for the two named roles and leaves the bundles alone.
+
+**Bundles (regenerated, not hand-edited).** `platform_admin` +4 (all four, by wildcard), `company_admin` +3 (issue, void_issued, mark_certified),
+`owner` +3 (equal to `company_admin`), `manager` +1 (issue). `finance_manager` gains no bundle row: it reaches `set_bank_details` by its grant.
+`set_bank_details` is bundled on `platform_admin` alone, like `core.contract.countersign`.
+
+**Pinned counts moved (deliberately), recomputed on the tree combined with PV4-02** (main's value, my delta, final):
+
+| Pin | main | delta | final |
+|---|---|---|---|
+| Catalog pairs (`cerbos-catalog-alignment`, `ui-grantable-catalog`) | 439 | +4 | 443 |
+| Grantable (`permission-groups-catalog-parity`, `ui-grantable-catalog`) | 424 | +4 | 428 |
+| Sensitive (`_meta.counts`) | 204 | +4 | 208 |
+| Kinds (`iam-215-boundary-pin`, alignment) | 104 | 0 | 104 |
+| `ui_grantable = false` (`iam-phase2-ui-grantable-guard.test.ts`) | 25 | +1 | 26 |
+| `ui_grantable = true` (`_meta.uiGrantable`) | 414 | +3 | 417 |
+| Authoring groups | 158 | +3 | 161 |
+| Covered by groups | 386 | +3 | 389 |
+| advancedOnly | 38 | +1 | 39 |
+| Sensitive groups | 108 | +3 | 111 |
+| Role bundle pairs (regenerated) | 1923 | +11 (platform_admin +4, company_admin +3, owner +3, manager +1) | 1934 |
+
+**What the wildcard grants, and PV-D26 (owner ruling, 2026-10-12).** `resource_invoice.yaml`, `resource_contract.yaml` and
+`resource_finance_config.yaml` each open with `actions: ["*"]` for `platform_admin`, so that wildcard grants **all four new actions**,
+`set_bank_details` included, at global scope on any tenant (a bot or automation account holding it is refused by the DENY). The owner ruled
+that this **stays**, and added a bar: **PV-D26: the operator keeps access; high assurance for everyone; every change notifies all owners
+(PV5-04).** Two `EFFECT_DENY` rules under `roles: ["user"]` (so deny-overrides beats the wildcard), both with the fail-closed condition
+`!has(request.principal.attr.assurance) || request.principal.attr.assurance != "high"`, on the attribute `vendor_master` already reads
+(`"low" | "linked" | "high"`; a plain SSO login is `linked`, the ruling's "medium"):
+
+| Where | Action | Effect |
+|---|---|---|
+| `resource_finance_config.yaml` | `set_bank_details` (our own account) | owner, finance_manager and platform_admin all need high assurance |
+| `resource_finance_ap.yaml` | `vendor_master` (**supplier** bank details; scope note: an AP change made by this ticket) | its ALLOW already required high, but the `*` wildcard bypassed it; platform_admin now needs high too |
+
+Every other AP rule is byte-identical. The notification to all owners is wired by PV5-04, not here.
+
+**Proof.** `src/rbac/pv5-billing-actions-cerbos.test.ts` (live Cerbos; per action a member denied, a bot and an automation account denied, the right
+roles allowed, `company_admin` denied `set_bank_details`, a delegated bot call denied, and the PV-D26 assurance matrix for `set_bank_details` and `vendor_master`: owner, finance_manager and platform_admin each denied at `linked`, allowed at `high`), plus the static pins above and
+`iam-04-reg1-mirror-reach-invariant` (the new mirrors are no wider than `company_admin`'s or `manager`'s role arm). **Restart
+`gaiada-test-cerbos` and the live sidecar after deploying the policy files** (nothing hot-reloads).

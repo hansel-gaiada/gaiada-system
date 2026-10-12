@@ -11,6 +11,55 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.99.0` - M5-V5-b: the A/B test statistics engine (pure; no estimate before the horizon) (2026-10-12) - DEV-VERIFIED
+
+- `search/experiment-stats.ts` is pure: no I/O, clock or randomness.
+- **Sample size:** `power.prop.test`'s formula, giving 2,518 per arm for 3.0 % → 4.5 % at α 0.05 and power 0.8, reproduced exactly.
+- **Duration:** a projection between 14 and 56 days. Above 56 days it is a typed refusal, which becomes a 422 in V5-c.
+- **The analysis at the horizon:**
+  - a pooled two-proportion z-test, or Fisher's exact test when an expected cell is under 5;
+  - a Newcombe interval for the difference;
+  - Holm step-down across arms;
+  - an arm is shipped only when its adjusted p < α and its interval excludes 0.
+- **The sample-ratio-mismatch check:** chi-square, flagged at p < 0.001.
+- `evaluateExperiment` returns only progress and the mismatch check before the horizon. It never reads conversions there, so "peek and stop" is impossible by construction.
+- **Verified:** 63 tests on known answers (R `power.prop.test`, Fisher's tea and textbook tables, `p.adjust` Holm, Newcombe 1998), with 500 random pre-horizon observations containing no outcome field. GitHub Actions 38268800904 green.
+
+### webdesk `0.24.0` - M5-V3-a: `consent.status`, the latest consent record per id (2026-10-12) - DEV-VERIFIED
+
+- **The read:** `POST /control/v1/tenants/:tenantSlug/consent/status`, body `{siteSlug?, consentIds: uuid[1..100]}`. It returns `200 {statuses:[{consentId, analytics, marketing, action, noticeVersion, recordedAt}]}`.
+- **Semantics:**
+  - The latest record per id wins (`recorded_at`, then id).
+  - Another tenant's ids are simply omitted.
+  - 101 ids, or any malformed body, is a 400. A scopeless caller is a 403, before the body is read.
+  - It is a read (`webdesk:read`): no audit row, no Idempotency-Key, not editorial, not on the client-editor list.
+  - No user-agent class and no row ids are returned.
+- **Consumers must key on `analytics === false`, never on `action`:** an analytics-only withdrawal arrives as `update`.
+- It is what M5 phase 5 (V3) uses to prove consent server-side.
+- No migration.
+- **Verified** on GitHub Actions 38268390774: the DB/HTTP spec and the unit + registry specs green.
+
+### platform-nest `0.98.0` - M5-P2: Google Ads conversion uploads on a lead stage change (simulate only; consent- and WS4-gated) (2026-10-12) - DEV-VERIFIED
+
+The lead-pipeline design's §8 interface (built by the M5 session).
+
+- **Migrations:**
+  - `202610131200_search_conversion_uploads`: the targets config and the uploads ledger, whose insert IS the claim, unique per (tenant, platform, submission, conversion key). It never stores hashes, a gclid or contact data.
+  - `202610131210_automation_approvals_origin_search`: widens the approvals origin CHECK, built from the LIVE definition so no earlier origin is lost. A test asserts every earlier origin and `search` pass and NULL is refused.
+  - This also fixes search's probe-consent filings, which use origin `search` and would have failed the old CHECK.
+- **Wiring:** `agency_lead` joins the consumer loop. A test reads `main.ts` and fails without it.
+- **The gate**, at plan time and again under the lock at execute: marketing consent exactly `true`, not on G5's suppression list, a usable identifier (gclid/gbraid/wbraid, or an email or phone for enhanced conversions).
+- **One WS4 approval per upload:** impact high, content-bound, origin `search`, executed in-band at `decide()` as the decider, never auto-retried.
+- **Mode:** simulate only. `SEARCH_CONVERSIONS_LIVE_PLATFORMS` is empty, and boot refuses unknown tokens. Live needs the Ads developer token and linked account, counsel (G2) and the access audit (O-8).
+- Targets routes and 4 MCP tools on `resource_search_property`. PERMISSION-CONTRACT §31.
+- **Verified** on GitHub Actions 38267194098:
+  - DB 23/23 (consent, suppression, de-dup, the in-band execution, no email/phone/gclid in approvals/outbox/logs/activities/notifications, the origin CHECK);
+  - unit 33/33, consumer wiring 3/3.
+
+### platform-ui `0.103.0` - M5-P2: the approvals inbox labels origin `search` "Consent & ad uploads" (2026-10-12) - DEV-VERIFIED
+
+- One label in `approvalsShared.ts`. GitHub Actions 38267194098 green.
+
 ### platform-nest `0.97.0` - M5-P5b: the AI-crawler log (counts only, no IP or user agent kept) (2026-10-12) - DEV-VERIFIED
 
 - **Ingest:** `POST …/search/properties/:propertyId/ai-crawlers/ingest` and MCP `search.aiCrawlers.ingest` (medium).

@@ -774,6 +774,15 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.contract.send" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # PV5-02 (2026-10-12): `mark_certified`'s mirror, shaped exactly like perm_contract_send.
+    - name: perm_contract_mark_certified
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.contract.mark_certified" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_identity_link_* — IAM-04-ROLLOUT-B12
     - name: perm_identity_link_read
       parentRoles: ["user"]
@@ -830,6 +839,24 @@ derivedRoles:
         match:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "invoice.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # PV5-02 (2026-10-12): the two new invoice actions' mirrors, plain global-or-company mirrors of exactly
+    # their own key (the shape of the four above). No attribute gate: neither action is maker/checker-bound.
+    - name: perm_invoice_issue
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "invoice.issue" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_invoice_void_issued
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "invoice.void_issued" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_knowledge_source_* — IAM-04-ROLLOUT-B12
