@@ -120,3 +120,62 @@ describe("WritersBoard: grouped by review state", () => {
     expect(Array.from(sel.options).map((o) => o.value)).toEqual(["", "faq", "page", "service"]);
   });
 });
+
+describe("WritersBoard: the workflow view (M5-W5)", () => {
+  const wf = { calendarHref: "/d/website/writers/calendar/gaiada/site-1", briefBase: "/d/website/writers/briefs/gaiada/site-1", locales: ["en", "id"] as const };
+  const wcard = (id: string, state: string, extra: Record<string, unknown> = {}, e: Partial<ItemEditorial> = {}) => ({ ...card(id, state, {}, e), brief: null, briefHidden: false, briefRef: null, requests: [], placement: null, ...extra }) as BoardItem;
+  const showWf = (b: EditorialBoard & { truncated?: boolean }, filters: { state?: string; collection?: string; locale?: string; assignee?: "me" } = {}) =>
+    render(<WritersBoard board={b} editorBase="/d/website/content/gaiada/site-1" authors={{ u1: "Ayu" }} filters={filters} filterAction="/d/website/writers/gaiada/site-1" peopleHref="/p" workflow={wf} />);
+
+  it("has the Board and Calendar tabs, with Board current", () => {
+    showWf(board([wcard("a", "draft")]));
+    expect(screen.getByTestId("tab-board").getAttribute("aria-current")).toBe("page");
+    expect(screen.getByTestId("tab-calendar").getAttribute("href")).toBe(wf.calendarHref);
+  });
+
+  it("a plain board has no tabs (nothing changes for the old caller)", () => {
+    show(board([card("a", "draft")]));
+    expect(screen.queryByTestId("workflow-nav")).toBeNull();
+    expect(screen.queryByLabelText("Language")).toBeNull();
+  });
+
+  it("a card shows the linked brief, the pending publish request, the due date and the planned date", () => {
+    showWf(board([wcard("a", "approved", {
+      brief: { id: "b1", topic: "Villa guide", status: "draft", assigneeId: "u1" }, briefRef: "b1",
+      requests: [{ approvalId: "r1", command: "content.schedule", status: "pending", publishAt: "2026-10-25T09:00:00.000Z", unpublishAt: null, createdAt: "2026-10-01T00:00:00.000Z", requestedByMe: false }],
+    }, { dueAt: "2026-10-10T00:00:00.000Z", plannedPublishAt: "2026-10-25T00:00:00.000Z" })]));
+    const c = within(screen.getByTestId("col-approved"));
+    expect(c.getByTestId("card-brief").getAttribute("href")).toBe("/d/website/writers/briefs/gaiada/site-1/b1");
+    expect(c.getByTestId("card-request").textContent).toBe("Publish request pending for 25 Oct");
+    expect(c.getByTestId("card-planned").textContent).toBe("Planned for 25 Oct");
+    expect(c.getByText(/Due /)).toBeTruthy();
+  });
+
+  it("a brief the caller can't read and one that can't be found are said in words", () => {
+    showWf(board([wcard("a", "draft", { briefRef: "b1", briefHidden: true }), wcard("b", "draft", { briefRef: "b2" })]));
+    expect(screen.getByTestId("card-brief-hidden").textContent).toMatch(/can.t read it/);
+    expect(screen.getByTestId("card-brief-missing").textContent).toMatch(/could not be found/);
+  });
+
+  it("filters: collection, language and 'assigned to me', with the current values selected", () => {
+    showWf(board([wcard("a", "draft")]), { collection: "service", locale: "id", assignee: "me" });
+    expect((screen.getByLabelText("Collection") as HTMLSelectElement).value).toBe("service");
+    expect((screen.getByLabelText("Language") as HTMLSelectElement).value).toBe("id");
+    expect((screen.getByLabelText("Assigned to me") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("link", { name: "Clear" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeTruthy();
+  });
+
+  it("a filtered, empty board says the filters matched nothing", () => {
+    showWf(board([]), { assignee: "me" });
+    expect(screen.getByText("No items match these filters.")).toBeTruthy();
+  });
+
+  it("a truncated read says items may be missing", () => {
+    showWf(board([wcard("a", "draft")], {}) as EditorialBoard & { truncated?: boolean });
+    expect(screen.queryByTestId("board-truncated")).toBeNull();
+    cleanup();
+    showWf({ ...board([wcard("a", "draft")]), truncated: true });
+    expect(screen.getByTestId("board-truncated").textContent).toMatch(/Some items may be missing/);
+  });
+});
