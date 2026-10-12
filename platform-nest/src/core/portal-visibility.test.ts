@@ -75,8 +75,11 @@ const SITES: Site[] = [
             AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
             AND ($2::uuid[] IS NULL OR r.project_id = ANY($2::uuid[]))`,
     now: `${runInPortalScope("r", S12)} AND ${gateClientVisible("g")} AND g.status = 'pending'` },
-  { site: "workspace finance invoices",
-    old: `i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'`,
+  // PV3-02d (intentional change, here and in every invoice entry below): an `approved` invoice (the internal
+  // maker/checker step before it is sent) is hidden as well as a `draft`. `old` is the NEW literal shape; it
+  // was `... AND i.status <> 'draft'`.
+  { site: "workspace finance invoices (not draft, not approved — PV3-02d)",
+    old: `i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
     now: invoiceInPortalScope("i", { clients: 1 }) },
   { site: "workspace finance payments lateral (detail context)",
     old: `pp.invoice_id = inv.id AND pp.deleted_at IS NULL`,
@@ -106,7 +109,7 @@ const SITES: Site[] = [
   // (`JOIN invoices pi ON pi.id = pp.invoice_id`), so a payment on a deleted or draft invoice is absent.
   // `old` is the NEW literal shape; it was `pp.client_id = ANY($1) AND pp.deleted_at IS NULL AND pp.status = 'confirmed'`.
   { site: "workspace timeline payments (timeline context, through a visible invoice — PV3-02c)",
-    old: `pp.deleted_at IS NULL AND pp.status = 'confirmed' AND pi.client_id = ANY($1::uuid[]) AND pi.deleted_at IS NULL AND pi.status <> 'draft'`,
+    old: `pp.deleted_at IS NULL AND pp.status = 'confirmed' AND pi.client_id = ANY($1::uuid[]) AND pi.deleted_at IS NULL AND pi.status NOT IN ('draft','approved')`,
     now: `${invoicePaymentClientVisible("pp", "timeline")} AND ${invoiceInPortalScope("pi", { clients: 1 })}` },
 
   // ── portal.controller.ts ──
@@ -147,7 +150,7 @@ const SITES: Site[] = [
     old: `pp.invoice_id = $1 AND pp.deleted_at IS NULL`,
     now: `pp.invoice_id = $1 AND ${invoicePaymentClientVisible("pp", "detail")}` },
   { site: "commerce ownedInvoice",
-    old: `i.id = $1 AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'`,
+    old: `i.id = $1 AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
     now: `i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}` },
   { site: "commerce ownedContract / ownsEntity.contract",
     old: `k.id = $1 AND k.client_id = ANY($2::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft'
@@ -167,7 +170,7 @@ const SITES: Site[] = [
   // pp.invoice_id`), so a payment on a deleted or draft invoice has no receipt. `old` is the NEW literal shape.
   { site: "commerce ownsEntity.invoice_payment (receipt download, through a visible invoice — PV3-02c)",
     old: `pp.id = $1 AND pp.deleted_at IS NULL
-                          AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'`,
+                          AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
     now: `pp.id = $1 AND ${invoicePaymentClientVisible("pp", "detail")} AND ${invoiceInPortalScope("i", { clients: 2 })}` },
 
   // ── mail/thread.controller.ts (MAIL-33 portal mail threads, PV3-02b) ──
@@ -270,7 +273,7 @@ describe("PV3-02 builder contract", () => {
     expect(contractInPortalScope("k", { clients: 7, projects: 9 })).toBe(
       `k.client_id = ANY($7::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft' AND ($9::uuid[] IS NULL OR k.project_id = ANY($9::uuid[]) OR k.project_id IS NULL)`,
     );
-    expect(invoiceInPortalScope("x", { clients: 4 })).toBe(`x.client_id = ANY($4::uuid[]) AND x.deleted_at IS NULL AND x.status <> 'draft'`);
+    expect(invoiceInPortalScope("x", { clients: 4 })).toBe(`x.client_id = ANY($4::uuid[]) AND x.deleted_at IS NULL AND x.status NOT IN ('draft','approved')`);
   });
 
   it("row-state builders bind NO parameters (so the staff side can reuse them, PV3-07)", () => {
@@ -283,11 +286,11 @@ describe("PV3-02 builder contract", () => {
     for (const sql of rowState) expect(sql).not.toMatch(/\$\d/);
   });
 
-  it("encodes the hidden report stage, client-side gates, non-draft money, and the two payment contexts", () => {
+  it("encodes the hidden report stage, client-side gates, non-draft contracts, invoices not draft/approved, and the two payment contexts", () => {
     expect(runStageClientVisible("s")).toBe(`s.track <> 'report'`);
     expect(gateClientVisible("g")).toBe(`g.actor_side = 'client' AND g.deleted_at IS NULL`);
     expect(contractClientVisible("k")).toBe(`k.deleted_at IS NULL AND k.status <> 'draft'`);
-    expect(invoiceClientVisible("i")).toBe(`i.deleted_at IS NULL AND i.status <> 'draft'`);
+    expect(invoiceClientVisible("i")).toBe(`i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`);
     expect(invoicePaymentClientVisible("pp", "detail")).toBe(`pp.deleted_at IS NULL`);
     expect(invoicePaymentClientVisible("pp", "timeline")).toBe(`pp.deleted_at IS NULL AND pp.status = 'confirmed'`);
     expect(postReviewClientVisible("r")).toBe(`TRUE`);
@@ -360,7 +363,9 @@ function importsPortalScope(src: string): boolean {
 
 /** The old inline literals. Each one now has exactly one home in portal-visibility.ts. */
 const FORBIDDEN: Array<{ name: string; re: RegExp }> = [
-  { name: "draft exclusion (contracts, invoices)", re: /status\s*<>\s*'draft'/ },
+  { name: "draft exclusion (contracts)", re: /status\s*<>\s*'draft'/ },
+  // PV3-02d: invoices are hidden while `draft` OR `approved`, written as a NOT IN list.
+  { name: "unissued-invoice exclusion (invoices)", re: /status\s+NOT\s+IN\s*\(\s*'draft'/ },
   { name: "client-side gate", re: /actor_side\s*=\s*'client'/ },
   { name: "hidden report stage", re: /track\s*<>\s*'report'/ },
   { name: "revoked-contact exclusion", re: /status\s*<>\s*'revoked'/ },
@@ -412,7 +417,7 @@ describe("PV3-02 guard — portal-facing files carry no inline row-visibility li
 
   it("the forbidden patterns are live: each matches the predicate that now owns it", () => {
     const own = [
-      contractClientVisible("k"), gateClientVisible("g"), runStageClientVisible("s"),
+      contractClientVisible("k"), invoiceClientVisible("i"), gateClientVisible("g"), runStageClientVisible("s"),
       clientContactClientVisible("cc"), PROJECT_SCOPE,
     ].join("\n");
     for (const f of FORBIDDEN) expect(own).toMatch(f.re);

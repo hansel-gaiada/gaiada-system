@@ -8,6 +8,7 @@
 //   2. ownsEntity.deliverable used the project's reach without `p.deleted_at IS NULL`, so a deleted project's
 //      deliverable file stayed downloadable. Teeth: switch it back to `projectReach("p", ...)` and the
 //      deleted-project download returns 200.
+//   4. PV3-02d: an `approved` invoice (internal maker/checker step before send) is not shown to the client.
 //   3. The timeline's payments and the receipt download reached a payment by its own client_id and never
 //      looked at the parent invoice. Teeth: put the old `invoicePaymentInPortalScope(...)` back in either
 //      place and a payment on a deleted invoice shows / downloads again.
@@ -206,6 +207,34 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
       await withTenants([co], (c) => c.query(`UPDATE projects SET deleted_at = now() WHERE id = $1`, [projectGone]));
       expect((await download(goneFile)).statusCode).toBe(404);
       expect((await download(liveFile)).statusCode).toBe(200);
+    });
+  });
+
+  // ── 4. an approved-but-unsent invoice is not shown (PV3-02d) ────────────────────────────────────────
+  // `approved` is the internal maker/checker step BEFORE the invoice is sent. Teeth: put `<> 'draft'` back
+  // in `invoiceClientVisible` (portal-visibility.ts) and the approved invoice appears in the list.
+  describe("an approved (not yet sent) invoice is hidden from the client", () => {
+    it("is absent from the list, timeline and finance, its detail is 404, and its payment has no receipt; a sent invoice shows", async () => {
+      const approved = await addInvoice({ status: "approved", dayOffset: 120 });
+      const sent = await addInvoice({ status: "sent", dayOffset: 160 });
+      const approvedPay = await addPayment(approved);
+      const approvedReceipt = await addFile("invoice_payment", approvedPay, "approved-receipt.txt");
+
+      const list = await app.inject({ method: "GET", url: `/api/${co}/portal/invoices`, headers: asUser(signerA) });
+      expect(list.statusCode).toBe(200);
+      const ids = (list.json() as Array<{ id: string }>).map((r) => r.id);
+      expect(ids).toContain(sent);
+      expect(ids).not.toContain(approved);
+
+      expect((await app.inject({ method: "GET", url: `/api/${co}/portal/invoices/${sent}`, headers: asUser(signerA) })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: `/api/${co}/portal/invoices/${approved}`, headers: asUser(signerA) })).statusCode).toBe(404);
+
+      const timeline = await app.inject({ method: "GET", url: `/api/${co}/portal/timeline?limit=400`, headers: asUser(signerA) });
+      const entries = (timeline.json() as Array<{ kind: string; id: string }>);
+      expect(entries.some((e) => e.kind === "invoice" && e.id === sent)).toBe(true);
+      expect(entries.some((e) => e.id === approved || e.id === approvedPay)).toBe(false);
+
+      expect((await app.inject({ method: "GET", url: `/api/${co}/portal/files/${approvedReceipt}`, headers: asUser(signerA) })).statusCode).toBe(404);
     });
   });
 
