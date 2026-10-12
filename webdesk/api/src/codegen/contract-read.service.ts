@@ -18,6 +18,43 @@ import type { ContractReadResponse, LatestContractPointer } from "./contract-man
 /** Exactly 64 lowercase hex characters (a sha256 digest as `createHash(...).digest("hex")` writes it). */
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 
+/** M6-P4j (WSK-D81) -- the five artifacts `readArtifact` serves over the control channel, named as the
+ *  ERP asks for them (the route's `:artifact` segment). `openapi` is the storage layer's `openapiJson`. */
+export const CONTRACT_ARTIFACT_NAMES = ["openapi", "sdkTs", "sdkPhp", "contractMd", "blockLibrary"] as const;
+export type ContractArtifactName = (typeof CONTRACT_ARTIFACT_NAMES)[number];
+
+export function isContractArtifactName(value: string): value is ContractArtifactName {
+  return (CONTRACT_ARTIFACT_NAMES as readonly string[]).includes(value);
+}
+
+/** The largest artifact the control channel will carry (the tgz is the big one, a few MiB today). */
+export const MAX_CONTRACT_ARTIFACT_BYTES = 25 * 1024 * 1024;
+
+/** An artifact exists but is over `MAX_CONTRACT_ARTIFACT_BYTES`; the controller maps it to a 5xx. */
+export class ContractArtifactTooLargeError extends Error {
+  constructor(readonly artifact: ContractArtifactName, readonly bytes: number) {
+    super(`contract artifact '${artifact}' is ${bytes} bytes, over the ${MAX_CONTRACT_ARTIFACT_BYTES}-byte control-channel cap`);
+    this.name = "ContractArtifactTooLargeError";
+  }
+}
+
+export interface ContractArtifactBody {
+  body: Buffer;
+  contentType: string;
+}
+
+const ARTIFACT_CONTENT_TYPES: Record<ContractArtifactName, string> = {
+  openapi: "application/json",
+  sdkTs: "application/octet-stream",
+  sdkPhp: "application/octet-stream",
+  contractMd: "text/markdown; charset=utf-8",
+  blockLibrary: "application/gzip",
+};
+
+/** A contract version is plain semver (`1.0.0`, `2.1.0-rc.1`). Anything else cannot name a stored version and is
+ *  never interpolated into an object key. */
+const CONTRACT_VERSION_RE = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,64})?$/;
+
 @Injectable()
 export class ContractReadService {
   private readonly logger = new Logger(ContractReadService.name);
@@ -100,5 +137,39 @@ export class ContractReadService {
       this.logger.error(`could not presign artifact URLs for tenant '${tenantSlug}' contract ${pointer.contractVersion}: ${String(err)}`);
       return null;
     }
+  }
+
+  /** M6-P4j (WSK-D81) -- the raw bytes of one artifact of one stored contract version: how the ERP gets them, since
+   *  the presigned URLs `readLatest` returns name this estate's internal object store and cross no boundary.
+   *  Resolves the key exactly as `readLatest` does (`artifactKey`; the block library's key from the pointer, which
+   *  only describes the latest version, so an older version has none).
+   *
+   *  `null` when the version is not a stored version of THIS tenant, or the artifact is absent for it (sdkPhp and
+   *  blockLibrary legitimately are for older generations). Throws `ContractArtifactTooLargeError` over the cap;
+   *  a storage failure propagates (unlike `readLatest` there is no honest "nothing to serve" reading of it). */
+  async readArtifact(tenantSlug: string, contractVersion: string, artifact: ContractArtifactName): Promise<ContractArtifactBody | null> {
+    if (!CONTRACT_VERSION_RE.test(contractVersion)) return null;
+    const bucket = storageConfig.bucketName("artifacts");
+
+    let key: string | undefined;
+    if (artifact === "blockLibrary") {
+      const pointerKey = latestPointerKey(tenantSlug);
+      if (!(await this.storage.headObject(bucket, pointerKey))) return null;
+      const pointer = JSON.parse((await this.storage.getObject(bucket, pointerKey)).body.toString("utf8")) as LatestContractPointer;
+      if (pointer.contractVersion !== contractVersion) return null;
+      key = pointer.artifactKeys.blockLibrary as string | undefined;
+    } else {
+      key = artifactKey(tenantSlug, contractVersion, artifact === "openapi" ? "openapiJson" : artifact);
+    }
+    if (!key) return null;
+
+    const head = await this.storage.headObject(bucket, key);
+    if (!head) return null;
+    if (typeof head.contentLength === "number" && head.contentLength > MAX_CONTRACT_ARTIFACT_BYTES) {
+      throw new ContractArtifactTooLargeError(artifact, head.contentLength);
+    }
+    const obj = await this.storage.getObject(bucket, key);
+    if (obj.body.length > MAX_CONTRACT_ARTIFACT_BYTES) throw new ContractArtifactTooLargeError(artifact, obj.body.length);
+    return { body: obj.body, contentType: ARTIFACT_CONTENT_TYPES[artifact] };
   }
 }

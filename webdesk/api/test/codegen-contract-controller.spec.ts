@@ -93,6 +93,7 @@ describe("GET /control/v1/tenants/:slug/contract (WSK-15 replacing WSK-21's 501)
   let generatedSlug: string;
   let generatedTenantId: string;
   let ungeneratedSlug: string;
+  let built: Awaited<ReturnType<typeof buildContractArtifacts>>;
 
   beforeAll(async () => {
     app = await buildControlApp();
@@ -100,7 +101,7 @@ describe("GET /control/v1/tenants/:slug/contract (WSK-15 replacing WSK-21's 501)
     generatedSlug = `wsk15-ctrl-gen-${randomUUID().slice(0, 8)}`;
     generatedTenantId = await seedTenantWithComposition(generatedSlug);
     const fetched = await fetchTenantComposition(appPool, generatedSlug);
-    const built = await buildContractArtifacts({
+    built = await buildContractArtifacts({
       tenantSlug: generatedSlug,
       defaultLocale: fetched!.defaultLocale,
       locales: fetched!.locales,
@@ -185,5 +186,49 @@ describe("GET /control/v1/tenants/:slug/contract (WSK-15 replacing WSK-21's 501)
     await app.inject({ method: "GET", url: `/control/v1/tenants/${generatedSlug}/contract`, headers: headers(["webdesk:read"]) });
     const after = await withTenant(generatedTenantId, (c) => c.query(`SELECT count(*)::int AS n FROM audit_entries WHERE action = 'control.contract.read'`));
     expect(after.rows[0].n).toBe(before.rows[0].n + 1);
+  });
+
+  // M6-P4j (WSK-D81) -- the artifact BYTES over the control channel (no presigned URL, no object-store host involved).
+  describe("GET /control/v1/tenants/:slug/contract/:contractVersion/artifacts/:artifact", () => {
+    const artifactUrl = (slug: string, version: string, artifact: string) => `/control/v1/tenants/${slug}/contract/${version}/artifacts/${artifact}`;
+
+    it.each([
+      ["openapi", () => built.openapiJson, "application/json"],
+      ["sdkTs", () => built.sdkTs, "application/octet-stream"],
+      ["sdkPhp", () => built.sdkPhp, "application/octet-stream"],
+      ["contractMd", () => built.contractMd, "text/markdown"],
+    ])("serves the stored %s bytes exactly as generated", async (artifact, expected, contentType) => {
+      const res = await app.inject({ method: "GET", url: artifactUrl(generatedSlug, "1.0.0", artifact), headers: headers(["webdesk:read"]) });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["content-type"]).toContain(contentType);
+      expect(res.rawPayload.equals(Buffer.from(expected(), "utf8"))).toBe(true);
+      expect(res.headers["content-length"]).toBe(String(res.rawPayload.length));
+    });
+
+    it("404s the block library of a tenant generated without one (an absent optional artifact)", async () => {
+      const res = await app.inject({ method: "GET", url: artifactUrl(generatedSlug, "1.0.0", "blockLibrary"), headers: headers(["webdesk:read"]) });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().type).toBe("https://webdesk.gaiada.online/errors/contract-artifact-not-found");
+    });
+
+    it("400s an unknown artifact name and 404s an unknown version, an ungenerated tenant and an unknown tenant", async () => {
+      const get = (url: string) => app.inject({ method: "GET", url, headers: headers(["webdesk:read"]) });
+      expect((await get(artifactUrl(generatedSlug, "1.0.0", "nope"))).statusCode).toBe(400);
+      expect((await get(artifactUrl(generatedSlug, "9.9.9", "openapi"))).statusCode).toBe(404);
+      expect((await get(artifactUrl(ungeneratedSlug, "1.0.0", "openapi"))).statusCode).toBe(404);
+      expect((await get(artifactUrl(`no-such-tenant-${randomUUID()}`, "1.0.0", "openapi"))).statusCode).toBe(404);
+    });
+
+    it("is gated like contract.read: 403 without webdesk:read, 401 with no principal", async () => {
+      expect((await app.inject({ method: "GET", url: artifactUrl(generatedSlug, "1.0.0", "openapi"), headers: headers(["webdesk:operate"]) })).statusCode).toBe(403);
+      expect((await app.inject({ method: "GET", url: artifactUrl(generatedSlug, "1.0.0", "openapi") })).statusCode).toBe(401);
+    });
+
+    it("writes one 'control.contract.read' audit row per call", async () => {
+      const count = () => withTenant(generatedTenantId, (c) => c.query(`SELECT count(*)::int AS n FROM audit_entries WHERE action = 'control.contract.read'`));
+      const before = await count();
+      await app.inject({ method: "GET", url: artifactUrl(generatedSlug, "1.0.0", "sdkTs"), headers: headers(["webdesk:read"]) });
+      expect((await count()).rows[0].n).toBe(before.rows[0].n + 1);
+    });
   });
 });
