@@ -100,6 +100,8 @@ export function IssueCreditNoteForm({
                 description: String(fd.get("description")).trim(),
                 amount: Number(fd.get("amount") || 0),
                 creditAccountCode: String(fd.get("creditAccountCode")),
+                // PV5-04: a taxed line names its tax code; the server takes the rate from the code's effective-dated row.
+                taxCode: Number(fd.get("taxRate")) > 0 ? "PPN" : undefined,
                 taxRate: Number(fd.get("taxRate")) || null,
               }],
             });

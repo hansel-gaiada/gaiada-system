@@ -60,9 +60,10 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
             invoiceId={inv.id}
             status={inv.status}
             canApprove={canApprove}
-            canBill={canBill}
+            canBill={canBill || holdsApproveCapability}
             isCreator={isCreator}
             legacyUnknownCreator={legacyUnknownCreator}
+            invoiceNo={inv.invoiceNo ?? null}
           />
         )}
       />
@@ -70,7 +71,13 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
         <Card title="Summary">
           <DescriptionList items={[
             { label: "Client", value: inv.clientName },
-            { label: "Status", value: <StatusBadge label={inv.status} /> },
+            // PV5-04: `sent` means issued through the ledger, so it reads "Issued".
+            { label: "Status", value: <StatusBadge label={inv.status === "sent" ? "Issued" : inv.status} /> },
+            ...(inv.invoiceNo ? [
+              { label: "Invoice no.", value: inv.invoiceNo },
+              { label: "Issued", value: formatDate(inv.issueDate ?? null) },
+              { label: "Due", value: formatDate(inv.dueDate ?? null) },
+            ] : []),
             { label: "Period", value: inv.periodStart ? `${formatDate(inv.periodStart)} – ${formatDate(inv.periodEnd)}` : "—" },
             { label: "Total", value: money(inv.total, inv.currency) },
           ]} />

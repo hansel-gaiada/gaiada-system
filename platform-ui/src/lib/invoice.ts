@@ -5,7 +5,10 @@ import "server-only";
 //   GET  /api/:t/invoices                 -> Invoice[]
 //   GET  /api/:t/invoices/:id             -> Invoice
 //   POST /api/:t/invoices  {clientId,periodStart,periodEnd,rate,currency} -> { id }
-//   PATCH/api/:t/invoices/:id  {status}   -> { ok }
+//   PATCH/api/:t/invoices/:id  {status}   -> { ok }        draft|void only (PV5-04; an ISSUED invoice: 409)
+//   GET  /api/:t/invoices/:id/issue-readiness -> { ready, issued, invoiceNo, blockers: [{code,message}] }
+//   POST /api/:t/invoices/:id/issue       -> the issued invoice (number, dates, totals), or 409 { reason:
+//                                            "issue_blocked", blockers } with nothing written (PV5-04, PV-D7)
 // The backend computes line items from billable time in the period (the demo
 // store approximates this). Finance capability (company.manage) only.
 //
@@ -41,7 +44,20 @@ export interface Invoice {
    *  this row's client can read it in the portal; a project-scoped contact may see less. Optional because
    *  an older server omits it. Never derive it in the browser (BFF §22d). */
   clientVisible?: boolean;
+  /** PV5-04: the invoice of record. All null until the invoice is ISSUED (shown as "Issued"; status `sent`). Optional
+   *  because an older server omits them. */
+  invoiceNo?: string | null;
+  issuedAt?: string | null;
+  issueDate?: string | null;
+  dueDate?: string | null;
+  subtotal?: number | null;
+  taxTotal?: number | null;
+  taxCode?: string | null;
 }
+
+/** PV5-04: one reason an invoice cannot be issued yet (stable `code`, human `message`). */
+export interface IssueBlocker { code: string; message: string }
+export interface IssueReadiness { invoiceId: string; status: string; issued: boolean; invoiceNo: string | null; ready: boolean; blockers: IssueBlocker[] }
 
 async function skip<T>(p: Promise<T>, fallback: T): Promise<T> {
   try { return await p; } catch (e) {
@@ -57,8 +73,14 @@ export const getInvoice = (u: string, t: string, id: string) =>
   skip(platformFetch<Invoice | null>(`/api/${t}/invoices/${id}`, u), null);
 export const createInvoice = (u: string, t: string, body: { clientId: string; periodStart: string; periodEnd: string; rate: number; currency: string }) =>
   platformFetch<{ id: string }>(`/api/${t}/invoices`, u, { method: "POST", body: JSON.stringify(body) });
-export const setInvoiceStatus = (u: string, t: string, id: string, status: InvoiceStatus) =>
+// PV5-04: `draft` and `void` only. `sent` is reached by issueInvoice(), and `paid` follows from confirmed payments.
+export const setInvoiceStatus = (u: string, t: string, id: string, status: "draft" | "void") =>
   platformFetch<{ ok: true }>(`/api/${t}/invoices/${id}`, u, { method: "PATCH", body: JSON.stringify({ status }) });
+export const getIssueReadiness = (u: string, t: string, id: string) =>
+  skip(platformFetch<IssueReadiness | null>(`/api/${t}/invoices/${id}/issue-readiness`, u), null);
+// Left uncaught (no `skip`): the 409 carries the blocker list, which issueInvoiceAction turns into the list it shows.
+export const issueInvoice = (u: string, t: string, id: string) =>
+  platformFetch<{ id: string; invoiceNo: string; alreadyIssued: boolean }>(`/api/${t}/invoices/${id}/issue`, u, { method: "POST" });
 // IAM-GAP-01 — the maker/checker seam's own endpoint. NOT `setInvoiceStatus({status:"approved"})`:
 // the backend's PATCH deliberately rejects 'approved' as an input value (see invoice.controller.ts's
 // STATUSES set) — this is the ONLY door into 'approved'. No body; the server reads the resource's
