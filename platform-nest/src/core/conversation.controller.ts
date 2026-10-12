@@ -41,6 +41,7 @@ import {
   WITHIN_EDIT_WINDOW_SQL, applyEdit, applyRetract, assertEditable, createProjectThread, findOrCreateGeneralThread,
   insertMessage, isUuid, markRead, prepareAttachments, readMessages, unreadCountSql, validateBody, validateSubject,
 } from "./conversation-core";
+import { notifyDraftCreated, notifyStaffPosted } from "./conversation-notify";
 
 const THREAD_STATUSES = new Set(["open", "closed"]);
 const MAX_IDEMPOTENCY_KEY = 200;
@@ -226,6 +227,8 @@ export class ConversationController {
       return { threadId, messageId: msg.id, created, attachmentIds: msg.attachmentIds };
     });
     await writeActivity(tenantId, userId, "posted", "conversation", out.threadId, { messageId: out.messageId, via: "staff" });
+    // PV4-06: tell the in-scope contacts, AFTER the commit; best-effort, never throws.
+    await notifyStaffPosted(tenantId, userId, out.threadId);
     return out;
   }
 
@@ -253,6 +256,7 @@ export class ConversationController {
       return { id: msg.id, threadId, createdAt: msg.createdAt, attachmentIds: msg.attachmentIds, clientVisible: true };
     });
     await writeActivity(tenantId, userId, "posted", "conversation", threadId, { messageId: out.id, via: "staff" });
+    await notifyStaffPosted(tenantId, userId, threadId);
     return out;
   }
 
@@ -347,7 +351,7 @@ export class ConversationController {
     else if (typeof b.idempotencyKey === "string" && b.idempotencyKey.length <= MAX_IDEMPOTENCY_KEY) key = b.idempotencyKey;
     else throw new BadRequestException(`idempotencyKey must be a string of at most ${MAX_IDEMPOTENCY_KEY} characters`);
     const userId = req.principal.userId as string;
-    return withTenants([tenantId], async (c) => {
+    const out = await withTenants([tenantId], async (c) => {
       const t = await this.thread(c, threadId);
       if (t.status === "closed") throw new ConflictException("this conversation is closed — reopen it first");
       const id = newId();
@@ -372,6 +376,9 @@ export class ConversationController {
       });
       return { id, threadId, status: "pending", replayed: false, clientVisible: false };
     });
+    // PV4-06: a NEW draft tells the staff recipients one is waiting (a replay of the same key does not repeat it).
+    if (!out.replayed) await notifyDraftCreated(tenantId, userId, threadId);
+    return out;
   }
 
   /** Edit a pending draft's text (`draft`). A sent or discarded draft: 409. */
@@ -422,6 +429,7 @@ export class ConversationController {
       return { id: msg.id, threadId: d.thread_id, draftId, draftedBy: d.drafted_by, createdAt: msg.createdAt, clientVisible: true };
     });
     await writeActivity(tenantId, userId, "sent_draft", "conversation", out.threadId, { messageId: out.id, draftId, via: "staff" });
+    await notifyStaffPosted(tenantId, userId, out.threadId);
     return out;
   }
 
