@@ -100,8 +100,7 @@ CREATE TRIGGER trg_contracts_pv5_legacy_guard
 -- ── the enforcing CHECK (validated against every existing row) ───────────────────────────────────
 ALTER TABLE contracts
   ADD CONSTRAINT contracts_content_fixed_when_sent CHECK (
-    true -- TEETH: CHECK disabled
-    OR status = 'draft'
+    status = 'draft'
     OR (status = 'void' AND sent_at IS NULL)
     OR pre_pv5_legacy
     OR (content_sha256 IS NOT NULL AND content_fixed_at IS NOT NULL AND signature_tier IS NOT NULL)

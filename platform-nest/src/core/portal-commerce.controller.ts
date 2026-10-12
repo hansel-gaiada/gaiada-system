@@ -384,7 +384,7 @@ export class PortalCommerceController {
             reason: "content_hash_required",
           });
         }
-        if (false && echoed !== k.contentSha256) { // TEETH: comparison skipped
+        if (echoed !== k.contentSha256) {
           throw new ConflictException({
             message: "this agreement changed since you opened it; reload it and read it again before signing",
             reason: "content_changed",
