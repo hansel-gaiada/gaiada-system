@@ -192,6 +192,9 @@ export const webdevModule: ModuleContract = {
     "202610111443_iam_writers_room_roles.sql",
     // WSK-60 (additive): the staging rebuild ledger + the stale-staging marker (third wall).
     "202610101730_webdev_site_builds.sql",
+    // M6-P4c (additive): the provisioning completion state machine's columns (§08: registry row,
+    // WebDesk tenant, pinned contract snapshot) on webdev_provisioned_sites.
+    "202610120425_webdev_provisioned_sites_completion.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
@@ -354,7 +357,7 @@ export const webdevModule: ModuleContract = {
         "Read the bytes of ONE stored artifact of a mirrored contract snapshot, base64-encoded with "
         + "its sha256, content type and size. The file is resolved from the snapshot's own pointer "
         + "(never a caller-supplied file id) and re-hashed against the mirror-time hash; a mismatch is "
-        + "refused as `artifact_hash_mismatch`, a null pointer (e.g. sdkPhp before P6) as `artifact_absent`.",
+        + "refused as `artifact_hash_mismatch`, a null pointer (e.g. sdkPhp before P6, or blockLibrary on an older snapshot) as `artifact_absent`.",
       minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact",
@@ -363,9 +366,47 @@ export const webdevModule: ModuleContract = {
         properties: {
           tenantId: { type: "string", description: "Company id (route scope)." },
           snapshotId: { type: "string", description: "webdev_contract_snapshots.id." },
-          artifact: { type: "string", enum: ["openapi", "sdkTs", "sdkPhp", "contractMd"], description: "Which stored artifact to read." },
+          artifact: { type: "string", enum: ["openapi", "sdkTs", "sdkPhp", "contractMd", "blockLibrary"], description: "Which stored artifact to read. blockLibrary is the @gaiada/webdesk-blocks tarball (gzip), absent on snapshots mirrored before it existed." },
         },
         required: ["tenantId", "snapshotId", "artifact"],
+      },
+    },
+    // M6-P4e (additive): the delivery flow's read of a run's provisioned site, so the code stage can wait
+    // for §08's completion (state `complete`, a pinned contract snapshot) before it calls code.scaffold.
+    // Plain reads (`write`/`impact` omitted): no D14 suspension. The platform enforces Cerbos
+    // `webdev_provisioned_site` `read`. The runId filter rides in the pathTemplate query string (TR-28).
+    {
+      name: "webdev.provisionedSites.list",
+      description:
+        "List the provisioned sites of ONE pipeline run (id, slug, framework, repo, status). Read-only; "
+        + "an empty array means nothing has been provisioned for that run yet.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/provisioned-sites?runId=:runId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          runId: { type: "string", description: "Pipeline run the site was provisioned for." },
+        },
+        required: ["tenantId", "runId"],
+      },
+    },
+    {
+      name: "webdev.provisionedSites.get",
+      description:
+        "Read ONE provisioned site plus its `completion` object (state, next step, WebDesk tenant slug, "
+        + "pinned contractSnapshotId, error). Read-only; unknown or other-company ids are 404.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/provisioned-sites/:siteId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          siteId: { type: "string", description: "webdev_provisioned_sites.id." },
+        },
+        required: ["tenantId", "siteId"],
       },
     },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -496,6 +537,32 @@ export const webdevModule: ModuleContract = {
           kind: { type: "string", enum: ["astro", "node", "wp"] }, name: { type: "string" },
         },
         required: ["tenantId", "tenantSlug", "kind", "name"],
+      },
+    },
+    // M6-P4c: WebDesk `contract.regenerate` (M6-P4r-b's re-run / backfill command). MEDIUM, matching WebDesk's
+    // own class (command-types.ts: medium / webdesk:operate, no WS4): an attended human runs it; an unattended
+    // caller SUSPENDS into a D14 approval and is re-driven as itself on approval — registered in BOTH
+    // `core/approval-executables.ts` (registerWebdeskContractExecutableApprovals) AND resource_mcp_tool.yaml.
+    {
+      name: "webdesk.contract.regenerate",
+      description:
+        "Regenerate the WebDesk contract (OpenAPI, SDKs, CONTENT-CONTRACT.md, the block library pointer) for ONE of this "
+        + "company's WebDesk tenants (`slug`), or for EVERY active tenant of this company when `slug` is omitted (never "
+        + "another company's). Queues WebDesk's codegen; the new contract becomes `contracts/<slug>/latest.json`, which "
+        + "webdev.refreshContract then mirrors. Answers {scope, tenants:[{tenantSlug, outcome: queued|failed, replayed, "
+        + "enqueue?, error?}]}. MEDIUM write — WS4 for automation principals.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/control/contract/regenerate",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          slug: { type: "string", description: "WebDesk tenant slug. Omit to regenerate every active tenant of this company." },
+        },
+        required: ["tenantId"],
       },
     },
     {

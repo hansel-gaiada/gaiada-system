@@ -1,4 +1,4 @@
-// WSK-20 — file fragments shared by both site-kind templates. Every value here is a STRING the
+// WSK-20 — file fragments for the astro site-kind template (the node kind has its own, node-site.ts). Every value here is a STRING the
 // scaffolder composes; none of it is ever executed by this process (WSK-D6).
 import type { GeneratedFile } from "../page-composer";
 
@@ -55,12 +55,13 @@ export function tsconfig(): GeneratedFile {
 }
 
 /** The block library + generated SDK are both installed as FILES (OQ-6: "no registry infra") — a
- *  `file:` dependency pointing at the tarballs the git-writer vendors into the repo, never a registry
+ *  `file:` dependency pointing at what the git-writer vendors into the repo (the library as a tarball, the
+ *  SDK as a small types-only package directory, see git-writer.ts's `vendorFiles`), never a registry
  *  publish/fetch. `npm install` itself never runs here (WSK-D6) — this is what repo CI's OWN install
  *  step resolves. */
 export function packageJson(args: {
   name: string;
-  siteKind: "astro" | "node";
+  siteKind: "astro";
   blockLibraryVersion: string;
   astroVersion?: string;
 }): GeneratedFile {
@@ -79,15 +80,12 @@ export function packageJson(args: {
     dependencies: {
       astro: astroVersion,
       "@gaiada/webdesk-blocks": "file:./vendor/webdesk-blocks.tgz",
-      "@gaiada/webdesk-sdk": "file:./vendor/webdesk-sdk.tgz",
+      "@gaiada/webdesk-sdk": "file:./vendor/webdesk-sdk",
     },
     devDependencies: {
       vitest: "^2.1.5",
       typescript: "^5.6.3",
     },
   } as Record<string, unknown>;
-  if (args.siteKind === "node") {
-    (base.dependencies as Record<string, string>)["@astrojs/node"] = "^9.0.0";
-  }
   return { path: "package.json", content: JSON.stringify(base, null, 2) + "\n" };
 }

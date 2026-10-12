@@ -9,7 +9,8 @@
 import type pg from "pg";
 import { fetchTenantComposition, type FetchedTenantComposition } from "./fetch-composition.mts";
 import { buildContractArtifacts, type BuiltArtifacts } from "./build-artifacts.mts";
-import { readLatestPointer, publishArtifacts } from "./storage-io.mts";
+import { readLatestPointer, publishArtifacts, publishBlockLibrary } from "./storage-io.mts";
+import { readBakedBlockLibrary } from "./block-library.mts";
 import type { createGeneratorStorageAdapter } from "./storage-io.mts";
 import type { TenantContractSnapshot } from "../../../../delivery/vocabulary/breaking-change.ts";
 import type { LatestContractPointer } from "../contract-manifest.types.ts";
@@ -29,6 +30,13 @@ export async function generateTenantContract(
   const fetched = await fetchTenantComposition(pool, tenantSlug);
   if (!fetched) return null;
 
+  // M6-P4b0: the block library is the fifth artifact. Uploaded (or verified identical) BEFORE the pointer is
+  // written, so a pointer never names an object that is not there; a different sha256 under the same version
+  // throws here and fails the run loudly. No baked tarball (dev, tests): nothing is invented, the pointer simply
+  // has no blockLibrary key.
+  const baked = readBakedBlockLibrary();
+  const blockLibrary = baked ? await publishBlockLibrary(storage, baked) : null;
+
   const previousPointer = await readLatestPointer(storage, tenantSlug);
   const previous = previousPointer
     ? { version: previousPointer.contractVersion, snapshot: previousPointer.compositionSnapshot as TenantContractSnapshot }
@@ -40,8 +48,9 @@ export async function generateTenantContract(
     locales: fetched.locales,
     composition: fetched.composition,
     previous,
+    blockLibrary: blockLibrary?.ref,
   });
 
-  const pointer = await publishArtifacts(storage, tenantSlug, built);
+  const pointer = await publishArtifacts(storage, tenantSlug, built, blockLibrary);
   return { fetched, built, pointer };
 }

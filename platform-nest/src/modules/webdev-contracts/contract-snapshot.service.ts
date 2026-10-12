@@ -47,6 +47,20 @@ export interface RawArtifactSet {
   contractMd: Buffer;
 }
 
+/** M6-P4b0 — the block-renderer library tarball. Deliberately NOT a member of `RawArtifactSet` and NOT an input to
+ *  `computeContentHash`: a fifth key in the hashed manifest would change the content hash of every contract
+ *  version already on file, and a re-fetch of such a version would then trip the determinism tripwire. Its own
+ *  sha256 is recorded beside the manifest instead (`artifacts.hashes.blockLibrary`). */
+const BLOCK_LIBRARY_CONTENT_TYPE = "application/gzip";
+
+/** The mirror stores WebDesk's plain-text SDK files as what they are (fixed in M6-P4b0; before that they were
+ *  stored as `sdk.ts.tgz` / `sdk.php.tgz` with `application/gzip`, which they never were). Rows written before the
+ *  fix keep their old labels. */
+export const SDK_TS_FILENAME = "sdk.d.ts";
+export const SDK_TS_CONTENT_TYPE = "text/plain";
+export const SDK_PHP_FILENAME = "sdk.php";
+export const SDK_PHP_CONTENT_TYPE = "text/x-php";
+
 function sha256Hex(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
 }
@@ -175,6 +189,7 @@ export async function refreshContractSnapshot(args: RefreshArgs): Promise<Refres
     provider.downloadArtifact(meta.artifacts.contractMdUrl),
   ]);
   const sdkPhp = meta.artifacts.sdkPhpUrl ? await provider.downloadArtifact(meta.artifacts.sdkPhpUrl) : null;
+  const blockLibrary = meta.artifacts.blockLibraryUrl ? await provider.downloadArtifact(meta.artifacts.blockLibraryUrl) : null;
 
   const { manifest, contentHash } = computeContentHash({ sdkTs, sdkPhp, openapi, contractMd });
 
@@ -224,18 +239,25 @@ export async function refreshContractSnapshot(args: RefreshArgs): Promise<Refres
 
     // ── FRESH VERSION — persist. ──────────────────────────────────────────────────────────────
     const snapshotId = newId();
-    const sdkTsId = await storeArtifact(c, tenantId, snapshotId, "sdk.ts.tgz", "application/gzip", sdkTs, fetchedBy);
+    const sdkTsId = await storeArtifact(c, tenantId, snapshotId, SDK_TS_FILENAME, SDK_TS_CONTENT_TYPE, sdkTs, fetchedBy);
     const openapiId = await storeArtifact(c, tenantId, snapshotId, "openapi.v1.json", "application/json", openapi, fetchedBy);
     const contractMdId = await storeArtifact(c, tenantId, snapshotId, "CONTENT-CONTRACT.md", "text/markdown", contractMd, fetchedBy);
-    const sdkPhpId = sdkPhp ? await storeArtifact(c, tenantId, snapshotId, "sdk.php.tgz", "application/gzip", sdkPhp, fetchedBy) : null;
+    const sdkPhpId = sdkPhp ? await storeArtifact(c, tenantId, snapshotId, SDK_PHP_FILENAME, SDK_PHP_CONTENT_TYPE, sdkPhp, fetchedBy) : null;
+    // M6-P4b0 — the fifth artifact: `gaiada-webdesk-blocks-<version>.tgz`, named from the version WebDesk reported.
+    const blockLibraryId = blockLibrary
+      ? await storeArtifact(c, tenantId, snapshotId, `gaiada-webdesk-blocks-${/^[0-9A-Za-z.+-]{1,64}$/.test(meta.blockLibrary.version) ? meta.blockLibrary.version : "unknown"}.tgz`, BLOCK_LIBRARY_CONTENT_TYPE, blockLibrary, fetchedBy)
+      : null;
 
     const artifactsJson = {
       sdkTs: sdkTsId,
       sdkPhp: sdkPhpId, // null until P6 (D-10)
       openapi: openapiId,
       contractMd: contractMdId,
-      hashes: manifest,
-      blockLibrary: meta.blockLibrary,
+      // `hashes` is the contentHash manifest plus, for a snapshot that has one, the block library's own sha256.
+      // The extra key is added AFTER computeContentHash ran, so it never reaches the content hash.
+      hashes: blockLibrary ? { ...manifest, blockLibrary: sha256Hex(blockLibrary) } : manifest,
+      blockLibrary: meta.blockLibrary, // the {package, version, range} ref
+      blockLibraryFile: blockLibraryId, // M6-P4b0 — the files row of the tarball; null for a snapshot with none
     };
 
     const ins = await c.query<SnapshotRow>(
@@ -291,8 +313,19 @@ export async function getContractSnapshot(tenantId: string, snapshotId: string):
   return res.rows[0] ? toSnapshotDto(res.rows[0]) : null;
 }
 
-export const SNAPSHOT_ARTIFACT_KEYS = ["openapi", "sdkTs", "sdkPhp", "contractMd"] as const;
+export const SNAPSHOT_ARTIFACT_KEYS = ["openapi", "sdkTs", "sdkPhp", "contractMd", "blockLibrary"] as const;
 export type SnapshotArtifactKey = (typeof SNAPSHOT_ARTIFACT_KEYS)[number];
+
+/** Which field of the snapshot's `artifacts` JSON holds the files-row id for an artifact. Four of them are named
+ *  after the artifact; `artifacts.blockLibrary` is already taken by the {package, version, range} ref (WSK-19), so
+ *  the tarball's file id lives in `artifacts.blockLibraryFile`. The sha256 is `artifacts.hashes[<artifact>]` for all five. */
+const POINTER_FIELD: Record<SnapshotArtifactKey, string> = {
+  openapi: "openapi",
+  sdkTs: "sdkTs",
+  sdkPhp: "sdkPhp",
+  contractMd: "contractMd",
+  blockLibrary: "blockLibraryFile",
+};
 
 export interface SnapshotArtifactDto {
   snapshotId: string;
@@ -331,7 +364,7 @@ export async function getContractSnapshotArtifact(
     );
     const row = snap.rows[0];
     if (!row) return { kind: "none" as const };
-    const fileId = row.artifacts?.[artifact];
+    const fileId = row.artifacts?.[POINTER_FIELD[artifact]];
     if (typeof fileId !== "string" || !fileId) return { kind: "absent" as const };
     const f = await c.query<{ id: string; content_type: string; byte_size: string | number; storage_key: string }>(
       `SELECT id, content_type, byte_size, storage_key FROM files

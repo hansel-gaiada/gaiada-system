@@ -136,6 +136,8 @@ describe("GET /control/v1/tenants/:slug/contract (WSK-15 replacing WSK-21's 501)
     expect(body.artifacts.openapiUrl).toContain(`contracts/${generatedSlug}/1.0.0/openapi.v1.json`);
     expect(body.artifacts.sdkTsUrl).toContain(`contracts/${generatedSlug}/1.0.0/sdk.d.ts`);
     expect(body.artifacts.contractMdUrl).toContain(`contracts/${generatedSlug}/1.0.0/CONTENT-CONTRACT.md`);
+    // M6-P4b0 — published here WITHOUT a baked block library, so the fifth artifact is honestly absent.
+    expect(body.artifacts.blockLibraryUrl).toBeNull();
 
     // The pre-signed URL is real and fetchable — proves the endpoint is not just echoing a claim.
     const fetched = await fetch(body.artifacts.openapiUrl);

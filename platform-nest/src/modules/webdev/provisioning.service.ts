@@ -70,6 +70,13 @@
 // idempotency key echoed by provision — a provision-side change (PRV-08/09), not something this side
 // can invent. See the report accompanying this ticket.
 //
+// ═══ M6-P4c: WHAT HAPPENS AFTER THE REPO EXISTS ══════════════════════════════════════════════════
+// This file still owns the REPO step only, unchanged. Once a row reaches `provisioned`/`live` with a
+// `repo_url`, `provision-completion.ts` (the state machine, its comment block names every transition) and
+// `provision-completion.service.ts` (its Postgres + WebDesk adapters) finish §08: the `webdev_sites` row,
+// the WebDesk tenant and the pinned contract snapshot, each idempotent and resumed by the next reconcile.
+// They take THIS file's lock (`takeProvisionLock`) and never touch the repo-step columns.
+//
 // ═══ CREDENTIALS ════════════════════════════════════════════════════════════════════════════════
 // Nothing here reads, stores, logs, or returns a credential. The provision service password lives in
 // `config.provision` and is touched only by `provision-http.ts`; the GitHub PAT and the fleet deploy
@@ -206,7 +213,7 @@ export const SUPPORTED_FRAMEWORKS = new Set(["vite", "nextjs", "astro", "node", 
  *  in `stack` instead of `framework`), mapped to the canonical `framework` value it now SELECTS.
  *  Deliberately NOT `Record<string, CanonicalFramework>` typed as exhaustive — this is a lookup
  *  table over untrusted input, not a closed enum. */
-const STACK_TO_FRAMEWORK: Readonly<Record<string, CanonicalFramework>> = {
+export const STACK_TO_FRAMEWORK: Readonly<Record<string, CanonicalFramework>> = {
   a: "astro", static: "astro", vite: "vite", astro: "astro",
   b: "wp", wp: "wp", wordpress: "wp",
   c: "node", fullstack: "node", "full-stack": "node", node: "node", next: "nextjs", nextjs: "nextjs",
@@ -490,7 +497,8 @@ async function performEgress(
 }
 
 /** Take the ONE lock for this operation (see `WEBDEV_PROVISION_LOCK_NS`). Must be the first statement
- *  after BEGIN whose result anything depends on. */
+ *  after BEGIN whose result anything depends on. M6-P4c: exported as `takeProvisionLock` so the
+ *  completion steps (provision-completion.service.ts) serialize on the SAME lock as reconcile and poll. */
 async function takeLock(c: PoolClient, runId: string | null, slug: string): Promise<void> {
   if (runId) {
     await lockPipelineRun(c, runId);
@@ -871,6 +879,8 @@ export async function listProvisionedSites(tenantId: string, runId?: string): Pr
   );
   return rows.rows.map(toSiteDto);
 }
+
+export { takeLock as takeProvisionLock };
 
 export async function getProvisionedSite(tenantId: string, id: string): Promise<SiteDto | null> {
   const row = await withTenants([tenantId], (c) => readSite(c, id), { modules: ["webdev"] });

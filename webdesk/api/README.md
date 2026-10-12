@@ -1233,7 +1233,12 @@ WSK-21's 501) now calls `ContractReadService.readLatest(slug)`
 (`control.contract.read`, same as every other command):
 
 - **200** — design §06's exact shape: `{ version, vocabularyVersion, blockLibrary, artifacts:
-  { sdkTsUrl, sdkPhpUrl: null, openapiUrl, contractMdUrl }, contentHash, generatedAt }`.
+  { sdkTsUrl, sdkPhpUrl: null, openapiUrl, contractMdUrl, blockLibraryUrl }, contentHash, generatedAt }`.
+  M6-P4b0 added `blockLibraryUrl` (additive): the presigned GET of the `@gaiada/webdesk-blocks` tarball the api
+  image baked, stored once per tarball under the SHARED, content-addressed key
+  `blocks/<version>/<first 16 hex of its sha256>/gaiada-webdesk-blocks-<version>.tgz` (sidecar `.sha256`; a
+  damaged object at that key fails the codegen run and is never overwritten). `null` for a pointer without it. The tarball's hash is
+  kept out of `contentHash`; the pointer records it as `blockLibrarySha256`.
 - **404** — `{ type: ".../errors/contract-not-generated", status: 404, ... }` when no successful
   generation exists for the tenant yet (or, defensively, when the artifact store itself cannot
   currently answer — see "One real bug found" below). This is a materially different, more honest

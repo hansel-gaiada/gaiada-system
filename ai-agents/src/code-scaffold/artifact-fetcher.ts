@@ -21,7 +21,13 @@ export class HubArtifactFetcher implements ArtifactFetcher {
 
   async fetchText(tenantId: string, artifactRef: string): Promise<string> {
     const raw = await this.callTool("pipeline.artifacts.get", { tenantId, artifactRef }, this.envelope);
-    const parsed = JSON.parse(raw) as { content?: string };
+    const parsed = JSON.parse(raw) as { content?: string | null; resolvable?: boolean; reason?: string };
+    // `pipeline.artifacts.get` answers `resolvable: false` (content null) for a ref that is not stored text, such
+    // as a URL, a repo, or a pre-file inline value. That is "cannot fetch", not "empty": reading it as "" would
+    // scaffold from an empty PRD and report success (M6-P4b1).
+    if (parsed.resolvable === false) {
+      throw new Error(`artifact ${artifactRef.slice(0, 80)} is not stored text: ${parsed.reason ?? "unresolvable"}`);
+    }
     return parsed.content ?? "";
   }
 }

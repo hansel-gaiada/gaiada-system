@@ -42,7 +42,9 @@ export function listItems<T = unknown>(
   collection: string,
   opts: { locale?: string; cursor?: string; limit?: number; expandBlocks?: boolean } = {},
 ): Promise<T> {
-  type _ListPaths = paths[\`/v1/t/\${typeof TENANT_SLUG}/\${string}\`];
+  // Compile-time anchor to the installed SDK: type-checks only while it still declares paths. (A template-literal
+  // index such as paths[\`/v1/t/<slug>/\${string}\`] is not a valid index type against the real generated \`paths\`.)
+  type _SdkPaths = keyof paths;
   return request<T>(\`/v1/t/\${TENANT_SLUG}/\${collection}\`, {
     locale: opts.locale,
     cursor: opts.cursor,

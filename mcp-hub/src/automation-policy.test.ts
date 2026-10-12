@@ -138,8 +138,9 @@ describe("automation scoped service accounts + write gate (WS4 §3)", () => {
 
   // M6-P4a — the code.scaffold v2 snapshot reads. Two READ-ONLY tools; they auto-run (no suspend) and
   // are scoped to wf:delivery ONLY.
-  it("wf:delivery may call the two snapshot read tools (M6-P4a), they run unattended, and no other workflow sees them", () => {
-    for (const name of ["webdev.contracts.get", "webdev.contracts.artifact"]) {
+  // M6-P4e adds the two provisioned-site reads the code stage waits on (same shape, same scoping).
+  it("wf:delivery may call the snapshot and provisioned-site read tools (M6-P4a/P4e), they run unattended, and no other workflow sees them", () => {
+    for (const name of ["webdev.contracts.get", "webdev.contracts.artifact", "webdev.provisionedSites.list", "webdev.provisionedSites.get"]) {
       expect(AUTOMATION_ALLOWLIST["wf:delivery"]).toContain(name);
       registerTool({
         name, description: "snapshot read", minAssurance: "low", inputSchema: { type: "object" }, handler: async () => "{}",

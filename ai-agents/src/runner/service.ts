@@ -42,6 +42,7 @@ import { liveDeps, tenantContext, envelopeContext, startRegistryImpactBootstrap 
 import { PgGoalStore, type GoalStore, type FinishGoalPatch, type BudgetCaps, type RunInput } from "./store";
 import { GoalQueue } from "./queue";
 import { publishRunEvent, subscribeTenant } from "./events-bus";
+import { CODE_SCAFFOLD_AGENT, SCAFFOLD_GOAL_MAX_CHARS, runScaffoldJob, type ScaffoldJobResult } from "../code-scaffold/runner-job";
 
 export const runnerConfig = {
   port: Number(process.env.RUNNER_PORT ?? 3006),
@@ -104,6 +105,9 @@ export interface RunnerDeps {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function budgetForAgent(agent: string, reg: AgentRegistry): BudgetCaps {
+  // M6-P4b1: a scaffold job calls no model; its budget is the hub reads it may make (a snapshot, its five
+  // artifacts, the PRD and the prototype are 8). Recorded for the goal row; the job has no loop to enforce it in.
+  if (agent === CODE_SCAFFOLD_AGENT) return { modelCalls: 0, toolCalls: 16 };
   if (agent === reg.supervisor.name || agent === "supervisor") return { ...reg.supervisor.goalBudget };
   const def = reg.writeSpecialists[agent] ?? reg.specialists[agent];
   return def ? { modelCalls: def.maxSteps, toolCalls: def.maxToolCalls } : { modelCalls: 0, toolCalls: 0 };
@@ -167,6 +171,21 @@ function mapTrace(t: AgentTrace): FinishGoalPatch {
   if (t.status === "budget_exhausted") return { status: "budget_exhausted", outcome: t.outcome, errorKind: t.status };
   // tool_not_allowed | protocol_error | unknown_error
   return { status: "failed", outcome: t.outcome, errorKind: t.status };
+}
+
+/** M6-P4b1 - a scaffold job's result as a goal patch. `ok` only for a dry run that composed a tree; every other
+ *  outcome is `failed` with the outcome name as the error kind. The whole result (the file manifest, the lock text)
+ *  rides in the goal's blackboard, which `GET /goals/:id` returns and the list endpoint never does, so the manifest
+ *  does not bloat the list. */
+function mapScaffoldResult(result: ScaffoldJobResult, goal: string): FinishGoalPatch {
+  const entry = {
+    specialist: CODE_SCAFFOLD_AGENT,
+    task: result.siteKind ? `scaffold ${result.siteKind} @ ${result.contractSnapshotId}` : goal.slice(0, 120),
+    status: result.outcome === "dry_run" ? ("ok" as const) : ("failed" as const),
+    summary: JSON.stringify(result),
+  };
+  if (result.outcome === "dry_run") return { status: "ok", outcome: result.content, blackboard: [entry] };
+  return { status: "failed", outcome: result.content, errorKind: result.outcome, blackboard: [entry] };
 }
 
 function mapWriteResult(res: WriteAgentResult): FinishGoalPatch {
@@ -485,6 +504,35 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           return { status: "ok", outcome: run.outcome, blackboard: run.blackboard, fanOut: run.blackboard.length };
         }
 
+        if (g.agent === CODE_SCAFFOLD_AGENT) {
+          // M6-P4b1: no model, no approval: a deterministic composer over hub reads, dry run only (runner-job.ts).
+          const runId = randomUUID();
+          trackRunStart(g.id, runId);
+          const runStartedAt = Date.now();
+          let result: ScaffoldJobResult;
+          try {
+            result = await runScaffoldJob({ goal: g.goal, tenantId: g.tenantId, envelope, callTool: counted.callTool });
+          } finally {
+            trackRunEnd(g.id, runId);
+          }
+          await store.insertRun({
+            runId,
+            goalId: g.id,
+            tenantId: g.tenantId,
+            agent: CODE_SCAFFOLD_AGENT,
+            status: result.outcome === "dry_run" ? "ok" : "unknown_error",
+            outcome: result.content,
+            steps: [],
+            modelCalls: 0,
+            toolCalls,
+            toolsCalled: [],
+            provider: null,
+            startedAt: runStartedAt,
+            endedAt: Date.now(),
+          });
+          return mapScaffoldResult(result, g.goal);
+        }
+
         const writeDef = reg.writeSpecialists[g.agent];
         if (writeDef) {
           // T2b — read-then-discard: the option is only needed for THIS run, and the map only ever
@@ -553,6 +601,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     ok: true,
     agents: [...Object.keys(reg.specialists), reg.supervisor.name],
     writeAgents: Object.keys(reg.writeSpecialists),
+    jobAgents: [CODE_SCAFFOLD_AGENT],
     queue: queue.size(),
   }));
 
@@ -572,9 +621,10 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     const b = req.body ?? {};
     const agent = b.agent ?? "supervisor";
     if (!b.tenantId || !UUID_RE.test(b.tenantId)) return reply.code(400).send({ error: "tenantId (uuid) required" });
-    if (typeof b.goal !== "string" || b.goal.length < 1 || b.goal.length > 4000)
-      return reply.code(400).send({ error: "goal must be 1..4000 chars" });
-    const known = agent === "supervisor" || !!reg.writeSpecialists[agent] || !!reg.specialists[agent];
+    const goalMax = agent === CODE_SCAFFOLD_AGENT ? SCAFFOLD_GOAL_MAX_CHARS : 4000;
+    if (typeof b.goal !== "string" || b.goal.length < 1 || b.goal.length > goalMax)
+      return reply.code(400).send({ error: `goal must be 1..${goalMax} chars` });
+    const known = agent === "supervisor" || agent === CODE_SCAFFOLD_AGENT || !!reg.writeSpecialists[agent] || !!reg.specialists[agent];
     if (!known) return reply.code(400).send({ error: `unknown agent: ${agent}` });
     if (!b.envelope?.provider || !b.envelope?.externalId)
       return reply.code(400).send({ error: "envelope {provider, externalId} required" });

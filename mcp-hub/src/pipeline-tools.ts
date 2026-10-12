@@ -51,7 +51,9 @@ async function platformSend(method: "POST" | "PATCH", path: string, body: unknow
 }
 
 const EXTRACT_KINDS: Record<string, string> = {
-  prd: "a Product Requirements Document (problem, goals, users, functional requirements, acceptance criteria, out-of-scope)",
+  // M6-P4e: the `Stack:` line is what wd-provision reads to choose the site kind (WSK-D28). "undecided"
+  // is refused loudly there, so a human sets it at the PRD review gate instead of a silent default.
+  prd: "a Product Requirements Document (problem, goals, users, functional requirements, acceptance criteria, out-of-scope). Start it with one line `Stack: <static|wordpress|fullstack>` naming the site kind the meeting chose, or `Stack: undecided` if it did not decide",
   report: "a concise internal status report (decisions made, risks, action items with owners)",
   scope: "a Scope Agreement (deliverables, commercial terms, timeline/milestones, assumptions, explicit exclusions)",
 };

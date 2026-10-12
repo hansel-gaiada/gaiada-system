@@ -36,7 +36,7 @@ function requireRunner(): string {
   return config.agentRunnerUrl.replace(/\/$/, "");
 }
 
-async function runnerFetch(
+export async function runnerFetch(
   method: "GET" | "POST",
   path: string,
   principal: OboSubject,
@@ -59,7 +59,7 @@ async function runnerFetch(
 /** Surface the runner's own `{error}` body verbatim — a status code alone strands the caller.
  *  Same reasoning as pm-tools.ts's P4-J2 note: a 429 that says "goal queue full" is actionable; a
  *  bare 429 makes an agent retry forever. */
-function passthrough(what: string, r: { status: number; text: string }): string {
+export function passthrough(what: string, r: { status: number; text: string }): string {
   if (r.status >= 200 && r.status < 300) return r.text;
   throw new Error(`agent runner ${what} ${r.status}: ${r.text.slice(0, 400)}`);
 }

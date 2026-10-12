@@ -41,12 +41,13 @@ describe("writeAndPush — dry_run", () => {
   it("writes nested paths and binary vendor files intact", async () => {
     const files: GeneratedFile[] = [
       ...sampleFiles,
-      ...vendorFiles({ sdkTsTarball: Buffer.from([0x1f, 0x8b, 0x00, 0x01]), sdkTsPackageJson: "{}\n" }),
+      ...vendorFiles({ sdkTsSource: "export type X = 1;\n", sdkTsPackageJson: "{}\n", blockLibraryTarball: Buffer.from([0x1f, 0x8b, 0x00, 0x01]) }),
     ];
     const result = await writeAndPush(files, { mode: "dry_run" });
     cleanupPaths.push(result.workDir);
-    const tarball = await readFile(join(result.workDir, "vendor/webdesk-sdk.tgz"));
+    const tarball = await readFile(join(result.workDir, "vendor/webdesk-blocks.tgz"));
     expect(tarball).toEqual(Buffer.from([0x1f, 0x8b, 0x00, 0x01]));
+    expect(await readFile(join(result.workDir, "vendor/webdesk-sdk/index.d.ts"), "utf8")).toBe("export type X = 1;\n");
   });
 });
 
