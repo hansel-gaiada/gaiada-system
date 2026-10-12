@@ -301,16 +301,8 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
       seed(`${key}-id`, key, editorAll, { locale: "id" });
     }
     try {
-      const seen: string[] = [];
-      let cursor: string | null = null;
-      for (let i = 0; i < 20; i++) {
-        const r = await dash(editorAll, `?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
-        expect(r.statusCode, r.body).toBe(200);
-        const b = body(r);
-        seen.push(...b.items.map((x) => x.slug));
-        if (!b.page.hasMore) break;
-        cursor = b.page.cursor;
-      }
+      // one collection per page, so 26 bulk collections + the 3 others are 29+ pages: dashAll follows every cursor
+      const seen = (await dashAll(editorAll)).items.map((x) => x.slug);
       expect(seen.filter((s) => s.startsWith("bulk"))).toHaveLength(52);
       expect(seen).toEqual(expect.arrayContaining(["hello", "world", "g1"]));
     } finally {
