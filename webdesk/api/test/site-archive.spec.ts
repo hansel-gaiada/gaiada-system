@@ -57,7 +57,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     ws4For("site.archive", { tenantSlug: fx.slug, siteId }, {}, approvalId);
 
   const post = (fx: ContentFixture, ws4: string | undefined, idem?: string | null, siteId = fx.siteId) =>
-    app.inject({ method: "POST", url: archiveUrl(fx, siteId), headers: promoteHdr(ws4, idem) });
+    app.inject({ method: "POST", url: archiveUrl(fx, siteId), headers: promoteHdr(ws4, idem), payload: {} });
 
   const siteStatus = (fx: ContentFixture, siteId = fx.siteId) =>
     asTenant(fx.tenantId, async (c) => (await c.query(`SELECT status FROM sites WHERE id = $1`, [siteId])).rows[0]?.status as string | undefined);
@@ -131,7 +131,7 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
 
   it("REFUSES a caller without the webdesk:promote scope (403)", async () => {
     const fx = await createContentFixture("sa-scope");
-    const res = await app.inject({ method: "POST", url: archiveUrl(fx), headers: hdr({ scopes: ["webdesk:read", "webdesk:operate"], ws4: archiveWs4(fx), editorial: null }) });
+    const res = await app.inject({ method: "POST", url: archiveUrl(fx), headers: hdr({ scopes: ["webdesk:read", "webdesk:operate"], ws4: archiveWs4(fx), editorial: null }), payload: {} });
     expect(res.statusCode).toBe(403);
     expect(await siteStatus(fx)).toBe("active");
   });
@@ -190,15 +190,15 @@ describe("site.archive (WS4-gated, irreversible, site-scope mirror of tenant.arc
     const a = await createContentFixture("sa-ta");
     const b = await createContentFixture("sa-tb");
     // b's slug + a's site id: the site is not b's.
-    const cross = await app.inject({ method: "POST", url: archiveUrl(b, a.siteId), headers: promoteHdr(ws4For("site.archive", { tenantSlug: b.slug, siteId: a.siteId }, {})) });
+    const cross = await app.inject({ method: "POST", url: archiveUrl(b, a.siteId), headers: promoteHdr(ws4For("site.archive", { tenantSlug: b.slug, siteId: a.siteId }, {})), payload: {} });
     expect(cross.statusCode).toBe(404);
     expect(await siteStatus(a)).toBe("active");
 
     const ghost = randomUUID();
-    const unknown = await app.inject({ method: "POST", url: archiveUrl(a, ghost), headers: promoteHdr(ws4For("site.archive", { tenantSlug: a.slug, siteId: ghost }, {})) });
+    const unknown = await app.inject({ method: "POST", url: archiveUrl(a, ghost), headers: promoteHdr(ws4For("site.archive", { tenantSlug: a.slug, siteId: ghost }, {})), payload: {} });
     expect(unknown.statusCode).toBe(404);
 
-    const malformed = await app.inject({ method: "POST", url: archiveUrl(a, "not-a-uuid"), headers: promoteHdr(ws4For("site.archive", { tenantSlug: a.slug, siteId: "not-a-uuid" }, {})) });
+    const malformed = await app.inject({ method: "POST", url: archiveUrl(a, "not-a-uuid"), headers: promoteHdr(ws4For("site.archive", { tenantSlug: a.slug, siteId: "not-a-uuid" }, {})), payload: {} });
     expect(malformed.statusCode).toBe(400);
 
     expect(await siteStatus(a)).toBe("active");
