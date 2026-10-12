@@ -66,7 +66,19 @@ func (p *Postgres) EventsAfter(ctx context.Context, website string, after int64,
 	if err := p.ensure(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := p.pool.Query(ctx, `SELECT id, visitor_id::text, consent_id::text, received_at, occurred_at, kind, path,
+	// The read takes the insert/forget lock EXCLUSIVE for the length of one page. Every insert holds it SHARED from before it
+	// takes its ids until it commits, so under this lock every id below the newest visible one is committed: a batch that took
+	// a lower id but committed later (it queued behind a forget, say) can never be passed by the cursor and skipped. The 15 s
+	// lag below still applies; this makes "never skipped" hold whatever the timing. Ingest waits for one page query.
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(forgetLockKey)); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT id, visitor_id::text, consent_id::text, received_at, occurred_at, kind, path,
 			COALESCE(name, ''), COALESCE(data::text, ''), device, COALESCE(country, ''), COALESCE(city, ''),
 			COALESCE(asn, 0), COALESCE(network_name, ''), COALESCE(company::text, '')
 		FROM consented_events
@@ -88,7 +100,11 @@ func (p *Postgres) EventsAfter(ctx context.Context, website string, after int64,
 		e.Website, e.ASN = website, uint32(asn)
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return out, tx.Commit(ctx)
 }
 
 const tombstoneUpsert = `INSERT INTO tombstones (website, kind, id_hash, reason)
