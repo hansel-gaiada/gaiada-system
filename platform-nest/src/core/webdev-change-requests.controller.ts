@@ -206,7 +206,8 @@ export class WebdevChangeRequestsController {
                 -- status without a status-copy that would go stale (and without OQ-5's deferred
                 -- "run complete => request done" mapping, which has judgment in it).
                 run.status AS "runStatus", run.title AS "runTitle",
-                t.title AS "taskTitle", t.status AS "taskStatus"
+                t.title AS "taskTitle", t.status AS "taskStatus",
+                ${staffClientVisible("cr", changeRequestClientVisible("cr"))} AS "clientVisible"
            FROM webdev_change_requests cr
            LEFT JOIN clients cl ON cl.id = cr.client_id
            LEFT JOIN projects p ON p.id = cr.project_id

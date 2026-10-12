@@ -700,7 +700,8 @@ export class MeetingRecordingsController {
       c.query(
         `SELECT id, meeting_id, client_id, project_id, department_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
                 duration_sec, size_bytes, local_hint, transcript, transcript_ref, audio_ref, drive_status,
-                drive_file_id, drive_link, pipeline_run_id, created_by, created_at, updated_at
+                drive_file_id, drive_link, pipeline_run_id, created_by, created_at, updated_at,
+                ${staffNeverClientVisible("meeting")} AS "clientVisible"
          FROM meeting_recordings WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       ),

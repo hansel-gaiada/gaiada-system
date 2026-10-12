@@ -17,6 +17,9 @@
 //   1. In contracts.controller.ts, replace `staffClientVisible("k", contractClientVisible("k"))` with the
 //      hand-written `(k.client_id IS NOT NULL AND k.deleted_at IS NULL)` (draft forgotten) and the
 //      contracts parity fails on the draft.
+//   (PV3-07 follow-up, detail reads) In client-work.controller.ts, replace the detail's
+//   `staffDeliverableClientVisible("d", "dp")` with the hand-written `(d.client_id IS NOT NULL AND d.deleted_at IS NULL)`
+//   and the deliverable-detail test fails on d3 (no client_id of its own, yet visible through its project).
 //   2. In portal-visibility.ts, flip `contractInPortalScope`'s NULL-project arm (`true` -> `false`) and
 //      the project-scoped contract assertion fails; flip `runInPortalScope`'s (`false` -> `true`) and
 //      the project-scoped run assertion fails.
@@ -381,6 +384,54 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
     const meetings = (await get(admin, "/meetings/recordings")) as Row[];
     expect(meetings.map((m) => m.id)).toContain(f.meeting);
     for (const m of meetings) expect(m.clientVisible, `meeting ${m.id}`).toBe(false);
+  });
+
+  // PV3-07 follow-up: the DETAIL reads carry the flag too, and agree with the list AND the portal.
+  describe("detail reads agree with the list and with the portal", () => {
+    /** For every id the list returned: the detail row's `clientVisible` is a boolean equal to the list row's. */
+    const expectDetailsMatchList = async (kind: string, listPath: string, detailPath: (id: string) => string, wantHidden = true) => {
+      const list = (await get(admin, listPath)) as Row[];
+      const rows = Array.isArray(list) ? list : (list as unknown as { items: Row[] }).items;
+      expect(rows.length, `${kind}: the list is not empty`).toBeGreaterThan(0);
+      const details = await Promise.all(rows.map(async (r) => ({ list: r, detail: (await get(admin, detailPath(r.id))) as Row })));
+      for (const { list: l, detail: d } of details) {
+        expect(typeof d.clientVisible, `${kind} detail ${l.id}: clientVisible is a boolean`).toBe("boolean");
+        expect(d.clientVisible, `${kind} detail ${l.id}: detail == list`).toBe(l.clientVisible);
+      }
+      if (wantHidden) expect(details.some(({ detail }) => detail.clientVisible === false), `${kind}: a hidden detail row`).toBe(true);
+      return details.map((x) => x.detail);
+    };
+
+    it("project detail == list == portal", async () => {
+      const details = await expectDetailsMatchList("project", "/projects", (id) => `/projects/${id}`);
+      const portal = ((await get(signer, "/portal/projects")) as Row[]).map((r) => r.id);
+      expectParity("project (detail)", details, portal);
+      expect(details.find((r) => r.id === pInternal)?.clientVisible).toBe(false);
+    });
+
+    it("deliverable detail == list == portal (through the project)", async () => {
+      const details = await expectDetailsMatchList("deliverable", "/deliverables", (id) => `/deliverables/${id}`);
+      const portal = ((await get(signer, "/portal/deliverables")) as Row[]).map((r) => r.id);
+      expectParity("deliverable (detail)", details, portal);
+      expect(details.find((r) => r.id === f.d3)?.clientVisible).toBe(true); // no client_id of its own
+      expect(details.find((r) => r.id === f.dInternal)?.clientVisible).toBe(false);
+    });
+
+    it("change request detail == list == portal", async () => {
+      const details = await expectDetailsMatchList("change request", "/webdev/change-requests", (id) => `/webdev/change-requests/${id}`);
+      const portal = ((await get(signer, "/portal/change-requests")) as Row[]).map((r) => r.id);
+      expectParity("change request (detail)", details, portal);
+      expect(details.find((r) => r.id === f.crInternal)?.clientVisible).toBe(false);
+    });
+
+    it("meeting recording and PM task details answer false, as the list does", async () => {
+      const meetings = await expectDetailsMatchList("meeting", "/meetings/recordings", (id) => `/meetings/recordings/${id}`, false);
+      expect(meetings.map((m) => m.id)).toContain(f.meeting);
+      for (const m of meetings) expect(m.clientVisible, `meeting detail ${m.id}`).toBe(false);
+      const tasks = await expectDetailsMatchList("task", "/pm/tasks", (id) => `/pm/tasks/${id}`, false);
+      expect(tasks.map((t) => t.id)).toContain(f.task);
+      for (const t of tasks) expect(t.clientVisible, `task detail ${t.id}`).toBe(false);
+    });
   });
 
   it("overview items: each item's flag matches the portal, and money items link to the billing page", async () => {

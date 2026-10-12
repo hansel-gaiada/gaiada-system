@@ -4617,8 +4617,13 @@ Notes:
 - **No staff post-review list exists**, so post reviews carry the flag only through the overview items.
 - Notes (`comments`) and history (`activities`) are in `NEVER_CLIENT_VISIBLE` too; their staff readers are
   not part of PV3-07, and PV3-09 styles the Internal area instead of marking rows.
-- The detail reads of projects, deliverables, meetings and tasks do not carry the flag (they were not in
-  PV3-07's scope); it is optional in the UI types for that reason and for older servers.
+- **Detail reads carry the flag too** (PV3-07 follow-up). `GET /projects/:id`, `/deliverables/:id`,
+  `/webdev/change-requests/:id`, `/meetings/recordings/:id` and `/pm/tasks/:id` compute `clientVisible` with the
+  same builder as their list (project: `projectClientVisible`; deliverable: `staffDeliverableClientVisible`,
+  through its project; change request: `changeRequestClientVisible`; meeting and task: always `false`), so a
+  detail row always agrees with its list row. The parity test pins detail == list == portal. Not covered: the
+  legacy core `GET /tasks/:id` and the PM module's `GET /pm/projects/:id` (a different payload from the
+  project row); neither has a list that carries the flag. The flag stays optional in the UI types for older servers.
 - PV3-08's new `lib/contracts.ts` types should declare `clientVisible?: boolean` on the contract and
   payment rows; this ticket added it to the existing types only.
 
