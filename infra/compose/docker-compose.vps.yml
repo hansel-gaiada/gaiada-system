@@ -820,6 +820,12 @@ services:
       # our own Search Console rows and Umami (above); set SEARCH_DECAY_INTERVAL_MS (>= 60000) to change the daily cadence.
       SEARCH_DECAY_ENABLED: ${SEARCH_DECAY_ENABLED:-}
       SEARCH_DECAY_INTERVAL_MS: ${SEARCH_DECAY_INTERVAL_MS:-}
+      # M5-P5a: IndexNow ping on publish (and Bing's URL Submission API as its fallback). OFF unless this is exactly "1" (empty = off,
+      # never 0). With it off nothing leaves the process and no row is written. A property still needs its own IndexNow key proven on
+      # the site (the key file served at https://<host>/<key>.txt) before it is enabled.
+      SEARCH_INDEXNOW_ENABLED: ${SEARCH_INDEXNOW_ENABLED:-}
+      # M5-P5a: Bing Webmaster connector. Anything but exactly "live" (empty, unset) is SIMULATE: synthetic rows, no call to Bing.
+      SEARCH_BING_MODE: ${SEARCH_BING_MODE:-}
       # M5-L4 — a gaiada.com form submission becomes an agency lead ONLY when this is exactly "1". Leave it
       # empty until counsel has reviewed the website-visitor addendum (WSK-D67).
       AGENCY_WEB_LEADS_ENABLED: ${AGENCY_WEB_LEADS_ENABLED:-}

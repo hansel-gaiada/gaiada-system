@@ -15,6 +15,7 @@ import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
 import { ANALYTICS_MCP_TOOLS } from "./umami-mcp-tools";
 import { DECAY_MCP_TOOLS } from "./content-decay-mcp-tools";
+import { INDEXNOW_MCP_TOOLS } from "./indexnow-mcp-tools";
 import { CONVERSION_MCP_TOOLS } from "./conversions-mcp-tools";
 import { handleStageChanged as handleLeadStageChanged } from "./conversions.service";
 import { AI_CRAWLER_MCP_TOOLS } from "./ai-crawler-mcp-tools";
@@ -167,6 +168,10 @@ export const searchModule: ModuleContract = {
     // M5-W4 (additive): the WebDesk link on search_content_briefs (site, collection, locale, item, assignee, the search facts a writer
     // needs) and a nullable property_id. Registered here AT WRITE TIME, same standing lesson as every comment above.
     "202610122300_search_content_briefs_webdesk_link.sql",
+    // M5-P5a: IndexNow key/switch + Bing connection columns on search_properties, search_indexnow_submissions, search_bing_performance;
+    // then the integration_connections.provider CHECK widened for 'bing_webmaster'. Registered AT WRITE TIME, same standing lesson.
+    "202610130200_search_indexnow_bing.sql",
+    "202610130210_integration_connections_bing_provider.sql",
     // M5-P2: search_conversion_targets + search_conversion_uploads (the ledger). Registered AT WRITE TIME, same standing lesson.
     "202610131200_search_conversion_uploads.sql",
     // M5-P5b: search_ai_crawler_daily + search_ai_crawler_chunks (AI-crawler log aggregates). Registered AT WRITE TIME.
@@ -264,6 +269,8 @@ export const searchModule: ModuleContract = {
     ...ANALYTICS_MCP_TOOLS,
     // M5-V4 — content-decay findings: one read + two LOW writes (acknowledge, file a refresh brief).
     ...DECAY_MCP_TOOLS,
+    // M5-P5a — IndexNow on publish + the Bing Webmaster connector: reads, LOW writes, one MEDIUM (connect: a credential).
+    ...INDEXNOW_MCP_TOOLS,
     // M5-P2 — ad-platform conversion uploads: targets (one LOW write), the ledger reads. The upload itself is a WS4 approval.
     ...CONVERSION_MCP_TOOLS,
     // M5-P5b: AI-crawler log (ingest MEDIUM write, summary read) + the SM-16 AI-visibility summary read.
@@ -602,6 +609,11 @@ export const searchModule: ModuleContract = {
     // Producer: search.controller.ts applyProposalApi.
     "search.campaign.applied": handleCampaignApplied,
     "search.ai_visibility.changed": handleAiVisibilityChanged,
+    // M5-P5a NOTE: the IndexNow ping on an approved WebDesk publish is deliberately NOT declared here. This module registers NO
+    // `automation_approval.decided` handler (search-sem-apply.test.ts and probe-consent.test.ts pin that: the module's other approval
+    // path spends a client's ad budget, and "no handler exists" is the guarantee that deciding can never grow a second branch). The
+    // ping is a CORE event handler instead, registered from main.ts by registerIndexNowEventHandlers() (indexnow-webdesk.ts); it
+    // acts only on origin 'webdesk' + workflow 'content.publish' and can do nothing but queue URL submissions.
     // M5-P2 (design §8.1): a lead's stage change plans an ad-platform conversion upload (gate, ledger claim, one WS4 approval). The
     // event is emitted on entity type `agency_lead`, and main.ts's startConsumerLoop([...]) MUST list that stream, or this handler is
     // registered and NEVER invoked (the SMM-14 trap; pinned by conversions.test.ts reading main.ts). It is deliberately NOT an

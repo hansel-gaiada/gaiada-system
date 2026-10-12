@@ -40,7 +40,8 @@ export type PortalTopic =
   | "invoices"     // invoice issued/updated, payment confirmed
   | "contracts"
   | "profile"      // contact added/revoked, capability changed
-  | "requests";    // MI-02/MI-03: a webdev change request submitted/triaged/converted
+  | "requests"     // MI-02/MI-03: a webdev change request submitted/triaged/converted
+  | "conversation"; // PV4-03: a conversation thread opened/updated, a message posted/edited/retracted
 
 /** event_type -> topic. An event type absent from this map produces NO frame: the portal's realtime
  *  surface is an allowlist, same principle as the timeline query (see portal-workspace.controller.ts).
@@ -71,6 +72,14 @@ const TOPIC_BY_EVENT: Record<string, PortalTopic> = {
   // land here — one topic covers the CR's whole lifecycle so the portal page refetches on either.
   "webdev.change_request.created": "requests",
   "webdev.change_request.updated": "requests",
+  // PV4-03 (client Conversation): every producer puts the thread's `clientId` in the payload, so the
+  // frame is narrowed to that client's connections. Draft events (`conversation.draft.*`, stream
+  // `conversation_draft`) are deliberately NOT mapped: drafts are staff-only (design decision 3), and
+  // even a content-free hint would tell a client's browser that staff are typing.
+  "conversation.thread.opened": "conversation",
+  "conversation.thread.updated": "conversation",
+  "conversation.message.posted": "conversation",
+  "conversation.message.edited": "conversation",
 };
 
 /** The `events:<entityType>` streams worth tailing — derived from the map above rather than listed
@@ -81,6 +90,7 @@ const TAILED_ENTITY_TYPES = [
   "pm_task", "pm_project", "pm_milestone",
   "deliverable", "invoice", "invoice_payment", "contract", "client_contact",
   "webdev_change_request",
+  "conversation",
 ] as const;
 
 export interface PortalFrame {

@@ -39,6 +39,9 @@ import { WebdevChangeRequestsPortalController } from "./core/webdev-change-reque
 // SMM-31 (D-16) — the portal's client-review decide surface for social posts. Same CP-2..CP-5 split
 // precedent: a distinct subject (social's client-review stage), same `api` prefix, no route collision.
 import { SocialClientReviewPortalController } from "./core/social-client-review-portal.controller";
+// PV4-03: client Conversation — the portal surface (portal read/converse) and the staff surface (`conversation` kind).
+import { PortalConversationController } from "./core/portal-conversation.controller";
+import { ConversationController } from "./core/conversation.controller";
 // CP-19: the STAFF half of the portal's commerce surface — contract authoring/send/countersign and
 // payment confirmation. Without it the portal's contracts section is permanently empty and a
 // client-recorded payment can never leave `pending`, so it ships in the same change.
@@ -131,6 +134,7 @@ import { SearchAnalyticsController } from "./modules/search/search-analytics.con
 import { SearchContentDecayController } from "./modules/search/content-decay.controller";
 import { SearchConversionsController } from "./modules/search/conversions.controller";
 import { SearchAiCrawlerController } from "./modules/search/ai-crawler.controller";
+import { SearchIndexNowController } from "./modules/search/indexnow.controller";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { GroupReportController } from "./modules/reports/group-report.controller"; // PV1-06a
 // PRV-02: the `webdev` module shell's HTTP surface (provision a site+repo, read/reconcile the mirror
@@ -189,7 +193,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, ClientsCentreController, HrController, LoansController,
@@ -231,6 +235,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SearchContentDecayController,
     SearchConversionsController,
     SearchAiCrawlerController,
+    SearchIndexNowController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
     ZoneBEventsController,
