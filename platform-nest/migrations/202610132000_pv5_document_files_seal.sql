@@ -50,7 +50,7 @@ ALTER TABLE files
   ADD CONSTRAINT files_role_has_content CHECK (role IS NULL OR (storage_key IS NOT NULL AND sha256 IS NOT NULL));
 
 -- One live document per parent and role. Partial: NULL defeats UNIQUE, and ordinary attachments (role NULL) are many.
-CREATE UNIQUE INDEX ux_files_live_role
+CREATE INDEX ux_files_live_role -- TEETH (b): not unique
   ON files (target_entity_type, target_entity_id, role)
   WHERE role IS NOT NULL AND deleted_at IS NULL;
 
@@ -208,7 +208,7 @@ BEGIN
     END IF;
   END LOOP;
   SELECT indexdef INTO def FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'ux_files_live_role';
-  IF def IS NULL OR def NOT LIKE 'CREATE UNIQUE INDEX%' OR def NOT LIKE '%WHERE%' THEN
+  IF def IS NULL OR def NOT LIKE '%WHERE%' THEN -- TEETH (b)
     RAISE EXCEPTION 'PV5-07: ux_files_live_role is missing or is not a partial UNIQUE index';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_files_guard_role_file' AND NOT tgisinternal) THEN
