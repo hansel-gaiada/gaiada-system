@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **203** capabilities across **16** owners
-- **108** writes · 95 reads
-- Writes by impact: **high 24** · medium 35 · low 49
+- **204** capabilities across **16** owners
+- **109** writes · 95 reads
+- Writes by impact: **high 24** · medium 35 · low 50
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 23 |
+| webdev | `webdev` | 24 |
 
 ## Capabilities
 
@@ -258,6 +258,7 @@ unfalsifiable after.
 | webdev | `webdesk.siteStatus` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/status` | read | — |
 | webdev | `webdev.contracts.artifact` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact` | read | — |
 | webdev | `webdev.contracts.get` | `GET` | `/api/:tenantId/modules/webdev/contracts/:snapshotId` | read | — |
+| webdev | `webdev.provisionedSites.commitScaffold` | `POST` | `/api/:tenantId/modules/webdev/provisioned-sites/:siteId/scaffold-commit` | write | `low` |
 | webdev | `webdev.provisionedSites.get` | `GET` | `/api/:tenantId/modules/webdev/provisioned-sites/:siteId` | read | — |
 | webdev | `webdev.provisionedSites.list` | `GET` | `/api/:tenantId/modules/webdev/provisioned-sites?runId=:runId` | read | — |
 | webdev | `webdev.provisionSite` | `POST` | `/api/:tenantId/modules/webdev/provision` | write | `medium` |

@@ -107,7 +107,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function budgetForAgent(agent: string, reg: AgentRegistry): BudgetCaps {
   // M6-P4b1: a scaffold job calls no model; its budget is the hub reads it may make (a snapshot, its five
-  // artifacts, the PRD and the prototype are 8). Recorded for the goal row; the job has no loop to enforce it in.
+  // artifacts, the PRD and the prototype are 8; M6-P4b2's commit offer is a 9th). Recorded for the goal row; the
+  // job has no loop to enforce it in.
   if (agent === CODE_SCAFFOLD_AGENT) return { modelCalls: 0, toolCalls: 16 };
   if (agent === reg.supervisor.name || agent === "supervisor") return { ...reg.supervisor.goalBudget };
   const def = reg.writeSpecialists[agent] ?? reg.specialists[agent];
@@ -187,14 +188,19 @@ function mapTrace(t: AgentTrace): FinishGoalPatch {
  *  outcome is `failed` with the outcome name as the error kind. The whole result (the file manifest, the lock text)
  *  rides in the goal's blackboard, which `GET /goals/:id` returns and the list endpoint never does, so the manifest
  *  does not bloat the list. */
+function scaffoldOk(result: ScaffoldJobResult): boolean {
+  // M6-P4b2: a requested commit that platform-nest made (or already had) is ok too; a refused one is not.
+  return result.outcome === "dry_run" || result.outcome === "committed";
+}
+
 function mapScaffoldResult(result: ScaffoldJobResult, goal: string): FinishGoalPatch {
   const entry = {
     specialist: CODE_SCAFFOLD_AGENT,
     task: result.siteKind ? `scaffold ${result.siteKind} @ ${result.contractSnapshotId}` : goal.slice(0, 120),
-    status: result.outcome === "dry_run" ? ("ok" as const) : ("failed" as const),
+    status: scaffoldOk(result) ? ("ok" as const) : ("failed" as const),
     summary: JSON.stringify(result),
   };
-  if (result.outcome === "dry_run") return { status: "ok", outcome: result.content, blackboard: [entry] };
+  if (scaffoldOk(result)) return { status: "ok", outcome: result.content, blackboard: [entry] };
   return { status: "failed", outcome: result.content, errorKind: result.outcome, blackboard: [entry] };
 }
 
@@ -531,7 +537,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           const runStartedAt = Date.now();
           let result: ScaffoldJobResult;
           try {
-            result = await runScaffoldJob({ goal: g.goal, tenantId: g.tenantId, envelope, callTool: counted.callTool });
+            result = await runScaffoldJob({ goal: g.goal, tenantId: g.tenantId, envelope, callTool: counted.callTool, goalId: g.id });
           } finally {
             trackRunEnd(g.id, runId);
           }
@@ -540,7 +546,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
             goalId: g.id,
             tenantId: g.tenantId,
             agent: CODE_SCAFFOLD_AGENT,
-            status: result.outcome === "dry_run" ? "ok" : "unknown_error",
+            status: scaffoldOk(result) ? "ok" : "unknown_error",
             outcome: result.content,
             steps: [],
             modelCalls: 0,

@@ -497,6 +497,28 @@ describe.skipIf(!liveReachable)("D14-13 — LIVE resource_mcp_tool.yaml policy",
     });
   });
 
+  // ── M6-P4b2 — webdev.provisionedSites.commitScaffold: a LOW-impact write, so NO policy entry ───────────
+  // The scaffold's first fill runs unattended for wf:delivery with no grant, through the policy's GENERIC impact
+  // conjunct (`impact == "low"`), which is why resource_mcp_tool.yaml did not change. Scope still binds (another
+  // workflow is denied), and the control proves it is the impact class doing it: the same name at medium is denied.
+  describe("M6-P4b2 — webdev.provisionedSites.commitScaffold (low-impact write, wf:delivery)", () => {
+    const NAME = "webdev.provisionedSites.commitScaffold";
+    const register = (impact: "low" | "medium") =>
+      registerTool({ name: NAME, description: "first fill", minAssurance: "low", write: true, impact, inputSchema: { type: "object" }, handler: async () => "{}" });
+
+    it("ALLOW: wf:delivery, unattended, no grant (low write); DENY: a workflow not scoped for it", async () => {
+      register("low");
+      expect(await livePolicyAllows(deliveryWf, NAME)).toBe(true);
+      expect((await authorizeCall(deliveryWf, NAME)).allow).toBe(true);
+      expect(await livePolicyAllows(noScopeWf, NAME)).toBe(false);
+    });
+
+    it("CONTROL: the same tool classified medium would be denied without a grant (it is the impact class that lets it run)", async () => {
+      register("medium");
+      expect(await livePolicyAllows(deliveryWf, NAME)).toBe(false);
+    });
+  });
+
   // ── SMM-22 security follow-up — social.publishPostMetered's own money-tool matrix ─────────────
   //
   // The tool SPENDS REAL MONEY per call (X is the only metered network live in v1; OQ-2 separately

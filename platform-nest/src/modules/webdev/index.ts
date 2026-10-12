@@ -195,6 +195,8 @@ export const webdevModule: ModuleContract = {
     // M6-P4c (additive): the provisioning completion state machine's columns (§08: registry row,
     // WebDesk tenant, pinned contract snapshot) on webdev_provisioned_sites.
     "202610120425_webdev_provisioned_sites_completion.sql",
+    // M6-P4b2 (additive): the scaffold commit's state machine columns (first fill of the provisioned repo).
+    "202610122130_webdev_scaffold_commit.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
@@ -407,6 +409,55 @@ export const webdevModule: ModuleContract = {
           siteId: { type: "string", description: "webdev_provisioned_sites.id." },
         },
         required: ["tenantId", "siteId"],
+      },
+    },
+    // M6-P4b2 (additive): the scaffold's FIRST FILL of the provisioned repo, written by platform-nest with the ERP App
+    // (docs/plans/2026-10-12-webdesk-m6-p4b2-scaffold-commit.md). Called by the code.scaffold v2 job (ai-agents) with
+    // the run's OBO envelope, carrying the composed tree by value; the hub and the agents never hold a write credential.
+    // `write` + impact LOW, deliberately (the design's authorization section): the repo was created by a company_admin's
+    // D14 approval for exactly this provisioning, and this tool can do NOTHING but a first fill: it refuses any write over
+    // a commit that is not the template's, never overwrites human work, and is reversible (the template commit stays the
+    // parent). Platform gates: `webdev_provisioned_site · provision` and `github_repo · push` (org tenant). A future
+    // re-scaffold over a filled repo is a DIFFERENT tool, medium, with an executable-registry pairing.
+    {
+      name: "webdev.provisionedSites.commitScaffold",
+      description:
+        "Commit a code.scaffold v2 tree as the FIRST FILL of a provisioned site's GitHub repo (the ERP App writes it: blobs, "
+        + "tree, commit, fast-forward of the default branch). platform-nest re-hashes every file against the manifest, requires "
+        + "CONTRACT.lock to name the site's pinned contract snapshot, refuses paths that escape the repo, .git, symlinks, "
+        + ".github/ changes and trees over 300 files / 512 KiB per file / 600 KiB total, and writes only over the template's "
+        + "generated commit (scaffold_repo_not_pristine otherwise). An identical tree re-submitted returns the existing commit. "
+        + "Answers {outcome: committed|already_committed, repo, branch, baseSha, treeSha, commitSha, snapshotId, manifestSha256, fileCount, totalBytes}.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/provisioned-sites/:siteId/scaffold-commit",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          siteId: { type: "string", description: "webdev_provisioned_sites.id (completion must be complete)." },
+          runId: { type: "string", description: "The pipeline run the tree was composed for; must be the site's own run." },
+          goalId: { type: "string", description: "The ai-agents goal that composed the tree (recorded for correlation)." },
+          contractSnapshotId: { type: "string", description: "Optional cross-check: must equal the snapshot CONTRACT.lock names." },
+          files: {
+            type: "array",
+            description: "Every file of the tree: path (relative POSIX), base64 bytes, sha256 (lowercase hex) and byte size.",
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                base64: { type: "string" },
+                sha256: { type: "string" },
+                bytes: { type: "integer" },
+                mode: { type: "string", enum: ["100644"] },
+              },
+              required: ["path", "base64", "sha256", "bytes"],
+            },
+          },
+        },
+        required: ["tenantId", "siteId", "runId", "files"],
       },
     },
     // ═══════════════════════════════════════════════════════════════════════════════════════════
