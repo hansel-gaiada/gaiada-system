@@ -69,6 +69,10 @@ export interface ChangeRequestRow {
   declinedReason: string | null;
   createdAt: string;
   updatedAt: string;
+  /** PV3-07: computed by the backend from the portal's own predicates. True when a client-wide contact of
+   *  this row's client can read it in the portal; a project-scoped contact may see less. Optional because
+   *  an older server omits it. Never derive it in the browser (BFF §22d). */
+  clientVisible?: boolean;
 }
 
 /** The detail read additionally joins body + the linked run/task's live status (§2.2: "the CR

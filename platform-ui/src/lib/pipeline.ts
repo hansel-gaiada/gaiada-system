@@ -51,6 +51,10 @@ export interface PipelineRun {
   /** Org-node id of the owning department (2026-08-27); derived from the source meeting or project. */
   department_id?: string | null;
   owner_id?: string | null;
+  /** PV3-07: computed by the backend from the portal's own predicates. True when a client-wide contact of
+   *  this row's client can read it in the portal; a project-scoped contact may see less. Optional because
+   *  an older server omits it. Never derive it in the browser (BFF §22d). */
+  clientVisible?: boolean;
 }
 export interface PipelineStage {
   id: string;
@@ -60,6 +64,8 @@ export interface PipelineStage {
   artifact_ref: string | null;
   confidence: number | null;
   updated_at: string;
+  /** PV3-07: through the run (not the `report` track, on a client-visible run). See PipelineRun. */
+  clientVisible?: boolean;
 }
 export interface PipelineGate {
   id: string;
@@ -73,6 +79,8 @@ export interface PipelineGate {
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
+  /** PV3-07: through the run (a client-side gate on a client-visible run). See PipelineRun. */
+  clientVisible?: boolean;
 }
 // Both SELECTs now carry client_id/project_id (C4/C6). The detail narrows them to required, since the
 // run-workspace links depend on them being present.

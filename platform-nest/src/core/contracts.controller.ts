@@ -27,6 +27,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { contractClientVisible, staffClientVisible, staffInvoicePaymentClientVisible } from "./portal-visibility";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
@@ -35,6 +36,9 @@ import { recordInvoiceRevision, snapshotInvoice } from "../modules/invoice/invoi
 import { check, type Resource } from "../rbac/cerbos";
 import { assemblePrincipal, type Principal } from "../rbac/principal";
 
+// PV3-07: `clientVisible` (a client-wide contact of the contract's client can read it in the portal) is
+// composed from the portal's own predicate, so a draft reads `false` here for exactly the reason the
+// portal hides it. Shared by the list and the detail.
 const CONTRACT_SELECT = `
   SELECT k.id, k.client_id AS "clientId", cl.name AS "clientName", k.project_id AS "projectId",
          p.name AS "projectName", k.title, k.reference, k.version, k.supersedes_id AS "supersedesId",
@@ -46,7 +50,8 @@ const CONTRACT_SELECT = `
          k.created_by AS "createdBy", k.created_at AS "createdAt",
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client') AS "clientSigned",
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'provider') AS "providerSigned",
-         (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded"
+         (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
+         ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible"
     FROM contracts k
     LEFT JOIN clients cl ON cl.id = k.client_id
     LEFT JOIN projects p ON p.id = k.project_id
@@ -383,6 +388,8 @@ export class ContractsController {
     // `invoice_payments.client_id`, the denormalised column the portal's own isolation predicate uses;
     // `internal` is the payments whose invoice names no client. Parsed after authorize.
     const clientFilter = clientFilterSql(parseClientFilter(clientId, true), "pp.client_id", 2);
+    // PV3-07: `clientVisible` travels through the PARENT INVOICE, as the portal shows a payment only in
+    // that invoice's history ("detail" context), so a claim on a draft invoice reads `false`.
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT pp.id, pp.invoice_id AS "invoiceId", pp.client_id AS "clientId", cl.name AS "clientName",
@@ -391,7 +398,8 @@ export class ContractsController {
                 pp.recorded_by AS "recordedBy", pp.created_at AS "recordedAt",
                 pp.confirmed_by AS "confirmedBy", pp.confirmed_at AS "confirmedAt",
                 pp.rejected_reason AS "rejectedReason",
-                i.total::float8 AS "invoiceTotal", i.status AS "invoiceStatus"
+                i.total::float8 AS "invoiceTotal", i.status AS "invoiceStatus",
+                ${staffInvoicePaymentClientVisible("pp", "i")} AS "clientVisible"
            FROM invoice_payments pp
            JOIN invoices i ON i.id = pp.invoice_id
            LEFT JOIN clients cl ON cl.id = pp.client_id
