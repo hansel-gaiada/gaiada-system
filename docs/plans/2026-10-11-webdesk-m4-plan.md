@@ -469,3 +469,29 @@ is proven").
     - a stale `--keep` dir;
     - probe 4's control did not know systemd's DefaultTasksMax.
   - Open: A6 (deploy plan/apply/rollback) waits for the owner's 1-day GHCR read token; then A9 (remove) and A10.
+- **Owner replan, "make it instantly ready"** (WSK-D76, WSK-D77): the cut-over today, a same-day decommission, the
+  backup retirement and the sumopod archive now, B4 compressed to ~48 h, `contract.regenerate` now.
+- 08:4x–08:51Z: **A9** removed the proof completely (no chain, user, range, drop-in, ACL, process or unit; evidence
+  kept locally). **A10**: live probes 40/40 before and after P2.
+- 08:52–08:55Z: **P3**, the live install (VERIFY OK 18/18, guard ACTIVE with OTLP ON). Every image was staged with ids
+  equal to rootful's, and the api was loaded and tagged. No downtime.
+- 08:57:01–08:57:59Z: **P4 cut-over, 58 s of downtime.** Three volumes were copied and VERIFIED; switch, up, verify
+  13/0; **rebased probes 48/48**; W1 404 through mTLS; 7 WebDesk traces in Tempo. Found while scripting it: a shell
+  function named `cut` shadowed `/usr/bin/cut`, and prep's own check caught it before anything changed.
+- 08:59–09:05Z: **A6 on live rootless** with the real workflow's credentials.
+  - plan OK.
+  - apply (same tag 364) failed its boot-log check, because a same-image `up -d` recreates nothing, and rolled back
+    correctly. That proves rollback on rootless.
+  - This was a pre-existing bug; fixed on main `5d794bcb` (`--force-recreate`).
+- 09:09Z: the rootless nightly was pulled offsite. **Restore drill from the decrypted offsite copy: DRILL OK in
+  21.6 s** on the rootless daemon.
+- 09:10–09:13Z: **P5, same-day decommission.** 5 rootful volumes were archived and pulled offsite (age, 5/5); the
+  rootful project went down; the old guard was removed (`guard.env` kept for the rootless guard); volumes and 13 api
+  images purged. Probes 47/0 after.
+- 09:15Z: **the backup retirement** reached main (`bad1ada5`, LF fix `d71018ca`). WebDesk's nightly also writes
+  password-free globals (5 roles, 0 hashes, live). backup.sh's part deploys with 365.
+- 09:18Z: **B4 compressed.** Legacy-name request logging (`infra/nginx/erp-legacy-name-log.conf`, hand-applied,
+  reloaded). WebDesk's Zone B bridge URL moved to erp.gaiada.com, and n8n answers it from inside the api. Retire on or
+  after 2026-10-14 ~09:20Z, if the log shows no caller left on the exception paths.
+- sumopod's `~/webdesk-retired-20261011/` was deleted (480 MB, the stale Payload-era copy).
+- T5, the runbooks rewritten for the rootless daemon, is in progress.

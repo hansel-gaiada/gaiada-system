@@ -1,6 +1,19 @@
 #!/usr/bin/env node
 // MON-01 — generate Prometheus file_sd targets for CLIENT PROPERTIES from `search_properties`.
 //
+// ── M6-P3d: SUPERSEDED AS THE SHIPPER, KEPT AS THE REFERENCE ───────────────────────────────────
+// gda-aicenter has no Node and no DB login that reads search_properties across tenants, so this
+// script never ran there. The target file is now rendered by platform-nest
+// (platform-nest/src/modules/monitoring/client-targets.ts), which ports isProbeableUrl()/toFileSd()
+// below to TypeScript and reads across tenants under the same RLS scope as the monitoring runner.
+// sumopod then pulls the file over a one-file forced-command SSH key
+// (infra/scripts/pull-client-property-targets.sh). THIS FILE IS THE SPECIFICATION: the two copies
+// are pinned together by platform-nest/src/modules/monitoring/client-targets-parity.test.ts, which
+// imports isProbeableUrl and toFileSd from here and runs the same fixtures through both. Change
+// the selection or label rules in one place and that test fails until the other follows.
+// (Why not ONE shared file: the platform image is built from platform-nest/ alone and infra/ must
+// not depend on platform-nest, so a shared module would have to live in a third package.)
+//
 // ── WHAT THIS UNLOCKS, AND WHY IT WAS THOUGHT BLOCKED ──────────────────────────────────────────
 // The ~63 managed client properties are monitored by nobody. The portfolio program recorded this
 // as blocked behind the observe-only ruling on `delphi`/`helios` — but that ruling gates *making
@@ -32,6 +45,7 @@
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /** Hosts we refuse to probe regardless of what a row says. */
 const PRIVATE_PATTERNS = [
@@ -205,7 +219,11 @@ async function main() {
   }
 }
 
-main().then((c) => process.exit(c)).catch((e) => {
-  console.error(`[mon-01] ${e.message}`);
-  process.exit(1);
-});
+// Run main() only when executed directly. platform-nest's parity test imports isProbeableUrl and
+// toFileSd from this file, and an unconditional main() would call process.exit() inside that import.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().then((c) => process.exit(c)).catch((e) => {
+    console.error(`[mon-01] ${e.message}`);
+    process.exit(1);
+  });
+}

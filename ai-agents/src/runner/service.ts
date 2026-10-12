@@ -43,7 +43,7 @@ import { PgGoalStore, type GoalStore, type FinishGoalPatch, type BudgetCaps, typ
 import { GoalQueue } from "./queue";
 import { publishRunEvent, subscribeTenant } from "./events-bus";
 import { SensitiveScope, holdsSensitiveTool, runWithSensitiveScope } from "../sensitive-tools";
-import { CODE_SCAFFOLD_AGENT, SCAFFOLD_GOAL_MAX_CHARS, runScaffoldJob, type ScaffoldJobResult } from "../code-scaffold/runner-job";
+import { CODE_SCAFFOLD_AGENT, SCAFFOLD_GOAL_MAX_CHARS, runScaffoldJob, scaffoldDedupeKey, type ScaffoldJobResult } from "../code-scaffold/runner-job";
 
 export const runnerConfig = {
   port: Number(process.env.RUNNER_PORT ?? 3006),
@@ -669,7 +669,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     // Capacity check BEFORE inserting a row — a full queue is a clean 429, no orphaned goal.
     if (queue.size().queued >= cfg.maxQueue) return reply.code(429).send({ error: "goal queue full" });
 
-    const id = await store.insertGoal({
+    const goalInput = {
       tenantId: b.tenantId,
       goal: b.goal,
       agent,
@@ -677,7 +677,18 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
       envelopeExternalId: b.envelope.externalId,
       requestedBy: b.requestedBy,
       budget: budgetForAgent(agent, reg),
-    });
+    };
+    // M6-P4e3 — a scaffold goal is idempotent on its key (provisioned site + pinned snapshot; see runner-job.ts):
+    // while one is queued, running or ok, return it instead of filing another. Every other agent files as before.
+    const dedupeKey = agent === CODE_SCAFFOLD_AGENT ? scaffoldDedupeKey(b.goal) : null;
+    let id: string;
+    if (dedupeKey) {
+      const once = await store.insertGoalOnce({ ...goalInput, dedupeKey });
+      if (once.deduped) return reply.code(200).send({ id: once.id, status: once.status, deduped: true });
+      id = once.id;
+    } else {
+      id = await store.insertGoal(goalInput);
+    }
     // T2b — only a non-default request costs a map entry (see `goalOptionsById`'s own doc above).
     if (b.fileOnSuspend === false) goalOptionsById.set(id, { fileOnSuspend: false });
     const accepted = queue.enqueue(id);

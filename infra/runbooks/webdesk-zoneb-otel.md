@@ -90,23 +90,20 @@ publish on any other address.
 | `infra/observability/otel-collector/config.yaml` | `otlp/webdesk`, `bearertokenauth/webdesk`, `memory_limiter/webdesk`, `resource/webdesk`, `tail_sampling/webdesk`, `traces/webdesk`, `logs/webdesk` |
 | `infra/compose/docker-compose.observability.yml` | the docker0-only publish and the token variable with its unsendable default |
 | `infra/compose/.env.example`, `webdesk/.env.example` | `WEBDESK_OTLP_BEARER_TOKEN` (ERP) / `OTEL_EXPORTER_OTLP_*` (WebDesk), empty-means-refuse stated |
-| `webdesk/ops/host/webdesk-egress-guard.sh` | the exception, off unless `WEBDESK_OTLP_PORT` is set or `apply --otlp` is passed |
-| `webdesk/ops/host/webdesk-host-deny.service` | reads `/etc/webdesk/guard.env` (optional) so the exception survives a reboot |
-| `webdesk/ops/host/test-egress-guard.sh` | proves it on a throwaway network with stand-in listeners |
+| `webdesk/ops/host/rootless/webdesk-rootless-guard.sh` | the live guard (installed as `/usr/local/sbin/webdesk-rootless-guard.sh`, unit `webdesk-rootless-guard@webdesk-rootless.service`): the exception is off unless `WEBDESK_OTLP_PORT` is set in `/etc/webdesk/guard.env`, which it trusts only while `/etc/webdesk` is root-owned and not group/other-writable |
+| `webdesk/ops/host/rootless/test-rootless-guard.sh` | proves it with stand-in listeners |
+| `webdesk/ops/host/webdesk-egress-guard.sh`, `webdesk-host-deny.service`, `test-egress-guard.sh` | HISTORICAL: the rootful guard, removed from `gda-aicenter` on 2026-10-12 when WebDesk moved to the rootless daemon; kept in the tree for the record only |
 | `webdesk/ops/probes/containment-probe.sh` | probe 6 allows exactly `<docker0>:<port>`, only while the guard has it on |
 | `webdesk/ops/scripts/check-otlp-write-only.mjs` | static auditor, run in CI (`observability-lint`) against the real config and compose file |
 
-The guard's two rules (port 4319; the address is `WEBDESK_OTLP_ADDR`, default `172.17.0.1`):
+The rootless guard matches by socket owner (uid 940 and its subuid range 700000000-700065535) in the OUTPUT path, in chains `WDRL940-*`. Its OTLP exception is two rules (port 4319; the address is `WEBDESK_OTLP_ADDR`, default `172.17.0.1`), matched on the ORIGINAL destination because a published port is reached by DNAT:
 
 ```
--A WEBDESK-EGRESS -p tcp -m conntrack --ctorigdst 172.17.0.1 --ctorigdstport 4319 -m hashlimit --hashlimit-name wd-otlp-fwd --hashlimit-mode srcip --hashlimit-above 300/second --hashlimit-burst 600 -j DROP
--A WEBDESK-EGRESS -p tcp -m conntrack --ctorigdst 172.17.0.1 --ctorigdstport 4319 -j RETURN
--A WEBDESK-HOST-IN -d 172.17.0.1 -p tcp --dport 4319 -m hashlimit --hashlimit-name wd-otlp-in --hashlimit-mode srcip --hashlimit-above 300/second --hashlimit-burst 600 -j DROP
--A WEBDESK-HOST-IN -d 172.17.0.1 -p tcp --dport 4319 -j RETURN
+-A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -m hashlimit --hashlimit-above 300/sec --hashlimit-burst 600 --hashlimit-mode srcip --hashlimit-name o940x<digest> -j DROP
+-A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -j RETURN
 ```
 
-Both sit before the chains' other rules. The FORWARD pair matches the **original** destination because a published port
-is reached by DNAT (the 172.16/12 drop would otherwise kill it); the INPUT pair covers docker's userland proxy.
+Both sit before the LOCAL-address and private-range denies, so 4319 is the only port on any host address that the WebDesk uids can reach. (The rootful guard's `WEBDESK-EGRESS` / `WEBDESK-HOST-IN` chains no longer exist; the design is `docs/plans/2026-10-12-webdesk-rootless-plan.md` section 5.)
 
 ---
 
@@ -140,15 +137,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/j
   -d '{"resourceSpans":[]}' http://172.17.0.1:4319/v1/traces                                          # 200
 ```
 
-**(c) Apply the guard with the port.** First run the harness where it is safe (the orchestrator runs it on `sumopod`):
-`bash webdesk/ops/host/test-egress-guard.sh webdesk/ops/host/webdesk-egress-guard.sh`. Then on `gda-aicenter`:
+**(c) Apply the guard with the port.** The guard is installed by `install-rootless.sh apply --profile live` (unit `webdesk-rootless-guard@webdesk-rootless.service`, script `/usr/local/sbin/webdesk-rootless-guard.sh`); the OTLP switch is the file below. First run the harness where it is safe (the orchestrator runs it on a test box): `bash webdesk/ops/host/rootless/test-rootless-guard.sh`. Then on `gda-aicenter`:
 
 ```bash
-sudo install -m 0755 webdesk/ops/host/webdesk-egress-guard.sh /usr/local/sbin/webdesk-egress-guard.sh
-sudo install -m 0644 webdesk/ops/host/webdesk-host-deny.service /etc/systemd/system/webdesk-host-deny.service
-printf 'WEBDESK_OTLP_PORT=4319\n' | sudo tee /etc/webdesk/guard.env >/dev/null
-sudo systemctl daemon-reload && sudo systemctl restart webdesk-host-deny.service
-sudo /usr/local/sbin/webdesk-egress-guard.sh status          # the four rules above
+printf 'WEBDESK_OTLP_PORT=4319\n' | sudo tee /etc/webdesk/guard.env >/dev/null     # /etc/webdesk must be root-owned and not group/other-writable, or the guard keeps OTLP OFF
+sudo systemctl reload webdesk-rootless-guard@webdesk-rootless                       # = apply
+sudo /usr/local/sbin/webdesk-rootless-guard.sh check webdesk-rootless               # the two rules above, no drift
 ```
 
 **(d) Switch WebDesk's OTel on.** In `/etc/webdesk/.env`: `OTEL_ENABLED=true`, `WEBDESK_OTEL_ZONEA_PUSH_ENABLED=true`,
@@ -157,7 +151,7 @@ Then recreate the api without building, with ALL THREE files (since release 357 
 overlay; the two-file form would swap it back to a stale local `webdesk-api:latest`):
 
 ```bash
-cd /home/Hansel/gaiada-webdesk/webdesk && sudo docker compose --env-file /etc/webdesk/.env -p webdesk \
+cd /home/Hansel/gaiada-webdesk/webdesk && sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk \
   -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml up -d --no-build --no-deps api
 ```
 
@@ -166,7 +160,7 @@ cd /home/Hansel/gaiada-webdesk/webdesk && sudo docker compose --env-file /etc/we
 **(e) Verify.** Hand-driven push from inside the guarded network (works with or without the SDK):
 
 ```bash
-docker run --rm --network webdesk_default -e TOK="$TOKEN" node:22-alpine node -e '
+DOCKER_HOST=unix:///run/user/940/docker.sock docker run --rm --network webdesk_default -e TOK="$TOKEN" node:22-alpine node -e '
   const b={resourceSpans:[{resource:{attributes:[{key:"service.name",value:{stringValue:"webdesk-api"}}]},scopeSpans:[{spans:[{traceId:"0af7651916cd43dd8448eb211c80319c",spanId:"b7ad6b7169203331",name:"t6a-rollout-probe",kind:1,startTimeUnixNano:"1760000000000000000",endTimeUnixNano:"1760000001000000000"}]}]}]};
   fetch("http://172.17.0.1:4319/v1/traces",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+process.env.TOK},body:JSON.stringify(b)}).then(r=>console.log(r.status));'
 ```
@@ -182,7 +176,7 @@ sudo WEBDESK_OTLP_PORT=4319 bash webdesk/ops/probes/containment-probe.sh      # 
 
 ## 4. Rollback (each step independent, fastest first)
 
-1. **Close the door:** `sudo rm /etc/webdesk/guard.env && sudo systemctl restart webdesk-host-deny.service` — the guard is pure
+1. **Close the door:** remove the `WEBDESK_OTLP_PORT` line from `/etc/webdesk/guard.env` (or `sudo rm` the file), then `sudo systemctl reload webdesk-rootless-guard@webdesk-rootless` — the guard is pure
    default-deny again; WebDesk's pushes fail soft.
 2. **Stop the sender:** `OTEL_ENABLED=false` in `/etc/webdesk/.env`, recreate the api as in (d).
 3. **Refuse at the receiver:** blank `WEBDESK_OTLP_BEARER_TOKEN` in the ERP env, recreate the collector as in (b); the receiver answers 401 to everything.
@@ -256,7 +250,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4319
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <the token from step (b)>
 ```
-Recreate the api (step (d)). Expect `[webdesk:otel] tracing on (OTLP/HTTP protobuf, traces only)` in `docker logs`, then Tempo
+Recreate the api (step (d)). Expect `[webdesk:otel] tracing on (OTLP/HTTP protobuf, traces only)` in `DOCKER_HOST=unix:///run/user/940/docker.sock docker logs webdesk-api-1`, then Tempo
 `{ resource.service.name = "webdesk-api" }` within ~20 s of a request. Every request is sampled (the collector's 500 spans/s tail limit is the cap; no head sampler is configured). Roll back with
 `OTEL_ENABLED=false` and a recreate. Cost: about 24 MB of node_modules (38 packages) in the image, roughly 30 MB RSS when on, nothing when off.
 

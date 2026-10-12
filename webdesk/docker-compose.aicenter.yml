@@ -270,13 +270,10 @@ services:
 # =============================================================================================
 # M4 F2: the default network's subnet is PINNED to what it is on gda-aicenter today.
 # =============================================================================================
-# The host egress guard (ops/host/webdesk-egress-guard.sh, run at boot by webdesk-host-deny.service)
-# reads this network's subnet from Docker ONCE and writes iptables rules against it. Docker picks the
-# next free 172.x/16 whenever the network is recreated (any `docker compose down`), so an unpinned
-# network could come back on another subnet and sit outside every rule until the unit is restarted.
-# Pinning means a recreate yields the same subnet and the rules stay valid. 172.19.0.0/16 is the live
-# value (2026-10-11); the ERP's `gaiada_default` is 172.18.0.0/16. Do not change it without
-# `systemctl restart webdesk-host-deny` afterwards and containment probe 3.
+# HISTORY: the rootful host egress guard (webdesk-host-deny.service) matched this subnet. Since 2026-10-12 WebDesk
+# runs on a ROOTLESS daemon (M4 F6) and its guard (webdesk-rootless-guard@webdesk-rootless) matches the daemon's uid,
+# not a subnet; the rootful guard is removed. The pin stays: it keeps the network stable inside the rootless netns,
+# and the containment probe reads it. 172.19.0.0/16 (2026-10-11); the ERP's `gaiada_default` is 172.18.0.0/16.
 networks:
   default:
     ipam:

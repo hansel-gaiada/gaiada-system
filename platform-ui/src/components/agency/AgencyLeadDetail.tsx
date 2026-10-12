@@ -84,6 +84,11 @@ export function AgencyLeadDetail({
 }) {
   const stages = reference.kind === "ok" ? reference.data.stages : null;
   const currencies = reference.kind === "ok" ? reference.data.currencies : null;
+  // The convert report lives HERE, not in ConvertCard: the convert action revalidates this page and (Next 16.3)
+  // the refreshed lead is `converted`, so ConvertCard unmounts together with the "what was delegated" report it
+  // held. This component stays mounted through the refresh, so the Converted card can show what just happened.
+  // A later visit has no report (it is not stored); the tasks themselves are on the project.
+  const [justConverted, setJustConverted] = useState<ConvertOk | null>(null);
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <LeadSummaryCard lead={lead} stages={stages} />
@@ -116,14 +121,24 @@ export function AgencyLeadDetail({
           action={actions.convert}
           currencies={canWrite ? currencies : null}
           recentCurrency={recentCurrency}
+          onConverted={setJustConverted}
         />
       )}
       {lead.status === "converted" && (
         <Card title="Converted">
-          <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--ink)" }}>
-            This lead is already converted.{" "}
-            {lead.pipelineRunId && <Link href={`/pipeline/${lead.pipelineRunId}`}>Open the delivery run →</Link>}
-          </p>
+          {justConverted ? (
+            <div className="adl-callout" role="status">
+              <p style={{ margin: 0, font: "500 13px var(--font-body)", color: "var(--ink)" }}>
+                Converted. <Link href={`/pipeline/${justConverted.runId}`}>Open the delivery run →</Link>
+              </p>
+              <DelegationReport delegations={justConverted.delegations} members={members} />
+            </div>
+          ) : (
+            <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--ink)" }}>
+              This lead is already converted.{" "}
+              {lead.pipelineRunId && <Link href={`/pipeline/${lead.pipelineRunId}`}>Open the delivery run →</Link>}
+            </p>
+          )}
           {lead.dealValue !== null && lead.dealCurrency !== null && (
             <p className="adl-note">Won at {formatDeal(lead.dealValue, lead.dealCurrency, currencies)}.</p>
           )}
@@ -505,7 +520,7 @@ function TriageCard({
 
 // ─────────────────────────────────────────────────────────────────── convert
 function ConvertCard({
-  leadId, members, action, currencies, recentCurrency,
+  leadId, members, action, currencies, recentCurrency, onConverted,
 }: {
   leadId: string;
   members: { id: string; name: string }[];
@@ -514,8 +529,14 @@ function ConvertCard({
    *  input is then offered. A caller without `update` gets a 403 for the deal part, so it is not shown. */
   currencies: PipelineCurrency[] | null;
   recentCurrency: string | null;
+  /** Hands a success to the parent, which outlives this card (see AgencyLeadDetail). */
+  onConverted: (result: ConvertOk) => void;
 }) {
-  const [state, doConvert, pending] = useActionState<ConvertResult | null, FormData>(action, null);
+  const [state, doConvert, pending] = useActionState<ConvertResult | null, FormData>(async (prev, formData) => {
+    const result = await action(prev, formData);
+    if (result.ok) onConverted(result as ConvertOk);
+    return result;
+  }, null);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [dealValue, setDealValue] = useState("");
   const [dealCurrency, setDealCurrency] = useState(recentCurrency ?? "");
@@ -617,30 +638,38 @@ function ConvertCard({
             <p style={{ margin: 0, font: "500 13px var(--font-body)", color: "var(--ink)" }}>
               Converted. <Link href={`/pipeline/${state.runId}`}>Open the delivery run →</Link>
             </p>
-            {state.delegations && state.delegations.length > 0 ? (
-              <div>
-                <p style={{ margin: "0 0 4px", font: "500 12px var(--font-body)", color: "var(--ink-muted)" }}>What was delegated</p>
-                {state.delegations.map((d, i) => (
-                  <div key={`${d.role}-${i}`} className="adl-delegation-row">
-                    <span>{d.title}</span>
-                    <span className="adl-subtle">
-                      {d.source === "unresolved"
-                        ? (d.reason ?? "unresolved")
-                        : `${members.find((m) => m.id === d.assigneeId)?.name ?? d.assigneeId} — ${DELEGATION_SOURCE_LABEL[d.source]}`}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--ink-subtle)" }}>
-                This backend response did not include a delegation report — tasks may still have been created; check
-                the project&rsquo;s task list directly.
-              </p>
-            )}
+            <DelegationReport delegations={state.delegations} members={members} />
           </div>
         )}
       </div>
     </Card>
+  );
+}
+
+/** A convert answer that succeeded (`ConvertResult` is one interface with `ok: boolean`, not a union). */
+type ConvertOk = ConvertResult & { ok: true };
+
+/** What the conversion delegated, as the convert answer reported it. */
+function DelegationReport({ delegations, members }: { delegations: ConvertOk["delegations"]; members: { id: string; name: string }[] }) {
+  return delegations && delegations.length > 0 ? (
+    <div>
+      <p style={{ margin: "0 0 4px", font: "500 12px var(--font-body)", color: "var(--ink-muted)" }}>What was delegated</p>
+      {delegations.map((d, i) => (
+        <div key={`${d.role}-${i}`} className="adl-delegation-row">
+          <span>{d.title}</span>
+          <span className="adl-subtle">
+            {d.source === "unresolved"
+              ? (d.reason ?? "unresolved")
+              : `${members.find((m) => m.id === d.assigneeId)?.name ?? d.assigneeId} — ${DELEGATION_SOURCE_LABEL[d.source]}`}
+          </span>
+        </div>
+      ))}
+    </div>
+  ) : (
+    <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--ink-subtle)" }}>
+      This backend response did not include a delegation report — tasks may still have been created; check
+      the project&rsquo;s task list directly.
+    </p>
   );
 }
 

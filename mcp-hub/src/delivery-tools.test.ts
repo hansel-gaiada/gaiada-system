@@ -154,6 +154,37 @@ describe("WS11 delivery tools", () => {
       expect((f as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0);
     });
 
+    // M6-P4e3: the runner files a scaffold goal idempotently (site + snapshot) and answers 200 { id, status, deduped: true }
+    // with the EXISTING goal's id; the tool surfaces it, and a fresh goal reports deduped: false (additive field).
+    it("surfaces a deduplicated goal: the existing goal's id and status, deduped true, and no new job is claimed", async () => {
+      const site = "cccccccc-0000-4000-8000-000000000003";
+      const f = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => JSON.stringify({ id: "goal-1", status: "running", deduped: true }) })) as unknown as typeof fetch;
+      vi.stubGlobal("fetch", f);
+      const out = JSON.parse(await getTool("code.scaffold")!.handler({ ...full, provisionedSiteId: site }, principal));
+      expect(out).toMatchObject({ goalId: "goal-1", status: "running", deduped: true, commitRequested: true, mode: "dry_run" });
+      expect(out.content).toMatch(/already exists.*provisioned site.*no new job was queued/);
+      expect(out.content).not.toMatch(/queued \(/);
+    });
+
+    it("a freshly filed goal reports deduped false; the rest of the output contract is unchanged", async () => {
+      vi.stubGlobal("fetch", accepted());
+      const out = JSON.parse(await getTool("code.scaffold")!.handler(full, principal));
+      expect(out).toMatchObject({ goalId: "goal-1", status: "queued", mode: "dry_run", siteKind: "node", contractSnapshotId: full.contractSnapshotId, commitRequested: false, deduped: false });
+      expect(typeof out.content).toBe("string");
+    });
+
+    it("sends the same goal text for the same inputs, so the runner derives the same key (site + snapshot ride in it)", async () => {
+      const f = accepted();
+      vi.stubGlobal("fetch", f);
+      const site = "cccccccc-0000-4000-8000-000000000003";
+      const h = getTool("code.scaffold")!.handler;
+      await h({ ...full, provisionedSiteId: site }, principal);
+      await h({ ...full, provisionedSiteId: site }, principal);
+      const goals = (f as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls.map((c) => JSON.parse(JSON.parse(c[1].body).goal));
+      expect(goals[0]).toEqual(goals[1]);
+      expect(goals[0]).toMatchObject({ contractSnapshotId: full.contractSnapshotId, commit: { provisionedSiteId: site } });
+    });
+
     it("surfaces the runner's own refusal (a full queue) instead of a bare failure", async () => {
       vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}), text: async () => '{"error":"goal queue full"}' })) as unknown as typeof fetch);
       await expect(getTool("code.scaffold")!.handler(full, principal)).rejects.toThrow(/429.*goal queue full/);

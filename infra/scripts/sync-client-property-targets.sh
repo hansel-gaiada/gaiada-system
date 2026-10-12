@@ -1,4 +1,13 @@
 #!/bin/sh
+# ── M6-P3d: SUPERSEDED, DO NOT INSTALL ────────────────────────────────────────────────────────────
+# This never ran: gda-aicenter has no Node, and the generator needs a DB login that reads
+# search_properties across tenants (FORCE RLS). The target file is now rendered by platform-nest
+# (platform-nest/src/modules/monitoring/client-targets.ts, env CLIENT_PROPERTY_TARGETS_PATH) and
+# sumopod PULLS it with infra/scripts/pull-client-property-targets.sh over a one-file forced-command
+# key (infra/scripts/client-targets-forced-command.sh). The WHY-THIS-SPLIT reasoning below still
+# holds and is exactly what the new design preserves. Kept for the record and as the push-based
+# alternative should a Node-capable host ever exist. Runbook: infra/runbooks/enable-estate-blackbox-and-alert-routing.md §7.
+#
 # MON-01 wiring, 2026-08-31 rollout — runs the generator (gen-client-property-targets.mjs) on
 # gda-aicenter and ships ONLY the resulting minimal JSON to SumoPod's Prometheus, which does the
 # actual probing.
