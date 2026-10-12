@@ -542,14 +542,16 @@ describe.skipIf(!live)("M5-W4 · writers' room briefs over HTTP, real Cerbos, re
     });
 
     const insert = (cols: Record<string, unknown>) => {
-      const all = { id: newId(), tenant_id: A, topic: "t", origin_site: config.originSite, ...cols };
+      // A plain SEO brief by default (a property); pass `property_id: null` to test a site-only or ownerless row.
+      const all = { id: newId(), tenant_id: A, topic: "t", origin_site: config.originSite, property_id: propertyId, ...cols };
       const keys = Object.keys(all);
       return adminPool().query(`INSERT INTO search_content_briefs (${keys.join(",")}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(",")})`, Object.values(all));
     };
 
-    it("property_id is nullable and a plain SEO brief (the old column set) still inserts", async () => {
-      await insert({});
-      await insert({ property_id: propertyId });
+    it("property_id is nullable, but a brief must belong to a property or a WebDesk site (chk_scb_has_owner)", async () => {
+      await insert({}); // a plain SEO brief (the old column set) still inserts
+      await expect(insert({ property_id: null })).rejects.toThrow(/chk_scb_has_owner/);
+      await insert({ property_id: null, webdesk_site_id: GAIADA_SITE, webdesk_tenant_slug: GAIADA_SLUG, collection_key: "post", locale: "en" });
     });
 
     it("the WebDesk link is all-or-none", async () => {
