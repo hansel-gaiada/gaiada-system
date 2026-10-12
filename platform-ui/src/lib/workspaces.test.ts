@@ -148,7 +148,7 @@ describe("nothing loses its home (plan §2.6 rule 1)", () => {
 
   it("owns the routes outside /departments that only one workspace uses", () => {
     expect(workspaceBySlug("web-dev")!.ownedRoutes).toEqual(["/pipeline", "/monitoring"]);
-    expect(workspaceBySlug("hr")!.ownedRoutes).toEqual(["/hr"]);
+    expect(workspaceBySlug("hr")!.ownedRoutes).toEqual(["/hr", "/appraisals/cycles"]);
     expect(workspaceBySlug("finance")!.ownedRoutes).toEqual(["/finance", "/invoices", "/billing"]);
     expect(workspaceBySlug("it")!.ownedRoutes).toEqual(["/it"]);
     expect(workspaceBySlug("gm")!.ownedRoutes).toEqual(["/reports/company"]);

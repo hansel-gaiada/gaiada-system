@@ -591,7 +591,8 @@ const HR: Workspace = {
     { key: "time-to-hire", label: "Time to hire" },
     { key: "mandatory-learning", label: "Mandatory learning complete" },
   ],
-  ownedRoutes: ["/hr"],
+  // Appraisal cycle administration lives in HR › Talent (§5.3), so its pages are HR's.
+  ownedRoutes: ["/hr", "/appraisals/cycles"],
 };
 
 // Finance's tabs are ungated in the UI today (`FinanceTabs`); the server gates each read.
