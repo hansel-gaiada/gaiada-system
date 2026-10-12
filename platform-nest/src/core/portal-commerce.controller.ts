@@ -36,8 +36,8 @@ import { notifyBestEffort } from "./client-notify";
 import { requireSigner, resolvePortalScope, type PortalScope } from "./portal-scope";
 // PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
 import {
-  contractInPortalScope, deliverableClientVisible, invoiceInPortalScope, invoicePaymentClientVisible,
-  projectInPortalScope,
+  contractInPortalScope, conversationAttachmentClientVisible, conversationThreadInPortalScope, deliverableClientVisible,
+  invoiceInPortalScope, invoicePaymentClientVisible, projectInPortalScope,
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
 
@@ -50,14 +50,19 @@ const MAX_PROOF_BYTES = 10 * 1024 * 1024;
  *  beyond this is a typo, not a payment. */
 const OVERPAY_TOLERANCE = 1.01;
 
+type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation";
+
 /** Where a client-visible file may live. An entity NOT in this map is unreachable through the portal's
  *  download route even if a file id is guessed, because the route resolves ownership by looking the
  *  parent entity up with the caller's scope applied — and it can only do that for shapes it knows. */
-const DOWNLOADABLE: Record<string, "deliverable" | "contract" | "invoice_payment" | "project"> = {
+const DOWNLOADABLE: Record<string, DownloadableKind> = {
   deliverable: "deliverable",
   contract: "contract",
   invoice_payment: "invoice_payment",
   project: "project",
+  // PV4-03: a Conversation message attachment (`target_entity_id` = the MESSAGE id). Reached through
+  // message -> thread -> conversationThreadInPortalScope in ownsEntity below.
+  conversation: "conversation",
 };
 
 function dispositionHeader(filename: string): string {
@@ -492,7 +497,7 @@ export class PortalCommerceController {
   /** Does the caller's client own this entity? One switch, so the download route's reachability set is
    *  exactly DOWNLOADABLE and adding a kind there without adding a branch here fails CLOSED. */
   private async ownsEntity(
-    c: PoolClient, scope: PortalScope, kind: "deliverable" | "contract" | "invoice_payment" | "project", id: string,
+    c: PoolClient, scope: PortalScope, kind: DownloadableKind, id: string,
   ): Promise<boolean> {
     const q = {
       // Ownership travels through the project, because `deliverables.client_id` is nullable and a
@@ -512,6 +517,12 @@ export class PortalCommerceController {
       invoice_payment: `SELECT 1 FROM invoice_payments pp JOIN invoices i ON i.id = pp.invoice_id
                          WHERE pp.id = $1 AND ${invoicePaymentClientVisible("pp", "detail")}
                            AND ${invoiceInPortalScope("i", { clients: 2 })}`,
+      // PV4-03: a message attachment, reached THROUGH its thread. The thread predicate carries both
+      // halves of layer 3 (the caller's clients AND, for a project-scoped contact, their projects with NO
+      // client-wide-thread admission, PV4-Q1). A retracted message's files are withdrawn with it.
+      conversation: `SELECT 1 FROM conversation_messages m JOIN conversation_threads t ON t.id = m.thread_id
+                      WHERE m.id = $1 AND ${conversationAttachmentClientVisible("m")}
+                        AND ${conversationThreadInPortalScope("t", { clients: 2, projects: 3 })}`,
     }[kind];
     // A receipt has no project reach, so its query binds only $1/$2. Passing an unreferenced $3 makes
     // Postgres refuse the statement ("could not determine data type of parameter $3"), which 500s the

@@ -1677,7 +1677,8 @@ Four layers, and only the third is per-client:
 
 1. **RLS** — tenant, in Postgres (FORCE RLS on the authorized-tenant-set).
 2. **Cerbos** — the `client` derived role on the `portal` resource. Actions: `read`, `decide`, `sign`,
-   `pay`, `update_profile`. **Cerbos does not see rows**, so `read` means "may ask the portal", never
+   `pay`, `update_profile` (and later `request_change`, `approve_post`, `edit_company_profile`, and PV4-02's `converse`, the Conversation write
+   action, §29). **Cerbos does not see rows**, so `read` means "may ask the portal", never
    "may see any client's data".
 3. **`src/core/portal-scope.ts`** — `client_id = ANY(:callerClientIds)` plus the project restriction,
    applied as a SQL predicate on **every** portal query. This is what stops client A reading client B
@@ -1700,6 +1701,8 @@ becomes an existence oracle for another client's ids.
 | ✅ | GET | `/api/:t/portal/timeline` | `?limit` (clamped 1–400, default 120). `PortalTimelineEvent[]` = `{kind, id, label, status, at, tense:'due'\|'happened', context, projectId}`. Composed as a UNION over client-visible OBJECTS — **never** from `activities`, so a new internal event type cannot leak into a client's feed by default. |
 | ✅ | GET | `/api/:t/portal/deliverables` | `?projectId`. Attachment metadata batched in one query (`files[]` per deliverable). |
 
+**Conversation (PV4-03)** is its own portal area under `/api/:t/portal/conversation*`: see **§29** (a thread per project plus one client-wide thread, unread counts, live topic `conversation`).
+
 ### 16b. Commerce — `src/core/portal-commerce.controller.ts`
 
 | Status | Method | Path | Notes |
@@ -1710,7 +1713,7 @@ becomes an existence oracle for another client's ids.
 | ✅ | GET | `/api/:t/portal/contracts` | `draft` excluded. `clientSigned`/`providerSigned`/`termEnded` per row (`termEnded` derived on read, never written back). |
 | ✅ | GET | `/api/:t/portal/contracts/:contractId` | Adds `bodyMd`, `document`, `signatures[]`, `canSign`, `viewOnly`. **`canSign` is the exact conjunction `POST /sign` enforces** — mirror it, never recompute it. |
 | ✅ | POST | `/api/:t/portal/contracts/:contractId/sign` | `{signerName, signerTitle?, agree:true}`. `agree` refused server-side if absent. Requires `signer` capability. Idempotent — a re-sign answers 200 `{alreadySigned:true}`, checked BEFORE the status check (signing is what changes the status). Flips to `signed` only when BOTH parties are present. |
-| ✅ | GET | `/api/:t/portal/files/:fileId` | The portal's OWN download. Resolves ownership by walking the file's parent entity through the scope predicate; parent kinds limited to `deliverable\|contract\|invoice_payment\|project`. Attachment-only + `nosniff` + sandbox CSP. **Do not link the staff `/files/:id/content` route from the portal** — it authorizes on the parent resource kind, which the `client` role does not hold, so it 403s by design. |
+| ✅ | GET | `/api/:t/portal/files/:fileId` | The portal's OWN download. Resolves ownership by walking the file's parent entity through the scope predicate; parent kinds limited to `deliverable\|contract\|invoice_payment\|project\|conversation` (`conversation` = a message attachment, admitted through its thread and only while the message is not retracted, §29). Attachment-only + `nosniff` + sandbox CSP. **Do not link the staff `/files/:id/content` route from the portal** — it authorizes on the parent resource kind, which the `client` role does not hold, so it 403s by design. |
 
 ### 16c. Profile — `src/core/portal-profile.controller.ts`
 
@@ -1733,7 +1736,7 @@ costs a wasted refetch, not a disclosure — that inversion is the whole securit
 realtime to external parties. `mode:'poll'` when `REDIS_URL` is unset; the client polls unconditionally
 anyway (120s when live, 30s when not), because SSE fails in ways invisible from the client.
 
-Topics: `approvals · projects · deliverables · invoices · contracts · profile`. The event→topic map in
+Topics (8): `approvals · projects · deliverables · invoices · contracts · profile · requests · conversation`. `requests` = a webdev change request submitted/triaged/converted (§16f); `conversation` = a conversation thread opened/updated or a message posted/edited/retracted (PV4-03, §29), narrowed to the thread's client. The browser copy of this list is `PortalTopic` in `platform-ui/src/lib/portal.ts` and must match `portal-live.service.ts`. The event→topic map in
 `portal-live.service.ts` is an **allowlist** — an unmapped event type produces no frame, so adding an
 internal event cannot wake a client's browser by default.
 
@@ -5749,3 +5752,51 @@ When a lead changes stage, the search module can upload that conversion to Googl
 **Mode.** `SEARCH_CONVERSIONS_LIVE_PLATFORMS` (default empty = every platform simulates; e.g. `google_ads`), separate from `SEARCH_ADS_WRITE_MODE`. Boot refuses a listed platform with no registered live uploader, and an unknown token. Live also needs the Google Ads developer token, a linked Ads account on the property, gate G2 and the O-8 access audit, none of which exist yet.
 
 **MCP tools:** `search.listConversionTargets` (read), `search.setConversionTarget` (write, impact `low`, `verified`), `search.listConversionUploads` (read), `search.listLeadConversionUploads` (read).
+
+## 29. Conversation — client and staff (PV4-03, 2026-10-12) — `platform-nest/src/core/{portal-conversation,conversation}.controller.ts`, `conversation-core.ts`; predicates in `portal-visibility.ts` — **STATUS: BACKEND BUILT, PROTOTYPED (HTTP suite `conversation.controller.test.ts` runs against real Postgres + Cerbos on the Linux CI gate; no UI yet — PV4-08 portal, PV4-09 staff)**
+
+Plan: `docs/plans/2026-10-12-pv4-conversation-tickets.md` (PV4-03). Rulings PV-D22 (a thread per project plus ONE client-wide "general" thread per client), PV-D23 (agents draft, staff send), PV-D24 (every contact who can see a project takes part, viewers included). Tables: migration `202610122330_pv4_conversation_data_model.sql`. Cerbos: `resource_conversation.yaml` (staff kind) and `resource_portal.yaml` `converse` (client).
+
+**Rules that hold on every route below**
+- **Portal isolation** (§16 "Isolation model"): `portal` `read` for GETs, `portal` `converse` for writes, then `resolvePortalScope`, then the thread predicate `conversationThreadInPortalScope` (client AND project). A message, its edit/retract and its attachments are admitted **through their thread**. Outside scope = **404**, never 403 (no existence oracle). A revoked or invited contact is refused by the kernel (403 "not a portal client").
+- **PV4-Q1 (default in force):** the client-wide thread (`project_id IS NULL`) is visible **only to client-wide contacts**. Unlike contracts and change requests, a project-scoped contact is NOT admitted to project-less rows here.
+- **PV-D24:** no route calls `requireSigner`; a `viewer` contact opens threads and posts.
+- **Server-derived fields:** `author_id` (the principal), `author_side` (`client` on portal routes, `staff` on staff routes), `client_id` (from the admitted project/thread, or the caller's own client) and `tenant_id` (the route) never come from the body. Body fields `authorId`, `authorSide`, `author_side`, `clientId` (except to choose among the caller's OWN clients), `status`, `tenantId` are ignored.
+- **Plain text only** (design decision 7): `body` 1..10,000 characters (also a DB CHECK), PAN/national-id scrubbed like change requests, never interpreted as HTML or Markdown. **The UI must render it as text** (links may be made clickable on render).
+- **Edit / retract (PV4-Q2 default):** own messages only, within **15 minutes** of `createdAt` (DB clock), both sides. Past the window or already retracted: **409**. Someone else's message: **403** on staff routes, **404** on portal routes. A retracted message is returned to BOTH sides as `{body: null, retracted: true, attachments: []}`; the old body is never returned again, and its files are refused by the portal download route.
+- **Closed thread:** posting (either side) is **409** until staff reopen it.
+- **Drafts are staff-only by table** (`conversation_drafts`): no portal route or portal helper names the table (static guard `conversation-portal-guard.test.ts`).
+- **"Client sees this"** (plan trap 9): every staff thread and message row carries `clientVisible: true` computed in SQL from `staffConversationThreadClientVisible` / `staffConversationMessageClientVisible`; every draft row carries `clientVisible: false` from `staffConversationDraftClientVisible`. The UI shows the marker from this field, never from its own logic.
+- **Attachments:** `attachments?: [{filename, contentType, content /* base64 */}]`, **at most 5 per message and at most 10 MB in total per message** (lead decision; the ticket's 5 x 10 MB was reduced). Text types are scrubbed like payment proofs. Stored as `files` rows with `target_entity_type = 'conversation'` and `target_entity_id` = the MESSAGE id. ⚠ **The app's Fastify body limit is the 1 MiB default** (`main.ts` never raises it), so in practice an inline JSON body (base64 is about 4/3 of the raw size) carries well under 1 MB of files; a larger request is refused 413 before the handler runs. The same is true of payment proofs (§16b). Raising it is a separate, app-wide decision.
+- **Downloads:** portal `GET /api/:t/portal/files/:fileId` (§16b) admits `conversation` files through message -> thread -> `conversationThreadInPortalScope`, and only while the message is not retracted. Staff use `GET /api/:t/files/:fileId/content`, which authorizes `{kind: 'conversation'}` `read` with no change there.
+- **Unread counts:** messages on the thread written by the **other side**, not retracted, newer than the caller's `conversation_reads.last_read_at`. Opening a thread (GET detail) marks it read; posting marks it read for the poster.
+- **Events** (transactional outbox, entity type `conversation`; every payload carries `clientId`, `threadId` and ids only, never text): `conversation.thread.opened`, `conversation.message.posted`, `conversation.message.edited` (`change: edited|retracted`), `conversation.thread.updated`. Drafts emit `conversation.draft.created` on the `conversation_draft` stream, which is NOT mapped to any portal topic.
+- **Live updates:** portal topic **`conversation`** (§16d), narrowed to the thread's client. Staff screens poll (20 s while a thread is open; design decision 6); there is no staff live channel.
+
+### 29a. Portal — `src/core/portal-conversation.controller.ts`
+
+| Status | Method | Path | Cerbos | Payload / notes |
+|---|---|---|---|---|
+| PROTOTYPED | GET | `/api/:t/portal/conversation[?projectId]` | `portal` · `read` | `{threads: PortalThread[], canUseGeneral: boolean}`. `PortalThread` = `{id, clientId, clientName, projectId, projectName, general, subject, status:'open'\|'closed', createdSide, lastMessageAt, createdAt, unreadCount}`, newest activity first, max 200. `canUseGeneral` = the caller is a client-wide contact (may post to, and so lazily create, the general thread). |
+| PROTOTYPED | GET | `/api/:t/portal/conversation/:threadId` | `portal` · `read` | `{thread: PortalThread (no unreadCount), messages: Message[]}`, oldest first (newest 500). Marks the thread read. `Message` = `{id, threadId, authorId, authorName, authorSide:'client'\|'staff', body: string\|null, retracted, edited, editedAt, createdAt, editableUntil: string\|null, mine, attachments:[{id, filename, contentType, byteSize}]}`. No `draftedBy` on the portal: the sender shown is the named person (design decision 4). |
+| PROTOTYPED | POST | `/api/:t/portal/conversation` | `portal` · `converse` | `{projectId?, clientId?, subject?, body, attachments?}` -> **201** `{threadId, messageId, created, attachmentIds}`. With `projectId` (one of the caller's projects; otherwise 404): a NEW thread on that project. Without: the client's ONE general thread, created on first post (race-safe: concurrent first posts land in one thread via the partial unique `ux_conv_threads_client_wide`); a project-scoped contact gets 404; a client-wide contact of several clients names one with `clientId` (validated against their scope, else 400). |
+| PROTOTYPED | POST | `/api/:t/portal/conversation/:threadId/messages` | `portal` · `converse` | `{body, attachments?}` -> **201** `{id, threadId, createdAt, attachmentIds}`. 404 outside scope, 409 closed. |
+| PROTOTYPED | PATCH | `/api/:t/portal/conversation/messages/:messageId` | `portal` · `converse` | `{body}` -> `{id, edited: true, editedAt}`. Own client-side message only (else 404); 409 past 15 minutes or retracted. |
+| PROTOTYPED | DELETE | `/api/:t/portal/conversation/messages/:messageId` | `portal` · `converse` | -> `{id, retracted: true, retractedAt}`. Same ownership and window rules as PATCH. |
+
+### 29b. Staff — `src/core/conversation.controller.ts` (Cerbos kind `conversation`)
+
+| Status | Method | Path | Cerbos | Payload / notes |
+|---|---|---|---|---|
+| PROTOTYPED | GET | `/api/:t/conversation[?clientId&projectId&status=open\|closed&awaitingReply=true\|false]` | `conversation` · `read` | `{threads: StaffThread[]}`. `StaffThread` = the PortalThread fields + `{createdBy, updatedAt, awaitingReply, pendingDrafts, clientVisible: true, unreadCount}`. `awaitingReply` = the last non-retracted message is the client's and the thread is open (the client Overview's "waiting for our reply" count). `unreadCount` counts CLIENT messages. |
+| PROTOTYPED | GET | `/api/:t/conversation/:threadId` | `conversation` · `read` | `{thread: StaffThread, messages: (Message & {draftedBy: string\|null, clientVisible: true})[]}`. Marks read. |
+| PROTOTYPED | GET | `/api/:t/conversation/:threadId/drafts[?status=pending\|all]` | `conversation` · `read` | `{drafts: [{id, threadId, body, draftedBy, draftedByName, status:'pending'\|'sent'\|'discarded', decidedBy, decidedAt, sentMessageId, createdAt, clientVisible: false}]}`. Default pending only. |
+| PROTOTYPED | POST | `/api/:t/conversation` | `conversation` · `post` | `{clientId, projectId?, subject?, body, attachments?}` -> **201** `{threadId, messageId, created, attachmentIds}`. With `projectId`: a new thread (the project must belong to `clientId`, else 400). Without: the client's general thread (lazy, race-safe). The internal client is refused (400). |
+| PROTOTYPED | POST | `/api/:t/conversation/:threadId/messages` | `conversation` · `post` | `{body, attachments?}` -> **201** `{id, threadId, createdAt, attachmentIds, clientVisible: true}`. **Refused to `bot`/`automation` principals by Cerbos** (403 `cerbos denied post on conversation`, PV-D23). 409 closed. |
+| PROTOTYPED | PATCH | `/api/:t/conversation/:threadId` | `conversation` · `manage` | `{status?: 'open'\|'closed', subject?}` -> `{id, status, subject, updatedAt}`. Emits `conversation.thread.updated`. Refused to agents. |
+| PROTOTYPED | PATCH | `/api/:t/conversation/messages/:messageId` | `conversation` · `post` | `{body}`. Own staff message only (403 otherwise); 409 past 15 minutes or retracted. |
+| PROTOTYPED | DELETE | `/api/:t/conversation/messages/:messageId` | `conversation` · `manage` | Retract one's own staff message (same rules). |
+| PROTOTYPED | POST | `/api/:t/conversation/:threadId/drafts` | `conversation` · `draft` | `{body, idempotencyKey?}` -> **201** `{id, threadId, status, replayed, clientVisible: false}`. **Allowed to agents** (PV4-07's tool calls this). `drafted_by` = the caller. Idempotent on `(tenant, idempotencyKey)`: a replay returns the same draft (`replayed: true`); the same key on another thread is 409. 409 on a closed thread. |
+| PROTOTYPED | PATCH | `/api/:t/conversation/drafts/:draftId` | `conversation` · `draft` | `{body}` -> `{id, status: 'pending', clientVisible: false}`. 409 unless pending. |
+| PROTOTYPED | POST | `/api/:t/conversation/drafts/:draftId/send` | `conversation` · `post` | -> **201** `{id (the message), threadId, draftId, draftedBy, createdAt, clientVisible: true}`. ONE transaction: the message is authored by the SENDER (`author_id` = the caller, `author_side = 'staff'`) with `drafted_by` = the draft's author; the draft becomes `sent` with `sent_message_id`, `decided_by`, `decided_at`. Already sent or discarded: 409. Refused to agents by Cerbos. |
+| PROTOTYPED | POST | `/api/:t/conversation/drafts/:draftId/discard` | `conversation` · `draft` | -> `{id, status: 'discarded', clientVisible: false}`. 409 unless pending. |

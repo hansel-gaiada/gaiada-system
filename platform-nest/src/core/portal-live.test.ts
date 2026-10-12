@@ -114,4 +114,31 @@ describe("portal live bus (CP-5)", () => {
     expect(a.frames).toEqual([{ topic: "requests", at: AT }, { topic: "requests", at: AT }]);
     a.off();
   });
+
+  // PV4-03 (client Conversation): the four conversation events map to the `conversation` topic, and a
+  // frame carrying `clientId` reaches ONLY that client's subscribers. Draft events are never mapped.
+  it("PV4-03: conversation events reach only the named client's subscribers, on the 'conversation' topic", () => {
+    const a = collector("t1", ["c1"]);
+    const b = collector("t1", ["c2"]);
+    const both = collector("t1", ["c1", "c2"]);
+    const otherTenant = collector("t2", ["c1"]);
+    for (const t of ["conversation.thread.opened", "conversation.thread.updated", "conversation.message.posted", "conversation.message.edited"]) {
+      dispatchPortalFrame("t1", t, { clientId: "c1", threadId: "th", messageId: "m", body: "SECRET" }, AT);
+    }
+    expect(a.frames).toEqual(Array.from({ length: 4 }, () => ({ topic: "conversation", at: AT })));
+    expect(b.frames).toEqual([]);
+    expect(both.frames).toHaveLength(4);
+    expect(otherTenant.frames).toEqual([]);
+    expect(JSON.stringify(a.frames)).not.toContain("SECRET");
+    a.off(); b.off(); both.off(); otherTenant.off();
+  });
+
+  it("PV4-03: staff-only draft events never produce a portal frame", () => {
+    const a = collector("t1", ["c1"]);
+    for (const t of ["conversation.draft.created", "conversation.draft.updated", "conversation.draft.sent"]) {
+      dispatchPortalFrame("t1", t, { clientId: "c1" }, AT);
+    }
+    expect(a.frames).toEqual([]);
+    a.off();
+  });
 });

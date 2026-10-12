@@ -22,6 +22,9 @@ import {
   invoiceClientVisible, invoiceInPortalScope, invoicePaymentClientVisible, invoicePaymentInPortalScope,
   milestoneClientVisible, postReviewClientVisible, postReviewInPortalScope, projectClientVisible,
   projectInPortalScope, projectReach, runClientVisible, runInPortalScope, runStageClientVisible,
+  conversationAttachmentClientVisible, conversationMessageClientVisible, conversationThreadClientVisible,
+  conversationThreadInPortalScope, staffConversationDraftClientVisible, staffConversationMessageClientVisible,
+  staffConversationThreadClientVisible,
 } from "./portal-visibility";
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -333,6 +336,36 @@ describe("PV3-02 builder contract", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
+// 2b. PV4-03 — conversation predicates
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("PV4-03 conversation predicates", () => {
+  it("a thread is reached by client AND project, with NO client-wide-thread admission for a project-scoped contact (PV4-Q1)", () => {
+    expect(conversationThreadInPortalScope("t", S23)).toBe(
+      `t.client_id = ANY($2::uuid[]) AND t.deleted_at IS NULL AND ($3::uuid[] IS NULL OR t.project_id = ANY($3::uuid[]))`,
+    );
+    // The contract/change-request shape admits project_id IS NULL; the thread shape must not.
+    expect(conversationThreadInPortalScope("t", S12)).not.toContain("project_id IS NULL");
+    expect(conjuncts(conversationThreadInPortalScope("t", S12))).toEqual(conjuncts(runInPortalScope("t", S12)));
+  });
+
+  it("row-state halves bind no parameters; attachments are withdrawn with a retracted message", () => {
+    for (const sql of [conversationThreadClientVisible("t"), conversationMessageClientVisible("m"), conversationAttachmentClientVisible("m")]) {
+      expect(sql).not.toMatch(/\$\d/);
+    }
+    expect(conversationMessageClientVisible("m")).toBe("TRUE");
+    expect(conversationAttachmentClientVisible("m")).toBe("m.retracted_at IS NULL");
+  });
+
+  it("staff flags: threads and messages through the thread's client; drafts are the constant FALSE", () => {
+    expect(staffConversationThreadClientVisible("t")).toBe("(t.client_id IS NOT NULL AND (t.deleted_at IS NULL))");
+    expect(staffConversationMessageClientVisible("m", "t")).toBe("(t.client_id IS NOT NULL AND (t.deleted_at IS NULL) AND (TRUE))");
+    expect(staffConversationDraftClientVisible("d")).toBe("FALSE");
+    expect(() => staffConversationDraftClientVisible("d;x")).toThrow(/invalid table alias/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
 // 3. The guard: no inline row-visibility literal in any portal-facing production file
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -400,6 +433,8 @@ const SWITCHED = [
   "src/core/webdev-change-requests-portal.controller.ts",
   "src/core/social-client-review-portal.controller.ts",
   "src/core/portal-profile.controller.ts",
+  // PV4-03: written on the builders from day one; listed so the importer scan must find it.
+  "src/core/portal-conversation.controller.ts",
 ];
 
 describe("PV3-02 guard — portal-facing files carry no inline row-visibility literal", () => {
