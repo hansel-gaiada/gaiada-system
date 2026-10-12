@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.103.0` - M5-P3/P4: Meta and LinkedIn conversion adapters, SIMULATE-ONLY (2026-10-13) - DEV-VERIFIED (simulate)
+
+- **New files:** `conversions-meta.ts` (Meta Conversions API, `POST /{dataset_id}/events`) and `conversions-linkedin.ts` (LinkedIn Conversions API).
+- **What they do:** each builds the request the platform WOULD receive, plus a non-personal summary. They follow each platform's own normalisation:
+  - Meta: `em`/`ph` SHA-256, with no gmail dot-removal; `fbc`/`fbp` sent unhashed and only with marketing consent.
+  - Both: `event_id` dedup with the browser Pixel's `Lead`; value/currency only on `won`.
+- **Simulate only:**
+  - Neither has a live transport or reads a token.
+  - The boot guard refuses `meta_capi` or `linkedin_capi` in `SEARCH_CONVERSIONS_LIVE_PLATFORMS`.
+  - `conversion-targets` now accept both platforms.
+  - An unknown platform is a typed 400 `platform_unknown`.
+- **Docs:** BFF §28b.1 and the capability inventory are updated.
+- **Verified** on GitHub Actions 38273062655: unit tests and DB tests green.
+- **Open before any live upload:**
+  - where the credentials live;
+  - Meta's `client_user_agent` (Meta requires it for website events, and the system stores no user agent);
+  - the currency case;
+  - Meta Business Verification (O-7).
+
 ### platform-nest `0.102.0` - GitHub repo requests reach the Approvals inbox; provisioned sites are reconciled on a schedule (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6-P4h and M6-P4i, found while mapping the P4 gate. Built by the M6 session.
