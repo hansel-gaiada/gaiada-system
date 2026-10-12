@@ -136,6 +136,8 @@ export class ContractSnapshotsController {
    * THE TWO TRIPWIRES (ticket's own emphasis):
    *   - hash_mismatch      -> 502 (Zone B's own claim disagrees with what we downloaded — a
    *                           transport-layer/upstream-integrity problem, not a client error).
+   *   - block_library_hash_mismatch -> 502 (M6-P4b0b: same, for the block-library tarball, which the
+   *                           content hash does not cover; `contract_block_library_hash_mismatch`).
    *   - determinism_breach -> 409, but ALSO an outbox event + a severity:"critical" activity row
    *                           (the service's own job) — "alerting, not merely 4xx" per the ticket.
    */
@@ -175,6 +177,11 @@ export class ContractSnapshotsController {
         // token itself (`error: "contract_hash_mismatch"`) is what survives the shared error
         // filter's reshape — see this file's own header note.
         throw new BadGatewayException({ message: "contract_hash_mismatch" });
+      case "block_library_hash_mismatch":
+        // Tripwire (a') (M6-P4b0b): the block-library tarball does not hash to WebDesk's own claim (or a hash was
+        // claimed with no tarball). Same class as (a): upstream integrity, 502, nothing persisted. A distinct token
+        // so the caller can tell which artifact failed; the hashes stay a service-level contract, as for (a).
+        throw new BadGatewayException({ message: "contract_block_library_hash_mismatch" });
       case "determinism_breach":
         // Tripwire (b): ALREADY alerted (event + activity) inside the service. The HTTP status is
         // secondary to that — 409 because the caller's request cannot be fulfilled as an ordinary

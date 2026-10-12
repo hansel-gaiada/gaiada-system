@@ -32,19 +32,25 @@ function artifacts(seed: string) {
   };
 }
 
-function providerFor(version: string, seed: string, lieAboutHash = false): WebdevControlProvider {
+function providerFor(version: string, seed: string, lieAboutHash = false, lieAboutBlockLibrary = false): WebdevControlProvider {
   const set = artifacts(seed);
   const { contentHash } = computeContentHash(set);
   const meta: ContractBundleMeta = {
     version, vocabularyVersion: "1.2.0",
     blockLibrary: { package: "@gaiada/webdesk-blocks", version: "1.3.2", range: "^1.3" },
     artifacts: {
-      sdkTsUrl: "fixture://sdk", sdkPhpUrl: null, openapiUrl: "fixture://openapi", contractMdUrl: "fixture://md", blockLibraryUrl: null,
+      sdkTsUrl: "fixture://sdk", sdkPhpUrl: null, openapiUrl: "fixture://openapi", contractMdUrl: "fixture://md",
+      // M6-P4b0b: a tarball whose bytes do not hash to the claim (the content hash is honest).
+      blockLibraryUrl: lieAboutBlockLibrary ? "fixture://blocks" : null,
+      blockLibrarySha256: lieAboutBlockLibrary ? "ab".repeat(32) : null,
     },
     contentHash: lieAboutHash ? "sha256:1111111111111111111111111111111111111111111111111111111111111" : contentHash,
     generatedAt: new Date().toISOString(),
   };
-  const byUrl: Record<string, Buffer> = { "fixture://sdk": set.sdkTs, "fixture://openapi": set.openapi, "fixture://md": set.contractMd };
+  const byUrl: Record<string, Buffer> = {
+    "fixture://sdk": set.sdkTs, "fixture://openapi": set.openapi, "fixture://md": set.contractMd,
+    "fixture://blocks": Buffer.from(`tarball-${seed}`),
+  };
   return { key: "fixture", getContractBundle: async () => meta, downloadArtifact: async (u: string) => byUrl[u] };
 }
 
@@ -162,6 +168,21 @@ describe.skipIf(!TEST_URL)("WSK-19 · ContractSnapshotsController (HTTP, isolate
     // `error`), not Nest's default `{ message }` — same recurring-mistake note WSK-12's own HTTP
     // suite states.
     expect(r.json()).toMatchObject({ error: "contract_hash_mismatch" });
+  });
+
+  it("TRIPWIRE (a-prime, M6-P4b0b) surfaces as 502 contract_block_library_hash_mismatch, and nothing is recorded", async () => {
+    setWebdevControlProviderForTests(providerFor("2.1.0", "http-bl-mismatch", false, true));
+    const r = await app.inject({
+      method: "POST", url: `/api/${tenant}/modules/webdev/contracts/refresh`,
+      headers: asUser(admin), payload: { slug: "acme" },
+    });
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toMatchObject({ error: "contract_block_library_hash_mismatch" });
+
+    const list = await app.inject({
+      method: "GET", url: `/api/${tenant}/modules/webdev/contracts?slug=acme`, headers: asUser(admin),
+    });
+    expect(list.json()).not.toEqual(expect.arrayContaining([expect.objectContaining({ contractVersion: "2.1.0" })]));
   });
 
   it("TRIPWIRE (b) surfaces as 409 at the HTTP layer", async () => {

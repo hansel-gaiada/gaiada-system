@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.83.0` - the contract mirror checks the block-library tarball against WebDesk's sha256; a provisioned site claims its real domain once (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6 (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`), batch 4. Built by the M6 session.
+
+- **Tripwire (a') at mirror time (M6-P4b0b).** `ContractBundleMeta.artifacts.blockLibrarySha256` (absent or `null` from an older WebDesk; a present value must be 64 lowercase hex, anything else is an unrecognized shape). `refreshContractSnapshot` checks the downloaded tarball against it before any transaction: a mismatch, or a claimed hash with no tarball URL, returns `block_library_hash_mismatch` and persists nothing. A URL with no claimed hash stays accepted as before. `POST …/contracts/refresh` answers 502 `contract_block_library_hash_mismatch`; P4c's `pinContractSnapshot` parks with that reason (its outcome mapping is now an exhaustive switch; the old ternary would have called it a determinism breach).
+- **`POST /api/:t/modules/webdev/sites/:id/domain` (M6-P4c2)**, body exactly `{domain}`: a site that provisioning registered as `<slug>.provisioned.invalid` gets its real domain, once. `webdev_site:update` (no new Cerbos action), authorization before body validation; only `origin = provisioned` rows still on the placeholder are claimable (else 409 `domain_already_set`); `.invalid` refused; row lock plus a conditional UPDATE, so two concurrent claims cannot both win; outbox `webdev.site.domain_claimed`. `normalizeSiteDomain` is now the one domain check for create and claim. The placeholder never reached WebDesk (`tenant.provision` carries no domain) and MON-01 reads only `search_properties`, so a claim propagates nowhere.
+- **`internal-sites-backfill` (M6-P3b)**, a one-off owner-run script beside `internal-sentinel`: `node dist/seed/internal-sites-backfill.js --tenant-id <companyId> --domains-file <a gitignored *.local.* list> [--apply]`. Dry run by default; finds the sentinel by `clients.is_internal` (exactly one, or a refusal); per domain `already` / `set` (NULL → sentinel) / `REFUSE` (another real client, never overwritten) / `missing`; any REFUSE writes nothing; one transaction under the `webdev` RLS scope with a conditional UPDATE (a concurrent change aborts everything); outbox `webdev.site.client_backfilled`. It waits for M5-G0's sentinel to exist live.
+- Verified on the Linux gate (sumopod): `m6b4` 618 files / 9210 passed / 0 failed; `m6b4b` (with M6-P3b and main `cda66f80`) 619 files / 9231 passed / 0 failed. (0.82.0 is reserved for M5.)
+
+### webdesk `0.16.0` - the contract read sends the block-library tarball's sha256 (2026-10-12) - DEV-VERIFIED
+
+- **M6-P4b0b.** `GET /control/v1/tenants/:slug/contract` adds `artifacts.blockLibrarySha256`: the pointer's own value when a tarball is named and the value is 64 lowercase hex, else `null` (never fabricated or repaired). Plain hex, outside `contentHash`, additive. `webdesk/api/README.md` and design §06's example updated.
+- Verified on the Linux gate (sumopod, `m6b4w`): webdesk-api 1796 passed / 0 failed / 3 skipped, incl. `contract-read-block-library.spec.ts` and the live block-library codegen spec against RustFS.
+
 ### infra `0.13.3` - CI runs the WebDesk Playwright suite against the built app (M5-W2f) (2026-10-12) - DEV-VERIFIED
 
 - **CI step:** the platform-ui job runs `playwright.webdesk.config.ts` (webdesk-content, portal-website, webdesk-editorial; 109 stub-based tests) against the `next build` output, using `next start` via `WD_E2E_BUILT=1`. Before this, only a 1-test smoke e2e ran in CI. The local default stays `next dev`.

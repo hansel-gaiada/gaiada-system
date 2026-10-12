@@ -49,6 +49,8 @@ function providerFor(version: string, seed: string, withPhp: boolean, withBlocks
       openapiUrl: "fixture://openapi",
       contractMdUrl: "fixture://md",
       blockLibraryUrl: withBlocks ? "fixture://blocks" : null,
+      // M6-P4b0b: WebDesk's honest claim of the tarball's sha256.
+      blockLibrarySha256: withBlocks ? sha(Buffer.from(`blocks-tarball-${seed}`)) : null,
     },
     contentHash,
     generatedAt: new Date().toISOString(),

@@ -94,7 +94,7 @@ class FakeWebdesk {
 }
 
 /** The contract mirror's far side: unpublished (404) until a test publishes the slug. */
-function contractProvider(published: Set<string>): WebdevControlProvider {
+function contractProvider(published: Set<string>, badBlockLibrary: Set<string> = new Set()): WebdevControlProvider {
   const artifacts = {
     sdkTs: Buffer.from("export const sdk = 'p4c';"),
     openapi: Buffer.from(JSON.stringify({ openapi: "3.0.0", info: { title: "p4c" } })),
@@ -106,6 +106,7 @@ function contractProvider(published: Set<string>): WebdevControlProvider {
     "https://fixture.invalid/sdk.d.ts": artifacts.sdkTs,
     "https://fixture.invalid/openapi.v1.json": artifacts.openapi,
     "https://fixture.invalid/CONTENT-CONTRACT.md": artifacts.contractMd,
+    "https://fixture.invalid/blocks.tgz": Buffer.from("tarball bytes as downloaded"),
   };
   return {
     key: "fixture",
@@ -120,7 +121,9 @@ function contractProvider(published: Set<string>): WebdevControlProvider {
           sdkPhpUrl: null,
           openapiUrl: "https://fixture.invalid/openapi.v1.json",
           contractMdUrl: "https://fixture.invalid/CONTENT-CONTRACT.md",
-          blockLibraryUrl: null,
+          // M6-P4b0b: a slug in `badBlockLibrary` is one whose tarball does not hash to WebDesk's claim.
+          blockLibraryUrl: badBlockLibrary.has(slug) ? "https://fixture.invalid/blocks.tgz" : null,
+          blockLibrarySha256: badBlockLibrary.has(slug) ? "ab".repeat(32) : null,
         },
         contentHash,
         generatedAt: new Date().toISOString(),
@@ -160,6 +163,7 @@ describe.skipIf(!live)("M6-P4c — provisioning completion (real Postgres, faked
   let principal: Principal;
   let wd: FakeWebdesk;
   let published: Set<string>;
+  let badBlockLibrary: Set<string>;
 
   async function pendingSite(slug: string, opts: { framework?: string; providerRef?: string; lineage?: boolean } = {}): Promise<string> {
     const id = newId();
@@ -231,8 +235,9 @@ describe.skipIf(!live)("M6-P4c — provisioning completion (real Postgres, faked
   beforeEach(() => {
     wd = new FakeWebdesk();
     published = new Set();
+    badBlockLibrary = new Set();
     setWebdeskApprovedCommandDepsForTests({ client: wd as unknown as WebdeskControlClient });
-    setProvisionCompletionDepsForTests({ contractProvider: contractProvider(published) });
+    setProvisionCompletionDepsForTests({ contractProvider: contractProvider(published, badBlockLibrary) });
     webdeskZoneB.clearSiteCache();
     vi.mocked(githubAppService.githubRequest).mockReset();
   });
@@ -299,6 +304,23 @@ describe.skipIf(!live)("M6-P4c — provisioning completion (real Postgres, faked
     expect(second.completion).toMatchObject({ state: "complete", advanced: ["contract"], error: null });
     expect(wd.provisionCalls()).toHaveLength(1);
     expect(await registryRows(`${slug}.provisioned.invalid`)).toHaveLength(1);
+  });
+
+  it("M6-P4b0b: a block-library tarball that does not hash to WebDesk's claim parks at tenant_ready with contract_block_library_hash_mismatch; nothing is pinned", async () => {
+    const slug = slugOf("blbad");
+    published.add(slug);
+    badBlockLibrary.add(slug);
+    const id = await pendingSite(slug);
+    const first = await reconcileAndComplete({ tenantId: T, siteId: id, provider: repoReady(slug), requestedByName: "x", principal });
+    expect(first.completion).toMatchObject({ state: "tenant_ready", next: "contract", error: "contract_block_library_hash_mismatch" });
+    expect(await stored(id)).toMatchObject({ completion_state: "tenant_ready", completion_error: "contract_block_library_hash_mismatch", contract_snapshot_id: null });
+    expect(await snapshotCount(slug)).toBe(0);
+
+    // WebDesk corrects its pointer: the next reconcile completes.
+    badBlockLibrary.delete(slug);
+    const second = await reconcileAndComplete({ tenantId: T, siteId: id, provider: repoReady(slug), requestedByName: "x", principal });
+    expect(second.completion).toMatchObject({ state: "complete", advanced: ["contract"], error: null });
+    expect(await snapshotCount(slug)).toBe(1);
   });
 
   it("CRASH-RESUME (tenant): WebDesk committed, the answer was lost -> resend with the SAME key is a replay; ONE tenant", async () => {

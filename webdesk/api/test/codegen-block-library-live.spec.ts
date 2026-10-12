@@ -134,6 +134,7 @@ describe("block library: the fifth artifact, live", () => {
     });
     const read = await new ContractReadService(adapter).readLatest(slugA);
     expect(read!.artifacts.blockLibraryUrl).toContain("X-Amz-Signature");
+    expect(read!.artifacts.blockLibrarySha256).toBe(sha(bytes)); // M6-P4b0b: the claim the ERP checks the bytes against
     const res = await fetch(read!.artifacts.blockLibraryUrl!);
     expect(res.status).toBe(200);
     expect(sha(Buffer.from(await res.arrayBuffer()))).toBe(sha(bytes));
@@ -183,6 +184,8 @@ describe("block library: the fifth artifact, live", () => {
       accessKeyId: storageConfig.accessKeyId,
       secretAccessKey: storageConfig.secretAccessKey,
     });
-    expect((await new ContractReadService(adapter).readLatest(slugC))!.artifacts.blockLibraryUrl).toBeNull();
+    const readC = await new ContractReadService(adapter).readLatest(slugC);
+    expect(readC!.artifacts.blockLibraryUrl).toBeNull();
+    expect(readC!.artifacts.blockLibrarySha256).toBeNull();
   });
 });

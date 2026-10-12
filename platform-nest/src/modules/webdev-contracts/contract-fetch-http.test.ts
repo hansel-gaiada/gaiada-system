@@ -20,6 +20,20 @@ const VALID_BUNDLE = {
   generatedAt: "2026-08-27T00:00:00.000Z",
 };
 
+const GOOD_SHA = "0123456789abcdef".repeat(4);
+/** M6-P4b0b - the `blockLibrarySha256` value a slug asks the fake far side to send (absent for a slug without `sha-`). */
+const SHA_BY_SLUG: Record<string, unknown> = {
+  "sha-valid": GOOD_SHA,
+  "sha-null": null,
+  "sha-upper": GOOD_SHA.toUpperCase(),
+  "sha-short": GOOD_SHA.slice(0, 63),
+  "sha-long": `${GOOD_SHA}0`,
+  "sha-prefixed": `sha256:${GOOD_SHA}`,
+  "sha-nothex": "g".repeat(64),
+  "sha-empty": "",
+  "sha-number": 12345,
+};
+
 let server: Server;
 let origin: string;
 let lastAuthHeader: string | undefined;
@@ -39,11 +53,14 @@ beforeAll(async () => {
       const blocks = req.url.includes("with-blocks")
         ? { blockLibraryUrl: `${origin}/artifacts/gaiada-webdesk-blocks-1.3.2.tgz` }
         : req.url.includes("null-blocks") ? { blockLibraryUrl: null } : {};
+      const shaSlug = Object.keys(SHA_BY_SLUG).find((k) => req.url!.includes(`/${k}/`));
+      const sha = shaSlug ? { blockLibrarySha256: SHA_BY_SLUG[shaSlug] } : {};
       res.end(JSON.stringify({
         ...VALID_BUNDLE,
         artifacts: {
           ...VALID_BUNDLE.artifacts,
           ...blocks,
+          ...sha,
           sdkTsUrl: `${origin}/artifacts/sdk.ts.tgz`,
           openapiUrl: `${origin}/artifacts/openapi.v1.json`,
           contractMdUrl: `${origin}/artifacts/CONTENT-CONTRACT.md`,
@@ -90,6 +107,33 @@ describe("WSK-19 — WebdevControlHttpDriver", () => {
     // The other four are parsed exactly as before.
     expect(withBlocks.artifacts.sdkPhpUrl).toBeNull();
     expect(withBlocks.artifacts.sdkTsUrl).toBe(`${origin}/artifacts/sdk.ts.tgz`);
+  });
+
+  describe("M6-P4b0b getContractBundle: artifacts.blockLibrarySha256", () => {
+    const driver = () => new WebdevControlHttpDriver({
+      baseUrl: origin, bearerToken: "", timeoutMs: 2000, retryAttempts: 1, retryBaseDelayMs: 1,
+    });
+
+    it("is null when the key is absent (an older WebDesk) and when it is an explicit null", async () => {
+      expect((await driver().getContractBundle("acme")).artifacts.blockLibrarySha256).toBeNull();
+      expect((await driver().getContractBundle("sha-null")).artifacts.blockLibrarySha256).toBeNull();
+    });
+
+    it("is the value when it is 64 lowercase hex, and the other artifacts parse as before", async () => {
+      const meta = await driver().getContractBundle("sha-valid");
+      expect(meta.artifacts.blockLibrarySha256).toBe(GOOD_SHA);
+      expect(meta.artifacts.sdkTsUrl).toBe(`${origin}/artifacts/sdk.ts.tgz`);
+      expect(meta.contentHash).toBe(VALID_BUNDLE.contentHash);
+    });
+
+    it.each(["sha-upper", "sha-short", "sha-long", "sha-prefixed", "sha-nothex", "sha-empty", "sha-number"])(
+      "a malformed value (%s) is a protocol error, like any other malformed field: nothing half-parsed is passed on",
+      async (slug) => {
+        const err = await driver().getContractBundle(slug).then(() => null, (e: unknown) => e);
+        expect(err).toBeInstanceOf(WebdevControlEgressError);
+        expect((err as Error).message).toMatch(/unrecognized shape/);
+      },
+    );
   });
 
   it("downloadArtifact: returns the real bytes over a real socket", async () => {

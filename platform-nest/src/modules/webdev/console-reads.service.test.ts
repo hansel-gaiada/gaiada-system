@@ -59,7 +59,7 @@ function fixtureProvider(version: string, vocabularyVersion = "1.0.0"): WebdevCo
   const meta: ContractBundleMeta = {
     version, vocabularyVersion,
     blockLibrary: { package: "@gaiada/webdesk-blocks", version: "1.0.0", range: "^1.0" },
-    artifacts: { sdkTsUrl: "fixture://sdk", sdkPhpUrl: null, openapiUrl: "fixture://openapi", contractMdUrl: "fixture://md", blockLibraryUrl: null },
+    artifacts: { sdkTsUrl: "fixture://sdk", sdkPhpUrl: null, openapiUrl: "fixture://openapi", contractMdUrl: "fixture://md", blockLibraryUrl: null, blockLibrarySha256: null },
     contentHash: `sha256:${"b".repeat(64)}`,
     generatedAt: new Date().toISOString(),
   };

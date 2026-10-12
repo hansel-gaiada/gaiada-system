@@ -15,6 +15,9 @@ import { storageConfig } from "../storage/storage.config";
 import { latestPointerKey, artifactKey } from "./artifact-keys";
 import type { ContractReadResponse, LatestContractPointer } from "./contract-manifest.types";
 
+/** Exactly 64 lowercase hex characters (a sha256 digest as `createHash(...).digest("hex")` writes it). */
+const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+
 @Injectable()
 export class ContractReadService {
   private readonly logger = new Logger(ContractReadService.name);
@@ -61,6 +64,12 @@ export class ContractReadService {
       const sdkPhpKey = pointer.artifactKeys.sdkPhp as string | undefined;
       // M6-P4b0 — same rule for the block library: an absent key is `null`, never a guessed URL.
       const blockLibraryKey = pointer.artifactKeys.blockLibrary as string | undefined;
+      // M6-P4b0b — the tarball's sha256, for the ERP to check what it downloads. Only ever the pointer's own value,
+      // and only when a tarball is named and the value is well-formed; anything else is `null`, never a guess.
+      const blockLibrarySha256 =
+        blockLibraryKey && typeof pointer.blockLibrarySha256 === "string" && SHA256_HEX_RE.test(pointer.blockLibrarySha256)
+          ? pointer.blockLibrarySha256
+          : null;
       const [openapiUrl, sdkTsUrl, sdkPhpUrl, contractMdUrl, blockLibraryUrl] = await Promise.all([
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "openapiJson"), ttl),
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "sdkTs"), ttl),
@@ -79,6 +88,7 @@ export class ContractReadService {
           openapiUrl,
           contractMdUrl,
           blockLibraryUrl,
+          blockLibrarySha256,
         },
         contentHash: pointer.contentHash,
         generatedAt: pointer.generatedAt,
