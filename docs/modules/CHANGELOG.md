@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.21.0` - codegen stops asking for bucket versioning it may not change (2026-10-12) - DEV-VERIFIED
+
+- `S3StorageAdapter.ensureBucket` sets versioning only on a bucket the call itself created, exactly like object lock. A pre-existing bucket's versioning and lock belong to `scripts/storage-bootstrap.mjs`, and the api key is refused `PutBucketVersioning` by design. Before this, codegen logged `versioning enable failed: AccessDenied` on every artifact write (4× in the 2026-10-12 `contract.regenerate` backfill, seen by M4).
+- M4 checked live, read-only, as the RustFS root: `artifacts` has versioning `Enabled` and object lock `Enabled` with a default `GOVERNANCE` 1-day rule. The no-overwrite guarantee was never at risk.
+- Verified on the Linux gate (sumopod, `m6vn`): webdesk-api 1796 passed / 0 failed / 3 skipped, incl. `storage-rustfs.spec.ts`.
+
 ### platform-ui `0.96.3` - the critical-status text passes contrast everywhere; the top-bar user menu is named by the user; the e2e suite is green again (2026-10-12) - DEV-VERIFIED
 
 WebDesk M3 follow-up: the 57 pre-existing failures of the full Playwright suite (CI mode) are down to none.
