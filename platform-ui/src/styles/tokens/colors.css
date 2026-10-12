@@ -330,7 +330,7 @@
      — canvas or card; --n-10 sunken is not a realistic text location for
      a status label, so it is not the worst case used here, unlike the
      ink ramp above which genuinely does render everywhere). */
-  --status-critical-fg: #A0511F;  /* 4.65:1 vs --n-11 */
+  --status-critical-fg: #984D1D;  /* 5.30:1 vs --n-11, 4.57:1 even on --n-10; was #A0511F, 4.48:1 on the #ede3d6 tint axe found (2026-10-12) */
   --status-ok-fg:       #3C6449;  /* 5.52:1 vs --n-11 */
   --status-info-fg:     #2F6390;  /* 5.19:1 vs --n-11 */
   --status-warning-fg:  #8A5E13;  /* 4.65:1 vs --n-11 */
@@ -738,7 +738,7 @@ html[data-theme="dark"] {
     --status-progress:        var(--primitive-bronze);
     --status-idle:            var(--primitive-idle);
     --status-neutral:         rgb(28 25 16 / 0.48);
-    --status-critical-fg:     #A0511F;
+    --status-critical-fg:     #984D1D;
     --status-ok-fg:           #3C6449;
     --status-info-fg:         #2F6390;
     --status-warning-fg:      #8A5E13;
