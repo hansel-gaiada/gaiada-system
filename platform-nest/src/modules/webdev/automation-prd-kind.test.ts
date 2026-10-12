@@ -132,13 +132,13 @@ describe("M6-P4e -- pipeline-delivery.json code stage", () => {
 
   it("passes contractSnapshotId, siteKind and BOTH artifact refs to code.scaffold", () => {
     const body = node(wf, "MCP code.scaffold").parameters.jsonBody as string;
-    for (const k of ["contractSnapshotId: $json.contractSnapshotId", "siteKind: $json.siteKind", "prdArtifact: $json.prdRef", "prototypeArtifact: $json.protoRef"]) {
+    for (const k of ["contractSnapshotId: $json.contractSnapshotId", "siteKind: $json.siteKind", "prdArtifact: $json.prdRef", "prototypeArtifact: $json.protoRef", "provisionedSiteId: $json.siteId"]) {
       expect(body).toContain(k);
     }
   });
 
   const complete = node(wf, "Provisioning complete?").parameters.jsCode as string;
-  const pickedSite = { tenantId: "t1", runId: "r1", prdRef: "stage:p", protoRef: "stage:d", slug: "acme", framework: "vite" };
+  const pickedSite = { tenantId: "t1", runId: "r1", prdRef: "stage:p", protoRef: "stage:d", slug: "acme", framework: "vite", siteId: "site-1" };
   const verdict = (site: Json): Json => run(complete, ok(site), { "Pick provisioned site": pickedSite });
   const done = { state: "complete", next: "done", contractSnapshotId: "snap-1", error: null };
 
@@ -161,7 +161,7 @@ describe("M6-P4e -- pipeline-delivery.json code stage", () => {
     "complete %s site -> siteKind %s with the pinned snapshot",
     (framework, siteKind) => {
       const r = verdict({ framework, completion: done });
-      expect(r).toMatchObject({ ready2: "true", siteKind, contractSnapshotId: "snap-1", prdRef: "stage:p", protoRef: "stage:d" });
+      expect(r).toMatchObject({ ready2: "true", siteKind, contractSnapshotId: "snap-1", prdRef: "stage:p", protoRef: "stage:d", siteId: "site-1" });
     },
   );
 
@@ -184,6 +184,28 @@ describe("M6-P4e -- pipeline-delivery.json code stage", () => {
     const one = run(pick, ok([{ id: "s0", status: "failed", framework: "vite" }, { id: "s1", status: "ready", framework: "node" }]), { "Repo ready?": repoReady });
     expect(one).toMatchObject({ hasSite: "true", siteId: "s1", framework: "node" });
     expect(run(pick, ok([]), { "Repo ready?": repoReady })).toMatchObject({ hasSite: "false" });
+  });
+
+  // M6-P4b2: the code.scaffold call names the provisioned site, so the finished job hands its tree to platform-nest, which
+  // commits it as the repo's first fill with the ERP App. The node's expression is EVALUATED here against the real output
+  // of 'Provisioning complete?', not string-matched.
+  it("M6-P4b2: code.scaffold carries provisionedSiteId = the completed site, from the completion check's own output", () => {
+    const ready = verdict({ framework: "astro", completion: done });
+    const expr = String(node(wf, "MCP code.scaffold").parameters.jsonBody);
+    expect(expr.startsWith("={{") && expr.endsWith("}}")).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+    const evaluate = new Function("$json", "$env", `return (${expr.slice(3, -2)});`) as (j: Json, e: Json) => string;
+    const rpc = JSON.parse(evaluate(ready, {})) as { method: string; params: { name: string; arguments: Json } };
+    expect(rpc.method).toBe("tools/call");
+    expect(rpc.params.name).toBe("code.scaffold");
+    expect(rpc.params.arguments).toMatchObject({
+      tenantId: "t1", runId: "r1", contractSnapshotId: "snap-1", siteKind: "astro", prdArtifact: "stage:p", prototypeArtifact: "stage:d",
+      provisionedSiteId: "site-1",
+    });
+    // the workflow never names a remote, a token or a mode: it cannot select a push
+    expect(JSON.stringify(rpc.params.arguments)).not.toMatch(/remote|token|mode|push/i);
+    // and the commit itself is not a workflow node: the job's completion triggers it (no node calls the commit tool)
+    expect(wf.nodes.some((n) => String(n.parameters.jsonBody ?? "").includes("commitScaffold"))).toBe(false);
   });
 
   it("'Load + decide' emits stage:<id> refs for the signed PRD and the accepted design", () => {

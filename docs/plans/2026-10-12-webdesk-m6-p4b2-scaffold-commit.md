@@ -96,8 +96,8 @@ All are in `modules/webdev/scaffold-commit.ts` (pure, unit-tested) and run in th
    `.github/workflows/site.yml`; and the ERP App should not need `workflows: write`. So the scaffolder stops emitting
    `.github/workflows/qa-harness.yml` (astro); the QA-harness workflow moves to the static template when webdev P5 lands
    (`qa-harness-workflow.ts` stays as its reference text).
-7. **The base tree.** A path that the template holds as a directory, a symlink or a submodule, or whose parent the template holds
-   as a file, is refused (`scaffold_path_conflicts_template`). A base tree that already has a root `CONTRACT.lock` is not
+7. **The base tree.** A path that the template holds as a directory, a symlink or a submodule, whose parent the template holds
+   as a file, or that differs only in case from a template path, is refused (`scaffold_path_conflicts_template`). A base tree that already has a root `CONTRACT.lock` is not
    pristine (`scaffold_repo_not_pristine`).
 8. **At GitHub.** Every blob sha GitHub returns must equal the git blob sha computed locally from the verified bytes
    (`github_blob_sha_mismatch`), so the bytes that land are provably the bytes that were checked.
@@ -127,7 +127,8 @@ NULL ──[claim]──> pending ──[objects]──> commit_created ──[r
 - **claim** (under the site's provisioning lock, after every integrity check and the pristine read): records the manifest digest,
   the snapshot id, the branch, the base (template) commit sha, file count, total bytes, the goal id and the actor.
   A row already `pending`/`commit_created` with the SAME digest is resumed. One with a DIFFERENT digest is superseded only
-  while nothing has landed (the ref is still the recorded base), else `scaffold_repo_not_pristine`.
+  while nothing has landed: for a `commit_created` claim the branch head is re-read UNDER the lock, and a head equal to that
+  claim's commit (it landed, the answer was lost) is recorded as the first fill and the newcomer refused.
 - **objects** (outside the lock; blobs, trees and commits are content-addressed, so a repeat is harmless): blobs (skipping any
   the base tree already holds), one tree on `base_tree`, one commit whose parent is the base and whose author and committer
   are the acting principal's user (§4.4; the ledger's `push` attribution), message trailers `Gaiada-Activity:` (the ledger
