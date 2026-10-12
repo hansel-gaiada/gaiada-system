@@ -11,6 +11,54 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.75.0` - M5-W1c: the writers' room two-phase gate on every content route (2026-10-12) - DEV-VERIFIED
+
+The transport that makes the W1a writers' room rules live (built by the M5 session). Until now those rules read `""` for `siteId` and `reviewState` and denied.
+
+- **Phase 1**, the controller's first statement on every `/content` route: `webdesk_collection:read` on `{tenantId, module, siteId}`, with the route's site.
+- **Phase 2**, before any body or query validation: the real action on attributes built only from a WebDesk read.
+  - The attributes: `item.get`, or `collection.get` for a create, gives `collectionKey`, `locale`, `ownerId` = the author, `reviewState`, `published` and `creatorId`.
+  - A branded `ItemAttrs`/`ItemGate` means a write cannot be reached without that read and that check.
+  - A body or query can never set those attributes.
+- Staff tiers are still asked their old company-level question, so nothing changes for them.
+- `GET …/content/sites` is filtered per site for a writers' room grant. When nothing is readable it is a 403, never `[]`.
+- `GET …/items/:id` gains `allowed: {…}` from one Cerbos batch. It is absent, never false, when Cerbos cannot answer.
+- A scoped `webdesk_editor` files publish requests: `fileWebdeskCommandApproval` re-checks on the item resources the caller already proved, instead of an attribute-free resource. Every other caller is unchanged.
+- PERMISSION-CONTRACT §27.2 (attribute provenance); FRONTEND-BFF-CONTRACT updated.
+- Verified on GitHub Actions 38199879858: the real-Cerbos HTTP suite 25/25 (a writer's PUT on another author's item is 403 with a valid body and no WebDesk write; forged attributes ignored; `allowed` equals Cerbos), unit 30/30, filer 6/6. platform-nest has 0 failures across all shards.
+
+### platform-ui `0.94.0` - M5-W1c: the item read's `allowed` member is typed and parsed (2026-10-12) - DEV-VERIFIED
+
+- `ItemAllowed` in `webdeskContentModel.ts`; `parseItemDetail` reads an optional `allowed`. No UI behaviour yet (W2e uses it). CI 38199879858: 5780 passed.
+
+### webdesk `0.12.0` - M5-W3c: content-check settings per collection; vocabulary 1.3.0 (2026-10-12) - DEV-VERIFIED
+
+- A collection composition may carry an optional `lint.content` member. It holds:
+  - a master switch;
+  - per-rule `enabled`;
+  - the knobs the rules actually have: meta lengths, internal-link minimum, answer-first word range, question-heading share and starters, banned phrases per language, the ID twin map, AEO paragraph length, and the h1, keyword and alt field names.
+- **Defaults:** an absent member or key gives today's constants. 11 fixtures produce byte-identical reports through 5 equivalent compositions.
+- **Validation:** unknown keys and out-of-range values are refused at `schema.apply`. A stored row that fails validation falls back to the defaults and never throws.
+- The save path and `item.get` share one resolution (W3b's read == save holds). The checks stay advisory.
+- **Vocabulary 1.3.0 (MINOR):** the breaking-change classifier gains a `lintKeys` dimension and pins the bump as minor. It is re-vendored into the api, the blocks package and platform-nest (`src/modules/webdev/vocabulary`). The new `w3c-lint-content` suite now runs in CI and in the Linux gate.
+- Verified on GitHub Actions 38199176963: webdesk-api 1605 passed / 2 skipped, blocks 32/0, every vocabulary suite green.
+
+### platform-nest `0.73.0` - M5-P1-g and M5-G5b: a race-safe lead convert with no name on the bus; privacy approvals store no identifiers (2026-10-12) - DEV-VERIFIED
+
+Two defects found by the M5-P1-f end-to-end QA, and the G5 privacy tools made safe to file unattended (built by the M5 session).
+
+- **Contact race.** Convert find-or-creates the contact's `users` row before it takes the lead lock, and `users.email` is UNIQUE. Concurrent converts of a lead whose contact had no row could 500 on the unique index instead of the clean 409. Now `INSERT … ON CONFLICT (email) DO NOTHING` plus a re-select, so every racer reaches the lock. An email held by a deactivated account is now a typed 400 instead of an untyped 500. This was also the real cause of the old convert-race test flake.
+- **No personal data on the bus.** Convert's `pipeline.run.created` payload is now exactly `{sourceMeetingId, actorId}`. It used to carry `title = org_name`, which is the person's full name for /contact/ and /audit/ web leads. The work-activity consumer now looks the run title up from `pipeline_runs`. n8n's `pipeline-fanout` never read the payload. The knowledge-graph bridge labels such a run by its id.
+- Verified on GitHub Actions 38198059657 (main + P1-g): pipeline e2e 26/26 with both defects asserted fixed, convert race 8/8, convert unit 34/34, work-activity consumer 19/19, all shards green.
+- **Privacy approvals store no identifiers (M5-G5b).** Filing an `agency_privacy.*` approval no longer persists the data subject's email or phone.
+  - **The approval row:** `automation_approvals.tool_args` holds `{minimised, subject hashes, ***@domain / ***NN hints}` and a generated reason. A static per-tool args-policy registry applies this at the single INSERT chokepoint.
+  - **The decided event and notifications:** hashes only. The DSR ledger's `filed` row is written in the same transaction.
+  - **Running it:** after approval, the request runs by `approvalId` and rebuilds the subject from the ledger hashes (no vault, no migration).
+  - **Filing authority:** filing one through `POST /automation-approvals` also needs `agency_lead:convert`.
+  - **Other tools:** a tool without a policy is stored exactly as before. The tools stay HIGH and two-person, and D14 never runs them.
+  - **Not covered:** ai-agents keeps its own copy of tool-call args (a separate pass).
+  - Verified on GitHub Actions 38198281158: the unattended suite 9/9 and the G5 privacy DB suite 9/9, all shards green.
+
 ### platform-nest `0.72.0` - M5 wave 3: data-subject rights and retention for website leads, the web-leads read, a staff alert, writers' room grants (2026-10-12) - DEV-VERIFIED
 
 WebDesk M5 wave 3, built by the M5 session (main `2e032678`).

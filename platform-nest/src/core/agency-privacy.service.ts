@@ -18,9 +18,19 @@
 //                             self-approved privacy request never runs), and no earlier execution. Only
 //                             then does it read or write personal data, and it ends by inserting the
 //                             `executed` ledger row, whose partial UNIQUE index is the single-use claim.
-// The approval row never holds the identifier: tool_args carries the kind, the request id and WHICH keys
-// were given ("email", "phone"), so neither the inbox, the decided event's outbox payload nor the
-// notification ever carries the person's email or phone.
+// The approval row never holds the identifier: tool_args carries the kind, the request id, WHICH keys were
+// given ("email", "phone") and the subject hashes (+ a display hint that stays in the row), so neither the inbox,
+// the decided event's outbox payload nor the notification ever carries the person's email or phone.
+//
+// ── M5-G5b: THE UNATTENDED (AGENT HUB) PATH ─────────────────────────────────────────────────────────
+// An unattended caller is suspended by the mcp-hub before it reaches this route, and files its approval through
+// `POST /automation-approvals` with the call's args. core/agency-privacy.filing.ts (applied by
+// core/approval-filing.ts) reduces those args to the same hashes BEFORE anything is stored or emitted and writes
+// this ledger's `filed` row in the same transaction, so a hub-filed approval is bound exactly like a route-filed
+// one. The requester then runs it with just the `approvalId`: `executeAgencyPrivacyRequest` is called with
+// `subject: null` and rebuilds the subject from the ledger's hashes (`resolveSubjectByHashes`): the stored contact
+// values that hash to them ARE the plaintext, already in this tenant's tables, so nothing is vaulted and no
+// schema changes. The call stays two-person and is still never auto-run by D14 (approval-executables.ts bar).
 //
 // ── WHAT ERASE DOES (scrub, keep the row) ───────────────────────────────────────────────────────────
 // For every lead in scope (its own contact matches, or one of its AD-1 submissions' contact matches):
@@ -49,8 +59,12 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { insertAutomationApprovalRow, notifyApprovalFiled, type FileApprovalInput } from "./approval-filing";
 import {
-  contactHashes, contactMatches, normalizeEmail, normalizePhone, scrubAnswers, subjectHash, type Subject,
+  collectStrings, contactHashes, contactMatches, findNormalisedByHash, normalizeEmail, normalizePhone,
+  recoverIdentifiersFromText, scrubAnswers, subjectHash, type Subject,
 } from "./agency-privacy.subject";
+import {
+  approvalReasonFor, identifierKinds as identifierKindsOf, insertLedgerRow, minimisedArgsForSubject,
+} from "./agency-privacy.filing";
 
 export const PRIVACY_KINDS = ["find", "export", "erase"] as const;
 export type PrivacyKind = (typeof PRIVACY_KINDS)[number];
@@ -353,9 +367,17 @@ async function runErase(
   for (const s of subs) {
     const lead = matched.find((m) => m.row.id === s.lead_id)!.row;
     const subContacts = lead.sub_contacts ?? [];
+    // A subject rebuilt from hashes (M5-G5b) has plaintext only for what some contact field held. An identifier
+    // that appears solely in free text of a lead matched through the OTHER key is found by hashing the email- and
+    // phone-shaped tokens of this submission, so the run scrubs what a run from typed identifiers would.
+    const found = (subject.emailHash && !subject.email) || (subject.phoneHash && !subject.phone)
+      ? recoverIdentifiersFromText(collectStrings(s.answers), {
+          emailHash: subject.email ? null : subject.emailHash, phoneHash: subject.phone ? null : subject.phoneHash,
+        })
+      : { emails: [], phones: [] };
     const { answers } = scrubAnswers(s.answers, {
-      emails: [subject.email, lead.contact_email, ...subContacts.map((x) => x.email)],
-      phones: [subject.phone, lead.contact_phone, ...subContacts.map((x) => x.phone)],
+      emails: [subject.email, lead.contact_email, ...subContacts.map((x) => x.email), ...found.emails],
+      phones: [subject.phone, lead.contact_phone, ...subContacts.map((x) => x.phone), ...found.phones],
       names: [lead.contact_name, ...subContacts.map((x) => x.name)],
     });
     await c.query(
@@ -412,38 +434,14 @@ async function runErase(
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════ ledger + WS4
-async function insertLedgerRow(
-  c: PoolClient,
-  row: { tenantId: string; requestId: string; kind: PrivacyKind; phase: "filed" | "executed"; subject: Subject; approvalId: string; actorId: string; counts?: PrivacyCounts },
-): Promise<string> {
-  const id = newId();
-  const k = row.counts ?? { leadCount: 0, submissionCount: 0, tokenCount: 0, outOfScopeCount: 0, suppressionCount: 0 };
-  await c.query(
-    `INSERT INTO agency_dsr_requests
-       (id, tenant_id, request_id, kind, phase, email_hash, phone_hash, approval_id, actor_id,
-        lead_count, submission_count, token_count, out_of_scope_count, suppression_count, origin_site)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-    [
-      id, row.tenantId, row.requestId, row.kind, row.phase, row.subject.emailHash, row.subject.phoneHash, row.approvalId,
-      row.actorId, k.leadCount, k.submissionCount, k.tokenCount, k.outOfScopeCount, k.suppressionCount, config.originSite,
-    ],
-  );
-  return id;
-}
-
 /** Which keys were given, for the approval and the inbox. Never the values. */
 export function identifierKinds(subject: Pick<Subject, "email" | "phone">): ("email" | "phone")[] {
-  return [...(subject.email ? (["email"] as const) : []), ...(subject.phone ? (["phone"] as const) : [])];
+  return identifierKindsOf(subject);
 }
 
 /** The approval's inbox text. No identifier: it names the command and which keys identify the person. */
 export function approvalReason(kind: PrivacyKind, subject: Pick<Subject, "email" | "phone">): string {
-  const verb = kind === "erase" ? "ERASE the personal data of" : kind === "export" ? "export the personal data of" : "find the records of";
-  return (
-    `Privacy request: ${verb} one data subject in the agency intake (leads, AD-1 submissions, intake tokens), ` +
-    `identified by ${identifierKinds(subject).join(" and ")}. Approving lets the requester run it exactly once; ` +
-    "nothing runs on approval itself, and the requester cannot approve their own request."
-  );
+  return approvalReasonFor(kind, identifierKindsOf(subject));
 }
 
 /** Call 1: file the WS4 approval and the ledger's `filed` row, atomically. Reads no personal data. */
@@ -459,7 +457,10 @@ export async function fileAgencyPrivacyRequest(input: {
     tenantId: input.tenantId,
     workflowId: `agency-privacy:${requestId}`,
     toolName: PRIVACY_TOOL[input.kind],
-    toolArgs: { kind: input.kind, requestId, identifiers: identifierKinds(input.subject) },
+    // The minimised shape (core/agency-privacy.filing.ts): kind, request id, which keys, the subject hashes and a
+    // display hint. `insertAutomationApprovalRow` re-applies the policy (idempotent) and, through its `onFiled`
+    // hook, writes the ledger's `filed` row in the same transaction: the one path every privacy approval takes.
+    toolArgs: minimisedArgsForSubject(input.kind, requestId, input.subject),
     impact: "high",
     reason: approvalReason(input.kind, input.subject),
     // 'automation', as SM-21: the inbox's origin taxonomy is closed, and an unlisted origin would file an
@@ -467,12 +468,7 @@ export async function fileAgencyPrivacyRequest(input: {
     origin: "automation",
     requestedBy: input.requestedBy,
   };
-  await withTenants([input.tenantId], async (c) => {
-    await insertAutomationApprovalRow(c, approvalId, approval);
-    await insertLedgerRow(c, {
-      tenantId: input.tenantId, requestId, kind: input.kind, phase: "filed", subject: input.subject, approvalId, actorId: input.requestedBy,
-    });
-  });
+  await withTenants([input.tenantId], (c) => insertAutomationApprovalRow(c, approvalId, approval));
   // The activity row + the decider notification (best-effort inside), after the commit.
   await notifyApprovalFiled(approvalId, approval);
   return { requestId, approvalId };
@@ -490,13 +486,56 @@ export type ExecuteOutcome =
   | { outcome: "executed"; requestId: string; result: PrivacyEffectResult };
 
 /**
+ * M5-G5b: rebuild the plaintext of a subject known only by its hashes. The stored contact values that hash to
+ * them (this tenant's leads and AD-1 submissions, normalised with the SAME functions the hash was computed
+ * with) are exactly what the effects need. An identifier no stored value hashes to has no plaintext: it matches
+ * no lead (matching is by stored contact), and an erase still suppresses it BY HASH. Runs on the caller's
+ * transaction (tenant GUC set); call it only after every refusal has been decided from stored state.
+ */
+export async function resolveSubjectByHashes(
+  c: PoolClient,
+  tenantId: string,
+  hashes: { emailHash: string | null; phoneHash: string | null },
+): Promise<Subject> {
+  let email: string | null = null;
+  let phone: string | null = null;
+  if (hashes.emailHash) {
+    const { rows } = await c.query<{ v: string }>(
+      `SELECT DISTINCT v FROM (
+         SELECT contact_email AS v FROM agency_leads WHERE tenant_id = $1 AND contact_email IS NOT NULL
+         UNION ALL
+         SELECT answers->>'contact_email' FROM agency_discovery_submissions WHERE tenant_id = $1 AND answers->>'contact_email' IS NOT NULL
+       ) x`,
+      [tenantId],
+    );
+    email = findNormalisedByHash("email", hashes.emailHash, rows.map((r) => r.v));
+  }
+  if (hashes.phoneHash) {
+    const { rows } = await c.query<{ v: string }>(
+      `SELECT DISTINCT v FROM (
+         SELECT contact_phone AS v FROM agency_leads WHERE tenant_id = $1 AND contact_phone IS NOT NULL
+         UNION ALL
+         SELECT answers->>'contact_phone' FROM agency_discovery_submissions WHERE tenant_id = $1 AND answers->>'contact_phone' IS NOT NULL
+       ) x`,
+      [tenantId],
+    );
+    phone = findNormalisedByHash("phone", hashes.phoneHash, rows.map((r) => r.v));
+  }
+  return { email, phone, emailHash: hashes.emailHash, phoneHash: hashes.phoneHash };
+}
+
+/**
  * Call 2: consume an approved request exactly once. Every refusal is decided from STORED state, before any
  * personal data is read. See the header for the order and why.
+ *
+ * `subject: null` (M5-G5b) is the run-by-approval form: the caller gave only the `approvalId`, and the subject is
+ * rebuilt from the ledger's hashes. There is then no content binding to compare (nothing was typed), and none is
+ * needed: the hashes ARE the stored binding. `kind`, requester, decision and single use are checked identically.
  */
 export async function executeAgencyPrivacyRequest(input: {
   tenantId: string;
   kind: PrivacyKind;
-  subject: Subject;
+  subject: Subject | null;
   approvalId: string;
   actorId: string;
 }): Promise<ExecuteOutcome> {
@@ -513,7 +552,8 @@ export async function executeAgencyPrivacyRequest(input: {
     if (!f) return { outcome: "not_found" };
     // Content binding: the same command for the same person, recomputed from THIS body. Null-equal on purpose:
     // a request filed for email-only does not execute for email+phone (that would widen what was approved).
-    if (f.kind !== kind || f.email_hash !== subject.emailHash || f.phone_hash !== subject.phoneHash) return { outcome: "mismatch" };
+    if (f.kind !== kind) return { outcome: "mismatch" };
+    if (subject && (f.email_hash !== subject.emailHash || f.phone_hash !== subject.phoneHash)) return { outcome: "mismatch" };
     if (f.actor_id !== actorId) return { outcome: "not_requester" };
     const requestId = f.request_id;
 
@@ -550,14 +590,20 @@ export async function executeAgencyPrivacyRequest(input: {
     // nothing about who filed the row.
     if (!a.decided_by || a.decided_by === actorId) return { outcome: "self_approved", requestId };
 
+    // Every refusal above came from stored state; only now is personal data read. A run-by-approval call rebuilds
+    // the subject from the filed row's hashes (the typed one, when given, was already proven equal to them).
+    const who = subject ?? await resolveSubjectByHashes(c, tenantId, { emailHash: f.email_hash, phoneHash: f.phone_hash });
     const result =
-      kind === "find" ? await runFind(c, tenantId, subject)
-      : kind === "export" ? await runExport(c, tenantId, subject)
-      : await runErase(c, tenantId, subject, requestId, actorId);
+      kind === "find" ? await runFind(c, tenantId, who)
+      : kind === "export" ? await runExport(c, tenantId, who)
+      : await runErase(c, tenantId, who, requestId, actorId);
 
     // The claim. The partial UNIQUE (approval_id) WHERE phase='executed' makes a second execution impossible
     // even past the advisory lock; a violation rolls this whole transaction (and the erase) back.
-    await insertLedgerRow(c, { tenantId, requestId, kind, phase: "executed", subject, approvalId, actorId, counts: result.counts });
+    await insertLedgerRow(c, {
+      tenantId, requestId, kind, phase: "executed", emailHash: f.email_hash, phoneHash: f.phone_hash, approvalId, actorId,
+      counts: result.counts,
+    });
     return { outcome: "executed", requestId, result };
   });
 }

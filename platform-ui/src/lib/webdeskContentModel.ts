@@ -175,6 +175,14 @@ export interface ItemEditorial {
   approvedVersion: number | null;
 }
 
+/**
+ * M5-W1c `item.get`'s `allowed` member: what the CALLER may do with THIS item, one Cerbos batch answer (the same
+ * resource the real handlers authorise), so the UI follows it instead of guessing from role bundles. Advisory: each real
+ * action is checked again by the BFF. Keys are Cerbos action names (read, update, submit, comment, request_changes,
+ * seo_signoff, approve, assign, request_publish, unpublish, delete); a key the BFF does not know yet is simply absent.
+ */
+export type ItemAllowed = Record<string, boolean>;
+
 export interface ItemDetail {
   item: ItemRef;
   version: VersionContent;
@@ -182,6 +190,8 @@ export interface ItemDetail {
   lint: Lint;
   /** Absent when WebDesk sends no `editorial` member (a WebDesk older than M5-W2b): "unknown", never "not required". */
   editorial?: ItemEditorial;
+  /** Absent when the BFF could not ask Cerbos (or the call was delegated): "unknown", never "denied". Never sent on the client portal. */
+  allowed?: ItemAllowed;
 }
 
 /** M5-W2c: would WebDesk's publish gate refuse publishing `version`? null = cannot tell (no review data). */

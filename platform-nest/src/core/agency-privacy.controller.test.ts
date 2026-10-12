@@ -154,3 +154,38 @@ describe("call 2 — every service outcome maps to its typed answer", () => {
   });
 });
 
+
+// M5-G5b — run-by-approval: an approval filed through the agent hub holds only hashes, so the requester runs it
+// with just the approvalId and the service rebuilds the subject from the ledger.
+describe("call 2 without identifiers (M5-G5b)", () => {
+  const counts = { leadCount: 1, submissionCount: 0, tokenCount: 0, outOfScopeCount: 0, suppressionCount: 1 };
+
+  it("an approvalId and NO email/phone runs the service with subject:null (no identifier is needed or asked for)", async () => {
+    executeAgencyPrivacyRequest.mockResolvedValue({ outcome: "replayed", requestId: "r", counts });
+    for (const body of [{ approvalId: APPROVAL }, { approvalId: APPROVAL, email: null, phone: undefined }]) {
+      executeAgencyPrivacyRequest.mockClear();
+      const out = await ctl.command(req, reply() as never, T, "erase", body);
+      expect(out).toMatchObject({ outcome: "executed", replayed: true });
+      expect(executeAgencyPrivacyRequest).toHaveBeenCalledWith({ tenantId: T, kind: "erase", subject: null, approvalId: APPROVAL, actorId: "u-1" });
+    }
+  });
+
+  it("identifiers given next to an approvalId are still parsed, bound and refused exactly as before", async () => {
+    expect(await refusal(ctl.command(req, reply() as never, T, "erase", { approvalId: APPROVAL, email: "not-an-email" })))
+      .toEqual({ status: 400, reason: "subject_invalid" });
+    expect(await refusal(ctl.command(req, reply() as never, T, "erase", { approvalId: APPROVAL, phone: "12" })))
+      .toEqual({ status: 400, reason: "subject_invalid" });
+    expect(executeAgencyPrivacyRequest).not.toHaveBeenCalled();
+    executeAgencyPrivacyRequest.mockResolvedValue({ outcome: "mismatch" });
+    expect(await refusal(ctl.command(req, reply() as never, T, "erase", { approvalId: APPROVAL, email: EMAIL })))
+      .toEqual({ status: 400, reason: "privacy_request_mismatch" });
+    expect((executeAgencyPrivacyRequest.mock.calls[0][0] as { subject: { email: string } }).subject.email).toBe(EMAIL);
+  });
+
+  it("a bad approvalId with no identifiers is 400 approval_id_invalid; no approvalId and no identifiers is 400 subject_invalid", async () => {
+    expect(await refusal(ctl.command(req, reply() as never, T, "erase", { approvalId: "x" }))).toEqual({ status: 400, reason: "approval_id_invalid" });
+    expect(await refusal(ctl.command(req, reply() as never, T, "erase", { approvalId: "" }))).toEqual({ status: 400, reason: "subject_invalid" });
+    expect(executeAgencyPrivacyRequest).not.toHaveBeenCalled();
+    expect(fileAgencyPrivacyRequest).not.toHaveBeenCalled();
+  });
+});

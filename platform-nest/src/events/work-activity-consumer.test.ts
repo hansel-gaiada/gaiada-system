@@ -151,6 +151,21 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("work-activity outbox consumer (WS
     expect(row.rows[0]).toMatchObject({ source: "pipeline", object_kind: "pipeline_run", title: "Q3 delivery pipeline" });
   });
 
+  it("pipeline.run.created WITHOUT a payload title (the lead-convert shape, M5-P1-g) looks the title up from pipeline_runs", async () => {
+    const runId = newId();
+    await withTenants([co], (c) =>
+      c.query(`INSERT INTO pipeline_runs (id, tenant_id, title, status, origin_site) VALUES ($1, $2, $3, 'delivery_active', 'central')`, [
+        runId, co, "Looked Up Org",
+      ]),
+    );
+    await withTenants([co], (c) => emitEvent(c, co, "pipeline_run", runId, "pipeline.run.created", { sourceMeetingId: null, actorId: null }));
+    await relayBatch(100);
+
+    expect(await consumeWorkActivityOnce("pipeline_run")).toBe(1);
+    const row = await adminPool().query(`SELECT source, object_kind, title FROM work_activity WHERE object_ref = $1`, [runId]);
+    expect(row.rows[0]).toMatchObject({ source: "pipeline", object_kind: "pipeline_run", title: "Looked Up Org" });
+  });
+
   it("a redelivery of the same outbox entry (XAUTOCLAIM reclaim) is idempotent: no duplicate row, no duplicate domain event", async () => {
     const projectId = await createProject(co, "Idempotency Check");
     const taskId = await createPmTask(co, projectId, "Ship the thing");

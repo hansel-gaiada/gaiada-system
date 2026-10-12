@@ -4814,7 +4814,7 @@ ends: `status` (the intake lifecycle above) and `stage` (the sales position, fro
   and `agency_pipeline.setDealValue` (impact `low`). `agency_intake.convert` gains the optional `deal`.
   `agency_intake.decline` now works from every open status.
 
-### Data-subject requests and lead retention (M5-G5) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
+### Data-subject requests and lead retention (M5-G5, G5b) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
 
 Addendum: `legal/website-visitor-addendum.md` §5 and §9.3 items 3, 7, 8, 9. Code: `core/agency-privacy.*`,
 `core/agency-lead-retention.ts`, migration `202610121835_agency_lead_privacy_retention.sql`. No UI consumes these yet;
@@ -4822,14 +4822,15 @@ they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored 
 
 | Method | Path | Returns | Cerbos |
 |---|---|---|---|
-| POST | `/api/:tenantId/agency/privacy/find` | Body `{ email?, phone?, approvalId? }`. Executed: `{ outcome:"executed", requestId, counts, outOfScope, leads:[{ leadId, status, stage, source, createdAt, statusChangedAt, erasedAt, deleted, directMatch, submissionCount, tokenCount, convertedClientId }] }`, no contact data | `agency_lead:convert` |
+| POST | `/api/:tenantId/agency/privacy/find` | Body `{ email?, phone?, approvalId? }` (G5b: with an `approvalId`, email and phone may be omitted). Executed: `{ outcome:"executed", requestId, counts, outOfScope, leads:[{ leadId, status, stage, source, createdAt, statusChangedAt, erasedAt, deleted, directMatch, submissionCount, tokenCount, convertedClientId }] }`, no contact data | `agency_lead:convert` |
 | POST | `/api/:tenantId/agency/privacy/export` | Same body. Executed: the `find` fields plus `orgName`, `contactName`, `contactEmail`, `contactPhone`, `originForm`, `submissionRef`, `webSiteSlug`, `attribution`, `visitorConsent`, `declinedReason`, `submissions:[{ submissionId, schemaVersion, createdAt, erasedAt, answers }]`, `intakeTokens:[{ tokenId, kind, createdAt, expiresAt, usedAt, revokedAt }]` | `agency_lead:convert` |
 | POST | `/api/:tenantId/agency/privacy/erase` | Same body. Executed: `{ outcome:"executed", replayed, requestId, erasedAt, counts:{ leadCount, submissionCount, tokenCount, outOfScopeCount, suppressionCount }, outOfScope:[{ leadId, convertedClientId, reason:"client_record_retention" }] }` | `agency_lead:convert` |
 
 - **WS4 per call, for every principal (the SM-21 shape).** Without `approvalId` the route files a HIGH approval and
   returns `202 { outcome:"suspended", requestId, approvalId }`, reading nothing. A DIFFERENT company admin decides it
   in the approvals inbox. The requester then repeats the call with the SAME identifiers and the `approvalId`: it runs
-  exactly once. Typed refusals: `202 awaiting_approval`, `400 subject_invalid | approval_id_invalid |
+  exactly once (G5b: the identifiers are optional on that call; omit them and the person is rebuilt from the hashes the
+  approval was filed with). Typed refusals: `202 awaiting_approval`, `400 subject_invalid | approval_id_invalid |
   privacy_request_mismatch` (other identifiers or another command than were approved), `403 privacy_request_not_requester
   | self_approved | user_required`, `404 privacy_request_not_found`, `409 approval_rejected | approval_already_used`.
   An erase called again with its used approval returns the stored counts with `replayed:true`; a find/export re-use is
@@ -4843,13 +4844,29 @@ they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored 
   answers `422 { reason:"subject_suppressed" }` and stores nothing.
 - **Ledger.** `agency_dsr_requests` is append-only and holds SHA-256 hashes only (the same hash WebDesk's
   `dsr_requests` computes, so one person's two ledgers correlate). The approval row holds the command and which keys
-  were given, never the values.
+  were given, never the values (G5b: plus the subject hashes and a display hint, see the next bullet).
+- **Unattended callers (M5-G5b).** An agent or workflow is suspended by the mcp-hub (`high`) and files its approval
+  through `POST /api/:tenantId/automation-approvals` with the call's args. For these three tools that filing path
+  (`core/approval-filing.ts`, policy in `core/approval-arg-minimisers.ts`) first replaces `email` and `phone` with the
+  G5 subject hashes (`SHA-256` of `webdesk:privacy:subject:` + the normalised value, the ledger's own hash) and a hint,
+  and drops every other key; a malformed identifier is `400 subject_invalid` and nothing is stored; and filing needs
+  `agency_lead:convert` (the route's own gate), so `403` for anyone without it. The stored `tool_args` are
+  `{ minimised:"agency-privacy.v1", kind, identifiers:["email"|"phone"], tenantId?, approvalId?, requestId?,
+  subject:{ emailHash?, phoneHash?, emailHint?, phoneHint? } }`: `emailHint` is `***@<domain>`, `phoneHint` is `***` plus
+  the last two digits, and they appear only in the approval row (the approver's detail view). The `reason` is generated
+  (the caller's text is replaced), the `automation_approval.decided` event carries the hashes without the hints, and the
+  notification and activity rows carry ids and the generated sentence only. The same transaction writes the ledger's
+  `filed` row, so a hub-filed approval is bound exactly like a route-filed one. After a DIFFERENT admin approves it, the
+  requester runs it with `POST .../privacy/:kind { approvalId }` (still attended: an unattended re-call is suspended
+  again). `resolve-and-execute` compares the re-run's args after the same reduction, so the runner finds its own
+  approval (`not_executable`, because the tools are barred) instead of re-filing it.
 - **Retention.** A scheduled purge (dark until `AGENCY_LEAD_RETENTION_PURGE_ENABLED=1`) hard-deletes an UNCONVERTED lead
   with its AD-1 submissions, tokens and stage history `AGENCY_LEAD_RETENTION_MONTHS` (default 24) after its last status
   or stage change (`status_changed_at`, kept by a DB trigger), unless a token or submission arrived after the cutoff.
 - **MCP.** `agency_privacy.find`, `agency_privacy.export`, `agency_privacy.erase`: impact `high`, barred from D14
-  auto-execution (the route is its own WS4 gate). Use them from an attended session: an unattended agent is suspended
-  by the hub first, and that hub approval would carry the identifier in its `tool_args`.
+  auto-execution (the route is its own WS4 gate). Since G5b an unattended agent may call them: the hub suspends it and
+  the approval it files holds hashes, never the identifier (the bullet above). They are still two-person and never
+  auto-run; `execution_status` stays `not_applicable` and the ledger is the record that a request ran.
 
 ### Convert — what it spawns, and the one thing it must never do
 
@@ -4859,6 +4876,15 @@ would leave the `prd_sign` gate open onto nobody who could ever sign it) → `pr
 own answers → the open client `prd_sign` gate → `pm_tasks` for delegation → `emitEvent
 pipeline.run.created`, which is what the shipped `pipeline-fanout` n8n workflow triggers on
 (`automation/workflows/pipeline-fanout.json:11`, verified) to open `scope_signoff` and notify the PM.
+
+**Event payload (M5-P1-g, a removal recorded on purpose).** Convert's `pipeline.run.created` carries exactly
+`{ sourceMeetingId: null, actorId }`. It used to carry `title: <org_name>`, but for `/contact/` and `/audit/` web
+leads `org_name` is the person's full name, and no personal data goes on the bus (design 2026-10-11, §10 risk 6).
+`createRun` and the webdev mini-run still send `title` (a meeting or change-request title). The event's readers, all
+checked: the `pipeline-fanout` n8n workflow reads only `tenantId` and `entityId` off the envelope and fetches the run
+over the hub; the work-activity consumer used `title` and now looks it up from `pipeline_runs` when the payload has
+none; the knowledge-graph bridge labels the node `name ?? title ?? label ?? entityId`, so a convert-born run is
+labelled by its id there. Consumers must treat `title` as optional. No response shape changes.
 
 **It never pre-seeds a signed gate.** The hard build gate requires PRD-signed AND scope-dual-signed,
 and a converted run satisfies that the same way every run does — by real client signatures.
@@ -5076,16 +5102,16 @@ back. Response bodies are WebDesk's own (`webdesk/api/src/control/content/*`), s
 ones, not a restatement. The caller is identified by the BFF's normal auth (session / OBO); the **editorial
 assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `created_by`.
 
-### Routes (all `AuthGuard` + `ModuleEnabledGuard("webdev")`; `authorize()` is the first statement of every handler)
+### Routes (all `AuthGuard` + `ModuleEnabledGuard("webdev")`; the first statement of every handler is Cerbos, phase 1 of the two-phase gate since M5-W1c: see "The two-phase gate" below. The "Cerbos (as the caller)" column names the REAL action, which is phase 2)
 
 `:ts` = `:tenantSlug` (the WebDesk tenant slug), `:site` = `:siteId` (uuid). Both come from `GET …/content/sites`.
 
 | Method | Path (after `/api/:tenantId/modules/webdev/content`) | Cerbos (as the caller) | Success |
 |---|---|---|---|
-| GET | `/sites` | `webdesk_collection:read` | 200 `{tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,environments:[{envId,name,domain,status}]}]}]}`: only THIS company's tenants |
+| GET | `/sites` | `webdesk_collection:read` (M5-W1c: asked **per site** for a writers' room grant, see below) | 200 `{tenants:[{slug,status,defaultLocale,locales,sites:[{siteId,name,kind,environments:[{envId,name,domain,status}]}]}]}`: only THIS company's tenants, and for a writers' room grant only the sites Cerbos lets it read (a tenant with none left is dropped; none readable is 403, never `[]`). Staff tiers: unchanged, the whole list |
 | GET | `/sites/:ts/:site/collections` | `webdesk_collection:read` | 200 `{collections:[{key,composition,vocabularyVersion,counts:{items,byLocale,live,pendingChanges},updatedAt}]}` |
 | GET | `/sites/:ts/:site/collections/:collectionKey/items?locale&state&q&includeDeleted&cursor&limit&slug` | `webdesk_content_item:read` | 200 `{items:[ItemSummary],page:{cursor,hasMore,limit}}`, editor order (slug, locale, id). `state` = draft·live·scheduled·unpublished·deleted·pending; `limit` 1..100. **`slug=` (BFF-side)** returns only the EXACT-slug matches (all locales, or the one `locale` asks for): WebDesk has no slug filter, so the BFF asks for `q=<slug>` at limit 100 and keeps the exact matches, following the cursor up to 5 pages; `page.hasMore:true` with no match means *not found yet*, never *does not exist*. Not combinable with `q` |
-| GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint}` |
+| GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint,editorial?,allowed?}`. **`allowed`** (M5-W1c, BUILT): `{read,update,submit,comment,request_changes,seo_signoff,approve,assign,request_publish,unpublish,delete: boolean}`, what THIS caller may do with THIS item, from ONE Cerbos batch on the resource the real handlers ask with (see "The two-phase gate"). Advisory: every action is checked again. **Absent (never `false`) when Cerbos could not answer or the call is delegated (`actFor`)**, and never sent on the client portal route |
 | GET | `/sites/:ts/:site/items/:itemId/versions?cursor&limit` | `webdesk_content_item:read` | 200 `{versions:[{version,contentHash,createdAt,createdBy,attribution,note}],page}`, newest first |
 | GET | `/sites/:ts/:site/items/:itemId/versions/:n` | `webdesk_content_item:read` | 200 one full version (`blocks`, `seo`, …) |
 | GET | `/sites/:ts/:site/media?mime&q&tag&includeDeleted&cursor&limit` | `webdesk_media_asset:read` (**WSK-43b**: was `webdesk_content_item:read`; same tiers, see "The media library") | 200 `{assets:[MediaAsset],page:{cursor,hasMore,limit},capabilities?:{read,upload,update,delete}}`, newest first. **`capabilities`** (WSK-359): what the caller may do here, from ONE Cerbos `checkResources` request (one resource, the four actions); advisory, so the UI disables the matching control up front, and the per-action check stays the authority (a 403 is still handled). Absent when Cerbos could not answer the batch (unknown, never "denied": every control stays on). |
@@ -5176,6 +5202,26 @@ A takedown-only schedule (`unpublishAt` without `publishAt`) is not gated, and r
 The early check is advisory (the review state can move before `decide()`, and the M1 importer files without it); WebDesk's
 gate is the authority. The approvals detail page (`WebdeskPublishSummary`) shows per item whether the requested version is the
 approved one and warns before the approver decides; an `item.get` without the `editorial` member reads as "unknown".
+
+**The two-phase gate (M5-W1c, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked, and the service-free suite `webdesk-content-two-phase.unit.test.ts` run locally; the real-Cerbos HTTP suite `webdesk-content-two-phase.test.ts` is written and needs the Linux gate; UI: M5-W2e).**
+Design `docs/plans/2026-10-11-m5-writers-room-design.md` §2.3; attribute provenance: PERMISSION-CONTRACT §27.2. Every content and media route above:
+- **Phase 1, the handler's first statement:** Cerbos `webdesk_collection:read` on `{tenantId, module:"webdev", siteId}` (the route's `:siteId`). A caller no rule matches is 403 here, with no WebDesk call at all. A principal that holds no writers' room grant (and is not delegating) is ALSO asked the old attribute-free question for the real action, so a denied staff caller is refused exactly as before, before any egress. `GET sites` has no site: staff get the old company-level question; a writers' room grant is filtered site by site (`check`, no denial rows for the sites it may not read).
+- **Phase 2, before ANY body or query validation:** the real action, with `siteId` (the route's, after the cross-company wall), and `collectionKey`, `locale`, `ownerId` (WebDesk's `editorial.authorSub`), `reviewState` (`editorial.state`), `published` (`publishedVersion !== null`) from WebDesk's `item.get`. `create`: the route's collection (proven by `collection.get`), the body's `locale`, and for a locale twin the SOURCE item's state and `published`. A body or query that names any of these is a 400 AFTER the check and changes nothing the check saw. A denied caller is 403 for any body, and WebDesk receives no write. **A WebDesk that sends no `editorial` member reads as ownerId `""`, reviewState `""`: the writers' room rules fail closed, the staff tiers are unaffected.**
+- Read order changes you may see: `item.get` is read once for the head (the attribute source) and a second time, after the check, only when `?version=` is given; the preview route reads the item before it probes the site (a denied caller triggers no probe); `publish-requests` reads the items its body names before it validates the body.
+- A scoped `webdesk_editor` files publish requests (the filer re-checks `request_publish` on the same attribute-carrying resources, `itemResources`), and lists/withdraws its OWN requests under phase 1 plus the own-rows filter; no policy change.
+
+| Route group | Phase 1 | Phase 2 |
+|---|---|---|
+| `GET sites` | company-level `webdesk_collection:read`, or per site for a writers' room grant | — |
+| `GET …/collections` | `webdesk_collection:read`+siteId | the same question (phase 1 IS the action) |
+| `GET …/collections/:key/items` | `webdesk_collection:read`+siteId | `webdesk_content_item:read`+siteId+route `collectionKey` |
+| `GET …/items/:id`, `/versions`, `/versions/:n` | same | `webdesk_content_item:read` with the item's attributes (`item.get`); `item.get` also asks one `CheckResources` for `allowed` |
+| `GET …/media`, `/media/:a/usage`; `POST …/media/upload-token`; `PATCH`, `DELETE …/media/:a` | same | `webdesk_media_asset:read`/`upload`/`update`/`delete`+siteId |
+| `POST …/collections/:key/items` | same | `webdesk_content_item:create`+siteId+route key+body locale (+ twin source state) |
+| `PUT`/`PATCH …/items/:id`, `POST …/restore`, `POST …/preview` | same | `webdesk_content_item:update` with the item's attributes |
+| `POST …/publish-requests` | same | `request_publish` per distinct (collection, locale, author, state, live) tuple of the items the body names; a malformed body is asked at site level |
+| `GET …/publish-requests`, `POST …/publish-requests/:a/withdraw` | same | none beyond phase 1 (and, for staff tiers, the old `request_publish` question); own rows only |
+| `POST …/unpublish`, `POST …/delete` | same | `webdesk_content_item:unpublish`/`delete` with the item's attributes |
 
 ### Withdrawing a request, and the approvals façade
 

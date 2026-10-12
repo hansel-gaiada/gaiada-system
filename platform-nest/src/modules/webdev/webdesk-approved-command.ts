@@ -654,6 +654,15 @@ export async function fileWebdeskCommandApproval(
      * `notifyDeciders: false` skips the "approval requested" notification to staff (a self-publish needs no second person).
      */
     client?: { clientId: string; notifyDeciders?: boolean };
+    /**
+     * M5-W1c: the exact Cerbos resources the CALLER built from WebDesk reads (`ItemGate.resourceOf`, one per distinct
+     * attribute tuple of the items the request names). When present and NON-EMPTY, the defence-in-depth check below asks
+     * the gate's action on EACH of them instead of the attribute-free resource: a writers' room `webdesk_editor` is matched
+     * by site/collection/locale attributes, which the attribute-free resource does not carry. An EMPTY array is treated as
+     * absent (never as "skip the check"). Ignored for `key.mint`, whose gate is another kind. Absent: unchanged for every
+     * other caller (the importer, key.mint, the client portal).
+     */
+    itemResources?: Resource[];
   },
 ): Promise<{ approvalId: string }> {
   if (!isApprovedCommand(input?.command)) {
@@ -663,7 +672,10 @@ export async function fileWebdeskCommandApproval(
     throw badRequest(WEBDESK_EXEC_ERROR.argsInvalid, "a client editor may file only a content.publish");
   }
   const gate = filingGate(input.command, tenantId);
-  await authorize(principal, input.client ? { ...gate.resource, clientId: input.client.clientId } : gate.resource, gate.action);
+  const withClient = (r: Resource): Resource => (input.client ? { ...r, clientId: input.client.clientId } : r);
+  const resources =
+    input.command !== "key.mint" && Array.isArray(input.itemResources) && input.itemResources.length > 0 ? input.itemResources : [gate.resource];
+  for (const r of resources) await authorize(principal, withClient(r), gate.action);
   if (!principal.userId) throw new BadRequestException("an authenticated user is required");
 
   const args = isPlainObject(input.args) ? input.args : null;

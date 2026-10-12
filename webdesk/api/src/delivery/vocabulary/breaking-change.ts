@@ -33,9 +33,13 @@
 // the snapshot, so adding `ui.clientEditable` would have been rated PATCH ("no structural change"). They
 // are snapshot dimensions now (`fieldUiKeys`, `collectionUiKeys`): a new key is MINOR, a removed one MAJOR.
 // A `clientEditable` VALUE flip inside a tenant contract is still a `ui` edit, so PATCH.
+//
+// M5-W3c (vocabulary 1.3.0) closed the same blind spot for `lint`: its key set is a snapshot dimension now
+// (`lintKeys`), so adding `lint.content` is rated MINOR, not PATCH. Any VALUE change of a tenant's `lint`
+// (placeholders or content settings) is still advisory-only: PATCH.
 import { MULTIPLE_CAPABLE_PRIMITIVES, PRIMITIVE_NAMES, FIELD_DEF_KEYS, FIELD_UI_KEYS, type FieldDef, type PrimitiveName } from './primitives'
 import { BLOCKS, BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, type BlockDef, type BlockType } from './blocks'
-import { COLLECTION_UI_KEYS, COMPOSITION_KEYS, type CollectionUi, type PlaceholderRule } from './composition'
+import { COLLECTION_UI_KEYS, COMPOSITION_KEYS, LINT_KEYS, type CollectionUi, type ContentLintSettings, type PlaceholderRule } from './composition'
 import { buildItemEnvelope, buildListEnvelope } from './envelope'
 import { problemDetails } from './problem-details'
 
@@ -218,6 +222,8 @@ export interface VocabularySnapshot {
   fieldUiKeys?: string[]
   /** WSK-49: keys a composition's `ui` object may carry. Same rule, required when `compositionKeys` include "ui". */
   collectionUiKeys?: string[]
+  /** M5-W3c: keys a composition's `lint` object may carry. Same rule, required when `compositionKeys` include "lint" (1.1.0 onward). */
+  lintKeys?: string[]
 }
 
 function paths(obj: Record<string, unknown>, prefix: string): string[] {
@@ -269,6 +275,7 @@ export function currentVocabularySnapshot(): VocabularySnapshot {
     compositionKeys: [...COMPOSITION_KEYS].sort(),
     fieldUiKeys: [...FIELD_UI_KEYS].sort(),
     collectionUiKeys: [...COLLECTION_UI_KEYS].sort(),
+    lintKeys: [...LINT_KEYS].sort(),
   }
 }
 
@@ -285,6 +292,13 @@ function assertCompleteSnapshot(which: string, snap: VocabularySnapshot): void {
   // WSK-49: once a vocabulary has a `ui` object, the keys of that object are part of its contract.
   const needsFieldUi = snap.fieldDefKeys.includes('ui') && snap.fieldUiKeys === undefined
   const needsCollectionUi = snap.compositionKeys.includes('ui') && snap.collectionUiKeys === undefined
+  // M5-W3c: the same for the keys of `lint`.
+  if (snap.compositionKeys.includes('lint') && snap.lintKeys === undefined) {
+    throw new Error(
+      `classifyVocabularyChange: the ${which} snapshot declares a \`lint\` object but lacks lintKeys, so it predates M5-W3c's lint-key dimension. ` +
+        'Recapture it with delivery/test/wsk64-snapshot-probe.mjs rather than comparing blind.',
+    )
+  }
   if (needsFieldUi || needsCollectionUi) {
     const lacking = [needsFieldUi ? 'fieldUiKeys' : null, needsCollectionUi ? 'collectionUiKeys' : null].filter(Boolean).join(', ')
     throw new Error(
@@ -384,6 +398,9 @@ export function classifyVocabularyChange(before: VocabularySnapshot, after: Voca
   if (before.compositionKeys.includes('ui') && before.collectionUiKeys && after.collectionUiKeys) {
     reasoned.push(...diffKeySet('collection ui', before.collectionUiKeys, after.collectionUiKeys))
   }
+  if (before.compositionKeys.includes('lint') && before.lintKeys && after.lintKeys) {
+    reasoned.push(...diffKeySet('composition lint', before.lintKeys, after.lintKeys))
+  }
 
   return classify(reasoned)
 }
@@ -406,7 +423,7 @@ export interface CollectionFieldSet {
   /** WSK-64: editor-only. Any change is PATCH. */
   ui?: CollectionUi
   /** WSK-64: advisory lint. Any change is PATCH. */
-  lint?: { placeholders?: PlaceholderRule[] }
+  lint?: { placeholders?: PlaceholderRule[]; content?: ContentLintSettings }
 }
 
 export interface TenantContractSnapshot {
