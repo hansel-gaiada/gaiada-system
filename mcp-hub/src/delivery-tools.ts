@@ -22,8 +22,13 @@
 import { config } from "./config";
 import { registerTool } from "./registry";
 import { gatewayComplete } from "./gateway-client";
+import { runnerFetch, passthrough } from "./agents-tools";
 import { oboHeaders } from "./obo-headers";
 import type { Principal } from "./principal";
+
+/** The ai-agents runner agent that code.scaffold v2 starts (ai-agents/src/code-scaffold/runner-job.ts). */
+const SCAFFOLD_AGENT = "code-scaffold-v2";
+const SCAFFOLD_SITE_KINDS = ["astro", "node", "wp"];
 
 interface PlatformGithubRepo {
   fullName: string;
@@ -54,10 +59,8 @@ async function fetchRepoStatus(tenantId: string, repo: string, principal: Princi
 
 export function registerDeliveryTools(): void {
   // ---- Claude Design / Claude Code (WS11 build item 7) ----
-  // v1: synchronous Gateway-wrapped ARTIFACT generation (same pattern as llm.extract). The design
-  // tool turns a signed PRD into a prototype/design brief; the code tool turns the approved prototype
-  // into an implementation plan for the PM-created repo. A running prototype + a real git push are a
-  // target-state refinement (a WS8 async specialist + github write) — documented, not faked here.
+  // design.prototype is v1: synchronous Gateway-wrapped ARTIFACT generation (same pattern as llm.extract): it
+  // turns a signed PRD into a prototype/design brief. code.scaffold is v2 (M6-P4b1, below): an async runner job.
   registerTool({
     name: "design.prototype",
     description: "Claude Design: turn a signed PRD into a prototype/design brief (screens, components, user flows) as markdown. Returns { content }.",
@@ -79,26 +82,88 @@ export function registerDeliveryTools(): void {
     },
   });
 
+  // ---- code.scaffold v2 (M6-P4b1) ----
+  // No longer a Gateway text stub. It starts an ai-agents runner job (agent "code-scaffold-v2", the same
+  // POST /goals path agents.invoke uses, with the caller's OBO identity forwarded verbatim) and returns the goal
+  // id at once. The job composes a site from the pinned contract snapshot, the signed PRD and the accepted
+  // prototype, in DRY-RUN mode only: nothing is pushed anywhere (the hub and the agents hold no GitHub write
+  // credential; platform-nest commits the returned file tree, M6-P4b2). Poll `agents.status` with the goal id: the
+  // finished goal carries the file list (path, size, sha256) and the CONTRACT.lock text in its blackboard entry.
+  //
+  // INPUT. Required: tenantId, contractSnapshotId (webdev_contract_snapshots.id, THE pin), siteKind
+  // ("astro" | "node" | "wp"), prdArtifact, prototypeArtifact (pipeline_stages.artifact_ref, resolved by the job
+  // through pipeline.artifacts.get). Optional: repoUrl, runId, blockLibraryVersion (default: the snapshot's own),
+  // maxRevise. The legacy keys `prd`, `prototype` and `repo` that wf:delivery sends today are accepted as aliases
+  // of prdArtifact, prototypeArtifact and repoUrl. The result keeps a `content` string for the same caller.
+  //
+  // Impact is "low", the floor agents.invoke uses: this files a goal and mutates no business data.
   registerTool({
     name: "code.scaffold",
-    description: "Claude Code: turn an approved prototype + PRD into an implementation plan / scaffolding for the (PM-created) repo. Returns { content }. Note: v1 produces the code artifact; the real git push is target-state.",
+    description:
+      "Claude Code v2: start a code.scaffold job that composes a site repo (siteKind astro, node = Next + Nest apps/web, or wp) from a pinned contract snapshot, the signed PRD and the accepted prototype. DRY RUN only: nothing is pushed. ASYNCHRONOUS: returns { goalId, status: 'queued', mode: 'dry_run', content } at once; poll agents.status for the file list and the CONTRACT.lock.",
     minAssurance: "low",
+    write: true,
+    impact: "low",
     inputSchema: {
       type: "object",
-      properties: { prd: { type: "string" }, prototype: { type: "string" }, repo: { type: "string" }, notes: { type: "string" } },
-      required: ["prd", "prototype"],
+      properties: {
+        tenantId: { type: "string", description: "Company uuid the run belongs to." },
+        contractSnapshotId: { type: "string", description: "webdev_contract_snapshots.id: the pin the scaffold is built against." },
+        siteKind: { type: "string", enum: ["astro", "node", "wp"], description: "node = the fullstack Next + Nest template (fills apps/web)." },
+        prdArtifact: { type: "string", description: "artifact_ref of the signed PRD stage (alias: prd)." },
+        prototypeArtifact: { type: "string", description: "artifact_ref of the accepted design stage (alias: prototype)." },
+        repoUrl: { type: "string", description: "The PM-created repo (alias: repo). Not used by a dry run." },
+        runId: { type: "string", description: "The pipeline run this belongs to, for correlation." },
+        blockLibraryVersion: { type: "string", description: "Default: the snapshot's own pinned library version." },
+        maxRevise: { type: "number" },
+        requestedBy: { type: "string" },
+      },
+      required: ["tenantId", "contractSnapshotId", "siteKind", "prdArtifact", "prototypeArtifact"],
     },
-    handler: async (args) => {
-      const prd = String(args.prd ?? "");
-      const prototype = String(args.prototype ?? "");
-      if (!prd.trim() || !prototype.trim()) throw new Error("prd and prototype required");
-      const content = await gatewayComplete(
-        `You are a senior engineer. From the PRD + approved prototype below, produce an IMPLEMENTATION ` +
-        `PLAN + code scaffolding (file tree, key modules, data model, API surface) as markdown for the ` +
-        `repo ${args.repo ? String(args.repo) : "(to be created)"}.${args.notes ? ` Reviewer notes: ${String(args.notes)}.` : ""}` +
-        `\n\nPRD:\n${prd}\n\nPROTOTYPE:\n${prototype}`,
-      );
-      return JSON.stringify({ content });
+    handler: async (args, principal) => {
+      const str = (v: unknown): string => (typeof v === "string" ? v : "");
+      const tenantId = str(args.tenantId);
+      const contractSnapshotId = str(args.contractSnapshotId);
+      const siteKind = str(args.siteKind);
+      const prdArtifact = str(args.prdArtifact) || str(args.prd);
+      const prototypeArtifact = str(args.prototypeArtifact) || str(args.prototype);
+      if (!tenantId.trim()) throw new Error("tenantId required");
+      if (!prdArtifact.trim() || !prototypeArtifact.trim()) throw new Error("prdArtifact and prototypeArtifact required (aliases: prd, prototype)");
+      if (!contractSnapshotId.trim()) {
+        throw new Error("contractSnapshotId required: code.scaffold v2 builds against a pinned contract snapshot (webdev_contract_snapshots.id)");
+      }
+      if (!SCAFFOLD_SITE_KINDS.includes(siteKind)) throw new Error(`siteKind must be one of ${SCAFFOLD_SITE_KINDS.join(", ")}`);
+
+      // The job's goal text is the frozen §06 scaffold envelope (ai-agents/src/code-scaffold/envelope.ts), and
+      // nothing in it can select a push: the runner job is dry-run only.
+      const envelope = {
+        runId: str(args.runId) || "unbound",
+        repoUrl: str(args.repoUrl) || str(args.repo) || "unbound",
+        siteKind,
+        prdArtifact,
+        prototypeArtifact,
+        contractSnapshotId,
+        constraints: {
+          blockLibraryVersion: str(args.blockLibraryVersion),
+          maxRevise: typeof args.maxRevise === "number" ? args.maxRevise : 3,
+        },
+      };
+      const r = await runnerFetch("POST", "/goals", principal, {
+        tenantId,
+        agent: SCAFFOLD_AGENT,
+        goal: JSON.stringify(envelope),
+        ...(typeof args.requestedBy === "string" ? { requestedBy: args.requestedBy } : {}),
+        envelope: { provider: principal.provider, externalId: principal.externalId },
+      });
+      const accepted = JSON.parse(passthrough("POST /goals (code.scaffold)", r)) as { id?: string; status?: string };
+      return JSON.stringify({
+        goalId: accepted.id,
+        status: accepted.status ?? "queued",
+        mode: "dry_run",
+        siteKind,
+        contractSnapshotId,
+        content: `code.scaffold v2 job ${accepted.id} queued (dry run, ${siteKind}); poll agents.status with { goalId, tenantId } for the file list and CONTRACT.lock.`,
+      });
     },
   });
 

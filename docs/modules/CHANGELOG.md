@@ -25,6 +25,49 @@ The ai-agents half of M5-G5b (built by the M5 session). No agent holds the `agen
 - **Verified:** GitHub Actions 38209313115 green (sensitive-tools 21/21, sensitive-run 11/11; ai-agents 340 passed locally).
   - The DB-gated `runner/store.test.ts` case is skipped in CI's ai-agents job (no Postgres there), so it has not run on Linux. Hence PROTOTYPED.
 
+### platform-nest `0.81.0` - provisioning finishes §08 (registry row, WebDesk tenant, pinned contract); contract.regenerate from the ERP; the block library is mirrored as a fifth artifact (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6 (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`). Built by the M6 session. (0.79.0 was reserved for M6 and is left unused to keep this registry monotonic.)
+
+- **Provisioning completes (M6-P4c).** After the company admin approves the GH-12 repo request, a crash-resumable state machine (`webdev_provisioned_sites.completion_state`: registered → tenant_ready → complete) upserts the `webdev_sites` row (`origin=provisioned`, `adoption=mandated`), requests the WebDesk tenant (`tenant.provision`, idempotency key per site) and pins the first contract snapshot once codegen publishes it. **Migration `202610120425_webdev_provisioned_sites_completion.sql`** (additive: six columns, a composite FK, a CHECK, one unique index). One approval covers repo, registry row and tenant (WebDesk classes `tenant.provision` MEDIUM). A new site gets the placeholder domain `<slug>.provisioned.invalid` until M6-P4c2.
+- **`webdesk.contract.regenerate`** (`POST /api/:t/modules/webdev/control/contract/regenerate`, `{slug?}`): one tenant, or every active tenant of THIS company. MEDIUM: an attended human runs it, automation suspends into D14.
+- **The fifth snapshot artifact (M6-P4b0).** The mirror stores WebDesk's block-library tarball (`artifacts.blockLibraryFile`, `hashes.blockLibrary`, kept out of `computeContentHash`); new snapshots store `sdk.d.ts` / `sdk.php` by their real type; the snapshot route and `webdev.contracts.artifact` gain `blockLibrary`.
+- **Delivery reads (M6-P4e).** `webdev.provisionedSites.list` / `.get` (read-only, `wf:delivery` only); `pipeline.artifacts.get` resolves `stage:<stageId>` refs (the stage lookup stays the authorization boundary; by-value refs unchanged).
+- Verified on the Linux gate (sumopod): `m6b3d` on the final batch-3 head (with M6-P4e): tsc clean, 618 files / 9179 passed / 0 failed (3 files skipped), incl. the P4c DB suites, the webdev-contracts mirror and `automation-prd-kind.test.ts`; `m6b3c` before it 9150/0.
+
+### webdesk `0.15.0` - the block library is a fifth contract artifact; the WordPress gate (2026-10-12) - DEV-VERIFIED
+
+- **Block library (M6-P4b0).** A codegen run uploads the image's baked `@gaiada/webdesk-blocks` tarball to a shared, content-addressed key `blocks/<version>/<sha16>/…` (absent: upload + sidecar; same: no-op; a damaged object at the key: loud failure, never an overwrite); the pointer records it outside `contentHash`; the contract read returns `blockLibraryUrl` (`null` for older pointers).
+- **The P5 gate** (`webdesk/qa/p5-wp-gate.sh`): a real WordPress renders entirely from `/v1` with a tenant SDK generated live; 65/65 on sumopod.
+- Verified on `sumopod`: gate `m6b3c` webdesk-api 1786/0 and legacy 16/16; `m6b3d` blocks 40/40 with `astro check` clean, `php -l` 17/17 and the render-invariant, router, safety and vocabulary-fields probes (29, 64, 47, 62); P5 gate `p5g1` 65/65.
+
+### ai-agents `0.10.0` - code.scaffold v2 runs for real (dry run) for all three kinds; fullstack fills the Next + Nest template (2026-10-12) - DEV-VERIFIED
+
+- **M6-P4b1.** `agent: "code-scaffold-v2"` goals run `runCodeScaffold` with the real hub snapshot provider and artifact fetcher, target hard-coded to `dry_run`; the result (file list with sizes and sha256, the exact `CONTRACT.lock`) is returned in the goal's blackboard. `node` writes into `apps/web` only, with a React block renderer (the block library is Astro-only); the static kind refuses a snapshot without a block library. A compile bug in the generated SDK client (template-literal index on `paths`) is fixed. The Dockerfile adds `git`.
+- Verified on the Linux gate (sumopod, `m6b3d`): tsc clean, 49 files / 409 passed.
+
+### mcp-hub `0.13.2` - code.scaffold starts a dry-run job; the PRD carries a Stack line (2026-10-12) - DEV-VERIFIED
+
+- `code.scaffold` now POSTs a runner goal with the caller's OBO envelope and returns `{goalId, status, mode: "dry_run"}`; it requires `contractSnapshotId`, `siteKind`, `prdArtifact`, `prototypeArtifact` (legacy `prd`/`prototype`/`repo` accepted as aliases).
+- `llm.extract` `prd` starts the PRD with `Stack: <static|wordpress|fullstack>` or `Stack: undecided`.
+- `wf:delivery` gains `webdev.provisionedSites.list` / `.get`.
+- Verified on the Linux gate (sumopod, `m6b3d`): tsc clean, 29 files / 390 passed (29 skipped).
+
+### automation (n8n) `0.5.0` - provisioning picks the kind from the signed PRD; the code stage waits for a pinned contract (2026-10-12) - PROTOTYPED
+
+- `wd-provision.json`: the signed PRD's `Stack:` line selects the kind (`stack`, no hardcoded framework); a missing or unknown hint is refused loudly (`prd_stack_missing` / `unsupported_stack`), never defaulted to static.
+- `pipeline-delivery.json`: before `code.scaffold`, the code stage reads the run's provisioned site and parks (retryable, notified) until its completion is `complete` with a pinned snapshot; it passes `contractSnapshotId`, `siteKind` and `stage:<id>` refs for the signed PRD and the accepted design. Parking does not re-trigger itself yet.
+- The shipped Code nodes of both workflows are executed by `platform-nest/src/modules/webdev/automation-prd-kind.test.ts` (Linux gate `m6b3d`); the flow itself is driven live only after the re-import.
+- `generators/gen-delivery.mjs` was already stale (the JSON has been edited directly since `43a1555f`); it now refuses to run instead of silently overwriting `pipeline-delivery.json`, and `automation/CLAUDE.md` says so.
+- **Needs a CLI re-import on the box after deploy** (`wswdprovision0001` first, then `ws11delivery0001`).
+
+### infra `0.13.2` - MON-04 Client Properties dashboard; MON-01 targets carry an internal label (2026-10-12) - DEV-VERIFIED
+
+- `infra/observability/grafana/dashboards/client-properties.json` (uid `client-properties`): stats, a per-property table (up, HTTP status, latency, certificate days, 24 h / 7 d uptime), time series; `internal` and `domain` variables.
+- `gen-client-property-targets.mjs` labels each target `internal` from `clients.is_internal` (falls back to `false` on an older schema); selftest 12/12. `ClientPropertyDown` / `ClientPropertyCertExpiringSoon` exclude `internal="true"`.
+- MON-01 itself still ships no targets to sumopod (M6-P3d).
+- Verified on the Linux gate (sumopod, `m6b3c`): promtool `check rules` SUCCESS on every rules file.
+
 ### platform-ui `0.96.0` - M5-W2e: the writers' room UI (2026-10-12) - DEV-VERIFIED
 
 - **Editorial panel in the item editor:**

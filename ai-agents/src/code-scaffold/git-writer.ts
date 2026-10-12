@@ -35,19 +35,25 @@ async function writeTree(workDir: string, files: GeneratedFile[]): Promise<void>
   }
 }
 
-/** Vendors the pinned SDK tarball (installed "from the snapshot tarball" — OQ-6, no registry infra)
- *  into `vendor/`, referenced by `package.json`'s `file:./vendor/...` dependency (templates/common.ts).
- *  Writing bytes to disk is composing a file, not executing anything — the tarball is never
- *  extracted/required by this process. */
-export function vendorFiles(args: { sdkTsTarball: Buffer; sdkTsPackageJson: string; blockLibraryTarballPlaceholder?: Buffer }): GeneratedFile[] {
-  const files: GeneratedFile[] = [
-    { path: "vendor/webdesk-sdk.tgz", content: args.sdkTsTarball },
-    { path: "vendor/webdesk-sdk-package.json", content: args.sdkTsPackageJson },
+/** Vendors the two pinned artifacts into `vendor/` (OQ-6, no registry infra), each referenced by a `file:`
+ *  dependency in `package.json` (templates/common.ts). Writing bytes to disk is composing a file, not
+ *  executing anything: nothing is extracted, required or imported by this process.
+ *
+ *  - The block library IS a tarball (`npm pack` output): `vendor/webdesk-blocks.tgz`.
+ *  - The generated SDK is NOT: it is WebDesk's plain-text `sdk.d.ts` (types only), so it is vendored as a
+ *    tiny local package, `vendor/webdesk-sdk/` (`index.d.ts` + a `package.json` whose `types` points at it),
+ *    which `file:./vendor/webdesk-sdk` installs as `@gaiada/webdesk-sdk` for `import type { paths }`. */
+export function vendorFiles(args: { sdkTsSource: string; sdkTsPackageJson: string; blockLibraryTarball: Buffer }): GeneratedFile[] {
+  return [
+    { path: "vendor/webdesk-sdk/index.d.ts", content: args.sdkTsSource },
+    { path: "vendor/webdesk-sdk/package.json", content: args.sdkTsPackageJson },
+    { path: "vendor/webdesk-blocks.tgz", content: args.blockLibraryTarball },
   ];
-  if (args.blockLibraryTarballPlaceholder) {
-    files.push({ path: "vendor/webdesk-blocks.tgz", content: args.blockLibraryTarballPlaceholder });
-  }
-  return files;
+}
+
+/** The `package.json` of the vendored SDK package: a types-only package (no runtime entry). */
+export function sdkPackageJson(contractVersion: string): string {
+  return JSON.stringify({ name: "@gaiada/webdesk-sdk", version: contractVersion, private: true, types: "./index.d.ts" }, null, 2) + "\n";
 }
 
 export async function writeAndPush(files: GeneratedFile[], target: PushTarget): Promise<WriteAndPushResult> {

@@ -1,3 +1,8 @@
+// STALE — DO NOT RUN (noted 2026-10-12, M6-P4e). workflows/pipeline-delivery.json was edited directly by
+// 43a1555f, 1eb17987 and 3ebcfcd3 (M6-P4e: the code stage parks until a pinned contract exists); running this
+// file would overwrite the JSON and silently drop all three. Edit the JSON; see automation/CLAUDE.md.
+console.error("gen-delivery.mjs is stale and would overwrite pipeline-delivery.json; refusing. See automation/CLAUDE.md.");
+process.exit(1);
 // Generator for pipeline-delivery.json — full delivery state machine.
 // 2026-07-22: extended with WS11 tails — A) bounded revise loop on client changes_requested,
 // B) production deploy gate (staging sign-off -> prod approval -> deploy.production -> production stage).
@@ -102,7 +107,7 @@ link("Open next gate?", "Release code?", 1);
 mcp("github.repoStatus", 6, "{ repo: $('Load + decide').first().json.slug }", 1300, 120, { label: "MCP github.repoStatus", continueOnFail: true });
 code("Repo ready?", `${SSE.replace("const raw","let raw")}\nlet ready=false, reason='';\ntry{ if(rpc.result?.isError){reason=rpc.result.content?.[0]?.text||'repo check failed';} else { const r=JSON.parse(rpc.result?.content?.[0]?.text??'{}'); ready=!!r.exists; if(!ready) reason='repo does not exist yet'; } }catch(e){ reason='github not configured'; }\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, prd:d.prd, proto:d.proto, slug:d.slug, ready, reason } }];`, 1520, 120);
 ifEq("Repo exists?", "$json.ready", "true", 1740, 120);
-mcp("code.scaffold", 7, "{ prd: $json.prd, prototype: $json.proto, repo: $json.slug }", 1960, 60, { label: "MCP code.scaffold" });
+mcp("code.scaffold", 7, "{ tenantId: $json.tenantId, runId: $json.runId, prd: $json.prd, prototype: $json.proto, repo: $json.slug }", 1960, 60, { label: "MCP code.scaffold" });
 code("Parse code", `${SSE}\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'code.scaffold failed');\nlet p={};try{p=JSON.parse(rpc.result?.content?.[0]?.text??'{}')}catch{}\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, doc:p.content??'' } }];`, 2180, 60);
 mcp("pipeline.createStage", 8, '{ tenantId: $json.tenantId, runId: $json.runId, track: "delivery", name: "claude_code", status: "awaiting_gate", artifactRef: $json.doc }', 2400, 60, { label: "MCP createStage code" });
 code("Parse code stage", `${SSE}\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'createStage failed');\nconst s=JSON.parse(rpc.result?.content?.[0]?.text??'{}');\nconst d=$('Load + decide').first().json;\nreturn [{ json: { tenantId:d.tenantId, runId:d.runId, stageId:s.id } }];`, 2620, 60);

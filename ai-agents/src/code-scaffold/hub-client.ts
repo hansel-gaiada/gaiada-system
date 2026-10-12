@@ -12,15 +12,15 @@
 // from the snapshot's own pointer and verifies its sha256; `wf:delivery` is allow-listed for both).
 // `HubContractSnapshotProvider` calls exactly those two.
 //
-// STILL OPEN: (a) the pinned `@gaiada/webdesk-blocks` tarball — NOT stored on the snapshot (its
-// `artifacts.blockLibrary` is only `{package, version, range}`); `webdev.artifacts.downloadBlockLibrary`
-// is an unregistered placeholder name until M6-P4b defines where those bytes live; (b) arbitrary file
+// CLOSED (M6-P4b0): the pinned `@gaiada/webdesk-blocks` tarball is the snapshot's fifth artifact, read with
+// `webdev.contracts.artifact` `{artifact: "blockLibrary"}` (`artifacts.blockLibrary` stays the `{package, version,
+// range}` ref; the file id is `artifacts.blockLibraryFile`).
+//
+// STILL OPEN: (b) arbitrary file
 // bytes by id are deliberately NOT exposed (`files.controller.ts`'s `GET :tenantId/files/:fileId/content`
 // has no hub wrapper, and the snapshot artifact route is intentionally not a general file reader);
 // (c) `pipeline_stages.artifact_ref` text is served by `pipeline.artifacts.get` (see artifact-fetcher.ts).
-// The interfaces below (`ToolCaller`, `ContractSnapshotProvider`, `ArtifactFetcher`) remain the seam; a
-// live run still cannot finish until (a) lands, so this goal is exercised end to end through the `Fake*`
-// test doubles only. This goal never opens an HTTP connection to platform-nest itself.
+// The interfaces below (`ToolCaller`, `ContractSnapshotProvider`, `ArtifactFetcher`) remain the seam. This goal never opens an HTTP connection to platform-nest itself.
 import type { Envelope } from "../agent";
 
 /** Identical shape to `AgentDeps["callTool"]` (ai-agents/src/agent.ts) — this goal is driven the same

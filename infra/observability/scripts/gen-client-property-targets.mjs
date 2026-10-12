@@ -74,6 +74,24 @@ export const PROBEABLE_SQL = `
    ORDER BY p.domain
 `;
 
+/**
+ * MON-04 / WSK-D36: same consent gate, same rows, plus `internal` from clients.is_internal so
+ * client-facing dashboards can exclude our own sites. LEFT JOIN: a property whose client row is
+ * missing is still probed (and labelled internal="false"). Used when the column exists; see
+ * PROBEABLE_SQL for the fallback on a DB that predates migration 202610111100.
+ */
+export const PROBEABLE_WITH_INTERNAL_SQL = `
+  SELECT p.id, p.tenant_id, p.client_id, p.domain, p.site_url,
+         p.hosting_provider, p.control_panel, p.stack,
+         COALESCE(c.is_internal, false) AS is_internal
+    FROM search_properties p
+    LEFT JOIN clients c ON c.id = p.client_id
+   WHERE p.verified_at IS NOT NULL
+     AND p.status = 'active'
+     AND p.deleted_at IS NULL
+   ORDER BY p.domain
+`;
+
 export function toFileSd(rows) {
   const targets = [];
   const skipped = [];
@@ -91,6 +109,8 @@ export function toFileSd(rows) {
         property_domain: r.domain,
         tenant_id: String(r.tenant_id),
         client_id: String(r.client_id),
+        // Missing/undefined (no column, no client row) is "false", never "unknown".
+        internal: r.is_internal === true ? "true" : "false",
         ...(r.hosting_provider ? { hosting_provider: r.hosting_provider } : {}),
         ...(r.control_panel ? { control_panel: r.control_panel } : {}),
         ...(r.stack ? { stack: r.stack } : {}),
@@ -132,7 +152,15 @@ function selftest() {
   check("the consent gate is in the SQL, not in a comment",
     /verified_at IS NOT NULL/.test(PROBEABLE_SQL) && /status = 'active'/.test(PROBEABLE_SQL));
 
-  console.log(`\n  selftest: ${8 - failed} passed, ${failed} failed`);
+  const lbl = (row) => toFileSd([{ domain: "a", site_url: "https://a.test", tenant_id: "t", client_id: "c", ...row }]).targets[0].labels.internal;
+  check("internal=true when clients.is_internal is true", lbl({ is_internal: true }) === "true");
+  check("internal=false when clients.is_internal is false", lbl({ is_internal: false }) === "false");
+  check("internal=false when the column/client is missing (no sentinel yet)", lbl({}) === "false" && lbl({ is_internal: null }) === "false");
+  check("the internal join is a LEFT JOIN and keeps the consent gate",
+    /LEFT JOIN clients/.test(PROBEABLE_WITH_INTERNAL_SQL) && /verified_at IS NOT NULL/.test(PROBEABLE_WITH_INTERNAL_SQL)
+    && /status = 'active'/.test(PROBEABLE_WITH_INTERNAL_SQL) && /deleted_at IS NULL/.test(PROBEABLE_WITH_INTERNAL_SQL));
+
+  console.log(`\n  selftest: ${12 - failed} passed, ${failed} failed`);
   return failed === 0 ? 0 : 1;
 }
 
@@ -154,7 +182,16 @@ async function main() {
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try {
-    const res = await client.query(PROBEABLE_SQL);
+    let res;
+    try {
+      res = await client.query(PROBEABLE_WITH_INTERNAL_SQL);
+    } catch (e) {
+      // 42703 undefined_column / 42P01 undefined_table: DB predates clients.is_internal.
+      if (e && (e.code === "42703" || e.code === "42P01")) {
+        console.warn('[mon-01] clients.is_internal unavailable; labelling every target internal="false"');
+        res = await client.query(PROBEABLE_SQL);
+      } else throw e;
+    }
     const { targets, skipped } = toFileSd(res.rows);
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, JSON.stringify(targets, null, 2) + "\n");

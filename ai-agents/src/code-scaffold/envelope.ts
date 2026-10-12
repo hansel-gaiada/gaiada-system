@@ -52,7 +52,16 @@ export type ScaffoldOutcome =
   | "dry_run"
   | "rejected_site_kind"
   | "snapshot_fetch_failed"
-  | "artifact_fetch_failed";
+  | "artifact_fetch_failed"
+  | "prototype_invalid";
+
+/** One composed file, by value-free description (M6-P4b1): what a downstream committer (platform-nest,
+ *  M6-P4b2) can check a fetched tree against. `sha256` is the lowercase hex digest of the file's exact bytes. */
+export interface ScaffoldFileEntry {
+  path: string;
+  bytes: number;
+  sha256: string;
+}
 
 /** `design.prototype`-style job/result shape, preserved (webdev D-10, PROGRESS.md WSK-20 row): a flat,
  *  serializable `{content}`-shaped result the hub tool's synchronous handlers already return, widened
@@ -64,8 +73,12 @@ export interface ScaffoldResult {
   content: string;
   /** Present only when outcome is "pushed" or "dry_run". */
   files?: string[];
+  /** M6-P4b1 - the same files with size and sha256, sorted by path. Present with `files`. */
+  fileManifest?: ScaffoldFileEntry[];
   gaps?: VocabularyGap[];
   contractLock?: ContractLock;
+  /** M6-P4b1 - the exact text of the composed `CONTRACT.lock` (repo root). Present with `files`. */
+  contractLockContent?: string;
   /** The ref actually pushed (branch/sha), or the local bare-repo path in dry-run mode. */
   pushedTo?: string;
   error?: string;

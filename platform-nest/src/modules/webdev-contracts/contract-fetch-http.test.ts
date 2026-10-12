@@ -34,10 +34,16 @@ beforeAll(async () => {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
+      // M6-P4b0: blockLibraryUrl is sent only for a slug naming one, so the default bundle models an OLDER pointer
+      // (the key is absent), and null-blocks models a far side that sends an explicit null.
+      const blocks = req.url.includes("with-blocks")
+        ? { blockLibraryUrl: `${origin}/artifacts/gaiada-webdesk-blocks-1.3.2.tgz` }
+        : req.url.includes("null-blocks") ? { blockLibraryUrl: null } : {};
       res.end(JSON.stringify({
         ...VALID_BUNDLE,
         artifacts: {
           ...VALID_BUNDLE.artifacts,
+          ...blocks,
           sdkTsUrl: `${origin}/artifacts/sdk.ts.tgz`,
           openapiUrl: `${origin}/artifacts/openapi.v1.json`,
           contractMdUrl: `${origin}/artifacts/CONTENT-CONTRACT.md`,
@@ -71,6 +77,19 @@ describe("WSK-19 — WebdevControlHttpDriver", () => {
     expect(meta.version).toBe("1.0.0");
     expect(meta.artifacts.sdkPhpUrl).toBeNull();
     expect(lastAuthHeader).toBe("Bearer test-token-abc");
+  });
+
+  it("M6-P4b0 getContractBundle: blockLibraryUrl is null when the key is absent (older pointer) or null, and the URL when present", async () => {
+    const driver = new WebdevControlHttpDriver({
+      baseUrl: origin, bearerToken: "", timeoutMs: 2000, retryAttempts: 1, retryBaseDelayMs: 1,
+    });
+    expect((await driver.getContractBundle("acme")).artifacts.blockLibraryUrl).toBeNull();
+    expect((await driver.getContractBundle("null-blocks")).artifacts.blockLibraryUrl).toBeNull();
+    const withBlocks = await driver.getContractBundle("with-blocks");
+    expect(withBlocks.artifacts.blockLibraryUrl).toBe(`${origin}/artifacts/gaiada-webdesk-blocks-1.3.2.tgz`);
+    // The other four are parsed exactly as before.
+    expect(withBlocks.artifacts.sdkPhpUrl).toBeNull();
+    expect(withBlocks.artifacts.sdkTsUrl).toBe(`${origin}/artifacts/sdk.ts.tgz`);
   });
 
   it("downloadArtifact: returns the real bytes over a real socket", async () => {

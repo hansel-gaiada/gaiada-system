@@ -46,6 +46,9 @@ import {
   isWebdeskApprovedCommandRequest,
   preflightWebdeskApprovedCommand,
 } from "../modules/webdev/webdesk-approved-command";
+// M6-P4c: a GH-12 repo created for a provisioned site finishes §08 (registry row, WebDesk tenant, pinned
+// contract). The module owns every step; this route only starts it, detached.
+import { completeAfterRepoApproval } from "../modules/webdev/provision-completion.service";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -560,6 +563,10 @@ export class AutomationApprovalsController {
         viaApproval: id,
         fullName: githubResult.fullName,
       });
+      // M6-P4c: if a provisioned site filed this request, finish §08 for it. DETACHED and never throwing:
+      // the decision and the repo stand whatever WebDesk does, and the next reconcile resumes anything
+      // left unfinished (GitHub's eventual consistency, WebDesk's async codegen).
+      void completeAfterRepoApproval(tenantId, id, req.principal);
     }
 
     // ── WSK-66: an APPROVED WebDesk command executes IN-BAND, exactly once ───────────────────────

@@ -52,11 +52,13 @@ function toBundleMeta(raw: unknown): ContractBundleMeta | null {
     return null;
   }
   const sdkPhpUrl = isNonEmptyString(art.sdkPhpUrl) ? art.sdkPhpUrl : null; // null until P6 (D-10)
+  // M6-P4b0 — additive: an older WebDesk (or an older pointer) has no such key, which is `null`, never a failure.
+  const blockLibraryUrl = isNonEmptyString(art.blockLibraryUrl) ? art.blockLibraryUrl : null;
   return {
     version: r.version,
     vocabularyVersion: r.vocabularyVersion,
     blockLibrary: { package: bl.package, version: bl.version, range: bl.range },
-    artifacts: { sdkTsUrl: art.sdkTsUrl, sdkPhpUrl, openapiUrl: art.openapiUrl, contractMdUrl: art.contractMdUrl },
+    artifacts: { sdkTsUrl: art.sdkTsUrl, sdkPhpUrl, openapiUrl: art.openapiUrl, contractMdUrl: art.contractMdUrl, blockLibraryUrl },
     contentHash: r.contentHash,
     generatedAt: r.generatedAt,
   };

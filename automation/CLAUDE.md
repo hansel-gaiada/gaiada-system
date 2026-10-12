@@ -40,7 +40,10 @@ MSYS_NO_PATHCONV=1 docker exec gaiada-automation-n8n-1 n8n import:workflow --inp
 - The console is exposed at `/n8n/` behind basic auth. `N8N_PATH` is only half-honoured; the
   prefix-stripping nginx vhost is what actually makes the path work (see `../infra/CLAUDE.md`).
 - Temporal is deliberately absent until a genuinely durable multi-step flow exists (spec §4).
-- `generators/gen-delivery.mjs` generates delivery workflow variants into `workflows/` —
-  regenerate rather than hand-editing the generated output.
+- `generators/gen-delivery.mjs` is **stale; do not run it**. It last matched `pipeline-delivery.json`
+  before `43a1555f`; that commit, `1eb17987` and M6-P4e (`3ebcfcd3`) edited the JSON directly, and
+  running the generator would silently drop all three. `workflows/pipeline-delivery.json` is the
+  source; edit it, and `platform-nest/src/modules/webdev/automation-prd-kind.test.ts` executes its
+  code-stage nodes.
 - Workflow JSON is source. A change made in the n8n UI exists only in the container volume until
   it is exported back into `workflows/`.
