@@ -1400,6 +1400,24 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "search.property.attest" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # M5-V3-f: perm_resource_search_property_{read_visitors,view_replay} — visitor profiles and session replay
+    # (design 2026-10-12-m5-phase5-design.md §4.8). Sensitive. One derived role per key; no sibling bleed.
+    - name: perm_resource_search_property_read_visitors
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.read_visitors" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_property_view_replay
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.view_replay" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # SM-76: perm_resource_search_finding_* — the new resource_search_finding kind
     # (search_finding_states). triage = baseline; accept_risk = sensitive/elevated.
     - name: perm_resource_search_finding_triage
