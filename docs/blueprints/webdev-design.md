@@ -145,7 +145,9 @@ Platform = product, spine = process, console = cockpit — separate concerns, wi
 ### Non-goals (v1)
 
 - **No Figma dependency** (locked 4) — design artifacts are ours; the Figma launcher button stays
-  a launcher, nothing more.
+  a launcher, nothing more. **Amended 2026-10-13 (owner ruling DW-Q6):** Figma is now *connected*, not
+  depended on. Frames, comments and exports show on tasks and requests, and every delivered design is
+  exported into the Asset Library. The pipeline still never requires Figma.
 - **No auto-join meeting bot** (locked 2) — the frozen dispatcher webhook is the seam; provider
   choice deferred (OQ-1).
 - **No Temporal yet** — the delivery workflow remains the first real candidate (WS11 plan §3);
