@@ -14,7 +14,7 @@ import { check } from "../rbac/cerbos";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { getExecutable } from "./approval-executables";
-import { EXECUTING_STALE_MS, executeApprovedAutomationWrite, isExecutionWedged, toolArgsOf } from "./approval-execute";
+import { EXECUTING_STALE_MS, executeApprovedAutomationWrite, isExecutionWedged, runApproverCheck, toolArgsOf } from "./approval-execute";
 import { computeArgsSha256 } from "./hub-client";
 import { fileAutomationApproval } from "./approval-filing";
 // M5-G5b: a tool whose args are personal data (agency_privacy.*) declares how its args are reduced before they are
@@ -463,6 +463,31 @@ export class AutomationApprovalsController {
     const executable = decision === "approved" && (rowOrigin === "automation" || rowOrigin === "agent")
       ? getExecutable(rowToolName)
       : undefined;
+    // ── The APPROVER rule of an executable entry (2026-10-12, PV3 follow-up) ─────────────────────
+    // The executor re-drives as the FILER (approval-execute.ts invariant 1), so a route's own
+    // maker-checker check never sees who approved. An entry that needs to exclude an approver says so
+    // in `approverCheck` (invoicePayments.decide: not the payment's recorder), and it is enforced HERE,
+    // before the decide UPDATE, so a refusal leaves the row `pending` and nothing executes. The executor
+    // re-checks the stored `decided_by` as a second wall. Approve only: rejecting executes nothing.
+    // Runs after authorize(), so a caller who may not decide at all still gets the plain 403.
+    // A principal with no user id cannot be told apart from the excluded human, so it is refused.
+    if (executable?.approverCheck) {
+      const approverId = req.principal.userId;
+      const verdict = !approverId
+        ? { ok: false as const, reason: "approver_unknown" }
+        : await withTenants([tenantId], (c) =>
+          runApproverCheck(c, executable, toolArgsOf(existing.rows[0].tool_args), {
+            userId: approverId,
+            ...(req.principal.actFor?.userId ? { actForUserId: req.principal.actFor.userId } : {}),
+          }),
+        );
+      if (!verdict.ok) {
+        throw new ForbiddenException({
+          message: `${verdict.reason}: you may not approve this request`,
+          reason: verdict.reason,
+        });
+      }
+    }
     // VLT-3: an approved reveal ALSO starts at 'pending' — not because the D14 registry executes it
     // (it never will: `automationApprovalExecutorHandler` below filters to origin
     // automation|agent before it ever claims a row, so a `credential_reveal`-origin row sitting at

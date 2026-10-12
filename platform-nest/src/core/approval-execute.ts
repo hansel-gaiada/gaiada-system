@@ -68,7 +68,12 @@
 //     re-enter, which is the property that actually prevents double-execution.
 import type { PoolClient } from "pg";
 import { withGlobal, withTenants } from "../db";
-import { getExecutable, type ExecutableApprovalEntry } from "./approval-executables";
+import {
+  getExecutable,
+  type ApprovalApprover,
+  type ExecutableApprovalEntry,
+  type PreconditionVerdict,
+} from "./approval-executables";
 import {
   ApprovalGrantNotConfiguredError,
   callHubTool,
@@ -128,6 +133,10 @@ export const EXEC_ERROR = {
   /** The row was claimed but its tool is no longer in the executable registry (or the entry is
    *  incomplete). Fail closed — never fall back to "call it anyway". */
   notExecutable: "not_executable",
+  /** The entry's `approverCheck` refused the human who approved the row (e.g. the payment's own
+   *  recorder approved its confirmation). Re-checked at execution against the stored `decided_by`, so
+   *  a row approved by any path is held to the same rule. The hub is never called. */
+  approverRefused: "approver_refused",
 } as const;
 
 /** What one invocation did, for D14-07's endpoint and for tests. `skipped` means the claim was not
@@ -167,6 +176,24 @@ const CLAIM_RETURNING =
 async function applyPreconditionScopes(c: PoolClient, entry: ExecutableApprovalEntry): Promise<void> {
   if (!entry.preconditionModules?.length) return;
   await c.query("SELECT set_config('app.scopes', $1, true)", [entry.preconditionModules.join(",")]);
+}
+
+/**
+ * Run an entry's `approverCheck` (if it declares one) on `c`, with the entry's module scope in force.
+ * The ONE spelling both callers use: `AutomationApprovalsController.decide()` before it flips a row to
+ * `approved`, and the executor's claim transaction against the stored `decided_by`. An entry with no
+ * check answers ok. A throw propagates: the caller fails closed (decide answers 500 and decides nothing;
+ * the executor records `precondition_error`).
+ */
+export async function runApproverCheck(
+  c: PoolClient,
+  entry: ExecutableApprovalEntry,
+  args: Record<string, unknown>,
+  approver: ApprovalApprover,
+): Promise<PreconditionVerdict> {
+  if (!entry.approverCheck) return { ok: true };
+  await applyPreconditionScopes(c, entry);
+  return entry.approverCheck(c, args, approver);
 }
 
 /** `execution_status='executing'` + untouched for longer than the staleness threshold = wedged by a
@@ -264,6 +291,29 @@ export async function executeApprovedAutomationWrite(
       const error = `${EXEC_ERROR.preconditionFailed}: ${verdict.reason}`;
       await markFailedInTx(c, approvalId, row, error);
       return { kind: "failed" as const, row, error };
+    }
+
+    // The approver rule (`ExecutableApprovalEntry.approverCheck`), against the STORED decider. decide()
+    // already refused an ineligible approver before the row became `approved`; this is the second wall,
+    // for a row that got here any other way. No decider on record means the rule cannot be evaluated,
+    // so it refuses. Not re-run in the retry loop below: neither `decided_by` nor what it is compared
+    // with changes between attempts, and every D14-07 retry re-enters through this claim.
+    if (entry.approverCheck) {
+      let approverVerdict: PreconditionVerdict;
+      if (!row.decided_by) {
+        approverVerdict = { ok: false, reason: "approver_unknown" };
+      } else {
+        try {
+          approverVerdict = await runApproverCheck(c, entry, args, { userId: row.decided_by });
+        } catch (err) {
+          return { kind: "precondition_threw" as const, row, message: (err as Error)?.message ?? "unknown" };
+        }
+      }
+      if (!approverVerdict.ok) {
+        const error = `${EXEC_ERROR.approverRefused}: ${approverVerdict.reason}`;
+        await markFailedInTx(c, approvalId, row, error);
+        return { kind: "failed" as const, row, error };
+      }
     }
 
     // Invariant: retry policy is read at EXECUTION time, never cached at boot (constraint 10). Same
