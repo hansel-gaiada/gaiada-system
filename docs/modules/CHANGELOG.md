@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.106.0` - M5-V3-i: the Visitors tab, the "bot hits filtered" figure, and the visitor permission mirror (2026-10-13) - PROTOTYPED
+
+- **Website → Visitors** (a sixth tab):
+  - **List:** the 8-character id, last seen, visits, place, "Network" or "Company" with confidence, top interests, score, and a lead linked or none. It keeps server order, with filters and paging.
+  - **Detail:** score parts, interests, the timeline, and a linked lead. A restricted lead says "a lead you cannot open" and shows no id.
+  - **Interest-rules sub-page:** saves the complete set, and refusals show as sentences.
+  - The header line is the design's own sentence.
+  - Every non-ok pipeline state is a sentence, and stored rows stay visible beside it.
+- **The tab 404s and is hidden** (tab strip and command palette) without the toolkit or `read_visitors`, so plain search staff never see an empty list.
+- **Analytics** gains "bot hits filtered": the 30-day total, the window and the reasons; non-ok states are words.
+- **Permission mirror:** `lib/rbac.ts` / `rbac-capability-map.ts` mirror `search.property.read_visitors` and `search.property.view_replay` (V3-f) as `search.visitors.read` and `search.replay.view`.
+- **Tests:** vitest (6544 full, 841 after the merge), tsc and `next build` green locally.
+
 ### platform-nest `0.108.0` - M5-V3-g: the visitors API and MCP tools (2026-10-13) - PROTOTYPED
 
 - **`SearchVisitorsController`** under `…/properties/:propertyId/visitors`:
