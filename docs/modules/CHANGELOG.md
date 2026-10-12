@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.13.0` - M5-L1d: form definitions get a write path; blank optional form values are absent (2026-10-12) - DEV-VERIFIED
+
+- **The write path.** `forms.define` (`PUT /control/v1/tenants/:tenantSlug/sites/:siteId/forms/:formKey`) is MEDIUM / `webdesk:operate`, needs an Idempotency-Key and writes its audit row first. The audit holds identifiers and counts, never the notice text.
+  - It upserts by (site, key), and a redefinition keeps the form id.
+  - A 422 `form-definition-invalid` lists every issue at once.
+  - A changed notice text under the same consent version is refused with 409 `consent-version-unchanged`.
+  - Reads: `forms.def.list` and `forms.def.get`.
+  - Until now a form could only be created by raw SQL.
+- The form schema gains a `tel` field type (phone subject refs come from `tel`-typed fields).
+- **Behaviour change on the public submit:**
+  - An OPTIONAL field sent as `""` or whitespace is treated as absent. It is accepted and stored without the key, and no subject ref is derived from it.
+  - A REQUIRED text, textarea or tel field now refuses `""` (it used to accept it).
+- gaiada.com's contact, audit and onboard definitions live as data in `webdesk/sites/gaiada-com/forms/*.json`. They use the site's field ids, honeypot `_hp`, consent version `site-2026-10-11` and 90-day retention, and the notice text is a DRAFT for counsel. CI validates them with the same parser the command uses. **Nothing is applied to any tenant**: that waits for G2 and the Turnstile keys.
+- Verified on GitHub Actions 38201574048: forms-define.spec 16/16 (define → public submit → consent snapshot and typed refs), the gaiada definitions 15/15, blank optionals 6/6.
+
+### platform-nest `0.76.0` - M5-L1d: website form definitions from the ERP (2026-10-12) - DEV-VERIFIED
+
+- `PUT|PATCH / GET /api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/forms[/:formKey]`, opened by W1c's `authorizeSite`.
+  - The write also needs `webdesk_collection:apply_schema` on the site, before the body is read (the publisher tier, like composition changes). The reads need phase 1 only.
+- MCP tools `webdesk.forms.define` (medium), `webdesk.forms.list` and `webdesk.forms.get`.
+- A contract test checks the L4 lead mapping against the gaiada.com definitions.
+- Verified on GitHub Actions 38201574048: webdesk-forms-define 14/14 (denials with valid bodies and positive controls; a scoped writer reads but cannot define), contract 11/11.
+
 ### platform-nest `0.75.0` - M5-W1c: the writers' room two-phase gate on every content route (2026-10-12) - DEV-VERIFIED
 
 The transport that makes the W1a writers' room rules live (built by the M5 session). Until now those rules read `""` for `siteId` and `reviewState` and denied.
