@@ -122,5 +122,6 @@ step ops-check-cdn-bypass-selftest node "$WD/ops/scripts/check-cdn-bypass.mjs" -
 step ops-check-otlp-write-only-selftest node "$WD/ops/scripts/check-otlp-write-only.mjs" --selftest
 step ops-test-deploy-webdesk bash "$WD/ops/deploy/test-deploy-webdesk.sh"
 step ops-test-rootless bash "$WD/ops/host/rootless/test-rootless.sh"   # M4 F6: pure parts, no root/docker
+step ops-test-rootless-guard-selftest bash "$WD/ops/host/rootless/test-rootless-guard.sh" --selftest   # M4 F6 A2 harness: syntax + pure helpers, no root/docker
 
 [ "$FAILS" -eq 0 ]
