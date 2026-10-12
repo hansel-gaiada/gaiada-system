@@ -11,6 +11,24 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### insights-collector `0.3.0` + infra `0.13.13` - M5-V6-a: the session replay channel (OFF; not deployed) (2026-10-13) - PROTOTYPED
+
+- **`POST /lib/kestrel/r`** takes one rrweb chunk (base64 gzip, or a JSON array) for a consented visitor and consent id.
+  - It is a plain 404 unless `REPLAY_ENABLED` is exactly `1`.
+  - A tombstoned id gets 410.
+- **Input is refused:** any typed input, including a masked value, makes the WHOLE chunk a 422, and nothing is stored.
+- **Size limits:** a decompression bomb is refused (256 KB compressed, 4 MB inflated). Caps per site per day, per visitor per day and a storage budget answer `{record:false}`.
+- **A leaked recording id cannot be appended to** from another visitor or website (403).
+- **Retention:** recordings go after 30 days at most (`REPLAY_RETENTION_DAYS` is 1–30). `forget` and `/f` remove them too.
+- **Ops** (read key only):
+  - `GET /ops/v1/replay/sessions` returns metadata;
+  - `GET /ops/v1/replay/chunks` returns content. Per O7, the ERP's MCP tool may call only the sessions route.
+- **Migration `0003_replay`** adds `replay_sessions` and `replay_chunks`, with no IP or UA column. `backup.sh` already excludes both, and a static test checks the names.
+- **Sumopod compose:** the five `REPLAY_*` variables are listed under `environment:` (empty = default).
+- The edge `/lib/kestrel/r` location stays off.
+- `go test -race` is green locally. The Postgres replay test runs in CI.
+- **For the site (V6-d):** chunks are sent as base64 gzip strings, and input elements must be blocked in rrweb, or chunks carrying them are refused.
+
 ### platform-nest `0.106.0` - M5-V5-c: the experiments service (A/B tests on blocks), ERP side (2026-10-13) - PROTOTYPED
 
 - **Migration `202610131800_search_experiments`** adds `search_experiments` (the pre-registration and lifecycle) and the append-only `search_experiment_results`. Both are FORCE RLS in the `search` scope.
