@@ -29,13 +29,14 @@ refresh() {
   [ -n "$FOUND" ] || { echo "geo-refresh FAILED ($ED): no DB-IP Lite file for this or last month" >&2; return 1; }
 
   gzip -t "$WORK/$ED.gz" || { echo "geo-refresh FAILED ($ED): gzip -t rejected the download" >&2; return 1; }
-  gunzip -c "$WORK/$ED.gz" > "$WORK/$ED.mmdb"
+  # Explicit `|| return 1` throughout: this function runs inside an `&&`/`||` list below, where `set -e` is OFF.
+  gunzip -c "$WORK/$ED.gz" > "$WORK/$ED.mmdb" || { echo "geo-refresh FAILED ($ED): gunzip failed" >&2; return 1; }
   SIZE="$(wc -c < "$WORK/$ED.mmdb" | tr -d ' ')"
   [ "$SIZE" -gt "$MIN" ] || { echo "geo-refresh FAILED ($ED): $SIZE bytes is too small to be a $ED database" >&2; return 1; }
   grep -qa "binary_format_major_version" "$WORK/$ED.mmdb" || { echo "geo-refresh FAILED ($ED): no MMDB metadata marker" >&2; return 1; }
 
-  chmod 644 "$WORK/$ED.mmdb"
-  mv "$WORK/$ED.mmdb" "$GEO_DIR/dbip-$ED-lite.mmdb"
+  chmod 644 "$WORK/$ED.mmdb" || { echo "geo-refresh FAILED ($ED): chmod failed" >&2; return 1; }
+  mv "$WORK/$ED.mmdb" "$GEO_DIR/dbip-$ED-lite.mmdb" || { echo "geo-refresh FAILED ($ED): rename into place failed" >&2; return 1; }
   if [ "$ED" = city ]; then echo "$FOUND" > "$GEO_DIR/VERSION"; else echo "$FOUND" > "$GEO_DIR/VERSION-asn"; fi
   echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') geo-refresh ok edition=$ED month=$FOUND bytes=$SIZE"
 }
