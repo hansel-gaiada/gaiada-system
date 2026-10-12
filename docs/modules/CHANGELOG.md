@@ -11,6 +11,14 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.73.0` - M5-P1-g: a lead convert is race-safe on its contact, and convert puts no name on the bus (2026-10-12) - DEV-VERIFIED
+
+Two defects found by the M5-P1-f end-to-end QA (built by the M5 session).
+
+- **Contact race.** Convert find-or-creates the contact's `users` row before it takes the lead lock, and `users.email` is UNIQUE. Concurrent converts of a lead whose contact had no row could 500 on the unique index instead of the clean 409. Now `INSERT … ON CONFLICT (email) DO NOTHING` plus a re-select, so every racer reaches the lock. An email held by a deactivated account is now a typed 400 instead of an untyped 500. This was also the real cause of the old convert-race test flake.
+- **No personal data on the bus.** Convert's `pipeline.run.created` payload is now exactly `{sourceMeetingId, actorId}`. It used to carry `title = org_name`, which is the person's full name for /contact/ and /audit/ web leads. The work-activity consumer now looks the run title up from `pipeline_runs`. n8n's `pipeline-fanout` never read the payload. The knowledge-graph bridge labels such a run by its id.
+- Verified on GitHub Actions 38198059657 (main + P1-g): pipeline e2e 26/26 with both defects asserted fixed, convert race 8/8, convert unit 34/34, work-activity consumer 19/19, all shards green.
+
 ### platform-nest `0.72.0` - M5 wave 3: data-subject rights and retention for website leads, the web-leads read, a staff alert, writers' room grants (2026-10-12) - DEV-VERIFIED
 
 WebDesk M5 wave 3, built by the M5 session (main `2e032678`).
