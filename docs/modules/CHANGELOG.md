@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.24.1` - ClamAV runs on the live box, so media uploads work in production (2026-10-12) - DEV-VERIFIED
+
+WSK-D80 (owner-approved 2026-10-12).
+
+- The aicenter overlay had left `clamav` out as "additive", but the public upload route fails closed without it: every live upload answered 503 `upload-scan-unavailable`, so the media library could take no upload in production.
+- `docker-compose.aicenter.yml` now runs `clamav`: digest-pinned, no published port, `cpus 0.20`, `mem_limit 1536m`, `pids_limit 256` inside the rootless slice (WSK-D72), capabilities dropped except what `/init` needs, signatures in the `clamav-db` volume. `ops/clamav/clamd.conf` is the image's default plus `ConcurrentDatabaseReload no`.
+- **Live (gda-aicenter, 2026-10-12):** started with `up -d --no-deps clamav`; clamd answered PONG from the api container after ~195 s at 964 MiB. A 1200x630 PNG upload to the gaiada library then answered 201, and the WSK-43d proof served it from cms-proof.gaiada.com's own `/_media/`. `deploy-webdesk` recreates only `api`, so ClamAV is started or updated by hand.
+- GitHub Actions run 38268989322 green.
+
 ### platform-nest `0.99.0` - M5-V5-b: the A/B test statistics engine (pure; no estimate before the horizon) (2026-10-12) - DEV-VERIFIED
 
 - `search/experiment-stats.ts` is pure: no I/O, clock or randomness.
