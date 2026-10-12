@@ -4528,8 +4528,10 @@ this, decide that); `needsUs` is its mirror and **nothing in the ERP rendered it
 is exactly how a client-recorded payment sat `pending` with no screen ever saying someone had to
 confirm it. Both lists answer one question: who is holding the ball. `needsUs` sources: a `pending`
 `invoice_payments` row · a `changes_requested` post review · a `new` change request · a `draft`
-contract never sent. Items carry `{kind,id,label,context,href,since}`; `since` is rendered as an AGE,
-and our side marks anything ≥7 days stale (one finance cycle).
+contract never sent. Items carry `{kind,id,label,context,href,since,clientVisible}`; `since` is rendered as an AGE,
+and our side marks anything ≥7 days stale (one finance cycle). `clientVisible` is §22d's flag (PV3-07). The
+`payment` and `contract` items (both lists) link to `/clients/:id/billing` (PV3-08's page); they used to
+point at `/invoices/:id` and the nonexistent `/clients/:id/commercial`.
 
 `money` mirrors `portal-workspace.controller.ts:finance` — **per currency, never summed across them** —
 with one deliberate difference: `draft` invoices are included as their own `drafted` figure. The portal
@@ -4558,6 +4560,44 @@ both reads apply the same server-side predicate, so a row there means the two fi
 Surfaced rather than dropped, because a dropped row is invisible. Demo fixtures mirror the facet
 (including `internal`) for the same reason: a fixture that ignored `?clientId=` would make every
 client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
+
+### 22d. `clientVisible` on staff payloads (PV3-07, 2026-10-12) — **STATUS: PROTOTYPED**
+
+Every row of the staff readers below carries `clientVisible: boolean`. It means exactly one thing:
+**a client-wide contact of the row's client can read this row in the client portal.** The backend
+computes it in SQL from the portal's own predicates (`core/portal-visibility.ts`, PV3-02), as
+`<client>.client_id IS NOT NULL AND <portal row-state builder>`, so the staff marker and the portal
+cannot drift (plan trap 9). Consumers render it ("Client sees this" / "Internal", PV3-09) and must
+**never derive it in the browser**. `client-visible-parity.db.test.ts` proves, per kind, that the staff
+ids marked `true` equal the ids the portal returns to a client-wide signer.
+
+⚠ **A project-scoped contact may see less.** Such a contact sees only rows of their own projects, plus
+the project-less contracts and change requests (a master agreement, a client-wide request); they do
+not see a project-less run. `clientVisible: true` therefore says "the client's people can see this",
+not "every contact of the client can". There is no per-contact flag.
+
+| Method | Path | `clientVisible` is | Builder (`portal-visibility.ts`) |
+|---|---|---|---|
+| GET | `/api/:t/projects` | client set, not deleted | `projectClientVisible` |
+| GET | `/api/:t/deliverables` | through the deliverable's **project**: the project has a client and is not deleted, and the deliverable is not deleted. `deliverables.client_id` is ignored (the portal reads deliverables by project). | `staffDeliverableClientVisible` |
+| GET | `/api/:t/contracts`, `/contracts/:id` | client set, not deleted, not `draft` | `contractClientVisible` |
+| GET | `/api/:t/invoices`, `/invoices/:id` | client set, not deleted, not `draft` (so `approved`, `sent`, `paid` and `void` all read `true`, as the portal shows them) | `invoiceClientVisible` |
+| GET | `/api/:t/invoice-payments` | through the **invoice** ("detail" context: the invoice's payment history, where pending and rejected claims show too): the invoice is client-visible and the payment is not deleted | `staffInvoicePaymentClientVisible` |
+| GET | `/api/:t/pipeline/runs` (and `include=gates`), `/pipeline/runs/:id` | run: client set, not deleted. Gate: through the run, and `actor_side = 'client'`. Stage (detail only): through the run, and not the `report` track. | `runClientVisible`, `staffGateClientVisible`, `staffRunStageClientVisible` |
+| GET | `/api/:t/webdev/change-requests` | client set, not deleted (a staff-logged request with no client reads `false`) | `changeRequestClientVisible` |
+| GET | `/api/:t/meetings/recordings` | always `false` (no portal read of meetings exists) | `NEVER_CLIENT_VISIBLE` (`meeting`) |
+| GET | `/api/:t/pm/tasks` | always `false` (the portal lists no tasks) | `NEVER_CLIENT_VISIBLE` (`task`) |
+| GET | `/api/:t/clients/:id/contacts` | listed in the portal People area: not revoked | `clientContactClientVisible` |
+| GET | `/api/:t/clients/:id/overview` → `needsUs[]`, `needsClient[]` | per item kind: `payment` through its invoice, `gate` through its run, `contract`, `request` and `review` on their own row (a post review is always visible to its client) | as above, plus `postReviewClientVisible` |
+
+Notes:
+- **No staff post-review list exists**, so post reviews carry the flag only through the overview items.
+- Notes (`comments`) and history (`activities`) are in `NEVER_CLIENT_VISIBLE` too; their staff readers are
+  not part of PV3-07, and PV3-09 styles the Internal area instead of marking rows.
+- The detail reads of projects, deliverables, meetings and tasks do not carry the flag (they were not in
+  PV3-07's scope); it is optional in the UI types for that reason and for older servers.
+- PV3-08's new `lib/contracts.ts` types should declare `clientVisible?: boolean` on the contract and
+  payment rows; this ticket added it to the existing types only.
 
 ---
 
