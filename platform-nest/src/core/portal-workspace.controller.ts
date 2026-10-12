@@ -22,7 +22,7 @@
 //   `p.client_id = ANY($clients) AND ($projects::uuid[] IS NULL OR p.id = ANY($projects))`
 // which is what makes an entity whose OWN client_id is nullable (deliverables) still correctly scoped:
 // ownership travels through the project, which always has a client.
-import { Controller, Get, NotFoundException, Param, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Controller, Get, NotFoundException, Param, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { withTenants } from "../db";
 import { authorize } from "./http";
@@ -35,11 +35,28 @@ import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "./project-stat
 import {
   PROJECT_SCOPE, contractInPortalScope, deliverableClientVisible, gateClientVisible, inCallerClients,
   invoiceInPortalScope, invoicePaymentClientVisible, milestoneClientVisible,
-  runClientVisible, runInPortalScope,
+  meetingMinutesInPortalScope, runClientVisible, runInPortalScope,
 } from "./portal-visibility";
+import { isUuid } from "./conversation-core";
 
 /** Scope params for queries that bind the caller's scope as $1 (clients) / $2 (projects). */
 const S12 = { clients: 1, projects: 2 } as const;
+
+/** The ONLY columns a client reads of a meeting (PV4-05): the title, when it happened, the minutes a staff member chose to
+ *  share, when, and by whom. Everything else about a meeting stays internal and is deliberately absent from this list, so
+ *  adding a column to the table can never widen the payload: `transcript`, `transcript_ref`, `audio_ref`, `local_hint`,
+ *  `drive_*`, the participants and the pipeline run. `portal-meeting-minutes.test.ts` pins this exact key set.
+ *  `$1`/`$2` are the caller's clients / projects; the sharer is named by `users.name` only (never an email or an id). */
+const MEETING_MINUTES_SELECT = `
+  SELECT mm.id,
+         COALESCE(m.title, 'Meeting') AS title,
+         COALESCE(m.started_at, m.scheduled_at, m.created_at) AS "meetingDate",
+         mm.body_md AS "bodyMd",
+         mm.shared_at AS "sharedAt",
+         u.name AS "sharedBy"
+    FROM meeting_minutes mm
+    JOIN meeting_recordings m ON m.id = mm.meeting_recording_id AND m.tenant_id = mm.tenant_id
+    LEFT JOIN users u ON u.id = mm.shared_by`;
 
 /** Progress for one project, 0-100.
  *
@@ -521,6 +538,54 @@ export class PortalWorkspaceController {
         byTarget.set(f.target_entity_id, list);
       }
       return rows.rows.map((r: Record<string, unknown>) => ({ ...r, files: byTarget.get(r.id as string) ?? [] }));
+    });
+  }
+
+  /** PV4-05: the minutes a staff member has SHARED with this client, newest first. `?projectId=` narrows to one project's
+   *  meetings. A draft never appears (`meetingMinutesInPortalScope` requires `status = 'shared'`), and the minutes of a
+   *  meeting with no project reach a client-wide contact only (PV4-Q1's default). Payload: MEETING_MINUTES_SELECT. */
+  @Get(":tenantId/portal/meetings")
+  async meetingMinutes(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("projectId") projectId?: string,
+  ) {
+    await authorize(req.principal, { kind: "portal", tenantId }, "read");
+    if (projectId !== undefined && projectId !== "" && !isUuid(projectId)) throw new BadRequestException("projectId must be a uuid");
+    return withTenants([tenantId], async (c) => {
+      const scope = await resolvePortalScope(c, req.principal);
+      const rows = await c.query(
+        `${MEETING_MINUTES_SELECT}
+          WHERE ${meetingMinutesInPortalScope("mm", "m", S12)}
+            AND ($3::uuid IS NULL OR m.project_id = $3::uuid)
+          ORDER BY mm.shared_at DESC, mm.id DESC LIMIT 200`,
+        [scope.clientIds, scope.projectIds, projectId || null],
+      );
+      return rows.rows;
+    });
+  }
+
+  /** PV4-05: one set of shared minutes. 404 for a draft, for another client's, for a project the contact is not scoped to,
+   *  for a project-less meeting when the contact is project-scoped, and for an id that does not exist: the same answer for
+   *  all of them, so the route is not an existence oracle. */
+  @Get(":tenantId/portal/meetings/:minutesId")
+  async meetingMinutesDetail(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("minutesId") minutesId: string,
+  ) {
+    await authorize(req.principal, { kind: "portal", tenantId }, "read");
+    // Not a uuid is not an id of ours: 404, never a cast error that would tell a probe it reached the database.
+    if (!isUuid(minutesId)) throw new NotFoundException("minutes not found");
+    return withTenants([tenantId], async (c) => {
+      const scope = await resolvePortalScope(c, req.principal);
+      const rows = await c.query(
+        `${MEETING_MINUTES_SELECT}
+          WHERE mm.id = $3::uuid AND ${meetingMinutesInPortalScope("mm", "m", S12)}`,
+        [scope.clientIds, scope.projectIds, minutesId],
+      );
+      if (!rows.rows[0]) throw new NotFoundException("minutes not found");
+      return rows.rows[0];
     });
   }
 }

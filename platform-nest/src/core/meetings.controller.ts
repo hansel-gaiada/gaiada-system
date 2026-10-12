@@ -10,18 +10,24 @@
 // Backbone rule holds: n8n orchestrates, this service holds the durable state + the outbound proxy.
 // Auth mirrors deliverable (any staff member registers "their" recording); read is member-level so the
 // whole team can reference recordings. Every state change emits a `meeting.recording.*` event.
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
+import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
-import { staffNeverClientVisible } from "./portal-visibility";
+import { staffMeetingMinutesClientVisible, staffNeverClientVisible } from "./portal-visibility";
+import { resolveClientRecipients, notifyBestEffort } from "./client-notify";
+import { isUuid } from "./conversation-core";
 import { storage } from "./storage";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
 const KINDS = new Set(["audio", "video"]);
+/** PV4-05: the longest minutes body accepted. Markdown text typed or pasted by staff or drafted by an agent; a meeting's
+ *  minutes are a page or two, so this is a ceiling against abuse rather than a target. */
+const MAX_MINUTES_CHARS = 100_000;
 // W0 (2026-08-03 engagement-setup spec, migration 0072): 'scheduled' is the pre-recording state —
 // a meeting row that exists before anyone presses record, per D-3. Widened here to match the DB
 // CHECK constraint (0072 §4); leaving this set behind the DB would make every scheduled row
@@ -654,6 +660,148 @@ export class MeetingRecordingsController {
     });
     if (!result) throw new NotFoundException("recording not found");
     return { id, userId, removed: result.removed };
+  }
+
+  // ── PV4-05: MINUTES, the only part of a meeting a client ever reads ─────────────────────────────────────────────
+  // The recording, transcript, participants and pipeline run stay internal (`meeting` is in NEVER_CLIENT_VISIBLE and no portal
+  // read names them). Minutes are a separate object (`meeting_minutes`, PV4-01), one per meeting, that staff write as a DRAFT and
+  // then deliberately SHARE with the meeting's client. Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-05).
+  //   GET  :t/meetings/:id/minutes        read the minutes + their sharing state     (`read`)
+  //   PUT  :t/meetings/:id/minutes        save the draft                             (`update`; an agent MAY draft)
+  //   POST :t/meetings/:id/minutes/share  publish to the client, once, no undo       (`share_minutes`; NEVER an agent, PV-D23)
+  // The client and project come from the MEETING, never from a column on the minutes (design decision 8).
+
+  /** The minutes' staff view: the meeting's client/project, and the minutes row (null while none was ever saved). */
+  private async minutesView(c: PoolClient, meetingId: string) {
+    const r = await c.query<Record<string, unknown>>(
+      `SELECT m.id AS "meetingId", m.client_id AS "clientId", m.project_id AS "projectId", m.title,
+              mm.id AS "minutesId", mm.body_md AS "bodyMd", mm.status, mm.drafted_by AS "draftedBy", mm.updated_by AS "updatedBy",
+              mm.created_at AS "createdAt", mm.updated_at AS "updatedAt", mm.shared_at AS "sharedAt", mm.shared_by AS "sharedBy",
+              su.name AS "sharedByName",
+              -- PV4-05: composed from portal-visibility.ts, never retyped (plan trap 9), so this marker and the portal agree.
+              COALESCE(${staffMeetingMinutesClientVisible("mm", "m")}, false) AS "clientVisible"
+         FROM meeting_recordings m
+         LEFT JOIN meeting_minutes mm ON mm.meeting_recording_id = m.id AND mm.tenant_id = m.tenant_id
+         LEFT JOIN users su ON su.id = mm.shared_by
+        WHERE m.id = $1 AND m.deleted_at IS NULL`,
+      [meetingId],
+    );
+    const row = r.rows[0];
+    if (!row) return null;
+    const { minutesId, bodyMd, status, draftedBy, updatedBy, createdAt, updatedAt, sharedAt, sharedBy, sharedByName, clientVisible, ...meeting } = row;
+    return {
+      ...meeting,
+      // A draft with text, on a meeting that has a client, is shareable. State only: the Cerbos action decides WHO.
+      shareable: minutesId !== null && status === "draft" && meeting.clientId !== null && typeof bodyMd === "string" && bodyMd.trim() !== "",
+      minutes: minutesId === null
+        ? null
+        : { id: minutesId, bodyMd, status, draftedBy, updatedBy, createdAt, updatedAt, sharedAt, sharedBy, sharedByName, clientVisible },
+    };
+  }
+
+  @Get(":tenantId/meetings/:id/minutes")
+  async getMinutes(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "meeting_recording", id, tenantId }, "read");
+    if (!isUuid(id)) throw new NotFoundException("recording not found");
+    const view = await withTenants([tenantId], (c) => this.minutesView(c, id));
+    if (!view) throw new NotFoundException("recording not found");
+    return view;
+  }
+
+  /** Save the draft. Saving NEVER shares and never un-shares: the status stays `draft`, and once shared the minutes are frozen
+   *  (a 409 here): a client may already have read them, so changing them after the fact is a conversation, not a save.
+   *  `drafted_by` is set ONLY when the caller is an agent (`bot` / `automation`), and is kept when a person later edits the
+   *  text; `updated_by` is always the caller. */
+  @Put(":tenantId/meetings/:id/minutes")
+  async saveMinutes(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: { bodyMd?: unknown },
+  ) {
+    // Authorization runs before validation, so a denial test tests authorization.
+    await authorize(req.principal, { kind: "meeting_recording", id, tenantId }, "update");
+    if (!isUuid(id)) throw new NotFoundException("recording not found");
+    const text = body?.bodyMd;
+    if (typeof text !== "string") throw new BadRequestException("bodyMd must be a string");
+    if (text.length > MAX_MINUTES_CHARS) throw new BadRequestException(`bodyMd must be at most ${MAX_MINUTES_CHARS} characters`);
+    const userId = req.principal.userId as string;
+    const agent = req.principal.kind === "bot" || req.principal.kind === "automation";
+    const view = await withTenants([tenantId], async (c) => {
+      const rec = await c.query(`SELECT id FROM meeting_recordings WHERE id = $1 AND deleted_at IS NULL`, [id]);
+      if (!rec.rowCount) return null;
+      const saved = await c.query<{ id: string }>(
+        `INSERT INTO meeting_minutes (id, tenant_id, meeting_recording_id, body_md, status, drafted_by, updated_by)
+         VALUES ($1, $2, $3, $4, 'draft', $5, $6)
+         ON CONFLICT (meeting_recording_id) DO UPDATE
+           SET body_md = EXCLUDED.body_md, updated_by = EXCLUDED.updated_by, updated_at = now(),
+               drafted_by = COALESCE(EXCLUDED.drafted_by, meeting_minutes.drafted_by)
+           WHERE meeting_minutes.status = 'draft'
+         RETURNING id`,
+        [newId(), tenantId, id, text, agent ? userId : null, userId],
+      );
+      // The conflict arm is guarded `status = 'draft'`: no row back means the minutes already exist and are shared.
+      if (!saved.rowCount) throw new ConflictException("these minutes are already shared with the client and can no longer be edited");
+      // The body is never put on the bus (the outbox carries ids and sizes, not content).
+      await emitEvent(c, tenantId, "meeting_minutes", saved.rows[0].id, "meeting.minutes.saved", { meetingId: id, chars: text.length, actorId: userId });
+      return this.minutesView(c, id);
+    });
+    if (!view) throw new NotFoundException("recording not found");
+    return view;
+  }
+
+  /** Share the minutes with the meeting's client, once. One UPDATE guarded `WHERE status = 'draft'` stamps `status`, `shared_at`
+   *  and `shared_by` together, so two concurrent shares cannot both win (the loser is a 409). There is no unshare route.
+   *  Refused with 409 when the meeting has no client (nobody to share with), when no minutes were saved or they are blank, and
+   *  when they are already shared. Emits `meeting.minutes.shared` (portal topic `projects`, narrowed to the client) and
+   *  notifies the client's contacts in scope, best-effort and after the commit. */
+  @Post(":tenantId/meetings/:id/minutes/share")
+  @HttpCode(200)
+  async shareMinutes(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "meeting_recording", id, tenantId }, "share_minutes");
+    if (!isUuid(id)) throw new NotFoundException("recording not found");
+    const userId = req.principal.userId as string;
+    const out = await withTenants([tenantId], async (c) => {
+      // FOR SHARE: the meeting's client cannot be re-linked between the check below and the share.
+      const rec = await c.query<{ client_id: string | null; project_id: string | null; title: string | null }>(
+        `SELECT client_id, project_id, title FROM meeting_recordings WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
+        [id],
+      );
+      const m = rec.rows[0];
+      if (!m) return null;
+      if (!m.client_id) throw new ConflictException("this meeting has no client, so there is nobody to share its minutes with");
+      const mm = await c.query<{ id: string; status: string; body_md: string }>(
+        `SELECT id, status, body_md FROM meeting_minutes WHERE meeting_recording_id = $1`, [id],
+      );
+      const row = mm.rows[0];
+      if (!row || row.body_md.trim() === "") throw new ConflictException("there are no minutes to share yet: save some text first");
+      if (row.status === "shared") throw new ConflictException("these minutes are already shared with the client");
+      const stamped = await c.query<{ id: string; shared_at: string }>(
+        `UPDATE meeting_minutes SET status = 'shared', shared_at = now(), shared_by = $2, updated_at = now()
+          WHERE id = $1 AND status = 'draft' AND btrim(body_md) <> ''
+        RETURNING id, shared_at`,
+        [row.id, userId],
+      );
+      // A concurrent share between the read and this UPDATE: the guard let exactly one through.
+      if (!stamped.rowCount) throw new ConflictException("these minutes are already shared with the client");
+      // `clientId` is what narrows the portal frame to this client's connections (portal-live.service.ts).
+      await emitEvent(c, tenantId, "meeting_minutes", row.id, "meeting.minutes.shared", {
+        clientId: m.client_id, projectId: m.project_id, meetingId: id, minutesId: row.id, actorId: userId,
+      });
+      // Same scope as the portal read: client-wide contacts, plus contacts of THIS project. A meeting with no project reaches
+      // client-wide contacts only, exactly as meetingMinutesInPortalScope does (kind "general": viewers included).
+      const recipients = await resolveClientRecipients(c, { clientId: m.client_id, projectId: m.project_id, kind: "general" });
+      return { minutesId: row.id, sharedAt: stamped.rows[0].shared_at, clientId: m.client_id, projectId: m.project_id, title: m.title, recipients };
+    });
+    if (!out) throw new NotFoundException("recording not found");
+    await writeActivity(tenantId, userId, "shared_minutes", "meeting_recording", id, { minutesId: out.minutesId });
+    // After the commit and best-effort: a notification failure never un-shares minutes that are already out.
+    await notifyBestEffort(tenantId, userId, out.recipients, "meeting.minutes.shared", {
+      title: `Meeting minutes shared: ${out.title ?? "Meeting"}`,
+      href: `/portal/meetings/${out.minutesId}`,
+      entityType: "meeting_minutes", entityId: out.minutesId, severity: "info",
+    });
+    return { id: out.minutesId, meetingId: id, status: "shared", sharedAt: out.sharedAt, sharedBy: userId, notified: out.recipients.length };
   }
 
   // ---- Registry reads ----

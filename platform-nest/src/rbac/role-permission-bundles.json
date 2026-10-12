@@ -15,12 +15,12 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1942,
+      "totalPairs": 1947,
       "perRole": {
-        "platform_admin": 430,
-        "company_admin": 393,
-        "manager": 190,
-        "member": 92,
+        "platform_admin": 431,
+        "company_admin": 394,
+        "manager": 191,
+        "member": 93,
         "viewer": 32,
         "org_unit_lead": 16,
         "client": 9,
@@ -44,7 +44,7 @@
         "finance_manager": 43,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 393
+        "owner": 394
       },
       "selfScopedPairs": 28
     }
@@ -144,6 +144,7 @@
       "core.meeting_recording.ingest",
       "core.meeting_recording.read",
       "core.meeting_recording.relink",
+      "core.meeting_recording.share_minutes",
       "core.meeting_recording.sync_drive",
       "core.meeting_recording.update",
       "core.member.read",
@@ -575,6 +576,7 @@
       "core.meeting_recording.ingest",
       "core.meeting_recording.read",
       "core.meeting_recording.relink",
+      "core.meeting_recording.share_minutes",
       "core.meeting_recording.sync_drive",
       "core.meeting_recording.update",
       "core.member.read",
@@ -944,6 +946,7 @@
       "core.meeting_recording.create",
       "core.meeting_recording.ingest",
       "core.meeting_recording.read",
+      "core.meeting_recording.share_minutes",
       "core.meeting_recording.sync_drive",
       "core.meeting_recording.update",
       "core.member.read",
@@ -1115,6 +1118,7 @@
       "core.meeting_recording.create",
       "core.meeting_recording.ingest",
       "core.meeting_recording.read",
+      "core.meeting_recording.share_minutes",
       "core.meeting_recording.sync_drive",
       "core.meeting_recording.update",
       "core.member.read",
@@ -1746,6 +1750,7 @@
       "core.meeting_recording.ingest",
       "core.meeting_recording.read",
       "core.meeting_recording.relink",
+      "core.meeting_recording.share_minutes",
       "core.meeting_recording.sync_drive",
       "core.meeting_recording.update",
       "core.member.read",

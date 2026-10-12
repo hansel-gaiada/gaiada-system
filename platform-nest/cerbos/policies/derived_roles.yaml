@@ -1867,6 +1867,14 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.meeting_recording.relink" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_meeting_recording_share_minutes
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.meeting_recording.share_minutes" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     - name: perm_meeting_recording_sync_drive
       parentRoles: ["user"]
       condition:
