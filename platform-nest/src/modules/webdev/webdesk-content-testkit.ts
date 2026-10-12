@@ -333,7 +333,7 @@ export class FakeZoneB {
       case "item.list": {
         const q = req.query ?? {};
         const rows = [...this.items.values()].filter(
-          (i) => i.siteId === p.siteId && i.collectionKey === p.key && !i.deletedAt && (!q.locale || i.locale === q.locale) && (!q.q || i.slug.includes(q.q)) && (!q.state || i.publishState === q.state),
+          (i) => i.siteId === p.siteId && i.collectionKey === p.key && !i.deletedAt && (!q.locale || i.locale === q.locale) && (!q.q || i.slug.includes(q.q)) && (!q.state || (q.state === "live" ? i.publishState === "published" && i.publishedVersion !== null : i.publishState === q.state)),
         );
         // M5-W5: `editorial` rides a row that has one, as WebDesk's item.list sends it.
         return ok({ items: rows.map((i) => ({ ...this.itemJson(i), ...(i.editorial ? { editorial: i.editorial } : {}) })), page: { cursor: null, hasMore: false, limit: Number(q.limit ?? 50) } });
