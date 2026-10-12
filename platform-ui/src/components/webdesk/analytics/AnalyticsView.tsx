@@ -56,6 +56,7 @@ export function AnalyticsView({ siteName, action, range, reads }: AnalyticsViewP
         How visitors use {siteName}, from Umami. Visitors who declined analytics are not counted. Any count under 5 shows as &quot;&lt;5&quot; so no small group can be picked out.
       </p>
       <p className="wa-note"><Link href={`${action}/ai-visibility`} data-testid="ai-visibility-link">AI visibility</Link>: which AI crawlers read this site, and whether AI answers mention it.</p>
+      <p className="wa-note"><Link href={`${action}/experiments`} data-testid="experiments-link">Experiments</Link>: tests that compare versions of a section, with results held back until each test is big enough.</p>
       <form method="get" action={action} className="wa-range" aria-label="Date range">
         <div className="lux-field"><label className="lux-field__label" htmlFor="wa-from">From</label>
           <input id="wa-from" name="from" type="date" className="lux-field__control" defaultValue={range.from} /></div>
