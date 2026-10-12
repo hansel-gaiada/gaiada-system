@@ -5,12 +5,16 @@ import {
   HEADER_LINE, LEAD_RESTRICTED_WORDS, PART_LABELS, fmtWhen, placeLabel, shortId, whoLabel,
   type ScoreParts, type VisitorDetail, type VisitorEvent,
 } from "@/lib/visitorsModel";
+import { RecordingsCard, type RecordingsSectionData } from "./RecordingsCard";
 import "../content/content.css";
 import "./visitors.css";
 
 const dataText = (d: VisitorEvent["data"]): string => (d ? Object.entries(d).map(([k, v]) => `${k}: ${String(v)}`).join(", ") : "");
 
-export function VisitorDetailView({ visitor: v, listHref }: { visitor: VisitorDetail; listHref: string }) {
+/** `recordings` is the Recordings card's data, and is only passed for a viewer who holds `search.replay.view` (V6-c): without it there is no card. */
+export function VisitorDetailView({
+  visitor: v, listHref, recordings, recordingsBase,
+}: { visitor: VisitorDetail; listHref: string; recordings?: RecordingsSectionData; recordingsBase?: string }) {
   const partKeys = Object.keys(PART_LABELS) as Array<keyof ScoreParts>;
   const shown = shortId(v.visitorId);
   return (
@@ -62,6 +66,8 @@ export function VisitorDetailView({ visitor: v, listHref }: { visitor: VisitorDe
           )}
         </Card>
       </div>
+
+      {recordings && recordingsBase ? <RecordingsCard section={recordings} playerBase={recordingsBase} /> : null}
 
       <Card title={`Timeline (${v.events.length}${v.eventsTruncated ? "+" : ""})`}>
         {v.events.length === 0 ? (

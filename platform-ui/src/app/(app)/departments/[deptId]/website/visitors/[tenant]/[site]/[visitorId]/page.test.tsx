@@ -6,9 +6,11 @@ import { render, screen } from "@testing-library/react";
 
 vi.mock("next/link", () => ({ default: ({ href, children, ...r }: { href: string; children: React.ReactNode }) => <a href={href} {...r}>{children}</a> }));
 vi.mock("@/lib/visitors", () => ({ resolveSiteProperty: vi.fn(), readDetail: vi.fn() }));
+vi.mock("@/lib/replays", () => ({ readRecordings: vi.fn() }));
 vi.mock("@/components/webdesk/content/serverCtx", () => ({ requireWebsiteCtx: vi.fn() }));
 
 import { readDetail, resolveSiteProperty } from "@/lib/visitors";
+import { readRecordings } from "@/lib/replays";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 import Page from "./page";
 
@@ -29,11 +31,15 @@ const detail = (lead: unknown, o: Record<string, unknown> = {}) => ({
 const ctxMock = vi.mocked(requireWebsiteCtx);
 const siteMock = vi.mocked(resolveSiteProperty);
 const detailMock = vi.mocked(readDetail);
+const recMock = vi.mocked(readRecordings);
+const R1 = "0194a3b2-bbbb-7000-8000-0000000000b1";
+const meOf = (role: string) => ({ userId: "u", name: "U", email: "u@x.com", title: null, assurance: "high", companies: [], roles: [{ role, scopeType: "company", scopeId: "co-1" }] });
+const asViewer = (role: string) => ctxMock.mockResolvedValue({ userId: "u", me: meOf(role), company: "co-1", deptId: "dept-1", visitorsBase: "/departments/dept-1/website/visitors" } as never);
 const mount = async () => render(await Page({ params: Promise.resolve({ deptId: "dept-1", tenant: "gaiada", site: "site-1", visitorId: V }) }));
 
 beforeEach(() => {
-  ctxMock.mockReset(); siteMock.mockReset(); detailMock.mockReset();
-  ctxMock.mockResolvedValue({ userId: "u", me: {}, company: "co-1", deptId: "dept-1", visitorsBase: "/departments/dept-1/website/visitors" } as never);
+  ctxMock.mockReset(); siteMock.mockReset(); detailMock.mockReset(); recMock.mockReset();
+  asViewer("search_staff"); // plain staff: no replay capability unless a test says otherwise
   siteMock.mockResolvedValue({ kind: "ok", siteName: "gaiada.com", property: { id: "p1", domain: "gaiada.com", umamiSiteId: "u" } });
 });
 
@@ -107,5 +113,65 @@ describe("Website -> Visitors -> site -> visitor", () => {
     detailMock.mockResolvedValue({ kind: "unavailable", code: "contract_drift", reason: "visitor.lead.state: unknown" });
     await mount();
     expect(screen.getByTestId("wd-contract-drift")).toBeTruthy();
+  });
+});
+
+describe("Recordings (V6-c)", () => {
+  const okList = (recordings: unknown[]) => ({ kind: "ok", list: { propertyId: "p1", visitorId: V, recordings } }) as never;
+  const rec = { recordingId: R1, startedAt: "2026-10-12T09:00:00.000Z", lastChunkAt: "2026-10-12T09:03:20.000Z", durationSeconds: 200, pages: ["https://gaiada.com/", "https://gaiada.com/contact/"], chunks: 20 };
+  const unreachable = "The recording store did not answer, so recordings cannot be read right now. Try again in a moment.";
+
+  it("a viewer without search.replay.view sees no Recordings section and NO read is made", async () => {
+    asViewer("search_staff");
+    detailMock.mockResolvedValue({ kind: "ok", visitor: detail({ state: "none" }) } as never);
+    const { container } = await mount();
+    expect(recMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("recordings")).toBeNull();
+    expect(screen.queryByTestId("recordings-unavailable")).toBeNull();
+    expect(container.textContent).not.toContain("Recordings");
+    expect(screen.getByTestId("visitor-detail")).toBeTruthy();
+  });
+
+  it("a holder of it sees each recording's date, length and pages, and a link to the player", async () => {
+    asViewer("search_manager");
+    detailMock.mockResolvedValue({ kind: "ok", visitor: detail({ state: "none" }) } as never);
+    recMock.mockResolvedValue(okList([rec]));
+    await mount();
+    expect(recMock).toHaveBeenCalledWith("u", "co-1", "p1", V);
+    const row = screen.getByTestId("recording-row");
+    expect(row.textContent).toContain("2026-10-12 09:00 UTC");
+    expect(row.textContent).toContain("3 min 20 s");
+    expect(row.textContent).toContain("https://gaiada.com/, https://gaiada.com/contact/");
+    // A plain link (a full page load), so the player's own Content-Security-Policy applies to its document.
+    const a = screen.getByTestId("recording-watch");
+    expect(a.getAttribute("href")).toBe(`/departments/dept-1/website/visitors/gaiada/site-1/${V}/recordings/${R1}`);
+    expect(a.tagName).toBe("A");
+  });
+
+  it("an empty list says the store answered and has none", async () => {
+    asViewer("search_manager");
+    detailMock.mockResolvedValue({ kind: "ok", visitor: detail({ state: "none" }) } as never);
+    recMock.mockResolvedValue(okList([]));
+    await mount();
+    expect(screen.getByTestId("recordings").textContent).toContain("No recordings are stored for this visitor");
+    expect(screen.queryByTestId("recordings-table")).toBeNull();
+  });
+
+  it("a failed read is words, not an empty table, and the rest of the visitor still shows", async () => {
+    asViewer("search_manager");
+    detailMock.mockResolvedValue({ kind: "ok", visitor: detail({ state: "none" }) } as never);
+    recMock.mockResolvedValue({ kind: "failed", failure: { kind: "unavailable", reason: "collector_unreachable", message: unreachable }, message: unreachable });
+    await mount();
+    expect(screen.getByTestId("recordings-unavailable").textContent).toContain("did not answer");
+    expect(screen.queryByTestId("recordings-table")).toBeNull();
+    expect(screen.getByTestId("visitor-detail")).toBeTruthy();
+  });
+
+  it("an off-contract answer is said as a defect", async () => {
+    asViewer("search_manager");
+    detailMock.mockResolvedValue({ kind: "ok", visitor: detail({ state: "none" }) } as never);
+    recMock.mockResolvedValue({ kind: "drift", message: "recordings[0].durationSeconds: expected a number" });
+    await mount();
+    expect(screen.getByTestId("recordings-unavailable").textContent).toMatch(/defect, not an empty list/);
   });
 });
