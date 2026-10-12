@@ -257,8 +257,12 @@ the new name.
   per table.
 - It then hooks OUTPUT, and only then writes `/run/webdesk-rootless-guard/<user>.active`.
 - `docker.service` refuses to start without that marker (`ExecStartPre=test -e`). A user unit cannot run a root
-  command, so the full check runs one level up: `user@940.service` has `ExecStartPre=` the guard's own `check 940`
-  **as root**. A flushed or drifted table therefore keeps the user manager, and so the daemon, from (re)starting
+  command, so the full check runs one level up: `user@940.service` has `ExecStartPre=+` the guard's own `check 940`.
+  The `+` makes it run **as root**. `user@.service` runs as `User=%i`, so without the `+` the check would die "root
+  only" and the user manager could never start (review N1).
+- The OTLP exception's address is an **allow-list** (`172.17.0.1`, docker0), not "an address this host has now".
+  docker0 exists only after the rootful dockerd creates it, so a live-interface test would race boot: `apply`
+  would render OTLP off, the pre-start `check` would render it on, and the hashes would differ (review N2). A flushed or drifted table therefore keeps the user manager, and so the daemon, from (re)starting
   unguarded. A daemon restart *inside* a running user manager is covered by the marker test only.
 - `user@940.service` `Wants=` the guard and is ordered `After=` it, so at boot the guard is in place first. A guard
   that fails leaves WebDesk **down**, never unguarded.

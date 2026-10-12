@@ -93,16 +93,13 @@ otlp_addr_class_ok() {
   return 0
 }
 
-# local_addrs: every IPv4 address configured on this host, one per line (tests replace this function).
-local_addrs() { ip -4 -o addr show 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }'; }
-
-# is_local_addr <ipv4>: the address belongs to THIS host. The OTLP exception rides a DNAT to the collector, so
-# its original destination must be an address the host owns (docker0), never an arbitrary one.
-is_local_addr() {
-  local a
-  a="$(local_addrs)" || return 1
-  grep -qxF -- "$1" <<<"$a"
-}
+# The OTLP exception's only allowed destination: docker0's address, where the ERP collector's write-only receiver
+# is published (WSK-D63 (2)). An allow-list, NOT "an address this host has right now": docker0 only exists once the
+# rootful dockerd has created it, so a live-interface test races boot (apply would render OTLP off, the user
+# manager's pre-start check a moment later OTLP on, the hashes would differ and WebDesk would stay down).
+# Changing it is a code change, reviewed, never an env-file edit.
+OTLP_ALLOWED_ADDRS="172.17.0.1"
+otlp_addr_allowed() { case " $OTLP_ALLOWED_ADDRS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # untrusted_reason <file>: prints why the switch file cannot be trusted (nothing if it can). A file or a
 # directory that anyone but TRUSTED_UID owns, or that anyone but the owner can write, lets a process in the
@@ -255,8 +252,8 @@ load_cfg() {
     if ! { otlp_port_ok "$OTLP_PORT" && otlp_addr_class_ok "$OTLP_ADDR" && is_uint "$OTLP_PPS"; }; then
       warn "malformed or forbidden OTLP settings in $of (port 1024-65535 and not 22; address not loopback/link-local): the OTLP exception stays OFF (default-deny holds)"
       OTLP_PORT=""
-    elif ! is_local_addr "$OTLP_ADDR"; then
-      warn "OTLP address $OTLP_ADDR in $of is not an address of this host: the OTLP exception stays OFF (default-deny holds)"
+    elif ! otlp_addr_allowed "$OTLP_ADDR"; then
+      warn "OTLP address $OTLP_ADDR in $of is not in the guard's allow-list ($OTLP_ALLOWED_ADDRS): the OTLP exception stays OFF (default-deny holds)"
       OTLP_PORT=""
     fi
   fi

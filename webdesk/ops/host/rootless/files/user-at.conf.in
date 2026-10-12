@@ -11,7 +11,9 @@ After=webdesk-rootless-guard@@USER@.service
 # guard's own `check` must pass (marker, current config, live chains undrifted, our jump first in OUTPUT). A flushed
 # or tampered table therefore blocks the daemon from coming up unguarded. (The daemon's own user unit can only test
 # the marker file: a user manager cannot run a root command.)
-ExecStartPre=/usr/local/sbin/webdesk-rootless-guard.sh check @USER@
+# The leading `+` is load-bearing: user@.service runs as User=%i, so without it this check would run as the daemon
+# user, die "root only", and the user manager could never start (review N1, 2026-10-12).
+ExecStartPre=+/usr/local/sbin/webdesk-rootless-guard.sh check @USER@
 # Only what WSK-D72 needs. systemd 252's default is Delegate=pids memory cpu (measured on gda-aicenter,
 # 2026-10-12); pinned so a changed default can never silently drop one. io and cpuset are NOT delegated: a
 # delegated controller is enabled in user.slice for EVERY user, and nothing here uses io weights or cpusets.

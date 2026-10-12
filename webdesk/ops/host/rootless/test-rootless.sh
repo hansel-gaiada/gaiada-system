@@ -10,6 +10,9 @@
 # and argument rules; and that every consumer script resolves WebDesk's daemon with the same POSIX function.
 # Each section runs in its own subshell (the scripts share helper names) and must print its END line.
 set -uo pipefail
+# The guard and the volume copy refuse group-writable files and dirs. A caller with umask 002 (sumopod's ubuntu user)
+# would make the fixtures group-writable and 6 checks fail for the wrong reason. Pin the umask root has on the box.
+umask 022
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WD_TREE="$(cd "$HERE/../../.." && pwd)" # the webdesk/ tree
@@ -89,9 +92,8 @@ section_guard() {
   . "$HERE/webdesk-rootless-guard.sh"
   set +e
   local got L A
-  # No root here: the test's own uid plays root for the switch-file ownership check, and the host's addresses are fixed.
+  # No root here: the test's own uid plays root for the switch-file ownership check.
   TRUSTED_UID="$(stat -c %u "$T")"
-  local_addrs() { printf '%s\n' 127.0.0.1 10.0.0.5 172.17.0.1; }
   # live args: tag uid first last ports resolvers otlp-addr otlp-port pps log
   L=(WDRL940 940 700000000 700065535 8380 169.254.169.254 172.17.0.1)
 
@@ -215,9 +217,16 @@ section_guard() {
     grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=80\nWEBDESK_OTLP_ADDR=169.254.169.254\n')"
   assert "link-local 169.254.1.1 is refused even with a high port" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=169.254.1.1\n')"
   assert "loopback 127.0.0.1 is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=127.0.0.1\n')"
-  assert "an address that is not local to this host (8.8.8.8) is refused" \
-    grep -q '^0 | .*not an address of this host' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=8.8.8.8\n')"
-  assert "a second local address (10.0.0.5) is accepted" grep -q '^2 | ' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=10.0.0.5\n')"
+  assert "an address outside the allow-list (8.8.8.8) is refused" \
+    grep -q "^0 | .*not in the guard's allow-list" <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=8.8.8.8\n')"
+  assert "another host-local address (10.0.0.5, a VPC address) is refused: only docker0 is allowed" \
+    grep -q "^0 | .*not in the guard's allow-list" <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=10.0.0.5\n')"
+  assert "an ERP bridge address (172.18.0.10, the collector's container) is refused" \
+    grep -q "^0 | .*not in the guard's allow-list" <<<"$(otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=172.18.0.10\n')"
+  # N2: the decision must not depend on live interfaces (docker0 can be missing at boot). With `ip` failing,
+  # the explicit docker0 address is still accepted.
+  same "the docker0 address is accepted even when no interface carries it (boot race, N2)" "2 | " \
+    "$(ip() { return 1; }; otlp_case 'WEBDESK_OTLP_PORT=4319\nWEBDESK_OTLP_ADDR=172.17.0.1\n')"
   assert "port 22 is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=22\n')"
   assert "port 80 (privileged) is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=80\n')"
   assert "port 1023 is refused" grep -q '^0 | .*stays OFF' <<<"$(otlp_case 'WEBDESK_OTLP_PORT=1023\n')"
@@ -442,7 +451,9 @@ section_install() {
   assert "user@940 drop-in: ordered after it" grep -qx 'After=webdesk-rootless-guard@webdesk-rootless.service' <<<"$R"
   assert "user@940 drop-in: delegates exactly cpu memory pids (WSK-D72), not io or cpuset" grep -qx 'Delegate=cpu memory pids' <<<"$R"
   refute "user@940 drop-in: no io / cpuset delegation anywhere" grep -Eq '^Delegate=.*(io|cpuset)' <<<"$R"
-  assert "user@940 drop-in: ExecStartPre runs the guard's check for this user (m5)"     grep -qx 'ExecStartPre=/usr/local/sbin/webdesk-rootless-guard.sh check webdesk-rootless' <<<"$R"
+  # N1: user@.service runs as User=%i, so only the `+` prefix makes the check run as root.
+  assert "user@940 drop-in: ExecStartPre=+ runs the guard's check AS ROOT for this user (m5, N1)" grep -qx 'ExecStartPre=+/usr/local/sbin/webdesk-rootless-guard.sh check webdesk-rootless' <<<"$R"
+  refute "user@940 drop-in: no ExecStartPre without the + (it would run as the user and die)" grep -Eq '^ExecStartPre=[^+]' <<<"$R"
   R="$(render_template "$F/slice.conf.in" USER=webdesk-rootless UID=940 CPU_QUOTA=100% MEMORY_MAX=5G TASKS_MAX=4096)"
   assert "slice envelope: CPUQuota=100% MemoryMax=5G TasksMax=4096 (WSK-D72: 1.0 vCPU)" \
     test "$(grep -E '^(CPUQuota|MemoryMax|TasksMax)=' <<<"$R" | tr '\n' ' ')" = "CPUQuota=100% MemoryMax=5G TasksMax=4096 "
@@ -873,7 +884,6 @@ section_roundtrip() {
   printf 'WEBDESK_OTLP_PORT=4319\n' >"$T/rt.guard.env"
   chmod 644 "$T/rt.guard.env"
   TRUSTED_UID="$(stat -c %u "$T")"
-  local_addrs() { printf '%s\n' 127.0.0.1 172.17.0.1; }
   render_template "$HERE/files/webdesk-rootless.conf.in" USER=webdesk-rootless ROLE=live UID=940 PORT=8380 \
     RESOLVERS=169.254.169.254 OTLP_ENV="$T/rt.guard.env" OPERATOR=Hansel OTLP_CREATED=0 >"$CONF_DIR/webdesk-rootless-webdesk-rootless"
   same "installer-rendered config + the live OTLP switch -> the designed v4 rule set" "$WANT_V4" \
