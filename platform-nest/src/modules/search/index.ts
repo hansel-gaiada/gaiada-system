@@ -171,6 +171,9 @@ export const searchModule: ModuleContract = {
     "202610131200_search_conversion_uploads.sql",
     // M5-P5b: search_ai_crawler_daily + search_ai_crawler_chunks (AI-crawler log aggregates). Registered AT WRITE TIME.
     "202610131500_search_ai_crawler_log.sql",
+    // M5-V3-d: consented visitor profiles (profiles, events, tombstones, interest rules, ingest state) + the agency_leads
+    // consent-link index. Registered AT WRITE TIME, same standing lesson.
+    "202610131600_search_visitor_profiles.sql",
   ],
   // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
   // module reconciliation, 14 declared keys):
