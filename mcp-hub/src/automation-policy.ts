@@ -46,8 +46,10 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // an approved re-drive land (see that policy's PRV-03 note). Do not widen this entry to cover any
   // other webdev tool without its own gate — same house rule deploy.* already established.
   // M6-P4a: webdev.contracts.get / webdev.contracts.artifact are the READ-ONLY (write:false) snapshot
-  // reads code.scaffold v2 needs; they are the only other webdev tools in this entry.
-  "wf:delivery": ["pipeline.getRun", "pipeline.artifacts.get", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "webdev.provisionSite", "webdev.contracts.get", "webdev.contracts.artifact", "notify", "approvals.request"],
+  // reads code.scaffold v2 needs.
+  // M6-P4e: webdev.provisionedSites.list / .get are the READ-ONLY (write:false) reads the code stage uses to
+  // wait for provisioning to complete; the only other webdev tools in this entry.
+  "wf:delivery": ["pipeline.getRun", "pipeline.artifacts.get", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "webdev.provisionSite", "webdev.contracts.get", "webdev.contracts.artifact", "webdev.provisionedSites.list", "webdev.provisionedSites.get", "notify", "approvals.request"],
   "wf:scope": ["pipeline.getRun", "pipeline.openGate", "notify"],
   // pm.createDoc / pm.createTask (WD-06, D-4): the report-track sink — a PM doc + review task
   // under the run's project, scoped to wf:report ONLY (invisible to wf:scope/wf:delivery/etc).

@@ -57,6 +57,10 @@ export interface FinishGoalPatch {
   toolCalls?: number;
   fanOut?: number;
   blackboard?: BlackboardEntry[] | null;
+  /** M5-G5c — set ONLY when the goal's own text named a person a sensitive tool then handled (see
+   *  `sensitive-tools.ts`): the goal row is rewritten with the identifiers scrubbed. Omitted for every
+   *  other goal, which leaves the stored text untouched. */
+  goal?: string;
 }
 
 /** List item — never carries the blackboard or step transcripts. */
@@ -409,7 +413,7 @@ export class PgGoalStore implements GoalStore {
       `UPDATE agent_goals SET
          status=$2, outcome=$3, error_kind=$4, approval_id=$5,
          model_calls=$6, tool_calls=$7, fan_out=$8,
-         blackboard=$9::jsonb, ended_at=now()
+         blackboard=$9::jsonb, ended_at=now(), goal=COALESCE($10, goal)
        WHERE id=$1`,
       [
         id,
@@ -421,6 +425,7 @@ export class PgGoalStore implements GoalStore {
         patch.toolCalls ?? 0,
         patch.fanOut ?? 0,
         patch.blackboard ? JSON.stringify(patch.blackboard) : null,
+        patch.goal ?? null,
       ],
     );
   }

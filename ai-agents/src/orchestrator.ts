@@ -21,6 +21,7 @@ import {
   type EmitStep,
 } from "./agent";
 import { isWriteCapable, runWriteAgent } from "./write-agent";
+import { scopeOrNew } from "./sensitive-tools";
 
 export interface OrchestratorDef {
   name: string;
@@ -217,6 +218,9 @@ export async function runOrchestrator(
   const notes: string[] = [];
   const seen = new Set<string>();
   const deps = budgetedDeps(rawDeps, def.goalBudget, blackboard);
+  // M5-G5c — the goal's sensitive-tool scope (sensitive-tools.ts): ambient when the runner opened one, else
+  // this orchestration's own. Inactive (identity) unless a policy tool's literals were registered.
+  const scope = scopeOrNew();
   let plannerSteps = 0;
   let subRuns = 0;
   let protocolRetries = 0;
@@ -226,7 +230,7 @@ export async function runOrchestrator(
     plannerSteps++;
     const plannerStart = Date.now();
     const raw = await deps.complete(plannerPrompt(def, goal, blackboard, notes));
-    await opts.emit?.({ kind: "model", detail: raw.slice(0, 200), durationMs: Date.now() - plannerStart });
+    await opts.emit?.({ kind: "model", detail: scope.scrub(raw).slice(0, 200), durationMs: Date.now() - plannerStart });
 
     const action = parsePlannerAction(raw);
     if (!action) {
@@ -236,7 +240,7 @@ export async function runOrchestrator(
     }
     protocolRetries = 0;
 
-    if (action.final !== undefined) return { outcome: action.final, blackboard };
+    if (action.final !== undefined) return { outcome: scope.scrub(action.final), blackboard: scope.scrubDeep(blackboard) };
 
     const { specialist: name, task } = action.assign!;
     const specialist = def.specialists[name!];
@@ -254,7 +258,7 @@ export async function runOrchestrator(
 
     const childRunId = opts.delegation?.newRunId?.() ?? randomUUID();
     const childEmit = opts.delegation?.emitFor?.(childRunId);
-    await opts.emit?.({ kind: "delegate", detail: `assign ${name}: ${task} -> run ${childRunId}` });
+    await opts.emit?.({ kind: "delegate", detail: `assign ${name}: ${scope.scrub(task!)} -> run ${childRunId}` });
     const subStartedAt = Date.now();
 
     try {
@@ -271,18 +275,18 @@ export async function runOrchestrator(
           throw new GoalSuspendedError(name!, res.filed ? res.filed.approvalId : null, blackboard);
         }
         const note = res.status === "forced_read_only" ? ` [read-only: ${res.reason}]` : "";
-        blackboard.push({ specialist: name!, task: task!, status: "ok", summary: res.run.outcome + note });
+        blackboard.push({ specialist: name!, task: scope.scrub(task!), status: "ok", summary: scope.scrub(res.run.outcome + note) });
         await opts.delegation?.onSpecialistRun?.({
-          runId: childRunId, parentRunId: runId, specialist: name!, task: task!,
-          status: "ok", outcome: res.run.outcome + note, steps: res.run.steps,
+          runId: childRunId, parentRunId: runId, specialist: name!, task: scope.scrub(task!),
+          status: "ok", outcome: scope.scrub(res.run.outcome + note), steps: scope.scrubDeep(res.run.steps),
           startedAt: subStartedAt, endedAt: Date.now(),
         });
       } else {
         const run = await runAgent(specialist, task!, envelope, deps, childEmit);
-        blackboard.push({ specialist: name!, task: task!, status: "ok", summary: run.outcome });
+        blackboard.push({ specialist: name!, task: scope.scrub(task!), status: "ok", summary: scope.scrub(run.outcome) });
         await opts.delegation?.onSpecialistRun?.({
-          runId: childRunId, parentRunId: runId, specialist: name!, task: task!,
-          status: "ok", outcome: run.outcome, steps: run.steps,
+          runId: childRunId, parentRunId: runId, specialist: name!, task: scope.scrub(task!),
+          status: "ok", outcome: scope.scrub(run.outcome), steps: scope.scrubDeep(run.steps),
           startedAt: subStartedAt, endedAt: Date.now(),
         });
       }
@@ -290,11 +294,11 @@ export async function runOrchestrator(
       // A suspension/budget exhaustion is a HUMAN decision — it suspends the whole goal (D14).
       if (err instanceof GoalSuspendedError || err instanceof ApprovalRequiredError || err instanceof GoalBudgetExhaustedError) throw err;
       // Everything else is data: the planner decides how to proceed with a failed subtask.
-      const message = (err as Error).message;
-      blackboard.push({ specialist: name!, task: task!, status: "failed", summary: message });
-      const steps = (err as { steps?: AgentStep[] })?.steps ?? [];
+      const message = scope.scrub((err as Error).message);
+      blackboard.push({ specialist: name!, task: scope.scrub(task!), status: "failed", summary: message });
+      const steps = scope.scrubDeep((err as { steps?: AgentStep[] })?.steps ?? []);
       await opts.delegation?.onSpecialistRun?.({
-        runId: childRunId, parentRunId: runId, specialist: name!, task: task!,
+        runId: childRunId, parentRunId: runId, specialist: name!, task: scope.scrub(task!),
         status: "failed", outcome: message, steps,
         startedAt: subStartedAt, endedAt: Date.now(),
       });

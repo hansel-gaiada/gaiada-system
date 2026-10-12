@@ -22,6 +22,10 @@ export interface BuildArtifactsInput {
   /** `null` = no prior generation exists (or the double-run gate's deliberate baseline mode) —
    *  see `versioning.mts`'s own doc comment for what that means for the resulting version. */
   previous: { version: string; snapshot: TenantContractSnapshot } | null;
+  /** M6-P4b0 — the real library ref when the image baked a tarball (generator/block-library.mts).
+   *  Omitted: the documented placeholder below, i.e. "no block library available". It is metadata
+   *  only and never enters the hash manifest, so it cannot move `contentHash`. */
+  blockLibrary?: BlockLibraryRef;
 }
 
 export interface BuiltArtifacts {
@@ -41,9 +45,10 @@ export interface BuiltArtifacts {
   versionReasons: string[];
 }
 
-/** design §06: `blockLibrary` names `@gaiada/webdesk-blocks`. WSK-16 (the block-renderer library)
- *  has not shipped — this is a documented placeholder, never presented as if a real published
- *  package exists. Flagged loudly in this ticket's report, not smuggled in as fact. */
+/** design §06: `blockLibrary` names `@gaiada/webdesk-blocks`. This placeholder is what a run records
+ *  when NO tarball is baked (dev, tests, an older image): the pointer then carries no
+ *  `artifactKeys.blockLibrary` either, which is the actual "unavailable" signal. With a baked tarball
+ *  (M6-P4b0) the real `{package, version, range}` is passed in as `input.blockLibrary`. */
 const PLACEHOLDER_BLOCK_LIBRARY: BlockLibraryRef = {
   package: "@gaiada/webdesk-blocks",
   version: "0.0.0-pending-wsk16",
@@ -100,7 +105,7 @@ export async function buildContractArtifacts(input: BuildArtifactsInput): Promis
     contentHash,
     contractVersion,
     vocabularyVersion: VOCABULARY_VERSION,
-    blockLibrary: PLACEHOLDER_BLOCK_LIBRARY,
+    blockLibrary: input.blockLibrary ?? PLACEHOLDER_BLOCK_LIBRARY,
     compositionSnapshot: toContractSnapshot(input.composition),
     versionReasons,
   };

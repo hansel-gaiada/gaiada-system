@@ -4,7 +4,7 @@
 //   GET  /api/:tenantId/modules/webdev/contracts[?slug=]  -> 200 [snapshot]
 //   GET  /api/:tenantId/modules/webdev/contracts/:snapshotId  -> 200 snapshot | 404   (M6-P4a)
 //   GET  /api/:tenantId/modules/webdev/contracts/:snapshotId/artifacts/:artifact
-//        (openapi|sdkTs|sdkPhp|contractMd)  -> 200 {…, base64} | 400 | 404 | 502   (M6-P4a)
+//        (openapi|sdkTs|sdkPhp|contractMd|blockLibrary)  -> 200 {…, base64} | 400 | 404 | 502   (M6-P4a)
 //
 // A SEPARATE controller from `WebdevController` and `ZoneBEventsController` (not an addition to
 // either) — `WebdevController` lives under `src/modules/webdev/`, which this ticket's hard
@@ -94,7 +94,7 @@ export class ContractSnapshotsController {
     return snap;
   }
 
-  /** M6-P4a — the bytes of ONE of a snapshot's four stored artifacts. The file id is resolved from
+  /** M6-P4a — the bytes of ONE of a snapshot's five stored artifacts. The file id is resolved from
    *  the snapshot's own pointer, never from the caller. Integrity-checked against the per-artifact
    *  sha256 recorded at mirror time. */
   @Get("contracts/:snapshotId/artifacts/:artifact")

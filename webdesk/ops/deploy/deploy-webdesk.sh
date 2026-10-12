@@ -12,6 +12,13 @@
 #   WEBDESK_TOOLS_IMAGE, WEBDESK_PROXY_HTTP_PORT, WEBDESK_PUBLIC_HOST, WEBDESK_HEALTH_TIMEOUT (120),
 #   WEBDESK_TICK_TIMEOUT (150; the content tick runs every 60 s by default, 15-300 allowed),
 #   WEBDESK_SUDO (default "sudo -n"; empty in the test harness).
+# M4 F6 (rootless, docs/plans/2026-10-12-webdesk-rootless-plan.md). Unset, all three behave exactly as before:
+#   WEBDESK_DOCKER_HOST  the daemon that runs WebDesk (unix:///run/user/<uid>/docker.sock). Unset: the host switch
+#                        /etc/default/webdesk-docker (written by the rootless cut-over), else the rootful daemon.
+#   WEBDESK_PROJECT      compose project (default webdesk). The rootless PROOF runs as another project, so a proof
+#                        command that reached the wrong daemon finds no such project and fails its plan.
+#   WEBDESK_HEALTH_VIA   nginx (default: the public vhost on 127.0.0.1:443) | direct (127.0.0.1:<proxy port>, for a
+#                        proof stack that no nginx vhost routes to).
 #
 # Secrets: /etc/webdesk/.env is only ever read through sudo, and only by (a) a filter that writes a 0600 temp
 # --env-file for the throwaway tools container, (b) compose --env-file, (c) set_env_var / remove_env_var, which
@@ -20,10 +27,12 @@ set -euo pipefail
 
 WD_DIR="${WEBDESK_DIR:-/home/Hansel/gaiada-webdesk/webdesk}"
 ENV_FILE="${WEBDESK_ENV_FILE:-/etc/webdesk/.env}"
-PROJECT=webdesk
-NET=webdesk_default
-API_CT="${WEBDESK_API_CONTAINER:-webdesk-api-1}"
-PG_CT="${WEBDESK_PG_CONTAINER:-webdesk-postgres-1}"
+PROJECT="${WEBDESK_PROJECT:-webdesk}"
+NET="${PROJECT}_default"
+API_CT="${WEBDESK_API_CONTAINER:-${PROJECT}-api-1}"
+PG_CT="${WEBDESK_PG_CONTAINER:-${PROJECT}-postgres-1}"
+HEALTH_VIA="${WEBDESK_HEALTH_VIA:-nginx}"
+WD_DOCKER_HOST=""
 TOOLS_IMAGE="${WEBDESK_TOOLS_IMAGE:-node:22-bookworm}"
 PROXY_PORT="${WEBDESK_PROXY_HTTP_PORT:-8380}"
 PUBLIC_HOST="${WEBDESK_PUBLIC_HOST:-api.erp.gaiada.com}"
@@ -56,6 +65,28 @@ PREV_MODE="" PREV_IMAGE_REF="" SWAPPED=0 UP_STARTED=0 SUCCESS=0 SINCE=""
 
 valid_tag() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$ ]]; }
 valid_digest() { [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]]; }
+valid_project() { [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]; }
+
+# M4 F6 (WSK-D73): the Docker daemon that runs WebDesk. Empty = the rootful daemon, exactly as before.
+# WEBDESK_DOCKER_HOST, when SET (even to ""), wins; else the host switch /etc/default/webdesk-docker, which
+# the rootless cut-over writes and its rollback deletes; else empty. Only a rootless socket path is accepted.
+# POSIX sh, and byte-identical in every script that resolves the daemon (test-rootless.sh compares them).
+wd_docker_host() {
+  _wdh_f="${WEBDESK_DOCKER_SWITCH:-/etc/default/webdesk-docker}"
+  if [ -n "${WEBDESK_DOCKER_HOST+set}" ]; then _wdh_v="$WEBDESK_DOCKER_HOST"
+  elif [ -r "$_wdh_f" ]; then _wdh_v="$(sed -n 's/^WEBDESK_DOCKER_HOST=//p' "$_wdh_f" | tail -n 1)"
+  else _wdh_v=""
+  fi
+  _wdh_v="${_wdh_v%\"}"; _wdh_v="${_wdh_v#\"}"
+  case "$_wdh_v" in
+    "") return 0 ;;
+    unix:///run/user/*/docker.sock)
+      _wdh_u="${_wdh_v#unix:///run/user/}"; _wdh_u="${_wdh_u%/docker.sock}"
+      case "$_wdh_u" in "" | 0* | *[!0-9]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$_wdh_v"
+}
 
 # With the containerd image store a pulled image's ID equals its manifest digest. Equal or refuse.
 image_matches_digest() { [ -n "$1" ] && [ "$1" = "$2" ]; }
@@ -142,9 +173,11 @@ compose() {
   shift 3
   local files=(-f docker-compose.yml -f docker-compose.aicenter.yml)
   local envs=()
+  # sudo resets the environment, so the rootless daemon is named explicitly (empty: the rootful one, as before).
+  [ -z "$WD_DOCKER_HOST" ] || envs+=("DOCKER_HOST=$WD_DOCKER_HOST")
   if [ "$rel" = 1 ]; then
     files+=(-f docker-compose.aicenter-release.yml)
-    envs=("WEBDESK_API_IMAGE=$img")
+    envs+=("WEBDESK_API_IMAGE=$img")
   fi
   (cd "$dir" && "${SUDO[@]}" env "${envs[@]}" docker compose --env-file "$ENV_FILE" -p "$PROJECT" "${files[@]}" "$@")
 }
@@ -196,6 +229,7 @@ prepare_stage() {
 
 plan_checks() {
   hdr "plan · $TAG · ${DIGEST:0:19}…"
+  say "  daemon: ${WD_DOCKER_HOST:-rootful (default)} · project: $PROJECT · health via: $HEALTH_VIA"
   valid_tag "$TAG" && ok "tag shape" || bad "tag '$TAG' is not a plain tag"
   valid_digest "$DIGEST" && ok "digest shape" || bad "digest is not sha256:<64 hex>"
   [ -n "$OWNER" ] || bad "GHCR_OWNER is not set"
@@ -349,9 +383,15 @@ chk_listening() { local l; l="$(api_logs)"; grep -q 'listening on :3000' <<<"$l"
 chk_jwks() { local l; l="$(api_logs)"; grep -q 'editorial JWKS loaded' <<<"$l"; }
 chk_healthz() { [ "$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PROXY_PORT}/healthz")" = 200 ]; }
 chk_problem401() {
-  local r
-  r="$(curl -s -m 10 -o /dev/null -w '%{http_code} %{content_type}' --resolve "${PUBLIC_HOST}:443:127.0.0.1" \
-    "https://${PUBLIC_HOST}/v1/t/wd-deploy-$(head -c6 /dev/urandom | od -An -tx1 | tr -d ' \n')/collections" || true)"
+  local r path
+  path="/v1/t/wd-deploy-$(head -c6 /dev/urandom | od -An -tx1 | tr -d ' \n')/collections"
+  if [ "$HEALTH_VIA" = direct ]; then
+    r="$(curl -s -m 10 -o /dev/null -w '%{http_code} %{content_type}' -H "Host: ${PUBLIC_HOST}" \
+      "http://127.0.0.1:${PROXY_PORT}${path}" || true)"
+  else
+    r="$(curl -s -m 10 -o /dev/null -w '%{http_code} %{content_type}' --resolve "${PUBLIC_HOST}:443:127.0.0.1" \
+      "https://${PUBLIC_HOST}${path}" || true)"
+  fi
   [[ "$r" == "401 application/problem+json"* ]]
 }
 chk_tick() {
@@ -360,7 +400,8 @@ chk_tick() {
   [[ "$line" =~ errors=0([^0-9]|$) ]]
 }
 chk_probe() {
-  PROBE_ONLY=1 WEBDESK_DIR="$WD_DIR" WEBDESK_ENV_FILE="$ENV_FILE" bash "$WD_DIR/ops/probes/containment-probe.sh" >"$WORK/probe.out" 2>&1 \
+  PROBE_ONLY=1 WEBDESK_DIR="$WD_DIR" WEBDESK_ENV_FILE="$ENV_FILE" WEBDESK_PROJECT="$PROJECT" WEBDESK_DOCKER_HOST="$WD_DOCKER_HOST" \
+    bash "$WD_DIR/ops/probes/containment-probe.sh" >"$WORK/probe.out" 2>&1 \
     || { tail -15 "$WORK/probe.out"; return 1; }
 }
 
@@ -371,7 +412,7 @@ health_check() {
   wait_until "api log: listening on :3000" chk_listening || true
   wait_until "api log: editorial JWKS loaded" chk_jwks || true
   wait_until "proxy GET /healthz -> 200" chk_healthz || true
-  wait_until "GET /v1/t/<random>/collections via nginx -> 401 application/problem+json" chk_problem401 || true
+  wait_until "GET /v1/t/<random>/collections via $HEALTH_VIA -> 401 application/problem+json" chk_problem401 || true
   DEADLINE=$((SECONDS + TICK_TIMEOUT))
   wait_until "next content tick logged errors=0" chk_tick || true
   if chk_probe; then ok "containment probe 1 (resolved-config port audit)"; else bad "containment probe 1 failed"; fi
@@ -512,6 +553,16 @@ main() {
     *) die "usage: $0 plan|apply <tag> <digest> <tree.tar> | rollback" ;;
   esac
   OWNER="$(printf '%s' "${GHCR_OWNER:-}" | tr '[:upper:]' '[:lower:]')"
+  valid_project "$PROJECT" || die "WEBDESK_PROJECT '$PROJECT' is not a compose project name"
+  case "$HEALTH_VIA" in nginx | direct) ;; *) die "WEBDESK_HEALTH_VIA must be nginx or direct" ;; esac
+  WD_DOCKER_HOST="$(wd_docker_host)" || die "WEBDESK_DOCKER_HOST (or /etc/default/webdesk-docker) must be unix:///run/user/<uid>/docker.sock"
+  if [ -n "$WD_DOCKER_HOST" ]; then
+    # Every plain `docker` call below now talks to the rootless daemon; compose gets it through sudo explicitly.
+    export DOCKER_HOST="$WD_DOCKER_HOST"
+    local so
+    so="$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)"
+    case "$so" in *name=rootless*) ;; *) die "$WD_DOCKER_HOST does not answer as a rootless Docker daemon" ;; esac
+  fi
   WORK="$(mktemp -d)"
   trap on_exit EXIT
   case "$MODE" in

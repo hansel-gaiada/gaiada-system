@@ -39,7 +39,7 @@ function providerFor(version: string, seed: string, lieAboutHash = false): Webde
     version, vocabularyVersion: "1.2.0",
     blockLibrary: { package: "@gaiada/webdesk-blocks", version: "1.3.2", range: "^1.3" },
     artifacts: {
-      sdkTsUrl: "fixture://sdk", sdkPhpUrl: null, openapiUrl: "fixture://openapi", contractMdUrl: "fixture://md",
+      sdkTsUrl: "fixture://sdk", sdkPhpUrl: null, openapiUrl: "fixture://openapi", contractMdUrl: "fixture://md", blockLibraryUrl: null,
     },
     contentHash: lieAboutHash ? "sha256:1111111111111111111111111111111111111111111111111111111111111" : contentHash,
     generatedAt: new Date().toISOString(),

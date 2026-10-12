@@ -19,6 +19,10 @@
 // itself is WSK-66's: executed at decide() by a DIFFERENT authorised user, the plaintext returned once in
 // that response and nowhere else.
 //
+// ── M6-P4c: `POST contract/regenerate` IS REAL ───────────────────────────────────────────────────────
+// WebDesk `contract.regenerate` (MEDIUM) for one of this company's tenants or all of them, through the same
+// channel and wall (`controlRegenerateContract`). Gate: `operate`, like the other MEDIUM control writes.
+//
 // ── EVERY ROUTE HERE (EXCEPT THE THREE ABOVE) IS AN HONEST STUB, AND THAT IS DELIBERATE ─────────────────────────────────────
 // WSK-23 (the ERP module egress client + BFF — mTLS + KC client-credentials + the §03 Layer-4 WS4
 // assertion into Zone B) has not landed (PROGRESS.md Part D, 2026-08-27: still ⬜ NOT DONE, and this
@@ -74,7 +78,7 @@ import { ModuleEnabledGuard } from "../module-enabled.guard";
 // control channel (the wall, typed errors and ledger rows live in the service). `POST sites/:siteId/keys` FILES a
 // key.mint approval (WSK-66 mints at decide()). Everything else stays 501.
 import { WebdeskProblemFilter } from "./webdesk-content.controller";
-import { controlApplySchema, controlListSites, controlProvisionSite, controlRequestKeyMint, idempotencyKeyOf } from "./webdesk-content.service";
+import { controlApplySchema, controlListSites, controlProvisionSite, controlRegenerateContract, controlRequestKeyMint, idempotencyKeyOf } from "./webdesk-content.service";
 
 /** The one honest answer every route below gives. A typed `error` token (this estate's error
  *  envelope, `http-error.filter.ts`), not prose alone, so a caller (the hub, a future console) can
@@ -146,6 +150,20 @@ export class WebdeskControlController {
     await authorize(req.principal, siteResource(tenantId), "operate");
     requireObjectBody(body);
     const r = await controlProvisionSite(req.principal, tenantId, body, idempotencyKeyOf(idem));
+    void reply.status(r.status).header("content-type", "application/json; charset=utf-8").send(r.body);
+  }
+
+  /** M6-P4c: WebDesk `contract.regenerate` for one of this company's tenants (`{slug}`) or all of them (`{}`).
+   *  MEDIUM like `schema.apply` (which triggers the same codegen runs): Cerbos `operate`, no WS4 for an attended
+   *  human; the MCP tool `webdesk.contract.regenerate` suspends an unattended caller (D14). An absent body is `{}`. */
+  @Post("contract/regenerate")
+  async regenerateContract(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: unknown,
+    @Headers("idempotency-key") idem: string | undefined, @Res() reply: FastifyReply,
+  ) {
+    await authorize(req.principal, siteResource(tenantId), "operate");
+    if (body !== undefined && body !== null) requireObjectBody(body);
+    const r = await controlRegenerateContract(req.principal, tenantId, body, idempotencyKeyOf(idem));
     void reply.status(r.status).header("content-type", "application/json; charset=utf-8").send(r.body);
   }
 

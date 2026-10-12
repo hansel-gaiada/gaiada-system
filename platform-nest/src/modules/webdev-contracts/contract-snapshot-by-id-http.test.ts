@@ -6,11 +6,11 @@
 //
 // What this file is trying to falsify:
 //   1. another tenant's snapshot id, an unknown id and a malformed id are all 404 (never the row);
-//   2. each of the four artifacts comes back as bytes whose sha256 equals the manifest recorded at
-//      mirror time;
-//   3. the artifact route can only name one of four stored artifacts (400 otherwise) — the file id is
+//   2. each of the five artifacts (M6-P4b0 added `blockLibrary`) comes back as bytes whose sha256 equals the
+//      hash recorded at mirror time, and the SDK files carry their real types (text/plain, text/x-php);
+//   3. the artifact route can only name one of five stored artifacts (400 otherwise) — the file id is
 //      resolved from the snapshot's own pointer, never from the caller;
-//   4. a null sdkPhp pointer is a 404 with the distinct reason `artifact_absent`;
+//   4. a null sdkPhp or blockLibrary pointer is a 404 with the distinct reason `artifact_absent`;
 //   5. `read` is enforced (plain member denied) and the hub's OBO path (verified n8n link, assurance
 //      "linked") satisfies the policy's `notLow` while an unenrolled OBO identity (anonymous) does not;
 //   6. a tampered stored object is refused as `artifact_hash_mismatch`, never served.
@@ -31,7 +31,7 @@ const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
-function providerFor(version: string, seed: string, withPhp: boolean): WebdevControlProvider {
+function providerFor(version: string, seed: string, withPhp: boolean, withBlocks = false): WebdevControlProvider {
   const set = {
     sdkTs: Buffer.from(`sdk-${seed}`),
     openapi: Buffer.from(`openapi-${seed}`),
@@ -48,6 +48,7 @@ function providerFor(version: string, seed: string, withPhp: boolean): WebdevCon
       sdkPhpUrl: withPhp ? "fixture://php" : null,
       openapiUrl: "fixture://openapi",
       contractMdUrl: "fixture://md",
+      blockLibraryUrl: withBlocks ? "fixture://blocks" : null,
     },
     contentHash,
     generatedAt: new Date().toISOString(),
@@ -56,6 +57,7 @@ function providerFor(version: string, seed: string, withPhp: boolean): WebdevCon
     "fixture://sdk": set.sdkTs, "fixture://openapi": set.openapi, "fixture://md": set.contractMd,
   };
   if (set.sdkPhp) byUrl["fixture://php"] = set.sdkPhp;
+  if (withBlocks) byUrl["fixture://blocks"] = Buffer.from(`blocks-tarball-${seed}`);
   return { key: "fixture", getContractBundle: async () => meta, downloadArtifact: async (u: string) => byUrl[u] };
 }
 
@@ -79,7 +81,7 @@ describe.skipIf(!TEST_URL)("M6-P4a · contract snapshot by id + artifact bytes (
   let plain: string; // member of `tenant`, no role
   let botUser: string; // company_admin in `tenant`, reached only through a verified OBO link
   let snapNoPhp: string; // sdkPhp pointer is null
-  let snapWithPhp: string; // all four artifacts present
+  let snapWithPhp: string; // all five artifacts present (php + block library)
   const mem = new Map<string, Buffer>();
 
   const url = (t: string, id: string, art?: string) =>
@@ -120,7 +122,7 @@ describe.skipIf(!TEST_URL)("M6-P4a · contract snapshot by id + artifact bytes (
     await linkIdentity(botUser, "n8n", "wf:delivery", true);
     app = await buildIsolatedApp();
     snapNoPhp = await mirror(providerFor("10.0.0", "p4a-nophp", false), "p4a-nophp");
-    snapWithPhp = await mirror(providerFor("10.1.0", "p4a-php", true), "p4a-php");
+    snapWithPhp = await mirror(providerFor("10.1.0", "p4a-php", true, true), "p4a-php");
   });
   afterAll(async () => {
     setWebdevControlProviderForTests(null);
@@ -151,13 +153,15 @@ describe.skipIf(!TEST_URL)("M6-P4a · contract snapshot by id + artifact bytes (
     expect(malformed.statusCode).toBe(404);
   });
 
-  it("each of the four artifacts returns bytes whose sha256 matches the manifest stored at mirror time", async () => {
+  it("each of the five artifacts returns bytes whose sha256 matches the hash stored at mirror time", async () => {
     const snap = (await app.inject({ method: "GET", url: url(tenant, snapWithPhp), headers: asUser(admin) })).json();
-    for (const art of ["openapi", "sdkTs", "sdkPhp", "contractMd"] as const) {
+    for (const art of ["openapi", "sdkTs", "sdkPhp", "contractMd", "blockLibrary"] as const) {
       const r = await app.inject({ method: "GET", url: url(tenant, snapWithPhp, art), headers: asUser(admin) });
       expect(r.statusCode, art).toBe(200);
       const body = r.json();
-      expect(body).toMatchObject({ snapshotId: snapWithPhp, artifact: art, fileId: snap.artifacts[art] });
+      // The tarball's file id lives in `artifacts.blockLibraryFile` (`artifacts.blockLibrary` is the version ref).
+      const pointerField = art === "blockLibrary" ? "blockLibraryFile" : art;
+      expect(body).toMatchObject({ snapshotId: snapWithPhp, artifact: art, fileId: snap.artifacts[pointerField] });
       const bytes = Buffer.from(body.base64, "base64");
       expect(sha(bytes)).toBe(body.sha256);
       expect(body.sha256).toBe(snap.artifacts.hashes[art]);
@@ -166,10 +170,28 @@ describe.skipIf(!TEST_URL)("M6-P4a · contract snapshot by id + artifact bytes (
     }
     const md = (await app.inject({ method: "GET", url: url(tenant, snapWithPhp, "contractMd"), headers: asUser(admin) })).json();
     expect(Buffer.from(md.base64, "base64").toString("utf8")).toBe("md-p4a-php");
+    const blocks = (await app.inject({ method: "GET", url: url(tenant, snapWithPhp, "blockLibrary"), headers: asUser(admin) })).json();
+    expect(Buffer.from(blocks.base64, "base64").toString("utf8")).toBe("blocks-tarball-p4a-php");
+    expect(blocks.contentType).toBe("application/gzip");
+    // The block library's hash sits beside the manifest, and the manifest itself is unchanged (4 keys).
+    expect(Object.keys(snap.artifacts.hashes).sort()).toEqual(["blockLibrary", "contractMd", "openapi", "sdkPhp", "sdkTs"]);
   });
 
-  it("an artifact name outside the four is a 400 — there is no way to name a file", async () => {
-    for (const bad of ["hashes", "blockLibrary", "fileId", "sdk"]) {
+  it("M6-P4b0: the SDK files are stored under their real types (text/plain, text/x-php), not as gzip tarballs", async () => {
+    const ts = (await app.inject({ method: "GET", url: url(tenant, snapWithPhp, "sdkTs"), headers: asUser(admin) })).json();
+    const php = (await app.inject({ method: "GET", url: url(tenant, snapWithPhp, "sdkPhp"), headers: asUser(admin) })).json();
+    expect(ts.contentType).toBe("text/plain");
+    expect(php.contentType).toBe("text/x-php");
+    const names = await adminPool().query<{ filename: string }>(
+      `SELECT filename FROM files WHERE target_entity_id = $1 ORDER BY filename`, [snapWithPhp],
+    );
+    expect(names.rows.map((x) => x.filename)).toEqual([
+      "CONTENT-CONTRACT.md", "gaiada-webdesk-blocks-1.3.2.tgz", "openapi.v1.json", "sdk.d.ts", "sdk.php",
+    ]);
+  });
+
+  it("an artifact name outside the five is a 400 — there is no way to name a file", async () => {
+    for (const bad of ["hashes", "blockLibraryFile", "fileId", "sdk"]) {
       const r = await app.inject({ method: "GET", url: url(tenant, snapNoPhp, bad), headers: asUser(admin) });
       expect(r.statusCode, bad).toBe(400);
     }
@@ -177,6 +199,12 @@ describe.skipIf(!TEST_URL)("M6-P4a · contract snapshot by id + artifact bytes (
 
   it("a null sdkPhp pointer is a 404 with the distinct reason artifact_absent", async () => {
     const r = await app.inject({ method: "GET", url: url(tenant, snapNoPhp, "sdkPhp"), headers: asUser(admin) });
+    expect(r.statusCode).toBe(404);
+    expect(r.json()).toMatchObject({ error: "artifact_absent", reason: "artifact_absent" });
+  });
+
+  it("a snapshot with no block library gives 404 artifact_absent for blockLibrary (a null pointer, like sdkPhp)", async () => {
+    const r = await app.inject({ method: "GET", url: url(tenant, snapNoPhp, "blockLibrary"), headers: asUser(admin) });
     expect(r.statusCode).toBe(404);
     expect(r.json()).toMatchObject({ error: "artifact_absent", reason: "artifact_absent" });
   });

@@ -42,6 +42,8 @@ import { liveDeps, tenantContext, envelopeContext, startRegistryImpactBootstrap 
 import { PgGoalStore, type GoalStore, type FinishGoalPatch, type BudgetCaps, type RunInput } from "./store";
 import { GoalQueue } from "./queue";
 import { publishRunEvent, subscribeTenant } from "./events-bus";
+import { SensitiveScope, holdsSensitiveTool, runWithSensitiveScope } from "../sensitive-tools";
+import { CODE_SCAFFOLD_AGENT, SCAFFOLD_GOAL_MAX_CHARS, runScaffoldJob, type ScaffoldJobResult } from "../code-scaffold/runner-job";
 
 export const runnerConfig = {
   port: Number(process.env.RUNNER_PORT ?? 3006),
@@ -104,6 +106,9 @@ export interface RunnerDeps {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function budgetForAgent(agent: string, reg: AgentRegistry): BudgetCaps {
+  // M6-P4b1: a scaffold job calls no model; its budget is the hub reads it may make (a snapshot, its five
+  // artifacts, the PRD and the prototype are 8). Recorded for the goal row; the job has no loop to enforce it in.
+  if (agent === CODE_SCAFFOLD_AGENT) return { modelCalls: 0, toolCalls: 16 };
   if (agent === reg.supervisor.name || agent === "supervisor") return { ...reg.supervisor.goalBudget };
   const def = reg.writeSpecialists[agent] ?? reg.specialists[agent];
   return def ? { modelCalls: def.maxSteps, toolCalls: def.maxToolCalls } : { modelCalls: 0, toolCalls: 0 };
@@ -150,6 +155,15 @@ function everyToolCallFailed(steps: AgentStep[]): boolean {
   return toolSteps.every((s) => / failed$/.test(s.detail));
 }
 
+/** M5-G5c — can this goal's agent (or any specialist under the supervisor) call a sensitive-policy tool? */
+function goalMayHandleSensitive(agent: string, reg: AgentRegistry): boolean {
+  if (agent === reg.supervisor.name || agent === "supervisor") {
+    return [...Object.values(reg.supervisor.specialists), ...Object.values(reg.writeSpecialists)].some(holdsSensitiveTool);
+  }
+  const def = reg.writeSpecialists[agent] ?? reg.specialists[agent];
+  return def ? holdsSensitiveTool(def) : false;
+}
+
 function mapTrace(t: AgentTrace): FinishGoalPatch {
   if (t.status === "ok") {
     if (everyToolCallFailed(t.steps)) {
@@ -167,6 +181,21 @@ function mapTrace(t: AgentTrace): FinishGoalPatch {
   if (t.status === "budget_exhausted") return { status: "budget_exhausted", outcome: t.outcome, errorKind: t.status };
   // tool_not_allowed | protocol_error | unknown_error
   return { status: "failed", outcome: t.outcome, errorKind: t.status };
+}
+
+/** M6-P4b1 - a scaffold job's result as a goal patch. `ok` only for a dry run that composed a tree; every other
+ *  outcome is `failed` with the outcome name as the error kind. The whole result (the file manifest, the lock text)
+ *  rides in the goal's blackboard, which `GET /goals/:id` returns and the list endpoint never does, so the manifest
+ *  does not bloat the list. */
+function mapScaffoldResult(result: ScaffoldJobResult, goal: string): FinishGoalPatch {
+  const entry = {
+    specialist: CODE_SCAFFOLD_AGENT,
+    task: result.siteKind ? `scaffold ${result.siteKind} @ ${result.contractSnapshotId}` : goal.slice(0, 120),
+    status: result.outcome === "dry_run" ? ("ok" as const) : ("failed" as const),
+    summary: JSON.stringify(result),
+  };
+  if (result.outcome === "dry_run") return { status: "ok", outcome: result.content, blackboard: [entry] };
+  return { status: "failed", outcome: result.content, errorKind: result.outcome, blackboard: [entry] };
 }
 
 function mapWriteResult(res: WriteAgentResult): FinishGoalPatch {
@@ -412,13 +441,23 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     };
     const provider = cfg.servingProvider ?? agentDeps.lastProvider?.() ?? null;
 
+    // M5-G5c — this goal's sensitive-tool scope (sensitive-tools.ts). It rides an AsyncLocalStorage so
+    // runAgent / runOrchestrator / traceRun / episodeFromTrace all see it without a parameter anyone could
+    // forget. For an agent (or a supervisor with a specialist) that holds a policy tool it is SEEDED from the
+    // goal text, because the planner's reply and the `delegate` event name the person BEFORE any tool call and
+    // `agent_run_events` is append-only. Any other goal gets an inactive scope: an identity function.
+    const scope = new SensitiveScope();
+    if (goalMayHandleSensitive(g.agent, reg)) scope.seedFromText(g.goal);
+    const persistRun = (r: RunInput): Promise<void> => store.insertRun(scope.active ? scope.scrubDeep(r) : r);
+    const goalText = (): string => scope.scrub(g.goal);
+
     let patch: FinishGoalPatch;
     try {
       // D14-14: `envelopeContext` nests INSIDE `tenantContext` — same goal, same lifetime, same
       // per-goal-not-module-level reasoning (see deps.ts's header on `envelopeContext`). This is what
       // lets `liveDeps.resolveApproval` recover the ORIGINAL requester's OBO envelope without agent.ts
       // having to pass it explicitly (D14-10's contract deliberately omits it — see agent.ts's doc).
-      patch = await tenantContext.run(g.tenantId, () => envelopeContext.run(envelope, async (): Promise<FinishGoalPatch> => {
+      patch = await runWithSensitiveScope(scope, () => tenantContext.run(g.tenantId, () => envelopeContext.run(envelope, async (): Promise<FinishGoalPatch> => {
         if (g.agent === reg.supervisor.name || g.agent === "supervisor") {
           // S0 — minted BEFORE the run (was: after it finished, purely for the observation record) so
           // the SAME id can tag every in-flight planner/delegate event this goal's supervisor level
@@ -447,7 +486,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
                   // result below (`status: "ok", blackboard, ...`) is unchanged byte-for-byte by this.
                   trackRunEnd(g.id, rec.runId);
                   const toolsCalled = rec.steps.filter((s) => s.kind === "tool").map((s) => s.detail.replace(/ (ok|failed)$/, ""));
-                  await store.insertRun({
+                  await persistRun({
                     runId: rec.runId,
                     goalId: g.id,
                     tenantId: g.tenantId,
@@ -476,13 +515,42 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           }
           await recordObservation(
             {
-              v: 1, runId, agent: reg.supervisor.name, envelope, goal: g.goal, status: "ok",
-              outcome: run.outcome, steps: [], modelCalls, toolCalls, toolsCalled: [], startedAt, endedAt: Date.now(),
+              v: 1, runId, agent: reg.supervisor.name, envelope, goal: goalText(), status: "ok",
+              outcome: scope.scrub(run.outcome), steps: [], modelCalls, toolCalls, toolsCalled: [], startedAt, endedAt: Date.now(),
             },
             g.tenantId,
             provider,
           );
           return { status: "ok", outcome: run.outcome, blackboard: run.blackboard, fanOut: run.blackboard.length };
+        }
+
+        if (g.agent === CODE_SCAFFOLD_AGENT) {
+          // M6-P4b1: no model, no approval: a deterministic composer over hub reads, dry run only (runner-job.ts).
+          const runId = randomUUID();
+          trackRunStart(g.id, runId);
+          const runStartedAt = Date.now();
+          let result: ScaffoldJobResult;
+          try {
+            result = await runScaffoldJob({ goal: g.goal, tenantId: g.tenantId, envelope, callTool: counted.callTool });
+          } finally {
+            trackRunEnd(g.id, runId);
+          }
+          await store.insertRun({
+            runId,
+            goalId: g.id,
+            tenantId: g.tenantId,
+            agent: CODE_SCAFFOLD_AGENT,
+            status: result.outcome === "dry_run" ? "ok" : "unknown_error",
+            outcome: result.content,
+            steps: [],
+            modelCalls: 0,
+            toolCalls,
+            toolsCalled: [],
+            provider: null,
+            startedAt: runStartedAt,
+            endedAt: Date.now(),
+          });
+          return mapScaffoldResult(result, g.goal);
         }
 
         const writeDef = reg.writeSpecialists[g.agent];
@@ -512,8 +580,8 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           const mapped = mapWriteResult(res);
           if (res.status === "completed" || res.status === "forced_read_only") {
             const traceStatus: TraceStatus = "ok";
-            const trace = traceFromRun(runId, writeDef, g.goal, envelope, traceStatus, res.run, startedAt, Date.now());
-            await store.insertRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
+            const trace = traceFromRun(runId, writeDef, goalText(), envelope, traceStatus, res.run, startedAt, Date.now());
+            await persistRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
             await recordObservation(trace, g.tenantId, provider);
           }
           return mapped;
@@ -530,12 +598,21 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
         } finally {
           trackRunEnd(g.id, runId);
         }
-        await store.insertRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
+        await persistRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
         await recordObservation(trace, g.tenantId, provider);
         return mapTrace(trace);
-      }));
+      })));
     } catch (err) {
       patch = mapError(err);
+    }
+    // M5-G5c — the goal row's own outcome / blackboard / text, last gate: a literal learned late (a policy tool
+    // called in a later step) still never reaches `agent_goals`. The goal text is rewritten only when it named
+    // the person; every other goal keeps its stored text (no `goal` in the patch).
+    if (scope.active) {
+      if (patch.outcome) patch.outcome = scope.scrub(patch.outcome);
+      if (patch.blackboard) patch.blackboard = scope.scrubDeep(patch.blackboard);
+      const scrubbedGoal = goalText();
+      if (scrubbedGoal !== g.goal) patch.goal = scrubbedGoal;
     }
     patch.modelCalls = modelCalls;
     patch.toolCalls = toolCalls;
@@ -553,6 +630,7 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     ok: true,
     agents: [...Object.keys(reg.specialists), reg.supervisor.name],
     writeAgents: Object.keys(reg.writeSpecialists),
+    jobAgents: [CODE_SCAFFOLD_AGENT],
     queue: queue.size(),
   }));
 
@@ -572,9 +650,10 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     const b = req.body ?? {};
     const agent = b.agent ?? "supervisor";
     if (!b.tenantId || !UUID_RE.test(b.tenantId)) return reply.code(400).send({ error: "tenantId (uuid) required" });
-    if (typeof b.goal !== "string" || b.goal.length < 1 || b.goal.length > 4000)
-      return reply.code(400).send({ error: "goal must be 1..4000 chars" });
-    const known = agent === "supervisor" || !!reg.writeSpecialists[agent] || !!reg.specialists[agent];
+    const goalMax = agent === CODE_SCAFFOLD_AGENT ? SCAFFOLD_GOAL_MAX_CHARS : 4000;
+    if (typeof b.goal !== "string" || b.goal.length < 1 || b.goal.length > goalMax)
+      return reply.code(400).send({ error: `goal must be 1..${goalMax} chars` });
+    const known = agent === "supervisor" || agent === CODE_SCAFFOLD_AGENT || !!reg.writeSpecialists[agent] || !!reg.specialists[agent];
     if (!known) return reply.code(400).send({ error: `unknown agent: ${agent}` });
     if (!b.envelope?.provider || !b.envelope?.externalId)
       return reply.code(400).send({ error: "envelope {provider, externalId} required" });

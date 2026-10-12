@@ -91,7 +91,7 @@ groups:
       # like an attack to a client's WAF). A 2m window is 2 scrape cycles; 5m gives real margin
       # against a single slow/blip response before an account manager gets paged over nothing.
       - alert: ClientPropertyDown
-        expr: probe_success{job="client-properties"} == 0
+        expr: probe_success{job="client-properties", internal!="true"} == 0
         for: 5m
         labels:
           severity: client_page
@@ -100,7 +100,7 @@ groups:
           description: "Blackbox probe to {{ $labels.instance }} (domain={{ $labels.property_domain }}, tenant={{ $labels.tenant_id }}, client={{ $labels.client_id }}) has failed for 5m. This is a CLIENT'S site, not our infrastructure — routes to account managers, never the engineering pager."
 
       - alert: ClientPropertyCertExpiringSoon
-        expr: (probe_ssl_earliest_cert_expiry{job="client-properties"} - time()) / 86400 < 21
+        expr: (probe_ssl_earliest_cert_expiry{job="client-properties", internal!="true"} - time()) / 86400 < 21
         for: 1h
         labels:
           severity: client_ticket

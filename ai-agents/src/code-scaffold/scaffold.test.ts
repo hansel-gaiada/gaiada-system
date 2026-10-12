@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { runCodeScaffold } from "./scaffold";
 import { FakeContractSnapshotProvider, SnapshotNotFoundError, type ContractSnapshotArtifacts } from "./contract-snapshot-provider";
 import { FakeArtifactFetcher, type ArtifactFetcher } from "./artifact-fetcher";
@@ -33,11 +34,12 @@ function fixtureSnapshot(overrides: Partial<ContractSnapshotArtifacts["meta"]> =
         openapi: "file-openapi",
         contractMd: "file-md",
         blockLibrary: { package: "@gaiada/webdesk-blocks", version: "1.3.2", range: "^1.3" },
+        blockLibraryFile: "file-blocks",
       },
       ...overrides,
     },
     openApiDocument: { paths: { "/v1/t/acme/case-study": {}, "/v1/t/acme/case-study/{slug}": {} } },
-    sdkTsTarball: Buffer.from("fake-sdk-tarball"),
+    sdkTsSource: "export interface paths { fake: never }\n",
     contractMd: "# Content contract\n",
     blockLibraryTarball: Buffer.from("fake-blocks-tarball"),
   };
@@ -178,6 +180,84 @@ describe("runCodeScaffold — success path", () => {
     if (a.pushedTo) cleanupDirs.push(a.pushedTo);
     if (b.pushedTo) cleanupDirs.push(b.pushedTo);
     expect(a.contractLock).toEqual(b.contractLock);
+  });
+});
+
+describe("runCodeScaffold — the block library is required for astro only (M6-P4b0; node renders with its own React renderer, M6-P4b1)", () => {
+  it("node does not need the library: a snapshot without one still scaffolds apps/web", async () => {
+    const result = await runCodeScaffold(baseEnvelope({ siteKind: "node" }), {
+      tenantId: "t1",
+      snapshotProvider: FakeContractSnapshotProvider.withOne({ ...fixtureSnapshot(), blockLibraryTarball: null }),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    if (result.pushedTo) cleanupDirs.push(result.pushedTo);
+    expect(result.outcome).toBe("dry_run");
+    expect(result.files).toContain("apps/web/src/app/page.tsx");
+    expect(result.files).not.toContain("vendor/webdesk-blocks.tgz");
+  });
+
+  it.each(["astro"] as const)("refuses a %s site whose snapshot has no block library, naming the snapshot, and composes nothing", async (siteKind) => {
+    const result = await runCodeScaffold(baseEnvelope({ siteKind }), {
+      tenantId: "t1",
+      snapshotProvider: FakeContractSnapshotProvider.withOne({ ...fixtureSnapshot(), blockLibraryTarball: null }),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    expect(result.outcome).toBe("rejected_site_kind");
+    expect(result.content).toMatch(/snap-1/);
+    expect(result.content).toMatch(/@gaiada\/webdesk-blocks/);
+    expect(result.files).toBeUndefined();
+    expect(result.pushedTo).toBeUndefined();
+  });
+
+  it("an EMPTY tarball is refused the same way: never vendored empty", async () => {
+    const result = await runCodeScaffold(baseEnvelope(), {
+      tenantId: "t1",
+      snapshotProvider: FakeContractSnapshotProvider.withOne({ ...fixtureSnapshot(), blockLibraryTarball: Buffer.alloc(0) }),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    expect(result.outcome).toBe("rejected_site_kind");
+  });
+
+  it("wp does not need the block library (it ships the PHP SDK instead)", async () => {
+    const result = await runCodeScaffold(baseEnvelope({ siteKind: "wp" }), {
+      tenantId: "t1",
+      snapshotProvider: FakeContractSnapshotProvider.withOne({ ...fixtureSnapshot(), blockLibraryTarball: null, sdkPhpSource: "<?php // sdk\n" }),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    if (result.pushedTo) cleanupDirs.push(result.pushedTo);
+    expect(result.outcome).toBe("dry_run");
+  });
+});
+
+describe("runCodeScaffold — SDK and block-library vendoring (M6-P4b0)", () => {
+  it("vendors the SDK as a types-only package from its plain text, and the library as its tarball, and package.json points at both", async () => {
+    const result = await runCodeScaffold(baseEnvelope(), {
+      tenantId: "t1",
+      snapshotProvider: FakeContractSnapshotProvider.withOne(fixtureSnapshot()),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    if (result.pushedTo) cleanupDirs.push(result.pushedTo);
+    expect(result.outcome).toBe("dry_run");
+    expect(result.files).toContain("vendor/webdesk-sdk/index.d.ts");
+    expect(result.files).toContain("vendor/webdesk-sdk/package.json");
+    expect(result.files).toContain("vendor/webdesk-blocks.tgz");
+    expect(result.files).not.toContain("vendor/webdesk-sdk.tgz");
+    expect(result.files).not.toContain("vendor/webdesk-sdk-package.json");
+
+    const dir = result.pushedTo!;
+    expect(await readFile(join(dir, "vendor/webdesk-sdk/index.d.ts"), "utf8")).toBe("export interface paths { fake: never }\n");
+    expect(JSON.parse(await readFile(join(dir, "vendor/webdesk-sdk/package.json"), "utf8"))).toEqual({
+      name: "@gaiada/webdesk-sdk", version: "1.4.0", private: true, types: "./index.d.ts",
+    });
+    expect((await readFile(join(dir, "vendor/webdesk-blocks.tgz"))).toString()).toBe("fake-blocks-tarball");
+    const pkg = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
+    expect(pkg.dependencies["@gaiada/webdesk-sdk"]).toBe("file:./vendor/webdesk-sdk");
+    expect(pkg.dependencies["@gaiada/webdesk-blocks"]).toBe("file:./vendor/webdesk-blocks.tgz");
   });
 });
 

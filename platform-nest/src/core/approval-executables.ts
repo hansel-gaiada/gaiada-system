@@ -837,6 +837,7 @@ export function registerWebdeskExecutableApprovals(): void {
   registerWebdeskContentExecutableApprovals();
   registerWebdeskMediaExecutableApprovals();
   registerWebdeskEditorialExecutableApprovals();
+  registerWebdeskContractExecutableApprovals();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1086,6 +1087,44 @@ export function registerWebdeskEditorialExecutableApprovals(): void {
   });
 }
 
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// M6-P4c — `webdesk.contract.regenerate` (MEDIUM): WebDesk's contract.regenerate for one of the company's
+// tenants (`slug`) or all of them (no `slug`). The same D14 pairing as every MEDIUM webdesk tool: this
+// entry AND the name in `cerbos/policies/resource_mcp_tool.yaml`'s executable list, in one change. An
+// unattended caller suspends; on approval the executor re-drives the tool through the hub as the ORIGINAL
+// principal, and the platform route re-checks Cerbos `operate` and the company wall on their CURRENT standing.
+// STRUCTURAL precondition only (the content tools' reason: the route's wall and WebDesk's own guards are the
+// atomic re-check; a precondition may not call out over the network). It refuses a malformed slug before
+// any grant is spent.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+const WEBDESK_TENANT_SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,198}[a-z0-9])?$/;
+
+/** Mirrored in `resource_mcp_tool.yaml`'s executable list. */
+export const WEBDESK_CONTRACT_REGISTRY_TOOLS: readonly string[] = ["webdesk.contract.regenerate"];
+
+async function webdeskContractRegeneratePrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  if (a.slug !== undefined && (typeof a.slug !== "string" || !WEBDESK_TENANT_SLUG_RE.test(a.slug))) {
+    return { ok: false, reason: "tenant_slug_invalid" };
+  }
+  return { ok: true };
+}
+
+function webdeskContractLockKey(a: Record<string, unknown>): string {
+  // The unit of consistency is (company, tenant); a company-wide run is its own unit.
+  const tenantId = typeof a?.tenantId === "string" && a.tenantId.trim() ? a.tenantId : "no-tenant";
+  const slug = typeof a?.slug === "string" && a.slug.trim() ? a.slug : "*";
+  return `webdesk:contract:${tenantId}:${slug}`;
+}
+
+export function registerWebdeskContractExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "webdesk.contract.regenerate",
+    lockKey: webdeskContractLockKey,
+    precondition: webdeskContractRegeneratePrecondition,
+  });
+}
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // SMM-09 — `social.publishPost` (executable) and `social.publishPostMetered` (BARRED twin).

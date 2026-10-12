@@ -4,7 +4,9 @@
 // There is deliberately NO trigger in this file (that is M6-P4r-b): importing it has no side effect.
 export { buildContractArtifacts } from "./build-artifacts.mts";
 export type { BuildArtifactsInput, BuiltArtifacts } from "./build-artifacts.mts";
-export { createGeneratorStorageAdapter, readLatestPointer, publishArtifacts } from "./storage-io.mts";
+export { createGeneratorStorageAdapter, readLatestPointer, publishArtifacts, publishBlockLibrary } from "./storage-io.mts";
+export { readBakedBlockLibrary, BlockLibraryHashConflictError } from "./block-library.mts";
+export type { BakedBlockLibrary, PublishedBlockLibrary } from "./block-library.mts";
 export { fetchTenantComposition } from "./fetch-composition.mts";
 export type { FetchedTenantComposition } from "./fetch-composition.mts";
 export { generateTenantContract } from "./generate-tenant.mts";

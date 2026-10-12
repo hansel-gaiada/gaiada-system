@@ -240,6 +240,9 @@ resourcePolicy:
               #    (grantRole HIGH, like iam.grantRole; revokeRole MEDIUM). The same D14 pairing with
               #    approval-executables.ts (registerWebdeskEditorialExecutableApprovals). The re-drive runs as the
               #    ORIGINAL principal, so `webdesk_collection:manage_editorial` is decided on their current standing.
+              #  • `webdesk.contract.regenerate` — M6-P4c, MEDIUM (WebDesk classifies contract.regenerate medium, no
+              #    WS4). The same D14 pairing (registerWebdeskContractExecutableApprovals); the re-drive runs as the
+              #    ORIGINAL principal, so `webdev_provisioned_site:operate` and the company wall decide on their standing.
               - expr: >
                   !request.principal.attr.isUnattended ||
                   ((!request.resource.attr.write ||
@@ -260,7 +263,8 @@ resourcePolicy:
                                                     "webdesk.key.revoke", "webdesk.site.archive",
                                                     "webdesk.content.unpublish", "webdesk.content.delete",
                                                     "webdesk.media.update", "webdesk.media.delete",
-                                                    "webdesk.editorial.grantRole", "webdesk.editorial.revokeRole"])))
+                                                    "webdesk.editorial.grantRole", "webdesk.editorial.revokeRole",
+                                                    "webdesk.contract.regenerate"])))
               # ── WSK-31 (docs/blueprints/webdesk-design.md §07) — ALWAYS-WS4 CONJUNCT ────────────
               # A SEPARATE, INDEPENDENT `all.of` entry, evaluated for EVERY caller regardless of the
               # `isUnattended` conjunct above — that is the whole point. §07's blueprint C-05 rule

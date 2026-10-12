@@ -2,8 +2,8 @@
 //
 //   POST /api/:tenantId/modules/webdev/provision                        -> 201 | 200 | 409 | 422 | 502 | 503
 //   GET  /api/:tenantId/modules/webdev/provisioned-sites[?runId=]       -> 200 [site]
-//   GET  /api/:tenantId/modules/webdev/provisioned-sites/:id            -> 200 site
-//   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/reconcile  -> 200 site
+//   GET  /api/:tenantId/modules/webdev/provisioned-sites/:id            -> 200 site (+ `completion`, M6-P4c)
+//   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/reconcile  -> 200 site (+ `completion`, M6-P4c)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
 // authorizes, builds the driver, and maps a typed outcome onto a status code. Every decision that
@@ -51,9 +51,11 @@ import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { ErpRepoControlNotConfiguredError, createErpRepoControlProvider } from "./erp-repo-control-provider";
 import type { ProvisionProvider } from "./provision-provider";
 import {
-  getProvisionedSite, listProvisionedSites, provisionSite, pollProvisioningSite,
-  reconcileProvisionedSite, type SiteDto,
+  getProvisionedSite, listProvisionedSites, provisionSite, pollProvisioningSite, type SiteDto,
 } from "./provisioning.service";
+import {
+  completeAfterPoll, readProvisionCompletion, reconcileAndComplete, type ProvisionCompletionDto,
+} from "./provision-completion.service";
 import { createWebdevSite, getWebdevSite, patchWebdevSiteVaultRef, type WebdevSiteDto } from "./site-registry.service";
 
 /** Test seam: suites drive a fake `ProvisionProvider` (or, for PRV-02's own historical idempotency
@@ -107,11 +109,12 @@ export class WebdevController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-  ): Promise<SiteDto> {
+  ): Promise<SiteDto & { completion: ProvisionCompletionDto | null }> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "read");
     const site = await getProvisionedSite(tenantId, id);
     if (!site) throw new NotFoundException("provisioned site not found");
-    return site;
+    // M6-P4c: where §08's completion stands (registry row, WebDesk tenant, pinned contract). Additive.
+    return { ...site, completion: await readProvisionCompletion(tenantId, id) };
   }
 
   /**
@@ -158,7 +161,12 @@ export class WebdevController {
         // not hold an HTTP request open. Errors are swallowed on purpose: the poller's ONLY job is to
         // advance a row it re-reads under a lock, and the hourly reconcile flow is the backstop for
         // anything it misses (including this process dying mid-poll).
-        void pollProvisioningSite(tenantId, outcome.site.id, provider).catch(() => {});
+        // M6-P4c: when the poll ends, finish §08 for whatever it reached (registry row, WebDesk tenant,
+        // contract). `completeAfterPoll` never throws and does nothing for a row still awaiting its repo.
+        const principal = req.principal;
+        void pollProvisioningSite(tenantId, outcome.site.id, provider)
+          .then((polled) => (polled ? completeAfterPoll(tenantId, polled.id, principal) : undefined))
+          .catch(() => {});
         await writeActivity(tenantId, actorId, "provisioned", "webdev_provisioned_site", outcome.site.id, {
           slug: outcome.site.slug, runId, adopted: outcome.outcome === "adopted",
         });
@@ -199,12 +207,15 @@ export class WebdevController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-  ): Promise<SiteDto> {
+  ): Promise<SiteDto & { completion: ProvisionCompletionDto | null }> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "reconcile");
     const provider = resolveProvider(tenantId, req.principal.userId);
-    const outcome = await reconcileProvisionedSite({
+    // M6-P4c: the repo step's reconcile (unchanged), then §08's completion steps. This route is THE resume
+    // path: a crash between any two steps is picked up here, and no step ever runs twice.
+    const { outcome } = await reconcileAndComplete({
       tenantId, siteId: id, provider,
       requestedByName: await displayNameFor(req.principal.userId),
+      principal: req.principal,
     });
     if (outcome.outcome === "not_found") throw new NotFoundException("provisioned site not found");
     if (outcome.outcome === "conflict_foreign") {
@@ -217,7 +228,7 @@ export class WebdevController {
     if (outcome.outcome === "egress_error" || outcome.outcome === "provider_rejected") {
       throw new ServiceUnavailableException({ message: outcome.site.failureReason ?? "failed", site: outcome.site });
     }
-    return outcome.site;
+    return { ...outcome.site, completion: await readProvisionCompletion(tenantId, outcome.site.id) };
   }
 
   // ══════════════════════════════════════════════════════════════════════════════════════════════

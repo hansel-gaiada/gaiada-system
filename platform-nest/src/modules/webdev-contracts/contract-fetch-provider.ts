@@ -29,6 +29,9 @@ export interface ContractBundleMeta {
     sdkPhpUrl: string | null; // null until P6 (D-10)
     openapiUrl: string;
     contractMdUrl: string;
+    /** M6-P4b0 — the block-renderer library tarball, the fifth artifact. `null` for a snapshot whose
+     *  WebDesk pointer predates it (the far side omits the key, or sends null). */
+    blockLibraryUrl: string | null;
   };
   contentHash: string; // Zone B's OWN claim — the mirror recomputes and verifies this, never trusts it
   generatedAt: string;
