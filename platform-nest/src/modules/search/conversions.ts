@@ -12,6 +12,8 @@
 // execution time, normalised and hashed in memory, sent, and never written anywhere.
 import { createHash } from "node:crypto";
 import { marketingConsentState, type LeadConversionFacts } from "../../core/agency-lead-pipeline.service";
+import { metaIdentifierKinds } from "./conversions-meta";
+import { linkedInIdentifierKinds } from "./conversions-linkedin";
 
 // ─────────────────────────────────────────────────────────────────────────────────────────── vocabulary
 /** `automation_approvals.workflow_id` AND `tool_name` of an upload approval. decide() recognises the row by origin AND workflow. */
@@ -25,10 +27,11 @@ export function isConversionUploadRequest(origin: string, workflowId: string | n
 }
 
 export type ConversionPlatform = "google_ads" | "meta_capi" | "linkedin_capi";
-/** The platforms the ledger and the CHECKs know about (P3 Meta, P4 LinkedIn will fill theirs in). */
+/** The platforms the ledger and the CHECKs know about. */
 export const ALL_PLATFORMS: readonly ConversionPlatform[] = ["google_ads", "meta_capi", "linkedin_capi"];
-/** The platforms a target may be configured for TODAY: only those with an adapter. */
-export const SUPPORTED_PLATFORMS: readonly ConversionPlatform[] = ["google_ads"];
+/** The platforms a target may be configured for: those with an adapter. Meta (P3) and LinkedIn (P4) are SIMULATE-ONLY adapters: they
+ *  plan, gate and record what would be sent, and have no live uploader (conversions-uploaders.ts refuses them as live platforms). */
+export const SUPPORTED_PLATFORMS: readonly ConversionPlatform[] = ["google_ads", "meta_capi", "linkedin_capi"];
 export const PLATFORM_LABEL: Record<ConversionPlatform, string> = {
   google_ads: "Google Ads",
   meta_capi: "Meta Conversions API",
@@ -64,6 +67,7 @@ export const REASON = {
   googleRefused: "google_refused",
   ambiguous: "conversion_ambiguous",
   unreachable: "conversion_unreachable",
+  adapterRejected: "conversion_request_invalid",
   rejected: "approval_rejected",
   internalError: "conversion_internal_error",
 } as const;
@@ -101,6 +105,24 @@ export function conversionModeFor(platform: ConversionPlatform, env: NodeJS.Proc
 // ─────────────────────────────────────────────────────────────────────────────────────────── the gate
 /** What kinds of identifier a lead can offer Google. Kinds only: the values are read at execution and never recorded. */
 export type GoogleIdentifierKind = "gclid" | "gbraid" | "wbraid" | "email" | "phone";
+/** Every kind any adapter reports: Google's, plus Meta's browser cookies (`fbc`, `fbp`) and LinkedIn's first-party id (`li_fat_id`). */
+export type ConversionIdentifierKind = GoogleIdentifierKind | "fbc" | "fbp" | "li_fat_id";
+
+/** What an adapter needs from the ledger row. No personal data. `stage` is there so value rides only on `won`. */
+export interface PlanLedger {
+  submissionRef: string;
+  conversionKey: string;
+  occurredAt: string; // ISO-8601
+  stage: string;
+  dealValue: string | null;
+  dealCurrency: string | null;
+}
+
+/** What every adapter's request builder returns. `body` HOLDS IDENTIFIERS (memory only, one call); only `summary` may be persisted. */
+export interface ConversionPlan {
+  body: Record<string, unknown>;
+  summary: { platform: ConversionPlatform; identifierKinds: ConversionIdentifierKind[] };
+}
 
 const CLICK_ID_RE = /^[A-Za-z0-9_.-]{1,200}$/;
 const CLICK_ID_KEYS = ["gclid", "gbraid", "wbraid"] as const;
@@ -162,7 +184,19 @@ export function googleIdentifierKinds(f: Pick<LeadConversionFacts, "attribution"
   return kinds;
 }
 
-export type GateVerdict = { ok: true; identifierKinds: GoogleIdentifierKind[] } | { ok: false; reason: string };
+/** The identifier kinds this lead can offer the platform (each adapter owns its own rules). Empty = nothing usable. */
+export function identifierKindsFor(
+  platform: ConversionPlatform,
+  f: Pick<LeadConversionFacts, "attribution" | "contactEmail" | "contactPhone" | "visitorConsent">,
+): ConversionIdentifierKind[] {
+  switch (platform) {
+    case "google_ads": return googleIdentifierKinds(f);
+    case "meta_capi": return metaIdentifierKinds(f);
+    case "linkedin_capi": return linkedInIdentifierKinds(f);
+  }
+}
+
+export type GateVerdict = { ok: true; identifierKinds: ConversionIdentifierKind[] } | { ok: false; reason: string };
 
 /**
  * The gate (design §8.4), pure. It runs at PLANNING and again under the lock at EXECUTION, on freshly read facts, so a lead
@@ -181,8 +215,7 @@ export function evaluateGate(
   if (consent === "not_given") return { ok: false, reason: REASON.consentNotGiven };
   if (consent !== "given") return { ok: false, reason: REASON.consentUnknown };
   if (suppressed) return { ok: false, reason: REASON.suppressed };
-  if (platform !== "google_ads") return { ok: false, reason: REASON.noIdentifier }; // adapters for the others arrive with P3 / P4
-  const kinds = googleIdentifierKinds(facts);
+  const kinds = identifierKindsFor(platform, facts);
   if (kinds.length === 0) return { ok: false, reason: REASON.noIdentifier };
   return { ok: true, identifierKinds: kinds };
 }

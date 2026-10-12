@@ -17,7 +17,7 @@ set -- ${SSH_ORIGINAL_COMMAND:-}
 if [ "${1:-}" != put ] || [ "$#" -ne 3 ]; then echo "refused: only 'put <name> <sha256>'" >&2; exit 1; fi
 NAME="$2"; SUM="$3"
 case "$NAME" in
-  umami-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].sql.gz.age) ;;
+  umami-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].sql.gz.age | vdb-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].sql.gz.age) ;;
   *) echo "refused: bad name" >&2; exit 2 ;;
 esac
 case "$SUM" in *[!0-9a-f]* | "") echo "refused: bad sha256" >&2; exit 2 ;; esac

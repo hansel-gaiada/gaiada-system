@@ -114,9 +114,10 @@ describe("the gate (design §8.4), pure", () => {
     expect(evaluateGate(facts({ attribution: null, contactPhone: null }), "google_ads", false)).toEqual({ ok: true, identifierKinds: ["email"] });
   });
 
-  it("a platform with no adapter yet has no usable identifier (Meta and LinkedIn arrive with P3 / P4)", () => {
-    expect(evaluateGate(facts(), "meta_capi", false)).toEqual({ ok: false, reason: REASON.noIdentifier });
-    expect(SUPPORTED_PLATFORMS).toEqual(["google_ads"]);
+  it("Meta (P3) and LinkedIn (P4) have adapters: the gate asks each platform's own identifier rules (their detail is conversions-meta-linkedin.test.ts)", () => {
+    expect(evaluateGate(facts(), "meta_capi", false)).toEqual({ ok: true, identifierKinds: ["email", "phone"] });
+    expect(evaluateGate(facts({ contactPhone: null }), "linkedin_capi", false)).toEqual({ ok: true, identifierKinds: ["email"] });
+    expect(SUPPORTED_PLATFORMS).toEqual(["google_ads", "meta_capi", "linkedin_capi"]);
     expect(ALL_PLATFORMS).toHaveLength(3);
   });
 });
@@ -308,7 +309,6 @@ describe("the config route's body (typed, strict)", () => {
     const reason = (over: Record<string, unknown>) => { const r = parseTargetBody({ ...ok, ...over }); return r.ok ? "ok" : r.reason; };
     expect(reason({ webSiteSlug: "Bad Slug" })).toBe("web_site_slug_invalid");
     expect(reason({ platform: "tiktok" })).toBe("platform_unknown");
-    expect(reason({ platform: "meta_capi" })).toBe("platform_unsupported");
     expect(reason({ stage: "Won!" })).toBe("stage_unknown");
     expect(reason({ conversionKey: "Lead Won" })).toBe("conversion_key_invalid");
     expect(reason({ conversionAction: "customers/1" })).toBe("conversion_action_invalid");
@@ -372,7 +372,7 @@ describe("static wiring pins", () => {
   });
 
   it("no conversion file owns a network primitive (the live call goes through the sanctioned Ads transport)", () => {
-    for (const f of ["conversions.ts", "conversions-google.ts", "conversions-uploaders.ts", "conversions.service.ts", "conversions.controller.ts"]) {
+    for (const f of ["conversions.ts", "conversions-google.ts", "conversions-meta.ts", "conversions-linkedin.ts", "conversions-uploaders.ts", "conversions.service.ts", "conversions.controller.ts"]) {
       const text = src("modules", "search", f).replace(/\/\/.*$/gm, "");
       expect(text, f).not.toMatch(/\bfetch\s*\(|\baxios\b|node:https?|XMLHttpRequest/);
     }
