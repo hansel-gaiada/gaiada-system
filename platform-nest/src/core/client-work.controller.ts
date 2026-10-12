@@ -11,6 +11,7 @@ import { authorize, writeActivity } from "./http";
 import { validateCustomFields } from "./custom-fields";
 import { AuthGuard } from "../auth/guards";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { staffDeliverableClientVisible } from "./portal-visibility";
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -21,12 +22,22 @@ export class ClientWorkController {
     await authorize(req.principal, { kind: "deliverable", tenantId }, "read");
     // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400, never every client).
     // Parsed AFTER authorize so a denial is a denial, not a validation error.
-    const filter = clientFilterSql(parseClientFilter(clientId, true), "client_id", 2);
+    // PV3-07 follow-up: the facet decides ownership the way the portal does, by the deliverable's PROJECT
+    // (`dp.client_id`), never by the nullable `deliverables.client_id`. The portal reaches a deliverable
+    // only through `JOIN projects p ... PROJECT_SCOPE` (portal-workspace.controller.ts), so the project's
+    // client is the one that can see it; `COALESCE(d.client_id, dp.client_id)` would list a deliverable
+    // under a client whose portal cannot reach it (own client_id set, project internal). So `<uuid>` =
+    // the project belongs to that client, and `internal` = the project has no client (or, under the LEFT
+    // JOIN, no project at all: also unreachable from any portal).
+    const filter = clientFilterSql(parseClientFilter(clientId, true), "dp.client_id", 2);
+    // PV3-07: `clientVisible` travels through the PROJECT for the same reason.
     const rows = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT id, project_id, client_id, name, status, due_date, custom_fields FROM deliverables
-         WHERE deleted_at IS NULL AND ($1::uuid IS NULL OR project_id = $1) AND ${filter.sql}
-         ORDER BY due_date NULLS LAST, created_at DESC`,
+        `SELECT d.id, d.project_id, d.client_id, d.name, d.status, d.due_date, d.custom_fields,
+                ${staffDeliverableClientVisible("d", "dp")} AS "clientVisible"
+           FROM deliverables d LEFT JOIN projects dp ON dp.id = d.project_id
+         WHERE d.deleted_at IS NULL AND ($1::uuid IS NULL OR d.project_id = $1) AND ${filter.sql}
+         ORDER BY d.due_date NULLS LAST, d.created_at DESC`,
         [projectId ?? null, ...filter.params],
       ),
     );

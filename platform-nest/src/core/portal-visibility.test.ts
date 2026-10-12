@@ -75,8 +75,11 @@ const SITES: Site[] = [
             AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
             AND ($2::uuid[] IS NULL OR r.project_id = ANY($2::uuid[]))`,
     now: `${runInPortalScope("r", S12)} AND ${gateClientVisible("g")} AND g.status = 'pending'` },
-  { site: "workspace finance invoices",
-    old: `i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'`,
+  // PV3-02d (intentional change, here and in every invoice entry below): an `approved` invoice (the internal
+  // maker/checker step before it is sent) is hidden as well as a `draft`. `old` is the NEW literal shape; it
+  // was `... AND i.status <> 'draft'`.
+  { site: "workspace finance invoices (not draft, not approved — PV3-02d)",
+    old: `i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
     now: invoiceInPortalScope("i", { clients: 1 }) },
   { site: "workspace finance payments lateral (detail context)",
     old: `pp.invoice_id = inv.id AND pp.deleted_at IS NULL`,
@@ -102,9 +105,12 @@ const SITES: Site[] = [
     old: `k.client_id = ANY($1::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft'
             AND ($2::uuid[] IS NULL OR k.project_id = ANY($2::uuid[]) OR k.project_id IS NULL)`,
     now: contractInPortalScope("k", S12) },
-  { site: "workspace timeline payments (timeline context)",
-    old: `pp.client_id = ANY($1::uuid[]) AND pp.deleted_at IS NULL AND pp.status = 'confirmed'`,
-    now: invoicePaymentInPortalScope("pp", "timeline", { clients: 1 }) },
+  // PV3-02c (intentional change, pinned on purpose): the timeline reaches a payment THROUGH its invoice
+  // (`JOIN invoices pi ON pi.id = pp.invoice_id`), so a payment on a deleted or draft invoice is absent.
+  // `old` is the NEW literal shape; it was `pp.client_id = ANY($1) AND pp.deleted_at IS NULL AND pp.status = 'confirmed'`.
+  { site: "workspace timeline payments (timeline context, through a visible invoice — PV3-02c)",
+    old: `pp.deleted_at IS NULL AND pp.status = 'confirmed' AND pi.client_id = ANY($1::uuid[]) AND pi.deleted_at IS NULL AND pi.status NOT IN ('draft','approved')`,
+    now: `${invoicePaymentClientVisible("pp", "timeline")} AND ${invoiceInPortalScope("pi", { clients: 1 })}` },
 
   // ── portal.controller.ts ──
   { site: "portal listRuns",
@@ -126,6 +132,11 @@ const SITES: Site[] = [
            AND r.deleted_at IS NULL
            AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
     now: `g.id = $1 AND ${runInPortalScope("r", S23)} AND ${gateClientVisible("g")}` },
+  // PV3-02c (intentional change): the scope-sign completion UPDATE may only decide a CLIENT-side gate.
+  // `old` is the NEW literal shape; before it had `deleted_at IS NULL` and no `actor_side` or `kind` conjunct.
+  { site: "portal scopeSign completion UPDATE (client-side gate only — PV3-02c)",
+    old: `id = $1 AND run_id = $3 AND status = 'pending' AND kind = 'scope_signoff' AND actor_side = 'client' AND deleted_at IS NULL`,
+    now: `id = $1 AND run_id = $3 AND status = 'pending' AND kind = 'scope_signoff' AND ${gateClientVisible("")}` },
   { site: "portal decideGate guarded UPDATE",
     old: `g.id = $1 AND g.run_id = r.id AND r.client_id = ANY($5::uuid[])
            AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL`,
@@ -139,24 +150,41 @@ const SITES: Site[] = [
     old: `pp.invoice_id = $1 AND pp.deleted_at IS NULL`,
     now: `pp.invoice_id = $1 AND ${invoicePaymentClientVisible("pp", "detail")}` },
   { site: "commerce ownedInvoice",
-    old: `i.id = $1 AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'`,
+    old: `i.id = $1 AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
     now: `i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}` },
   { site: "commerce ownedContract / ownsEntity.contract",
     old: `k.id = $1 AND k.client_id = ANY($2::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft'
           AND ($3::uuid[] IS NULL OR k.project_id = ANY($3::uuid[]) OR k.project_id IS NULL)`,
     now: `k.id = $1 AND ${contractInPortalScope("k", S23)}` },
-  { site: "commerce ownsEntity.deliverable (no project deleted_at, as before)",
+  // PV3-02c (intentional change): the deliverable's project must itself be visible (`p.deleted_at IS NULL`),
+  // like every deliverable list. `old` is the NEW literal shape.
+  { site: "commerce ownsEntity.deliverable (project not deleted — PV3-02c)",
     old: `d.id = $1 AND d.deleted_at IS NULL
-                       AND p.client_id = ANY($2::uuid[]) AND ($3::uuid[] IS NULL OR p.id = ANY($3::uuid[]))`,
-    now: `d.id = $1 AND ${deliverableClientVisible("d")} AND ${projectReach("p", S23)}` },
+                       AND p.client_id = ANY($2::uuid[]) AND ($3::uuid[] IS NULL OR p.id = ANY($3::uuid[])) AND p.deleted_at IS NULL`,
+    now: `d.id = $1 AND ${deliverableClientVisible("d")} AND ${projectInPortalScope("p", S23)}` },
   { site: "commerce ownsEntity.project",
     old: `p.id = $1 AND p.deleted_at IS NULL
                   AND p.client_id = ANY($2::uuid[]) AND ($3::uuid[] IS NULL OR p.id = ANY($3::uuid[]))`,
     now: `p.id = $1 AND ${projectInPortalScope("p", S23)}` },
-  { site: "commerce ownsEntity.invoice_payment (receipt download)",
+  // PV3-02c (intentional change): the receipt is reached THROUGH its invoice (`JOIN invoices i ON i.id =
+  // pp.invoice_id`), so a payment on a deleted or draft invoice has no receipt. `old` is the NEW literal shape.
+  { site: "commerce ownsEntity.invoice_payment (receipt download, through a visible invoice — PV3-02c)",
     old: `pp.id = $1 AND pp.deleted_at IS NULL
-                          AND pp.client_id = ANY($2::uuid[])`,
-    now: `pp.id = $1 AND ${invoicePaymentInPortalScope("pp", "detail", { clients: 2 })}` },
+                          AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`,
+    now: `pp.id = $1 AND ${invoicePaymentClientVisible("pp", "detail")} AND ${invoiceInPortalScope("i", { clients: 2 })}` },
+
+  // ── mail/thread.controller.ts (MAIL-33 portal mail threads, PV3-02b) ──
+  { site: "portal mail thread ?gateId= ownership read (unchanged meaning)",
+    old: `g.id = $1 AND g.deleted_at IS NULL AND g.actor_side = 'client' AND r.deleted_at IS NULL
+              AND r.client_id = ANY($2::uuid[])
+              AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+    now: `g.id = $1 AND ${runInPortalScope("r", S23)} AND ${gateClientVisible("g")}` },
+  // PV3-02b (intentional change): the run branch no longer admits a project-less run to a project-scoped
+  // contact. `old` is the NEW literal shape; before it ended `... OR r.project_id IS NULL)`.
+  { site: "portal mail thread ?runId= ownership read (no NULL-project admission — PV3-02b)",
+    old: `r.id = $1 AND r.deleted_at IS NULL AND r.client_id = ANY($2::uuid[])
+            AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+    now: `r.id = $1 AND ${runInPortalScope("r", S23)}` },
 
   // ── webdev-change-requests-portal.controller.ts ──
   { site: "change requests list",
@@ -198,6 +226,25 @@ describe("PV3-02 equivalence — every switched call site keeps its exact conjun
     );
   });
 
+  it("PV3-02b: the mail thread run branch differs from its old shape in exactly one conjunct (the NULL-project arm)", () => {
+    const old = `r.id = $1 AND r.deleted_at IS NULL AND r.client_id = ANY($2::uuid[])
+            AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]) OR r.project_id IS NULL)`;
+    const now = `r.id = $1 AND ${runInPortalScope("r", S23)}`;
+    expect(conjuncts(old).filter((c) => !conjuncts(now).includes(c))).toEqual([
+      `($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]) OR r.project_id IS NULL)`,
+    ]);
+    expect(conjuncts(now).filter((c) => !conjuncts(old).includes(c))).toEqual([
+      `($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+    ]);
+  });
+
+  it("PV3-02c: the scope-sign completion UPDATE gained exactly two conjuncts, the scope_signoff kind and the client-side gate", () => {
+    const old = `id = $1 AND run_id = $3 AND status = 'pending' AND deleted_at IS NULL`;
+    const now = `id = $1 AND run_id = $3 AND status = 'pending' AND kind = 'scope_signoff' AND ${gateClientVisible("")}`;
+    expect(conjuncts(old).filter((c) => !conjuncts(now).includes(c))).toEqual([]);
+    expect(conjuncts(now).filter((c) => !conjuncts(old).includes(c))).toEqual([`actor_side = 'client'`, `kind = 'scope_signoff'`]);
+  });
+
   it("needsYou contracts: the ONLY added conjunct is `status <> 'draft'`, implied by `status = 'sent'`", () => {
     const old = `k.client_id = ANY($1::uuid[]) AND k.deleted_at IS NULL AND k.status = 'sent'
             AND ($2::uuid[] IS NULL OR k.project_id = ANY($2::uuid[]) OR k.project_id IS NULL)`;
@@ -226,7 +273,7 @@ describe("PV3-02 builder contract", () => {
     expect(contractInPortalScope("k", { clients: 7, projects: 9 })).toBe(
       `k.client_id = ANY($7::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft' AND ($9::uuid[] IS NULL OR k.project_id = ANY($9::uuid[]) OR k.project_id IS NULL)`,
     );
-    expect(invoiceInPortalScope("x", { clients: 4 })).toBe(`x.client_id = ANY($4::uuid[]) AND x.deleted_at IS NULL AND x.status <> 'draft'`);
+    expect(invoiceInPortalScope("x", { clients: 4 })).toBe(`x.client_id = ANY($4::uuid[]) AND x.deleted_at IS NULL AND x.status NOT IN ('draft','approved')`);
   });
 
   it("row-state builders bind NO parameters (so the staff side can reuse them, PV3-07)", () => {
@@ -239,11 +286,11 @@ describe("PV3-02 builder contract", () => {
     for (const sql of rowState) expect(sql).not.toMatch(/\$\d/);
   });
 
-  it("encodes the hidden report stage, client-side gates, non-draft money, and the two payment contexts", () => {
+  it("encodes the hidden report stage, client-side gates, non-draft contracts, invoices not draft/approved, and the two payment contexts", () => {
     expect(runStageClientVisible("s")).toBe(`s.track <> 'report'`);
     expect(gateClientVisible("g")).toBe(`g.actor_side = 'client' AND g.deleted_at IS NULL`);
     expect(contractClientVisible("k")).toBe(`k.deleted_at IS NULL AND k.status <> 'draft'`);
-    expect(invoiceClientVisible("i")).toBe(`i.deleted_at IS NULL AND i.status <> 'draft'`);
+    expect(invoiceClientVisible("i")).toBe(`i.deleted_at IS NULL AND i.status NOT IN ('draft','approved')`);
     expect(invoicePaymentClientVisible("pp", "detail")).toBe(`pp.deleted_at IS NULL`);
     expect(invoicePaymentClientVisible("pp", "timeline")).toBe(`pp.deleted_at IS NULL AND pp.status = 'confirmed'`);
     expect(postReviewClientVisible("r")).toBe(`TRUE`);
@@ -254,7 +301,7 @@ describe("PV3-02 builder contract", () => {
     expect(runInPortalScope("r", S12)).not.toContain("project_id IS NULL");
     expect(contractInPortalScope("k", S12)).toContain(`OR k.project_id IS NULL)`);
     expect(changeRequestInPortalScope("w", S12)).toContain(`OR w.project_id IS NULL)`);
-    // projectReach is layer 3 only: no row-state (the deliverable download relies on that, see hand-back).
+    // projectReach is layer 3 only: no row-state (projectInPortalScope = projectReach + projectClientVisible).
     expect(projectReach("p", S12)).not.toContain("deleted_at");
   });
 
@@ -266,6 +313,12 @@ describe("PV3-02 builder contract", () => {
     expect(() => inCallerClients("k", 1.5)).toThrow(/invalid parameter index/);
     expect(() => runInPortalScope("r", { clients: 1, projects: -2 })).toThrow(/invalid parameter index/);
     expect(() => invoicePaymentClientVisible("pp", "ledger" as never)).toThrow(/unknown invoice payment context/);
+  });
+
+  it("invoicePaymentInPortalScope is the direct-reach (own client_id) shape; the portal no longer uses it (PV3-02c)", () => {
+    expect(invoicePaymentInPortalScope("pp", "timeline", { clients: 1 })).toBe(
+      `pp.client_id = ANY($1::uuid[]) AND pp.deleted_at IS NULL AND pp.status = 'confirmed'`,
+    );
   });
 
   it("an empty alias means unqualified columns", () => {
@@ -310,7 +363,9 @@ function importsPortalScope(src: string): boolean {
 
 /** The old inline literals. Each one now has exactly one home in portal-visibility.ts. */
 const FORBIDDEN: Array<{ name: string; re: RegExp }> = [
-  { name: "draft exclusion (contracts, invoices)", re: /status\s*<>\s*'draft'/ },
+  { name: "draft exclusion (contracts)", re: /status\s*<>\s*'draft'/ },
+  // PV3-02d: invoices are hidden while `draft` OR `approved`, written as a NOT IN list.
+  { name: "unissued-invoice exclusion (invoices)", re: /status\s+NOT\s+IN\s*\(\s*'draft'/ },
   { name: "client-side gate", re: /actor_side\s*=\s*'client'/ },
   { name: "hidden report stage", re: /track\s*<>\s*'report'/ },
   { name: "revoked-contact exclusion", re: /status\s*<>\s*'revoked'/ },
@@ -339,10 +394,6 @@ const NOT_YET_SWITCHED: Record<string, string> = {
   "src/core/client-website-access.controller.ts":
     "WSK-49f website-editor contact list (staff + portal surfaces): `cc.status <> 'revoked'` inline, plus " +
     "`cc.project_id IS NULL`, which the People predicate does not have. Outside PV3-02's owned paths.",
-  "src/mail/thread.controller.ts":
-    "MAIL-33 portal mail threads: the gate branch inlines `actor_side = 'client'` + the run scope; the run " +
-    "branch admits a project-less run to a project-scoped contact, which is WIDER than runInPortalScope " +
-    "(the portal's own run list does not). Needs a ruling before it can use a builder. Outside PV3-02's owned paths.",
 };
 
 /** The portal controllers PV3-02 switched. The scan must find every one, or it is broken. */
@@ -366,7 +417,7 @@ describe("PV3-02 guard — portal-facing files carry no inline row-visibility li
 
   it("the forbidden patterns are live: each matches the predicate that now owns it", () => {
     const own = [
-      contractClientVisible("k"), gateClientVisible("g"), runStageClientVisible("s"),
+      contractClientVisible("k"), invoiceClientVisible("i"), gateClientVisible("g"), runStageClientVisible("s"),
       clientContactClientVisible("cc"), PROJECT_SCOPE,
     ].join("\n");
     for (const f of FORBIDDEN) expect(own).toMatch(f.re);

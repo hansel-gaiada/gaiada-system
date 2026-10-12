@@ -33,6 +33,7 @@ import { AuthGuard } from "../auth/guards";
 import { authorize } from "../core/http";
 import { isElevated } from "../admin/elevated";
 import { resolvePortalScope } from "../core/portal-scope";
+import { gateClientVisible, runInPortalScope } from "../core/portal-visibility";
 import { storage } from "../core/storage";
 import { MAIL_THREAD_ENTITY_KINDS, authorizeThreadParent } from "./thread-authz";
 import type { StoredAttachment } from "./inbound/intake";
@@ -244,7 +245,7 @@ export class MailThreadController {
    *  `mail_messages` rows keyed the same way, and `runId` alone can never surface them (an entity-scoped
    *  read is keyed on the exact `(entity_type, entity_id)` pair, never "any thread on this run"). The
    *  ownership predicate mirrors `PortalController.decideGate`'s own gate-ownership check exactly
-   *  (`actor_side = 'client'`, joined through the run to the SAME client/project scope) — a gate this
+   *  (a client-side gate, joined through the run to the SAME client/project scope, both from portal-visibility.ts) — a gate this
    *  client cannot legitimately act on must not leak its thread either, even if the client happens to
    *  own the parent run. */
   @Get(":tenantId/portal/mail/threads")
@@ -262,17 +263,12 @@ export class MailThreadController {
       if (!UUID_RE.test(gateId)) throw new BadRequestException("gateId must be a valid id");
       const owned = await withTenants([tenantId], async (c) => {
         const scope = await resolvePortalScope(c, req.principal);
-        // Predicate shape is IDENTICAL to `PortalController.decideGate`'s own ownership check
-        // (`core/portal.controller.ts`) — same table join, same `actor_side = 'client'` gate, same
-        // `($n IS NULL OR project_id = ANY($n))` project clause, deliberately WITHOUT the extra
-        // "OR project_id IS NULL" this file's `runId` branch below carries: mirroring decideGate here
-        // means a client can read a gate's thread in exactly the cases they could act on that same
-        // gate, never a case wider than that.
+        // PV3-02b: built from the SAME builders as `PortalController.decideGate`'s ownership read
+        // (`runInPortalScope` for the run and the caller's reach, `gateClientVisible` for the client-side
+        // gate), so a client reads a gate's thread in exactly the cases they could act on that gate.
         const g = await c.query<{ id: string }>(
           `SELECT g.id FROM pipeline_gates g JOIN pipeline_runs r ON g.run_id = r.id
-            WHERE g.id = $1 AND g.deleted_at IS NULL AND g.actor_side = 'client' AND r.deleted_at IS NULL
-              AND r.client_id = ANY($2::uuid[])
-              AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
+            WHERE g.id = $1 AND ${runInPortalScope("r", { clients: 2, projects: 3 })} AND ${gateClientVisible("g")}`,
           [gateId, scope.clientIds, scope.projectIds],
         );
         return g.rows.length > 0;
@@ -287,10 +283,11 @@ export class MailThreadController {
     const owned = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       const r = await c.query<{ id: string }>(
+        // PV3-02b: the portal's own run scope. A run with no project is admitted to a client-wide contact
+        // only; this branch used to add `OR r.project_id IS NULL`, which let a project-scoped contact
+        // read a thread on a run the portal's run list and run page never show them.
         `SELECT r.id FROM pipeline_runs r
-          WHERE r.id = $1 AND r.deleted_at IS NULL
-            AND r.client_id = ANY($2::uuid[])
-            AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]) OR r.project_id IS NULL)`,
+          WHERE r.id = $1 AND ${runInPortalScope("r", { clients: 2, projects: 3 })}`,
         [runId, scope.clientIds, scope.projectIds],
       );
       return r.rows.length > 0;

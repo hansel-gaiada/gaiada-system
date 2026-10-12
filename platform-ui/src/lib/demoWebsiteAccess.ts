@@ -122,6 +122,8 @@ export function websiteAccessDemo(method: string, p: string, userId: string, bod
         capability: c.capability, status: c.status, email: c.email, name: c.name,
         invitedAt: "2026-09-01T09:00:00Z", activatedAt: c.status === "active" ? "2026-09-02T09:00:00Z" : null,
         hasAccount: c.status === "active",
+        // PV3-09: listed in the portal People area unless revoked (BFF §22d); this store has no revoked state.
+        clientVisible: true,
       })),
     );
   }

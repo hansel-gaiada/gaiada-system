@@ -66,6 +66,46 @@ The transport that makes the W1a writers' room rules live (built by the M5 sessi
 - **Vocabulary 1.3.0 (MINOR):** the breaking-change classifier gains a `lintKeys` dimension and pins the bump as minor. It is re-vendored into the api, the blocks package and platform-nest (`src/modules/webdev/vocabulary`). The new `w3c-lint-content` suite now runs in CI and in the Linux gate.
 - Verified on GitHub Actions 38199176963: webdesk-api 1605 passed / 2 skipped, blocks 32/0, every vocabulary suite green.
 
+### platform-nest `0.74.0` - PV-3 waves 2-3: client visibility on staff payloads, contract and payment tools, portal isolation fixes (2026-10-12) - PROTOTYPED
+
+PV-3 waves 2 and 3 (tickets `docs/plans/2026-10-11-pv3-hub-symmetry-tickets.md`: PV3-02b, 02c, 02d, 06, 07). No migration.
+
+- **PV3-07:** every staff hub payload carries `clientVisible`, computed in SQL from `core/portal-visibility.ts`:
+  - covered: projects, deliverables (through the project), contracts, invoices, invoice payments (through the invoice), pipeline runs, gates and stages, change requests, client contacts, and the overview's `needsUs` / `needsClient` items;
+  - tasks and meetings are always `false`;
+  - a parity test proves the staff `true` set equals what the portal returns to a client-wide contact, kind by kind, plus the NULL-project rules for a project-scoped contact;
+  - the deliverables `?clientId=` facet now goes by the project's client, as the portal does;
+  - the overview's payment and contract items link to `/clients/:id/billing`.
+- **PV3-06 (agentic-native bar):** `contracts.list/get/createDraft/updateDraft/send/countersign` and `invoicePayments.list/decide`:
+  - send is MEDIUM; countersign and decide are HIGH, each with a D14 executor;
+  - `createDraft` is idempotent on `ix_contracts_reference_uniq`;
+  - countersign, decide and create authorize before they validate;
+  - an agent or n8n can no longer set a contract `status` through PATCH (`status_not_allowed_via_automation`), so void stays human-only.
+- **Portal isolation fixes:**
+  - PV3-02b: mail threads follow the portal's run scope.
+  - PV3-02c:
+    - scope sign-off can decide only the run's client-side `scope_signoff` gate;
+    - a deleted project's deliverable file is 404;
+    - a payment shows only through a visible invoice;
+    - the receipt download no longer 500s on an unused parameter.
+  - PV3-02d: an `approved` (not yet sent) invoice is hidden from the client like a draft.
+- Verified: targeted Linux runs per ticket with teeth, plus the full platform-nest gate of wave 2 on sumopod and main's CI on the merged tree.
+
+### platform-ui `0.93.0` - PV-3 waves 2-3: the Contracts & billing page; every hub row says who sees it (2026-10-12) - PROTOTYPED
+
+- **PV3-08:** `/clients/[id]/billing` ("Contracts & billing", between Business and People, with a badge).
+  - Contracts: draft (with optional PDF), edit, void, send (disabled with its reason), and countersign shown only when `canCountersign`, with the signatures.
+  - Invoices as a list (D7 open).
+  - Payments to confirm: confirm, or reject with a reason; the "you recorded this payment" refusal is shown in words.
+  - Every read refuses explicitly.
+  - A stateful demo store mirrors the backend's rules.
+- **PV3-09:** every row on the hub's Overview, Projects, Contracts & billing and People shows **Client sees this** or **Internal**, from the backend's `clientVisible` only.
+  - A missing field renders nothing; it never defaults.
+  - Each state has a text label and a distinct edge, not colour alone.
+  - The Business area notes "The client sees and edits this profile".
+  - A new hub axe sweep covers light and dark.
+- Verified on the merged tree: hub, markers, hub-axe, billing-flow and portal e2e on sumopod; ui suite and `next build` in main's CI.
+
 ### platform-nest `0.73.0` - M5-P1-g and M5-G5b: a race-safe lead convert with no name on the bus; privacy approvals store no identifiers (2026-10-12) - DEV-VERIFIED
 
 Two defects found by the M5-P1-f end-to-end QA, and the G5 privacy tools made safe to file unattended (built by the M5 session).

@@ -20,6 +20,10 @@ import {
 } from "./client-input";
 import { assertGroupCompany } from "./group-company";
 import { emptyProfileState, loadProfileRow, saveProfileRow } from "./centre/store";
+import {
+  changeRequestClientVisible, contractClientVisible, postReviewClientVisible, staffClientVisible,
+  staffGateClientVisible, staffInvoicePaymentClientVisible,
+} from "../../core/portal-visibility";
 
 // CC-D10: every read of a client row carries its owner (account manager) and the owner's name. The
 // users join is LEFT so an ownerless client, or one whose owner was hard-deleted, still reads.
@@ -495,20 +499,25 @@ export class ClientsController {
     return { byCurrency, primary: byCurrency[0] ?? null };
   }
 
-  /** Outstanding items only WE can clear. See the endpoint header for why this list exists. */
+  /** Outstanding items only WE can clear. See the endpoint header for why this list exists.
+   *
+   *  PV3-07: every item carries `clientVisible` (a client-wide contact of this client can read the row in
+   *  the portal), computed in each SELECT from portal-visibility.ts. A payment's travels through its
+   *  invoice, hence the LEFT JOIN below: a payment whose invoice is a draft reads `false`. */
   private async needsUs(c: PoolClient, clientId: string) {
     const [payments, reviews, requests, drafts] = await Promise.all([
       c.query(
         `SELECT pp.id, pp.invoice_id AS "invoiceId", pp.amount::float8 AS amount, pp.currency,
-                pp.created_at AS "since"
-           FROM invoice_payments pp
+                pp.created_at AS "since", ${staffInvoicePaymentClientVisible("pp", "i")} AS "clientVisible"
+           FROM invoice_payments pp LEFT JOIN invoices i ON i.id = pp.invoice_id
           WHERE pp.client_id = $1 AND pp.status = 'pending' AND pp.deleted_at IS NULL
           ORDER BY pp.created_at ASC`,
         [clientId],
       ),
       // The social third wall applies to this join — see the endpoint header.
       c.query(
-        `SELECT r.id, r.comment, r.decided_at AS "since", pst.title AS "postTitle"
+        `SELECT r.id, r.comment, r.decided_at AS "since", pst.title AS "postTitle",
+                ${staffClientVisible("r", postReviewClientVisible("r"))} AS "clientVisible"
            FROM social_post_client_reviews r
            JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
            JOIN social_posts pst       ON pst.id = v.post_id  AND pst.tenant_id = v.tenant_id
@@ -517,14 +526,16 @@ export class ClientsController {
         [clientId],
       ),
       c.query(
-        `SELECT w.id, w.title, w.kind, w.created_at AS "since"
+        `SELECT w.id, w.title, w.kind, w.created_at AS "since",
+                ${staffClientVisible("w", changeRequestClientVisible("w"))} AS "clientVisible"
            FROM webdev_change_requests w
           WHERE w.client_id = $1 AND w.status = 'new' AND w.deleted_at IS NULL
           ORDER BY w.created_at ASC`,
         [clientId],
       ),
       c.query(
-        `SELECT k.id, k.title, k.created_at AS "since"
+        `SELECT k.id, k.title, k.created_at AS "since",
+                ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible"
            FROM contracts k
           WHERE k.client_id = $1 AND k.status = 'draft' AND k.deleted_at IS NULL
           ORDER BY k.created_at ASC`,
@@ -536,25 +547,26 @@ export class ClientsController {
         kind: "payment" as const, id: r.id as string,
         label: "Confirm a client-recorded payment",
         context: `${r.currency as string} ${r.amount as number}`,
-        href: `/invoices/${r.invoiceId as string}`, since: r.since,
+        // PV3-07: payments are confirmed on the client's Contracts & billing page (PV3-08).
+        href: `/clients/${clientId}/billing`, since: r.since, clientVisible: r.clientVisible === true,
       })),
       ...reviews.rows.map((r: Record<string, unknown>) => ({
         kind: "review" as const, id: r.id as string,
         label: "Client asked for changes on a post",
         context: (r.postTitle as string) ?? "Social post",
-        href: `/clients/${clientId}/requests`, since: r.since,
+        href: `/clients/${clientId}/requests`, since: r.since, clientVisible: r.clientVisible === true,
       })),
       ...requests.rows.map((r: Record<string, unknown>) => ({
         kind: "request" as const, id: r.id as string,
         label: "Triage a new change request",
         context: r.title as string,
-        href: `/clients/${clientId}/requests`, since: r.since,
+        href: `/clients/${clientId}/requests`, since: r.since, clientVisible: r.clientVisible === true,
       })),
       ...drafts.rows.map((r: Record<string, unknown>) => ({
         kind: "contract" as const, id: r.id as string,
         label: "Send a drafted agreement",
         context: r.title as string,
-        href: `/clients/${clientId}/commercial`, since: r.since,
+        href: `/clients/${clientId}/billing`, since: r.since, clientVisible: r.clientVisible === true,
       })),
     ];
   }
@@ -562,11 +574,16 @@ export class ClientsController {
   /** Outstanding items only the CLIENT can clear — the staff-side view of what the portal is asking of
    *  them. Kept in step with `portal-workspace.controller.ts:needsYou`: same two sources (pending
    *  client-side gates, sent-but-unsigned contracts) plus pending post reviews, which that method
-   *  deliberately omits because its own tab carries no badge. */
+   *  deliberately omits because its own tab carries no badge.
+   *
+   *  PV3-07: each item carries `clientVisible`, computed from portal-visibility.ts (a gate's through its
+   *  run). Everything here should read `true`, since it is what the portal asks of the client; the flag
+   *  is computed rather than assumed, so a drift between this list and the portal shows as `false`. */
   private async needsClient(c: PoolClient, clientId: string) {
     const [gates, contracts, reviews] = await Promise.all([
       c.query(
-        `SELECT g.id, g.kind, g.created_at AS "since", r.id AS "runId", r.title AS "runTitle"
+        `SELECT g.id, g.kind, g.created_at AS "since", r.id AS "runId", r.title AS "runTitle",
+                ${staffGateClientVisible("g", "r")} AS "clientVisible"
            FROM pipeline_gates g JOIN pipeline_runs r ON r.id = g.run_id
           WHERE r.client_id = $1 AND r.deleted_at IS NULL
             AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL
@@ -576,7 +593,8 @@ export class ClientsController {
       c.query(
         // Same "already countersigned by that side" exclusion the portal's own query carries: `status`
         // flips only once BOTH parties are in, so a row can read 'sent' while the client has signed.
-        `SELECT k.id, k.title, k.created_at AS "since"
+        `SELECT k.id, k.title, k.created_at AS "since",
+                ${staffClientVisible("k", contractClientVisible("k"))} AS "clientVisible"
            FROM contracts k
           WHERE k.client_id = $1 AND k.deleted_at IS NULL AND k.status = 'sent'
             AND NOT EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client')
@@ -584,7 +602,8 @@ export class ClientsController {
         [clientId],
       ),
       c.query(
-        `SELECT r.id, r.requested_at AS "since", pst.title AS "postTitle"
+        `SELECT r.id, r.requested_at AS "since", pst.title AS "postTitle",
+                ${staffClientVisible("r", postReviewClientVisible("r"))} AS "clientVisible"
            FROM social_post_client_reviews r
            JOIN social_post_variants v ON v.id = r.variant_id AND v.tenant_id = r.tenant_id
            JOIN social_posts pst       ON pst.id = v.post_id  AND pst.tenant_id = v.tenant_id
@@ -603,19 +622,19 @@ export class ClientsController {
         kind: "gate" as const, id: g.id as string,
         label: GATE_LABEL[g.kind as string] ?? "Client input needed",
         context: (g.runTitle as string) ?? "Delivery run",
-        href: `/pipeline/${g.runId as string}`, since: g.since,
+        href: `/pipeline/${g.runId as string}`, since: g.since, clientVisible: g.clientVisible === true,
       })),
       ...contracts.rows.map((k: Record<string, unknown>) => ({
         kind: "contract" as const, id: k.id as string,
         label: "Awaiting client signature",
         context: k.title as string,
-        href: `/clients/${clientId}/commercial`, since: k.since,
+        href: `/clients/${clientId}/billing`, since: k.since, clientVisible: k.clientVisible === true,
       })),
       ...reviews.rows.map((r: Record<string, unknown>) => ({
         kind: "review" as const, id: r.id as string,
         label: "Awaiting client post approval",
         context: (r.postTitle as string) ?? "Social post",
-        href: `/clients/${clientId}/requests`, since: r.since,
+        href: `/clients/${clientId}/requests`, since: r.since, clientVisible: r.clientVisible === true,
       })),
     ];
   }

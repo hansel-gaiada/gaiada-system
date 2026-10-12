@@ -10,6 +10,7 @@ import { config } from "../config";
 import { authorize, writeActivity, notify } from "./http";
 import { validateCustomFields } from "./custom-fields";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { projectClientVisible, staffClientVisible } from "./portal-visibility";
 import { recomputeRollups } from "../rollups/engine";
 import { AuthGuard } from "../auth/guards";
 import { getServiceScopes } from "./service-scopes";
@@ -157,8 +158,11 @@ export class CoreController {
       // consumer could show a project's target but never the start of its authored range — and the
       // authored-vs-derived slippage signal (decision 12) needs both ends. One extra column on a
       // query that already reads the row.
+      // PV3-07: `clientVisible` = a client-wide contact of this project's client can read it in the
+      // portal, composed from the portal's own predicate (portal-visibility.ts), never retyped here.
       c.query(
-        `SELECT id, name, status, client_id, is_internal, owner_id, start_date, due_date, custom_fields, department_id, short_code AS "shortCode"
+        `SELECT id, name, status, client_id, is_internal, owner_id, start_date, due_date, custom_fields, department_id, short_code AS "shortCode",
+                ${staffClientVisible("", projectClientVisible(""))} AS "clientVisible"
                FROM projects WHERE deleted_at IS NULL AND ${filter.sql} ORDER BY created_at DESC`,
         filter.params,
       ),

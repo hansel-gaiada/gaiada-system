@@ -4,6 +4,8 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getClientOverview } from "@/lib/clientHub";
+import { countContractsToCountersign } from "@/lib/contracts-data";
+import { billingBadgeCount } from "@/lib/contracts";
 import { deleteClientForm, setClientArchivedForm } from "@/lib/clientWorkActions";
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
@@ -50,6 +52,14 @@ export default async function ClientHubLayout({
   const overview = await getClientOverview(userId, tenant, clientId);
   if (!overview) notFound();
 
+  // PV3-08 — the Contracts & billing badge: payments waiting for us to confirm (free, from the aggregate
+  // already fetched: `needsUs` carries one `payment` item per pending claim) plus contracts this caller
+  // may countersign now (one read). That read is fail-soft HERE, unlike the overview: a caller who may not
+  // read contracts must still get every other tab, so a refused read leaves that part of the badge out
+  // (`null`), never counted as "0". The billing page itself shows the refusal in words.
+  const toCountersign = await countContractsToCountersign(userId, tenant, clientId);
+  const billingBadge = billingBadgeCount(overview.needsUs.filter((i) => i.kind === "payment").length, toCountersign ?? 0);
+
   // The Overview badge is `needsUs`, NOT `needsUs + needsClient`. The hub's job is to surface what
   // this company has to do; a badge that also counts what we are waiting on THEM for would never
   // reach zero for a healthy client and would therefore stop meaning anything.
@@ -57,12 +67,13 @@ export default async function ClientHubLayout({
     { segment: "", label: "Overview", badge: overview.needsUs.length },
     // PV3-05 — the hub mirrors the portal's areas (PV-D4). "Work" is now Projects (it also holds
     // deliverables, approvals, requests and meetings); Profile is Business; "Contacts & meetings" is
-    // People (meetings moved to Projects). Every path is unchanged. Contracts & billing arrives with its
-    // page in PV3-08, so no tab ever links to a page that is not there.
+    // People (meetings moved to Projects). Every path is unchanged; `billing` is the one new route.
     { segment: "work", label: "Projects", badge: overview.tasks.overdue },
     // CC-D8 — Business is the former Client Centre workspace (how the client's business is set up);
     // People is the former Details tab (owner, contact details, who on the client side has portal access).
     { segment: "profile", label: "Business" },
+    // PV3-08 — contracts, payments to confirm and the invoice list, between Business and People.
+    { segment: "billing", label: "Contracts & billing", badge: billingBadge },
     { segment: "contacts", label: "People" },
     // CC-D10 / PV3-05 — internal notes plus the change history. Staff only: the client never reads
     // either, so it is styled apart from every client-visible area (`internal`).
