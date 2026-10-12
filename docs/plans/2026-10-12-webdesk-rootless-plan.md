@@ -20,7 +20,7 @@ probe output go in a gitignored `*.local.md` file, never here.
 | D1 | A new system user **`webdesk-rootless`**, uid/gid **940**, runs the daemon. Not `webdesk-svc`. | uid 999 (`webdesk-svc`) is the uid three rootful redis processes run as today, and it owns the secrets. |
 | D2 | subuid/subgid **700000000:65536** (live), **700065536:65536** (proof) | Above useradd's `SUB_UID_MAX` (600100000), so no future account can ever be given them. They overlap none of the five existing ranges. |
 | D3 | **Linger** + the user's systemd `docker.service`. Socket `unix:///run/user/940/docker.sock`. | This is the supported rootless lifecycle. Linger already works on this box: another account uses it. |
-| D4 | **cgroup v2 delegation** pinned (`Delegate=cpu cpuset io memory pids` on `user@940.service` only), plus a **root-owned envelope** on `user-940.slice`: `CPUQuota=100% MemoryMax=5G TasksMax=4096` | Keeps WSK-D72's per-service cpus/mem/pids enforced. The envelope enforces WSK-D72's 1.0 vCPU for the whole stack, daemon included, as root's limit. |
+| D4 | **cgroup v2 delegation** pinned (`Delegate=cpu memory pids` on `user@940.service` only), plus a **root-owned envelope** on `user-940.slice`: `CPUQuota=100% MemoryMax=5G TasksMax=4096` | Keeps WSK-D72's per-service cpus/mem/pids enforced. The envelope enforces WSK-D72's 1.0 vCPU for the whole stack, daemon included, as root's limit. |
 | D5 | Network driver **slirp4netns** (sandbox + seccomp forced), port driver **builtin**, **`DETACH_NETNS=false`**, host loopback disabled | Debian-supported, no SUID helper. The ingress path never touches slirp. `--net=host` stays inside RootlessKit's netns. |
 | D6 | **Source-IP propagation is not needed** | The only client of `127.0.0.1:8380` is host nginx. The api has no `trustProxy`. The client IP travels at L7 (`X-Real-IP` / `X-Forwarded-For`). |
 | D7 | The egress guard moves to **OUTPUT** and matches the **socket owner** (uid 940 + its subuid range). Listeners are muted (REPLY-direction drop). IPv6 is dropped entirely. OTLP is matched by `--ctorigdst`. | Rootless container traffic leaves the host as slirp4netns sockets owned by uid 940. No bridge subnet is ever visible to the host. |
@@ -70,7 +70,7 @@ measurements:
 | Guard design (OUTPUT, owner match, REPLY-mute, `--ctorigdst` OTLP, v6 drop-all, marker, `check` drift detection) | **Kept** | It is right, and it is the core of the design (§5). |
 | `webdesk-rootless-guard.sh` | **Kept; cleaned up** | Literal newlines had been pasted into `printf`/`tr` strings. v6 rendering now also refuses a uid inside its own range. |
 | Profiles, uid 940/941, subid ranges, slice envelope, the `user@` drop-in, `grant-socket.sh` | **Kept** | Re-verified against the measured facts (§1). |
-| `install-rootless.sh` | **Rewritten in part** | **Bug: it could never run.** The operator check used the lower-case user regex, so the default operator `Hansel` always died. Added: the bind-source step and its checks (D8), `apt-get update` before installing, `--etc-access` / `--tree`, a guard against a uid inside its own range, and a check that the bridge does not shadow docker0. A false "config changed, not restarted" warning on first install is gone. A cgroup-root override makes the checks testable. |
+| `install-rootless.sh` | **Rewritten in part** | **Bug: it could never run.** The operator check used the lower-case user regex, so the default operator `Hansel` always died. Added: the bind-source step and its checks (D8), `apt-get update` before installing, `--etc-access` / `--tree`, a guard against a uid inside its own range, and a check that the bridge does not shadow docker0. A false "config changed, not restarted" warning on first install is gone. A cgroup-root override makes the checks testable. **Review round 2:** root never writes inside the daemon user's tree (see below); `remove` derives the uid from passwd and refuses a differing `--uid`, needs the per-user config with a matching `RL_UID` and `RL_ROLE=proof` (no default role), reads the subuid range from `/etc/subuid`, and deletes only a switch file the install recorded (`RL_OTLP_CREATED=1`) with `rm -f`; no recursive `rm`. |
 | `wd-volume-copy.sh` | **Rewritten in part** | **Bug:** the root-owner restore ran `chown <uid> <gid> /dst`, and worked only by falling through to a later command. **Bug:** an unreadable destination counted as empty. The emptiness check is now fail-closed with `DAC_READ_SEARCH`. The busybox tar of `postgres:16-alpine` was replaced by GNU tar (`node:22-bookworm`, the same image on both sides). Argument parsing is now pure. Subid lookups must find exactly one entry. |
 | `docker.service.in` | **Changed** | The operator grant is non-fatal (`ExecStartPost=-…`): a failed ACL breaks deploys loudly, not WebDesk. The unverifiable "since Docker 29.5" claim was replaced by the installed script's own words. |
 | `daemon.json.in` | **Changed** | `native.cgroupdriver=systemd` is pinned, so limits cannot silently fall back to cgroupfs. |
@@ -114,8 +114,11 @@ that user, including the ERP's deploy.
 
 **cgroups.**
 - The drop-in `/etc/systemd/system/user@940.service.d/50-webdesk-rootless.conf` sets
-  `Delegate=cpu cpuset io memory pids`. That pins the measured default (`pids memory cpu`) against future change and
-  adds cpuset and io, so `docker info` reports no missing controller.
+  `Delegate=cpu memory pids`. That pins the measured default (`pids memory cpu`) against future change. io and cpuset
+  are deliberately **not** delegated: a delegated controller is enabled in `user.slice` for **every** user, and
+  WSK-D72 needs only cpu, memory and pids. If `docker info` then reports a missing io or cpuset controller, that is
+  expected and not a defect: the installer's `no_warnings` check matches cgroup, cpu (as a word), memory, pids and
+  swap only. A2 confirms the output on the proof daemon.
 - dockerd uses the systemd cgroup driver (pinned in `daemon.json`). Each container gets its own scope with `cpu.max`
   = NanoCpus/10000 over 100000, `memory.max` and `pids.max`.
 - **The envelope.** `/etc/systemd/system/user-940.slice.d/50-webdesk-rootless.conf` holds
@@ -209,6 +212,17 @@ host's.
 - The config `/etc/default/webdesk-rootless-<user>`, parsed and never sourced.
 - The OTLP switch: the **same** `/etc/webdesk/guard.env` (`WEBDESK_OTLP_PORT=4319`) the rootful guard reads. One
   switch serves both guards.
+- **The switch is not trusted blindly** (the guard runs as root and the file is input to its rules). The OTLP
+  exception stays **OFF**, with a warning, unless:
+  - the file is a regular file (not a symlink) owned by root, and neither it nor its **directory** is group- or
+    other-writable, and the directory is root-owned;
+  - the address (`WEBDESK_OTLP_ADDR`, default 172.17.0.1) is one of **this host's own** IPv4 addresses
+    (`ip -4 -o addr show`), and not loopback, link-local (so never the 169.254.169.254 metadata service) or 0/8;
+  - the port is 1024-65535 and not 22.
+  Consequence to decide (Q5): `/etc/webdesk` is owned by `webdesk-svc` today, so the live switch at
+  `/etc/webdesk/guard.env` is **refused** until T9 re-owns the directory to root (or the switch moves to a root-owned
+  directory for both guards). That fails safe (OTLP off, a liveness loss for WebDesk's own metrics), not open. A proof
+  install may not point its switch under `/etc/webdesk`.
 
 **Exact v4 rules** for the live install with OTLP on. `test-rootless.sh` pins this text line for line.
 
@@ -220,7 +234,7 @@ host's.
 -A WDRL940-OUT -m conntrack --ctdir REPLY -j WDRL940-DENY    (any other listener of the set is mute)
 -A WDRL940-OUT -d 169.254.169.254/32 -p udp -m udp --dport 53 -j RETURN
 -A WDRL940-OUT -d 169.254.169.254/32 -p tcp -m tcp --dport 53 -j RETURN
--A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -m hashlimit --hashlimit-above 300/sec --hashlimit-burst 600 --hashlimit-mode srcip --hashlimit-name otlp940 -j DROP
+-A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -m hashlimit --hashlimit-above 300/sec --hashlimit-burst 600 --hashlimit-mode srcip --hashlimit-name o940x060731 -j DROP
 -A WDRL940-OUT -p tcp -m conntrack --ctorigdst 172.17.0.1/32 --ctorigdstport 4319 -j RETURN
 -A WDRL940-OUT -m addrtype --dst-type LOCAL -j WDRL940-DENY  (every host address: lo, docker0, wg0, the NIC)
 -A WDRL940-OUT -d {0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24
@@ -231,11 +245,21 @@ host's.
 v6: -A WDRL940-SEL (both selectors) -j WDRL940-DENY ; WDRL940-DENY = LOG (rate-limited) + DROP
 ```
 
+**The hashlimit table name** carries a digest: `o<uid>x<first 6 hex of sha256("<addr>:<port>:<pps>")>` (at most 15
+characters, the kernel's name limit). `xt_hashlimit` reuses an existing table **by name**, so with a fixed name a
+changed `WEBDESK_OTLP_PPS` would keep the old rate across an atomic reload. With the digest, a changed rate, port or
+address makes a **new** table (the old one lingers, unreferenced, until the chain is removed). This is the design
+intent, not yet observed on the kernel: **A2 must confirm** that after changing the cap and a `reload`, the new rate
+is the one enforced (the 2 pps burst check below, then a different cap), and that `/proc/net/ipt_hashlimit/` shows
+the new name.
 **Lifecycle (fail closed).**
 - `apply` loads both payloads with `iptables-restore --noflush`. Declaring a chain flushes it, so a reload is atomic
   per table.
 - It then hooks OUTPUT, and only then writes `/run/webdesk-rootless-guard/<user>.active`.
-- `docker.service` refuses to start without that marker (`ExecStartPre=test -e`).
+- `docker.service` refuses to start without that marker (`ExecStartPre=test -e`). A user unit cannot run a root
+  command, so the full check runs one level up: `user@940.service` has `ExecStartPre=` the guard's own `check 940`
+  **as root**. A flushed or drifted table therefore keeps the user manager, and so the daemon, from (re)starting
+  unguarded. A daemon restart *inside* a running user manager is covered by the marker test only.
 - `user@940.service` `Wants=` the guard and is ordered `After=` it, so at boot the guard is in place first. A guard
   that fails leaves WebDesk **down**, never unguarded.
 - A config that fails to render changes nothing: the old rules and marker stay, and `check` fails.
@@ -312,12 +336,30 @@ The project tree's own bind sources (`proxy/Caddyfile`, `postgres/init-roles.sh`
 - The destination container extracts as container root, so the **kernel's** user namespace maps every owner. There is
   no uid arithmetic in the copy.
 - `verify` then compares, as root, a manifest of both host paths (path, type, mode, in-container owner after mapping
-  back, size, sha256).
+  back, size, sha256, and the whole-second mtime of files and directories).
 - It refuses:
   - a source used by a running container;
   - a missing destination (compose must create it, so the labels are right);
   - a non-empty destination without `--replace`;
+  - `--replace` toward the **rootful** daemon, and `--replace` of any destination that **any** container (running or
+    stopped) references, unless `--replace-rootful-rollback-copy` is also given. During a cut-over the rootful
+    containers are stopped, and `not_in_use` sees only running ones, so a swapped `--from`/`--to` would otherwise
+    empty the rollback copy;
+  - a source that holds extended attributes, POSIX ACLs or multiply-linked regular files (see the limit below);
+  - `--keep` of an existing path (it is created 0700 and never reused or chmod'ed; its parent must be owned by root
+    or the sudo caller and writable by nobody else);
   - a helper image missing on either side.
+
+**Documented limit (M5).** The copy runs `tar` without `--xattrs --acls`, and the manifest sees neither xattrs, ACLs,
+hard links nor sub-second times, so a volume with any of them would not be a faithful copy. Today's data has none
+(§1: no hardlinks, no xattrs on all 1616 entries), so the safe limit is to **refuse**, not to carry them. The scan runs
+**in the helper image** (default `node:22-bookworm`, Debian, GNU userland), before anything is emptied:
+- hard links: GNU `find /src -xdev -type f -links +1`;
+- xattrs and ACLs: GNU `tar --xattrs --acls --format=pax`, whose extended headers carry `SCHILY.xattr.*` /
+  `SCHILY.acl.*` records, counted over the whole stream (a second full read of the volume; seconds at these sizes).
+  A literal match inside file data would refuse falsely, which is the safe direction.
+An image without GNU tar and find fails the scan and so the copy: pass a Debian-based `--image`. mtimes are compared
+to the second because the tar format stores no more; a symlink's mtime is not compared.
 
 | Volume | Choice | Why |
 |---|---|---|
@@ -343,7 +385,9 @@ Expect **3–5 minutes**; book a **15-minute** window. M4's down/up took 56 s fo
   `webdesk-host-deny`. About 1 minute.
 - **R2**, after writes on rootless:
   1. Archive the rootful volumes.
-  2. Copy back with `wd-volume-copy.sh copy --from unix:///run/user/940/docker.sock --to rootful --volume … --replace`.
+  2. Copy back with `wd-volume-copy.sh copy --from unix:///run/user/940/docker.sock --to rootful --volume … --replace
+     --replace-rootful-rollback-copy`. The extra flag is required on purpose: this overwrites the rootful copy, which
+     is the rollback, and step 1's archive is the only way back from a mistake.
   3. Do R1.
 - The rootful copy is kept for the **7-day soak** (P5).
 
@@ -574,6 +618,17 @@ What it does **not** fix:
    daemons hold WebDesk images (≈1–2 GB). Logs: Loki loses WebDesk's container logs until T8.
 9. **IPv6.** All IPv6 is dropped for the uid set. Revisit only if WebDesk ever needs IPv6 egress.
 10. **Root and Hansel** still control both daemons. Unchanged.
+11. **Paths that bypass the OUTPUT guard after an escape to the daemon uid** (not covered by any netfilter rule here):
+    - `/var/run/postgresql` is 2775 with others r-x: a process of the uid set can reach the host Postgres **unix
+      socket** there without a single IP packet. `pg_hba.conf` and the roles are then the only control.
+    - The `systemd-resolved` varlink/D-Bus sockets are reachable the same way and bypass netfilter.
+    - **Hairpin traffic to the VM's own external IP** is unverified: a connect to the NIC's address is a LOCAL
+      destination and should hit the `--dst-type LOCAL` deny, but this has not been observed. A2 checks it (the
+      "every host address :22" probe must include the external address).
+    - **Root never trusts the daemon user's tree.** The daemon uid owns its home, so it can plant symlinks in it. The
+      installer therefore writes every file there *as that user*, with the content on stdin, and the helper also
+      refuses a symlinked or foreign-owned path component; root never runs `install`, `ln`, `chown` or `rm` inside it.
+      An escapee cannot turn the next `apply` into a root write of, say, `/etc/systemd/system/docker.service`.
 
 | Phase | Effort | Main risk | Mitigation |
 |---|---|---|---|
@@ -619,7 +674,8 @@ P4 execution) stays with the orchestrator, per the estate rule.
 4. **Q4: live window.** Approve the live install (P3) and a 15-minute cut-over window (3–5 minutes of WebDesk `/v1`
    downtime; the uptime alert will fire), with a 7-day soak before the rootful copy is deleted?
 5. **Q5: `/etc/webdesk` ownership.** Re-own it to root (T9)? Two ERP redis containers run as host uid 999, which owns
-   WebDesk's secrets.
+   WebDesk's secrets. It now also gates the live OTLP exception: the guard refuses a switch whose directory is not
+   root-owned (§5), so until this is done `/etc/webdesk/guard.env` is ignored by the rootless guard.
 
 ## 14. Found on the way (not F6; each needs its own box)
 
