@@ -43,6 +43,14 @@ import { assertDealAllowed, SQL_NOW, transitionStage, WON_STAGE, type DealInput 
  *  lock space. */
 export const AGENCY_LEAD_LOCK_NS = 0x414c0001;
 
+/** The EXACT key set of the `pipeline.run.created` payload the convert path emits (M5-P1-g). `title` was
+ *  dropped from it: see the emit below. `createRun` and MI-03's mini-run still send `title` (a meeting or CR
+ *  title, not a person's name); consumers must treat it as optional. */
+export const CONVERT_RUN_CREATED_KEYS = ["actorId", "sourceMeetingId"] as const;
+export function convertRunCreatedPayload(actorId: string): { sourceMeetingId: null; actorId: string } {
+  return { sourceMeetingId: null, actorId };
+}
+
 const OPEN_STATUSES = new Set(["submitted", "in_review", "nurturing"]);
 
 /** Serialize the convert transition for ONE lead. Call as the FIRST statement inside the
@@ -460,6 +468,44 @@ interface LeadRow {
   pipeline_run_id: string | null;
 }
 
+/** Find-or-create the lead contact's global `users` row, safe against concurrent callers.
+ *
+ *  M5-P1-g: this runs BEFORE the lead lock (it is on the global, no-RLS `users` table, so it cannot share
+ *  the tenant transaction), and `users.email` is UNIQUE (migration 0001: `email text NOT NULL UNIQUE`, a
+ *  plain index on `email`, not on `lower(email)`; we always insert the lower-cased address). The old
+ *  SELECT-then-INSERT let N concurrent converts of a lead whose contact had no row yet all miss the SELECT;
+ *  the losers then died on 23505 and returned a 500 instead of queueing on the lead lock and getting the
+ *  clean 409 with the existing ids. `ON CONFLICT (email) DO NOTHING` makes the loser's INSERT wait for the
+ *  winner's commit and then do nothing; the re-select then finds the winner's row (autocommit, so a fresh
+ *  snapshot). The inserted values and the found-path are unchanged, so a successful convert writes exactly
+ *  what it wrote before.
+ *
+ *  `email` must already be trimmed and lower-cased. Returns the user id. Throws BadRequestException when the
+ *  address belongs to a deactivated (soft-deleted) account: it is neither findable nor insertable, and that
+ *  used to surface as an untyped 500 from the unique index. */
+export async function findOrCreateContactUser(
+  c: Pick<PoolClient, "query">,
+  email: string,
+  contactName: string | null,
+  originSite: string,
+): Promise<string> {
+  const select = () =>
+    c.query<{ id: string }>(`SELECT id FROM users WHERE lower(email) = $1 AND deleted_at IS NULL`, [email]);
+  const found = await select();
+  if (found.rows[0]) return found.rows[0].id;
+  const ins = await c.query<{ id: string }>(
+    `INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (email) DO NOTHING
+     RETURNING id`,
+    [newId(), email, contactName ?? email.split("@")[0], originSite],
+  );
+  if (ins.rows[0]) return ins.rows[0].id;
+  // Lost the race (or the address is taken by a soft-deleted account): whoever holds the key has committed.
+  const again = await select();
+  if (again.rows[0]) return again.rows[0].id;
+  throw new BadRequestException("the lead's contact email belongs to a deactivated account; reactivate or change the contact first");
+}
+
 /** Runs the whole design-§4.2/§4.3 spawn as ONE `withTenants` transaction, after two preliminary,
  *  non-racy, read-only steps outside it:
  *
@@ -503,21 +549,7 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
   // rather than silently worked around).
   const contactEmail = lead.contact_email?.trim().toLowerCase() || null;
   const contactUserId = contactEmail
-    ? await withGlobal(async (c) => {
-        const found = await c.query<{ id: string }>(
-          `SELECT id FROM users WHERE lower(email) = $1 AND deleted_at IS NULL`,
-          [contactEmail],
-        );
-        if (found.rows[0]) return found.rows[0].id;
-        const id = newId();
-        await c.query(`INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, $3, $4)`, [
-          id,
-          contactEmail,
-          lead.contact_name ?? contactEmail.split("@")[0],
-          config.originSite,
-        ]);
-        return id;
-      })
+    ? await withGlobal((c) => findOrCreateContactUser(c, contactEmail, lead.contact_name, config.originSite))
     : null;
 
   const answersRow = await withTenants([tenantId], (c) =>
@@ -772,9 +804,14 @@ export async function convertAgencyLead(input: ConvertLeadInput): Promise<Conver
     // `ev/pipeline.run.created`, header line 5) and opens the client `scope_signoff` gate + notifies
     // the PM itself — zero special-casing, same payload shape as `createRun`'s emit
     // (pipeline.controller.ts:234) and MI-03's mini-run emit.
-    await emitEvent(c, tenantId, "pipeline_run", runId, "pipeline.run.created", {
-      sourceMeetingId: null, title: row.org_name, actorId: actorUserId,
-    });
+    //
+    // M5-P1-g: NO `title`. For `/contact/` and `/audit/` web leads `org_name` falls back to the PERSON'S
+    // full name, and a name must never ride the bus (design 2026-10-11-m5-lead-pipeline-design.md §10 risk 6).
+    // Payload keys are exactly {sourceMeetingId, actorId} (`CONVERT_RUN_CREATED_KEYS`, test-pinned). The
+    // one in-tree reader of `title` (work-activity-consumer) now looks it up from `pipeline_runs` when the
+    // payload has none; n8n's `pipeline-fanout` reads only `tenantId`/`entityId` off the envelope and
+    // fetches the run over the authenticated hub; the knowledge-graph bridge falls back to the entity id.
+    await emitEvent(c, tenantId, "pipeline_run", runId, "pipeline.run.created", convertRunCreatedPayload(actorUserId));
     await emitEvent(c, tenantId, "agency_lead", leadId, "agency.lead.converted", {
       clientId, projectId, runId, actorId: actorUserId,
     });

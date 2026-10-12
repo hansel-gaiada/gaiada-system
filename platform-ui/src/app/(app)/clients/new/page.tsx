@@ -9,6 +9,7 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ClientForm } from "@/components/forms/ClientWorkForms";
 import { createClientAction } from "@/lib/clientWorkActions";
 import { listMembers } from "@/lib/entities";
+import { groupCompanyOptions } from "@/lib/clientGroupCompany";
 
 export default async function NewClientPage() {
   const userId = await getSessionUserId();
@@ -25,7 +26,7 @@ export default async function NewClientPage() {
   return (
     <>
       <PageHeader eyebrow="Business" title="New client" breadcrumbs={crumbs} />
-      <Card><ClientForm action={createClientAction} owners={owners} /></Card>
+      <Card><ClientForm action={createClientAction} owners={owners} groupCompanies={groupCompanyOptions(me, tenant)} /></Card>
     </>
   );
 }

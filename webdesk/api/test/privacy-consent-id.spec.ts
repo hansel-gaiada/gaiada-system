@@ -22,11 +22,13 @@ describe("privacy.* by consent id (M5-G6)", () => {
 
   async function seedConsent(t: FixtureTenant, consentId: string, actions: [string, boolean, boolean][]) {
     await withTenantRaw(t.tenantId, async (c) => {
-      for (const [action, analytics, marketing] of actions) {
+      // One transaction means one now(), so each row gets its own explicit, increasing recorded_at; otherwise the
+      // export's ORDER BY recorded_at falls through to the random row id and the history order is a coin toss.
+      for (const [i, [action, analytics, marketing]] of actions.entries()) {
         await c.query(
-          `INSERT INTO consent_records (consent_id, tenant_id, site_id, analytics, marketing, notice_version, action, user_agent_class)
-           VALUES ($1, $2, $3, $4, $5, '3', $6, 'mobile')`,
-          [consentId, t.tenantId, t.siteId, analytics, marketing, action],
+          `INSERT INTO consent_records (consent_id, tenant_id, site_id, analytics, marketing, notice_version, action, user_agent_class, recorded_at)
+           VALUES ($1, $2, $3, $4, $5, '3', $6, 'mobile', now() - make_interval(mins => $7))`,
+          [consentId, t.tenantId, t.siteId, analytics, marketing, action, actions.length - i],
         );
       }
     });

@@ -508,14 +508,28 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
       })();
     });
 
-    it("a malformed clientId matches nothing instead of 500ing on a uuid cast", () => {
-      // Compared as text on purpose: a hand-edited query string is a normal thing to receive, and an
-      // invalid-uuid cast would fail the whole request rather than return an empty list.
-      return (async () => {
-        const r = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?clientId=not-a-uuid`, headers: asUser(admin) });
-        expect(r.statusCode).toBe(200);
-        expect(r.json()).toEqual([]);
-      })();
+    it("PV3-03: clientId=internal returns only the clientless runs", async () => {
+      const cl = await createClient(co, "Internal Facet Co");
+      for (const [client, title] of [[cl, "facet-with-client"], [null, "facet-clientless"]] as [string | null, string][]) {
+        const res = await app.inject({
+          method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin),
+          payload: client ? { title, clientId: client } : { title },
+        });
+        expect(res.statusCode).toBe(201);
+      }
+      const r = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?clientId=internal`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+      const rows = r.json() as Array<{ title: string; client_id: string | null }>;
+      expect(rows.map((x) => x.title)).toContain("facet-clientless");
+      expect(rows.map((x) => x.title)).not.toContain("facet-with-client");
+      expect(rows.every((x) => x.client_id === null)).toBe(true);
+    });
+
+    it("PV3-03: a malformed clientId is a 400, never every client's runs (strict facet)", async () => {
+      // Was `200 []` (compared as text). A hub page asking for one client must never silently get a
+      // wrong list, so a non-uuid is now refused outright.
+      const r = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?clientId=not-a-uuid`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(400);
     });
 
     it("narrows by projectId", () => {

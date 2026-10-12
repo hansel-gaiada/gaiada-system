@@ -10,6 +10,7 @@ import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { validateCustomFields } from "./custom-fields";
 import { AuthGuard } from "../auth/guards";
+import { clientFilterSql, parseClientFilter } from "./client-filter";
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -18,12 +19,15 @@ export class ClientWorkController {
   @Get(":tenantId/deliverables")
   async listDeliverables(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("projectId") projectId?: string, @Query("clientId") clientId?: string) {
     await authorize(req.principal, { kind: "deliverable", tenantId }, "read");
+    // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400, never every client).
+    // Parsed AFTER authorize so a denial is a denial, not a validation error.
+    const filter = clientFilterSql(parseClientFilter(clientId, true), "client_id", 2);
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT id, project_id, client_id, name, status, due_date, custom_fields FROM deliverables
-         WHERE deleted_at IS NULL AND ($1::uuid IS NULL OR project_id = $1) AND ($2::uuid IS NULL OR client_id = $2)
+         WHERE deleted_at IS NULL AND ($1::uuid IS NULL OR project_id = $1) AND ${filter.sql}
          ORDER BY due_date NULLS LAST, created_at DESC`,
-        [projectId ?? null, clientId ?? null],
+        [projectId ?? null, ...filter.params],
       ),
     );
     return rows.rows;

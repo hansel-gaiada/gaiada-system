@@ -393,6 +393,34 @@ describe.skipIf(!TEST_URL)("SMM-05 · publisher orgs + connector registry", () =
     expect(state.calls.filter((c) => c.op === "listIntegrations")).toHaveLength(1); // only the earlier sync
   });
 
+  it("PV3-03: GET accounts?clientId= is a strict facet (uuid / internal / garbage)", async () => {
+    for (const [client, label, handle] of [[clientOne, "f1", "@one"], [clientTwo, "f2", "@two"]] as const) {
+      const ref = orgRef(label);
+      await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: client, publisherOrgRef: ref }, manager);
+      state.integrations.set(ref, [integration({ id: `ig-${label}`, network: "instagram", handle })]);
+      expect((await post(`/api/${A}/modules/social/publisher-orgs/${client}/sync`, {}, manager)).statusCode).toBe(200);
+    }
+    type Acct = { id: string; clientId: string; handle: string };
+    const list = async (qs: string) => {
+      const r = await get(`/api/${A}/modules/social/accounts${qs}`, staff);
+      return { status: r.statusCode, accounts: (r.statusCode === 200 ? r.json().accounts : []) as Acct[] };
+    };
+
+    const one = await list(`?clientId=${clientOne}`);
+    expect(one.status).toBe(200);
+    expect(one.accounts.map((a) => a.handle)).toEqual(["@one"]);
+    expect(one.accounts.every((a) => a.clientId === clientOne)).toBe(true);
+
+    // `social_accounts.client_id` is NOT NULL, so `internal` is an honest, always-empty selection.
+    const internal = await list(`?clientId=internal`);
+    expect(internal.status).toBe(200);
+    expect(internal.accounts).toEqual([]);
+
+    expect((await list(`?clientId=not-a-uuid`)).status).toBe(400);
+    // Absent clientId still lists both clients' accounts.
+    expect((await list("")).accounts.map((a) => a.clientId)).toEqual(expect.arrayContaining([clientOne, clientTwo]));
+  });
+
   it("reports an unconfigured publisher honestly instead of pretending", async () => {
     resetPublishers();
     const status = (await get(`/api/${A}/modules/social/publisher/status`, manager)).json();

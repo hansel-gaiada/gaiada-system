@@ -60,7 +60,7 @@ describe.skipIf(!TEST_URL)("invoices (§4)", () => {
     app = await buildApp();
 
     // A client + project + billable time in the period to invoice against.
-    clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme" } })).json().id;
+    clientId = (await app.inject({ method: "POST", url: `/api/${tenant}/clients`, headers: asUser(admin), payload: { name: "Acme", businessType: "other" } })).json().id;
     projectId = await createProject(tenant, "Acme Site", admin);
     await withTenants([tenant], (c) =>
       c.query(`UPDATE projects SET client_id = $1 WHERE id = $2`, [clientId, projectId]),

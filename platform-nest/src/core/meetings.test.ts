@@ -952,4 +952,49 @@ describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 cap
       }
     });
   });
+
+  describe("PV3-03: ?clientId= facet on GET meetings/recordings", () => {
+    let mine: string;
+    let theirs: string;
+    const ids: Record<string, string> = {};
+
+    beforeAll(async () => {
+      mine = await createClient(co, "Facet Mine Co");
+      theirs = await createClient(co, "Facet Theirs Co");
+      for (const [key, clientId] of [["mine", mine], ["theirs", theirs], ["clientless", undefined]] as [string, string | undefined][]) {
+        const r = await app.inject({
+          method: "POST", url: `/api/${co}/meetings/recordings/start`, headers: asUser(member),
+          payload: { title: `facet-${key}`, kind: "video", ...(clientId ? { clientId } : {}) },
+        });
+        expect(r.statusCode).toBe(201);
+        ids[key] = r.json().id;
+      }
+    });
+
+    const list = async (qs: string) => {
+      const r = await app.inject({ method: "GET", url: `/api/${co}/meetings/recordings${qs}`, headers: asUser(member) });
+      return { status: r.statusCode, rows: (r.statusCode === 200 ? r.json() : []) as Array<{ id: string; client_id: string | null }> };
+    };
+
+    it("a uuid returns only that client's recordings", async () => {
+      const { status, rows } = await list(`?clientId=${mine}`);
+      expect(status).toBe(200);
+      expect(rows.map((x) => x.id)).toContain(ids.mine);
+      expect(rows.map((x) => x.id)).not.toContain(ids.theirs);
+      expect(rows.map((x) => x.id)).not.toContain(ids.clientless);
+      expect(rows.every((x) => x.client_id === mine)).toBe(true);
+    });
+
+    it("internal returns only clientless recordings", async () => {
+      const { status, rows } = await list(`?clientId=internal`);
+      expect(status).toBe(200);
+      expect(rows.map((x) => x.id)).toContain(ids.clientless);
+      expect(rows.map((x) => x.id)).not.toContain(ids.mine);
+      expect(rows.every((x) => x.client_id === null)).toBe(true);
+    });
+
+    it("a non-uuid is a 400 (it was a 500 on the uuid cast)", async () => {
+      expect((await list(`?clientId=not-a-uuid`)).status).toBe(400);
+    });
+  });
 });

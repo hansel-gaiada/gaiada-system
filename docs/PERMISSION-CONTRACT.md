@@ -40,6 +40,19 @@ build against.
 > need the two-person appointment (`owner` is in `ELEVATED_TIER`), so system power still has no
 > single-step path. Ruling: decision log of `docs/plans/2026-10-10-three-perspectives.md`.
 
+> **⚠ PV3-01 (2026-10-11): a company `owner` may countersign that company's contracts.** Cerbos
+> `contract` / `countersign` gains one rule (`resource_contract.yaml`): `roles: ["user"]`, allowed when
+> the principal holds `owner` at company scope ON the contract's tenant (plus `inTenant && notLow`),
+> the shape of PV1-06a's `report_document` / `read_company` rule. This implements the recorded intent
+> ("owner-only, deliberately narrower than company_admin"); it is not a new ruling. Until now only the
+> `platform_admin` wildcard reached the action. The pair is catalogued as `core.contract.countersign`
+> (grantable, sensitive, **`uiGrantable: false`**, migration `202610112330`) only because every literal
+> policy action must be (`cerbos-catalog-alignment.test.ts` (b)). **Holding the key grants nothing:** no
+> `perm_*` rule names it, it is bundled onto `platform_admin` alone (its wildcard), and not onto
+> `company_admin` or `owner`. So `company_admin`, `manager` and every custom role stay refused, whatever
+> `core.contract.*` keys they hold, the new one included. An owner of another company is refused too. The staff contract reads expose the outcome as a
+> `canCountersign` row flag (BFF §16e).
+
 > **⚠ NEW AXIS (2026-08-13, P2-03): `ui_grantable`.** Every catalog entry now carries a REQUIRED
 > `uiGrantable: boolean` (and a DB-side `permissions.ui_grantable`, migration 0110). It answers a
 > DIFFERENT question than `sensitive` or `class`: **may this permission ever appear in a role bundle
@@ -1641,3 +1654,23 @@ tenant in `companies`, with the other action's key only; manager keeps `manage_a
 `owner` assembled from the REAL migrated bundle grants/revokes the website editor and assigns/removes admin over HTTP, audited; an owner of
 another company and an owner on the portal route are refused), and the live probe matrix against Cerbos 0.54.0 (the new rows FAIL on the
 previous policy and pass on this one).
+
+---
+
+## 29. M5-G5b — `agency_privacy.*` may be called unattended; the approval holds hashes, never the identifier (2026-10-12, PROTOTYPED)
+
+No new Cerbos kind, action, role or permission key. Three facts about who may do what, stated so nobody re-derives them:
+
+| Step | Authority | Where |
+|---|---|---|
+| Call a privacy tool (attended, or an agent acting for a person) | `agency_lead:convert` on the tenant (company_admin; platform_admin), checked FIRST by the route | `core/agency-privacy.controller.ts` |
+| **File** the approval an unattended call is suspended into (`POST /automation-approvals`, tool name `agency_privacy.*`) | the generic `automation_approval:create` **and ALSO** `agency_lead:convert` (G5b). The generic `create` is held by manager and member, so without the second check any of them could plant a privacy approval the route would never have filed | `core/approval-arg-minimisers.ts` policy `authorizeFiling` |
+| Decide it | `automation_approval:decide` (company_admin), by someone other than the requester | unchanged |
+| Run it | the requester only, `convert` again, by `approvalId`; maker != checker is re-read from the stored decision | `core/agency-privacy.service.ts` |
+
+What changed in the data, not the permissions: for these three tools the filing path stores `tool_args` as the subject hashes (the G5
+ledger's own SHA-256 helper) plus a display hint, the filed `reason` is generated, the `automation_approval.decided` event carries the hashes
+without the hints, and the ledger's `filed` row is written in the approval's transaction. Still HIGH, still two-person, still never D14
+auto-run (the bar in `core/approval-executables.ts` stands; `execution_status` stays `not_applicable`). The earlier "attended-only" caveat on
+these tools is withdrawn. Proof: `core/agency-privacy.filing.test.ts`, `core/approval-filing-minimise.test.ts` (no service) and
+`core/agency-privacy-unattended.db.test.ts` (Linux gate).

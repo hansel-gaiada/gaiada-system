@@ -66,7 +66,7 @@ describe.skipIf(!TEST_URL)("CC-D10 · client edit, owner, notes, history (client
   it("an ordinary staff member (member role) can create a client, and the chosen status is kept", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/clients`, headers: asUser(member),
-      payload: { name: "Prospect Villa", status: "prospect", contact: { phone: "+62 361 1" } },
+      payload: { name: "Prospect Villa", status: "prospect", businessType: "hotel", contact: { phone: "+62 361 1" } },
     });
     expect(r.statusCode).toBe(201);
     const row = (await app.inject({ method: "GET", url: `/api/${co}/clients/${r.json().id}`, headers: asUser(member) })).json();

@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { hubTabHref, isHubTabActive } from "@/lib/clientHubNav";
 
 // CC-3 — the client hub's tab strip.
 //
@@ -20,23 +21,30 @@ export interface ClientHubTab {
   /** Rendered as a count pill when > 0. Omitted or 0 renders nothing — never a "0" chip, which reads
    *  as a broken badge rather than as "nothing outstanding". */
   badge?: number;
+  /** PV3-05: a STAFF-ONLY area the client never sees (Internal). Styled apart from every other tab and
+   *  labelled in words — see `.ch-tab--internal`. */
+  internal?: boolean;
 }
 
 export function ClientHubTabs({ clientId, tabs }: { clientId: string; tabs: ClientHubTab[] }) {
   const pathname = usePathname() ?? "";
-  const base = `/clients/${clientId}`;
   return (
     <nav aria-label="Client sections" className="ch-tabs">
       {tabs.map((t) => {
-        const href = t.segment ? `${base}/${t.segment}` : base;
-        // Exact match for the index tab, prefix match for the rest. Without the special case
-        // "Overview" would light up on every tab (every path starts with the base), and with only
-        // exact matching a detail route under a tab would light up nothing — the same two-rule shape
-        // `PortalTabs` uses.
-        const active = t.segment ? pathname.startsWith(href) : pathname === base;
+        const href = hubTabHref(clientId, t.segment);
+        // Exact match for the index tab, SEGMENT-BOUNDARY match for the rest (`isHubTabActive`). A bare
+        // `startsWith` lit `/work` for `/workshop`; with only exact matching a detail route under a tab
+        // would light nothing — the same two-rule shape `PortalTabs` uses.
+        const active = isHubTabActive(pathname, clientId, t.segment);
         return (
-          <Link key={t.segment || "overview"} href={href} className="ch-tab" aria-current={active ? "page" : undefined}>
+          <Link
+            key={t.segment || "overview"}
+            href={href}
+            className={t.internal ? "ch-tab ch-tab--internal" : "ch-tab"}
+            aria-current={active ? "page" : undefined}
+          >
             {t.label}
+            {t.internal ? <span className="ch-tab__staff">Staff only</span> : null}
             {t.badge ? <span className="ch-tab__count" aria-label={`${t.badge} outstanding`}>{t.badge}</span> : null}
           </Link>
         );

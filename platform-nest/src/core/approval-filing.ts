@@ -23,6 +23,7 @@ import { config } from "../config";
 import { writeActivity } from "./http";
 import { notifyBestEffort } from "./client-notify";
 import { resolveAutomationApprovalDeciders } from "./approval-deciders";
+import { getApprovalArgsPolicy, minimiseFilingInput } from "./approval-arg-minimisers";
 
 export interface FileApprovalInput {
   tenantId: string;
@@ -45,12 +46,19 @@ export interface FileApprovalInput {
 
 /** JUST the INSERT, on a caller-supplied client/transaction, with a caller-supplied id. Used by
  *  `fileAutomationApproval` below AND directly by the confirm machinery's atomic claim transaction —
- *  see this file's header for why those two callers need different transaction shapes. */
+ *  see this file's header for why those two callers need different transaction shapes.
+ *
+ *  M5-G5b: THE chokepoint for a tool whose args are personal data. `minimiseFilingInput` applies the tool's
+ *  args policy (core/approval-arg-minimisers.ts) here, so whatever the caller passed, only the minimised args
+ *  and the generated reason are persisted; a tool with no policy is stored exactly as before. The policy's
+ *  `onFiled` write (the privacy ledger's `filed` row) runs on the SAME client, so it commits or rolls back
+ *  with the approval. */
 export async function insertAutomationApprovalRow(
   c: PoolClient,
   id: string,
-  input: FileApprovalInput,
+  rawInput: FileApprovalInput,
 ): Promise<void> {
+  const input = minimiseFilingInput(rawInput);
   await c.query(
     `INSERT INTO automation_approvals
        (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, agent_name, origin_site)
@@ -69,6 +77,13 @@ export async function insertAutomationApprovalRow(
       config.originSite,
     ],
   );
+  await getApprovalArgsPolicy(input.toolName)?.onFiled?.(c, {
+    approvalId: id,
+    tenantId: input.tenantId,
+    toolName: input.toolName,
+    requestedBy: input.requestedBy,
+    toolArgs: input.toolArgs,
+  });
 }
 
 /**
@@ -79,7 +94,10 @@ export async function insertAutomationApprovalRow(
  * transaction commits — never inside it (nesting a second `withTenants`/connection inside an
  * in-flight transaction is exactly the hazard `insertAutomationApprovalRow` exists to avoid).
  */
-export async function notifyApprovalFiled(id: string, input: FileApprovalInput): Promise<void> {
+export async function notifyApprovalFiled(id: string, rawInput: FileApprovalInput): Promise<void> {
+  // M5-G5b: the title below is the filed `reason`; for a minimised tool that is the generated sentence, never the
+  // caller's text (idempotent, so a caller that already minimised pays nothing).
+  const input = minimiseFilingInput(rawInput);
   await writeActivity(input.tenantId, input.requestedBy, "suspended", "automation_approval", id, {
     workflowId: input.workflowId,
     toolName: input.toolName,
@@ -109,7 +127,10 @@ export async function notifyApprovalFiled(id: string, input: FileApprovalInput):
  * `create()` ran before this extraction, moved here verbatim so `create()` can become a thin HTTP
  * wrapper without changing what an n8n workflow (or any other direct caller) observes.
  */
-export async function fileAutomationApproval(input: FileApprovalInput): Promise<{ id: string; status: "pending" }> {
+export async function fileAutomationApproval(rawInput: FileApprovalInput): Promise<{ id: string; status: "pending" }> {
+  // M5-G5b: minimise BEFORE opening the transaction, so args a tool would refuse (a malformed identifier) fail
+  // as a clean 400 with nothing stored. Idempotent with the same call inside the INSERT.
+  const input = minimiseFilingInput(rawInput);
   const id = newId();
   await withTenants([input.tenantId], (c) => insertAutomationApprovalRow(c, id, input));
   await notifyApprovalFiled(id, input);

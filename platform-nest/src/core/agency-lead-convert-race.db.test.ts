@@ -37,7 +37,7 @@ function settledWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
 interface ConvertOk { id: string; status: string; clientId: string; projectId: string; runId: string }
 interface ConvertConflict { message: string; existing?: { clientId: string | null; projectId: string | null; runId: string | null } }
 
-describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a real race", () => {
+describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a real race", { timeout: 90000 }, () => {
   let app: NestFastifyApplication;
   let co: string;
   let admin: string;
@@ -117,15 +117,44 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     return r.rows[0].n;
   }
 
-  async function waitForAdvisoryWaiters(n: number, timeoutMs = 10000): Promise<void> {
+  /** What each racer is doing, observed from the outside: a handler that RETURNS before the lock is released
+   *  never reached the lock (or was refused first), which is a different failure from "slow". */
+  interface FlightState { done: boolean; status?: number; body?: string }
+  function track(flights: Promise<{ statusCode: number; body: string }>[]): FlightState[] {
+    const state: FlightState[] = flights.map(() => ({ done: false }));
+    flights.forEach((p, i) => {
+      p.then(
+        (r) => { state[i] = { done: true, status: r.statusCode, body: r.body.slice(0, 300) }; },
+        (e) => { state[i] = { done: true, status: -1, body: String(e).slice(0, 300) }; },
+      );
+    });
+    return state;
+  }
+
+  /** Wait until `n` handlers are queued on the advisory lock. CONDITION-based, not timing-based:
+   *   - it polls until the count reaches `n` and returns the moment it does, so a fast machine pays nothing;
+   *   - the deadline (45s) is a backstop for a machine under heavy load, not the expected wait; a loaded CI
+   *     runner or the shared sumopod gate can take many seconds to get 4 requests through Cerbos and the pool;
+   *   - the lock holder is THIS TEST's own connection and is not released until `n` waiters are seen, so a
+   *     slow racer cannot "miss" the lock: it simply arrives later and queues behind it;
+   *   - if a racer RETURNS while we wait, it can never queue, so we fail at once with its status and body
+   *     instead of burning the deadline and reporting a bare count. */
+  async function waitForAdvisoryWaiters(n: number, flights: FlightState[] = [], timeoutMs = 45000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let last = -1;
     while (Date.now() < deadline) {
       last = await advisoryWaiters();
       if (last >= n) return;
+      const early = flights.map((f, i) => ({ f, i })).filter((x) => x.f.done);
+      if (early.length > 0) {
+        expect.fail(
+          `expected ${n} advisory-lock waiters; saw ${last}, and ${early.length} racer(s) already RETURNED without queuing on the lock: ` +
+            early.map((x) => `#${x.i} -> ${x.f.status} ${x.f.body}`).join(" | "),
+        );
+      }
       await new Promise((r) => setTimeout(r, 25));
     }
-    expect.fail(`expected ${n} advisory-lock waiters (the collision); saw ${last} — the racers never collided, so this test proves nothing`);
+    expect.fail(`expected ${n} advisory-lock waiters (the collision); saw ${last} after ${timeoutMs}ms; the racers never collided, so this test proves nothing`);
   }
 
   const countClientsNamed = async (orgName: string) =>
@@ -148,10 +177,13 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
         [orgName],
       )
     ).rows[0].n;
+  // M5-P1-g: the convert path's `pipeline.run.created` carries NO title (a person's name must not ride the bus),
+  // so the events are counted through the run they belong to rather than by a payload title.
   const countRunCreatedEvents = async (orgName: string) =>
     (
       await adminPool().query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM outbox_events WHERE event_type = 'pipeline.run.created' AND payload->>'title' = $1`,
+        `SELECT count(*)::int AS n FROM outbox_events e JOIN pipeline_runs r ON r.id = e.entity_id
+          WHERE e.event_type = 'pipeline.run.created' AND e.entity_type = 'pipeline_run' AND r.title = $1`,
         [orgName],
       )
     ).rows[0].n;
@@ -241,7 +273,7 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
 
       // COLLISION PROOF: both handlers are inside their transactions, queued on the SAME advisory
       // lock key, having read nothing race-sensitive yet.
-      await waitForAdvisoryWaiters(2);
+      await waitForAdvisoryWaiters(2, track(flights));
       expect(await settledWithin(Promise.all(flights), 300)).toBe(false);
       expect(await countClientsNamed(lead.orgName)).toBe(0); // neither spawned before blocking
 
@@ -308,7 +340,7 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     const release = await holdLeadLock(lead.id);
     try {
       const flights = Array.from({ length: 4 }, () => convert(lead.id));
-      await waitForAdvisoryWaiters(4);
+      await waitForAdvisoryWaiters(4, track(flights));
       expect(await settledWithin(Promise.all(flights), 300)).toBe(false);
       await release();
       const results = await Promise.all(flights);
@@ -326,6 +358,52 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
       expect(await countRunCreatedEvents(lead.orgName)).toBe(1);
     } finally {
       await release();
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // THE CONTACT-ROW RACE (found by M5-P1-f, fixed by M5-P1-g) — the real cause of the old "expected 4 advisory-lock
+  // waiters; saw 3" flake
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // convertAgencyLead() find-or-creates the contact's `users` row OUTSIDE the lead lock (global, no-RLS table), and
+  // `users.email` is UNIQUE. It used to be a SELECT then a plain INSERT, so two converts of the same lead whose
+  // contact had no row yet could both miss the SELECT; the second INSERT raised 23505 and the request failed before
+  // it ever reached the lock. Fixed with `INSERT ... ON CONFLICT (email) DO NOTHING` + re-select
+  // (`findOrCreateContactUser`). Reproduced here deterministically, with no timing: this test's own connection holds
+  // an UNCOMMITTED insert of the contact's email (standing in for "the other convert's INSERT, not yet visible"), a
+  // lone convert starts, its SELECT misses, its INSERT blocks on that key, the holder commits, and the convert must
+  // find the committed row and carry on to a 200 (and link THAT row as the client contact).
+  it("a convert whose contact row appears between its SELECT and its INSERT still succeeds and links the row that won", async () => {
+    const lead = await newLead();
+    const email = `${lead.id}@prospect.test`;
+    const holder = await adminPool().connect();
+    let committed = false;
+    const holderUserId = newId();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(`INSERT INTO users (id, email, name, origin_site) VALUES ($1, $2, 'Prospect Contact', 'test')`, [holderUserId, email]);
+      const holderPid = (await holder.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)).rows[0].pid;
+      const flight = convert(lead.id);
+      const deadline = Date.now() + 45000;
+      for (;;) {
+        // Only a backend blocked by THIS holder counts: other DB test files run in parallel and may have their own
+        // ungranted locks, which must not release the holder before the convert reaches its INSERT.
+        const w = await adminPool().query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))`, [holderPid]);
+        if (w.rows[0].n >= 1) break; // the convert's INSERT is parked on the uncommitted key
+        if (Date.now() > deadline) expect.fail("the convert never reached the contact INSERT");
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      await holder.query("COMMIT");
+      committed = true;
+      const r = await flight;
+      expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
+      const contacts = await adminPool().query(`SELECT user_id FROM client_contacts WHERE client_id = $1`, [(r.json() as ConvertOk).clientId]);
+      expect(contacts.rows.map((x: { user_id: string }) => x.user_id)).toEqual([holderUserId]);
+      expect((await adminPool().query(`SELECT count(*)::int AS n FROM users WHERE lower(email) = $1`, [email])).rows[0].n).toBe(1);
+    } finally {
+      if (!committed) await holder.query("ROLLBACK").catch(() => {});
+      holder.release();
     }
   });
 
@@ -364,7 +442,7 @@ describe.skipIf(!TEST_URL)("AD-6 — agency lead convert idempotency under a rea
     const release = await holdLeadLock(leadA.id);
     try {
       const blockedA = convert(leadA.id);
-      await waitForAdvisoryWaiters(1);
+      await waitForAdvisoryWaiters(1, track([blockedA]));
       expect(await settledWithin(blockedA, 300)).toBe(false);
 
       // B's identical transition completes normally. Both leads share ONE tenant, so a tenant-keyed

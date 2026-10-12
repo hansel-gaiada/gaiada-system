@@ -13,6 +13,7 @@ import { seedDepartmentsAndHr, type SeededDepartments } from "./departments";
 import { AGENCY_DEPTS, STAFF } from "./roster";
 import { seedPositions } from "./positions";
 import { resolveSeedActor, assertNotRetired } from "./seed-actor";
+import { emptyProfileState, loadProfileRow, saveProfileRow } from "../modules/clients/centre/store";
 
 // ── THE REAL ESTATE (corrected 2026-08-22, owner-supplied + verified against public sources) ─────
 // `Sanur Resort` was a placeholder and wrong on two counts: the resort is VICEROY BALI and it is in
@@ -97,6 +98,17 @@ async function ensureClient(tenantId: string, name: string, email: string): Prom
   if (f.rows[0]) return f.rows[0].id;
   const id = newId();
   await withTenants([tenantId], (c) => c.query(`INSERT INTO clients (id, tenant_id, name, contact, origin_site) VALUES ($1,$2,$3,$4,$5)`, [id, tenantId, name, JSON.stringify({ email }), site()]));
+  return id;
+}
+/** PV3-04 (PV-D2): a client that IS one of our own companies. Marks the link only when the client has none
+ *  (never re-points an existing one), and gives it a business type only when it has no profile row, so a
+ *  re-run never overwrites what the owner chose. Names are data (PV-D13); nothing in src/ keys off this one. */
+async function ensureGroupClient(tenantId: string, groupCompanyId: string, name: string, email: string, businessType: string): Promise<string> {
+  const id = await ensureClient(tenantId, name, email);
+  await withTenants([tenantId], async (c) => {
+    await c.query(`UPDATE clients SET group_company_id = $2 WHERE id = $1 AND group_company_id IS NULL`, [id, groupCompanyId]);
+    if (!(await loadProfileRow(c, tenantId, id))) await saveProfileRow(c, tenantId, id, emptyProfileState(businessType), null);
+  });
   return id;
 }
 async function ensureProject(tenantId: string, name: string, ownerId: string, clientId: string | null): Promise<string> {
@@ -209,6 +221,9 @@ export async function seedAgency(): Promise<SeededAgency> {
     await ensureClient(tenantId, "Bali Beach Resort", "hello@balibeach.test"),
     await ensureClient(tenantId, "Nusa Coffee Co", "hello@nusacoffee.test"),
   ];
+  // The hospitality sibling is also a client of the agency (PV-D2): one client record, linked to its own
+  // company record. Kept out of `clients` above: that array feeds the project/deliverable/invoice seeds.
+  await ensureGroupClient(tenantId, resortId, RESORT_NAME, "accounts@viceroy-bali.test", "hotel");
   const projects = [
     await ensureProject(tenantId, "Rebrand — Bali Beach", users.pm, clients[0]),
     await ensureProject(tenantId, "Launch — Nusa Coffee", users.pm, clients[1]),

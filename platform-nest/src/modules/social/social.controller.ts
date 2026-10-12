@@ -37,6 +37,7 @@ import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
+import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
@@ -238,7 +239,11 @@ export class SocialController {
     await authorize(req.principal, { kind: "social_engagement", tenantId, module: "social" }, "read");
     const params: unknown[] = [];
     const clauses = ["deleted_at IS NULL"];
-    if (clientId) { params.push(clientId); clauses.push(`client_id = $${params.length}`); }
+    // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict. `social_engagements.client_id` is NOT NULL,
+    // so `internal` is a legitimate, always-empty selection here, not an error.
+    const clientFilter = clientFilterSql(parseClientFilter(clientId, true), "client_id", params.length + 1);
+    params.push(...clientFilter.params);
+    clauses.push(clientFilter.sql);
     if (status) {
       if (!ENGAGEMENT_STATUSES.has(status)) refuse("invalid_status");
       params.push(status); clauses.push(`status = $${params.length}`);
@@ -2460,7 +2465,11 @@ export class SocialController {
     await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
     const params: unknown[] = [];
     const where: string[] = ["a.deleted_at IS NULL"];
-    if (clientId) { params.push(clientId); where.push(`a.client_id = $${params.length}`); }
+    // PV3-03 / CC-1: strict `?clientId=<uuid>|internal`. `social_accounts.client_id` is NOT NULL, so
+    // `internal` selects nothing.
+    const clientFilter = clientFilterSql(parseClientFilter(clientId, true), "a.client_id", params.length + 1);
+    params.push(...clientFilter.params);
+    where.push(clientFilter.sql);
     if (status) { params.push(status); where.push(`a.status = $${params.length}`); }
     const { rows } = await withTenants(
       [tenantId],
