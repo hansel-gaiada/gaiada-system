@@ -388,3 +388,33 @@ export async function handleCampaignApplied(event: OutboxEvent): Promise<void> {
     entityType: "search_change_proposal", entityId: event.entityId, href: HREF.ads,
   });
 }
+
+// ── search.decay.found (M5-V4: content-decay job, content-decay-job.ts) ─────────────────────────────────
+// Called directly by the daily job (no outbox event: it is a batch result, not a domain event). One bell per
+// property owner per detection window, deduplicated by `notifyOnce` on `decay:<property>:<windowEnd>`. The
+// payload carries ids, page paths (no host, no query string) and the reason in words (counts only) — no
+// personal data. No href: the findings surface is the writer dashboard (M5-W8), which has no route yet; a
+// wrong-but-plausible link is worse than none (see the note at the top of this file).
+const DECAY_NOTIFY_MAX_LISTED = 5;
+export async function notifyDecayFindings(
+  tenantId: string,
+  propertyId: string,
+  findings: Array<{ id: string; path: string; reason: string }>,
+  windowEnd: string,
+): Promise<void> {
+  if (findings.length === 0) return;
+  const owners = await propertyOwners(tenantId, propertyId);
+  const listed = findings.slice(0, DECAY_NOTIFY_MAX_LISTED);
+  const more = findings.length - listed.length;
+  const body = listed.map((f) => `${f.path}: ${f.reason}`).join("\n") + (more > 0 ? `\n…and ${more} more.` : "");
+  for (const ownerId of owners) {
+    await notifyOnce(tenantId, ownerId, "search.decay.found", `decay:${propertyId}:${windowEnd}`, {
+      title: findings.length === 1 ? "A page is losing traffic" : `${findings.length} pages are losing traffic`,
+      body,
+      severity: "warning",
+      entityType: "search_property", entityId: propertyId,
+      findingIds: findings.map((f) => f.id),
+      paths: listed.map((f) => f.path),
+    });
+  }
+}

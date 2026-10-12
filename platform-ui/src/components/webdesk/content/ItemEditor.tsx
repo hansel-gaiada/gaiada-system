@@ -23,6 +23,7 @@ import { ContentChecksCard } from "./ContentChecksCard";
 import { PreviewCard } from "./PreviewCard";
 import { PublishBar } from "./PublishBar";
 import { EditorialPanel } from "../editorial/EditorialPanel";
+import { AssistDrawer } from "./AssistDrawer";
 import type { EditorialInitial } from "@/lib/webdeskEditorialModel";
 import "./content.css";
 
@@ -673,6 +674,21 @@ export function ItemEditor({
                 initial={editorial}
                 authors={authors}
                 refreshKey={`${loadedAt}|${baseVersion}`}
+              />
+            )}
+
+            {/* M5-W6: the writing assistant. Offered only when the item read's `allowed.update` is true (the drawer renders nothing otherwise); it
+                only ever puts text into the draft as an UNSAVED edit: saving stays this editor's Save. */}
+            {!clientMode && !item.deletedAt && (
+              <AssistDrawer
+                scope={scope}
+                itemId={item.itemId}
+                allowed={editorial?.allowed}
+                baseVersion={baseVersion}
+                dirty={dirty}
+                ctx={{ defs, draft, locale, defaultLocale: tenant.defaultLocale, seoCarrier, localeNeutralCollection }}
+                applyBlocked={readOnly ? "Read-only." : stale !== null ? "Disabled until WebDesk answers again." : unconfirmed !== null ? "Disabled until you reload." : null}
+                onApply={(next) => setDraft(next)}
               />
             )}
 

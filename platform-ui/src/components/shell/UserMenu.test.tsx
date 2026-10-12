@@ -28,3 +28,10 @@ describe("UserMenu — Client view link (PV2-06)", () => {
     expect(screen.getByRole("menuitem", { name: "Account settings" })).toBeInTheDocument();
   });
 });
+
+describe("UserMenu — accessible name", () => {
+  it("names the compact (avatar-only) trigger by the user, not their initials", () => {
+    render(<UserMenu name="Clement Hansel" secondary="AI Manager" initials="CH" compact />);
+    expect(screen.getByRole("button", { name: "Clement Hansel" })).toHaveAttribute("aria-haspopup", "menu");
+  });
+});

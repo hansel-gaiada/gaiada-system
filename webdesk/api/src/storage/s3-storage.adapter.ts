@@ -140,7 +140,11 @@ export class S3StorageAdapter implements StorageAdapter {
       );
     }
 
-    if (options.versioning) {
+    // Only for a bucket THIS call just created, exactly like object lock below. A pre-existing bucket's versioning
+    // and lock belong to webdesk/scripts/storage-bootstrap.mjs (re-run on every deploy), and the api's own key is
+    // deliberately refused PutBucketVersioning (storage-rustfs.spec.ts), so asking again on every codegen write only
+    // logged an AccessDenied per call (M6, seen live in the 2026-10-12 contract.regenerate backfill).
+    if (options.versioning && !exists) {
       // Object lock requires versioning to be enabled first — order matters.
       await this.client
         .send(new PutBucketVersioningCommand({ Bucket: bucket, VersioningConfiguration: { Status: "Enabled" } }))
