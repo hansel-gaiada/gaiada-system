@@ -1,0 +1,14 @@
+{
+  "note": "DELTA, not a body. The post composition is not in the repo (it lives in the tenant's collections.schema). Add this field to the post (and guide, if it uses the same fields) composition, send the whole new composition through schema.propose, then schema.apply. Replaces the front-matter literal '[CONFIRM: author name and role]'.",
+  "addFields": [
+    {
+      "name": "author",
+      "primitive": "relation",
+      "relationTo": "author",
+      "required": false,
+      "localized": false,
+      "ui": { "label": "Author", "help": "Pick a published author profile. A byline is never typed as free text." }
+    }
+  ],
+  "valueShape": { "author": { "collection": "author", "slug": "<author item slug>" } }
+}
