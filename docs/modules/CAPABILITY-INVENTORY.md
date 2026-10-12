@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **244** capabilities across **16** owners
-- **131** writes · 113 reads
+- **245** capabilities across **16** owners
+- **131** writes · 114 reads
 - Writes by impact: **high 24** · medium 37 · low 70
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -52,7 +52,7 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 25 |
+| search | `search` | 27 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
@@ -191,6 +191,7 @@ unfalsifiable after.
 | search | `search.pullBing` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/bing/pull` | write | `low` |
 | search | `search.pullRanks` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/rank-pull` | write | `medium` |
 | search | `search.rankSummary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/rank-snapshots` | read | — |
+| search | `search.replays.list` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/visitors/:visitorId/recordings` | read | — |
 | search | `search.runAudit` | — | — | write | `low` |
 | search | `search.setBudget` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.setConversionTarget` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | write | `low` |

@@ -236,3 +236,102 @@ export async function forgetAtCollector(
   }
   return out;
 }
+
+// ── replay (M5-V6-b: session recordings, design 2026-10-12 §6.3; collector side is V6-a, internal/ops/replay.go) ───────────────────
+// Two READ-key calls, kept apart on purpose so listing never touches content:
+//   GET /ops/v1/replay/sessions?website&visitorId[&limit<=200]        -> {sessions:[{id, consentId, startedAt, lastChunkAt, durationSeconds, chunks, bytes, pages}]}  METADATA ONLY
+//   GET /ops/v1/replay/chunks?website&recording[&after<seq>][&limit<=50] -> {recording, visitorId, consentId, chunks:[{seq, receivedAt, bytes, events}], next, more}  CONTENT
+// The collector's route is key-gated only: WHO may see a recording (view_replay), whether its visitor still has a live, verified profile, and the
+// activity row are the ERP's job (replays.service.ts). Nothing here logs or puts into an error message a visitor id, a recording id or content.
+export const REPLAY_SESSIONS_MAX = 200;
+export const REPLAY_CHUNKS_MAX = 50;
+export const REPLAY_CHUNKS_DEFAULT = 20;
+const REPLAY_SEQ_MAX = 999;
+
+export interface ReplaySession {
+  id: string; // lower-case uuid
+  consentId: string; // lower-case uuid (the ERP compares it with the profile's; it is never sent on to a browser)
+  startedAt: string;
+  lastChunkAt: string;
+  durationSeconds: number;
+  chunks: number;
+  pages: string[];
+}
+
+function parseReplaySession(raw: unknown): ReplaySession | null {
+  if (!isObj(raw)) return null;
+  const id = typeof raw.id === "string" && UUID_RE.test(raw.id) ? raw.id.toLowerCase() : null;
+  const consentId = typeof raw.consentId === "string" && UUID_RE.test(raw.consentId) ? raw.consentId.toLowerCase() : null;
+  const startedAt = str(raw.startedAt);
+  const lastChunkAt = str(raw.lastChunkAt);
+  if (!id || !consentId || !startedAt || !lastChunkAt) return null;
+  const secs = typeof raw.durationSeconds === "number" && Number.isFinite(raw.durationSeconds) && raw.durationSeconds >= 0 ? Math.floor(raw.durationSeconds) : 0;
+  const chunks = typeof raw.chunks === "number" && Number.isSafeInteger(raw.chunks) && raw.chunks >= 0 ? raw.chunks : 0;
+  const pages = Array.isArray(raw.pages) ? raw.pages.filter((p): p is string => typeof p === "string" && p.length > 0 && p.length <= 600).slice(0, 50) : [];
+  return { id, consentId, startedAt, lastChunkAt, durationSeconds: secs, chunks, pages };
+}
+
+/** One visitor's recordings, newest first, metadata only. A row the contract does not describe throws (an empty list is a claim). */
+export async function readReplaySessions(website: string, visitorId: string, limit: number, opts: InsightsOpts = {}): Promise<ReplaySession[]> {
+  const s = opts.settings === undefined ? insightsSettings() : opts.settings;
+  if (!s) throw new InsightsNotConfiguredError();
+  if (!UUID_RE.test(website) || !UUID_RE.test(visitorId)) throw new InsightsBadResponseError("an id is not a UUID");
+  const lim = Math.max(1, Math.min(REPLAY_SESSIONS_MAX, Math.floor(limit)));
+  const qs = new URLSearchParams({ website: website.toLowerCase(), visitorId: visitorId.toLowerCase(), limit: String(lim) });
+  const body = await call(s, "GET", `/ops/v1/replay/sessions?${qs.toString()}`, s.readKey, undefined, opts);
+  if (!isObj(body) || !Array.isArray(body.sessions)) throw new InsightsBadResponseError("no sessions array");
+  if (body.sessions.length > lim) throw new InsightsBadResponseError("more sessions than the limit");
+  const out: ReplaySession[] = [];
+  for (const raw of body.sessions) {
+    const r = parseReplaySession(raw);
+    if (!r) throw new InsightsBadResponseError("a session row is malformed");
+    out.push(r);
+  }
+  return out;
+}
+
+export interface ReplayChunk { seq: number; receivedAt: string; events: unknown[] }
+
+export interface ReplayChunksPage {
+  recordingId: string;
+  visitorId: string;
+  consentId: string;
+  chunks: ReplayChunk[];
+  /** The collector's cursor: the last seq returned (or `after`). */
+  next: number;
+  more: boolean;
+}
+
+/**
+ * One page of a recording's content, chunks in seq order. `after` is the last seq the caller already has (-1 = from the start).
+ * An unknown recording (or website) is InsightsNotFoundError. The response names the recording's visitor and consent ids so the caller can
+ * check them against a live profile BEFORE releasing the content.
+ */
+export async function readReplayChunks(website: string, recordingId: string, after: number, limit: number, opts: InsightsOpts = {}): Promise<ReplayChunksPage> {
+  const s = opts.settings === undefined ? insightsSettings() : opts.settings;
+  if (!s) throw new InsightsNotConfiguredError();
+  if (!UUID_RE.test(website) || !UUID_RE.test(recordingId)) throw new InsightsBadResponseError("an id is not a UUID");
+  const lim = Math.max(1, Math.min(REPLAY_CHUNKS_MAX, Math.floor(limit)));
+  const aft = Math.max(-1, Math.floor(after));
+  const qs = new URLSearchParams({ website: website.toLowerCase(), recording: recordingId.toLowerCase(), after: String(aft), limit: String(lim) });
+  const body = await call(s, "GET", `/ops/v1/replay/chunks?${qs.toString()}`, s.readKey, undefined, opts);
+  if (!isObj(body) || !Array.isArray(body.chunks)) throw new InsightsBadResponseError("no chunks array");
+  const visitorId = typeof body.visitorId === "string" && UUID_RE.test(body.visitorId) ? body.visitorId.toLowerCase() : null;
+  const consentId = typeof body.consentId === "string" && UUID_RE.test(body.consentId) ? body.consentId.toLowerCase() : null;
+  if (!visitorId || !consentId) throw new InsightsBadResponseError("the recording is not attributed");
+  if (body.chunks.length > lim) throw new InsightsBadResponseError("more chunks than the limit");
+  const chunks: ReplayChunk[] = [];
+  let prev = aft;
+  for (const raw of body.chunks) {
+    if (!isObj(raw) || !Array.isArray(raw.events)) throw new InsightsBadResponseError("a chunk is malformed");
+    const seq = raw.seq;
+    if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0 || seq > REPLAY_SEQ_MAX || seq <= prev) throw new InsightsBadResponseError("chunk seq out of order");
+    prev = seq;
+    chunks.push({ seq, receivedAt: str(raw.receivedAt) ?? "", events: raw.events });
+  }
+  const next = typeof body.next === "number" && Number.isSafeInteger(body.next) && body.next >= -1 ? body.next : null;
+  if (next === null || next < prev) throw new InsightsBadResponseError("next is not a sequence number at or past the page");
+  if (typeof body.more !== "boolean") throw new InsightsBadResponseError("more is not a boolean");
+  if (body.more && chunks.length === 0) throw new InsightsBadResponseError("more with no chunk");
+  return { recordingId: recordingId.toLowerCase(), visitorId, consentId, chunks, next, more: body.more };
+}

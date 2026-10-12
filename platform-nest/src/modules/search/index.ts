@@ -24,6 +24,7 @@ import { AI_CRAWLER_MCP_TOOLS } from "./ai-crawler-mcp-tools";
 // startContentDecayLoop. No routes and no MCP tools here (those are V3-g).
 export { startVisitorJobs } from "./visitor-jobs";
 import { EXPERIMENT_MCP_TOOLS } from "./experiments-mcp-tools";
+import { REPLAY_MCP_TOOLS } from "./replays-mcp-tools";
 import {
   handleAiVisibilityChanged,
   handleAuditCompleted,
@@ -284,6 +285,8 @@ export const searchModule: ModuleContract = {
     ...AI_CRAWLER_MCP_TOOLS,
     // M5-V5-c: A/B experiments (pre-registration, sync, results, stop/abort/decide): 3 reads + 6 LOW writes.
     ...EXPERIMENT_MCP_TOOLS,
+    // M5-V6-b: session recordings — ONE read, metadata only (O7: no tool returns recording content). Cerbos view_replay.
+    ...REPLAY_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",
