@@ -86,10 +86,33 @@ describe("wire validation: a 2xx body that does not match the spec is DRIFT, nev
   it("M5-W2c: item.get's `editorial` member is optional (an older WebDesk sends none) and validated when present", () => {
     expect(parseItemDetail(detail()).editorial).toBeUndefined();
     expect(parseItemDetail({ ...detail(), editorial: { reviewRequired: true, state: "approved", approvedVersion: 2, approvedIsHead: false, openComments: 0 } }).editorial)
-      .toEqual({ reviewRequired: true, state: "approved", approvedVersion: 2 });
+      // M5-W2e: the rest of WebDesk's view is kept (each member validated when present).
+      .toEqual({ reviewRequired: true, state: "approved", approvedVersion: 2, approvedIsHead: false, openComments: 0 });
     expect(parseItemDetail({ ...detail(), editorial: { reviewRequired: false, state: "draft", approvedVersion: null } }).editorial?.approvedVersion).toBeNull();
     expect(() => parseItemDetail({ ...detail(), editorial: { reviewRequired: "yes", state: "draft", approvedVersion: null } })).toThrow(/editorial.reviewRequired/);
     expect(() => parseItemDetail({ ...detail(), editorial: { reviewRequired: true, state: "draft" } })).toThrow(WireDrift);
+  });
+
+  it("M5-W2e: the full editorial view is parsed member by member; a wrongly typed member is drift, an absent one stays undefined", () => {
+    const full = {
+      reviewRequired: true, seoSignoffRequired: true, state: "in_review", authorSub: "u1", submittedVersion: 3, seoSignedVersion: 2, seoSignedBy: "u2",
+      seoSignedCurrent: false, approvedVersion: null, approvedBy: null, approvedAt: null, approvedIsHead: false, dueAt: "2026-10-20T00:00:00.000Z",
+      plannedPublishAt: null, briefRef: "brief-1", openComments: 2, updatedAt: "2026-10-12T08:00:00.000Z",
+    };
+    const e = parseItemDetail({ ...detail(), editorial: full }).editorial;
+    expect(e).toMatchObject({ state: "in_review", authorSub: "u1", submittedVersion: 3, seoSignedCurrent: false, dueAt: "2026-10-20T00:00:00.000Z", briefRef: "brief-1", openComments: 2, seoSignoffRequired: true });
+    expect(e && "updatedAt" in e).toBe(false); // not read: the UI has no use for it
+    expect(parseItemDetail({ ...detail(), editorial: { reviewRequired: true, state: "draft", approvedVersion: null } }).editorial?.authorSub).toBeUndefined();
+    expect(() => parseItemDetail({ ...detail(), editorial: { ...full, openComments: "2" } })).toThrow(/editorial.openComments/);
+    expect(() => parseItemDetail({ ...detail(), editorial: { ...full, submittedVersion: "3" } })).toThrow(WireDrift);
+  });
+
+  it("M5-W2e: an item list row's `editorial` is optional and validated when present", () => {
+    const row = summary();
+    expect(parseItemList({ items: [row], page: { cursor: null, hasMore: false, limit: 1 } }).items[0].editorial).toBeUndefined();
+    const withE = { ...row, editorial: { reviewRequired: true, state: "changes_requested", approvedVersion: null, authorSub: "u1" } };
+    expect(parseItemList({ items: [withE], page: { cursor: null, hasMore: false, limit: 1 } }).items[0].editorial).toMatchObject({ state: "changes_requested", authorSub: "u1" });
+    expect(() => parseItemList({ items: [{ ...row, editorial: { reviewRequired: true } }], page: { cursor: null, hasMore: false, limit: 1 } })).toThrow(WireDrift);
   });
 
   it("M5-W1c: item.get's `allowed` member is optional (absent = unknown, never denied) and an object of booleans when present", () => {

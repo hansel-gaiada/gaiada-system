@@ -239,6 +239,8 @@ function parseItemSummary(v: unknown, path: string): ItemSummary {
     deletedAt: key(o, "deletedAt", strN, path), updatedAt: key(o, "updatedAt", str, path),
     headCreatedAt: key(o, "headCreatedAt", strN, path), headCreatedBy: key(o, "headCreatedBy", strN, path),
     pendingChanges: key(o, "pendingChanges", bool, path),
+    // The review member is OPTIONAL (a WebDesk older than M5-W2b sends none), validated when present.
+    ...(o.editorial !== undefined ? { editorial: parseEditorial(o.editorial, `${path}.editorial`) } : {}),
   };
 }
 export function parseItemList(v: unknown): ItemListBody {
@@ -328,13 +330,28 @@ function parseVersionContent(v: unknown, path: string): VersionContent {
 }
 
 /** M5-W2b's `editorial` member: OPTIONAL (absent from a WebDesk older than M5-W2b), validated when present. */
-function parseEditorial(v: unknown, path: string): ItemEditorial {
+export function parseEditorial(v: unknown, path: string): ItemEditorial {
   const o = obj(v, path);
-  return {
+  const out: ItemEditorial = {
     reviewRequired: key(o, "reviewRequired", bool, path),
     state: key(o, "state", str, path),
     approvedVersion: key(o, "approvedVersion", nullable(int), path),
   };
+  // M5-W2e: the other members of WebDesk's view, each validated when present and left `undefined` when absent.
+  const seoReq = opt(o, "seoSignoffRequired", bool, path); if (seoReq !== undefined) out.seoSignoffRequired = seoReq;
+  const authorSub = opt(o, "authorSub", strN, path); if (authorSub !== undefined) out.authorSub = authorSub;
+  const submitted = opt(o, "submittedVersion", nullable(int), path); if (submitted !== undefined) out.submittedVersion = submitted;
+  const seoVer = opt(o, "seoSignedVersion", nullable(int), path); if (seoVer !== undefined) out.seoSignedVersion = seoVer;
+  const seoBy = opt(o, "seoSignedBy", strN, path); if (seoBy !== undefined) out.seoSignedBy = seoBy;
+  const seoCur = opt(o, "seoSignedCurrent", bool, path); if (seoCur !== undefined) out.seoSignedCurrent = seoCur;
+  const apprBy = opt(o, "approvedBy", strN, path); if (apprBy !== undefined) out.approvedBy = apprBy;
+  const apprAt = opt(o, "approvedAt", strN, path); if (apprAt !== undefined) out.approvedAt = apprAt;
+  const apprHead = opt(o, "approvedIsHead", bool, path); if (apprHead !== undefined) out.approvedIsHead = apprHead;
+  const due = opt(o, "dueAt", strN, path); if (due !== undefined) out.dueAt = due;
+  const planned = opt(o, "plannedPublishAt", strN, path); if (planned !== undefined) out.plannedPublishAt = planned;
+  const brief = opt(o, "briefRef", strN, path); if (brief !== undefined) out.briefRef = brief;
+  const open = opt(o, "openComments", int, path); if (open !== undefined) out.openComments = open;
+  return out;
 }
 
 /** M5-W1c's `allowed` member: OPTIONAL, validated when present (an object of booleans; anything else is wire drift). */
@@ -553,8 +570,9 @@ function parseIssues(ext: Record<string, unknown>): Issue[] | null {
 
 // `approval_not_found` is the withdraw route's 404 (an id that is not a publish request for THIS site): a real answer, not "not served".
 // `environment-not-found` is the key-request route's 404 for an environment that is not on THIS site: a real answer, and no existing
-// route emits it, so adding it changes no existing case.
-const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found", "version-not-found", "approval_not_found", "environment-not-found"]);
+// route emits it, so adding it changes no existing case. `comment-not-found` (M5-W2e) is the editorial resolve route's 404 for a comment
+// that is not on this item: without it the 404 read as "not served on this deployment".
+const NOT_FOUND_SLUGS = new Set(["item-not-found", "collection-not-found", "site-not-found", "version-not-found", "approval_not_found", "environment-not-found", "comment-not-found"]);
 
 export function resultFromError(e: unknown): WdResult<never> {
   if (e instanceof WireDrift) return { kind: "unavailable", code: "contract_drift", reason: e.message };

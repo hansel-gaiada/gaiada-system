@@ -8,7 +8,7 @@ import { WdRefusal } from "@/components/webdesk/content/WdRefusal";
 import { requireWebsiteCtx } from "@/components/webdesk/content/serverCtx";
 
 type Params = Promise<{ deptId: string; tenant: string; site: string; collection: string }>;
-type Search = Promise<{ locale?: string; state?: string; q?: string; cursor?: string }>;
+type Search = Promise<{ locale?: string; state?: string; q?: string; review?: string; cursor?: string }>;
 
 // Website → Content → site → collection: the item list (locale / state / pending / search filters).
 // A SINGLETON collection opens its editor directly (§10): one document per locale, so a list of one
@@ -51,7 +51,7 @@ export default async function WebsiteCollectionPage({ params, searchParams }: { 
       <ItemsPanel
         list={list.data}
         locales={ctx.data.tenant.locales}
-        filters={{ locale: sp.locale, state: sp.state, q: sp.q }}
+        filters={{ locale: sp.locale, state: sp.state, q: sp.q, review: sp.review }}
         editorBase={here}
         authors={authors}
         filterAction={here}

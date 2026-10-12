@@ -121,6 +121,8 @@ export interface ItemSummary {
   headCreatedAt: string | null;
   headCreatedBy: string | null;
   pendingChanges: boolean;
+  /** M5-W2b: the row's review member. Absent from a WebDesk older than W2b ("unknown", never "draft"). */
+  editorial?: ItemEditorial;
 }
 
 export interface Page { cursor: string | null; hasMore: boolean; limit: number }
@@ -173,6 +175,25 @@ export interface ItemEditorial {
   state: string;
   /** The ONE version that may go live on a review-required collection; null = nothing is approved. */
   approvedVersion: number | null;
+  // M5-W2e: the rest of WebDesk's `editorial` member (`viewOf`). Each is OPTIONAL on the wire as far as this UI is concerned: a
+  // WebDesk that omits one reads as "unknown" (undefined), never as null/false, and the panel says so instead of guessing.
+  /** A collection that also needs an SEO/AEO sign-off of the submitted version before approval. */
+  seoSignoffRequired?: boolean;
+  /** Opaque ERP user id of the item's author / assignee (null = nobody yet). */
+  authorSub?: string | null;
+  submittedVersion?: number | null;
+  seoSignedVersion?: number | null;
+  seoSignedBy?: string | null;
+  /** The signed version is the one in review (a newer version after the sign-off makes it stale). */
+  seoSignedCurrent?: boolean;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  /** False once the item was edited after approval (the approved version is no longer the head). */
+  approvedIsHead?: boolean;
+  dueAt?: string | null;
+  plannedPublishAt?: string | null;
+  briefRef?: string | null;
+  openComments?: number;
 }
 
 /**

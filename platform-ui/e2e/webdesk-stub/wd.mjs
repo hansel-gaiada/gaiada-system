@@ -19,6 +19,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { addAsset, handleMediaBff, mediaCfg, mediaState, seedMedia } from "./media.mjs";
+import { decorateItemDetail, decorateItemList, handleEditorial, seedReview } from "./editorial.mjs";
 
 export { addAsset, handlePublicMedia, mediaState } from "./media.mjs";
 
@@ -222,10 +223,11 @@ export function seed() {
     compositions,
     items,
     approvals: new Map(),
+    review: seedReview(), // M5-W2e: the writers' room (editorial.mjs)
     build: null,
     stagingStale: false,
     seq: 0,
-    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, drift: null, forceIssues: null, unavailableOnce: 0, ...mediaCfg() },
+    cfg: { keyMintFails: false, approvalReadForbidden: false, forbidden: false, unavailable: false, moduleDisabled: false, delayMs: 0, buildStatusServed: true, lintUnavailable: false, ambiguous: null, rebuildNotConfigured: false, reviewAllowedAbsent: false, reviewCountsWithheld: false, reviewOff: false, reviewRefuse: null, drift: null, forceIssues: null, unavailableOnce: 0, ...mediaCfg() },
     log: [],
   };
 }
@@ -340,6 +342,10 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
   const [, t, s, rest = ""] = m;
   if (company !== COMPANY || t !== TENANT || s !== SITE) return problem(404, "site-not-found", "Site not found");
 
+  // M5-W2e: the writers' room routes (board, grants, an item's review record and its review commands).
+  const editorial = handleEditorial(S, { method, rest, query, body, userId, role });
+  if (editorial) return editorial;
+
   if (rest === "/collections" && method === "GET") return R(200, collectionsBody(S));
 
   let mm;
@@ -364,7 +370,7 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
       const offset = Number(query.get("cursor") ?? 0);
       const pageItems = its.slice(offset, offset + limit);
       const hasMore = offset + limit < its.length;
-      return R(200, { items: pageItems.map((i) => summary(S, i)), page: { cursor: hasMore ? String(offset + limit) : null, hasMore, limit } });
+      return R(200, decorateItemList(S, { items: pageItems.map((i) => summary(S, i)), page: { cursor: hasMore ? String(offset + limit) : null, hasMore, limit } }, { userId }));
     }
     if (method === "POST") return createItem(S, key, composition, body, userId);
   }
@@ -375,7 +381,7 @@ export function handleWebdesk(S, { method, pathname, query, body, userId, compan
     if (method === "GET") {
       const b = detailBody(S, it, query.get("version") ?? "head");
       if (!b) return problem(404, "version-not-found", "Version not found");
-      return R(200, b);
+      return R(200, decorateItemDetail(S, b, it, { userId, role }));
     }
     if (method === "PUT") return ambiguousWrite(S, () => updateItem(S, it, body, userId)) ?? updateItem(S, it, body, userId);
   }

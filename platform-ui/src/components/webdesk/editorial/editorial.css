@@ -1,0 +1,45 @@
+/* Writers' room (M5-W2e): the editor's review panel, the review board and the people (grants) page.
+
+   Prefix `we-` (webdesk editorial). Built on the `wc-` page chrome, cards, chips and banners of the content workspace, which it imports
+   so a direct load of a writers' room page is never unstyled. Tokens only: `styles/tokens.test.ts` fails the build on a colour literal. */
+@import "../content/content.css";
+
+/* A review state is a shape + a word first and a tone second: the glyph differs per state, so the four read apart with no colour. */
+.we-state { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border: 1px solid var(--line-strong); font: 700 12px var(--font-body); color: var(--ink-body); white-space: nowrap; }
+.we-state__glyph { font-size: 11px; line-height: 1; }
+.we-state--neutral { border-style: dashed; }
+.we-state--info { border-color: var(--status-info); color: var(--status-info-fg); }
+.we-state--warn { border-color: var(--status-warning); color: var(--status-warning-fg); border-width: 2px; }
+.we-state--ok { border-color: var(--status-ok); color: var(--status-ok-fg); border-width: 2px; }
+
+.we-actions { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.we-form { display: flex; flex-direction: column; gap: var(--space-8); }
+.we-form__row { display: flex; flex-wrap: wrap; gap: var(--space-8); align-items: flex-end; }
+.we-why { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); border-left: 2px solid var(--line-strong); padding-left: 10px; }
+
+.we-log { margin: 0; padding-left: 18px; font: 400 12px/1.5 var(--font-body); color: var(--ink-body); max-height: 220px; overflow-y: auto; }
+.we-log li { margin: 2px 0; }
+.we-details > summary { cursor: pointer; font: 600 12px var(--font-body); color: var(--ink-body); }
+
+/* Comments */
+.we-comments { display: flex; flex-direction: column; gap: var(--space-8); margin: 0; padding: 0; list-style: none; }
+.we-comment { border: 1px solid var(--line); padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--surface-card-solid); }
+.we-comment--resolved { border-style: dashed; color: var(--ink-subtle); }
+.we-comment__meta { font: 400 11px var(--font-body); color: var(--ink-subtle); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.we-comment__body { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-body); white-space: pre-wrap; word-break: break-word; }
+.we-anchor { font: 600 11px var(--font-body); color: var(--ink-strong); }
+
+/* Board */
+.we-board { display: grid; gap: var(--space-16); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; }
+.we-col { border: 1px solid var(--line); background: var(--surface-card-solid); padding: 12px; display: flex; flex-direction: column; gap: var(--space-8); }
+.we-col__head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); }
+.we-col__count { font: 700 12px var(--font-body); color: var(--ink-subtle); font-variant-numeric: tabular-nums; }
+.we-card { border: 1px solid var(--line-soft); padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.we-card a { color: var(--accent-fg); text-decoration: none; font: 600 13px var(--font-body); word-break: break-word; }
+.we-card a:hover { text-decoration: underline; }
+.we-counts { display: flex; flex-wrap: wrap; gap: var(--space-12); font: 400 13px var(--font-body); color: var(--ink-body); margin: 0; padding: 0; list-style: none; }
+
+/* People */
+.we-scope { display: flex; flex-wrap: wrap; gap: var(--space-12); border: 1px solid var(--line); padding: 8px 12px; margin: 0; }
+.we-scope legend { font: 700 11px var(--font-body); letter-spacing: 0.1em; color: var(--ink-subtle); padding: 0 4px; }
+.we-check { display: inline-flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--ink-body); }

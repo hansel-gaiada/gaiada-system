@@ -1,4 +1,5 @@
 import { loadEditorBundle, resolveAuthorNames } from "@/lib/webdeskContent";
+import { loadEditorialInitial } from "@/lib/webdeskEditorial";
 import { mediaPublicBase } from "@/lib/webdeskMedia";
 import { collectionLabel } from "@/lib/webdeskContentModel";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -26,6 +27,8 @@ export default async function WebsiteItemPage({ params, searchParams }: { params
   ]);
   if (bundle.kind !== "ok") return <WdRefusal result={bundle} subject="this item" retryHref={here} />;
   const b = bundle.data;
+  // M5-W2e: the review record for the editor's Review panel. A failed read there is words in the panel, never a missing page.
+  const editorial = await loadEditorialInitial(c.userId, c.company, tenant, site, b.detail);
 
   return (
     <div className="wc-page">
@@ -45,6 +48,7 @@ export default async function WebsiteItemPage({ params, searchParams }: { params
         site={b.site}
         bundle={b}
         authors={authors}
+        editorial={editorial}
         mediaPublicBase={mediaPublicBase()}
         readOnlyReason={b.detail.item.deletedAt ? "This item has been deleted. Its history is kept; an operator can reverse the deletion." : null}
       />

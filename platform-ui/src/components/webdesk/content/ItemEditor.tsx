@@ -22,6 +22,8 @@ import { FieldEditor, type FormCtx } from "./FieldEditor";
 import { ContentChecksCard } from "./ContentChecksCard";
 import { PreviewCard } from "./PreviewCard";
 import { PublishBar } from "./PublishBar";
+import { EditorialPanel } from "../editorial/EditorialPanel";
+import type { EditorialInitial } from "@/lib/webdeskEditorialModel";
 import "./content.css";
 
 // The item editor (§10: "Editor") — one component for edit AND create, because the form, the locks,
@@ -98,7 +100,7 @@ const staffApi: EditorDriver = {
 };
 
 export function ItemEditor({
-  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason, mediaPublicBase = null, clientMode,
+  mode, scope, routeBase, collection, tenant, site, bundle, seed, authors, readOnlyReason, mediaPublicBase = null, clientMode, editorial,
 }: {
   mode: "edit" | "create";
   scope: SiteScope;
@@ -121,6 +123,9 @@ export function ItemEditor({
    *  read-only, a save sends `{ baseVersion, fields, note }` only, a 409 is a Reload banner, and there is no delete, unpublish,
    *  schedule, twin creation, key or schema UI. The staff editor never passes it. */
   clientMode?: ClientModeCfg;
+  /** M5-W2e: the writers' room review panel (staff editor only). The item page passes what it read: the item's `editorial` + `allowed`
+   *  and its review record. Absent = no panel (create mode, the client portal, tests that predate it). */
+  editorial?: EditorialInitial;
 }) {
   const router = useRouter();
   const api: EditorDriver = clientMode?.driver ?? staffApi;
@@ -656,6 +661,19 @@ export function ItemEditor({
               onUnavailable={goStale}
               onUnconfirmed={(what) => setUnconfirmed(unconfirmedCopy(what))}
             />
+            )}
+
+            {!clientMode && editorial && (
+              <EditorialPanel
+                scope={scope}
+                itemId={item.itemId}
+                version={baseVersion}
+                dirty={dirty}
+                blocked={item.deletedAt ? "This item has been deleted." : stale !== null ? "Disabled until WebDesk answers again." : unconfirmed !== null ? "Disabled until you reload." : null}
+                initial={editorial}
+                authors={authors}
+                refreshKey={`${loadedAt}|${baseVersion}`}
+              />
             )}
 
             <section className="wc-side-card" data-testid="lint-card">

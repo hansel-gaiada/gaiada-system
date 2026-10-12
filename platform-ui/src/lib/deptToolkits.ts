@@ -188,6 +188,8 @@ const WEB_DEV: DeptToolkit = {
         { key: "analytics", label: "Analytics", path: "website/analytics", icon: "pulse", blurb: "How visitors use the site: visits, where they came from (including AI search), which sections they reach, which buttons they press, how forms convert, and Core Web Vitals. Counts under 5 show as \"<5\"." },
         // M5-L6 — the web leads WebDesk's forms produce for a site (agency_leads, source web), read-only: where each came from, its pipeline stage, marketing consent. Each row opens the existing lead page.
         { key: "leads", label: "Leads", path: "website/leads", icon: "user", blurb: "The enquiries the website's forms have produced: which form, when, where the visitor came from (landing page, campaign, whether an ad click id was present), the pipeline stage, and whether they agreed to marketing. Open a row to work the lead." },
+        // M5-W2e — the writers' room: the site's review board (what is in review, by state) and, for publishers, who holds which writers' room role. The `path` carries the whole sub-tree (`website/writers[/people][/:tenant/:site]`).
+        { key: "writers", label: "Writers' room", path: "website/writers", icon: "award", blurb: "The review board for a site's content: what is a draft, in review, waiting on changes or approved. Publishers also give and remove writers' room roles (writer, translator, SEO reviewer, editor) per site, collection and language." },
       ],
     },
     CONNECTIONS_GROUP,
