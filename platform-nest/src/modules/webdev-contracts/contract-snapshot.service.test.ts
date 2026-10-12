@@ -266,7 +266,7 @@ describe.skipIf(!TEST_URL)("WSK-19 — contract-snapshot mirror: the two tripwir
     const php = Buffer.from("<?php // sdk");
     const tarball = Buffer.from("fake gzip bytes of the block library");
     const withBlocks = await refreshContractSnapshot({
-      tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "4.0.0", artifacts, blockLibrary: tarball, sdkPhp: php }),
+      tenantId: tenant, slug: SLUG, fetchedBy: manager, provider: fakeProvider({ version: "6.0.0", artifacts, blockLibrary: tarball, sdkPhp: php }),
     });
     expect(withBlocks.outcome).toBe("created");
     if (withBlocks.outcome !== "created") throw new Error("unreachable");
@@ -274,7 +274,7 @@ describe.skipIf(!TEST_URL)("WSK-19 — contract-snapshot mirror: the two tripwir
     // The hashed manifest is unchanged: the same four artifacts hash to the same contentHash whether or not a library rides along.
     expect(withBlocks.snapshot.contentHash).toBe(computeContentHash({ ...artifacts, sdkPhp: php }).contentHash);
 
-    const row = (await storedSnapshots(tenant, SLUG)).find((r) => r.contract_version === "4.0.0")!;
+    const row = (await storedSnapshots(tenant, SLUG)).find((r) => r.contract_version === "6.0.0")!;
     const a = row.artifacts as Record<string, unknown> & { hashes: Record<string, string | null> };
     expect(typeof a.blockLibraryFile).toBe("string");
     expect(a.blockLibrary).toEqual({ package: "@gaiada/webdesk-blocks", version: "1.3.2", range: "^1.3" }); // the ref keeps its key
