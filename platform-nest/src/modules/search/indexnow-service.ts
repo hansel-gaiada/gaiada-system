@@ -309,6 +309,9 @@ export async function dispatchDue(tenantId: string, propertyId: string, engine: 
         RETURNING id, url`,
         [tenantId, propertyId, engine, Math.min(batchSize, budget), new Date(now.getTime() + LEASE_MS), now])).rows, SEARCH);
       if (claimed.length === 0) break;
+      // UPDATE .. RETURNING does not keep the subquery's ORDER BY (it returns rows in physical order), so sort here: the batch
+      // MEMBERS are chosen by the ORDER BY + LIMIT above, and the request lists them in a stable (URL) order.
+      claimed.sort((a, b) => (a.url < b.url ? -1 : a.url > b.url ? 1 : 0));
       const ids = claimed.map((r) => r.id);
       const urls = claimed.map((r) => r.url);
       budget -= claimed.length;
