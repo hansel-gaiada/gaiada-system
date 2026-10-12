@@ -427,3 +427,45 @@ is proven").
 
   `contract.regenerate` is MEDIUM. Its first all-tenant run waits for M6-P4c, M6's RSS measurement and the owner,
   and M4 watches the api's CPU and memory during it.
+  - M6 measured one codegen run at 166–167 MiB maxRSS on the gate.
+- 05:34Z: **F6-T9, `/etc/webdesk` re-owned to root:root** (owner-approved Q5).
+  - Why: uid 999, the old owner `webdesk-svc`, is also the uid of 3 rootful redis processes. Nothing legitimate ran as
+    webdesk-svc.
+  - Proven by an api force-recreate: healthz 200, 0 restarts, the editorial and WS4 JWKS and the control CA loaded,
+    W1 404 at layer 4 through mTLS, probes 40/40.
+  - Release 363's deploy kept the ownership.
+- 05:39–05:53Z: **the owner's approval closed two items.**
+  - The owner approved `content.schedule` on the seed tenant `wsk49e-test`. The command is HIGH, so it is WS4-gated,
+    and v1 was already retired, so it could only pass as v2. That is F1's acceptance write.
+  - The content tick published it, and the first real `schedule.fired` crossed the Zone B bridge: n8n 2660, ERP row
+    a47018c5, verified by session a8. That closed P1's last box.
+- 06:01–06:13Z: **release 363 deployed to WebDesk.** api `c7140a0c…`, 0 restarts, 56 MiB, codegen worker registered,
+  WS4 v2 only, probes 40/40.
+- **F6 P1 landed** (`716c36b6`).
+  - The architect's design, and the root-run scripts after two Opus adversarial reviews: 1 BLOCKER, 5 MAJOR, then
+    N1/N2, all fixed.
+  - Linux gate m4f6p1c: migrations 749/0, legacy 17/0/1, rootless 327/0, deploy 60/0.
+  - T1, the live guard packet harness, landed at `f57872e9`.
+- **F6 P2 on gda-aicenter** (owner-approved). Proof user wdproof-rootless, uid 941, 0.5 vCPU envelope. Evidence in
+  `/srv/wdproof/evidence/` on the box.
+
+  | Row | What | Result |
+  |---|---|---|
+  | A1 | install | VERIFY OK 18/18 (4 packages, 0 upgraded) |
+  | A2 | guard packets | 72/0. Every host/private/metadata/WireGuard target is dropped with a rootful control; OTLP on/off/2 pps works; slirp's 10.0.2.2 is unreachable (ENETUNREACH, refused in-process) |
+  | A3 | boot proof | 49/0, every limit enforced by its cgroup |
+  | A4 | copy rehearsal | 44/0. **RustFS version ids and retain-until dates are identical after a raw copy**; postgres stops clean, is VERIFIED, row counts equal; a redis delayed job is intact |
+  | A5 | full stack, real api image | healthz 200; probes 1/3/5/6 pass, probe 4 14/0 |
+  | A7 | backup | 12/0: `webdesk_backup` arrived intact (`unchanged`), DRILL OK 27 s |
+  | A8 | reboot stand-in | 49/0. **Fail-closed proven**: with the guard broken, user@941 will not start |
+
+  - The live api's StartedAt was unchanged throughout.
+  - The uptime probe dipped only at 02:24Z and 04:48Z (known recreates), never during P2. `WebDeskApiDown` was
+    pending, never firing.
+  - P2 found 4 script defects, fixed on main `41864286`:
+    - a loaded api image is nameless and must be tagged before `name@digest` resolves; P3's live staging needs the
+      same step;
+    - `| grep -q` under pipefail;
+    - a stale `--keep` dir;
+    - probe 4's control did not know systemd's DefaultTasksMax.
+  - Open: A6 (deploy plan/apply/rollback) waits for the owner's 1-day GHCR read token; then A9 (remove) and A10.
