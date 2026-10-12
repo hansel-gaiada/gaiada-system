@@ -15,9 +15,12 @@
 // WHERE IT RUNS (every path calls the same `advanceProvisionCompletion`; none of them is the only one):
 //   1. `completeAfterRepoApproval` — decide() of the GH-12 repo request (automation-approvals.controller),
 //      right after the repo is created, detached so the decider's response never waits on WebDesk;
-//   2. `reconcileAndComplete` — POST …/provisioned-sites/:id/reconcile (staff and the hourly
-//      wd-provision-reconcile flow): THE resume path after any crash;
+//   2. `reconcileAndComplete` — POST …/provisioned-sites/:id/reconcile (staff pressing "Check status now"):
+//      THE resume path after any crash;
 //   3. the provision route's detached poller, once the poll reaches provisioned/live.
+//   4. the scheduled loop (provision-reconcile-loop.ts, M6-P4c2): `completeAfterPoll` for a row whose repo is
+//      done, `reconcileAndComplete` for one whose repo request is approved but not yet seen. It is what finishes a
+//      site whose WebDesk codegen outlasts the poll window; there is no n8n flow behind it.
 //
 // AUTHORISATION. The completion decides nothing: slug, company, kind and lineage come from the approved
 // provisioned row (see the state machine's "APPROVAL CLASS"). Each entry point is itself gated
