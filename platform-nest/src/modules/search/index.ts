@@ -19,9 +19,10 @@ import { INDEXNOW_MCP_TOOLS } from "./indexnow-mcp-tools";
 import { CONVERSION_MCP_TOOLS } from "./conversions-mcp-tools";
 import { handleStageChanged as handleLeadStageChanged } from "./conversions.service";
 import { AI_CRAWLER_MCP_TOOLS } from "./ai-crawler-mcp-tools";
+import { VISITOR_MCP_TOOLS } from "./visitors-mcp-tools";
 // M5-V3-e: the consented-visitor jobs (ingest every 10 min, withdrawal sweep hourly, retention purge daily). Dark unless
 // SEARCH_VISITORS_ENABLED is exactly "1": startVisitorJobs() then returns null with no timer. Started from main.ts beside
-// startContentDecayLoop. No routes and no MCP tools here (those are V3-g).
+// startContentDecayLoop. The routes and MCP tools are V3-g (visitors.controller.ts, visitors-mcp-tools.ts).
 export { startVisitorJobs } from "./visitor-jobs";
 import {
   handleAiVisibilityChanged,
@@ -279,6 +280,8 @@ export const searchModule: ModuleContract = {
     ...CONVERSION_MCP_TOOLS,
     // M5-P5b: AI-crawler log (ingest MEDIUM write, summary read) + the SM-16 AI-visibility summary read.
     ...AI_CRAWLER_MCP_TOOLS,
+    // M5-V3-g: consented visitor profiles — list/get/rules.list/status reads, rules.set LOW write. Cerbos read_visitors / update.
+    ...VISITOR_MCP_TOOLS,
     {
       name: "search.listEngagements",
       description: "List the served company's search-marketing engagements",
