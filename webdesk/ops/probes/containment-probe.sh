@@ -268,8 +268,12 @@ if [ "$ROOTLESS" = 1 ]; then
     [ "$got" = "$exp" ] && ok "$name limits ENFORCED by its cgroup (cpu.max|memory.max|pids.max = $got)" || bad "$name cgroup enforces '$got', HostConfig asks '$exp'"
   done
   got="$(limits_got "${RUN}-nolimit" || echo unreadable)"
-  case "$got" in "max 100000|max|max") ok "control: the unlimited container's cgroup reads unlimited ($got), so the check can fail" ;;
-    *) bad "control: the unlimited container's cgroup reads '$got' (expected max 100000|max|max)" ;; esac
+  # Under the user's systemd, an "unlimited" container's transient scope still gets systemd's DefaultTasksMax as
+  # pids.max (19109 on gda-aicenter = 15% of threads-max; found in P2 A5, 2026-10-12). cpu and memory read "max".
+  # Accept exactly that default, read live, and nothing else.
+  dtm="$(systemctl show -p DefaultTasksMax --value 2>/dev/null)"
+  case "$got" in "max 100000|max|max" | "max 100000|max|${dtm:-max}") ok "control: the unlimited container's cgroup reads unlimited ($got; pids.max may be systemd's DefaultTasksMax=${dtm:-?}), so the check can fail" ;;
+    *) bad "control: the unlimited container's cgroup reads '$got' (expected max 100000|max|max, or systemd's DefaultTasksMax ${dtm:-?} as pids.max)" ;; esac
   ENV_DIR="/sys/fs/cgroup/user.slice/user-$RL_UID.slice"
   ENV_CPU="$(cat "$ENV_DIR/cpu.max" 2>/dev/null)"; ENV_MEM="$(cat "$ENV_DIR/memory.max" 2>/dev/null)"; ENV_PIDS="$(cat "$ENV_DIR/pids.max" 2>/dev/null)"
   if [ -z "$ENV_CPU" ] || [ -z "$ENV_MEM" ] || [ -z "$ENV_PIDS" ] || [ "${ENV_CPU%% *}" = max ] || [ "$ENV_MEM" = max ] || [ "$ENV_PIDS" = max ]; then
