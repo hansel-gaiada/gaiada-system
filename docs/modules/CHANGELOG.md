@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### insights-collector `0.3.1` - M5-V2-d: the pseudonym moves to 2001:db8::/32 so Umami keeps the country (2026-10-13) - PROTOTYPED
+
+- **The bug:** proved on sumopod in a throwaway project. Umami 3.4.0 runs `is-localhost-ip` on the client address before it reads any location header, and that package treats fc00::/7 as local. With the `fd…` pseudonym, Umami stored NO country, region or city for any visitor.
+- **The fix:** the pseudonym is now an address in 2001:db8::/32, the IPv6 documentation range, which is never assigned to anyone. It is built from 96 HMAC bits under the in-memory daily key. A direct test stored GB / GB-ENG / London with it.
+- Umami still never sees an IP. This is not the `FORWARD_IP_MODE=real` fallback.
+- **Other V2-d results** (runbook §13, C5):
+  - `check-config.sh` ALL PASS;
+  - the 367 image's provenance verified;
+  - test IPs 0 times in both dumps and every log;
+  - bots dropped and counted, by UA and by datacenter ASN.
+- Steps 1, 3 and 4 are re-run with the first image that carries this fix.
+- The design §3.2, the addendum F6 and `CLAUDE.md` are updated.
+
 ### platform-ui `0.105.0` - M5-V5-d: the Experiments tab in Website → Analytics (2026-10-13) - PROTOTYPED
 
 - **List:** in server order, with the status, the goal, the visitors needed per variant and the projected days, all in words.

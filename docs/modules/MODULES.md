@@ -39,7 +39,7 @@ versions below; the running build reports it at `GET /health`.
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.15.0` | PROTOTYPED | WS2 | 2026-10-13 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
-| insights-collector | `0.3.0` | PROTOTYPED | SEO | 2026-10-13 |
+| insights-collector | `0.3.1` | PROTOTYPED | SEO | 2026-10-13 |
 | automation (n8n) | `0.6.0` | PROTOTYPED | WS4 | 2026-10-13 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.13.13` | PROTOTYPED | WS10 | 2026-10-13 |
