@@ -4869,7 +4869,7 @@ ends: `status` (the intake lifecycle above) and `stage` (the sales position, fro
   and `agency_pipeline.setDealValue` (impact `low`). `agency_intake.convert` gains the optional `deal`.
   `agency_intake.decline` now works from every open status.
 
-### Data-subject requests and lead retention (M5-G5) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
+### Data-subject requests and lead retention (M5-G5, G5b) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
 
 Addendum: `legal/website-visitor-addendum.md` §5 and §9.3 items 3, 7, 8, 9. Code: `core/agency-privacy.*`,
 `core/agency-lead-retention.ts`, migration `202610121835_agency_lead_privacy_retention.sql`. No UI consumes these yet;
@@ -4877,14 +4877,15 @@ they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored 
 
 | Method | Path | Returns | Cerbos |
 |---|---|---|---|
-| POST | `/api/:tenantId/agency/privacy/find` | Body `{ email?, phone?, approvalId? }`. Executed: `{ outcome:"executed", requestId, counts, outOfScope, leads:[{ leadId, status, stage, source, createdAt, statusChangedAt, erasedAt, deleted, directMatch, submissionCount, tokenCount, convertedClientId }] }`, no contact data | `agency_lead:convert` |
+| POST | `/api/:tenantId/agency/privacy/find` | Body `{ email?, phone?, approvalId? }` (G5b: with an `approvalId`, email and phone may be omitted). Executed: `{ outcome:"executed", requestId, counts, outOfScope, leads:[{ leadId, status, stage, source, createdAt, statusChangedAt, erasedAt, deleted, directMatch, submissionCount, tokenCount, convertedClientId }] }`, no contact data | `agency_lead:convert` |
 | POST | `/api/:tenantId/agency/privacy/export` | Same body. Executed: the `find` fields plus `orgName`, `contactName`, `contactEmail`, `contactPhone`, `originForm`, `submissionRef`, `webSiteSlug`, `attribution`, `visitorConsent`, `declinedReason`, `submissions:[{ submissionId, schemaVersion, createdAt, erasedAt, answers }]`, `intakeTokens:[{ tokenId, kind, createdAt, expiresAt, usedAt, revokedAt }]` | `agency_lead:convert` |
 | POST | `/api/:tenantId/agency/privacy/erase` | Same body. Executed: `{ outcome:"executed", replayed, requestId, erasedAt, counts:{ leadCount, submissionCount, tokenCount, outOfScopeCount, suppressionCount }, outOfScope:[{ leadId, convertedClientId, reason:"client_record_retention" }] }` | `agency_lead:convert` |
 
 - **WS4 per call, for every principal (the SM-21 shape).** Without `approvalId` the route files a HIGH approval and
   returns `202 { outcome:"suspended", requestId, approvalId }`, reading nothing. A DIFFERENT company admin decides it
   in the approvals inbox. The requester then repeats the call with the SAME identifiers and the `approvalId`: it runs
-  exactly once. Typed refusals: `202 awaiting_approval`, `400 subject_invalid | approval_id_invalid |
+  exactly once (G5b: the identifiers are optional on that call; omit them and the person is rebuilt from the hashes the
+  approval was filed with). Typed refusals: `202 awaiting_approval`, `400 subject_invalid | approval_id_invalid |
   privacy_request_mismatch` (other identifiers or another command than were approved), `403 privacy_request_not_requester
   | self_approved | user_required`, `404 privacy_request_not_found`, `409 approval_rejected | approval_already_used`.
   An erase called again with its used approval returns the stored counts with `replayed:true`; a find/export re-use is
@@ -4898,13 +4899,29 @@ they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored 
   answers `422 { reason:"subject_suppressed" }` and stores nothing.
 - **Ledger.** `agency_dsr_requests` is append-only and holds SHA-256 hashes only (the same hash WebDesk's
   `dsr_requests` computes, so one person's two ledgers correlate). The approval row holds the command and which keys
-  were given, never the values.
+  were given, never the values (G5b: plus the subject hashes and a display hint, see the next bullet).
+- **Unattended callers (M5-G5b).** An agent or workflow is suspended by the mcp-hub (`high`) and files its approval
+  through `POST /api/:tenantId/automation-approvals` with the call's args. For these three tools that filing path
+  (`core/approval-filing.ts`, policy in `core/approval-arg-minimisers.ts`) first replaces `email` and `phone` with the
+  G5 subject hashes (`SHA-256` of `webdesk:privacy:subject:` + the normalised value, the ledger's own hash) and a hint,
+  and drops every other key; a malformed identifier is `400 subject_invalid` and nothing is stored; and filing needs
+  `agency_lead:convert` (the route's own gate), so `403` for anyone without it. The stored `tool_args` are
+  `{ minimised:"agency-privacy.v1", kind, identifiers:["email"|"phone"], tenantId?, approvalId?, requestId?,
+  subject:{ emailHash?, phoneHash?, emailHint?, phoneHint? } }`: `emailHint` is `***@<domain>`, `phoneHint` is `***` plus
+  the last two digits, and they appear only in the approval row (the approver's detail view). The `reason` is generated
+  (the caller's text is replaced), the `automation_approval.decided` event carries the hashes without the hints, and the
+  notification and activity rows carry ids and the generated sentence only. The same transaction writes the ledger's
+  `filed` row, so a hub-filed approval is bound exactly like a route-filed one. After a DIFFERENT admin approves it, the
+  requester runs it with `POST .../privacy/:kind { approvalId }` (still attended: an unattended re-call is suspended
+  again). `resolve-and-execute` compares the re-run's args after the same reduction, so the runner finds its own
+  approval (`not_executable`, because the tools are barred) instead of re-filing it.
 - **Retention.** A scheduled purge (dark until `AGENCY_LEAD_RETENTION_PURGE_ENABLED=1`) hard-deletes an UNCONVERTED lead
   with its AD-1 submissions, tokens and stage history `AGENCY_LEAD_RETENTION_MONTHS` (default 24) after its last status
   or stage change (`status_changed_at`, kept by a DB trigger), unless a token or submission arrived after the cutoff.
 - **MCP.** `agency_privacy.find`, `agency_privacy.export`, `agency_privacy.erase`: impact `high`, barred from D14
-  auto-execution (the route is its own WS4 gate). Use them from an attended session: an unattended agent is suspended
-  by the hub first, and that hub approval would carry the identifier in its `tool_args`.
+  auto-execution (the route is its own WS4 gate). Since G5b an unattended agent may call them: the hub suspends it and
+  the approval it files holds hashes, never the identifier (the bullet above). They are still two-person and never
+  auto-run; `execution_status` stays `not_applicable` and the ledger is the record that a request ran.
 
 ### Convert — what it spawns, and the one thing it must never do
 

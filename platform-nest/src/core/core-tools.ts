@@ -917,9 +917,15 @@ export function registerAllCoreTools(): void {
 // and the three names are BARRED from D14 auto-execution (approval-executables.ts): a hub re-drive would only
 // file a second route-level approval, so an approved hub row must never pretend to have run the command.
 //
-// WARNING: an unattended agent's call is suspended BY THE HUB before it reaches the route, and the runner's
-// approval row then carries the call's args, i.e. the email/phone, in `automation_approvals.tool_args`. Use these
-// tools from an ATTENDED session (a person in chat) until the hub minimises args for them (M5-G5 follow-up).
+// UNATTENDED CALLERS (M5-G5b): an agent's or workflow's call is suspended BY THE HUB before it reaches the route,
+// and the caller files the suspension through `approvals.request` -> `POST /automation-approvals`. That filing
+// path reduces these tools' args to the G5 subject hashes (+ a display hint) BEFORE storing or emitting anything,
+// via the args policy in core/approval-arg-minimisers.ts (the minimiser itself is core/agency-privacy.filing.ts,
+// next to the tool's other privacy code), so the approval row, the decided event and the notification never carry
+// the email or phone. The policy is keyed by these three tool NAMES: add a fourth `agency_privacy.*` tool and
+// the unit test that walks this array fails until it has a policy. Still HIGH, still two-person, still never
+// auto-run by D14: after a DIFFERENT admin approves, the requester runs it by calling the route with just the
+// `approvalId` (an unattended re-call is suspended by the hub again, so a person, or an attended session, runs it).
 const PRIVACY_IDENTIFIER_PROPS = {
   tenantId: { type: "string" },
   email: { type: "string", description: "The person's email. Give email, phone, or both; matched after trim + lower-case." },
@@ -933,7 +939,8 @@ const PRIVACY_IDENTIFIER_PROPS = {
     type: "string",
     description:
       "Omit on the first call (it files a WS4 approval and returns 202 with the approvalId). After a DIFFERENT " +
-      "company admin approves it, call again with the SAME identifiers and this approvalId to run it exactly once.",
+      "company admin approves it, call again with this approvalId to run it exactly once. The identifiers are " +
+      "optional on that call: the person is rebuilt from the hashes the approval was filed with.",
   },
 } as const;
 
@@ -945,7 +952,8 @@ const AGENCY_PRIVACY_CORE_TOOLS: McpToolDef[] = [
       "phone. Returns ids, statuses and counts, no contact data. impact:'high', WS4-gated per call: the first call " +
       "files an approval (202 suspended); the approved re-call returns the matches once (a re-use is 409 " +
       "`approval_already_used`). Converted leads are listed under `outOfScope`: their client record follows " +
-      "client-record retention.",
+      "client-record retention. Safe for an unattended agent to call: the approval stores only a hash of the " +
+      "identifiers, never the email or phone.",
     minAssurance: "verified",
     method: "POST",
     pathTemplate: "/api/:tenantId/agency/privacy/find",
@@ -958,7 +966,8 @@ const AGENCY_PRIVACY_CORE_TOOLS: McpToolDef[] = [
     description:
       "Export a person's agency-intake data (lead contact fields, attribution, consent snapshot, AD-1 answers, " +
       "intake-token history) by email and/or phone. impact:'high', WS4-gated per call like agency_privacy.find; the " +
-      "response IS personal data and is never stored, so a re-use of the approval is refused.",
+      "response IS personal data and is never stored, so a re-use of the approval is refused. Safe for an " +
+      "unattended agent to call: the approval stores only a hash of the identifiers, never the email or phone.",
     minAssurance: "verified",
     method: "POST",
     pathTemplate: "/api/:tenantId/agency/privacy/export",
@@ -974,7 +983,9 @@ const AGENCY_PRIVACY_CORE_TOOLS: McpToolDef[] = [
       "suppression list so the web intake never re-creates the lead and nothing is uploaded to an ad platform. Rows " +
       "are kept (status, stage, client link). A converted lead's client record is NOT touched (`outOfScope`). " +
       "impact:'high', irreversible, WS4-gated per call; the requester cannot approve their own request. Calling again " +
-      "with a used approval returns the stored counts (`replayed: true`).",
+      "with a used approval returns the stored counts (`replayed: true`). Safe for an unattended agent to call: the " +
+      "approval stores only a hash of the identifiers, never the email or phone; the requester runs it after " +
+      "approval with just the approvalId.",
     minAssurance: "verified",
     method: "POST",
     pathTemplate: "/api/:tenantId/agency/privacy/erase",

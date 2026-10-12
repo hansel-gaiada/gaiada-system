@@ -3,6 +3,9 @@
 // ./agency-privacy.service.ts (read its header first); this file is authorize() + HTTP wiring + audit.
 //
 //   POST /api/:tenantId/agency/privacy/find     { email?, phone?, approvalId? }
+//   (M5-G5b: with an approvalId, email and phone may be OMITTED: the subject is then rebuilt from the hashes the
+//    approval was filed with. This is how an approval filed through the agent hub runs, and it means the requester
+//    need not retype the person's contact data. Giving them is still allowed and is checked against the approval.)
 //   POST /api/:tenantId/agency/privacy/export   { email?, phone?, approvalId? }
 //   POST /api/:tenantId/agency/privacy/erase    { email?, phone?, approvalId? }
 //
@@ -33,7 +36,7 @@ import {
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
-import { parseSubject } from "./agency-privacy.subject";
+import { parseSubject, type Subject } from "./agency-privacy.subject";
 import {
   executeAgencyPrivacyRequest, fileAgencyPrivacyRequest, isPrivacyKind, type PrivacyKind,
 } from "./agency-privacy.service";
@@ -61,12 +64,20 @@ export class AgencyPrivacyController {
     const actorId = req.principal.userId;
     if (!actorId) throw new ForbiddenException({ message: "a privacy request needs a user principal", reason: "user_required" });
 
-    const parsed = parseSubject(body);
-    if (!parsed.ok) throw new BadRequestException({ message: parsed.message, reason: parsed.reason });
-    const subject = parsed.subject;
-
     const approvalRaw = body?.approvalId;
-    if (approvalRaw === undefined || approvalRaw === null || approvalRaw === "") {
+    const hasApproval = !(approvalRaw === undefined || approvalRaw === null || approvalRaw === "");
+    const given = (v: unknown) => v !== undefined && v !== null;
+    // Run-by-approval (M5-G5b): an approvalId and NO identifier at all. Anything else, including a bad identifier
+    // next to an approvalId, is parsed (and refused) exactly as before.
+    let subject: Subject | null = null;
+    if (!hasApproval || given(body?.email) || given(body?.phone)) {
+      const parsed = parseSubject(body);
+      if (!parsed.ok) throw new BadRequestException({ message: parsed.message, reason: parsed.reason });
+      subject = parsed.subject;
+    }
+
+    if (!hasApproval) {
+      if (!subject) throw new BadRequestException({ message: "give the person's email, phone, or both", reason: "subject_invalid" });
       const filed = await fileAgencyPrivacyRequest({ tenantId, kind, subject, requestedBy: actorId });
       await writeActivity(tenantId, actorId, `privacy_${kind}_requested`, "agency_privacy_request", filed.requestId, {
         approvalId: filed.approvalId,
@@ -79,7 +90,7 @@ export class AgencyPrivacyController {
         approvalId: filed.approvalId,
         message:
           "Nothing was read or changed. A high-impact approval was filed; once a different company admin approves it, " +
-          "call this endpoint again with the same identifiers and this approvalId to run it exactly once.",
+          "call this endpoint again with this approvalId (the same identifiers are optional) to run it exactly once.",
       };
     }
     if (typeof approvalRaw !== "string" || !UUID_RE.test(approvalRaw)) {

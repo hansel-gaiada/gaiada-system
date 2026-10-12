@@ -11,13 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.73.0` - M5-P1-g: a lead convert is race-safe on its contact, and convert puts no name on the bus (2026-10-12) - DEV-VERIFIED
+### platform-nest `0.73.0` - M5-P1-g and M5-G5b: a race-safe lead convert with no name on the bus; privacy approvals store no identifiers (2026-10-12) - DEV-VERIFIED
 
-Two defects found by the M5-P1-f end-to-end QA (built by the M5 session).
+Two defects found by the M5-P1-f end-to-end QA, and the G5 privacy tools made safe to file unattended (built by the M5 session).
 
 - **Contact race.** Convert find-or-creates the contact's `users` row before it takes the lead lock, and `users.email` is UNIQUE. Concurrent converts of a lead whose contact had no row could 500 on the unique index instead of the clean 409. Now `INSERT … ON CONFLICT (email) DO NOTHING` plus a re-select, so every racer reaches the lock. An email held by a deactivated account is now a typed 400 instead of an untyped 500. This was also the real cause of the old convert-race test flake.
 - **No personal data on the bus.** Convert's `pipeline.run.created` payload is now exactly `{sourceMeetingId, actorId}`. It used to carry `title = org_name`, which is the person's full name for /contact/ and /audit/ web leads. The work-activity consumer now looks the run title up from `pipeline_runs`. n8n's `pipeline-fanout` never read the payload. The knowledge-graph bridge labels such a run by its id.
 - Verified on GitHub Actions 38198059657 (main + P1-g): pipeline e2e 26/26 with both defects asserted fixed, convert race 8/8, convert unit 34/34, work-activity consumer 19/19, all shards green.
+- **Privacy approvals store no identifiers (M5-G5b).** Filing an `agency_privacy.*` approval no longer persists the data subject's email or phone.
+  - **The approval row:** `automation_approvals.tool_args` holds `{minimised, subject hashes, ***@domain / ***NN hints}` and a generated reason. A static per-tool args-policy registry applies this at the single INSERT chokepoint.
+  - **The decided event and notifications:** hashes only. The DSR ledger's `filed` row is written in the same transaction.
+  - **Running it:** after approval, the request runs by `approvalId` and rebuilds the subject from the ledger hashes (no vault, no migration).
+  - **Filing authority:** filing one through `POST /automation-approvals` also needs `agency_lead:convert`.
+  - **Other tools:** a tool without a policy is stored exactly as before. The tools stay HIGH and two-person, and D14 never runs them.
+  - **Not covered:** ai-agents keeps its own copy of tool-call args (a separate pass).
+  - Verified on GitHub Actions 38198281158: the unattended suite 9/9 and the G5 privacy DB suite 9/9, all shards green.
 
 ### platform-nest `0.72.0` - M5 wave 3: data-subject rights and retention for website leads, the web-leads read, a staff alert, writers' room grants (2026-10-12) - DEV-VERIFIED
 
