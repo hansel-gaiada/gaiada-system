@@ -691,6 +691,8 @@ interface ItemAttrs {
   ownerId: string;
   /** M5-W1c: `editorial.state`; "" when WebDesk sent no usable one (an older WebDesk): the review rules deny. */
   reviewState: string;
+  /** M5-W4: `editorial.briefRef` (opaque to WebDesk; the ERP sets it to a `search_content_briefs` id). null when none. */
+  briefRef: string | null;
   /** M5-W1c: `publishedVersion !== null`. */
   published: boolean;
   /** M5-W2d: the item's title as WebDesk reported it (a notification names the item by it; never a body). */
@@ -781,6 +783,19 @@ export class ItemGate {
   }
 }
 
+/** M5-W6: what `openItemForContent` hands back: the gate that proves phase 2, the head's `item.get` body, and the facts read from it. */
+export interface ItemContentRead {
+  itemGate: ItemGate;
+  /** `item.get`'s body for the head (`{item, version: {blocks, seo, ...}, ...}`). */
+  head: unknown;
+  collectionKey: string;
+  locale: string;
+  headVersion: number | null;
+  /** The version number `head` carries (`version.version`), when WebDesk named one. */
+  selectedVersion: number | null;
+  deleted: boolean;
+}
+
 /** `item.get`'s answer as the Cerbos attributes and the review facts the BFF reads. The ONLY constructor of `ItemAttrs`. */
 function parseItemAttrs(body: unknown): ItemAttrs {
   const root = isPlainObject(body) ? body : {};
@@ -807,6 +822,7 @@ function parseItemAttrs(body: unknown): ItemAttrs {
     publishedVersion: typeof item.publishedVersion === "number" ? item.publishedVersion : null,
     ownerId: ed && typeof ed.authorSub === "string" ? ed.authorSub : "",
     reviewState: ed && typeof ed.state === "string" && REVIEW_STATES.includes(ed.state) ? ed.state : "",
+    briefRef: ed && typeof ed.briefRef === "string" && ed.briefRef !== "" ? ed.briefRef : null,
     published: typeof item.publishedVersion === "number",
     itemTitle: typeof item.title === "string" ? item.title.slice(0, 120) : null,
     submittedVersion: num(submitted),
@@ -984,6 +1000,25 @@ export class WebdeskContentService {
     return ItemGate.forItem(gate, site, editable.site.siteId, itemId, action, attrs, creatorId);
   }
 
+  /**
+   * M5-W6 PHASE 2 for a use of an item's CONTENT that writes nothing to WebDesk (AI assist): the cross-company wall, WebDesk's
+   * `item.get` for the head, then the REAL action (`update`: whoever may edit the item may ask for suggestions for it) with the
+   * item's own attributes. Runs before the caller's body is looked at. The head's answer is returned in hand so the caller need
+   * not read it twice; `readVersionBody` reads another version, and only with the `ItemGate` this returns.
+   */
+  async openItemForContent(gate: ContentGate, site: SiteRef, itemId: string, action: "update"): Promise<ItemContentRead> {
+    const editable = await gate.resolveSite(this.zoneB, site);
+    const { result, attrs } = await this.readItemRaw(site, itemId);
+    const itemGate = await ItemGate.forItem(gate, site, editable.site.siteId, itemId, action, attrs);
+    return { itemGate, head: result.body, collectionKey: attrs.collectionKey, locale: attrs.locale, headVersion: attrs.headVersion, selectedVersion: attrs.selectedVersion, deleted: attrs.deletedAt !== null };
+  }
+
+  /** M5-W6: one version of the item `g` was opened for (`item.get?version=`), a read. 404 `version-not-found` passes through. */
+  async readVersionBody(g: ItemGate, version: number): Promise<{ body: unknown; locale: string; collectionKey: string }> {
+    const { result, attrs } = await this.readItemRaw(g.site, g.itemId as string, String(version));
+    return { body: result.body, locale: attrs.locale, collectionKey: attrs.collectionKey };
+  }
+
   async listVersions(gate: ContentGate, site: SiteRef, itemId: string, rawQuery: unknown): Promise<ZoneBResult> {
     gate.require("webdesk_content_item", "read");
     const editable = await gate.resolveSite(this.zoneB, site);
@@ -1097,6 +1132,20 @@ export class WebdeskContentService {
 
   private async readItemAttrs(site: SiteRef, itemId: string, version?: string): Promise<ItemAttrs> {
     return (await this.readItemRaw(site, itemId, version)).attrs;
+  }
+
+  /**
+   * M5-W4: WebDesk's current facts about one item (owner, review state, collection, locale, brief reference) with NO
+   * authorization and NO audit row. The caller must authorise with them (`probeAllowed` / `ItemGate`); it exists so the
+   * brief list can filter many rows by Cerbos without writing a denial row per hidden brief.
+   */
+  itemFacts(site: SiteRef, itemId: string): Promise<ItemAttrs> {
+    return this.readItemAttrs(site, itemId);
+  }
+
+  /** M5-W4: `collection.get` for the ROUTE's/brief's key: a typed 404 `collection-not-found` passes through. */
+  async assertCollectionExists(site: SiteRef, collectionKey: string): Promise<void> {
+    await this.proveCollection(site, collectionKey);
   }
 
   private async rawItem(site: SiteRef, itemId: string, version?: string): Promise<RawItem> {

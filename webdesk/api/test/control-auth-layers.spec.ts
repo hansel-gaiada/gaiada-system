@@ -13,7 +13,7 @@
 // "no cert" row.
 //
 // Layer 2 (Keycloak token): §03's own text — "Zone B must need NO Zone A credential to verify."
-// The real public issuer (`https://erp.gaiada.online/idp/realms/gaiada`) IS reachable from this
+// The real public issuer (`https://erp.gaiada.com/idp/realms/gaiada`; the old erp.gaiada.online name is retired by ERP names B4) IS reachable from this
 // dev box (probed 2026-08-26, `.well-known/openid-configuration` returns 200) and this suite
 // proves that reachability + real-JWKS-shaped rejection against it directly (see the "real public
 // issuer" describe block). No `webdesk-control` Keycloak client exists yet — creating it is an
@@ -600,7 +600,7 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
     it("the real public JWKS is fetchable with zero Zone A credentials, and rejects a token it never issued", async () => {
       const { OfflineJwksVerifier } = await import("../src/control/auth/keycloak-token-verifier");
       const verifier = new OfflineJwksVerifier({
-        issuer: "https://erp.gaiada.online/idp/realms/gaiada",
+        issuer: "https://erp.gaiada.com/idp/realms/gaiada",
         audience: "webdesk-control-plane",
       });
       try {
@@ -609,7 +609,7 @@ describe("WSK-22 — control-channel auth, adversarial matrix (design §03 layer
         const fakeKeys = await jose.generateKeyPair("RS256", { extractable: true });
         const fakeToken = await new jose.SignJWT({ scope: "webdesk:operate" })
           .setProtectedHeader({ alg: "RS256", kid: "definitely-not-a-real-keycloak-kid" })
-          .setIssuer("https://erp.gaiada.online/idp/realms/gaiada")
+          .setIssuer("https://erp.gaiada.com/idp/realms/gaiada")
           .setAudience("webdesk-control-plane")
           .setExpirationTime("5m")
           .sign(fakeKeys.privateKey);

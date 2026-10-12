@@ -384,7 +384,7 @@ services:
       # strip the prefix, so Keycloak itself must serve under /idp or every request 404s — verified
       # live (`/idp/health/ready` on the management port returns the health payload; the same path
       # without the /idp prefix does not).
-      KC_HOSTNAME: ${KC_HOSTNAME:-https://erp.gaiada.online/idp}
+      KC_HOSTNAME: ${KC_HOSTNAME:-https://erp.gaiada.com/idp}
       KC_HTTP_RELATIVE_PATH: ${KC_HTTP_RELATIVE_PATH:-/idp}
       # `xforwarded` matches nginx's proxy_set_header block on `location /idp/` (X-Forwarded-For/
       # -Proto/-Host/-Port) — the other value Keycloak accepts, `forwarded`, expects the single
