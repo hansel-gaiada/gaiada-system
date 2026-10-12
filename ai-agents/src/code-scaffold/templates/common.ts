@@ -83,7 +83,7 @@ export function packageJson(args: {
       "@gaiada/webdesk-sdk": "file:./vendor/webdesk-sdk",
     },
     devDependencies: {
-      vitest: "^2.1.5",
+      vitest: "^4.1.11",
       typescript: "^5.6.3",
     },
   } as Record<string, unknown>;

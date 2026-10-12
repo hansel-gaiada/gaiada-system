@@ -23,3 +23,10 @@ differ). It runs as part of `npm test` in `webdesk/`.
 
 Every template carries `.github/workflows/site.yml`: `verify` is skipped in a template repo, and
 `deploy` needs the org secret `WEBDESK_DEPLOY_GRANT` (see M6-P4g, M6-P6).
+
+`qa/build-templates.sh` (M6-P4d2) proves, on Linux, that both templates and one scaffolded fullstack site install
+and build from a clean copy (no network beyond the npm registry, no secrets). Run it in a container:
+
+    docker run --rm -v "$PWD":/src:ro node:24-bookworm bash /src/webdesk/templates/qa/build-templates.sh /src
+
+It prints PASS/FAIL per step and ends with `### build-templates PASS` or `FAIL` (exit 1). Run it on the server, not a laptop.
