@@ -157,8 +157,9 @@ services:
       # a SEPARATE key pair and a SEPARATE file from the editorial set above (the api refuses boot if the
       # two share a kid or a key). Same discipline: literal path, read-only FILE mount, shape-validated at
       # boot (present but malformed → boot refused). Absent → v2 is unavailable and WS4 v1 (HMAC,
-      # WEBDESK_APPROVAL_ASSERTION_KEY in .env.control) keeps working while it is set. No private key
-      # ever lives on this box. Install / rotate: ../infra/runbooks/webdesk-ws4-keys.md.
+      # WEBDESK_APPROVAL_ASSERTION_KEY in /etc/webdesk/.env, NOT .env.control) works only while it is set.
+      # Live since 2026-10-12 with kid ws4-2026-10, and v1 is retired there. No private key ever lives on
+      # this box. Install / rotate: ../infra/runbooks/webdesk-ws4-keys.md.
       WEBDESK_WS4_JWKS_FILE: /etc/webdesk/ws4/ws4.jwks.json
     # Everything else control-channel (WSK-22) still comes from its own env file, NOT `.env`
     # (single-line secrets only now — the CA left this file on purpose, see above). On THIS box

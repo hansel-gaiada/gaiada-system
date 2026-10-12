@@ -816,6 +816,9 @@ services:
       # M5-L5 — comma-separated ERP user ids alerted (bell) on a new web lead. Empty = nobody. Never a group the
       # work-summary bot ingests (addendum R-V13).
       AGENCY_WEB_LEAD_ALERT_USER_IDS: ${AGENCY_WEB_LEAD_ALERT_USER_IDS:-}
+      # M5-L5b — ALSO relay the alert to chat via the bot (POST bot /admin/alerts/web-lead) ONLY when exactly "1";
+      # empty = bell only. Needs BOT_URL + the bot admin token above, and WEB_LEAD_ALERT_CHAT_ID on the bot.
+      AGENCY_WEB_LEAD_ALERT_CHAT: ${AGENCY_WEB_LEAD_ALERT_CHAT:-}
       N8N_BRIDGE_ENTITY_TYPES: ${N8N_BRIDGE_ENTITY_TYPES:-}
       # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
       # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.
@@ -1563,6 +1566,13 @@ services:
       DATABASE_URL: postgres://bot_app:${BOT_APP_PASSWORD:?}@pg-bot:5432/gaiada_bot
       MIGRATE_DATABASE_URL: postgres://bot_owner:${BOT_OWNER_PASSWORD:?}@pg-bot:5432/gaiada_bot
       MANAGEMENT_GROUP_ID: ${MANAGEMENT_GROUP_ID:-}
+      # M5-L5b — web-lead alert relay (wa-chat-bot/src/web-lead-alert.ts). The destination chat id lives ONLY here
+      # (e.g. 62811...@c.us or tg:<id>), never in a request; empty = OFF (503 alert-destination-unset). The bot refuses
+      # a chat it ingests (a monitored group, or any group not on its ignored list): use a DM / Telegram private chat.
+      WEB_LEAD_ALERT_CHAT_ID: ${WEB_LEAD_ALERT_CHAT_ID:-}
+      # Must equal the platform's MAIL_LINK_BASE_URL: the caller's link is matched against it exactly. Falls back to
+      # MAIL_LINK_BASE_URL so one .env name is enough; empty = the route answers 503 alert-link-base-unset.
+      WEB_LEAD_ALERT_LINK_BASE: ${WEB_LEAD_ALERT_LINK_BASE:-${MAIL_LINK_BASE_URL:-}}
       POST_TO_GROUPS: ${POST_TO_GROUPS:-false}
       REDIS_URL: redis://redis-bot:6379
       # A3: group registry lives on the writable bot-data volume so the ERP can edit it. No seed
