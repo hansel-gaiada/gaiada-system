@@ -26,6 +26,7 @@ import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
 import { NETWORK_FIXTURES } from "./demoNetwork";
 import { websiteAccessDemo } from "./demoWebsiteAccess";
+import { billingDemo, demoBillingNeedsClient, demoBillingNeedsUs, demoBillingPendingTotal } from "./demoBilling";
 
 export interface DemoResult {
   status: number;
@@ -2139,6 +2140,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const websiteAccess = websiteAccessDemo(method, p, userId, body);
   if (websiteAccess) return websiteAccess;
 
+  // PV3-08 — the staff Contracts & billing area: `/contracts*` and `/invoice-payments*`. Stateful
+  // (lib/demoBilling.ts), and placed before the generic matchers so none of them answers one of these paths.
+  const billing = billingDemo(method, p, url.searchParams, body, userId);
+  if (billing) return billing;
+
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);
   if (pm) return applyDemoTaskClientFilter(pm, p, url);
@@ -2722,30 +2728,29 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     const invoiced = invoices
       .filter((i) => i.status !== "void" && i.status !== "draft")
       .reduce((n, i) => n + Number(i.total ?? 0), 0);
-    // One pending payment and one untriaged request on the first demo client, so "waiting on us" is a
-    // REACHABLE state in demo mode. A demo that only ever shows an empty ball list cannot be reviewed.
-    const needsUs = cid === "cl-1"
-      ? [
-          { kind: "payment", id: "dpay-1", label: "Confirm a client-recorded payment", context: "USD 2,400", href: "/invoices/inv-1", since: daysAgoIso(11) },
-          { kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work` },
-        ]
-      : [];
-    // PV3-05: no contracts page exists yet (PV3-08 adds `/clients/:id/billing`), so the contract item
-    // points at the hub Overview rather than at the nonexistent `/commercial`. The review item gives the
-    // Projects area's post-review list a reachable state in demo mode.
-    const needsClient = cid === "cl-1"
-      ? [
-          { kind: "contract", id: "dk-1", label: "Awaiting client signature", context: "Statement of Work — redesign", href: `/clients/${cid}`, since: daysAgoIso(4) },
-          { kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3) },
-        ]
-      : [];
+    // Payments and contracts come from the billing store (lib/demoBilling.ts), the same one the Contracts &
+    // billing area reads and writes, so deciding a payment there clears its item here. One untriaged
+    // request stays a literal on the first demo client, so "waiting on us" has a non-billing item too.
+    const needsUs = [
+      ...demoBillingNeedsUs(cid),
+      ...(cid === "cl-1"
+        ? [{ kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/work` }]
+        : []),
+    ];
+    // PV3-05: the review item gives the Projects area's post-review list a reachable state in demo mode.
+    const needsClient = [
+      ...demoBillingNeedsClient(cid),
+      ...(cid === "cl-1"
+        ? [{ kind: "review", id: "drv-1", label: "Awaiting client post approval", context: "Launch announcement", href: `/clients/${cid}/work`, since: daysAgoIso(3) }]
+        : []),
+    ];
     const money = invoices.length
       ? {
           currency: String(invoices[0].currency ?? "USD"),
           invoiced,
           drafted: 0,
           paid: 0,
-          pendingConfirmation: cid === "cl-1" ? 2400 : 0,
+          pendingConfirmation: demoBillingPendingTotal(cid),
           outstanding: invoiced,
           overdueCount: invoices.filter((i) => i.status === "sent" && String(i.periodEnd) < today).length,
           openCount: invoices.filter((i) => i.status === "sent").length,
