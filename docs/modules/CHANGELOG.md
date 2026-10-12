@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### insights-collector `0.2.0` + infra `0.13.10` - M5-V3-b: the consented channel, forget, the ops events read and the 72-hour purge (not deployed) (2026-10-13) - PROTOTYPED
+
+- **`POST /lib/kestrel/v`** (consented events):
+  - A missing or invalid `consentId` is a 400, and a tombstoned visitor or consent id is a 410; nothing is stored in either case.
+  - Only allow-listed data keys with id-like values are kept.
+  - At most 50 events and 16 KB per request.
+  - Geo, network and company come from the same single lookup as the aggregate channel.
+- **`POST /lib/kestrel/f`** (withdrawal) deletes that visitor and consent pair and tombstones the visitor id.
+- **Ops API** (port 8081):
+  - `GET /ops/v1/events` (read key) pages by id with a cursor and never returns a row younger than 15 s. It takes the insert lock exclusively for one page, so a batch that commits late with a lower id is never skipped.
+  - `POST /ops/v1/forget` needs a separate forget key: the read key gets 403. It tombstones and is idempotent.
+- **Tombstones** use the ERP's hash contract, `sha256(utf8(lower-case uuid))`, pinned by a known-vector test.
+- **Inserts and forgets** serialise on one advisory lock, so a batch cannot land after its forget.
+- **Purge:** buffered events go after 72 h at most (`BUFFER_RETENTION_HOURS` is 1–72, and 0 refuses to start); tombstones go after 14 months.
+- **Migration `0002_consented_events`:** no IP or user-agent column; a schema test pins the column list.
+- **Sumopod compose:** `OPS_FORGET_KEY_SHA256` is now required. `CONSENT_EVENT_NAMES`, `CONSENT_RATE_PER_SECOND`, `BUFFER_RETENTION_HOURS` and `PURGE_INTERVAL_MINUTES` are passed through. `check-config.sh` and runbook C2 are updated.
+- `/v` and `/f` stay unrouted at the edge until V3-c.
+- `go test -race` is green locally. The Postgres contract test runs in CI.
+
 ### infra `0.13.9` - M5-V2-c: the insights-collector in the Umami compose project on sumopod (files only, not deployed) (2026-10-13) - PROTOTYPED
 
 - **`infra/sumopod/umami/docker-compose.yml`** gains two services, both on the `internal` network only (no egress):
