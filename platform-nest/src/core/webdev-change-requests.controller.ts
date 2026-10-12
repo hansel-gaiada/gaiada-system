@@ -257,6 +257,7 @@ export class WebdevChangeRequestsController {
     @Body() body: {
       kind?: string; title?: string; body?: string; clientId?: string; projectId?: string;
       reproSteps?: string; environment?: string; seenOnVersion?: string; affectedUrl?: string;
+      sourceMessageId?: string;
     },
   ) {
     const { kind, clientId, projectId } = body ?? {};
@@ -264,16 +265,39 @@ export class WebdevChangeRequestsController {
     if (!kind || !KINDS.has(kind)) throw new BadRequestException("kind must be content|design|feature|bug");
     if (!rawTitle) throw new BadRequestException("title required");
     await authorize(req.principal, { kind: "webdev_change_request", tenantId, module: "webdev" }, "create");
+    // PV4-09: "Turn into a change request" on a client's conversation message. Authorization has already
+    // run above, so a denied caller never learns whether a message id exists. The shape check is here;
+    // the existence check runs inside the insert's transaction (below), where RLS and the tenant wall apply.
+    const sourceMessageId = body?.sourceMessageId ?? null;
+    if (sourceMessageId !== null && (typeof sourceMessageId !== "string" || !UUID_RE.test(sourceMessageId))) {
+      throw new BadRequestException("source_message_invalid");
+    }
     const id = newId();
     const title = scrubText(rawTitle).text.slice(0, TITLE_CAP);
     const bodyText = body?.body ? scrubText(body.body).text.slice(0, BODY_CAP) : null;
     try {
       await withTenants([tenantId], async (c) => {
+        if (sourceMessageId !== null) {
+          // Valid only when the message is in THIS tenant and its thread belongs to the request's own
+          // client. A request with no client has nothing to match, so it can never cite a message. The
+          // same answer (400 source_message_invalid) covers "unknown id" and "another client's message":
+          // staff may read every client's threads, but a request that cites another client's message
+          // would attach that client's words to this client's work.
+          const ok = clientId && UUID_RE.test(clientId)
+            ? await c.query(
+                `SELECT 1 FROM conversation_messages m
+                   JOIN conversation_threads t ON t.id = m.thread_id AND t.tenant_id = m.tenant_id
+                  WHERE m.id = $1 AND m.tenant_id = $2 AND t.client_id = $3 AND t.deleted_at IS NULL`,
+                [sourceMessageId, tenantId, clientId],
+              )
+            : { rowCount: 0 };
+          if (!ok.rowCount) throw new BadRequestException("source_message_invalid");
+        }
         await c.query(
           `INSERT INTO webdev_change_requests
              (id, tenant_id, client_id, project_id, source, kind, title, body, status, requested_by, origin_site,
-              repro_steps, environment, seen_on_version, affected_url)
-           VALUES ($1, $2, $3, $4, 'internal', $5, $6, $7, 'new', $8, $9, $10, $11, $12, $13)`,
+              repro_steps, environment, seen_on_version, affected_url, source_message_id)
+           VALUES ($1, $2, $3, $4, 'internal', $5, $6, $7, 'new', $8, $9, $10, $11, $12, $13, $14)`,
           // Same four reporter-supplied fields the portal accepts. Parity is the point: this is the
           // path a QA engineer, an n8n flow and (later) the D-9 CI receiver all file through, and a
           // capability that only carries full detail on the portal path is the "UI as the definition"
@@ -286,6 +310,7 @@ export class WebdevChangeRequestsController {
             body?.environment ? scrubText(body.environment).text.slice(0, ENVIRONMENT_CAP) : null,
             body?.seenOnVersion ? scrubText(body.seenOnVersion).text.slice(0, SEEN_ON_VERSION_CAP) : null,
             body?.affectedUrl ? scrubText(body.affectedUrl).text.slice(0, AFFECTED_URL_CAP) : null,
+            sourceMessageId,
           ],
         );
         await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.created", {
