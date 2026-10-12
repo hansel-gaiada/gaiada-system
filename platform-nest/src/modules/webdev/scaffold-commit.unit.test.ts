@@ -450,6 +450,19 @@ describe("commitScaffoldTree — crash and resume", () => {
     expect(h.gh.count("POST", "/git/commits")).toBe(1); // the second tree never made a commit
   });
 
+  it("a human push that lands between the head read and the PATCH is refused by GitHub's fast-forward check; the ledger says failed", async () => {
+    const h = harness();
+    h.gh.beforeRequest = (method) => {
+      if (method === "PATCH" && h.gh.count("PATCH", "/git/refs/heads/") === 1) h.gh.pushHumanCommit({ "race.md": "human" });
+    };
+    const e = await refusal(commitScaffoldTree(h.deps, req(tree())));
+    expect(e.code).toBe("scaffold_repo_not_pristine");
+    expect(e.detail).toMatch(/not a fast forward/);
+    expect(h.gh.filesAt(h.gh.headOf()!).get("race.md")).toBe("human");
+    expect(h.ledger).toEqual([{ step: "objects", outcome: "succeeded" }, { step: "ref", outcome: "failed" }]);
+    expect(h.site.row).toMatchObject({ scaffoldState: "commit_created", scaffoldError: "scaffold_repo_not_pristine" });
+  });
+
   it("an UNLANDED claim is superseded by a different tree; the stale writer then gives way", async () => {
     const h = harness();
     // tree A gets as far as commit_created, then its PATCH fails

@@ -662,16 +662,23 @@ export async function commitScaffoldTree(deps: ScaffoldCommitDeps, req: Scaffold
         return refuse("scaffold_superseded", "a different tree claimed this site while this one was being written");
       }
       if (r.scaffoldState === "committed") return r;
+      if (r.scaffoldState !== "commit_created" || r.scaffoldCommitSha !== commitSha) {
+        return refuse("scaffold_superseded", "this site's claim changed while this tree was being written");
+      }
       const now = await getBranchHead(deps.git, repo, branch);
       if (now !== commitSha) {
         if (now !== baseSha) {
           // (The refusal rolls this transaction back; `recordAndThrow` records it in its own.)
           return refuse("scaffold_repo_not_pristine", `branch ${branch} moved from the template commit ${baseSha} to ${now ?? "nothing"}`);
         }
-        const ff = await deps.ledger("ref", { repo, branch }, async () => ({ data: await fastForwardRef(deps.git, repo, branch, commitSha as string), sha: commitSha as string }));
-        if (ff.data.outcome !== "updated") {
-          return refuse("scaffold_repo_not_pristine", `branch ${branch} moved while the fill was being written (not a fast forward)`);
-        }
+        // A refused fast-forward throws INSIDE the ledger step, so its row reads `failed`, never `succeeded`.
+        await deps.ledger("ref", { repo, branch }, async () => {
+          const ff = await fastForwardRef(deps.git, repo, branch, commitSha as string);
+          if (ff.outcome !== "updated") {
+            refuse("scaffold_repo_not_pristine", `branch ${branch} moved while the fill was being written (not a fast forward)`);
+          }
+          return { data: ff, sha: commitSha as string };
+        });
       }
       await tx.markCommitted(tree.manifestSha256, commitSha as string);
       return tx.read();
