@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **172** capabilities across **16** owners
-- **90** writes · 82 reads
-- Writes by impact: **high 21** · medium 28 · low 41
+- **176** capabilities across **16** owners
+- **92** writes · 84 reads
+- Writes by impact: **high 22** · medium 29 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -39,11 +39,11 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 12 |
+| agency | `agency` | 13 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 12 |
-| core | `agency` · `positions` · `role-grants` | 16 |
+| clients | `clients` | 13 |
+| core | `agency` · `positions` · `role-grants` | 18 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 4 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 17 |
+| webdev | `webdev` | 18 |
 
 ## Capabilities
 
@@ -72,6 +72,7 @@ unfalsifiable after.
 | core | `agency_intake.invite` | `POST` | `/api/:tenantId/agency/leads/:leadId/invite` | write | `low` |
 | core | `agency_intake.listLeads` | `GET` | `/api/:tenantId/agency/leads` | read | — |
 | core | `agency_intake.listSubmissions` | `GET` | `/api/:tenantId/agency/leads/:leadId/submissions` | read | — |
+| core | `agency_intake.listWebLeads` | `GET` | `/api/:tenantId/agency/web-leads/:siteSlug` | read | — |
 | core | `agency_intake.nurture` | `POST` | `/api/:tenantId/agency/leads/:leadId/nurture` | write | `low` |
 | core | `agency_intake.open` | `POST` | `/api/:tenantId/agency/leads/:leadId/open` | write | `low` |
 | core | `agency_pipeline.moveStage` | `POST` | `/api/:tenantId/agency/leads/:leadId/stage` | write | `low` |
@@ -211,6 +212,9 @@ unfalsifiable after.
 | webdev | `webdesk.content.unpublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/unpublish` | write | `medium` |
 | webdev | `webdesk.content.update` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId` | write | `low` |
 | webdev | `webdesk.deploy.staging` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/deploy/staging` | write | `medium` |
+| webdev | `webdesk.editorial.grantRole` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | write | `high` |
+| webdev | `webdesk.editorial.listGrants` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | read | — |
+| webdev | `webdesk.editorial.revokeRole` | `DELETE` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants/:userId/:role` | write | `medium` |
 | webdev | `webdesk.key.mint` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/keys` | write | `high` |
 | webdev | `webdesk.key.revoke` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/revoke` | write | `high` |
 | webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |
