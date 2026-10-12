@@ -59,7 +59,7 @@ export interface FakeItem {
   versions: Array<{ version: number; fields: unknown; contentHash: string; createdBy: string; createdAt: string; note: string | null; seo?: Record<string, unknown>; blocks?: unknown[] }>;
   /** M5-W2b/W2c: `item.get`'s `editorial` member. Absent = a WebDesk older than M5-W2b (the member is not sent).
    *  M5-W1c: `authorSub` (editorial_items.author_sub, the Cerbos ownerId) and `submittedVersion` ride it as the real view does. */
-  editorial?: { reviewRequired: boolean; state: string; approvedVersion: number | null; authorSub?: string | null; submittedVersion?: number | null };
+  editorial?: { reviewRequired: boolean; state: string; approvedVersion: number | null; authorSub?: string | null; submittedVersion?: number | null; briefRef?: string | null; dueAt?: string | null; plannedPublishAt?: string | null };
 }
 
 export interface FakeCall {
@@ -433,6 +433,23 @@ export class FakeZoneB {
     if (this.dropBeforeApply) {
       this.dropBeforeApply = false;
       throw new WebdeskControlTransportError("link died before the request was written", 1, true, "ECONNRESET");
+    }
+    if (req.command === "editorial.assign") {
+      // M5-W4: `assign` is the one review command whose effect the brief tests read back (author, dates and `brief_ref` on the
+      // item's `editorial` member), exactly as WebDesk's UPDATE does: a key the body omits keeps its value, and the item is touched
+      // (a draft with no author) when it had no editorial row yet.
+      const i = this.items.get(String(req.params?.itemId));
+      if (!i || i.siteId !== req.params?.siteId) return problem(404, "item-not-found");
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const cur = i.editorial ?? { reviewRequired: false, state: "draft", approvedVersion: null, authorSub: null, submittedVersion: null };
+      i.editorial = {
+        ...cur,
+        ...("authorSub" in b ? { authorSub: b.authorSub as string } : {}),
+        ...("briefRef" in b ? { briefRef: b.briefRef as string | null } : {}),
+        ...("dueAt" in b ? { dueAt: b.dueAt as string | null } : {}),
+        ...("plannedPublishAt" in b ? { plannedPublishAt: b.plannedPublishAt as string | null } : {}),
+      };
+      return ok({ itemId: i.itemId, editorial: i.editorial, replayed: false });
     }
     if (req.command.startsWith("editorial.")) {
       // M5-W2d: the review commands are recorded (the call list is the assertion); WebDesk's state machine is not restated here.

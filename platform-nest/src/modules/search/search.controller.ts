@@ -498,8 +498,10 @@ async function findingRow(c: PoolClient, findingId: string): Promise<{ auditId: 
 }
 
 async function briefRow(c: PoolClient, briefId: string): Promise<{ propertyId: string } | null> {
+  // M5-W4: a writers' room brief may have no search property (it is read through the WebDesk routes, authorised on its
+  // item). Every route below authorises against the PARENT property, so a property-less row is "not found" here.
   const r = await c.query<{ property_id: string }>(
-    `SELECT property_id FROM search_content_briefs WHERE id = $1 AND deleted_at IS NULL`,
+    `SELECT property_id FROM search_content_briefs WHERE id = $1 AND deleted_at IS NULL AND property_id IS NOT NULL`,
     [briefId],
   );
   return r.rows[0] ? { propertyId: r.rows[0].property_id } : null;
