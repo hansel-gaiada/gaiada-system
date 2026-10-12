@@ -41,7 +41,7 @@ after the owner reviewed revision 1 and its drafts.
   audit. The checks made for revision 2 are cited where they are used.
 - `UI` = `platform-ui/src/`, `PN` = `platform-nest/src/`.
 
-**Visual:** draft screens for each department: https://claude.ai/artifact/9dmFWVYvR7o3AG8W61x5aP
+**Visual:** draft screens for each department: https://claude.ai/artifact/BeKqZixVQq8R2AuywQBEN9
 
 ---
 
