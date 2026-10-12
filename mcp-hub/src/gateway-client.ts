@@ -17,5 +17,19 @@ async function post(path: string, body: unknown): Promise<string> {
   return data.text;
 }
 
-export const gatewayComplete = (prompt: string): Promise<string> => post("/complete", { prompt });
+// The gateway's keyless terminator (ai-gateway-go providers/echo.go) answers "[echo — no provider key configured] <prompt>".
+const ECHO_PREFIX = "[echo — no provider key configured]";
+
+// Text generation through /complete. A generation that is empty after trim, or that is the gateway's echo fallback
+// (no real provider produced it), is a FAILURE here: no brief, PRD, report, scope or summary is ever legitimately
+// either, and storing one opens the next stage on a blank artifact (M6-P4n, live 2026-10-13). The throw fails the tool,
+// n8n's node errors, the webhook answers 5xx and platform-nest's at-least-once bridge redelivers: a bounded retry.
+export async function gatewayComplete(prompt: string): Promise<string> {
+  const raw = await post("/complete", { prompt });
+  if (!raw.trim()) throw new Error("gateway /complete: the model returned no text");
+  if (raw.trimStart().startsWith(ECHO_PREFIX)) {
+    throw new Error("gateway /complete: the gateway answered with its echo fallback: no real provider produced this");
+  }
+  return raw;
+}
 export const gatewayMedia = (base64: string, mime: string): Promise<string> => post("/media", { base64, mime });

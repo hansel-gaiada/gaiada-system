@@ -20,7 +20,13 @@ type OpenAIProvider struct {
 	// Cloud, e.g., glm-5.2 rejects images while qwen3.5 accepts them.
 	VisionModel string
 	MaxTokens   int
-	Client      *http.Client
+	// ReasoningMaxTokens caps a reasoning model's thinking via OpenRouter's unified `reasoning`
+	// body field. 0 (the default) sends nothing, so the request body is byte-identical to what it
+	// was before the field existed: OpenAI's own API does not take it. On OpenRouter a reasoning
+	// model's thinking tokens count against MaxTokens, so an uncapped one can spend the whole
+	// budget thinking and return empty content (M6-P4n).
+	ReasoningMaxTokens int
+	Client             *http.Client
 }
 
 func NewOpenAIProvider(baseURL, apiKey, model, visionModel string, maxTokens int, client *http.Client) *OpenAIProvider {
@@ -34,18 +40,32 @@ func NewOpenAIProvider(baseURL, apiKey, model, visionModel string, maxTokens int
 	}
 }
 
+// WithReasoningMaxTokens sets OPENAI_REASONING_MAX_TOKENS (<= 0 leaves the field unsent) and
+// returns the provider for chaining at construction.
+func (p *OpenAIProvider) WithReasoningMaxTokens(n int) *OpenAIProvider {
+	if n < 0 {
+		n = 0
+	}
+	p.ReasoningMaxTokens = n
+	return p
+}
+
 // chat POSTs an OpenAI /chat/completions request with the given model and user-message content
 // (a plain string, or a []any of typed parts for multimodal input) and returns the first choice's
 // trimmed text.
 func (p *OpenAIProvider) chat(ctx context.Context, model string, content any) (string, error) {
 	// Marshal error is safely ignored: the input is always a struct of strings/ints/known parts,
 	// which is always marshalable.
-	body, _ := json.Marshal(map[string]any{
+	reqBody := map[string]any{
 		"model":      model,
 		"max_tokens": p.MaxTokens,
 		"messages":   []map[string]any{{"role": "user", "content": content}},
 		"stream":     false,
-	})
+	}
+	if p.ReasoningMaxTokens > 0 {
+		reqBody["reasoning"] = map[string]any{"max_tokens": p.ReasoningMaxTokens}
+	}
+	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -68,18 +88,26 @@ func (p *OpenAIProvider) chat(ctx context.Context, model string, content any) (s
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&data); err != nil {
 		return "", err
 	}
 	// A response with no choices is a malformed/failed generation → error so the chain fails
-	// over. A choice whose content is a present-but-empty string is legitimate (mirrors the
-	// ollama/gemini providers), and is trimmed and returned as-is.
+	// over. A choice whose content is a present-but-empty string with finish_reason "stop" is a
+	// legitimate empty answer (mirrors the ollama/gemini providers) and is returned as-is. The same
+	// empty content with finish_reason "length" is NOT: the generation was cut off, typically a
+	// reasoning model that spent the whole max_tokens budget thinking (M6-P4n, live 2026-10-13: HTTP
+	// 200, empty content, stored as a design artifact), so it errors and the chain fails over.
 	if len(data.Choices) == 0 {
 		return "", fmt.Errorf("openai returned no choices")
 	}
-	return strings.TrimSpace(data.Choices[0].Message.Content), nil
+	text := strings.TrimSpace(data.Choices[0].Message.Content)
+	if text == "" && data.Choices[0].FinishReason == "length" {
+		return "", fmt.Errorf("openai returned no content: the token budget ran out (finish_reason=length; a reasoning model may have spent it all reasoning)")
+	}
+	return text, nil
 }
 
 func (p *OpenAIProvider) Name() string { return "openai" }

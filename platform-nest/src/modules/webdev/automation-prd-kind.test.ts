@@ -222,6 +222,46 @@ describe("M6-P4e -- pipeline-delivery.json code stage", () => {
     const r = run(decide, ok(runDoc), {});
     expect(r).toMatchObject({ prdRef: "stage:s-prd", protoRef: "stage:s-d2" }); // the LATEST design
   });
+
+  // M6-P4n: the PM's beat-1 rejection (pm_review changes_requested on the design) used to dead-end in noop. It now revises the design
+  // exactly like the client's beat-2 feedback, with the same budget, taking the note from the gate that asked for the changes.
+  describe("'Load + decide' on the design's pm_review (beat 1)", () => {
+    const decide = node(wf, "Load + decide").parameters.jsCode as string;
+    const gate = (kind: string, stageId: string, over: Json = {}): Json => ({ id: `g-${kind}-${stageId}`, kind, stage_id: stageId, status: "decided", decision: "approved", created_at: "2026-10-13T10:00:00Z", ...over });
+    const runWith = (designs: number, gates: Json[]): Json => {
+      const stages: Json[] = [{ id: "s-prd", name: "prd_extract", artifact_ref: "the prd text" }];
+      for (let i = 1; i <= designs; i++) stages.push({ id: `s-d${i}`, name: "claude_design", artifact_ref: `design v${i}` });
+      return run(decide, ok({
+        id: "r1", tenant_id: "t1", title: "Acme Site", stages,
+        gates: [gate("prd_sign", "s-prd", { decision: "signed" }), ...gates],
+        scopeSignoffs: [{ party: "provider" }, { party: "client" }],
+      }), {});
+    };
+
+    it("changes_requested revises the design and carries the PM's note", () => {
+      const r = runWith(1, [gate("pm_review", "s-d1", { decision: "changes_requested", note: "the nav is missing" })]);
+      expect(r).toMatchObject({ action: "revise_design", note: "the nav is missing" });
+    });
+
+    it("changes_requested at the revise cap escalates instead", () => {
+      const r = runWith(3, [gate("pm_review", "s-d3", { decision: "changes_requested", note: "still wrong" })]);
+      expect(r).toMatchObject({ action: "escalate_revise", note: "still wrong" });
+    });
+
+    it("a pending pm_review, or none yet, is still a noop (a redelivery after the revise must not revise twice)", () => {
+      expect(runWith(2, [gate("pm_review", "s-d1", { decision: "changes_requested" }), gate("pm_review", "s-d2", { status: "pending", decision: null })])).toMatchObject({ action: "noop" });
+    });
+
+    it("approved still opens the client's customer_feedback (beat 2)", () => {
+      const r = runWith(1, [gate("pm_review", "s-d1")]);
+      expect(r).toMatchObject({ action: "open_gate", nextKind: "customer_feedback", nextActor: "client", stageId: "s-d1" });
+    });
+
+    it("the client's customer_feedback changes_requested still revises with ITS note", () => {
+      const r = runWith(1, [gate("pm_review", "s-d1"), gate("customer_feedback", "s-d1", { decision: "changes_requested", note: "make it blue" })]);
+      expect(r).toMatchObject({ action: "revise_design", note: "make it blue" });
+    });
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
