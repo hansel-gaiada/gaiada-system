@@ -40,7 +40,7 @@ const lines = require("fs").readFileSync(0, "utf8").trim().split("\n").filter(Bo
 const tcp = (h, p) => new Promise((res) => { const s = net.connect({ host: h, port: +p });
   const d = (r) => { s.destroy(); res(`${h}:${p} ${r}`); };
   s.setTimeout(2500, () => d("timeout")); s.on("connect", () => d("open"));
-  s.on("error", (e) => d(e.code === "ECONNREFUSED" ? "refused" : "error")); });
+  s.on("error", (e) => d(e.code === "ECONNREFUSED" ? "refused" : `error ${e.code || "?"}`)); });
 const look = () => new Promise((res) => dns.lookup("example.com", (e) => res(`dns ${e ? "fail" : "ok"}`)));
 Promise.all([look(), ...lines.map((l) => tcp(...l.split(" ")))]).then((r) => console.log(r.join("\n")));'
 
@@ -269,6 +269,20 @@ expect_dropped() { # expect_dropped <file> <host:port> <description>
     *) bad "$3: got '$(res "$1" "$2")', not a timeout (a DROP in OUTPUT must not answer; check slirp/RST)" ;;
   esac
 }
+# expect_unreachable <file> <host:port> <description>: for slirp's host alias 10.0.2.2 only. With
+# --disable-host-loopback, slirp4netns rejects it INSIDE its own process, before any host socket exists, so the OUTPUT
+# guard never sees it and the answer is an error, not a timeout (measured on gda-aicenter 2026-10-12, P2 A2 run 1).
+# The property is "never reaches the host": the target port must be one the host LISTENS on (sshd on 0.0.0.0:22), so
+# reaching it would read "open". Anything but open passes; the error code is printed.
+expect_unreachable() {
+  local r code
+  r="$(res "$1" "$2")"
+  code="$(awk -v t="$2" '$1 == t { print $3; exit }' "$1")"
+  case "$r" in
+    open) bad "$3: REACHABLE (host loopback through slirp)" ;;
+    *) ok "$3: not reachable ($r${code:+ $code}; slirp refuses it in-process with host loopback disabled)" ;;
+  esac
+}
 control() { # control <file> <host:port> <description>: the target answers (open|refused) from the unguarded path
   if answers "$1" "$2"; then ok "control: $3 answers ($(res "$1" "$2")) from the rootful default bridge"
   else bad "control: $3 does NOT answer from the rootful default bridge ($(res "$1" "$2")); its dropped-check proves nothing"; fi
@@ -334,7 +348,9 @@ elif [ -n "$WG_CANDS" ]; then
 else
   note "no WireGuard peer on this host (wg show all allowed-ips is empty): the peer check was SKIPPED"
 fi
-expect_dropped "$T/drop.proof" "10.0.2.2:22" "slirp host alias 10.0.2.2:22"
+ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '^(0\.0\.0\.0|\*|127\.0\.0\.1):22$' \
+  || bad "precondition: the host does not listen on 127.0.0.1:22 / 0.0.0.0:22, so the 10.0.2.2:22 check proves nothing"
+expect_unreachable "$T/drop.proof" "10.0.2.2:22" "slirp host alias 10.0.2.2:22 (= host loopback)"
 note "10.0.2.2:22 has NO rootful control: the address exists only inside slirp4netns"
 
 # --- 3 published ports ----------------------------------------------------------------------------------------
