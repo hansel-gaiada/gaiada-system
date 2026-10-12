@@ -35,6 +35,7 @@ PASSED=0
 FAILED=0
 _SUMMARY_DONE=0
 TMPFILES=()
+RUN_TMP=""   # per-run 0700 scratch directory under the evidence dir; created by require_proof_context, removed at exit
 
 pass() { printf '  PASS  %s\n' "$*"; PASSED=$((PASSED + 1)); }
 fail() { printf '  FAIL  %s\n' "$*"; FAILED=$((FAILED + 1)); }
@@ -52,6 +53,7 @@ _on_exit() {
   if declare -F cleanup >/dev/null; then cleanup || true; fi
   local f
   for f in "${TMPFILES[@]:-}"; do [ -z "$f" ] || rm -f -- "$f"; done
+  [ -z "$RUN_TMP" ] || rm -rf -- "$RUN_TMP"
   if [ "$_SUMMARY_DONE" = 0 ]; then
     if [ "$rc" != 0 ] && [ "$FAILED" = 0 ]; then printf '  FAIL  script aborted (exit %s)\n' "$rc"; FAILED=$((FAILED + 1)); fi
     printf '\npassed=%d failed=%d\n' "$PASSED" "$FAILED"
@@ -114,6 +116,8 @@ require_proof_context() {
   [ "$(cfg_get "$PROOF_CONF" RL_ROLE)" = proof ] || die "REFUSED: $PROOF_CONF does not say RL_ROLE=proof"
   [ "$(cfg_get "$PROOF_CONF" RL_UID)" = "$PROOF_UID" ] || die "REFUSED: $PROOF_CONF does not say RL_UID=$PROOF_UID"
   [ "$(getent passwd "$PROOF_UID" | cut -d: -f1)" = "$PROOF_USER" ] || die "REFUSED: uid $PROOF_UID is not $PROOF_USER"
+  install -d -m 0700 "$PROOF_EVID" || die "cannot create $PROOF_EVID"
+  RUN_TMP="$(mktemp -d -p "$PROOF_EVID" .run.XXXXXX)" || die "cannot create a scratch directory in $PROOF_EVID"
   pass "proof context: role proof, user $PROOF_USER (uid $PROOF_UID), project $PROOF_PROJECT"
 }
 
@@ -149,13 +153,11 @@ wait_until() {
   done
 }
 
-# mk_tmp: a 0600 temp file (removed at exit), path on stdout. Lives in the root-only evidence dir.
+# mk_tmp: a 0600 temp file inside the per-run scratch dir (removed at exit with the dir), path on stdout. Safe to call in
+# $(...): the removal does not depend on any variable set in the subshell. Needs require_proof_context first.
 mk_tmp() {
-  local f
-  install -d -m 0700 "$PROOF_EVID"
-  f="$(mktemp -p "$PROOF_EVID" .tmp.XXXXXX)" || die "cannot create a temp file in $PROOF_EVID"
-  TMPFILES+=("$f")
-  printf '%s\n' "$f"
+  [ -n "$RUN_TMP" ] && [ -d "$RUN_TMP" ] || { echo "mk_tmp: no scratch dir (call require_proof_context first)" >&2; return 1; }
+  mktemp -p "$RUN_TMP" f.XXXXXX
 }
 
 # ev_dir <name>: the evidence subdirectory (root 0700), path on stdout.
