@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **224** capabilities across **16** owners
-- **118** writes · 106 reads
-- Writes by impact: **high 24** · medium 36 · low 58
+- **235** capabilities across **16** owners
+- **125** writes · 110 reads
+- Writes by impact: **high 24** · medium 37 · low 64
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -52,7 +52,7 @@ unfalsifiable after.
 | monitoring | `monitoring` | 3 |
 | pm | `pm` | 10 |
 | reports | `checkins` · `reports` | 17 |
-| search | `search` | 22 |
+| search | `search` | 23 |
 | social | `social` | 13 |
 | webdev | `webdev` | 30 |
 
@@ -152,30 +152,41 @@ unfalsifiable after.
 | search | `search.approveReport` | `POST` | `/api/:tenantId/modules/search/reports/:id/approve` | write | `low` |
 | search | `search.auditSummary` | — | — | read | — |
 | search | `search.clusterKeywords` | `POST` | `/api/:tenantId/modules/search/keyword-sets/:setId/cluster` | write | `low` |
+| search | `search.connectBing` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/bing` | write | `medium` |
 | search | `search.deliverReport` | `POST` | `/api/:tenantId/modules/search/reports/:id/deliver` | write | `medium` |
+| search | `search.disconnectBing` | `DELETE` | `/api/:tenantId/modules/search/properties/:propertyId/bing` | write | `low` |
 | search | `search.draftBrief` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/briefs` | write | `low` |
 | search | `search.draftReport` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/reports` | write | `low` |
 | search | `search.editReport` | `PATCH` | `/api/:tenantId/modules/search/reports/:id` | write | `low` |
 | search | `search.exportProposal` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/export` | write | `low` |
 | search | `search.fileRefreshBrief` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/decay/:findingId/refresh-brief` | write | `low` |
+| search | `search.generateIndexNowKey` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/key` | write | `low` |
+| search | `search.getBingStatus` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/bing` | read | — |
+| search | `search.getIndexNowKey` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/key` | read | — |
+| search | `search.getIndexNowStatus` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow` | read | — |
 | search | `search.keywordResearch` | — | — | write | `medium` |
 | search | `search.launchCampaign` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.ledgerSummary` | — | — | read | — |
+| search | `search.listBingPerformance` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/bing/performance/:kind/:from/:to` | read | — |
 | search | `search.listConversionTargets` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | read | — |
 | search | `search.listConversionUploads` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-uploads` | read | — |
 | search | `search.listDecayFindings` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/decay` | read | — |
 | search | `search.listEngagements` | `GET` | `/api/:tenantId/modules/search/engagements` | read | — |
 | search | `search.listLeadConversionUploads` | `GET` | `/api/:tenantId/modules/search/leads/:leadId/conversion-uploads` | read | — |
+| search | `search.notifyContentChange` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/notify` | write | `low` |
 | search | `search.previewReport` | `GET` | `/api/:tenantId/modules/search/reports/:id/preview` | read | — |
 | search | `search.proposeNegatives` | `POST` | `/api/:tenantId/modules/search/campaigns/:campaignId/negatives/propose` | write | `low` |
 | search | `search.publishContent` | — | — | write | `high` |
 | search | `search.pullAiVisibility` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/ai-visibility-pull` | write | `medium` |
 | search | `search.pullBacklinks` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/backlinks-pull` | write | `medium` |
+| search | `search.pullBing` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/bing/pull` | write | `low` |
 | search | `search.pullRanks` | `POST` | `/api/:tenantId/modules/search/engagements/:engagementId/rank-pull` | write | `medium` |
 | search | `search.rankSummary` | `GET` | `/api/:tenantId/modules/search/properties/:propertyId/rank-snapshots` | read | — |
 | search | `search.runAudit` | — | — | write | `low` |
 | search | `search.setBudget` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | search | `search.setConversionTarget` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/conversion-targets` | write | `low` |
+| search | `search.setIndexNow` | `PATCH` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow` | write | `low` |
+| search | `search.submitUrls` | `POST` | `/api/:tenantId/modules/search/properties/:propertyId/indexnow/submit` | write | `low` |
 | social | `social.addPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants` | write | `low` |
 | social | `social.approvePostVariant` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/approve` | write | `high` |
 | social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |

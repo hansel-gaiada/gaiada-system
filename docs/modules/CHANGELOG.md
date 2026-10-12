@@ -11,6 +11,54 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.101.0` - M5-V3-d: the schema for consented visitor profiles (DDL only; nothing writes to it yet) (2026-10-12) - DEV-VERIFIED
+
+- **Migration `202610131600_search_visitor_profiles`** adds five tables, each FORCE RLS in the `search` scope:
+  - `search_visitor_profiles`;
+  - `search_visitor_events` (composite FK, cascades with its profile; data allow-listed and size-capped; path-only);
+  - `search_visitor_tombstones` (32-byte hashes only, outliving everything);
+  - `search_interest_rules`;
+  - `search_visitor_ingest_state`.
+- A trigger refuses to create or update a profile whose visitor id or consent id is tombstoned. Its error message carries no id.
+- `agency_leads` gains one index, `ix_lead_consent_id`, on `(visitor_consent->>'consentId')`.
+- No IP or user-agent column: a self-check refuses one.
+- No GRANT, SECURITY DEFINER or BYPASSRLS. No data changes.
+- **The tombstone hash contract:** `sha256(utf8(lower-case uuid text))`, which V3-e and V3-h must use.
+- **Verified** on GitHub Actions 38269863029: 15 tests (cross-tenant, unset-GUC and missing-scope reads are 0 rows and writes are refused; the cascade; the tombstone guard; applied as a NOBYPASSRLS role).
+
+### platform-nest `0.100.0` - M5-P5a: IndexNow on publish and a Bing Webmaster connector (both off by default) (2026-10-12) - DEV-VERIFIED
+
+- **Migrations:**
+  - `202610130200_search_indexnow_bing`: the IndexNow key and switch, plus Bing columns on `search_properties`, `search_indexnow_submissions` and `search_bing_performance`.
+  - `202610130210_integration_connections_bing_provider`: the provider CHECK, widened from its live definition.
+- **IndexNow:**
+  - An approved WebDesk `content.publish` pings IndexNow with the items' page URLs (`site_url` + W8b's `pagePathFor`). An item with no route pattern is skipped with a reason.
+  - The key is public by protocol, so it is stored as a plain column. Enabling first fetches `https://<host>/<key>.txt` (https, public host, no redirect).
+  - Batches of 500, 5000 a day per engine (the excess is deferred), backoff up to 6 attempts, idempotent per (url, version).
+  - ON only when `SEARCH_INDEXNOW_ENABLED=1`.
+  - Unpublish and `schedule.fired` are not wired yet; for those, use the manual notify route.
+- **Bing Webmaster:**
+  - The API key is sealed in the existing vault.
+  - Stats go into `search_bing_performance`, with URL Submission as the fallback.
+  - Simulate unless `SEARCH_BING_MODE=live`.
+- 11 routes and 11 MCP tools on `resource_search_property`; `connectBing` is medium.
+- Found and fixed: `UPDATE … RETURNING` ignores the subquery's sort order, so the posted URL list is now sorted.
+- **Verified** on GitHub Actions 38270184449: DB 20/20, unit 58/58.
+- The site build must serve the key file (FRONTEND-BFF-CONTRACT §28d).
+
+### infra `0.13.6` - compose passes `SEARCH_INDEXNOW_ENABLED` and `SEARCH_BING_MODE` through (empty = off / simulate) (2026-10-12) - PROTOTYPED
+
+- M5-P5a's two switches, with empty defaults.
+
+### webdesk `0.24.1` - ClamAV runs on the live box, so media uploads work in production (2026-10-12) - DEV-VERIFIED
+
+WSK-D80 (owner-approved 2026-10-12).
+
+- The aicenter overlay had left `clamav` out as "additive", but the public upload route fails closed without it: every live upload answered 503 `upload-scan-unavailable`, so the media library could take no upload in production.
+- `docker-compose.aicenter.yml` now runs `clamav`: digest-pinned, no published port, `cpus 0.20`, `mem_limit 1536m`, `pids_limit 256` inside the rootless slice (WSK-D72), capabilities dropped except what `/init` needs, signatures in the `clamav-db` volume. `ops/clamav/clamd.conf` is the image's default plus `ConcurrentDatabaseReload no`.
+- **Live (gda-aicenter, 2026-10-12):** started with `up -d --no-deps clamav`; clamd answered PONG from the api container after ~195 s at 964 MiB. A 1200x630 PNG upload to the gaiada library then answered 201, and the WSK-43d proof served it from cms-proof.gaiada.com's own `/_media/`. `deploy-webdesk` recreates only `api`, so ClamAV is started or updated by hand.
+- GitHub Actions run 38268989322 green.
+
 ### platform-nest `0.99.0` - M5-V5-b: the A/B test statistics engine (pure; no estimate before the horizon) (2026-10-12) - DEV-VERIFIED
 
 - `search/experiment-stats.ts` is pure: no I/O, clock or randomness.
