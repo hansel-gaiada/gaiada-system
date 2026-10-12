@@ -152,6 +152,26 @@ const itemNotFound = () => problem(404, "item-not-found", "Item not found");
 const siteNotFound = () => problem(404, "site-not-found", "Site not found");
 
 const head = (it) => it.versions[it.versions.length - 1];
+
+/** WSK-359: `authors: {<id>: label}` for every author id in a read, as the BFF resolves them: a contact of THIS client -> their name;
+ *  Gaiada staff -> "Gaiada" (never a personal name); anyone else -> "Someone else". */
+const STAFF_IDS = new Set(["demo-hansel", "dept-manager", "gede-ic"]);
+export function authorLabel(id) {
+  if (PORTAL_USERS[id]) return PORTAL_USERS[id].name;
+  return STAFF_IDS.has(id) ? "Gaiada" : "Someone else";
+}
+function withAuthors(r) {
+  if (r.status !== 200 || !isRec(r.json)) return r;
+  const ids = new Set();
+  const add = (v) => { if (typeof v === "string" && v !== "") ids.add(v); };
+  if (isRec(r.json.version)) add(r.json.version.createdBy);
+  add(r.json.createdBy);
+  if (Array.isArray(r.json.versions)) for (const v of r.json.versions) add(v?.createdBy);
+  if (Array.isArray(r.json.items)) for (const i of r.json.items) add(i?.headCreatedBy);
+  if (ids.size === 0) return r;
+  return R(200, { ...r.json, authors: Object.fromEntries([...ids].map((id) => [id, authorLabel(id)])) });
+}
+
 const staffBase = `/api/${COMPANY}/modules/webdev/content/sites/${TENANT}/${SITE}`;
 const staff = (S, userId, method, rest, body, query = new URLSearchParams()) =>
   handleWebdesk(S, { method, pathname: `${staffBase}${rest}`, query, body, userId, company: COMPANY });
@@ -227,7 +247,7 @@ export function handlePortalWebsite(S, { method, pathname, query, body, userId, 
       const slug = q.get("slug"); q.delete("slug");
       const r = staff(S, userId, "GET", `/collections/${key}/items`, undefined, q);
       if (r.status === 200 && slug) r.json = { ...r.json, items: r.json.items.filter((i) => i.slug === slug) };
-      return r;
+      return withAuthors(r);
     }
     if (method === "POST") return createItem(S, userId, key, body);
   }
@@ -239,14 +259,14 @@ export function handlePortalWebsite(S, { method, pathname, query, body, userId, 
       const r = staff(S, userId, "GET", `/items/${mm[1]}`, undefined, query);
       if (r.status !== 200) return r;
       const comp = composedFor(S, it.collectionKey);
-      return R(200, { ...r.json, composition: comp, clientEditable: clientEditableMap(it.collectionKey, comp) });
+      return withAuthors(R(200, { ...r.json, composition: comp, clientEditable: clientEditableMap(it.collectionKey, comp) }));
     }
     if (method === "PUT") return updateItem(S, userId, it, body);
   }
   if ((mm = sub.match(/^\/items\/([^/]+)\/versions(?:\/(\d+))?$/)) && method === "GET") {
     const it = S.items.get(mm[1]);
     if (!it || it.deletedAt) return itemNotFound();
-    return staff(S, userId, "GET", `/items/${mm[1]}/versions${mm[2] ? `/${mm[2]}` : ""}`, undefined, query);
+    return withAuthors(staff(S, userId, "GET", `/items/${mm[1]}/versions${mm[2] ? `/${mm[2]}` : ""}`, undefined, query));
   }
   if ((mm = sub.match(/^\/items\/([^/]+)\/restore$/)) && method === "POST") return restoreItem(S, userId, S.items.get(mm[1]), body);
   if ((mm = sub.match(/^\/items\/([^/]+)\/preview$/)) && method === "POST") return previewItem(S, S.items.get(mm[1]), body);
@@ -257,7 +277,7 @@ export function handlePortalWebsite(S, { method, pathname, query, body, userId, 
   if (sub === "/media" || sub.startsWith("/media/")) {
     if (method === "DELETE" || /\/usage$/.test(sub)) return R(404, { error: `Cannot ${method} ${pathname}` }); // there is NO route to delete media or read its usage
     if (query.get("includeDeleted") !== null) return problem(400, "invalid-request", "Invalid request", { detail: "a client editor cannot list deleted media" });
-    return handleMediaBff(S, { method, rest: sub, query, body, userId, role: "publisher" }) ?? R(404, { error: `Cannot ${method} ${pathname}` });
+    return handleMediaBff(S, { method, rest: sub, query, body, userId, role: "publisher", client: true }) ?? R(404, { error: `Cannot ${method} ${pathname}` });
   }
   return R(404, { error: `Cannot ${method} ${pathname}` });
 }
@@ -362,9 +382,13 @@ function requestPublish(S, userId, raw) {
   return fileRequest(S, userId, b.items.map((x) => ({ itemId: x.itemId, version: x.version })));
 }
 
+/** The staging rebuild as the BFF shows a client (WSK-D65): `{state, failureReason}` only. `cfg.portalBuild` sets it (default: rebuilding);
+ *  `null` omits it, as an older BFF would. */
+const clientBuild = (S) => (S.cfg.portalBuild === null ? {} : { build: S.cfg.portalBuild ?? { state: "rebuilding", failureReason: null } });
+
 function approveBody(S, id, selfPublish) {
   const a = S.approvals.get(id);
-  return R(200, { approvalId: id, status: a.status, executionStatus: a.executionStatus === "executed" ? "executed" : "failed", ...(a.executionStatus === "executed" ? { selfPublish, reconciled: S.cfg.reconciled !== false, items: a.toolArgs.items.map((i) => ({ itemId: i.itemId, version: i.version })) } : { error: a.executionError ?? "failed" }) });
+  return R(200, { approvalId: id, status: a.status, executionStatus: a.executionStatus === "executed" ? "executed" : "failed", ...(a.executionStatus === "executed" ? { selfPublish, reconciled: S.cfg.reconciled !== false, items: a.toolArgs.items.map((i) => ({ itemId: i.itemId, version: i.version })), ...clientBuild(S) } : { error: a.executionError ?? "failed" }) });
 }
 
 function selfPublish(S, userId, it, raw) {
@@ -408,7 +432,7 @@ function listRequests(S, userId, query) {
       const mine = a.requestedBy === userId;
       return {
         approvalId: a.id, status: a.status, createdAt: a.createdAt, tenantSlug: a.toolArgs.tenantSlug, siteId: a.toolArgs.siteId,
-        itemCount: a.toolArgs.items.length, itemIds: a.toolArgs.items.map((i) => i.itemId),
+        itemCount: a.toolArgs.items.length, itemIds: a.toolArgs.items.map((i) => i.itemId), items: a.toolArgs.items.map((i) => ({ itemId: i.itemId, version: i.version })),
         requestedBy: { userId: a.requestedBy, name: a.requestedByName }, requestedByMe: mine,
         canApprove: a.status === "pending" && (!mine || a.toolArgs.items.length === 1), executionStatus: a.executionStatus === "not_applicable" ? null : a.executionStatus ?? null,
       };

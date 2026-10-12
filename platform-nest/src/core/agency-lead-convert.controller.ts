@@ -29,6 +29,7 @@ import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
 import { notifyBestEffort } from "./client-notify";
 import { convertAgencyLead, normalizeDelegationsInput } from "./agency-lead-convert.service";
+import { normalizeOptionalDeal } from "./agency-lead-pipeline.service";
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -39,13 +40,19 @@ export class AgencyLeadConvertController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("leadId") leadId: string,
-    @Body() body: { delegations?: unknown },
+    @Body() body: { delegations?: unknown; deal?: unknown },
   ) {
     // AUTHORIZE BEFORE VALIDATE (pipeline.controller.ts's createProject / webdev's triage precedent):
     // a caller who may not convert learns only that, and no future required body field can quietly
     // demote a denial test to a payload 400. Nothing above depends on the body.
-    await authorize(req.principal, { kind: "agency_lead", tenantId, id: leadId, module: "agency" }, "convert");
+    const res = { kind: "agency_lead", tenantId, id: leadId, module: "agency" } as const;
+    await authorize(req.principal, res, "convert");
+    // M5-P1 (design §6): a deal that rides on the convert is a value write, so `update` is required too. It is
+    // checked right after `convert` and BEFORE any validation, so a caller who may convert but not edit values
+    // is refused for the deal part with a 403, never a deal 400.
+    if (body?.deal !== undefined && body?.deal !== null) await authorize(req.principal, res, "update");
     const delegations = normalizeDelegationsInput(body?.delegations);
+    const deal = normalizeOptionalDeal(body?.deal);
     if (!req.principal.userId) {
       // The converting actor becomes pipeline_runs.owner_id / projects.owner_id / client_contacts
       // .invited_by, all of which are `uuid REFERENCES users(id)` — an automation/service principal
@@ -59,6 +66,7 @@ export class AgencyLeadConvertController {
       leadId,
       actorUserId: req.principal.userId,
       delegations,
+      deal,
     });
 
     if (result.outcome === "not_found") throw new NotFoundException("lead not found");
@@ -76,6 +84,13 @@ export class AgencyLeadConvertController {
     await writeActivity(tenantId, req.principal.userId, "converted", "agency_lead", leadId, {
       clientId: result.clientId, projectId: result.projectId, runId: result.runId,
     });
+
+    // Every deal change is audited, whichever route carries it.
+    if (result.dealChanged) {
+      await writeActivity(tenantId, req.principal.userId, "deal_set", "agency_lead", leadId, {
+        dealValue: result.dealValue, dealCurrency: result.dealCurrency,
+      });
+    }
 
     // Best-effort, AFTER commit (client-notify.ts:63-68: a notify() failure must never turn a real
     // write into a 500 the caller might retry into a duplicate). Design §4.2 step 8: the AM and the
@@ -106,6 +121,9 @@ export class AgencyLeadConvertController {
       // team-facing UI renders this; a silently missing delegation is the failure mode this ticket
       // exists to remove, so it is never trimmed out of the response.
       delegations: result.delegations,
+      // M5-P1 (additive): the lead's value after the move to `won`, as a decimal string (or null).
+      dealValue: result.dealValue,
+      dealCurrency: result.dealCurrency,
     };
   }
 }

@@ -50,14 +50,14 @@
 # The only published port must be proxy's, on 127.0.0.1.
 #
 # =============================================================================================
-# CAPACITY — sized against gda-aicenter AS MEASURED 2026-08-31, not against sumopod's numbers
+# CAPACITY — WSK-D72 (owner, 2026-10-12): a 1.0 vCPU PROJECT BUDGET on a 2-vCPU box
 # =============================================================================================
-# 4 vCPU / 15.6 GiB total, ~10 GiB available, load ~2.1/4, 27 containers already running. This is
-# a SHARED, TIGHTER budget than the sumopod file's headroom (12 GiB / 4 vCPU dedicated to that
-# project alone) — see the capacity verdict in the runbook. WebDesk's own ceilings here sum to
-# ~4.35 GiB / ~4.75 vCPU; that is a WORST-CASE, not a reservation, but see the runbook for why the
-# worst-case sum across all three incoming workloads is the number that actually matters on a
-# 4-vCPU box.
+# gda-aicenter was 4 vCPU at the 2026-08-31 survey and is now an e2-highmem-2: 2 vCPU / 16 GiB, shared with
+# the whole ERP. The old ceilings summed to 3.25 vCPU, more than the box. The owner chose the no-cost option:
+# WebDesk's CPU ceilings sum to 1.0 vCPU (api 0.40, postgres 0.30, proxy/redis/rustfs 0.10 each), so WebDesk
+# alone can never take more than half the box. Measured at rest 2026-10-11: ~0.1 vCPU total; one full site
+# build is 34 /v1 reads. Memory ceilings are unchanged (~2.75 GiB of 16). Revisit before a second tenant
+# (docs/blueprints/webdesk-tenant-cost-and-quotas.md §4).
 #
 # =============================================================================================
 # WHAT IS DELIBERATELY ABSENT (same reasoning as the sumopod file)
@@ -102,7 +102,7 @@ services:
       - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
-    cpus: 0.50
+    cpus: 0.10
     mem_limit: 256m
     pids_limit: 128
 
@@ -153,6 +153,13 @@ services:
       # answers 503 editorial-keys-not-configured. No private key ever lives on this box (D39).
       # Install / rotate: ../infra/runbooks/webdesk-editorial-keys.md.
       WEBDESK_EDITORIAL_JWKS_FILE: /etc/webdesk/editorial/editorial.jwks.json
+      # M4 F1 — the pinned WS4 JWKS: the PUBLIC half of the ERP's WS4 v2 (EdDSA) approval-assertion key,
+      # a SEPARATE key pair and a SEPARATE file from the editorial set above (the api refuses boot if the
+      # two share a kid or a key). Same discipline: literal path, read-only FILE mount, shape-validated at
+      # boot (present but malformed → boot refused). Absent → v2 is unavailable and WS4 v1 (HMAC,
+      # WEBDESK_APPROVAL_ASSERTION_KEY in .env.control) keeps working while it is set. No private key
+      # ever lives on this box. Install / rotate: ../infra/runbooks/webdesk-ws4-keys.md.
+      WEBDESK_WS4_JWKS_FILE: /etc/webdesk/ws4/ws4.jwks.json
     # Everything else control-channel (WSK-22) still comes from its own env file, NOT `.env`
     # (single-line secrets only now — the CA left this file on purpose, see above). On THIS box
     # the file is `/etc/webdesk/.env.control`, owned by the dedicated `webdesk-svc` unix user,
@@ -171,11 +178,15 @@ services:
       # empty DIRECTORY at the host path; the api treats that as "not configured" (503 on writes), and
       # the runbook removes it before installing the real file.
       - /etc/webdesk/editorial/editorial.jwks.json:/etc/webdesk/editorial/editorial.jwks.json:ro
+      # M4 F1 — the pinned WS4 JWKS, public keys only, read-only FILE mount (see the env row above).
+      # Same footgun as the editorial file: a missing host file becomes an empty DIRECTORY, which the
+      # api treats as "v2 unavailable"; the runbook removes it before installing the real file.
+      - /etc/webdesk/ws4/ws4.jwks.json:/etc/webdesk/ws4/ws4.jwks.json:ro
     # M4 F3: node:22-alpine, no entrypoint script, no privileged port (listens on 3000), writes only to
     # the /tmp tmpfs. It runs as root (the image has no USER) but never chowns or switches user, so it
     # needs NO capability. Live-apply note: without DAC_OVERRIDE, root in the container cannot read a
-    # bind-mounted host file that is mode 0600 and owned by another uid; the two mounted files above
-    # are PUBLIC material and must be readable by "other" (0644). Check before the recreate.
+    # bind-mounted host file that is mode 0600 and owned by another uid; the three mounted files above
+    # are PUBLIC material and must be readable by "other" (0644/0444). Check before the recreate.
     cap_drop:
       - ALL
     security_opt:
@@ -183,7 +194,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
-    cpus: 1.00
+    cpus: 0.40
     mem_limit: 768m
     pids_limit: 256
 
@@ -210,7 +221,7 @@ services:
       - SETUID
     security_opt:
       - no-new-privileges:true
-    cpus: 1.00
+    cpus: 0.30
     mem_limit: 1024m
     pids_limit: 256
 
@@ -232,7 +243,7 @@ services:
       - SETUID
     security_opt:
       - no-new-privileges:true
-    cpus: 0.25
+    cpus: 0.10
     mem_limit: 256m
     pids_limit: 128
 
@@ -246,7 +257,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    cpus: 0.50
+    cpus: 0.10
     mem_limit: 512m
     pids_limit: 128
 

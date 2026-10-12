@@ -125,7 +125,7 @@ export async function provisionAllClientPortalLogins(opts: { dryRun: boolean }):
     [tenantId],
     (c) =>
       c.query<{ id: string; name: string }>(
-        `SELECT id, name FROM clients WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY name`,
+        `SELECT id, name FROM clients WHERE tenant_id = $1 AND deleted_at IS NULL AND NOT is_internal ORDER BY name`,
         [tenantId],
       ),
     { modules: MODULES },

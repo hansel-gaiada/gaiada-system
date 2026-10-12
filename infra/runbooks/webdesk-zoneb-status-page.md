@@ -3,13 +3,13 @@
 ## LIVE path (M4 T6b, 2026-10-11): `https://status.erp.gaiada.com`, served from sumopod
 
 **Status: DEV-VERIFIED 2026-10-11.** Served from **sumopod**, never from the box it reports on (WSK-D64). It is
-routed through the owner's `mimi` Traefik by one file (WSK-D70). The design below this section (an in-project
+routed through the shared `erp-edge` Traefik on sumopod (WSK-D71, which amended D70's per-name file in mimi; cut over 2026-10-12 18:52Z). The design below this section (an in-project
 `status-page` service on the WebDesk box, fed by its own health probes) is superseded and kept for its reasoning.
 
 | Piece | Where |
 |---|---|
 | DNS | `status.erp.gaiada.com` CNAME `sumopod.erp.gaiada.com` (owner, 2026-10-11) |
-| TLS + route | mimi's Traefik (`mimi-tls-le`), file `/home/ubuntu/mimi/infrastructure/tls/dynamic/erp-status.yml` = `webdesk/ops/status-page/traefik-erp-status.yml`; Let's Encrypt via mimi's resolver |
+| TLS + route | `erp-edge` (Traefik, `~/erp-edge`, repo `infra/sumopod/erp-edge/`): route file `~/erp-edge/dynamic/erp-status.yml` = `infra/sumopod/erp-edge/dynamic/erp-status.yml`; erp-edge's own Let's Encrypt certificate (resolver `erp-le`, TLS-ALPN-01). mimi's Traefik only passes `*.erp.gaiada.com` through, untouched (one file, `erp-passthrough.yml`). Runbook: `infra/runbooks/erp-edge-sumopod.md` |
 | Page | compose project `erp-status` in `~/erp-status` (= `webdesk/ops/status-page/`): `web` (Caddy, read-only, cap_drop ALL + NET_BIND_SERVICE) published ONLY on `172.17.0.1:18480`; `renderer` (Node, read-only, cap_drop ALL) on the obs network only |
 | Data | sumopod's own Prometheus. `blackbox-webdesk-api` probes `/v1` for its 401 problem+json (the api itself answers); `blackbox-estate` probes `/healthz` (Caddy alone answers). Alerts: `WebDeskApiDown`, `EstateProbeDown` |
 
@@ -18,8 +18,8 @@ not answer, renders as **unknown**, never green. Nothing internal (hosts, addres
 
 **Deploy or update:**
 - Copy `webdesk/ops/status-page/` to `~/erp-status`, with LF only, then `docker compose up -d`.
-- The route file is copied once. Traefik's file provider watches the directory, so no restart is needed.
-- To remove the page: delete `erp-status.yml` from the mimi dynamic dir, then `docker compose down` in
+- The route file belongs to erp-edge (`infra/sumopod/erp-edge/dynamic/erp-status.yml`); its file provider watches the directory.
+- To remove the page: delete `erp-status.yml` from `~/erp-edge/dynamic/`, then `docker compose down` in
   `~/erp-status`.
 
 **Verify:**

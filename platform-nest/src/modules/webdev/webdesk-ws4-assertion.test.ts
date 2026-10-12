@@ -4,15 +4,23 @@
 // them through WebDesk's real `computeCommandHash` / `mintWs4Assertion` / `verifyWs4Signature`. If
 // either side drifts, the test on the side that drifted fails. Change a literal only on both sides.
 //
+// M4 F1 adds the v2 (Ed25519 JWS) vectors below, verbatim in `webdesk/api/test/ws4-assertion-v2-vectors.spec.ts`,
+// which mints them with WebDesk's own test-only minter and verifies them with the real `verifyWs4Assertion`.
+//
 // Pure: no database, no Cerbos, no network.
-import { existsSync, readFileSync } from "node:fs";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, verify as cryptoVerify, type KeyObject } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   commandArgsAsZoneBSeesThem,
   computeCommandHash,
+  loadWs4SigningKey,
   mintWs4Assertion,
+  mintWs4AssertionV2,
   mintWs4ForCommand,
+  Ws4SigningKeyError,
 } from "./webdesk-ws4-assertion";
 
 const WS4_COMMAND_HASH_VECTORS = [
@@ -141,4 +149,148 @@ describe("WSK-63b WS4 primitives are a verbatim copy of WebDesk's", () => {
       expect(fnSource(ours, sig), sig).toBe(fnSource(theirs, sig));
     }
   });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// M4 F1 — v2 (EdDSA). The literals below appear verbatim in webdesk/api/test/ws4-assertion-v2-vectors.spec.ts.
+// The vector keys are DERIVED from a public label (sha256(label) as the Ed25519 seed), so both repos pin
+// byte-identical tokens without a private key ever being written into either repository.
+
+const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+function vectorKey(label: string): { privateKey: KeyObject; x: string } {
+  const seed = createHash("sha256").update(label).digest();
+  const privateKey = createPrivateKey({ key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]), format: "der", type: "pkcs8" });
+  return { privateKey, x: createPublicKey(privateKey).export({ format: "jwk" }).x as string };
+}
+
+const WS4_V2_VECTORS = [
+  {
+    name: "v1 claims of WSK-63b's vector, now as v2 (tenant.archive {tenantSlug: acme})",
+    label: "m4-f1-ws4-vector-key-not-a-secret",
+    kid: "ws4-vector-1",
+    x: "TmxGQVTuyZQhzGd99OcY1ovRIEkXgvwoJ1VpVIiey3E",
+    claims: {
+      approvalId: "00000000-0000-4000-8000-000000000063",
+      commandHash: "3ba7dad4d2e8cdc9f210754d5af57f23ef6b758cc14e80c58088458d4840288b",
+      exp: 4102444800,
+    },
+    token:
+      "eyJhbGciOiJFZERTQSIsImtpZCI6IndzNC12ZWN0b3ItMSIsInR5cCI6IndzNCtqd3QifQ" +
+      ".eyJhcHByb3ZhbElkIjoiMDAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDYzIiwiY29tbWFuZEhhc2giOiIzYmE3ZGFkNGQyZThjZGM5ZjIxMDc1NGQ1YWY1N2YyM2VmNmI3NThjYzE0ZTgwYzU4MDg4NDU4ZDQ4NDAyODhiIiwiZXhwIjo0MTAyNDQ0ODAwLCJhdWQiOiJ3ZWJkZXNrLWNvbnRyb2wtcGxhbmUifQ" +
+      ".ZQWoPEjeFWynPTDHaBkRAKOs8PwBX5zBcCN7JjiUURZM6THkDvQjtpyrl8SYm0evDUpowJv2PSfOAgINUT9ECw",
+  },
+  {
+    name: "second key (a rotation overlap), release.promote claims, non-UUID approval id",
+    label: "m4-f1-ws4-vector-key-2-not-a-secret",
+    kid: "ws4-vector-2",
+    x: "iOGoUq0hqR-fU8TlL4JLHOLoBg0F9JqtJ0A3g9cJfZg",
+    claims: {
+      approvalId: "ws4-v2-vector-approval-2",
+      commandHash: "d8bbaf983865c34d6634bdddb493ed80a2e2712046bc9b71ac4fe93c51f0a7d2",
+      exp: 4102444800,
+    },
+    token:
+      "eyJhbGciOiJFZERTQSIsImtpZCI6IndzNC12ZWN0b3ItMiIsInR5cCI6IndzNCtqd3QifQ" +
+      ".eyJhcHByb3ZhbElkIjoid3M0LXYyLXZlY3Rvci1hcHByb3ZhbC0yIiwiY29tbWFuZEhhc2giOiJkOGJiYWY5ODM4NjVjMzRkNjYzNGJkZGRiNDkzZWQ4MGEyZTI3MTIwNDZiYzliNzFhYzRmZTkzYzUxZjBhN2QyIiwiZXhwIjo0MTAyNDQ0ODAwLCJhdWQiOiJ3ZWJkZXNrLWNvbnRyb2wtcGxhbmUifQ" +
+      ".CLZU9NCH3wbX-R1JKe82yW8baOjkRcmUrhf9Dx9Bwal5UBsUKmOz1AqtWH-TxnUMIL-2bghdGJ2lMqhP3boFBw",
+  },
+] as const;
+
+describe("M4 F1 WS4 v2 minting (ERP side) — shared vectors", () => {
+  for (const v of WS4_V2_VECTORS) {
+    const k = vectorKey(v.label);
+    it(`${v.name}: the label derives the pinned public key`, () => {
+      expect(k.x).toBe(v.x);
+    });
+    it(`${v.name}: mintWs4AssertionV2 produces the pinned token bytes`, () => {
+      expect(mintWs4AssertionV2({ ...v.claims }, { privateKey: k.privateKey, kid: v.kid })).toBe(v.token);
+    });
+    it(`${v.name}: the signature verifies with the public key alone (what WebDesk holds)`, () => {
+      const [h, p, s] = v.token.split(".");
+      const pub = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: v.x }, format: "jwk" });
+      expect(cryptoVerify(null, Buffer.from(`${h}.${p}`, "ascii"), pub, Buffer.from(s, "base64url"))).toBe(true);
+    });
+  }
+
+  it("mintWs4ForCommand mints v2 when a signing key is given, landing on vector 1's bytes", () => {
+    const v = WS4_V2_VECTORS[0];
+    const k = vectorKey(v.label);
+    const header = mintWs4ForCommand({
+      key: "an-hmac-key-that-must-be-ignored",
+      signing: { privateKey: k.privateKey, kid: v.kid },
+      approvalId: v.claims.approvalId,
+      command: "tenant.archive",
+      args: { tenantSlug: "acme" },
+      nowSec: v.claims.exp - 60,
+      ttlSec: 60,
+    });
+    expect(header).toBe(v.token);
+  });
+
+  it("without a signing key mintWs4ForCommand still mints v1 (phase 1, and whenever no kid is set)", () => {
+    const header = mintWs4ForCommand({
+      key: WS4_MINT_VECTOR.key,
+      approvalId: WS4_MINT_VECTOR.claims.approvalId,
+      command: "tenant.archive",
+      args: { tenantSlug: "acme" },
+      nowSec: WS4_MINT_VECTOR.claims.exp - 60,
+      ttlSec: 60,
+    });
+    expect(header).toBe(WS4_MINT_VECTOR.header);
+  });
+
+  it("refuses to sign with a non-Ed25519 key, a public key, or a malformed kid", () => {
+    const c = { ...WS4_V2_VECTORS[0].claims };
+    const ec = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey;
+    expect(() => mintWs4AssertionV2(c, { privateKey: ec, kid: "ws4-x" })).toThrow(Ws4SigningKeyError);
+    const ed = generateKeyPairSync("ed25519");
+    expect(() => mintWs4AssertionV2(c, { privateKey: ed.publicKey, kid: "ws4-x" })).toThrow(/Ed25519 private key/);
+    expect(() => mintWs4AssertionV2(c, { privateKey: ed.privateKey, kid: "has space" })).toThrow(/kid must match/);
+  });
+});
+
+describe("M4 F1 WS4 signing key loading (custody: a PKCS8 PEM file, never env text)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "m4f1-ws4-key-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const ed = generateKeyPairSync("ed25519");
+  const pemText = ed.privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+  const pemFile = join(dir, "ws4-signing.ws4-2026-10.pk8.pem");
+  writeFileSync(pemFile, pemText);
+  chmodSync(pemFile, 0o400);
+  const write = (name: string, text: string) => {
+    const f = join(dir, name);
+    writeFileSync(f, text);
+    return f;
+  };
+
+  it("kid unset → not-configured (v1 stays in charge)", () => {
+    expect(loadWs4SigningKey({ keyFile: pemFile, kid: "" })).toEqual({ state: "not-configured", reason: "WEBDESK_CONTROL_WS4_SIGNING_KID is not set" });
+  });
+
+  it("kid set + a valid Ed25519 PKCS8 file → configured, and it signs a token the public key verifies", () => {
+    const l = loadWs4SigningKey({ keyFile: pemFile, kid: "ws4-2026-10" });
+    expect(l.state).toBe("configured");
+    if (l.state !== "configured") return;
+    const t = mintWs4AssertionV2({ approvalId: "a", commandHash: "0".repeat(64), exp: 1 }, l.signing);
+    const [h, p, s] = t.split(".");
+    expect(cryptoVerify(null, Buffer.from(`${h}.${p}`, "ascii"), ed.publicKey, Buffer.from(s, "base64url"))).toBe(true);
+  });
+
+  const invalid: Array<[string, () => { keyFile: string; kid: string }, RegExp]> = [
+    ["a missing file (what compose names for a kid with no key installed)", () => ({ keyFile: join(dir, "ws4-signing.ws4-missing.pk8.pem"), kid: "ws4-missing" }), /cannot be read \(ENOENT\)/],
+    ["a directory", () => { const d = join(dir, "a-dir"); mkdirSync(d, { recursive: true }); return { keyFile: d, kid: "ws4-x" }; }, /not a regular file/],
+    ["a truncated PEM", () => ({ keyFile: write("trunc.pem", pemText.slice(0, 40)), kid: "ws4-x" }), /not a complete PKCS8 PEM/],
+    ["an EC key", () => ({ keyFile: write("ec.pem", generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ type: "pkcs8", format: "pem" }) as string), kid: "ws4-x" }), /is a ec key; the WS4 signing key must be Ed25519/],
+    ["a bad kid", () => ({ keyFile: pemFile, kid: "has space" }), /SIGNING_KID must match/],
+    ["no key file path", () => ({ keyFile: "", kid: "ws4-x" }), /SIGNING_KEY_FILE is not set/],
+  ];
+  for (const [name, make, re] of invalid) {
+    it(`kid set + ${name} → invalid (WS4 calls answer 503, never a silent v1), naming the file, never its bytes`, () => {
+      const l = loadWs4SigningKey(make());
+      expect(l.state).toBe("invalid");
+      if (l.state !== "invalid") return;
+      expect(l.reason).toMatch(re);
+      expect(l.reason).not.toContain(pemText.slice(40, 80));
+    });
+  }
 });

@@ -410,8 +410,11 @@ const AGENCY_INTAKE_CORE_TOOLS: McpToolDef[] = [
   {
     name: "agency_intake.decline",
     description:
-      "in_review -> declined. `reason` is REQUIRED (the DB's own CHECK enforces it; this surface returns a " +
-      "typed 400 first rather than letting a reasonless decline hit that constraint as a raw 500).",
+      "Decline a lead from ANY open status (new, invited, submitted, in_review or nurturing) -> declined, " +
+      "and its pipeline stage becomes `lost` in the same transaction (unused invite links are revoked). " +
+      "`reason` is REQUIRED (the DB's own CHECK enforces it; this surface returns a typed 400 first rather " +
+      "than letting a reasonless decline hit that constraint as a raw 500). A converted or declined lead " +
+      "409s naming its current status.",
     minAssurance: "verified",
     method: "POST",
     pathTemplate: "/api/:tenantId/agency/leads/:leadId/decline",
@@ -511,8 +514,117 @@ const AGENCY_INTAKE_CORE_TOOLS: McpToolDef[] = [
             required: ["assigneeId"],
           },
         },
+        deal: {
+          type: "object",
+          description:
+            "Optional deal value to record on the lead in the same transaction as the move to stage `won` " +
+            "(M5-P1). Needs the `update` permission as well as `convert`. Omit to leave the value as it is.",
+          properties: {
+            value: { type: ["string", "number"], description: "Non-negative decimal, preferably a string. Exact at the currency's minor unit (IDR 0 decimals, USD 2)." },
+            currency: { type: "string", description: "ISO 4217 code from `agency_pipeline.reference`." },
+          },
+          required: ["value", "currency"],
+        },
       },
       required: ["tenantId", "leadId"],
+    },
+  },
+];
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// M5-P1-c — `agency_pipeline.*`, the lead pipeline's agent surface (WSK-D69).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/plans/2026-10-11-m5-lead-pipeline-design.md §6. Routes: core/agency-leads.controller.ts.
+// No new Cerbos kind or action: a stage move is `triage` (+ `update` when it carries a deal), a value is
+// `update`, the reads are `read`. WON and LOST have no tool here on purpose: won is `agency_intake.convert`
+// (medium, D14-gated) and lost is `agency_intake.decline`.
+//
+// ── WHY `moveStage` IS LOW, NOT MEDIUM ──────────────────────────────────────────────────────────
+// A move sends nothing itself. Its only external effect, a P2 ad-platform upload, needs its own WS4 approval
+// (filing that request is the low-impact act, IAM's precedent above). A low tool needs no executor entry.
+const AGENCY_PIPELINE_CORE_TOOLS: McpToolDef[] = [
+  {
+    name: "agency_pipeline.reference",
+    description:
+      "The pipeline vocabulary: every stage in order (`key`, `position`, `kind` open|won|lost, `label`) and the " +
+      "active currencies (`code`, `symbol`, `minorUnit`). Read it before a move or a value: stage keys are data, " +
+      "not a fixed list, and a currency's minorUnit decides how many decimals a value may carry.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/agency/pipeline/reference",
+    inputSchema: { type: "object", properties: { tenantId: { type: "string" } }, required: ["tenantId"] },
+  },
+  {
+    name: "agency_pipeline.stageHistory",
+    description:
+      "One lead's stage history, newest first: from/to stage, the deal value at that moment (a decimal STRING), " +
+      "who moved it and `viaAgent` when an agent drove it. No personal data. 404 when the lead does not exist or " +
+      "is not visible; a 403 is a distinct refusal.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/stage-history",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, leadId: { type: "string" } },
+      required: ["tenantId", "leadId"],
+    },
+  },
+  {
+    name: "agency_pipeline.moveStage",
+    description:
+      "Move a lead to an OPEN stage (enquiry, contacted, qualified, proposal; see `agency_pipeline.reference`), " +
+      "forwards or backwards. A staff decision, never a reaction to something a prospect did. Moving to the stage " +
+      "it is already at returns changed:false and writes nothing (safe to retry). `won` and `lost` are refused " +
+      "(400 `stage_terminal`): won is `agency_intake.convert`, lost is `agency_intake.decline`. A converted or " +
+      "declined lead 409s `lead_closed`. An optional `deal` sets the value in the same call and needs the `update` " +
+      "permission too. impact:'low': a move sends nothing itself; an ad-platform upload it may trigger needs its " +
+      "own approval.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/stage",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        leadId: { type: "string" },
+        stage: { type: "string", description: "An open stage key from `agency_pipeline.reference`." },
+        deal: {
+          type: "object",
+          description: "Optional value to set with the move. Both members are required when `deal` is sent.",
+          properties: {
+            value: { type: ["string", "number"], description: "Non-negative decimal, preferably a string; exact at the currency's minor unit." },
+            currency: { type: "string", description: "ISO 4217 code from `agency_pipeline.reference`." },
+          },
+          required: ["value", "currency"],
+        },
+      },
+      required: ["tenantId", "leadId", "stage"],
+    },
+  },
+  {
+    name: "agency_pipeline.setDealValue",
+    description:
+      "Set or clear a lead's deal value, in any status. Send {value, currency} to set (value is a decimal string " +
+      "exact at the currency's minor unit: IDR takes no decimals, USD two) or {value:null, currency:null} to clear; " +
+      "value and currency are set together or not at all. Typed 400 reasons: `deal_incomplete`, " +
+      "`deal_value_invalid`, `deal_currency_unknown`, `deal_value_precision`. Emits no stage event. impact:'low'.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/deal",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        leadId: { type: "string" },
+        value: { type: ["string", "number", "null"], description: "Non-negative decimal (preferably a string), or null to clear." },
+        currency: { type: ["string", "null"], description: "ISO 4217 code, or null to clear." },
+      },
+      required: ["tenantId", "leadId", "value", "currency"],
     },
   },
 ];
@@ -537,6 +649,12 @@ export function registerAgencyIntakeCoreTools(): void {
 export function registerAllCoreTools(): void {
   registerIamCoreTools();
   registerAgencyIntakeCoreTools();
+  registerAgencyPipelineCoreTools();
+}
+
+/** M5-P1-c: the four `agency_pipeline.*` tools; exported so a suite can restore exactly this area. */
+export function registerAgencyPipelineCoreTools(): void {
+  registerCoreTools(AGENCY_PIPELINE_CORE_TOOLS);
 }
 
 registerAllCoreTools();

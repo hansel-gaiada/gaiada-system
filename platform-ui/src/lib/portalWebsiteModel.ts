@@ -44,6 +44,9 @@ export interface PortalPublishRequest {
   siteId: string | null;
   itemCount: number;
   itemIds: string[];
+  /** The versions the request NAMED (WSK-359, from the approval's stored items). Shorter than `itemIds` (or empty) for a row whose stored
+   *  items carry no usable version: the version of such an item is then unknown, never guessed from the current draft. */
+  items: { itemId: string; version: number }[];
   requestedBy: { userId: string | null; name: string | null };
   requestedByMe: boolean;
   /** A HINT (`pending && (!requestedByMe || itemCount == 1)`); the server decides at approval. */
@@ -51,36 +54,63 @@ export interface PortalPublishRequest {
   executionStatus: string | null;
 }
 
-/** `POST …/publish-requests/:id/approve` and `POST …/items/:id/publish` -> 200 (§16j). The staging rebuild is NOT in it. */
+/** The staging rebuild a client publish started (WSK-D65), as the BFF shows a client: the state and the typed reason, nothing else. */
+export type PortalBuildState = "rebuilding" | "live" | "unverified" | "failed";
+export interface PortalBuild { state: PortalBuildState; failureReason: string | null }
+
+/** `POST …/publish-requests/:id/approve` and `POST …/items/:id/publish` -> 200 (§16j). `build` is the rebuild state (WSK-359): `null` when
+ *  the answer carries none (an older BFF, or a failed execution). */
 export interface PortalApproveResult {
   approvalId: string;
   status: string;
   executionStatus: "executed" | "failed";
   selfPublish: boolean | null;
   reconciled: boolean | null;
+  build: PortalBuild | null;
   error: string | null;
 }
 
-/** One page of a request, in words (the Website page resolves each from the item itself: §16j's list carries only ids). */
+/** One page of a request, in words. The list names each item's id and REQUESTED version; the Website page reads the item AT that version
+ *  for its title (WSK-359), so what the card says is "v<N> of <title>", never the item's current draft. */
 export interface RequestItemView {
   itemId: string;
   title: string;
-  /** The item's latest draft NOW. §16j's list does not carry the version a request named, so that one is not shown as if it were known. */
-  headVersion: number | null;
-  /** False when the item could not be read (it may no longer exist). */
+  /** The version the request named; `null` when the stored request carries none (then no version is shown). */
+  version: number | null;
+  /** False when the item (at that version) could not be read: it may no longer exist. */
   available: boolean;
 }
 
-export type RequestView = PortalPublishRequest & { siteName: string | null; items: RequestItemView[] };
+/** A request with its pages named: the wire `items` (id + requested version) become `RequestItemView`s (title, version, availability). */
+export type RequestView = Omit<PortalPublishRequest, "items"> & { siteName: string | null; items: RequestItemView[] };
 
 /** `POST …/publish-requests` -> 202 (§16j). */
 export interface PortalRequestFiled { approvalId: string; command: string; itemCount: number }
 
 // ── The words ────────────────────────────────────────────────────────────────────────────────────────
 
-/** After a client publish executes. §16j returns no rebuild state to the client (D65 rebuilds staging on its own), so this
- *  says only what is true: it is published, and the site catches up. */
+/** After a client publish executes and the answer carries NO rebuild state (an older BFF): it is published, and the site catches up. */
 export const PUBLISHED_COPY = "Published. Your site updates in a few minutes.";
+
+/** The staging rebuild's state in words (WSK-D65). "Live" is said ONLY for `state === "live"`: a publish is not a live site. */
+export const REBUILD_COPY = {
+  rebuilding: "Your site is rebuilding. This usually takes a few minutes.",
+  live: "Live on your site.",
+  notConfigured: "Published. Your site's automatic update isn't set up yet, so Gaiada will update it.",
+  failed: "Published, but the site update didn't start. Gaiada has been told.",
+  unverified: "Published. We can't yet confirm that your site has updated. Check again in a few minutes.",
+} as const;
+
+/** What a client is told after a publish that EXECUTED, from the rebuild state the answer carries. `null` build = the older wording. */
+export function publishOutcomeCopy(build: PortalBuild | null): { tone: "ok" | "warn" | "info"; text: string } {
+  if (!build) return { tone: "ok", text: PUBLISHED_COPY };
+  switch (build.state) {
+    case "rebuilding": return { tone: "info", text: REBUILD_COPY.rebuilding };
+    case "live": return { tone: "ok", text: REBUILD_COPY.live };
+    case "unverified": return { tone: "warn", text: REBUILD_COPY.unverified };
+    case "failed": return { tone: "warn", text: build.failureReason === "rebuild_not_configured" ? REBUILD_COPY.notConfigured : REBUILD_COPY.failed };
+  }
+}
 
 /** The publish was accepted and ran, but nothing yet CONFIRMS it is live (the answer was not `reconciled` and no item read has shown the
  *  version). Said instead of "Published" so a client is never told something that was only sent. */

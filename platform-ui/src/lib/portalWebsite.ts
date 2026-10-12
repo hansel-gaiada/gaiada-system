@@ -37,7 +37,7 @@ import { parseMediaList, type MediaListBody } from "./webdeskMediaModel";
 import { pickWebsiteClient, WEBSITE_EDITOR_ROLE, websiteEditorClients } from "./portalWebsiteAccess";
 import { itemTitle } from "./portalWebsiteModel";
 import type {
-  PortalApproveResult, PortalCollection, PortalPublishRequest, PortalRequestFiled, PortalSite, RequestItemView, RequestView,
+  PortalApproveResult, PortalBuild, PortalCollection, PortalPublishRequest, PortalRequestFiled, PortalSite, RequestItemView, RequestView,
 } from "./portalWebsiteModel";
 
 const { str, int, bool, nullable, arr, obj, key, opt } = wire;
@@ -119,9 +119,23 @@ export function parsePortalCollections(v: unknown): PortalCollection[] {
   return base.map((c, i) => ({ ...c, clientEditable: key(raw[i] as Record<string, unknown>, "clientEditable", (x, p) => parseClientEditable(x, p), `collections[${i}]`) }));
 }
 
+/** The display labels the BFF resolved for the author ids in a read (WSK-359): `{<users.id>: "Ayu Wijaya" | "Gaiada" | "<automation name>" | "Someone else"}`.
+ *  Absent in the body (an older BFF, or a read naming no author) is `{}`, and `authorLabel` then falls back to a short id as before. */
+export type PortalAuthors = Record<string, string>;
+
+export function parseAuthors(v: unknown): PortalAuthors {
+  const o = obj(v, "read");
+  const raw = opt(o, "authors", wire.record(str), "read");
+  return raw ?? {};
+}
+
+/** A parser whose result also carries the body's `authors`. */
+const withAuthors = <T,>(parse: (raw: unknown) => T) => (raw: unknown): T & { authors: PortalAuthors } => ({ ...parse(raw), authors: parseAuthors(raw) });
+
 export interface PortalItemDetail extends ItemDetail {
   composition: CollectionComposition;
   clientEditable: ClientEditable;
+  authors: PortalAuthors;
 }
 
 export function parsePortalItemDetail(v: unknown): PortalItemDetail {
@@ -131,6 +145,7 @@ export function parsePortalItemDetail(v: unknown): PortalItemDetail {
     ...detail,
     composition: key(o, "composition", (x, p) => parseComposition(x, p), "item.get"),
     clientEditable: key(o, "clientEditable", (x, p) => parseClientEditable(x, p), "item.get"),
+    authors: parseAuthors(v),
   };
 }
 
@@ -147,6 +162,8 @@ export function parsePortalRequests(v: unknown): PortalPublishRequest[] {
       approvalId: key(r, "approvalId", str, p), status: status as PortalPublishRequest["status"], createdAt: key(r, "createdAt", str, p),
       tenantSlug: key(r, "tenantSlug", strN, p), siteId: key(r, "siteId", strN, p),
       itemCount: key(r, "itemCount", int, p), itemIds: key(r, "itemIds", arr(str), p),
+      // The requested versions (WSK-359). Optional on the wire so an older BFF still parses: no `items` = the versions are unknown.
+      items: opt(r, "items", arr((x, ip) => { const i = obj(x, ip); return { itemId: key(i, "itemId", str, ip), version: key(i, "version", int, ip) }; }), p) ?? [],
       requestedBy: { userId: key(by, "userId", strN, `${p}.requestedBy`), name: key(by, "name", strN, `${p}.requestedBy`) },
       requestedByMe: key(r, "requestedByMe", bool, p), canApprove: key(r, "canApprove", bool, p),
       executionStatus: key(r, "executionStatus", strN, p),
@@ -155,11 +172,23 @@ export function parsePortalRequests(v: unknown): PortalPublishRequest[] {
 }
 
 /** The approve / self-publish answer. `executionStatus` is `executed` or `failed`; anything else is drift, never "published". */
+const BUILD_STATES = ["rebuilding", "live", "unverified", "failed"] as const;
+
+/** `build: {state, failureReason}` (WSK-359). Absent is `null` (no state to show); present, an unknown state is drift, never "live". */
+export function parseBuild(v: unknown, path: string): PortalBuild | null {
+  if (v === undefined || v === null) return null;
+  const o = obj(v, path);
+  const state = key(o, "state", str, path);
+  if (!(BUILD_STATES as readonly string[]).includes(state)) throw new WireDrift(`${path}.state`, BUILD_STATES.join("|"), state);
+  return { state: state as PortalBuild["state"], failureReason: key(o, "failureReason", strN, path) };
+}
+
 export function parseApproveResult(v: unknown): PortalApproveResult {
   const o = obj(v, "approve");
   const exec = key(o, "executionStatus", str, "approve");
   if (exec !== "executed" && exec !== "failed") throw new WireDrift("approve.executionStatus", "executed|failed", exec);
   return {
+    build: parseBuild(o.build, "approve.build"),
     approvalId: key(o, "approvalId", str, "approve"), status: key(o, "status", str, "approve"), executionStatus: exec,
     selfPublish: opt(o, "selfPublish", bool, "approve") ?? null, reconciled: opt(o, "reconciled", bool, "approve") ?? null,
     error: opt(o, "error", strN, "approve") ?? null,
@@ -187,7 +216,7 @@ export function listPortalItems(userId: string, tenant: string, clientId: string
   const p = new URLSearchParams();
   for (const k of ["locale", "state", "q", "cursor", "slug"] as const) if (q[k]) p.set(k, q[k] as string);
   p.set("limit", String(Math.min(q.limit ?? 100, 100)));
-  return portalCall<ItemListBody>(`${portalSiteBase(tenant, clientId, tenantSlug, siteId)}/collections/${enc(collectionKey)}/items?${p.toString()}`, userId, parseItemList);
+  return portalCall(`${portalSiteBase(tenant, clientId, tenantSlug, siteId)}/collections/${enc(collectionKey)}/items?${p.toString()}`, userId, withAuthors(parseItemList));
 }
 
 export function getPortalItem(userId: string, tenant: string, clientId: string, tenantSlug: string, siteId: string, itemId: string, version?: "head" | "live" | number) {
@@ -196,11 +225,11 @@ export function getPortalItem(userId: string, tenant: string, clientId: string, 
 }
 
 export function listPortalVersions(userId: string, tenant: string, clientId: string, tenantSlug: string, siteId: string, itemId: string) {
-  return portalCall<VersionListBody>(`${portalSiteBase(tenant, clientId, tenantSlug, siteId)}/items/${enc(itemId)}/versions?limit=100`, userId, parseVersionList);
+  return portalCall(`${portalSiteBase(tenant, clientId, tenantSlug, siteId)}/items/${enc(itemId)}/versions?limit=100`, userId, withAuthors(parseVersionList));
 }
 
 export function getPortalVersion(userId: string, tenant: string, clientId: string, tenantSlug: string, siteId: string, itemId: string, n: number) {
-  return portalCall<VersionFull>(`${portalSiteBase(tenant, clientId, tenantSlug, siteId)}/items/${enc(itemId)}/versions/${n}`, userId, parseVersionFull);
+  return portalCall(`${portalSiteBase(tenant, clientId, tenantSlug, siteId)}/items/${enc(itemId)}/versions/${n}`, userId, withAuthors(parseVersionFull));
 }
 
 export function listPortalRequests(userId: string, tenant: string, clientId: string, status: "pending" | "approved" | "rejected" | "cancelled" | "all" = "all") {
@@ -265,6 +294,8 @@ export async function resolvePortalItemBySlug(
 /** What the editor page needs: the staff `EditorBundle` (so the shared ItemEditor takes it unchanged) plus the client's verdict. */
 export interface PortalEditorBundle extends EditorBundle {
   clientEditable: ClientEditable;
+  /** The BFF's author labels for this item's reads (WSK-359). */
+  authors: PortalAuthors;
   /** This client's PENDING publish requests that name this item. `null` + `requestsProblem` when the lookup failed. */
   requests: PortalPublishRequest[] | null;
   requestsProblem: string | null;
@@ -312,6 +343,7 @@ export async function loadPortalEditorBundle(
       loadedAt: new Date().toISOString(),
       // The item read's own verdict wins over the collection's: it is the one computed for THIS item's composition.
       clientEditable: detail.data.clientEditable,
+      authors: detail.data.authors,
       requests: mine,
       requestsProblem: requests.kind === "ok" ? null : "unavailable",
     },
@@ -368,11 +400,12 @@ export interface WebsiteAccessRefusal { refused: "denied" | "unavailable" }
 
 export const websiteAccessOk = (a: WebsiteAccess | WebsiteAccessRefusal): a is WebsiteAccess => !("refused" in a);
 
-/** Names the viewer can be shown for version authors: the portal cannot read the company directory, so this is the viewer ("You")
- *  and the requesters of the client's publish requests. Anyone else (Gaiada staff, a colleague with no request) reads as a short id,
- *  which is `authorLabel`'s own fallback. */
-export function portalAuthorNames(me: Pick<Me, "userId" | "name">, requests: readonly PortalPublishRequest[] = []): Record<string, string> {
-  const out: Record<string, string> = {};
+/** Names the viewer can be shown for version authors. The portal cannot read the company directory, so the labels are the BFF's own
+ *  (`fromBff`, WSK-359: a same-client contact's name, "Gaiada" for staff, an automation account's name, else "Someone else"), then the
+ *  requesters of the client's publish requests, then the viewer ("<name> (you)"), which always wins. An id nobody labelled reads as a short
+ *  id, which is `authorLabel`'s own fallback. */
+export function portalAuthorNames(me: Pick<Me, "userId" | "name">, requests: readonly PortalPublishRequest[] = [], fromBff: PortalAuthors = {}): Record<string, string> {
+  const out: Record<string, string> = { ...fromBff };
   for (const r of requests) if (r.requestedBy.userId && r.requestedBy.name) out[r.requestedBy.userId] = r.requestedBy.name;
   out[me.userId] = `${me.name || "You"} (you)`;
   return out;
@@ -383,9 +416,10 @@ export function portalAuthorNames(me: Pick<Me, "userId" | "name">, requests: rea
 const REQUEST_ITEMS_SHOWN = 6;
 
 /**
- * Each request with its pages named. §16j's list carries only item ids, so the titles (and the latest draft version) come from
- * reading each item; the version a request NAMED is not in the list and is not shown as if it were. A page that cannot be read
- * is "no longer available" (never dropped: the count on the card stays true). Capped per request; the card says "and N more".
+ * Each request with its pages named, at the version the request NAMED (§16j's `items:[{itemId, version}]`, WSK-359): the title is read
+ * from the item AT that version, so the card says "v<N> of <title>" and never shows the item's current draft as if it were the requested
+ * one. A row whose stored request carries no version for an item reads the head for its title and shows NO version. A page that cannot be
+ * read is "no longer available" (never dropped: the count on the card stays true). Capped per request; the card says "and N more".
  */
 export async function buildRequestViews(
   userId: string, tenant: string, clientId: string, rows: readonly PortalPublishRequest[], sites: readonly PortalSite[],
@@ -394,11 +428,12 @@ export async function buildRequestViews(
   return Promise.all(rows.map(async (r): Promise<RequestView> => {
     const ids = r.itemIds.slice(0, REQUEST_ITEMS_SHOWN);
     const items = await Promise.all(ids.map(async (itemId): Promise<RequestItemView> => {
-      if (!r.tenantSlug || !r.siteId) return { itemId, title: itemId, headVersion: null, available: false };
-      const d = await getPortalItem(userId, tenant, clientId, r.tenantSlug, r.siteId, itemId, "head");
-      if (d.kind !== "ok") return { itemId, title: itemId, headVersion: null, available: false };
+      const version = r.items.find((i) => i.itemId === itemId)?.version ?? null;
+      if (!r.tenantSlug || !r.siteId) return { itemId, title: itemId, version, available: false };
+      const d = await getPortalItem(userId, tenant, clientId, r.tenantSlug, r.siteId, itemId, version ?? "head");
+      if (d.kind !== "ok") return { itemId, title: itemId, version, available: false };
       const fields = splitVersionContent(d.data.item.collectionKey, d.data.version.blocks, d.data.version.seo).fields;
-      return { itemId, title: itemTitle(fields, d.data.version.seo, d.data.composition.ui?.titleField, d.data.item.slug), headVersion: d.data.item.headVersion, available: true };
+      return { itemId, title: itemTitle(fields, d.data.version.seo, d.data.composition.ui?.titleField, d.data.item.slug), version, available: true };
     }));
     return { ...r, siteName: siteName(r), items };
   }));

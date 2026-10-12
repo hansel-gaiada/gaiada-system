@@ -111,3 +111,46 @@ describe("WebdeskPublishSummaryView (pure)", () => {
     expect(screen.getByTestId("webdesk-summary").textContent).toContain("none requested"); // rebuild
   });
 });
+
+describe("WebdeskPublishSummary: the editorial review (M5-W2c, the approver's view)", () => {
+  const withEditorial = (id: string, editorial: Record<string, unknown> | undefined) => {
+    const d = detailFor(id);
+    return { ...d, data: { ...d.data, ...(editorial ? { editorial } : {}) } };
+  };
+  const cells = () => screen.getAllByTestId("summary-review-cell").map((c) => c.textContent);
+
+  it("the requested version IS the approved one: 'approved', and no warning", async () => {
+    get.mockImplementation(async (_u, _c, _t, _s, id) => withEditorial(String(id), { reviewRequired: true, state: "approved", approvedVersion: 3 }) as never);
+    render(await WebdeskPublishSummary({ userId: "u", company: "c", toolArgs: args(1), workflowId: "content.publish" }));
+    expect(cells()).toEqual(["approved (v3)"]);
+    expect(screen.queryByTestId("summary-review-blocked")).toBeNull();
+  });
+
+  it("a requested version that is NOT the approved one: the row says so and a banner warns that WebDesk will refuse the publish", async () => {
+    get.mockImplementation(async (_u, _c, _t, _s, id) =>
+      withEditorial(String(id), String(id) === "i0" ? { reviewRequired: true, state: "draft", approvedVersion: 2 } : { reviewRequired: true, state: "in_review", approvedVersion: null }) as never);
+    render(await WebdeskPublishSummary({ userId: "u", company: "c", toolArgs: args(2), workflowId: "content.publish" }));
+    expect(cells()).toEqual(["not approved (v2 is)", "not approved (no version is)"]);
+    const banner = screen.getByTestId("summary-review-blocked").textContent ?? "";
+    expect(banner).toContain("2 items are not the approved version");
+    expect(banner).toContain("WebDesk will refuse this publish");
+  });
+
+  it("review off says 'not required'; no review data at all says 'unknown' (never 'not required'); neither warns", async () => {
+    get.mockImplementation(async (_u, _c, _t, _s, id) =>
+      withEditorial(String(id), String(id) === "i0" ? { reviewRequired: false, state: "draft", approvedVersion: null } : undefined) as never);
+    render(await WebdeskPublishSummary({ userId: "u", company: "c", toolArgs: args(2), workflowId: "content.publish" }));
+    expect(cells()).toEqual(["not required", "unknown"]);
+    expect(screen.queryByTestId("summary-review-blocked")).toBeNull();
+  });
+
+  it("a schedule that publishes is warned about the same; a takedown-only schedule puts nothing live and is not", async () => {
+    get.mockImplementation(async (_u, _c, _t, _s, id) => withEditorial(String(id), { reviewRequired: true, state: "draft", approvedVersion: 2 }) as never);
+    const { unmount } = render(await WebdeskPublishSummary({ userId: "u", company: "c", toolArgs: args(1, { publishAt: "2026-11-01T00:00:00Z" }), workflowId: "content.schedule" }));
+    expect(screen.getByTestId("summary-review-blocked").textContent).toContain("WebDesk will refuse this schedule");
+    unmount();
+    render(await WebdeskPublishSummary({ userId: "u", company: "c", toolArgs: args(1, { unpublishAt: "2026-11-01T00:00:00Z" }), workflowId: "content.schedule" }));
+    expect(screen.queryByTestId("summary-review-blocked")).toBeNull();
+    expect(cells()).toEqual(["not checked (takedown)"]);
+  });
+});

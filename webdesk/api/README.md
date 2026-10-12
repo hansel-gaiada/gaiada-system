@@ -861,6 +861,39 @@ before it asks a human for an approval. **This is a real integration point that 
 platform-nest-side alignment** when that side's WS4-minting code is built (not this ticket's repo
 to touch) — flagged here rather than assumed compatible.
 
+### WS4 v2 — the asymmetric assertion (M4 F1)
+
+v1 above needs the same HMAC key on both sides, so WebDesk held a secret that could mint approvals for
+itself. v2 removes it: the ERP signs with an Ed25519 private key (platform-nest
+`webdesk-ws4-assertion.ts`, `WEBDESK_CONTROL_WS4_SIGNING_KEY_FILE` + `WEBDESK_CONTROL_WS4_SIGNING_KID`) and
+WebDesk holds only the public half, in its own pinned file `WEBDESK_WS4_JWKS_FILE`
+(`/etc/webdesk/ws4/ws4.jwks.json`), separate from the editorial JWKS.
+
+```
+x-ws4-assertion: <b64url(header)>.<b64url(payload)>.<b64url(Ed25519 signature)>
+header   = {"alg":"EdDSA","kid":"<kid>","typ":"ws4+jwt"}                       (this key order)
+payload  = {"approvalId","commandHash","exp","aud":"webdesk-control-plane"}      (this key order)
+signed   = ASCII of `<b64url(header)>.<b64url(payload)>` (RFC 7515)
+```
+
+- **Version by shape only:** two dot-separated parts is v1, three is v2.
+- **v1** is accepted only while `WEBDESK_APPROVAL_ASSERTION_KEY` holds a real key. In production an unset
+  key or a published placeholder retires it (logged at boot).
+- **v2** is accepted only while the WS4 JWKS is installed. `alg` is pinned to `EdDSA` before any key is
+  touched (`none`, `HS*`, `RS*`, `ES*` refused). The header must be exactly `{alg, kid, typ}`, `typ` must be
+  `ws4+jwt`, the kid is looked up only in the WS4 set, and `aud` must be `webdesk-control-plane`.
+- **Unchanged for both:** `exp` (`now < exp`, no extra skew), the `commandHash` comparison and single use
+  by `approvalId`. One approval cannot be used once as v1 and again as v2.
+- **Boot:** a malformed WS4 JWKS, or one sharing a kid or a key with the editorial JWKS, refuses boot. An
+  absent one does not.
+- **Audit:** `audit_entries.ws4_assertion_version` (migration 0018) records which version Layer 4 verified
+  for the row's approval (1, 2, or NULL when not recorded).
+
+Refusal codes and exact reasons: `auth/ws4-assertion.ts` header; matrix
+`test/ws4-assertion-v2-matrix.spec.ts`; shared vectors `test/ws4-assertion-v2-vectors.spec.ts` (same
+literals in `platform-nest/src/modules/webdev/webdesk-ws4-assertion.test.ts`). Keys, install, phases and
+rotation: `infra/runbooks/webdesk-ws4-keys.md`.
+
 ### Known gap: WS4 single-use is not fully race-proof (documented, not hidden)
 
 `real-policy-decision-point.ts`'s `wasApprovalIdAlreadyUsed` is a `SELECT ... WHERE
@@ -930,7 +963,8 @@ value**:
 
 | Var | Purpose | Read by |
 |---|---|---|
-| `WEBDESK_APPROVAL_ASSERTION_KEY` | HMAC key for WS4 assertions (§03 Layer 4) — shared with platform-nest, Zone A/B custody only | `real-policy-decision-point.ts` |
+| `WEBDESK_APPROVAL_ASSERTION_KEY` | HMAC key for WS4 **v1** assertions (§03 Layer 4) — shared with platform-nest, Zone A/B custody only. M4 F1: unset (or a published placeholder) in production retires v1 | `real-policy-decision-point.ts` |
+| `WEBDESK_WS4_JWKS_FILE` | M4 F1: path of the pinned WS4 v2 public key set (1–2 Ed25519 keys). Absent → v2 unavailable; malformed or overlapping the editorial set → boot refused | `real-policy-decision-point.ts` (`auth/ws4-jwks.ts`) |
 | `WEBDESK_CONTROL_MTLS_CA_PEM` | Pinned synccert CA public cert (PEM) — Zone B holds only the CA public, never a private key | `real-control-channel-authenticator.ts` |
 | `WEBDESK_CONTROL_MTLS_ALLOWED_CN` | Comma-separated allow-list of client-cert CNs (default `platform-nest-webdesk`) | `real-control-channel-authenticator.ts` |
 | `WEBDESK_CONTROL_OIDC_ISSUER` | Public Keycloak issuer URL(s) - comma-separated; during an issuer move list `old,new` (the JWKS URI derives from the first) (default `https://erp.gaiada.online/idp/realms/gaiada` — there is only one real issuer in this design, so the dev fallback IS the real one; harmless because it is read-only public key material) | `real-control-channel-authenticator.ts` |
@@ -1994,6 +2028,67 @@ produces the tenant webhook.
 `test/scheduler-content-tick.spec.ts` (behaviour, injected clock), `test/scheduler-wiring.spec.ts` (job schedulers,
 boot, shutdown, config) and `migrations/tests/0012_content_schedules.test.mjs` (also in `qa/linux-gate.sh`'s
 `migrations` suite and the CI `webdesk-api` job). They need Postgres and Redis like the rest of the suite.
+
+## Editorial review (M5-W2b, PROTOTYPED) — `src/control/editorial/*`
+
+The writers' room review flow (design: `docs/plans/2026-10-11-m5-writers-room-design.md` section 4). Tables are migration
+`0016` (W2a). **Review is OFF by default**: a collection with no `editorial_policies` row is exactly "off", and every item
+command then answers **409 `review-not-enabled`** and changes nothing. `editorial.policySet` is the way in.
+
+| Route (under `/control/v1/tenants/:tenantSlug/sites/:siteId`) | Command | Class / scope | Body |
+|---|---|---|---|
+| `POST content/items/:itemId/editorial/submit` | `editorial.submit` | medium / operate | `{ version }` (the head) |
+| `POST .../editorial/withdraw` | `editorial.withdraw` | medium / operate | `{}` |
+| `POST .../editorial/request-changes` | `editorial.requestChanges` | medium / operate | `{ version, note }` |
+| `POST .../editorial/seo-signoff` | `editorial.seoSignoff` | medium / operate | `{ version }` |
+| `POST .../editorial/approve` | `editorial.approve` | medium / operate | `{ version }` |
+| `POST .../editorial/assign` | `editorial.assign` | medium / operate | any of `{ authorSub, dueAt, plannedPublishAt, briefRef }`; `null` clears a date or the brief |
+| `POST .../editorial/comments` | `editorial.comment` | medium / operate | `{ version, anchor?, body }` (201) |
+| `POST .../editorial/comments/:commentId/resolve` | `editorial.commentResolve` | medium / operate | `{}` |
+| `PUT collections/:key/editorial-policy` | `editorial.policySet` | medium / operate | `{ reviewRequired, seoSignoffRequired? }` |
+| `GET editorial/board?state&collection&authorSub&dueBefore&cursor&limit` | `editorial.board` | read / read | items in the flow, per-state `counts`, the site's `policies` |
+| `GET content/items/:itemId/editorial` | `editorial.history` | read / read | state, `events` (oldest first), `comments`, `seoSnapshot` |
+
+`item.get` gains a top-level `editorial` member and every `item.list` row gains `editorial` (plus a `?reviewState=` filter);
+both are control-plane only. Every write needs an `Idempotency-Key` and an editorial assertion, writes its audit row first
+(`control.editorial.<cmd>`), and replays with `replayed: true`. None is on `CLIENT_EDITOR_COMMANDS`: a client editor gets
+`403 client-command-not-allowed`. No tenant webhook event is emitted.
+
+State machine (`editorial-model.ts`, walked pair by pair in `test/editorial-state-machine.spec.ts`): `draft` and
+`changes_requested` -> **submit** -> `in_review`; `in_review` -> **withdraw** -> `draft`, **requestChanges** ->
+`changes_requested`, **approve** -> `approved`; **seoSignoff** stamps a version and leaves the state. Any other pair is
+**409 `review-state-conflict`** `{ currentState }`. Review is per immutable version: acting on a version other than the head
+(submit) or the one in review (the rest) is **409 `review-version-mismatch`**; a collection that requires a sign-off refuses
+approval of a version that was not signed (**409 `seo-signoff-required`**). A new version written during review keeps the state
+and moves `submitted_version` to the new head (an older sign-off stops counting); one written after approval returns the item to
+`draft` and leaves `approved_version` as it was. `policySet` with review off clears both flags; sign-off on with review off is a 400.
+
+WebDesk enforces on its own, besides the ERP's Cerbos: approve and sign-off are **human** decisions (an `agent` or `automation`
+principal gets **403 `review-principal-not-allowed`**), and **maker != checker**: the approver may not be the creator of the
+version being approved (**403 `review-self-approval`**, against `content_versions.created_by`). The `editorial_events.kind`
+vocabulary is `review.*` (`EDITORIAL_EVENT_KINDS`); `/v1` never reads these tables (`test/editorial-delivery-isolation.spec.ts`).
+The publish gate that makes an unapproved version unpublishable is W2c (next section).
+
+### The publish gate (M5-W2c, PROTOTYPED) — `src/control/editorial/review-gate.ts`
+
+On a collection whose policy has review ON, the only version that may go in front of a production key is the one in
+`editorial_items.approved_version`, compared to the EXACT version being published: not the head (promotion import and
+rollback append versions without the review hooks, so the head can move under an approved item) and not the state alone
+(an edit after approval returns the item to `draft`, and `approved_version` stays publishable). No review row, or no approved
+version, is refused. Where it runs, always under the item locks and inside the command's own transaction:
+
+| Path | When | Refusal |
+|---|---|---|
+| `content.publish` | after the WS4 claim (the envelope's audit row) and D62's client-path check, before any effect | **409 `review-not-approved`** `{ items: [{ itemIndex, itemId, version, approvedVersion }], total }` for the WHOLE batch; the transaction (claim included) rolls back |
+| `content.schedule` with `publishAt` | the same | the same; a takedown-only schedule (`publishAt: null`) is not gated |
+| scheduler, due version swap (WSK-61 step 2) | at fire time, after the composition re-check | the swap row is marked failed, `fail_reason = "review-not-approved: version N is not the approved version (approved: M \| nothing is approved)"`, counted in `swapsFailed`; the live version keeps serving |
+
+It applies to every principal class, client editors included (a client cannot approve, so a client's self-publish on a
+review-required collection needs an agency approval first; D62 still runs first and independently). Review OFF (no
+policy row, the default) is one policy read and nothing else. Not gated: `content.unpublish`, `content.promote`,
+`content.rollback`. A non-live item's scheduled publish (step 1) cannot be re-checked at fire time: the frozen `/v1` read
+path shows it by time at `publish_at`, before any tick; it was gated when it was scheduled. Proof:
+`test/editorial-publish-gate.spec.ts`.
 
 ## Draft preview (WSK-46) — `src/control/content/preview-token-*`, `src/delivery/preview-*`
 

@@ -57,6 +57,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
     return {
       id: c.id,
       name: c.name,
+      // M5-G0b: the internal sentinel client (WSK-D36) is shown to staff, flagged.
+      badge: c.isInternal ? "Internal" : "",
       email: (c.contact as { email?: string })?.email ?? "—",
       owner: c.owner_name ?? "—",
       businessType: centre ? businessTypeLabel(registry, centre.businessType) : "—",

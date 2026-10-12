@@ -207,6 +207,8 @@ export interface Client {
   owner_user_id?: string | null; owner_name?: string | null;
   /** PV3-04 (PV-D2): the group company this client IS, or null for an ordinary client. Optional: an older backend omits it. */
   groupCompany?: { id: string; name: string } | null;
+  /** M5-G0b: the internal sentinel client (WSK-D36); additive, absent on an older backend. */
+  isInternal?: boolean;
 }
 /** The contact keys the staff UI edits (platform-nest `client-input.ts` CONTACT_KEYS). */
 export const CLIENT_CONTACT_KEYS = ["email", "phone", "address", "billingName", "billingEmail"] as const;

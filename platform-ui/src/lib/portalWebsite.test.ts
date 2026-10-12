@@ -14,8 +14,8 @@ vi.mock("./platform", async () => {
 import { getPortalOverview } from "./portal-data";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import {
-  listPortalItems, listPortalSites, loadPortalEditorBundle, parseApproveResult, parseClientEditable, parsePortalCollections, parsePortalItemDetail,
-  parsePortalRequests, portalAuthorNames, portalCall, portalResultFromError, portalSiteBase, resolvePortalItemBySlug, resolveWebsiteAccess,
+  buildRequestViews, listPortalItems, listPortalSites, listPortalVersions, loadPortalEditorBundle, parseApproveResult, parseAuthors, parseClientEditable,
+  parsePortalCollections, parsePortalItemDetail, parsePortalRequests, portalAuthorNames, portalCall, portalResultFromError, portalSiteBase, resolvePortalItemBySlug, resolveWebsiteAccess,
 } from "./portalWebsite";
 
 const fetchMock = vi.mocked(platformFetch);
@@ -180,5 +180,90 @@ describe("authors the portal can name", () => {
   it("the viewer ('you') and requesters; anyone else reads as authorLabel's short id", () => {
     const names = portalAuthorNames({ userId: "u1", name: "Dana" }, [{ requestedBy: { userId: "u2", name: "Dewi" } } as never]);
     expect(names).toEqual({ u2: "Dewi", u1: "Dana (you)" });
+  });
+});
+
+describe("WSK-359 · requested versions, the rebuild state and author labels on the wire", () => {
+  const row = { approvalId: "a1", status: "pending", createdAt: "t", tenantSlug: "gaiada", siteId: "s1", itemCount: 2, itemIds: ["i1", "i2"], requestedBy: { userId: "u2", name: "Dewi" }, requestedByMe: false, canApprove: true, executionStatus: null };
+
+  it("the request row's `items` are the requested versions; a BFF that sends none parses to [] (versions unknown, never guessed)", () => {
+    const withItems = parsePortalRequests({ requests: [{ ...row, items: [{ itemId: "i1", version: 4 }, { itemId: "i2", version: 2 }] }] })[0];
+    expect(withItems.items).toEqual([{ itemId: "i1", version: 4 }, { itemId: "i2", version: 2 }]);
+    expect(parsePortalRequests({ requests: [row] })[0].items).toEqual([]);
+    expect(() => parsePortalRequests({ requests: [{ ...row, items: [{ itemId: "i1", version: "4" }] }] })).toThrow();
+    expect(() => parsePortalRequests({ requests: [{ ...row, items: [{ itemId: "i1" }] }] })).toThrow();
+  });
+
+  it("the approve answer's `build` is {state, failureReason}; absent is null; an unknown state is drift, never 'live'", () => {
+    const base = { approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: true, reconciled: false, items: [] };
+    expect(parseApproveResult({ ...base, build: { state: "rebuilding", failureReason: null } }).build).toEqual({ state: "rebuilding", failureReason: null });
+    expect(parseApproveResult({ ...base, build: { state: "failed", failureReason: "rebuild_not_configured" } }).build).toEqual({ state: "failed", failureReason: "rebuild_not_configured" });
+    expect(parseApproveResult(base).build).toBeNull();
+    expect(parseApproveResult({ ...base, build: null }).build).toBeNull();
+    expect(() => parseApproveResult({ ...base, build: { state: "deployed", failureReason: null } })).toThrow(/state/);
+    expect(() => parseApproveResult({ ...base, build: { state: "live" } })).toThrow(/failureReason/);
+  });
+
+  it("`authors` is a map of strings; absent is {}; a non-string label is drift", () => {
+    expect(parseAuthors({ authors: { u1: "Ayu", u2: "Gaiada" } })).toEqual({ u1: "Ayu", u2: "Gaiada" });
+    expect(parseAuthors({})).toEqual({});
+    expect(() => parseAuthors({ authors: { u1: 3 } })).toThrow();
+  });
+
+  it("the versions list read carries the BFF's author labels next to the versions", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ versions: [{ version: 2, contentHash: "h", createdAt: "t", createdBy: "u9", note: null }], page: { cursor: null, hasMore: false, limit: 100 }, authors: { u9: "Gaiada" } });
+    const r = await listPortalVersions("u1", "co-1", "c1", "gaiada", "s1", "i1");
+    expect(r).toMatchObject({ kind: "ok", data: { versions: [{ version: 2, createdBy: "u9" }], authors: { u9: "Gaiada" } } });
+  });
+
+  it("the item list read carries the labels too, and without them it is {}", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce({ items: [], page: { cursor: null, hasMore: false, limit: 100 }, authors: { u9: "Someone else" } });
+    expect(await listPortalItems("u1", "co-1", "c1", "gaiada", "s1", "service")).toMatchObject({ kind: "ok", data: { authors: { u9: "Someone else" } } });
+    fetchMock.mockResolvedValueOnce({ items: [], page: { cursor: null, hasMore: false, limit: 100 } });
+    expect(await listPortalItems("u1", "co-1", "c1", "gaiada", "s1", "service")).toMatchObject({ kind: "ok", data: { authors: {} } });
+  });
+
+  it("portalAuthorNames: the BFF's labels first, then requesters, and the viewer ('you') always wins", () => {
+    const names = portalAuthorNames({ userId: "u1", name: "Dana" }, [{ requestedBy: { userId: "u2", name: "Dewi" } } as never], { u1: "Dana Smith", u2: "Someone else", u3: "Gaiada" });
+    expect(names).toEqual({ u1: "Dana (you)", u2: "Dewi", u3: "Gaiada" });
+  });
+
+  describe("buildRequestViews reads each page AT the version the request named", () => {
+    const detail = (itemId: string, version: number, h1: string) => ({
+      item: { itemId, collectionKey: "service", locale: "en", slug: `slug-${itemId}`, localizationGroupId: "g", headVersion: 9, publishedVersion: 1, publishState: "published", publishAt: null, unpublishAt: null, deletedAt: null, updatedAt: "t" },
+      version: { n: version, contentHash: "h", createdAt: "t", createdBy: "u", note: null, blocks: [{ type: "fields", props: { h1 } }], seo: { title: h1 } },
+      group: [], lint: {}, composition: {}, clientEditable: CE,
+    });
+    const asRow = (over: Record<string, unknown> = {}) => ({
+      approvalId: "a1", status: "pending", createdAt: "t", tenantSlug: "gaiada", siteId: "s1", itemCount: 2, itemIds: ["i1", "i2"], items: [{ itemId: "i1", version: 4 }],
+      requestedBy: { userId: "u2", name: "Dewi" }, requestedByMe: false, canApprove: true, executionStatus: null, ...over,
+    });
+
+    it("asks for ?version=<requested> (never the head) when the request names one, shows that version, and the title is that version's", async () => {
+      fetchMock.mockReset();
+      fetchMock.mockImplementation(async (...args: unknown[]) => {
+        const url = String(args[0]);
+        if (url.includes("/items/i1") && url.includes("version=4")) return detail("i1", 4, "Home as requested");
+        return detail("i2", 9, "About head");
+      });
+      const views = await buildRequestViews("u1", "co-1", "c1", [asRow()] as never, [{ tenantSlug: "gaiada", siteId: "s1", name: "gaiada.com" }] as never);
+      const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(urls.some((u) => u.includes("/items/i1?version=4"))).toBe(true);
+      expect(urls.some((u) => u.includes("/items/i1?version=head"))).toBe(false);
+      expect(views[0].items[0]).toEqual({ itemId: "i1", title: "Home as requested", version: 4, available: true });
+      // i2 is in `itemIds` but the stored request names no version for it: its title is read from the head and NO version is claimed.
+      expect(urls.some((u) => u.includes("/items/i2?version=head"))).toBe(true);
+      expect(views[0].items[1]).toEqual({ itemId: "i2", title: "About head", version: null, available: true });
+      expect(views[0].siteName).toBe("gaiada.com");
+    });
+
+    it("a page that cannot be read stays in the card as unavailable and keeps its requested version", async () => {
+      fetchMock.mockReset();
+      fetchMock.mockRejectedValue(new PlatformError(404, "item-not-found", undefined, undefined, undefined, { type: "https://webdesk.gaiada.online/errors/item-not-found", title: "t", status: 404 }));
+      const views = await buildRequestViews("u1", "co-1", "c1", [asRow({ itemIds: ["i1"], itemCount: 1 })] as never, []);
+      expect(views[0].items).toEqual([{ itemId: "i1", title: "i1", version: 4, available: false }]);
+    });
   });
 });

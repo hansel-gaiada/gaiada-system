@@ -336,8 +336,11 @@ describe.skipIf(!live || !uiPresent)("WSK-44b · the Website editor's code again
     it("media: the UI has NO media reader, so the contract is checked here against §27 directly (assetId, bucketKey, mime, sizeBytes, scanStatus, createdAt)", async () => {
       const res = await app.inject({ method: "GET", url: `/api/${A}/modules/webdev/content/sites/${GAIADA_SLUG}/${GAIADA_SITE}/media?mime=image/*`, headers: { authorization: "Bearer svc-token", "x-user-id": editorA } });
       expect(res.statusCode).toBe(200);
-      const body = res.json() as { assets: Array<Record<string, unknown>>; page: Record<string, unknown> };
-      expect(Object.keys(body).sort()).toEqual(["assets", "page"]);
+      const body = res.json() as { assets: Array<Record<string, unknown>>; page: Record<string, unknown>; capabilities?: Record<string, unknown> };
+      // 359: the list also answers the caller's media capabilities (one Cerbos batch, advisory), omitted only when Cerbos cannot answer
+      expect(Object.keys(body).sort()).toEqual(["assets", "capabilities", "page"]);
+      expect(Object.keys(body.capabilities!).sort()).toEqual(["delete", "read", "update", "upload"]);
+      expect(Object.values(body.capabilities!).every((v) => typeof v === "boolean")).toBe(true);
       expect(Object.keys(body.assets[0]).sort()).toEqual(["assetId", "bucketKey", "createdAt", "mime", "scanStatus", "sizeBytes"]);
       expect(Object.keys(body.page).sort()).toEqual(["cursor", "hasMore", "limit"]);
       evidence.push({ step: "media (no UI reader)", http: ["GET media → 200"], ui: "n/a (§27 shape asserted)" });

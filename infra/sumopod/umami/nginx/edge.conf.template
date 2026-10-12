@@ -5,10 +5,12 @@ upstream umami_app {
   keepalive 8;
 }
 
-# The only peer is Traefik, arriving from a docker bridge address. Trust the docker ranges so the last
-# UNtrusted entry of X-Forwarded-For (the visitor, as Traefik saw it) becomes $remote_addr. Anything a client
-# put at the front of X-Forwarded-For is ignored.
-set_real_ip_from 172.16.0.0/12;
+# The only peer that may state a client address is erp-edge's Traefik (WSK-D71), which writes X-Forwarded-For
+# from the PROXY-protocol address mimi passed on and discards whatever the visitor sent. Trust ONLY the source
+# address erp-edge's connections arrive from here (ERP_EDGE_SOURCE in .env, measured at deploy: runbook
+# "Which source does the edge see"), never a docker range. A request from any other peer keeps its own address,
+# so a forged X-Forwarded-For from another container on the box is ignored.
+set_real_ip_from ${ERP_EDGE_SOURCE};
 real_ip_header X-Forwarded-For;
 real_ip_recursive on;
 

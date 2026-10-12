@@ -18,7 +18,7 @@ const row = (n: number, over: Partial<ItemSummary> = {}): ItemSummary => ({
   itemId: `i${n}`, slug: `page-${n}`, locale: "en", localizationGroupId: `g${n}`, title: null, headVersion: 4, publishedVersion: 3, publishState: "published", publishAt: null, unpublishAt: null,
   deletedAt: null, updatedAt: "2026-10-10T08:00:00Z", headCreatedAt: "2026-10-10T08:00:00Z", headCreatedBy: "u-me", pendingChanges: true, ...over,
 });
-const approved = (): PortalApproveResult => ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: true, reconciled: null, error: null });
+const approved = (): PortalApproveResult => ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: true, reconciled: null, build: null, error: null });
 const labelOf = { i1: "Home", i2: "About", i3: "Pricing", i4: "Contact", i5: "Careers" };
 
 function mount(items: ItemSummary[], pendingIds: string[] = [], viewerId = "u-me") {
@@ -175,5 +175,23 @@ describe("a list that has a pending-request lookup problem", () => {
   it("is the page's to say; the table itself never marks an item as pending without evidence", () => {
     mount([row(1)], []);
     expect(within(rowOf("page-1")).queryByText("Waiting for approval")).toBeNull();
+  });
+});
+
+describe("WSK-359 · Publish now says what the staging rebuild is doing", () => {
+  it.each([
+    ["rebuilding", { state: "rebuilding", failureReason: null }, "Home: Your site is rebuilding. This usually takes a few minutes."],
+    ["live", { state: "live", failureReason: null }, "Home: Live on your site."],
+    ["failed: rebuild_not_configured", { state: "failed", failureReason: "rebuild_not_configured" }, "Home: Published. Your site's automatic update isn't set up yet, so Gaiada will update it."],
+    ["failed: another reason", { state: "failed", failureReason: "dispatch_unconfirmed" }, "Home: Published, but the site update didn't start. Gaiada has been told."],
+  ] as const)("build %s", async (_n, build, text) => {
+    cleanup();
+    acts.portalPublishItemAction.mockReset();
+    acts.portalGetItemHeadAction.mockReset();
+    acts.portalPublishItemAction.mockResolvedValue(ok({ ...approved(), reconciled: true, build: { ...build } }));
+    mount([row(1)]);
+    fireEvent.click(screen.getByTestId("publish-now-page-1"));
+    await act(async () => { fireEvent.click(screen.getByTestId("publish-now-page-1-confirm")); });
+    expect(screen.getByTestId("items-notice").textContent).toContain(text);
   });
 });

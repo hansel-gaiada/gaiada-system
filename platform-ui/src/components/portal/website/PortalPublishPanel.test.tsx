@@ -13,7 +13,7 @@ const act0 = vi.mocked(A);
 const SCOPE = { tenantSlug: "gaiada", siteId: "s1" };
 const ok = <T,>(data: T): WdResult<T> => ({ kind: "ok", data });
 const item = (over: Partial<ItemRef> = {}): ItemRef => ({ itemId: "i1", collectionKey: "service", locale: "en", slug: "service.seo", localizationGroupId: "g", headVersion: 4, publishedVersion: 3, publishState: "published", publishAt: null, unpublishAt: null, deletedAt: null, updatedAt: "2026-10-10T08:00:00Z", ...over });
-const approved = (over: Partial<PortalApproveResult> = {}): PortalApproveResult => ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: true, reconciled: null, error: null, ...over });
+const approved = (over: Partial<PortalApproveResult> = {}): PortalApproveResult => ({ approvalId: "a1", status: "approved", executionStatus: "executed", selfPublish: true, reconciled: null, build: null, error: null, ...over });
 const detailOf = (i: ItemRef) => ({ item: i, version: { n: i.headVersion }, group: [], lint: {} }) as never;
 
 const cbs = { onItemChanged: vi.fn(), onUnavailable: vi.fn(), onUnconfirmed: vi.fn() };
@@ -148,7 +148,7 @@ describe("when Publish now is off, and why", () => {
 
 describe("the panel's claims and its absences", () => {
   it("a page in a publish request says so, naming who filed it, and links to the requests", () => {
-    mount({ requests: [{ approvalId: "a9", status: "pending", createdAt: "t", tenantSlug: "gaiada", siteId: "s1", itemCount: 2, itemIds: ["i1", "i2"], requestedBy: { userId: "u2", name: "Dewi" }, requestedByMe: false, canApprove: true, executionStatus: null }] });
+    mount({ requests: [{ approvalId: "a9", status: "pending", createdAt: "t", tenantSlug: "gaiada", siteId: "s1", itemCount: 2, itemIds: ["i1", "i2"], items: [{ itemId: "i1", version: 4 }, { itemId: "i2", version: 2 }], requestedBy: { userId: "u2", name: "Dewi" }, requestedByMe: false, canApprove: true, executionStatus: null }] });
     expect(screen.getByTestId("in-request").textContent).toContain("filed by Dewi");
     expect(screen.getByRole("link", { name: "See publish requests" }).getAttribute("href")).toBe("/portal/website#requests");
   });
@@ -169,5 +169,47 @@ describe("the panel's claims and its absences", () => {
     const region = screen.getByTestId("publish-flow");
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(document.querySelector('[aria-live="assertive"], [role="log"]')).toBeNull();
+  });
+});
+
+describe("WSK-359 · the staging rebuild after a self-publish", () => {
+  const publishedWith = async (build: PortalApproveResult["build"]) => {
+    act0.portalPublishItemAction.mockResolvedValue(ok(approved({ build })));
+    act0.portalGetItemHeadAction.mockResolvedValue(ok(detailOf(item({ publishedVersion: 4 }))));
+    mount();
+    await publishNow();
+    return screen.findByTestId("published");
+  };
+
+  it.each([
+    ["rebuilding", { state: "rebuilding", failureReason: null }, "Your site is rebuilding. This usually takes a few minutes."],
+    ["live", { state: "live", failureReason: null }, "Live on your site."],
+    ["failed: rebuild_not_configured", { state: "failed", failureReason: "rebuild_not_configured" }, "Published. Your site's automatic update isn't set up yet, so Gaiada will update it."],
+    ["failed: another reason", { state: "failed", failureReason: "dispatch_unconfirmed" }, "Published, but the site update didn't start. Gaiada has been told."],
+  ] as const)("build %s: the headline is the owner's sentence and the second line says the VERSION is published, not that the site is live", async (_n, build, text) => {
+    cleanup(); Object.values(act0).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset());
+    const box = await publishedWith({ ...build });
+    expect(screen.getByTestId("published-copy").textContent).toBe(text);
+    expect(box.textContent).toContain("Version 4 is published.");
+    expect(box.textContent).not.toContain("is now live");
+    expect(box.getAttribute("data-build")).toBe(build.state);
+  });
+
+  it("only a live rebuild says the site is live", async () => {
+    for (const build of [{ state: "rebuilding", failureReason: null }, { state: "failed", failureReason: "rebuild_not_configured" }, { state: "unverified", failureReason: null }] as const) {
+      cleanup(); Object.values(act0).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset());
+      const box = await publishedWith({ ...build });
+      expect(box.textContent, build.state).not.toMatch(/live on your site/i);
+    }
+  });
+
+  it("an item read that does NOT confirm the version still says so, whatever the rebuild state", async () => {
+    cleanup(); Object.values(act0).forEach((f) => (f as ReturnType<typeof vi.fn>).mockReset());
+    act0.portalPublishItemAction.mockResolvedValue(ok(approved({ build: { state: "live", failureReason: null } })));
+    act0.portalGetItemHeadAction.mockResolvedValue(ok(detailOf(item({ publishedVersion: 3 }))));
+    mount();
+    await publishNow();
+    expect(await screen.findByTestId("published-unconfirmed")).toBeTruthy();
+    expect(screen.queryByTestId("published")).toBeNull();
   });
 });

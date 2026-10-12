@@ -4,6 +4,19 @@ extensions:
     directory: /var/lib/otelcol/queue
     timeout: 10s
 
+  # WSK-D63 (2): bearer auth for the WebDesk-only receiver `otlp/webdesk` below. NEVER a literal here.
+  # The token comes from WEBDESK_OTLP_BEARER_TOKEN, which docker-compose.observability.yml passes with
+  # an UNSENDABLE default when the variable is empty or unset. That default matters: this extension
+  # refuses to start at all on an empty token ("no bearer token provided"), which would crash-loop
+  # the ERP's own collector on a release that precedes minting the token, and the tempting fix (a
+  # printable placeholder) would be an open door. The default is a lone U+0001 control character,
+  # which no HTTP client can put in a header, so "empty" means "this receiver refuses
+  # every request" while the collector still starts and the ERP's own pipelines are untouched. A real token must be a plain
+  # string: letters, digits, _ or -, starting with a letter (so nothing along the way can re-type it).
+  bearertokenauth/webdesk:
+    scheme: Bearer
+    token: ${env:WEBDESK_OTLP_BEARER_TOKEN}
+
 # WS9 OpenTelemetry Collector — the single ingest point for the estate's telemetry.
 # Services push OTLP (traces + metrics); this fans out to Tempo / Prometheus / Loki. Container
 # stdout (JSON logs with trace_id) is tailed by the filelog receiver and shipped to Loki, so the
@@ -15,6 +28,23 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+
+  # WSK-D63 (2) / WebDesk M4 T6a: the ONE ingest point for WebDesk's telemetry (design v2 §03 channel 2).
+  # WRITE-ONLY: a receiver has no query API and nothing else on this port answers a read. OTLP/HTTP
+  # only (traces + logs; see the pipelines below). Reachable ONLY through the docker0 publish in
+  # docker-compose.observability.yml (172.17.0.1:4319), which the webdesk egress guard opens for the
+  # webdesk network alone (webdesk/ops/host/webdesk-egress-guard.sh). Bearer-authenticated; an
+  # unauthenticated or wrong-token request is a 401 before any body is read.
+  # Verified by webdesk/ops/scripts/check-otlp-write-only.mjs (wired into CI), which also fails the
+  # build if this receiver loses its auth or a read surface appears next to it.
+  otlp/webdesk:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4319
+        auth:
+          authenticator: bearertokenauth/webdesk
+        # Bounds one request (the default is 20 MiB). Part of the rate bound; see the guard's pps limit.
+        max_request_body_size: 4194304
 
   # Tail every gaiada container's JSON log file. The Docker json-file driver wraps each line as
   # {"log": "...", "stream": "...", "time": "..."}; we unwrap `log`, then parse the service's own
@@ -100,6 +130,37 @@ processors:
     check_interval: 5s
     limit_percentage: 80
     spike_limit_percentage: 25
+
+  # ── WebDesk receiver processors (WSK-D63 (2)) ─────────────────────────────────────────────────
+  # A SEPARATE, LOWER memory ceiling so WebDesk telemetry is shed first: the limiter checks the whole
+  # collector's heap, so when it passes ~768 MiB (soft = limit - spike) pushes on the webdesk receiver
+  # are refused while the ERP's own pipelines (80% of the host) keep going. Not a rate limit: it is a
+  # pressure valve.
+  memory_limiter/webdesk:
+    check_interval: 5s
+    limit_mib: 1024
+    spike_limit_mib: 256
+  # Stamps every webdesk record. `upsert` so a sender cannot claim another namespace.
+  resource/webdesk:
+    attributes:
+      - key: service.namespace
+        value: webdesk
+        action: upsert
+      - key: gaiada.ingest
+        value: otlp-push/webdesk
+        action: upsert
+  # The one real RATE limit the pinned collector (0.116.1) offers: spans per second, per collector.
+  # (No ratelimit processor exists in this version; the logs path is bounded by request size, the
+  # memory valve above, and the guard's packet-rate limit.) A trace is decided 5s after its first span.
+  tail_sampling/webdesk:
+    decision_wait: 5s
+    num_traces: 5000
+    expected_new_traces_per_sec: 50
+    policies:
+      - name: webdesk-spans-per-second
+        type: rate_limiting
+        rate_limiting:
+          spans_per_second: 500
 
 exporters:
   # Prometheus scrapes THIS endpoint for all app/business metrics pushed over OTLP.
@@ -198,7 +259,7 @@ exporters:
     verbosity: basic
 
 service:
-  extensions: [file_storage]
+  extensions: [file_storage, bearertokenauth/webdesk]
   telemetry:
     logs:
       level: info
@@ -241,4 +302,18 @@ service:
     logs:
       receivers: [otlp, filelog]
       processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlphttp/loki]
+    # ── WebDesk (WSK-D63 (2)): own pipelines, same exporters, tagged service.namespace=webdesk. ─────
+    # Traces and logs only. NO metrics pipeline on purpose: the only metrics exporter here is the
+    # Prometheus endpoint :8889 the ERP's alert rules read, and an untrusted sender must not be able
+    # to mint series into it (the design's "metric poisoning / alert-fatigue" risk). A metrics push
+    # to this receiver gets a 404. NEVER add `otlp/webdesk` to a pipeline above, and never add
+    # another receiver to these: the checker fails CI on both.
+    traces/webdesk:
+      receivers: [otlp/webdesk]
+      processors: [memory_limiter/webdesk, resource/webdesk, tail_sampling/webdesk, batch]
+      exporters: [otlp/tempo]
+    logs/webdesk:
+      receivers: [otlp/webdesk]
+      processors: [memory_limiter/webdesk, resource/webdesk, batch]
       exporters: [otlphttp/loki]

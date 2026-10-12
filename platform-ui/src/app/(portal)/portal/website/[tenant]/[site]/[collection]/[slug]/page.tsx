@@ -54,7 +54,7 @@ export default async function PortalWebsiteItemPage({ params, searchParams }: { 
         tenant={b.tenant}
         site={b.site}
         bundle={b}
-        authors={portalAuthorNames(me, b.requests ?? [])}
+        authors={portalAuthorNames(me, b.requests ?? [], b.authors)}
         mediaPublicBase={mediaPublicBase()}
         readOnlyReason={null}
         clientId={clientId}

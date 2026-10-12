@@ -7,6 +7,10 @@
 #
 #   bash containment-probe.sh            # all six probes; exit 0 only if every probe passes
 #   PROBE_ONLY=3 bash containment-probe.sh
+#   WS4_HMAC_RETIRED=1 bash containment-probe.sh
+#       M4 F1 phase 3 and after (infra/runbooks/webdesk-ws4-keys.md): the WS4 HMAC key is gone from both
+#       sides, so probe 6 no longer lists WEBDESK_CONTROL_WS4_KEY as shared by design and FAILS if that
+#       ERP value is found anywhere in the WebDesk surface. Leave unset until phase 3 is done.
 #
 # What it changes: nothing in the `webdesk` or `gaiada` projects. It starts short-lived throwaway
 # containers named m4probe-* (removed on exit) on the `webdesk_default` and default `bridge` networks,
@@ -26,6 +30,7 @@ NET=webdesk_default
 PROBE_IMG="${PROBE_IMAGE:-node:22-alpine}"
 RUN="m4probe-$(date +%s)"
 ONLY="${PROBE_ONLY:-}"
+WS4_HMAC_RETIRED="${WS4_HMAC_RETIRED:-0}"
 TMP="$(mktemp -d)"
 PASS=0
 FAIL=0
@@ -233,12 +238,20 @@ for c in $(docker ps -q --filter "label=com.docker.compose.project=$PROJECT"); d
   docker inspect "$c" --format '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}'
 done | sort -u > "$TMP/wd-mounts.txt"
 HITS=""
+# Designed shared values, each authorising nothing beyond WebDesk itself:
+#   WEBDESK_EVENT_SECRET    — the B->A event HMAC (design §03 channel 1; a forged fact is noise, not authority)
+#   WEBDESK_CONTROL_WS4_KEY — the WS4 v1 approval HMAC: the ERP signs, WebDesk verifies (= its
+#                             WEBDESK_APPROVAL_ASSERTION_KEY); it is accepted only by WebDesk's own control plane.
+#                             M4 F1 replaces it with an Ed25519 key WebDesk holds only the public half of;
+#                             after phase 3 (WS4_HMAC_RETIRED=1) it is no longer shared, and finding its value
+#                             in the surface is a FAIL like any other ERP secret.
+SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET WEBDESK_CONTROL_WS4_KEY"
+if [ "$WS4_HMAC_RETIRED" = 1 ]; then
+  SHARED_BY_DESIGN="WEBDESK_EVENT_SECRET"
+  echo "    WS4_HMAC_RETIRED=1: WEBDESK_CONTROL_WS4_KEY is NOT shared by design (M4 F1 phase 3)"
+fi
 while IFS=$'\t' read -r k v; do
-  # Designed shared values, each authorising nothing beyond WebDesk itself:
-  #   WEBDESK_EVENT_SECRET    — the B->A event HMAC (design §03 channel 1; a forged fact is noise, not authority)
-  #   WEBDESK_CONTROL_WS4_KEY — the WS4 approval HMAC: the ERP signs, WebDesk verifies (= its
-  #                             WEBDESK_APPROVAL_ASSERTION_KEY); it is accepted only by WebDesk's own control plane
-  case "$k" in WEBDESK_EVENT_SECRET|WEBDESK_CONTROL_WS4_KEY) echo "    shared by design: $k"; continue;; esac
+  case " $SHARED_BY_DESIGN " in *" $k "*) echo "    shared by design: $k"; continue;; esac
   if grep -qF -- "$v" "$TMP/wd-env.txt" \
      || sudo -n grep -rqsF -- "$v" $SCAN_DIRS $(cat "$TMP/wd-mounts.txt") 2>/dev/null; then HITS="$HITS $k"; fi
 done < "$TMP/erp-needles.tsv"
@@ -252,19 +265,49 @@ grep -qF -- "$CTL" "$TMP/planted" && ok "control: a planted ERP value is found b
 rm -f "$TMP/planted"
 
 # 6b. Routes. From the webdesk network: every ERP container's exposed ports, every host listener on every
-# host address, the wireguard peers, the cloud metadata service. Only host nginx :80/:443 may answer.
+# host address, the wireguard peers, the cloud metadata service. Only host nginx :80/:443 may answer,
+# plus ONE exception while the guard has it on: <docker0 address>:<WEBDESK_OTLP_PORT> (WSK-D63 (2)). That
+# port on any other address, and every other port on docker0, is still a FAIL.
 for c in $(docker ps -q --filter "label=com.docker.compose.project=$ERP_PROJECT"); do
   ips="$(docker inspect "$c" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}')"
   ports="$(docker inspect "$c" --format '{{range $p, $_ := .Config.ExposedPorts}}{{println $p}}{{end}}' | grep /tcp | cut -d/ -f1)"
   for ip in $ips; do for p in $ports; do echo "$ip $p"; done; done
 done > "$TMP/t-erp.txt"
 HOST_PORTS="$(sudo -n ss -ltnH | awk '{print $4}' | grep -v -E '^(127\.|\[::1\]|\[::ffff:127)' | sed -E 's/.*:([0-9]+)$/\1/' | sort -un)"
+# The ONE allowed exception (WSK-D63 (2)): WebDesk's OTLP push to <docker0 address>:<WEBDESK_OTLP_PORT>,
+# allowed ONLY while the guard has it on. "On" is read from the live FORWARD rule (its original-destination
+# match), never from the variable alone; the variable, when set, is an expectation the live rule must meet.
+OTLP_RULE="$(sudo -n iptables -S WEBDESK-EGRESS 2>/dev/null | grep -E -- '--ctorigdst [0-9.]+(/32)? --ctorigdstport [0-9]+ -j RETURN' | head -1)"
+OTLP_ADDR=""; OTLP_LIVE_PORT=""
+if [ -n "$OTLP_RULE" ]; then
+  OTLP_ADDR="$(echo "$OTLP_RULE" | sed -E 's/.*--ctorigdst ([0-9.]+).*/\1/')"
+  OTLP_LIVE_PORT="$(echo "$OTLP_RULE" | sed -E 's/.*--ctorigdstport ([0-9]+).*/\1/')"
+fi
+DOCKER0_ADDR="$(ip -4 -o addr show docker0 2>/dev/null | awk '{split($4, a, "/"); print a[1]}' | head -1)"
+OTLP_ALLOWED=""
+if [ -n "$OTLP_LIVE_PORT" ]; then
+  if [ "$OTLP_ADDR" = "$DOCKER0_ADDR" ] && { [ -z "${WEBDESK_OTLP_PORT:-}" ] || [ "$WEBDESK_OTLP_PORT" = "$OTLP_LIVE_PORT" ]; }; then
+    OTLP_ALLOWED="$OTLP_ADDR:$OTLP_LIVE_PORT"
+    echo "    guard has the OTLP exception ON: $OTLP_ALLOWED (the only host port allowed besides nginx :80/:443)"
+    HOST_PORTS="$(printf '%s\n%s\n' "$HOST_PORTS" "$OTLP_LIVE_PORT" | sort -un)"   # probe it on EVERY host address even with no listener in ss
+  else
+    bad "guard OTLP exception is not the docker0 address / expected port: rule=$OTLP_ADDR:$OTLP_LIVE_PORT docker0=$DOCKER0_ADDR expected-port=${WEBDESK_OTLP_PORT:-any}"
+  fi
+elif [ -n "${WEBDESK_OTLP_PORT:-}" ]; then
+  bad "WEBDESK_OTLP_PORT=$WEBDESK_OTLP_PORT is expected but the guard has no OTLP exception ON"
+fi
 for a in $HOST_ADDRS; do for p in $HOST_PORTS; do echo "$a $p"; done; done > "$TMP/t-host.txt"
 for a in $WG_PEERS; do for p in 22 80 443 3000 3100 4317 4318 5432 5433 6379 8080 9090 9093; do echo "$a $p"; done; done > "$TMP/t-wg.txt"
 echo "169.254.169.254 80" > "$TMP/t-meta.txt"
 cat "$TMP"/t-*.txt | sort -u | tcp_probe "$NET" > "$TMP/p6.txt"
 echo "    probed $(wc -l < "$TMP/p6.txt") targets: $(wc -l < "$TMP/t-erp.txt") ERP container ports, $(wc -l < "$TMP/t-host.txt") host address:port, $(wc -l < "$TMP/t-wg.txt") wireguard, 1 metadata"
 OPEN="$(grep ' open$' "$TMP/p6.txt" | awk '{print $1}' | grep -v -E ':(80|443)$' || true)"
+if [ -n "$OTLP_ALLOWED" ]; then
+  # Positive: the exception does what it is for. A rule with no listener behind it means no telemetry is flowing.
+  if echo "$OPEN" | grep -q -x -F "$OTLP_ALLOWED"; then ok "OTLP exception: $OTLP_ALLOWED answers from $NET"; else bad "OTLP exception is ON but $OTLP_ALLOWED does not answer from $NET (collector down, or the rule is wrong)"; fi
+  # Negative: that port on any OTHER host address stays in OPEN, so the host-listener check below fails it.
+  OPEN="$(echo "$OPEN" | grep -v -x -F "$OTLP_ALLOWED" || true)"
+fi
 OPEN_NGX="$(grep ' open$' "$TMP/p6.txt" | awk '{print $1}' | grep -E ':(80|443)$' | grep -F -f <(echo "$HOST_ADDRS" | sed 's/$/:/') || true)"
 [ -n "$OPEN_NGX" ] && echo "    allowed (host nginx): $(echo $OPEN_NGX)"
 for t in $(grep -F -f <(awk '{print $1":"$2}' "$TMP/t-erp.txt") "$TMP/p6.txt" | grep ' open$' | awk '{print $1}'); do bad "ERP container reachable: $t"; done

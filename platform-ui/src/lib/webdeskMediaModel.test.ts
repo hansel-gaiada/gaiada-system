@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   altFor, assetLabel, bucketFor, checkFileAgainstToken, failureFromMint, failureFromUploadResponse, formatBytes, isUsableUploadUrl, problemSlugOf,
   MediaShapeError, mediaValueFor, normalizeTags, originOf, parseMediaDeleted, parseMediaList, parseMediaUpdated, parseMediaUsage, parseUploadedAsset,
-  parseUploadToken, previewUrl, usageLabel, type MediaAsset,
+  parseUploadToken, previewUrl, usageLabel, capabilityReasons, type MediaAsset,
 } from "./webdeskMediaModel";
 
 const asset = (over: Partial<MediaAsset> = {}): MediaAsset => ({
@@ -207,5 +207,42 @@ describe("an upload refusal from a current WebDesk is told by its problem+json `
     for (const slug of ["upload-not-found", "upload-busy", "upload-too-large", "upload-infected"]) {
       expect(JSON.stringify(f(400, problem(slug, 400), { maxBytes: 10 }))).not.toMatch(/statusCode|TOKEN|errors\//);
     }
+  });
+});
+
+describe("WSK-359 · the list's capabilities", () => {
+  it("are read when present (four booleans), and absent or null is null (unknown), never a guess", () => {
+    const caps = { read: true, upload: true, update: false, delete: false };
+    expect(parseMediaList({ assets: [], page: PAGE, capabilities: caps }).capabilities).toEqual(caps);
+    expect(parseMediaList({ assets: [], page: PAGE }).capabilities).toBeNull();
+    expect(parseMediaList({ assets: [], page: PAGE, capabilities: null }).capabilities).toBeNull();
+  });
+
+  it.each([
+    ["not an object", "yes", "media.capabilities"],
+    ["a missing member", { read: true, upload: true, update: true }, "media.capabilities.delete"],
+    ["a non-boolean member", { read: true, upload: "yes", update: true, delete: true }, "media.capabilities.upload"],
+  ])("%s is drift (a MediaShapeError), never 'allowed' or 'denied'", (_n, capabilities, path) => {
+    try { parseMediaList({ assets: [], page: PAGE, capabilities }); throw new Error("did not throw"); } catch (e) {
+      expect(e).toBeInstanceOf(MediaShapeError);
+      expect((e as MediaShapeError).path).toBe(path);
+    }
+  });
+
+  it("capabilityReasons: a reason for each capability that is off, in staff or client words; nothing for unknown or all-on", () => {
+    expect(capabilityReasons(null, false)).toEqual({});
+    expect(capabilityReasons(undefined, true)).toEqual({});
+    expect(capabilityReasons({ read: true, upload: true, update: true, delete: true }, false)).toEqual({});
+    expect(capabilityReasons({ read: true, upload: false, update: false, delete: false }, false)).toEqual({
+      upload: "You can't upload images here. Ask a Web Dev editor or a company admin for access.",
+      update: "You can't edit images here. Ask a Web Dev editor or a company admin for access.",
+      delete: "You can't delete images here. Deleting needs a Web Dev publisher or a company admin.",
+    });
+    expect(capabilityReasons({ read: true, upload: false, update: false, delete: false }, true)).toEqual({
+      upload: "You can't upload images here. Ask your company's admin.",
+      update: "You can't edit images here. Ask your company's admin.",
+      delete: "You can't delete images here.",
+    });
+    expect(capabilityReasons({ read: true, upload: true, update: true, delete: false }, false)).toEqual({ delete: "You can't delete images here. Deleting needs a Web Dev publisher or a company admin." });
   });
 });

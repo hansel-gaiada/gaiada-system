@@ -22,6 +22,7 @@ import type { ControlRequest, ControlContext } from "./control-request";
 import type { ControlPrincipal } from "./control-principal";
 import { verifyClientCertificate } from "./mtls-verifier";
 import { OfflineJwksVerifier, parseIssuerList } from "./keycloak-token-verifier";
+import { peekWs4Assertion } from "./ws4-assertion";
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -129,17 +130,12 @@ export function loadPinnedCaPem(devFallback: string): string {
  * single-use) — by the time this "unverified" value is actually used, Layer 4 has already
  * vouched for it. If Layer 4 refuses, the request never reaches a controller and this value is
  * never used for anything.
+ *
+ * M4 F1: v1 carries the claims in the first segment, v2 (a JWS) in the second; peekWs4Assertion
+ * reads the right one for each, so a v2 HIGH command still reaches its service with its approval id.
  */
 function extractApprovalIdUnverified(header: string | undefined): string | null {
-  if (!header) return null;
-  const dot = header.indexOf(".");
-  if (dot < 0) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(header.slice(0, dot), "base64url").toString("utf8")) as { approvalId?: unknown };
-    return typeof parsed.approvalId === "string" ? parsed.approvalId : null;
-  } catch {
-    return null;
-  }
+  return peekWs4Assertion(header)?.approvalId ?? null;
 }
 
 @Injectable()

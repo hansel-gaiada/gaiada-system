@@ -44,6 +44,12 @@
 //   * publish (WSK-D62): a client may publish only what a client could have changed. Every item's published
 //     version (empty when never published) is diffed against the version being published, and every changed
 //     path must be client-editable, else 422 publish-not-client-editable for the whole batch.
+//
+// THE REVIEW GATE (M5-W2c, writers' room design 4.5). On a collection whose editorial policy has review ON, publish
+// and schedule (a schedule that publishes) refuse any version that is not EXACTLY the approved one: 409
+// review-not-approved for the whole batch, for every principal class. It runs inside the transaction, after the WS4
+// claim and D62's client check and before any effect, so a refusal rolls the claim back with everything else. Review
+// OFF (the default) is a no-op. See ../editorial/review-gate.ts for the rule and why it is the version, not the head.
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -74,6 +80,10 @@ import {
 } from "./content-projection";
 import { extractSearchText } from "./search-text";
 import { attributionOf, insertContentVersion } from "./content-versions";
+// M5-W2b: the review flow follows the version writer (an edit in review / after approval), see editorial-store.ts.
+import { onItemCreated, onVersionAppended } from "../editorial/editorial-store";
+// M5-W2c: the publish gate, the exact approved version on a review-required collection (review-gate.ts).
+import { assertReviewApproved, type GateItem } from "../editorial/review-gate";
 import {
   ITEM_COLUMNS,
   adoptLegacyItem,
@@ -397,6 +407,8 @@ export class ContentCommandsService {
         RETURNING ${ITEM_COLUMNS}`,
       [item.id, v, JSON.stringify(blocks), JSON.stringify(seo), extractSearchText(blocks)],
     );
+    // M5-W2b: in_review follows the new head, approved returns to draft; a no-op for an item with no review row.
+    await onVersionAppended(client, { tenantId: ctx.tenant.id, itemId: item.id, version: v, actor: ctx.principal.sub });
     return {
       state: toState({ ...rows[0], collection_key: item.collection_key }),
       version: { version: v, contentHash: stored.contentHash, createdAt: iso(stored.createdAt) as string },
@@ -548,6 +560,28 @@ export class ContentCommandsService {
     if (found.length > 0) throw publishNotClientEditable(found);
   }
 
+  /**
+   * M5-W2c — the review gate as a pre-pass over the WHOLE batch (one unapproved item refuses all of them, 409
+   * review-not-approved), run under the item locks and before any effect. A deleted item is left to the ordinary
+   * loop (409 item-deleted), as assertClientPublish does. A version that does not exist can never be the approved
+   * one (approved_version is a foreign key into content_versions), so on a review-required collection it is refused
+   * here; on any other collection the ordinary loop answers 409 version-not-found as before. A no-op where review is off.
+   */
+  private async assertReviewGate(
+    client: PoolClient,
+    ctx: EditorialCommandContext,
+    rows: Map<string, ItemRow>,
+    items: { itemId: string; version: number }[],
+  ): Promise<void> {
+    const gate: GateItem[] = [];
+    for (const [index, req] of items.entries()) {
+      const item = rows.get(req.itemId) as ItemRow;
+      if (item.deleted_at) continue;
+      gate.push({ index, itemId: item.id, collectionKey: item.collection_key, version: req.version });
+    }
+    await assertReviewApproved(client, ctx.siteId, gate);
+  }
+
   private versionConflict(item: ItemRow, head: VersionRef): ControlProblem {
     return problems.conflict(
       "version-conflict",
@@ -682,6 +716,8 @@ export class ContentCommandsService {
           note: input.note ?? null,
           attribution: attributionOf(ctx.principal),
         });
+        // M5-W2b: on a review-required collection the new item enters the flow as a draft by its creator.
+        await onItemCreated(client, { tenantId: ctx.tenant.id, siteId: ctx.siteId, itemId, collectionKey: col.key, actor: ctx.principal.sub });
         const lint = await this.lint(client, ctx, composition, assembled.blocks, input.locale, assembled.seo, rows[0].localization_group_id);
         return {
           result: {
@@ -783,6 +819,7 @@ export class ContentCommandsService {
       async (client) => {
         const rows = await this.lockAll(client, ctx.siteId, input.items.map((i) => i.itemId));
         await this.assertClientPublish(client, ctx, rows, input.items);
+        await this.assertReviewGate(client, ctx, rows, input.items);
         const published: PublishResult["published"] = [];
         const refs: TenantWebhookContentItemRef[] = [];
         for (const [index, req] of input.items.entries()) {
@@ -850,6 +887,8 @@ export class ContentCommandsService {
       },
       async (client) => {
         const rows = await this.lockAll(client, ctx.siteId, input.items.map((i) => i.itemId));
+        // A schedule that publishes puts a version live at publishAt: gated now (a takedown-only schedule is not).
+        if (input.publishAt !== null) await this.assertReviewGate(client, ctx, rows, input.items);
         const scheduled: ScheduleResult["scheduled"] = [];
         const refs: TenantWebhookContentItemRef[] = [];
         for (const [index, req] of input.items.entries()) {

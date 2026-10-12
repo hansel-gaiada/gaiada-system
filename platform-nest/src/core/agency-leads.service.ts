@@ -5,6 +5,8 @@
 // AD-6 (convert) is a SEPARATE ticket/owner and is NOT implemented here — this file only ever
 // moves a lead into 'declined', 'nurturing' or 'in_review'. Nothing here writes
 // converted_client_id/converted_project_id/pipeline_run_id.
+// M5-P1: decline also moves the STAGE to 'lost', and only through `transitionStage`
+// (core/agency-lead-pipeline.service.ts), the one stage writer.
 //
 // ── WHY THESE TABLES CARRY NO `module` DB-WALL OPTION HERE (design §3.1) ────────────────────────
 // `agency_leads`/`agency_discovery_submissions` take the PLAIN tenant wall — the same MI-02 D-2a
@@ -21,6 +23,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { emitEvent } from "../events/outbox.service";
 import { scrubText } from "./scrub";
+import { LOST_STAGE, OPEN_LEAD_STATUSES, SQL_NOW, transitionStage } from "./agency-lead-pipeline.service";
 
 // ─────────────────────────────────────────────────────────────────────── field caps
 const ORG_NAME_CAP = 300;
@@ -28,6 +31,14 @@ const CONTACT_NAME_CAP = 200;
 const CONTACT_EMAIL_CAP = 320; // RFC 5321 practical max
 const CONTACT_PHONE_CAP = 40;
 const REASON_CAP = 1000;
+
+/** M5-P1 (design §6): when the lead entered its current stage. The latest history row's `occurred_at`; else
+ *  `triaged_at` for a won/lost lead (a backfilled terminal one has no history); else `created_at` (still at
+ *  `enquiry`). Correlated on the (tenant_id, lead_id, occurred_at DESC) index. */
+const STAGE_ENTERED_AT = `COALESCE(
+  (SELECT max(e.occurred_at) FROM agency_lead_stage_events e WHERE e.lead_id = l.id AND e.tenant_id = l.tenant_id),
+  CASE WHEN l.stage IN ('won','lost') THEN l.triaged_at END,
+  l.created_at)`;
 
 // ─────────────────────────────────────────────────────────────── queue ordering (design §9.2)
 /** The queue sorts by WHOSE MOVE IT IS, not by recency or by lifecycle order.
@@ -107,8 +118,10 @@ export async function createStaffLead(
        VALUES ($1, $2, $3, $4, $5, $6, 'staff', 'new', $7, $8)`,
       [id, tenantId, input.orgName, input.contactName, input.contactEmail, input.contactPhone, actorId, config.originSite],
     );
+    // M5-P1 payload hygiene (design §5): ids only. `orgName` used to ride here; no consumer read it, and
+    // an org name on the bus is personal data for a sole trader. Consumers fetch the lead.
     await emitEvent(c, tenantId, "agency_lead", id, "agency.lead.created", {
-      source: "staff", orgName: input.orgName, actorId,
+      source: "staff", actorId,
     });
   });
   return { id };
@@ -129,6 +142,8 @@ export async function listLeadsQueue(tenantId: string): Promise<unknown[]> {
       `SELECT l.id, l.org_name AS "orgName", l.contact_name AS "contactName",
               l.contact_email AS "contactEmail", l.contact_phone AS "contactPhone",
               l.source, l.status, l.owner_id AS "ownerId", ou.name AS "ownerName",
+              l.stage, l.deal_value::text AS "dealValue", l.deal_currency AS "dealCurrency",
+              ${STAGE_ENTERED_AT} AS "stageEnteredAt",
               l.created_at AS "createdAt", l.updated_at AS "updatedAt",
               EXTRACT(EPOCH FROM (now() - l.created_at))::bigint AS "ageSeconds",
               EXISTS (SELECT 1 FROM agency_discovery_submissions s WHERE s.lead_id = l.id) AS "hasSubmission"
@@ -158,6 +173,8 @@ export async function getLeadDetail(tenantId: string, leadId: string): Promise<R
       `SELECT l.id, l.org_name AS "orgName", l.contact_name AS "contactName",
               l.contact_email AS "contactEmail", l.contact_phone AS "contactPhone",
               l.source, l.status, l.owner_id AS "ownerId", ou.name AS "ownerName",
+              l.stage, l.deal_value::text AS "dealValue", l.deal_currency AS "dealCurrency",
+              ${STAGE_ENTERED_AT} AS "stageEnteredAt",
               l.converted_client_id AS "convertedClientId", l.converted_project_id AS "convertedProjectId",
               l.pipeline_run_id AS "pipelineRunId", l.declined_reason AS "declinedReason",
               l.triaged_by AS "triagedBy", tu.name AS "triagedByName", l.triaged_at AS "triagedAt",
@@ -218,7 +235,8 @@ export async function listLeadSubmissions(tenantId: string, leadId: string): Pro
 export type TriageAction = "open" | "decline" | "nurture";
 
 interface TransitionSpec {
-  from: string;
+  /** The statuses this action may start from. */
+  from: readonly string[];
   to: string;
   eventType: string;
   /** A "disposition" stamps `triaged_by`/`triaged_at` (decline, nurture — an actual decision was
@@ -227,13 +245,14 @@ interface TransitionSpec {
   disposition: boolean;
 }
 
-// The lead state machine, design §4.1's diagram verbatim: `open` moves submitted -> in_review;
-// decline/nurture are the two non-convert dispositions out of in_review. `convert` is AD-6's, not
-// modeled here at all — this map is exhaustive for what THIS file may do to a lead's status.
+// The lead state machine, design §4.1's diagram: `open` moves submitted -> in_review; nurture is
+// in_review -> nurturing. DECLINE is the M5-P1 AD-5 amendment (lead-pipeline design §2): it works from
+// EVERY open status, because a web lead is often lost before AD-1 is ever sent, and it moves the stage
+// to `lost` through the one stage writer (`transitionStage`). `convert` is AD-6's, not modeled here.
 const TRANSITIONS: Record<TriageAction, TransitionSpec> = {
-  open: { from: "submitted", to: "in_review", eventType: "agency.lead.opened", disposition: false },
-  decline: { from: "in_review", to: "declined", eventType: "agency.lead.declined", disposition: true },
-  nurture: { from: "in_review", to: "nurturing", eventType: "agency.lead.nurtured", disposition: true },
+  open: { from: ["submitted"], to: "in_review", eventType: "agency.lead.opened", disposition: false },
+  decline: { from: OPEN_LEAD_STATUSES, to: "declined", eventType: "agency.lead.declined", disposition: true },
+  nurture: { from: ["in_review"], to: "nurturing", eventType: "agency.lead.nurtured", disposition: true },
 };
 
 /** The typed refusal wording for an illegal transition, naming both the action and the lead's
@@ -241,7 +260,9 @@ const TRANSITIONS: Record<TriageAction, TransitionSpec> = {
  *  unit-tested directly so the wording (and the `from` it cites) cannot drift from `TRANSITIONS`
  *  without a test noticing. */
 export function describeIllegalTransition(action: TriageAction, currentStatus: string): string {
-  return `cannot ${action} a lead in status '${currentStatus}' — expected '${TRANSITIONS[action].from}'`;
+  const from = TRANSITIONS[action].from;
+  const expected = from.length === 1 ? `'${from[0]}'` : `one of ${from.map((s) => `'${s}'`).join(", ")}`;
+  return `cannot ${action} a lead in status '${currentStatus}' — expected ${expected}`;
 }
 
 /** `reason` is required for a decline (the DB's `lead_declined_has_reason` CHECK would refuse a
@@ -275,31 +296,29 @@ async function resolveTransitionFailure(
   return { outcome: "illegal", currentStatus: cur.rows[0].status };
 }
 
-/** The one shared engine for all three dispositions. The `UPDATE ... WHERE status = $from` is
- *  itself the concurrency guard: Postgres takes the row lock for the statement's duration, so two
- *  concurrent callers cannot both see `status = $from` and both succeed — the loser's `UPDATE`
- *  affects zero rows and re-reads the (now different) actual status below. This is NOT the
- *  lock-then-spawn idiom `webdev-cr-lock.ts`/`pipeline-lock.ts` document at length — those exist
- *  because their transitions SPAWN new rows in other tables from a snapshot read before the lock;
- *  every transition here is a single, single-table, single-statement UPDATE, which Postgres already
- *  serializes correctly on its own. An advisory lock here would guard nothing an ordinary
- *  conditional UPDATE does not already guard. */
+/** The engine for `open` and `nurture` — status-only moves that never touch `stage` (both stay inside
+ *  the open statuses, so the won/lost CHECKs are not involved). The `UPDATE ... WHERE status = ANY($from)`
+ *  is itself the concurrency guard: Postgres takes the row lock for the statement's duration, so two
+ *  concurrent callers cannot both see the `from` status and both succeed — the loser's `UPDATE` affects
+ *  zero rows and re-reads the (now different) actual status below. This is NOT the lock-then-spawn
+ *  idiom `webdev-cr-lock.ts`/`pipeline-lock.ts` document — each transition here is a single-table,
+ *  single-statement UPDATE, which Postgres already serializes on its own. Decline is NOT routed here: it
+ *  moves the stage, so it goes through `transitionStage` (see `declineLead`). */
 async function applyTransition(
   tenantId: string,
   leadId: string,
   actorId: string | null,
-  action: TriageAction,
-  extra: { declinedReason?: string } = {},
+  action: "open" | "nurture",
 ): Promise<TransitionOutcome> {
   const spec = TRANSITIONS[action];
   return withTenants([tenantId], async (c) => {
     const upd = await (spec.disposition
       ? c.query(
           `UPDATE agency_leads
-              SET status = $4, declined_reason = $5, triaged_by = $3, triaged_at = now(), updated_at = now()
-            WHERE id = $1 AND tenant_id = $2 AND status = $6 AND deleted_at IS NULL
+              SET status = $4, triaged_by = $3, triaged_at = now(), updated_at = now()
+            WHERE id = $1 AND tenant_id = $2 AND status = ANY($5::text[]) AND deleted_at IS NULL
             RETURNING id`,
-          [leadId, tenantId, actorId, spec.to, extra.declinedReason ?? null, spec.from],
+          [leadId, tenantId, actorId, spec.to, [...spec.from]],
         )
       : c.query(
           // `open` is not a disposition: triaged_by/triaged_at stay untouched, and owner_id is set
@@ -307,14 +326,12 @@ async function applyTransition(
           // owner to whoever happened to click it.
           `UPDATE agency_leads
               SET status = $4, owner_id = COALESCE(owner_id, $3), updated_at = now()
-            WHERE id = $1 AND tenant_id = $2 AND status = $5 AND deleted_at IS NULL
+            WHERE id = $1 AND tenant_id = $2 AND status = ANY($5::text[]) AND deleted_at IS NULL
             RETURNING id`,
-          [leadId, tenantId, actorId, spec.to, spec.from],
+          [leadId, tenantId, actorId, spec.to, [...spec.from]],
         ));
     if (upd.rowCount) {
-      await emitEvent(c, tenantId, "agency_lead", leadId, spec.eventType, {
-        actorId, ...(action === "decline" ? { reason: extra.declinedReason } : {}),
-      });
+      await emitEvent(c, tenantId, "agency_lead", leadId, spec.eventType, { actorId });
       return { outcome: "ok" as const };
     }
     return resolveTransitionFailure(c, tenantId, leadId);
@@ -329,11 +346,43 @@ export async function nurtureLead(tenantId: string, leadId: string, actorId: str
   return applyTransition(tenantId, leadId, actorId, "nurture");
 }
 
+/** DECLINE — the only way to `lost` (lead-pipeline design D3, §2). One transaction:
+ *   1. `transitionStage` locks the lead row, re-checks under that lock that its status is still OPEN,
+ *      and writes status='declined', the reason, triaged_* and stage='lost' in ONE UPDATE, plus the
+ *      history row and `agency.lead.stage_changed`;
+ *   2. every UNUSED, unrevoked invite token of the lead is revoked, so a link already in the prospect's
+ *      hands stops working. The lead row is locked first and the token rows second: the same order the
+ *      intake submit uses, so the two can never deadlock;
+ *   3. `agency.lead.declined` still fires, now WITHOUT `reason` (design §5 payload hygiene: a reason is
+ *      free text about a person; it stays on the lead, where M5-G5 erasure can scrub it).
+ *  A lead that is already converted or declined is `illegal`, naming its actual status. */
 export async function declineLead(
   tenantId: string,
   leadId: string,
   actorId: string | null,
   reason: string,
 ): Promise<TransitionOutcome> {
-  return applyTransition(tenantId, leadId, actorId, "decline", { declinedReason: reason });
+  return withTenants([tenantId], async (c) => {
+    const r = await transitionStage(c, {
+      tenantId,
+      leadId,
+      to: LOST_STAGE,
+      actorId,
+      requireStatusIn: TRANSITIONS.decline.from,
+      extraSet: { status: "declined", declined_reason: reason, triaged_by: actorId, triaged_at: SQL_NOW },
+    });
+    if (r.outcome === "not_found") return { outcome: "not_found" as const };
+    if (r.outcome === "status_mismatch") return { outcome: "illegal" as const, currentStatus: r.status };
+    if (r.outcome === "unchanged") {
+      // Unreachable under lead_lost_iff_declined (an open status is never at 'lost').
+      throw new Error(`declineLead: lead ${leadId} is open but already at stage '${r.stage}'`);
+    }
+    await c.query(
+      `UPDATE agency_intake_tokens SET revoked_at = now()
+        WHERE tenant_id = $1 AND lead_id = $2 AND used_at IS NULL AND revoked_at IS NULL`,
+      [tenantId, leadId],
+    );
+    await emitEvent(c, tenantId, "agency_lead", leadId, TRANSITIONS.decline.eventType, { actorId });
+    return { outcome: "ok" as const };
+  });
 }

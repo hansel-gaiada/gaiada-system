@@ -40,6 +40,12 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       // M5-L4: a gaiada.com form submission becomes a lead (medium impact; executor in approval-executables.ts).
       "agency_intake.createFromWebSubmission",
       "agency_intake.convert",
+      // M5-P1-c: the lead pipeline's agent surface (WSK-D69). Two reads, two LOW writes. There is no tool
+      // for won or lost on purpose: won is agency_intake.convert, lost is agency_intake.decline.
+      "agency_pipeline.reference",
+      "agency_pipeline.stageHistory",
+      "agency_pipeline.moveStage",
+      "agency_pipeline.setDealValue",
     ]);
   });
 
@@ -146,5 +152,57 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       expect(byName.has(name), `${name} must be declared`).toBe(true);
       expect(!!getExecutable(name), `${name} must have a D14 executor`).toBe(true);
     }
+  });
+});
+
+describe("M5-P1-c · the agency_pipeline.* tools", () => {
+  const SCHEMA_KEYS = (n: string) => Object.keys((byName.get(n)!.inputSchema as { properties: object }).properties);
+
+  it("the two writes are LOW, POST, and need no D14 executor (a move sends nothing itself)", () => {
+    for (const name of ["agency_pipeline.moveStage", "agency_pipeline.setDealValue"]) {
+      const t = byName.get(name)!;
+      expect(t.write, name).toBe(true);
+      expect(t.impact, name).toBe("low");
+      expect(t.method, name).toBe("POST");
+      expect(getExecutable(name), `${name} is low, so it must not register an executor`).toBeUndefined();
+    }
+  });
+
+  it("the two reads are plain GETs with no write flag and no impact", () => {
+    for (const name of ["agency_pipeline.reference", "agency_pipeline.stageHistory"]) {
+      const t = byName.get(name)!;
+      expect(t.method, name).toBe("GET");
+      expect(t.write, name).toBeUndefined();
+      expect(t.impact, name).toBeUndefined();
+    }
+  });
+
+  it("path templates are the routes the controller serves", () => {
+    expect(byName.get("agency_pipeline.moveStage")!.pathTemplate).toBe("/api/:tenantId/agency/leads/:leadId/stage");
+    expect(byName.get("agency_pipeline.setDealValue")!.pathTemplate).toBe("/api/:tenantId/agency/leads/:leadId/deal");
+    expect(byName.get("agency_pipeline.stageHistory")!.pathTemplate).toBe("/api/:tenantId/agency/leads/:leadId/stage-history");
+    expect(byName.get("agency_pipeline.reference")!.pathTemplate).toBe("/api/:tenantId/agency/pipeline/reference");
+  });
+
+  it("the schemas carry exactly the body members the routes read", () => {
+    expect(SCHEMA_KEYS("agency_pipeline.moveStage")).toEqual(["tenantId", "leadId", "stage", "deal"]);
+    expect((byName.get("agency_pipeline.moveStage")!.inputSchema as { required: string[] }).required).toEqual(["tenantId", "leadId", "stage"]);
+    expect(SCHEMA_KEYS("agency_pipeline.setDealValue")).toEqual(["tenantId", "leadId", "value", "currency"]);
+    // a clear is the explicit pair of nulls, so both are required (an omitted pair must not wipe a value)
+    expect((byName.get("agency_pipeline.setDealValue")!.inputSchema as { required: string[] }).required).toEqual(["tenantId", "leadId", "value", "currency"]);
+  });
+
+  it("agency_intake.convert gains an optional `deal` and stays medium", () => {
+    const t = byName.get("agency_intake.convert")!;
+    expect(t.impact).toBe("medium");
+    expect(Object.keys((t.inputSchema as { properties: object }).properties)).toContain("deal");
+    expect((t.inputSchema as { required: string[] }).required).not.toContain("deal");
+  });
+
+  it("the decline tool no longer says it only works from in_review", () => {
+    const d = byName.get("agency_intake.decline")!.description;
+    expect(d).not.toMatch(/in_review -> declined/);
+    expect(d).toMatch(/ANY open status/);
+    expect(d).toMatch(/lost/);
   });
 });

@@ -3,7 +3,7 @@
 #
 # Shape (read this before changing anything):
 #
-#   Traefik (mimi-tls-le) --> 172.17.0.1:18742 --> [edge: nginx] --internal net--> [app: Umami] --> [db: Postgres]
+#   erp-edge Traefik (behind mimi's passthrough, WSK-D71) --> 172.17.0.1:18742 --> [edge: nginx] --internal net--> [app: Umami] --> [db: Postgres]
 #
 #   * `internal` is `internal: true`: no gateway, no route out. db and app sit only on it, so they have NO
 #     egress by construction (not by a firewall rule that can be flushed, forgotten, or lose a race with a
@@ -149,6 +149,8 @@ services:
       # Same values as the app's: nginx's envsubst fills them into the two `location =` blocks.
       TRACKER_SCRIPT_NAME: ${TRACKER_SCRIPT_NAME:?set TRACKER_SCRIPT_NAME in .env}
       COLLECT_API_ENDPOINT: ${COLLECT_API_ENDPOINT:?set COLLECT_API_ENDPOINT in .env}
+      # The one source address allowed to state the client address (erp-edge as this edge sees it).
+      ERP_EDGE_SOURCE: ${ERP_EDGE_SOURCE:?set ERP_EDGE_SOURCE in .env, see the runbook section Which source does the edge see}
       NGINX_ENVSUBST_OUTPUT_DIR: /tmp
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -202,7 +204,7 @@ networks:
     # Fixed subnet so the egress guard can name it. Check it is free first (runbook preflight).
     ipam:
       config:
-        - subnet: 172.28.91.0/28
+        - subnet: 10.211.91.0/28
 
 volumes:
   umami-db-data:

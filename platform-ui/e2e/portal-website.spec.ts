@@ -181,7 +181,11 @@ test("self-publish ONE item (D58): Publish now asks once, publishes that item, a
   await expect(page.getByTestId("publish-now-ask")).toContainText("Publish v2 of this page now?");
   expect((await stub.item("service.web-design")).publishedVersion).toBe(1); // asking published nothing
   await page.getByTestId("publish-now-confirm").click();
-  await expect(page.getByTestId("published")).toContainText("Published. Your site updates in a few minutes.");
+  // WSK-359 (WSK-D65): the answer carries the staging rebuild state, and the words come from it. The VERSION is published; the site is not
+  // said to be live until the state is `live`.
+  await expect(page.getByTestId("published")).toContainText("Your site is rebuilding. This usually takes a few minutes.");
+  await expect(page.getByTestId("published")).toContainText("Version 2 is published.");
+  await expect(page.getByTestId("published")).not.toContainText("is now live");
   expect((await stub.item("service.web-design")).publishedVersion).toBe(2);
   await expect(page.getByTestId("publish-flow")).toBeFocused(); // focus follows the outcome (the Publish now button is disabled afterwards)
   // the panel now reads live at v2
@@ -299,8 +303,17 @@ test("files a 2-item request, sees Approve ABSENT on it, withdraws on demand; a 
   const mine = page.locator('[data-testid^="request-ap-"][data-mine]');
   await expect(mine).toHaveCount(1);
   await expect(mine).toContainText("Filed by You");
-  await expect(mine).toContainText("Home banner");
-  await expect(mine).toContainText("latest draft v1");
+  await expect(mine).toContainText("v1 of Home banner");
+  await expect(mine).not.toContainText("latest draft");
+  // WSK-359: the page moves on after the request was filed (Gaiada saves v2). The request still NAMES v1, and the card says so.
+  const banner = await stub.item("banner.home");
+  await stub.post("concurrent-save", { itemId: banner.itemId, fields: { title: "Gaiada rewrote this" }, by: "dept-manager" });
+  expect((await stub.item("banner.home")).headVersion).toBe(2);
+  await page.reload();
+  const mineAgain = page.locator('[data-testid^="request-ap-"][data-mine]');
+  await expect(mineAgain).toContainText("v1 of Home banner");
+  await expect(mineAgain).not.toContainText("Gaiada rewrote this");
+  await expect(mineAgain).not.toContainText("v2");
   await expect(mine.getByRole("button", { name: /^Approve/ })).toHaveCount(0);
   await expect(mine.getByTestId("needs-colleague")).toHaveText("Waiting for another person from your company to approve.");
   await expect(mine.getByRole("button", { name: /^Withdraw/ })).toBeVisible();
@@ -318,7 +331,7 @@ test("files a 2-item request, sees Approve ABSENT on it, withdraws on demand; a 
   await expect(theirs.getByTestId(`approve-${approveId}-ask`)).toContainText("Approve and publish 2 pages now?");
   expect((await stub.state()).items.filter((i) => i.slug.startsWith("banner.")).every((i) => i.publishedVersion === null)).toBe(true);
   await theirs.getByTestId(`approve-${approveId}-confirm`).click();
-  await expect(ewan.page.getByTestId("request-notice")).toHaveText("Published. Your site updates in a few minutes.");
+  await expect(ewan.page.getByTestId("request-notice")).toHaveText("Your site is rebuilding. This usually takes a few minutes.");
   const after = await stub.state();
   expect(after.items.filter((i) => i.slug === "banner.home" || i.slug === "banner.autumn").map((i) => i.publishedVersion)).toEqual([1, 1]);
   expect(after.approvals.find((a) => a.workflowId === "content.publish")?.status).toBe("approved");
@@ -370,6 +383,11 @@ test("history lists versions with authors and restores one as a draft", async ({
   await page.goto(`${SITE}/service/service.web-design/history?locale=en`);
   const table = page.getByTestId("versions-table");
   await expect(table).toContainText("Dana Editor (you)");
+  // WSK-359: a client has no directory read, so the BFF labels the other authors: Gaiada staff read "Gaiada" (never a personal name or a
+  // short id), and no author id is shown raw.
+  await expect(table).toContainText("Gaiada");
+  await expect(table).not.toContainText(/user [0-9a-z-]{4,}/);
+  await expect(table).not.toContainText("demo-hansel");
   await expect(table).not.toContainText("Hash");
   await page.getByTestId("restore-1").click();
   await page.getByTestId("confirm-restore-1").click();
@@ -379,7 +397,57 @@ test("history lists versions with authors and restores one as a draft", async ({
   expect(it.versions[2].props?.h1).toBe(it.versions[0].props?.h1);
 });
 
+// ── WSK-359: the staging rebuild after a client publish (WSK-D65), every state in the owner's words ───────────
+
+const REBUILD_COPY: [string, Record<string, unknown> | null, string][] = [
+  ["rebuilding", { state: "rebuilding", failureReason: null }, "Your site is rebuilding. This usually takes a few minutes."],
+  ["live", { state: "live", failureReason: null }, "Live on your site."],
+  ["failed: rebuild_not_configured", { state: "failed", failureReason: "rebuild_not_configured" }, "Published. Your site's automatic update isn't set up yet, so Gaiada will update it."],
+  ["failed: any other reason", { state: "failed", failureReason: "dispatch_unconfirmed" }, "Published, but the site update didn't start. Gaiada has been told."],
+  ["no build in the answer (an older BFF)", null, "Published. Your site updates in a few minutes."],
+];
+
+for (const [name, build, copy] of REBUILD_COPY) {
+  test(`WSK-359 · self-publish with the rebuild state "${name}" says exactly "${copy}"${build?.state === "live" ? "" : ", never 'live'"}`, async ({ page }) => {
+    await stub.config({ portalBuild: build });
+    await loginAs(page, DANA);
+    await openEditor(page, WEB_DESIGN);
+    await page.locator(P("h1")).fill(`Headline for ${name}`);
+    await page.getByTestId("save").click();
+    await expect(page.getByTestId("save-status")).toHaveText("Saved v2");
+    await page.getByTestId("publish-now").click();
+    await page.getByTestId("publish-now-confirm").click();
+    const box = page.getByTestId("published");
+    await expect(box).toBeVisible();
+    await expect(page.getByTestId("published-copy")).toHaveText(copy);
+    await expect(box).toContainText("Version 2 is published.");
+    if (build?.state !== "live") await expect(box).not.toContainText(/live on your site/i);
+    await expect(box).not.toContainText("github");
+    await expect(box).not.toContainText("http");
+  });
+}
+
+test("WSK-359 · the list's Publish now says the rebuild state too, and a batch approved by a colleague says it on the requests page", async ({ page, browser }) => {
+  await stub.config({ portalBuild: { state: "failed", failureReason: "rebuild_not_configured" } });
+  await loginAs(page, DANA);
+  await page.goto(`${SITE}/banner`);
+  await hydrated(page.getByTestId("items-table"));
+  await page.getByRole("checkbox", { name: /Select Home banner \(en\)/ }).check();
+  await page.getByRole("checkbox", { name: /Select Autumn banner \(en\)/ }).check();
+  await page.getByTestId("request-publish").click();
+  await expect(page.getByTestId("items-notice")).toContainText("Request filed for 2 pages.");
+  const ewan = await newClient(browser, EWAN);
+  await ewan.page.goto("/portal/website");
+  const id = (await stub.state()).approvals.find((a) => a.workflowId === "content.publish")!.id;
+  await hydrated(ewan.page.getByTestId(`approve-${id}`));
+  await ewan.page.getByTestId(`approve-${id}`).click();
+  await ewan.page.getByTestId(`approve-${id}-confirm`).click();
+  await expect(ewan.page.getByTestId("request-notice")).toHaveText("Published. Your site's automatic update isn't set up yet, so Gaiada will update it.");
+  await ewan.context.close();
+});
+
 // ── media ──────────────────────────────────────────────────────────────────────────────────────────
+
 
 test("media: browse, edit details, upload; NO delete and no 'where it's used'", async ({ page }) => {
   await stub.post("seed-media", { title: "Logo", alt: { en: "Logo" }, mime: "image/png", originalFilename: "logo.png" });
@@ -454,4 +522,36 @@ test("keyboard: the confirm step is reachable and returns focus; every control i
       return !label;
     }).map((e) => e.outerHTML.slice(0, 120)));
   expect(unnamed).toEqual([]);
+});
+
+// ── WSK-359: the media controls are decided up front, from the list's `capabilities` ───────────────────────────
+
+test("media capabilities: a client who cannot upload or edit sees Upload and Save OFF on first paint, with the reasons; browsing works", async ({ page }) => {
+  await stub.config({ mediaCaps: { upload: false, update: false } });
+  await stub.post("seed-media", { title: "Logo", alt: { en: "Logo" }, mime: "image/png", originalFilename: "logo.png" });
+  await loginAs(page, DANA);
+  await page.goto(`${SITE}/~media`);
+  await hydrated(page.getByTestId("media-upload"));
+  await expect(page.getByTestId("media-upload")).toBeDisabled();
+  await expect(page.getByTestId("media-upload-why")).toHaveText("You can't upload images here. Ask your company's admin.");
+  await page.getByTestId("media-tile").first().click();
+  await expect(page.getByTestId("media-readonly")).toContainText("You can't edit images here. Ask your company's admin.");
+  await expect(page.getByLabel("Title")).not.toBeEditable();
+  await expect(page.getByTestId("media-save")).toBeDisabled();
+  await expect(page.getByTestId("media-delete")).toHaveCount(0); // a client has no delete at all
+  // nothing was attempted to learn this
+  expect((await stub.state() as unknown as { mediaLog: unknown[] }).mediaLog).toEqual([]);
+});
+
+test("media capabilities: unknown (the BFF could not ask) leaves the controls on, and a server 403 is still handled as the fallback", async ({ page }) => {
+  await stub.config({ mediaCapsUnknown: true, mediaDeny: { upload: true } });
+  await loginAs(page, DANA);
+  await page.goto(`${SITE}/~media`);
+  await hydrated(page.getByTestId("media-upload"));
+  await expect(page.getByTestId("media-upload")).toBeEnabled();
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  await page.getByTestId("media-file-input").setInputFiles([{ name: "new.png", mimeType: "image/png", buffer: png }]);
+  await expect(page.getByTestId("media-upload-failed")).toContainText("You can't upload to this library.");
+  await expect(page.getByTestId("media-upload")).toBeDisabled();
+  await expect(page.getByTestId("media-upload-why")).toContainText("Ask your company's admin");
 });

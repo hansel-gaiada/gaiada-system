@@ -159,9 +159,12 @@ services:
       TENANT_GUC_NAME: ${TENANT_GUC_NAME}
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
-      # WSK-28: bearer token for the (proposed, not-yet-applied) Zone A write-only OTLP listener —
-      # see infra/runbooks/webdesk-zoneb-otel.md. Second independent gate alongside OTEL_ENABLED
-      # so the local dev-sink collector can keep running without also enabling the real push.
+      # WSK-D63 (2): the bearer for the ERP collector's write-only `otlp/webdesk` receiver (OTLP/HTTP on
+      # 172.17.0.1:4319, the one exception in the egress guard) — see infra/runbooks/webdesk-zoneb-otel.md.
+      # Empty = no credential sent = nothing delivered; never an error. Second independent gate alongside
+      # OTEL_ENABLED so the local dev-sink collector can keep running without also enabling the real push.
+      # PROTOCOL defaults to grpc (the local dev sink); production sets http/protobuf in /etc/webdesk/.env.
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
       OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
       WEBDESK_OTEL_ZONEA_PUSH_ENABLED: ${WEBDESK_OTEL_ZONEA_PUSH_ENABLED:-false}
       # Control-channel placeholders only — see .env.example's hard rule. Never a Zone A host.

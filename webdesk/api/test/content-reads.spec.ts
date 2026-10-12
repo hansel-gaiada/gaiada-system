@@ -238,6 +238,7 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
         expect(keysOf(i)).toEqual(
           [
             "deletedAt",
+            "editorial", // M5-W2b: the review state (control plane only)
             "headCreatedAt",
             "headCreatedBy",
             "headVersion",
@@ -302,7 +303,7 @@ describe("WSK-51 content reads (real DB + real PDP)", () => {
       const r = await get(itemUrl(fxA, id.seo));
       expect(r.statusCode).toBe(200);
       const body = r.json();
-      expect(keysOf(body)).toEqual(["group", "item", "lint", "live", "version"]);
+      expect(keysOf(body)).toEqual(["editorial", "group", "item", "lint", "live", "version"]); // editorial: M5-W2b
       expect(keysOf(body.item)).toEqual(
         [
           // ItemState (content-commands.service.ts), unchanged

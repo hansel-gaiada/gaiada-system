@@ -131,7 +131,7 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ | GET/POST | `/api/:t/projects/:pid/tasks` | list + create. |
 | ✅ | PATCH | `/api/:t/tasks/:id` | BUILT (`core.controller.ts`). Base task update. |
 | ✅ | Agency | `/api/:t/modules/agency/campaigns[/:cid/briefs]`, `/approvals/pending`, `/approvals/:id/decide` | campaigns + approvals ✅; **briefs GET+POST ✅** (`agency.controller.ts`); assets GET+POST ✅, submit ✅. **Still no campaign detail/edit/delete endpoints** (not in route inventory). |
-| ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. **PV3-04: POST now REQUIRES `businessType`; see §26.** |
+| ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. **Additive (M5-G0b):** every client row carries `isInternal: boolean` (the WSK-D36 internal sentinel; the list shows an "Internal" badge, and `GET /clients/centre` rows carry `isInternal` too). The sentinel is HIDDEN from the portal and portal scope, portal login provisioning, report delivery and AI report drafting (`400`), invoice creation (`404 client not found`), the knowledge client ingest and assistant client citations; staff lists, the Clients Centre and monitoring still show it. **PV3-04: POST now REQUIRES `businessType`; see §26.** |
 | ✅ (UI built) | GET/POST/PATCH | `/api/:t/deliverables[?projectId][/:id]` | BUILT (`client-work.controller.ts`). UI: `/deliverables` list + `/deliverables/new`. |
 | ✅ (UI built) | GET/POST | `/api/:t/time-entries` | BUILT (incl. PATCH). UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
 | ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`invoice.controller.ts`: GET, GET/:id, POST, PATCH). **Invoices** UI: `/invoices` list + `/invoices/new` (generate from billable time in a period × rate) + `/invoices/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/invoice.ts`. `company.manage` only. |
@@ -1878,8 +1878,8 @@ admin_revoked` (`previousCapability` / `restoredCapability`). A revoke also bump
 | Status | Method | Path | Notes |
 |---|---|---|---|
 | ✅ | GET | `/api/:t/clients/:clientId/website-access` | STAFF. → `{clientId, role:'client_website_editor', contacts:[{contactId, userId, name, email, capability, status, isAdmin, websiteEditor}]}`. Only client-wide, non-revoked contact rows (a project-scoped or revoked row is not eligible and is not listed). Authz `client_contact · read`. |
-| ✅ | PUT / DELETE | `/api/:t/clients/:clientId/contacts/:contactId/website-editor` | STAFF. Grant / revoke → `{clientId, contactId, userId, role, websiteEditor, changed}`. Authz `client_contact · manage_website_editor` (company_admin, manager, platform_admin of THIS company). `owner` is not included yet: it is permission-native and these actions have no permission key (tracked as a defect). `404` if the contact is not a contact of that client (RLS hides other companies'); `400 website_editor_is_client_wide` for a project-scoped row, `400 target_not_a_contact_of_client` for a revoked one; `400 self_grant_forbidden` when the caller is the target. A client admin gets `403` here (they use the portal route). |
-| ✅ | PUT / DELETE | `/api/:t/clients/:clientId/contacts/:contactId/admin` | STAFF ONLY. Assign / remove the `admin` capability → `{clientId, contactId, userId, capability:'admin'\|'signer'\|'viewer', changed}` (`capability` is the contact's resulting capability; on a no-op it is the real current one). Authz `client_contact · manage_admin` (company_admin, platform_admin; `owner` is not included yet, same reason as above; **not manager, and no client arm at all** — a client admin can never mint another admin). `admin` REPLACES `signer`/`viewer` in the one column and **IMPLIES SIGNER** (owner ruling 2026-10-11): everywhere a signer is tested an admin passes too (portal contract signing and gate decisions via `canSign`/`requireSigner`, the portal `canSign`/`viewOnly` flags, signature-notification recipients, Client Centre editing), so promoting a signer needs no confirmation and they keep signing (the audit row records `previousCapability`). `DELETE` takes an explicit target, `{ "to": "signer" \| "viewer" }`, default **`viewer`** (least privilege; `400` for anything else); the prior capability is not stored, so a **former signer must be re-made a signer deliberately** (`to:"signer"`). UI note: the portal People page's "Can sign" display must treat `admin` as able to sign. Client-wide rows only (`400 admin_is_client_wide`). |
+| ✅ | PUT / DELETE | `/api/:t/clients/:clientId/contacts/:contactId/website-editor` | STAFF. Grant / revoke → `{clientId, contactId, userId, role, websiteEditor, changed}`. Authz `client_contact · manage_website_editor` (company_admin, manager, **owner**, platform_admin of THIS company). `owner` is permission-native (no role rules): it reaches this through the permission arm, key `core.client_contact.manage_website_editor`, which its bundle carries and the policy mirrors for the STAFF shape only (no `clientId` on the resource), so an owner can never ride the portal arm (PERMISSION-CONTRACT §27). `404` if the contact is not a contact of that client (RLS hides other companies'); `400 website_editor_is_client_wide` for a project-scoped row, `400 target_not_a_contact_of_client` for a revoked one; `400 self_grant_forbidden` when the caller is the target. A client admin gets `403` here (they use the portal route). |
+| ✅ | PUT / DELETE | `/api/:t/clients/:clientId/contacts/:contactId/admin` | STAFF ONLY. Assign / remove the `admin` capability → `{clientId, contactId, userId, capability:'admin'\|'signer'\|'viewer', changed}` (`capability` is the contact's resulting capability; on a no-op it is the real current one). Authz `client_contact · manage_admin` (company_admin, **owner** via the permission key `core.client_contact.manage_admin`, platform_admin; **not manager, and no client arm at all** — a client admin can never mint another admin). `admin` REPLACES `signer`/`viewer` in the one column and **IMPLIES SIGNER** (owner ruling 2026-10-11): everywhere a signer is tested an admin passes too (portal contract signing and gate decisions via `canSign`/`requireSigner`, the portal `canSign`/`viewOnly` flags, signature-notification recipients, Client Centre editing), so promoting a signer needs no confirmation and they keep signing (the audit row records `previousCapability`). `DELETE` takes an explicit target, `{ "to": "signer" \| "viewer" }`, default **`viewer`** (least privilege; `400` for anything else); the prior capability is not stored, so a **former signer must be re-made a signer deliberately** (`to:"signer"`). UI note: the portal People page's "Can sign" display must treat `admin` as able to sign. Client-wide rows only (`400 admin_is_client_wide`). |
 | ✅ | GET | `/api/:t/portal/clients/:clientId/website-access` | PORTAL (client admin). Same body as the staff list, for the caller's own client. Authz `client_contact · manage_website_editor` with `clientId`, then the portal scope predicate (`resolvePortalScope`): `403` for any client that is not the caller's. |
 | ✅ | PUT / DELETE | `/api/:t/portal/clients/:clientId/contacts/:contactId/website-editor` | PORTAL (client admin). Grant / revoke the website editor to a contact of the SAME client. `403` for a signer, a viewer, a plain website editor, an admin of another client, a revoked or project-scoped admin, any staff member (not a contact of the client) and any other company's user; `404` for a contact id of another client/company; `400 self_grant_forbidden` for a grant to themselves (a self-REVOKE is allowed). There is deliberately **no** portal route for `admin` or any other role. |
 
@@ -1915,19 +1915,19 @@ is the authority for which site belongs to which client.
 |---|---|---|---|
 | ✅ | GET | `/website` | → `{clientId, sites:[{tenantSlug, siteId, name, kind, defaultLocale, locales, linkedAt}]}`: THIS client's linked sites (a link whose site WebDesk no longer lists is omitted; a WebDesk outage is `503 editorial_unavailable`, never `[]`). Authz `webdesk_content_item · read`. |
 | ✅ | GET | `/website/sites/:slug/:siteId/collections` | Zone B's `collection.list` body, each collection with a computed **`clientEditable`** map (below). Authz `webdesk_content_item · read` (a client never reads `webdesk_collection`: schema is the agency's). |
-| ✅ | GET | `/website/sites/:slug/:siteId/collections/:key/items` | The staff list; query allow-list `locale, state, q, cursor, limit, slug`. `?includeDeleted` or `?state=deleted` → `400` (a client never sees a deleted item). |
-| ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId[?version=]` | `{item, version, live, group, lint}` PLUS **`composition`** and **`clientEditable`** (below). A deleted item is `404 item-not-found`. |
-| ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId/versions[/:n]` | The staff version reads. |
+| ✅ | GET | `/website/sites/:slug/:siteId/collections/:key/items` | The staff list, plus **`authors`** (below); query allow-list `locale, state, q, cursor, limit, slug`. `?includeDeleted` or `?state=deleted` → `400` (a client never sees a deleted item). |
+| ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId[?version=]` | `{item, version, live, group, lint}` PLUS **`composition`**, **`clientEditable`** (below) and **`authors`** (below). A deleted item is `404 item-not-found`. |
+| ✅ | GET | `/website/sites/:slug/:siteId/items/:itemId/versions[/:n]` | The staff version reads, plus **`authors`** (below). |
 | ✅ | POST | `/website/sites/:slug/:siteId/collections/:key/items` | Create. Body `{locale, slug, twinOf?, fields?, blocks?, note?}`; **no `seo`**. `201` as the staff create. D59 pre-check (below). |
 | ✅ | PUT | `/website/sites/:slug/:siteId/items/:itemId` | Update. Body `{baseVersion, fields?, blocks?, note?}`; **no `seo`**. The BFF fills what you omit FROM THE HEAD (fields, generic blocks, and always the existing `seo`) so a partial edit never removes what the client cannot see; a stale `baseVersion` is `409 version-conflict`, decided before the D59 diff (below). |
 | ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/restore` | Body `{version, baseVersion, note?}`. The restored version may differ from the head only in client-editable paths. |
 | ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/preview` | WSK-46's one-time preview link (§27), authorised as the item's `update`. `200 {previewUrl, expiresAt, version}`. |
 | ✅ | POST | `/website/sites/:slug/:siteId/publish-requests` | Body `{items:[{itemId, version}], note?}` → `202 {approvalId, command:'content.publish', itemCount}`. Files ONE WS4 approval with the client on the row; publishes nothing. `publishAt` / `unpublishAt` → `403 client-command-not-allowed` (a client never schedules). D62 pre-check (below). |
 | ✅ | POST | `/website/sites/:slug/:siteId/items/:itemId/publish` | **Self-publish ONE item (D58).** Body `{version?}` (default: the head). Files the request and approves it as the same person in one call → the approve body below. If the approval step fails, the request it filed is withdrawn so no orphan is left. |
-| ✅ | GET | `/website/publish-requests[?status=pending\|approved\|rejected\|cancelled\|all]` | This CLIENT's publish requests, every client editor's (default `pending`, newest first, <= 100): `{requests:[{approvalId, status, createdAt, tenantSlug, siteId, itemCount, itemIds, requestedBy:{userId, name}, requestedByMe, canApprove, executionStatus}]}`. A request STAFF filed, another client's, or one whose site was re-pointed never appears. `canApprove` is a UI hint (`pending && (!requestedByMe \|\| itemCount == 1)`); Cerbos decides. |
-| ✅ | POST | `/website/publish-requests/:approvalId/approve` | **Decide AND execute (D58).** → `200 {approvalId, status:'approved', executionStatus:'executed'\|'failed', selfPublish?, reconciled?, items?, error?}` (the staging-rebuild internals are not shown). `403` for a self-approved BATCH (Cerbos; the request stays pending, nothing is sent); `404` for a request that is not this client's publish (incl. staff-filed); `409 approval_not_pending` the second time; `422 publish-not-client-editable` when the D62 check fails now (the live page may have moved since filing; the request stays pending). |
+| ✅ | GET | `/website/publish-requests[?status=pending\|approved\|rejected\|cancelled\|all]` | This CLIENT's publish requests, every client editor's (default `pending`, newest first, <= 100): `{requests:[{approvalId, status, createdAt, tenantSlug, siteId, itemCount, itemIds, items:[{itemId, version}], requestedBy:{userId, name}, requestedByMe, canApprove, executionStatus}]}`. **`items`** (WSK-359) is the versions the request NAMED, read from the approval's stored items exactly as the staff list does (an item whose stored entry carries no usable version is simply absent from `items`; `itemIds` is unchanged). The list makes no WebDesk call, so it carries no title or slug (WebDesk's `item.get` has a slug but no title; a title is computed from the version's fields): the portal reads each page AT its requested version (`GET …/items/:id?version=N`) for the words. A request STAFF filed, another client's, or one whose site was re-pointed never appears. `canApprove` is a UI hint (`pending && (!requestedByMe \|\| itemCount == 1)`); Cerbos decides. |
+| ✅ | POST | `/website/publish-requests/:approvalId/approve` | **Decide AND execute (D58).** → `200 {approvalId, status:'approved', executionStatus:'executed'\|'failed', selfPublish?, reconciled?, items?, build?, error?}`. **`build`** (WSK-359, WSK-D65) is `{state:'rebuilding'\|'live'\|'unverified'\|'failed', failureReason: string\|null}`, present on an executed publish: the client-safe subset of the executor's `build` (never the build id, repo, ref or URL; `failureReason` is the typed token, e.g. `rebuild_not_configured`, `client_publish_unverified`, `dispatch_unconfirmed`, and anything that is not a plain lower-case token is replaced by `rebuild_failed`). The self-publish route answers the same body. The portal says "live" only for `state === 'live'`. `403` for a self-approved BATCH (Cerbos; the request stays pending, nothing is sent); `404` for a request that is not this client's publish (incl. staff-filed); `409 approval_not_pending` the second time; `422 publish-not-client-editable` when the D62 check fails now (the live page may have moved since filing; the request stays pending). |
 | ✅ | POST | `/website/sites/:slug/:siteId/publish-requests/:approvalId/withdraw` | The REQUESTER cancels their own pending request → `200 {approvalId, status:'cancelled'}`. `403` for another client editor's request, `404` when the row is not a publish request for this site, `409 approval_not_pending` once decided. Nothing is sent to WebDesk. |
-| ✅ | GET | `/website/sites/:slug/:siteId/media[?mime&q&tag&cursor&limit]` | The staff media list minus `includeDeleted` (`400`). Authz `webdesk_media_asset · read`. |
+| ✅ | GET | `/website/sites/:slug/:siteId/media[?mime&q&tag&cursor&limit]` | The staff media list minus `includeDeleted` (`400`), plus **`capabilities`** (§27): in client mode `delete` is always `false`. Authz `webdesk_media_asset · read`. |
 | ✅ | POST | `/website/sites/:slug/:siteId/media/upload-token` | Body `{bucket, maxBytes?, mime?}` → `201 {uploadUrl, expiresAt, maxBytes, allowedMimes}` (`no-store`; the URL carries a one-time secret). Authz `upload`. |
 | ✅ | PATCH | `/website/sites/:slug/:siteId/media/:assetId` | Body `{title?, alt?, tags?}`. Authz `update`. **There is NO route to delete media, delete / unpublish / schedule an item, or touch schema or keys.** |
 
@@ -1937,6 +1937,12 @@ is the authority for which site belongs to which client.
 blocks (editable iff the collection is); `seo` is always false (D59 design default: the agency keeps SEO-critical fields). `create.reason`
 is `null | 'system-collection' | 'nothing-editable' | 'required-fields-not-editable'`; **a REQUIRED field that is not client-editable
 makes a client create impossible**, so `create.allowed` is false and `blockedBy` names the field(s): hide or disable "New" and say why.
+
+**Author labels (WSK-359).** A client has no directory read, so the ids WebDesk records as version authors (`version.createdBy`, `versions[].createdBy`, `items[].headCreatedBy`) would read as short ids.
+`item.get`, `GET …/versions`, `GET …/versions/:n` and the item list therefore carry **`authors: {"<users.id>": "<label>"}`** (absent when the body names no author), resolved server-side in the request's tenant in ONE query
+per response: an author who is a contact of THIS client (any `client_contacts` row of the client, or its legacy portal user) → their name; an automation / bot account (`users.kind`) that is a member of the company → its name
+(as the staff members list shows it); a Gaiada staff user (an `employee` member of the company) → **"Gaiada"** (no personal name or email: a deliberate privacy choice for this release); anyone else (another client's contact,
+a user in no company, a removed account, a non-uuid) → **"Someone else"**. The contact rule is tried first. The UI's `authorLabel` uses a label when present and keeps its short-id fallback otherwise.
 
 **The D59 / D62 pre-check (refused BEFORE any WebDesk write, with WebDesk's own problem slugs; WebDesk's check stays the authority).**
 `422 field-not-client-editable` (`issues[].path` = RFC 6901 pointers such as `/blocks/0/props/slugLabel`, `total`; `/seo` for any `seo`;
@@ -4699,16 +4705,20 @@ no Cerbos policy at all, which is deliberate and preserves the `0072:32-36` inva
 
 | Method | Path | Returns | Cerbos |
 |---|---|---|---|
-| GET | `/api/:tenantId/agency/leads` | queue rows + `ageSeconds`, `hasSubmission` | `agency_lead:read` |
-| GET | `/api/:tenantId/agency/leads/:leadId` | lead + latest submission | `agency_lead:read` |
+| GET | `/api/:tenantId/agency/leads` | queue rows + `ageSeconds`, `hasSubmission`, and (M5-P1) `stage`, `dealValue`, `dealCurrency`, `stageEnteredAt` | `agency_lead:read` |
+| GET | `/api/:tenantId/agency/leads/:leadId` | lead + latest submission + (M5-P1) `stage`, `dealValue`, `dealCurrency`, `stageEnteredAt` | `agency_lead:read` |
 | GET | `/api/:tenantId/agency/leads/:leadId/submissions` | full history (`supersedes_id` chains) | `agency_discovery_submission:read` |
 | POST | `/api/:tenantId/agency/leads` | `{ id, status: "new" }` (staff-entered, `source='staff'`) | `agency_lead:create` |
 | POST | `/api/:tenantId/agency/leads/:leadId/invite` | `{ tokenId, token, expiresAt }` — **the token is returned ONCE** | `agency_lead:update` |
 | POST | `/api/:tenantId/agency/leads/:leadId/invite/:tokenId/revoke` | `{ revoked }` (idempotent) | `agency_lead:update` |
 | POST | `/api/:tenantId/agency/leads/:leadId/open` | `{ ok }` — `submitted → in_review` | `agency_lead:triage` |
-| POST | `/api/:tenantId/agency/leads/:leadId/decline` | `{ ok }` — `reason` REQUIRED | `agency_lead:triage` |
+| POST | `/api/:tenantId/agency/leads/:leadId/decline` | `{ id, status: "declined" }` — `reason` REQUIRED. **From any open status** (new, invited, submitted, in_review, nurturing); sets stage `lost` | `agency_lead:triage` |
 | POST | `/api/:tenantId/agency/leads/:leadId/nurture` | `{ ok }` | `agency_lead:triage` |
-| POST | `/api/:tenantId/agency/leads/:leadId/convert` | `{ id, status, clientId, projectId, runId }` | **`agency_lead:convert`** |
+| POST | `/api/:tenantId/agency/leads/:leadId/convert` | `{ id, status, clientId, projectId, runId, delegations, dealValue, dealCurrency }`. Body gains an optional `deal: {value, currency}` (M5-P1); sets stage `won` | **`agency_lead:convert`**, plus `agency_lead:update` when `deal` is sent |
+| GET | `/api/:tenantId/agency/leads/:leadId/stage-history` | M5-P1. `[{ id, fromStage, toStage, dealValue, dealCurrency, actorId, actorName, viaAgent, occurredAt }]`, newest first; 404 when the lead is invisible | `agency_lead:read` (with the lead id) |
+| GET | `/api/:tenantId/agency/pipeline/reference` | M5-P1. `{ stages: [{ key, position, kind: open\|won\|lost, label }], currencies: [{ code, symbol, minorUnit }] }` — the six stages in order and the ACTIVE currencies | `agency_lead:read` |
+| POST | `/api/:tenantId/agency/leads/:leadId/stage` | M5-P1. Body `{ stage, deal? }` → `{ id, stage, changed, stageEventId? }`. Open stages only; same-stage move is `200 changed:false` and writes nothing | `agency_lead:triage`, plus `agency_lead:update` when `deal` is sent |
+| POST | `/api/:tenantId/agency/leads/:leadId/deal` | M5-P1. Body `{ value, currency }` or `{ value: null, currency: null }` (clear) → `{ id, changed, dealValue, dealCurrency }`. Any status; emits no stage event | `agency_lead:update` |
 
 ### The invite token is shown once and never again
 
@@ -4757,6 +4767,40 @@ the lead; it will not drag a lead that has already **submitted** backwards out o
    said, and it is the basis of scope. Corrections arrive as a NEW submission with `supersedes_id`
    set; both are kept and the compare view is the intended surface for the difference.
 
+### The lead pipeline (M5-P1, WSK-D69) — **STATUS: PROTOTYPED**
+
+Design: `docs/plans/2026-10-11-m5-lead-pipeline-design.md`. A lead has two state machines that meet only at the
+ends: `status` (the intake lifecycle above) and `stage` (the sales position, from the global reference table
+`agency_lead_stages`): `enquiry` → `contacted` → `qualified` → `proposal` (open), then `won` or `lost`. **Won
+⇔ converted and lost ⇔ declined, enforced by CHECKs.**
+
+- **Won only through Convert, lost only through Decline.** `POST …/stage` with `won` or `lost` is
+  `400 {reason:"stage_terminal"}`. Moves go in any direction between open stages (deals regress). A converted
+  or declined lead is `409 {reason:"lead_closed"}`. An unknown key is `400 {reason:"stage_unknown"}`.
+- **Authorization needs no new Cerbos action.** A move is `triage`, a value is `update`, won is `convert`. When
+  a `deal` rides on a move or a convert, the route ALSO authorizes `update`, after the first check and before
+  any validation, so a caller with `triage` or `convert` but not `update` gets a `403` for the deal part. Every
+  route authorizes before it validates, so a denial is never a validation 400.
+- **Deal value.** `dealValue` is a decimal **string** (Postgres `numeric(20,4)`, for example `"15000000.0000"`),
+  never a JSON number: do no float arithmetic on it. The request may send a decimal string (preferred) or a
+  finite number, matched by `^\d{1,16}(\.\d{1,4})?$`. The value must be exact at the currency's `minorUnit`
+  (from `…/pipeline/reference`): IDR (0) refuses `1500.5`, USD (2) accepts `10.25` and refuses `10.255`. Value and
+  currency are set together or not at all; the clear is the explicit pair of nulls (a body that omits both is
+  incomplete, so `{}` can never wipe a value). There is no default currency: pre-select the one most recently
+  used and always send the code.
+- **Typed `reason` codes** (branch on `reason`, rule 5 above): `stage_unknown`, `stage_terminal`, `lead_closed`,
+  `deal_incomplete`, `deal_value_invalid`, `deal_currency_unknown`, `deal_value_precision`.
+- **`stageEnteredAt`** is the latest history `occurredAt`; else `triagedAt` for a won or lost lead; else
+  `createdAt`. The queue **keeps its whose-move-it-is order**: `stage` and `dealValue` are for filter chips and
+  columns, and a consumer must not re-sort by them (rule 1 above).
+- **History** holds no personal data and is append-only. A lead's entry into `enquiry` is its `createdAt`; the
+  history starts at the first move.
+- **Event.** Every stage change emits `agency.lead.stage_changed` v1 (ids, stages, value; no names, emails,
+  phones, reasons, attribution or consent). It is not a notification topic and not on the n8n allow-list.
+- **MCP.** `agency_pipeline.reference` and `agency_pipeline.stageHistory` (reads); `agency_pipeline.moveStage`
+  and `agency_pipeline.setDealValue` (impact `low`). `agency_intake.convert` gains the optional `deal`.
+  `agency_intake.decline` now works from every open status.
+
 ### Convert — what it spawns, and the one thing it must never do
 
 One transaction: `clients` → `client_contacts` (`capability='signer'`, because a viewer-only contact
@@ -4770,12 +4814,20 @@ pipeline.run.created`, which is what the shipped `pipeline-fanout` n8n workflow 
 and a converted run satisfies that the same way every run does — by real client signatures.
 Pre-seeding would forge what a client signed.
 
-### Known limitation a consumer should not design around
+### The agent path to Convert (corrected 2026-10-11)
 
-`convert` is medium-impact and therefore D14-gated, and the D14 **resume path is broken estate-wide**
-("approving a suspended write currently executes nothing" — the agentic-native plan's highest-leverage
-open item). So an agent-initiated convert suspends and never executes. **Convert is a human-driven
-capability until that lands.** This feature neither introduces nor can fix it.
+`convert` is medium-impact, so an unattended agent call **suspends** at the hub and files an approval. An older
+version of this section said the D14 resume path was broken estate-wide and that convert was therefore
+human-driven only. That predates convert's executor entry: `core/approval-executables.ts` registers
+`agency_intake.convert` (a lock key per lead and a precondition that the lead is still open), so when a human
+approves the filed request the executor re-drives the call. D14's execution half is built estate-wide (see
+`automation-approvals` above), and registered tools execute on approval.
+
+What is NOT verified: an approve-then-executed round trip for this tool has not been driven against a running
+hub, Cerbos and platform (**PROTOTYPED**; the suspension itself is proven in `mcp-hub/src/agency-intake-tools.test.ts`).
+Until it is, treat an agent-initiated convert as "files an approval", and expect a human to be able to run the
+same convert directly. A `deal` in the tool arguments rides along to the re-driven call, which is authorized
+for `update` as well as `convert`.
 
 ## 25. Client Centre — CMC's layout/categorisation as native ERP pages (CC-D1…D7, 2026-09-29) — `src/modules/clients/centre/`, `src/core/portal-centre.controller.ts` — **STATUS: PROTOTYPED (backend only — typechecked + unit-tested; DB-backed proofs written, not yet run on the Linux gate)**
 
@@ -4986,7 +5038,7 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | GET | `/sites/:ts/:site/items/:itemId[?version=head\|live\|<n>]` | `webdesk_content_item:read` | 200 `{item,version:{n,version,contentHash,createdAt,createdBy,attribution,note,blocks,seo},live,group,lint}` |
 | GET | `/sites/:ts/:site/items/:itemId/versions?cursor&limit` | `webdesk_content_item:read` | 200 `{versions:[{version,contentHash,createdAt,createdBy,attribution,note}],page}`, newest first |
 | GET | `/sites/:ts/:site/items/:itemId/versions/:n` | `webdesk_content_item:read` | 200 one full version (`blocks`, `seo`, …) |
-| GET | `/sites/:ts/:site/media?mime&q&tag&includeDeleted&cursor&limit` | `webdesk_media_asset:read` (**WSK-43b**: was `webdesk_content_item:read`; same tiers, see "The media library") | 200 `{assets:[MediaAsset],page:{cursor,hasMore,limit}}`, newest first |
+| GET | `/sites/:ts/:site/media?mime&q&tag&includeDeleted&cursor&limit` | `webdesk_media_asset:read` (**WSK-43b**: was `webdesk_content_item:read`; same tiers, see "The media library") | 200 `{assets:[MediaAsset],page:{cursor,hasMore,limit},capabilities?:{read,upload,update,delete}}`, newest first. **`capabilities`** (WSK-359): what the caller may do here, from ONE Cerbos `checkResources` request (one resource, the four actions); advisory, so the UI disables the matching control up front, and the per-action check stays the authority (a 403 is still handled). Absent when Cerbos could not answer the batch (unknown, never "denied": every control stays on). |
 | GET | `/sites/:ts/:site/media/:assetId/usage` (**WSK-43b**, BUILT) | `webdesk_media_asset:read` | 200 `{assetId,url,total,items:[{itemId,collectionKey,locale,slug,in}]}` (at most 50 items) |
 | POST | `/sites/:ts/:site/media/upload-token` (**WSK-43b**, BUILT) | `webdesk_media_asset:upload` | **201** `{uploadUrl,expiresAt,maxBytes,allowedMimes}`; `Cache-Control: no-store` |
 | PATCH | `/sites/:ts/:site/media/:assetId` (**WSK-43b**, BUILT) | `webdesk_media_asset:update` | 200 `{asset}` |
@@ -4994,7 +5046,7 @@ assertion's `sub` is the same ERP user id**, which is what WebDesk stores as `cr
 | POST | `/sites/:ts/:site/collections/:collectionKey/items` | `…:create` | **201** `ItemWriteResult` |
 | PUT (and `PATCH`, the MCP hub's alias) | `/sites/:ts/:site/items/:itemId` | `…:update` | 200 `ItemWriteResult` |
 | POST | `/sites/:ts/:site/items/:itemId/restore` | `…:update` | 200 `ItemWriteResult` |
-| POST | `/sites/:ts/:site/publish-requests` | `…:request_publish` | **202** `{approvalId,command,itemCount}` |
+| POST | `/sites/:ts/:site/publish-requests` | `…:request_publish` | **202** `{approvalId,command,itemCount}`; **409 `review-not-approved`** (M5-W2c, BUILT) when an item's collection requires editorial review and the requested version is not the approved one: nothing is filed |
 | GET | `/sites/:ts/:site/publish-requests?status=pending` (WSK-44b) | `…:request_publish` (the right that filed it) | 200 `{requests:[{approvalId, status, createdAt, itemIds:[…], items:[{itemId,version}], executionStatus\|null}]}`: the CALLER'S OWN `origin='webdesk'` publish/schedule approvals for THIS site, newest first, at most 100. `status` = `pending` (default) · `approved` · `rejected` · `cancelled` · `all`; anything else is 400 `invalid_request`, as is any other query key. `items` carries the requested version per item (what the editor shows after a reload). `executionStatus` is the approval's `execution_status` (`not_applicable` while pending or withdrawn, then `pending`·`executing`·`executed`·`failed`). Behind the same cross-company wall (`resolveEditableSite`): a foreign site is the uniform 404 `site-not-found`. Only `requested_by = caller` rows are ever returned, so it reveals no other user's request |
 | POST | `/sites/:ts/:site/publish-requests/:approvalId/withdraw` | `…:request_publish` (the right that filed it) | 200 `{approvalId, status:"cancelled"}` |
 | POST | `/sites/:ts/:site/items/:itemId/unpublish` | `…:unpublish` | 200 `{item,replayed}` |
@@ -5063,6 +5115,18 @@ typed 404 `item-not-found`/`version-not-found`, 409 `item-deleted`), authorizes 
 `decide()` in the Approvals inbox, as the decider (maker ≠ checker; a publisher may approve their own single-item,
 non-scheduled publish, R4); see §9 row `automation-approvals` (WSK-66). The UI shows "Awaiting approval #…" and polls the approval.
 
+**The editorial review gate (M5-W2c, BUILT; writers' room design `docs/plans/2026-10-11-m5-writers-room-design.md` 4.5).**
+On a collection where review is ON, WebDesk publishes only the EXACT approved version (`editorial.approvedVersion` on
+`item.get`), checked inside `content.publish` / `content.schedule` after the WS4 claim and D62's client check, and again
+by the scheduler before a queued version swap; a refusal is **409 `review-not-approved`** for the whole batch, the claim
+rolls back, and the approval row ends `failed` with `webdesk_refused: 409 review-not-approved`. `publish-requests` refuses
+EARLY with the same problem, after authorization and before anything is filed:
+`{type:"…/errors/review-not-approved", title, status:409, detail, items:[{itemIndex,itemId,version,approvedVersion|null}], total}`.
+A takedown-only schedule (`unpublishAt` without `publishAt`) is not gated, and review OFF (the default) changes nothing.
+The early check is advisory (the review state can move before `decide()`, and the M1 importer files without it); WebDesk's
+gate is the authority. The approvals detail page (`WebdeskPublishSummary`) shows per item whether the requested version is the
+approved one and warns before the approver decides; an `item.get` without the `editorial` member reads as "unknown".
+
 ### Withdrawing a request, and the approvals façade
 
 `…/publish-requests/:approvalId/withdraw` lets the REQUESTER cancel their own PENDING publish/schedule approval. The row becomes
@@ -5116,6 +5180,11 @@ commands `media.list` · `media.usage` · `media.uploadToken` · `media.update` 
 `webdesk-media.service.ts` (the use cases) and the routes in `webdesk-content.controller.ts`. Same wall, same typed errors, same two-row ledger as the content
 writes. The three writes are MEDIUM: they carry the editorial assertion (signed as the caller) and an `Idempotency-Key` (optional on the BFF; generated when
 absent). Replace-all semantics on `update`: `alt` is the COMPLETE locale -> text map (`{}` clears), `tags` the COMPLETE list (`[]` clears), `title` a string or `null`.
+
+**Capabilities (WSK-359).** `GET …/media` also answers `capabilities: {read, upload, update, delete}` (booleans) for the caller on that site: one Cerbos `checkResources` request carrying the exact resource the handlers
+authorize with (`{kind: webdesk_media_asset, tenantId, module: "webdev"}` + `clientId` in client mode), with `request.principal` from the same `principalPayload`. Per tier today: an editor (`webdev_staff`) or a company-scope `manager` → read/upload/update true, delete false; a publisher
+(`webdev_manager`) or `company_admin` → all four; a role holding none of them gets no list at all (403). The test `webdesk-media.test.ts` pins every boolean to the per-action `check()` for each tier, so the batch cannot drift from the handlers. The UI (`MediaLibrary`,
+and through it `MediaDetail` and the picker) turns a control off from it on first paint with the reason ("You can't upload images here."), and a later 403 still turns it off as before.
 
 `MediaAsset` (WebDesk's own row, passed through): `{assetId,bucketKey,mime,sizeBytes,scanStatus,createdAt,title,alt,tags,originalFilename,width,height,createdBy,url,updatedAt,deletedAt}`.
 `url` is the canonical `/v1/t/<tenant>/media/<assetId>`: what the editor writes into a media field and what the in-use scan looks for.
@@ -5236,3 +5305,24 @@ The other `control/*` routes remain honest 501s.
 UI consumer: `platform-ui/src/lib/webdeskContentActions.ts#requestKeyAction` → `lib/webdeskContent.ts#parseKeyRequest` (STRICT: a body with any key other than `approvalId`/`alreadyPending`, or an `alreadyPending` that is not exactly `true`, is `contract_drift`, never "filed"). `environment-not-found` joins the not-found slugs in `resultFromError`; every existing shape is unchanged. The control renders on the site overview (`…/website/content/:tenant/:site`) only for a user holding the UI capability **`webdev.promote`** (the mirror of `promote`, company_admin + manager, in `lib/rbac.ts` / `rbac-capability-map.ts`, permission key `webdev.provisioned_site.promote`); everyone else sees nothing, not a disabled button. Environments come from the existing `GET …/content/sites` read (`environments[{envId,name,domain,status}]`), no second read.
 
 The approver's side is the **existing** `POST /api/:t/approvals/:id/decide {origin:"webdesk", decision}` façade, which already answers `{ok:true, webdesk:{command:"key.mint", executionStatus:"executed"\|"failed", apiKeyId, envId, scope, plaintextOnce, error?}}` (see the automation-approvals row). **`plaintextOnce` is the API key in plaintext and this response is the ONLY place it ever exists** (WebDesk keeps a hash; never in the approval row, activities, outbox or logs). The UI parses it with `parseKeyMintDecision` (names a bad field by path and type, never by value) and holds it only in the approver's component state; `executed` with `plaintextOnce: null` is "created, not returned" and shows no key.
+
+## 28. Website analytics from Umami (M5-A4, 2026-10-11) — `platform-nest/src/modules/search/search-analytics.controller.ts`, `umami-client.ts`, `umami-reads.ts`; `platform-ui/src/lib/websiteAnalytics*.ts` — **STATUS: PROTOTYPED (typechecked + unit-tested locally; the DB-backed route test is written but needs the Linux gate; no live Umami exists yet)**
+
+The ERP reads gaiada.com's analytics from Umami 3.4.0 over WireGuard through the GET-only read gate (`infra/runbooks/umami-sumopod.md`) with a team view-only user's API key. Two env vars, read by `umami-client.ts` on every call: `UMAMI_BASE_URL` (e.g. `http://10.88.0.2:18743`) and `UMAMI_API_KEY` (Bearer); optional `UMAMI_TIMEOUT_MS` (default 10000). Compose must pass both through `environment:`. A property is bound to its Umami website by `search_properties.umami_site_id` (migration 0034).
+
+| Status | Method | Path | Authz / notes |
+|---|---|---|---|
+| PROTOTYPED | GET | `/api/:t/modules/search/properties/:propertyId/analytics/:kind?from=YYYY-MM-DD&to=YYYY-MM-DD` | Cerbos `resource_search_property · read` (existing kind and action, no policy change), then `withTenants([t],{modules:['search']})`: another company's property id is 404, a principal outside the tenant is refused. `kind` is `summary \| pages \| sources \| sections \| ctas \| forms \| vitals` (else 404). `from`/`to` are UTC days, inclusive, default the 30 days ending today, at most 400 days (else 400). |
+| PROTOTYPED | GET | `/api/:t/modules/search/properties/:propertyId/analytics/:kind/range/:from/:to` | Same read, range in the path (the MCP hub forwards only path params on a GET). |
+
+**Response (always 200 for these four states):** `{ state, kind, range:{from,to}, message?, data? }`. `state` is `ok` (carries `data`), `not_configured` (env unset), `not_bound` (property has no `umami_site_id`), `unreachable` (timeout, network, 5xx), `rejected` (Umami 401/403/404). Every non-ok state carries a plain-words `message` and no `data`: the UI must show it, never an empty dashboard.
+
+**Small-cell suppression (visitor addendum R-V6):** every count under 5 is the string `"<5"`, never the number. `bounceRate`, `avgVisitSeconds` and `reachPct` are `null` when their cell is suppressed. Suppression happens in `umami-reads.ts`, so the BFF, the MCP tools and the UI all inherit it.
+
+**`data` by kind:** `summary` `{visitors,visits,pageviews,bounceRate,avgVisitSeconds}`; `pages` `[{label,count}]` (top 20); `sources` `{referrers:[{label,count}], aiSearch:{total, hosts:[{label,count}]}}` (AI search = referrer host or subdomain of chatgpt.com, perplexity.ai, gemini.google.com, copilot.microsoft.com, claude.ai); `sections` `[{sectionId,views,reachPct}]` (`section_view` by `section_id`, reach = views / page views); `ctas` `[{label,count}]` (`cta_click` by `link_location`); `forms` `[{formId,lead_form_start,lead_form_step,lead_form_send,generate_lead}]` (by `form_id`); `vitals` `{byMetric:[{label,count}], byRating:[{label,count}]}` (`web_vitals` by `metric_name` and, separately, `metric_rating`; Umami's values endpoint groups one property at a time, so rating is not split per metric). The event names and parameters are the site's contract, `gaiada-web-revamp/src/scripts/tracking/events.ts`.
+
+**MCP tools (read-only, no `impact` field, same as the other search reads):** `search.analyticsSummary`, `analyticsPages`, `analyticsSources`, `analyticsSections`, `analyticsCtas`, `analyticsForms`, `analyticsVitals`, each `GET .../analytics/<kind>/range/:from/:to` with `tenantId, propertyId, from, to`.
+
+**Umami v3.4.0 endpoints used** (source read at tag v3.4.0): `GET /api/websites/:id/stats?startAt&endAt` (`{pageviews,visitors,visits,bounces,totaltime,comparison}`), `GET /api/websites/:id/metrics?type=path|referrer&startAt&endAt&limit` (`[{x,y}]`), `GET /api/websites/:id/event-data/values?eventName&propertyName&startAt&endAt` (`[{value,total}]`, top 100). Times are epoch milliseconds.
+
+**platform-ui:** Website workspace tab **Analytics** (`/departments/:deptId/website/analytics[/:tenant/:site]`, `?from&to`). The site's environment domains are matched to a search property's `domain` (`www.` ignored); no match is said in words. `lib/websiteAnalytics.ts` validates every body (`parseAnalyticsRead`); a raw number under 5 or an off-shape body is contract drift, shown as a defect notice, never as data.

@@ -28,7 +28,8 @@ import { emptyProfileState, loadProfileRow, saveProfileRow } from "./centre/stor
 // so the LEFT JOIN works inside the tenant transaction; a link to a company that has since been deleted
 // reads as null (the link is dead, and the hub should not badge a retired company).
 const GROUP_COMPANY_COLUMN = `CASE WHEN gc.id IS NULL THEN NULL ELSE jsonb_build_object('id', gc.id, 'name', gc.name) END AS "groupCompany"`;
-const CLIENT_COLUMNS = `cl.id, cl.name, cl.contact, cl.status, cl.custom_fields, cl.owner_user_id, ou.name AS owner_name, ${GROUP_COMPANY_COLUMN}`;
+const CLIENT_COLUMNS = `cl.id, cl.name, cl.contact, cl.status, cl.custom_fields, cl.owner_user_id, ou.name AS owner_name,
+  cl.is_internal AS "isInternal", ${GROUP_COMPANY_COLUMN}`;
 const CLIENT_FROM = `FROM clients cl LEFT JOIN users ou ON ou.id = cl.owner_user_id
   LEFT JOIN companies gc ON gc.id = cl.group_company_id AND gc.deleted_at IS NULL`;
 
