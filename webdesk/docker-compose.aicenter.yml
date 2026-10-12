@@ -262,6 +262,37 @@ services:
     mem_limit: 512m
     pids_limit: 128
 
+  # Media upload scanning (WSK-07). The api's public upload route fails CLOSED without it: 503 `upload-scan-unavailable`
+  # (found 2026-10-12, so the media library could take no upload in production). Owner-approved 2026-10-12 (WSK-D80).
+  # Internal only: no published port; the api reaches clamav:3310 (CLAMAV_HOST/PORT) on the default network. Signatures
+  # download from database.clamav.net on first start (public egress) and persist in `clamav-db`. Sized INSIDE the
+  # rootless slice (WSK-D72: 1 vCPU, 5G for all of WebDesk): `ops/clamav/clamd.conf` (ConcurrentDatabaseReload no) keeps clamd from holding two
+  # signature sets during the daily reload (a few seconds of 503 to retry, instead of ~2x memory). deploy-webdesk only
+  # recreates `api`: start or update this service by hand (`up -d --no-deps clamav`), as its first start was.
+  clamav:
+    profiles: !reset []
+    ports: !reset []
+    image: clamav/clamav@sha256:638d90201ee7ee6a82d249a2fc23b132e578673b5f1f2766852b127676ca1ef6
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+    volumes:
+      - clamav-db:/var/lib/clamav
+      - ./ops/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    # /init (s6) starts as root and drops to the clamav user, so it needs these back; nothing else.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.20
+    mem_limit: 1536m
+    pids_limit: 256
+
   # No `cloudflared` service here — this box already has a public listener (nginx) that the
   # sumopod box lacked for this purpose. Exposure is `../infra/nginx/webdesk.aicenter.conf`
   # (a vhost) plus the loopback `proxy` above, not a tunnel. Do not port the sumopod file's
@@ -279,3 +310,6 @@ networks:
     ipam:
       config:
         - subnet: 172.19.0.0/16
+
+volumes:
+  clamav-db:
