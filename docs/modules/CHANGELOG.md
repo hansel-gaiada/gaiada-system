@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### infra `0.13.11` - M5-V3-c: routes and keys for the collector's consented channel and ops API (files only, not deployed) (2026-10-13) - PROTOTYPED
+
+- **erp-edge:** a separate router `erp-insights-consented` for exactly `/lib/kestrel/v` and `/lib/kestrel/f`. It uses the same service and middlewares as the collect path, so it can be removed on its own.
+- **Umami edge:** the `/v` (16 KB cap) and `/f` (2 KB) locations are on: exact path, POST/OPTIONS only, to `collector:8080`. `/r` stays off until V6-a.
+- **Read-gate** (WireGuard only):
+  - GET `/ops/v1/events` and `/ops/v1/bots`, and POST `/ops/v1/forget` (16 KB), to `collector:8081`;
+  - the Authorization header passes through untouched;
+  - every other method or path is refused.
+  - `/ops/v1/*` is not on the public edge.
+- **ERP:** `INSIGHTS_BASE_URL`, `INSIGHTS_READ_KEY`, `INSIGHTS_FORGET_KEY` and `SEARCH_VISITORS_ENABLED` are passed through to platform-nest (`${VAR:-}`, empty = off).
+- **`check-config.sh`** checks the new locations.
+- **Runbook C7:** deploy order, post-deploy checks run from aicenter with the keys read from files, and rollback.
+- Static checks only. `check-config.sh --deploy` runs on sumopod.
+
 ### insights-collector `0.2.0` + infra `0.13.10` - M5-V3-b: the consented channel, forget, the ops events read and the 72-hour purge (not deployed) (2026-10-13) - PROTOTYPED
 
 - **`POST /lib/kestrel/v`** (consented events):
