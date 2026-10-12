@@ -11,6 +11,43 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.94.0` - the deploy gate is the org secret grant: only a registered, locked repo can read deploy secrets (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4g (design `docs/plans/2026-10-13-webdesk-m6-p4g-deploy-grant.md`). Built by the M6 session.
+
+- **The grant.** A provisioned site's repo is added to a deploy secret's "selected repositories" only when all of these hold, re-checked on every grant:
+  - completion is `complete`;
+  - a live `provisioned` `webdev_sites` row names the repo;
+  - the P4b2 scaffold is `committed` and the repo is the one GH-12 created;
+  - the default branch's head carries a `CONTRACT.lock` that names the pinned snapshot, read through the App's contents API.
+- **Two kinds of secret.**
+  - The fixed list `WEBDESK_DEPLOY_SECRET_NAMES` (default `WEBDESK_DEPLOY_GRANT`, the marker the templates' "Require deploy grant" step checks).
+  - One per-site secret, `siteDeploySecretName()` = `WEBDESK_DEPLOY_<SLUG>_<ENV>_<sha256(site id)[:8]>`, granted to that site's repo only. Secret names are org-wide while slugs are unique only per tenant, hence the hash.
+  - A secret that does not exist yet answers `pending` (named, not an error).
+  - A secret whose visibility is not "selected" is refused (`deploy_grant_secret_not_selected`).
+- **The ERP never holds a value (D29).**
+  - The only writes are `PUT` / `DELETE /orgs/{org}/actions/secrets/{name}/repositories/{id}`, plus a metadata `GET`.
+  - Each write is ledgered as `github.secret_write`, with the secret name and the GH-12 approval.
+  - Without the App's `organization_secrets` permission (O-3, not yet in effect live) a grant records `github_permission_missing: organization_secrets`, never a 500.
+- **State:** `NULL → pending → granted → revoked`, claimed before any GitHub write and serialized on the provisioning lock. A partial grant is finished by the next run, and the automatic path never undoes an operator's revoke.
+- **Trigger and routes.**
+  - The grant runs inline after P4b2's scaffold commit is recorded, as an additive `deployGrant` in the commit answer.
+  - `POST /api/:t/modules/webdev/provisioned-sites/:id/deploy-grant` (re-check + grant) and `DELETE …/deploy-grant` (revoke, body `{reason}` of 8–500 characters, human only).
+  - Gates: `webdev_provisioned_site · provision`, then `github_repo · push` on the org tenant. No Cerbos change, no hub tool.
+  - `GET provisioned-sites/:id` adds `deployGrant`.
+- **Migration `202610130100_webdev_deploy_grant.sql`**, additive: 14 `deploy_grant_*` columns on `webdev_provisioned_sites` plus a CHECK.
+- **Not built (follow-ups):** a scheduled re-check that revokes a repo which lost its lock, healing pending grants from the hourly reconcile, and the D14-gated exception path.
+- **Owner, in GitHub:**
+  1. Give the `gaiada-erp` App Organization permissions → Secrets: Read and write, and accept it on the installation.
+  2. Create the org secret `WEBDESK_DEPLOY_GRANT` (any value, "Selected repositories", none selected).
+  3. Later, each per-site secret by hand, under the exact name `deployGrant.siteSecretName` shows.
+- **Also fixed: a CHECK passes on NULL.** The live `wps_scaffold_links` (202610122130, M6-P4b2) read `scaffold_state IS NULL OR completion_state = 'complete'`, which accepts a scaffold state on a site whose completion is NULL. **Migration `202610130110_webdev_scaffold_links_null_safe.sql`** re-declares only that constraint with `IS NOT DISTINCT FROM` (no live row has a scaffold state). The new `wps_deploy_grant_links` had the same shape and was fixed before shipping. Both migrations are now listed in the webdev module. (0.91.0 left unused: the registry was already at 0.92.0.)
+- Verified on the Linux gate (sumopod): `m6p4g` found the NULL-CHECK defect (1 failure); `m6p4g3` on the fixed tree, 642 files / 9665 passed / 0 failed, incl. `deploy-grant.db.test.ts`, `deploy-grant-http.test.ts` (real Cerbos), `scaffold-commit.db.test.ts` with the new NULL-completion case.
+
+### infra `0.13.5` - the platform receives WEBDESK_DEPLOY_SECRET_NAMES (2026-10-12) - PROTOTYPED
+
+- `docker-compose.vps.yml` passes `WEBDESK_DEPLOY_SECRET_NAMES` to the platform (empty = the default marker). Names only, never values.
+
 ### webdesk `0.22.0` - M5-W8b: a collection may declare its public route pattern (vocabulary 1.4.0) (2026-10-12) - DEV-VERIFIED
 
 - **The key:** an optional composition `ui.routePattern`, for example `/blog/{slug}/` or `/{locale}/insights/{slug}/`.
