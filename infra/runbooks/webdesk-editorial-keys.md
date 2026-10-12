@@ -47,6 +47,9 @@ must `rmdir` it before it writes the real file. Always check with `stat -c %F`.
 **Footgun: the file mount pins an inode until restart.** Every step below restarts the api after changing the file. That restart is
 also what loads the new key set, because the api reads the JWKS once, at boot.
 
+**"Restart api" in this runbook always means a recreate on the rootless daemon** (WebDesk has run there since 2026-10-12). On the box, from `/home/Hansel/gaiada-webdesk/webdesk`:
+`sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml up -d --no-deps --no-build --force-recreate api`
+
 ## Probes (no content is written by either)
 
 **P1. WebDesk side configured?** Run this in the ERP platform container. It sends a content.create with NO editorial assertion, for a
@@ -114,7 +117,7 @@ sudo docker run --rm -v /root/wde-keygen:/out -v <deploy-tree>/platform-nest/scr
    2. Run `sudo install -d -m 0750 --owner=$(stat -c %U /etc/webdesk/certs) --group=$(stat -c %G /etc/webdesk/certs) /etc/webdesk/editorial`.
    3. Run `sudo install -m 0444 /root/wde-keygen/editorial.jwks.json /etc/webdesk/editorial/editorial.jwks.json`.
 4. **WebDesk api:** deploy the image that carries WSK-40 with the overlay that carries the mount, using the box's usual compose file
-   set, `--env-file /etc/webdesk/.env` and `up -d --no-deps --no-build api` (see `webdesk-control-channel.md`, corrections 1 and 3).
+   set on the rootless daemon (the "Restart api" form above, without `--force-recreate`) and `up -d --no-deps --no-build api` (see `webdesk-control-channel.md`, corrections 1 and 3).
    Expected log line: `editorial JWKS loaded from WEBDESK_EDITORIAL_JWKS_FILE (...): kid(s) wde-2026-10`.
 5. **ERP:** set `WEBDESK_EDITORIAL_SIGNING_KID=wde-2026-10` in the ERP `.env`. Then run `up -d platform` with the FULL server compose
    file set. `vps.yml` alone is not a valid project, and a stale image tag in `.env` rolls back silently, so check both. Expected log line:
@@ -163,7 +166,7 @@ The ERP side was the real platform-nest egress client and signer, driven from
 | Step | Action (the script, run in `node:22`) | Observed |
 |---|---|---|
 | First install | `generate --kid wde-gate-1`; private key `0400 root:root`; JWKS mounted; api started | api log `editorial JWKS loaded … kid(s) wde-gate-1`; the end-to-end pairing (5 tests) passed with this key |
-| 1 + 2 | `generate --kid wde-gate-2 --jwks <live>`; `inspect` lists both kids; JWKS replaced in place; `docker restart` api | api log `kid(s) wde-gate-1, wde-gate-2` |
+| 1 + 2 | `generate --kid wde-gate-2 --jwks <live>`; `inspect` lists both kids; JWKS replaced in place; api recreated (a plain `docker restart` does not re-read a replaced bind-mounted file) | api log `kid(s) wde-gate-1, wde-gate-2` |
 | Overlap probe | content.create signed by wde-gate-1, then by wde-gate-2, through the real channel | **both 201** |
 | 3 | ERP switched to wde-gate-2 (the probe signs with the new key from here on) | — |
 | 4 | `remove --kid wde-gate-1`; `inspect` lists `wde-gate-2` only; restart api | api log `kid(s) wde-gate-2` |

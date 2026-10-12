@@ -6,6 +6,8 @@ is executed by the orchestrator, in order. Design: `docs/plans/2026-10-10-webdes
 
 ## As executed on `gda-aicenter`, 2026-10-10 (read this before re-running)
 
+**Since 2026-10-12 WebDesk runs on the ROOTLESS Docker daemon (user `webdesk-rootless`, socket `unix:///run/user/940/docker.sock`).** Every WebDesk command below (`webdesk-api-1`, `webdesk-proxy-1`, `docker compose` for the `webdesk` project) targets that daemon: `DOCKER_HOST=unix:///run/user/940/docker.sock docker ...` for plain docker, and `sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml <cmd>` from `/home/Hansel/gaiada-webdesk/webdesk` for compose. The rootful daemon no longer runs WebDesk, so an old form would find nothing. ERP containers (`gaiada-*`) stay on the rootful daemon, unchanged. The steps below keep their 2026-10-10 history, with the WebDesk commands brought up to date; the compose project is now always the three-file set plus `--no-build`.
+
 Steps 0, 2, 3, 4, 5, 6, 7, 9, 10 and 11 were run live by the orchestrator. Step 8 was deliberately left for the release that
 ships WSK-63b's compose change (`extra_hosts`). Reachability from the ERP network was proven instead with a throwaway
 container: `docker run --rm --network gaiada_default --add-host control.webdesk.internal:host-gateway alpine:3 nc -z control.webdesk.internal 9443` prints `tcp ok`.
@@ -13,7 +15,7 @@ Five corrections to the steps below, each found live:
 
 1. **The WebDesk env file is `/etc/webdesk/.env`.** There is no project-directory `.env` on this box. Every compose call needs `--env-file /etc/webdesk/.env`, and the gate secret is appended there (owner `webdesk-svc`, mode 600).
 2. **Generate the gate secret BEFORE step 4's `up api`.** The overlay makes it a required variable, and compose validates the whole project, so `up -d --no-deps api` fails to interpolate until the secret exists. Order used: step 5 (secret + proxy), then step 4 (api).
-3. **Do not build the api on this box.** It is the live ERP kernel; a build once drove load to 16 on 4 cores. Build on sumopod from a `git -c core.autocrlf=false archive`, then `docker save | gzip -1 | ssh gda-aicenter 'gunzip | docker load'` (351 MB in 30 s). Tag it `webdesk-api:latest` and use `up -d --no-deps --no-build api`.
+3. **Do not build the api on this box.** It is the live ERP kernel; a build once drove load to 16 on 4 cores. Build on sumopod from a `git -c core.autocrlf=false archive`, then `docker save | gzip -1 | ssh gda-aicenter 'gunzip | DOCKER_HOST=unix:///run/user/940/docker.sock docker load'` (351 MB in 30 s), so the image lands in the rootless daemon. Tag it as `webdesk-live-swap.md` step 2 describes (a loaded digest reference is nameless) and use `up -d --no-deps --no-build api`.
 4. **The Keycloak container has no `awk`.** Step 9's scope-binding loop dies under `set -e` after the client and scopes are created. Parse `kcadm` JSON on the host with python3 instead.
 5. **Matrix rows 3 and 4 must target a real route.** `GET /control/v1/tenants` does not exist (tenants is POST-only), and Nest's routing 404s before any guard runs, so those rows prove nothing. Use `GET /control/v1/tenants/<slug>/contract`: with cert and no token → `401 Layer 2 … no Bearer token presented`; the same with a forged URL-encoded cert header and a wrong gate header → the identical Layer 2 answer, never a Layer 1 refusal.
 
@@ -65,7 +67,7 @@ No new host port is published (compose still publishes only `proxy` on `127.0.0.
     TS=$(date -u +%Y%m%dT%H%M%SZ); echo "$TS" > ~/wsk63a.ts     # reuse the SAME stamp for every backup name
     # baseline - keep this output, step 11 compares against it
     curl -s -o /dev/null -w 'erp %{http_code}\n' https://erp.gaiada.online/
-    docker compose -f /home/Hansel/gaiada-webdesk/webdesk/docker-compose.yml -f /home/Hansel/gaiada-webdesk/webdesk/docker-compose.aicenter.yml --project-directory /home/Hansel/gaiada-webdesk/webdesk ps
+    (cd /home/Hansel/gaiada-webdesk/webdesk && sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml ps)
     sudo nginx -t
     ss -ltn | grep -E ':9443\b' || echo "9443 free"
     sudo cp -a /etc/nginx /etc/nginx.bak-wsk63a-$TS
@@ -145,27 +147,26 @@ The client private key is the one sensitive copy that leaves the CA volume (the 
 
     docker run --rm --entrypoint sha256sum -v gaiada_gateway-data:/ca:ro 61cec9c1f221 /ca/ca-cert.pem
     sudo sha256sum /etc/webdesk/certs/ca-cert.pem
-    docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem
+    DOCKER_HOST=unix:///run/user/940/docker.sock docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem
 
 First the CA pin (the swap `internal-ca.md` section 3 describes). All three equal: skip the swap lines. Otherwise swap IN PLACE, keeping owner/mode:
 
       sudo cp -a /etc/webdesk/certs/ca-cert.pem /etc/webdesk/certs/ca-cert.pem.bak-wsk63a-$TS
       sudo sh -c 'cat /home/Hansel/wsk63a-certs/ca-cert.pem > /etc/webdesk/certs/ca-cert.pem'
-      docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem    # must equal the CA volume's hash
+      DOCKER_HOST=unix:///run/user/940/docker.sock docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem    # must equal the CA volume's hash
 
 
 Then deploy the api with the WSK-63a Layer 1 change (`mtls-verifier.ts` now accepts ONLY the URL-encoded PEM that nginx `$ssl_client_escaped_cert` produces; the old
-base64 form is refused). This must be live before the vhost is enabled in step 7. The api image is built from `./api` by the aicenter overlay (no registry tag involved):
+base64 form is refused). This must be live before the vhost is enabled in step 7. The api image is the release image, loaded into the rootless daemon and pinned by the release overlay (never built on the box):
 
     cd /home/Hansel/gaiada-webdesk/webdesk
-    docker compose -f docker-compose.yml -f docker-compose.aicenter.yml build api
-    docker compose -f docker-compose.yml -f docker-compose.aicenter.yml up -d --no-deps api      # this also picks up the swapped CA file
-    sleep 8; docker logs webdesk-api-1 --tail 3                                                   # expect: [webdesk:api] listening on :3000
-    docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem                            # must equal the CA volume's hash
-    docker exec webdesk-api-1 grep -c 'decodeURIComponent' /app/dist/control/auth/mtls-verifier.js    # >=1 (path may differ; locate with find /app -name mtls-verifier.js)
+    sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml up -d --no-deps --no-build api      # this also picks up the swapped CA file
+    sleep 8; DOCKER_HOST=unix:///run/user/940/docker.sock docker logs webdesk-api-1 --tail 3      # expect: [webdesk:api] listening on :3000
+    DOCKER_HOST=unix:///run/user/940/docker.sock docker exec webdesk-api-1 sha256sum /etc/webdesk/certs/ca-cert.pem      # must equal the CA volume's hash
+    DOCKER_HOST=unix:///run/user/940/docker.sock docker exec webdesk-api-1 grep -c 'decodeURIComponent' /app/dist/control/auth/mtls-verifier.js    # >=1 (path may differ; locate with find /app -name mtls-verifier.js)
 
 **Check:** hashes equal; `curl -s http://127.0.0.1:8380/healthz` still `webdesk proxy ok`; a public `/v1` smoke still answers.
-**Rollback:** CA: `sudo sh -c 'cat /etc/webdesk/certs/ca-cert.pem.bak-wsk63a-'$TS' > /etc/webdesk/certs/ca-cert.pem'`; code: check out the previous commit's `api/` and repeat the build + `up -d --no-deps api`.
+**Rollback:** CA: `sudo sh -c 'cat /etc/webdesk/certs/ca-cert.pem.bak-wsk63a-'$TS' > /etc/webdesk/certs/ca-cert.pem'`; code: load the previous release image (`webdesk-live-swap.md` rollback) and repeat `up -d --no-deps --no-build api`.
 (If the api crash-loops after a CA swap, the file is not a valid PEM - roll back at once; the boot check refuses a truncated CA.)
 
 ## Step 5 - the gate secret, Caddy and the overlay (WebDesk side)
@@ -176,23 +177,23 @@ base64 form is refused). This must be live before the vhost is enabled in step 7
       printf 'WEBDESK_CONTROL_GATE_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
     chmod 600 .env
     # config check BEFORE touching the running proxy; prints no secret
-    docker compose -f docker-compose.yml -f docker-compose.aicenter.yml config > /tmp/wd-resolved.yml
+    sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml config > /tmp/wd-resolved.yml
     grep -n -B1 -A6 '^    ports:' /tmp/wd-resolved.yml          # ONLY proxy: host_ip 127.0.0.1, published "8380", target 80
     awk '/^  [a-z-]+:$/{s=$1} /^    ports:/{print s}' /tmp/wd-resolved.yml    # must print exactly: proxy:
     grep -E 'WEBDESK_CONTROL_GATE_SECRET' /tmp/wd-resolved.yml | sed -E 's/(SECRET: ).*/\1<set>/'; rm -f /tmp/wd-resolved.yml
-    docker compose -f docker-compose.yml -f docker-compose.aicenter.yml up -d --no-deps proxy
+    sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml up -d --no-deps --no-build proxy
 
 `proxy` is caddy with no state (the public `/v1` blips for a second or two while it recreates).
 **Check:**
 
-    docker compose -f docker-compose.yml -f docker-compose.aicenter.yml ps proxy          # healthy/Up
+    sudo -n env DOCKER_HOST=unix:///run/user/940/docker.sock docker compose --env-file /etc/webdesk/.env -p webdesk -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml ps proxy          # healthy/Up
     curl -s -o /dev/null -w 'healthz %{http_code}\n' http://127.0.0.1:8380/healthz         # 200
     curl -s -o /dev/null -w 'control no gate %{http_code}\n' http://127.0.0.1:8380/control/v1/tenants   # 404
     curl -s -o /dev/null -w 'control WRONG gate %{http_code}\n' -H 'X-Webdesk-Control-Gate: wrong' http://127.0.0.1:8380/control/v1/tenants   # 404
-    docker exec webdesk-proxy-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1    # Valid configuration
+    DOCKER_HOST=unix:///run/user/940/docker.sock docker exec webdesk-proxy-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1    # Valid configuration
 
 **Rollback:** `cp -a Caddyfile/overlay/.env .bak-wsk63a-$TS` back over the three files (`proxy/Caddyfile`, `docker-compose.aicenter.yml`, `.env`) and
-re-run the same `up -d --no-deps proxy`.
+re-run the same `up -d --no-deps --no-build proxy`.
 
 ## Step 6 - the PUBLIC vhost strips both headers (staged file, not yet enabled, so this edit is safe)
 
@@ -322,7 +323,7 @@ Certs are issued `notBefore = now - 1h` by the estate procedure, tokens carry a 
 
     timedatectl show -p NTP -p NTPSynchronized          # NTP=yes, NTPSynchronized=yes
     timedatectl timesync-status 2>/dev/null | head -8   # offset in the low milliseconds
-    date -u; docker exec gaiada-platform-1 date -u; docker exec webdesk-api-1 date -u     # all within 1 s (containers share the host clock)
+    date -u; docker exec gaiada-platform-1 date -u; DOCKER_HOST=unix:///run/user/940/docker.sock docker exec webdesk-api-1 date -u     # all within 1 s (containers share the host clock)
     curl -sI https://erp.gaiada.online/ | grep -i '^date:'                                 # within a couple of seconds of `date -u`
 
 Observed 2026-10-10: `NTP=yes`, `NTPSynchronized=yes`, UTC. If not synchronized: `sudo timedatectl set-ntp true`, wait, re-check. **Rollback:** none.
@@ -346,7 +347,7 @@ Observed 2026-10-10: `NTP=yes`, `NTPSynchronized=yes`, UTC. If not synchronized:
 | 9 | Row 8 with `Authorization: Bearer garbage` | `401`, `Layer 2 ... token ... refused` | Layer 2 is real |
 | 10 | Row 8 without `--cert/--key` but with the token | `400` | token alone is not enough |
 
-Rows 1, 2, 5, 6 and 10 must not appear in the api log: `docker logs webdesk-api-1 --since 5m | grep -c '/control/v1'` should only count rows 3, 4, 8, 9.
+Rows 1, 2, 5, 6 and 10 must not appear in the api log: `DOCKER_HOST=unix:///run/user/940/docker.sock docker logs webdesk-api-1 --since 5m | grep -c '/control/v1'` should only count rows 3, 4, 8, 9.
 (The api README reports an unknown I could not resolve from the repo: whether row 8 needs an existing tenant slug to reach `501`; use a real slug from the DB if it returns `404`.)
 
 If row 3 returns a **Layer 1** refusal, the api is pinning a different CA than nginx verified against: redo step 4.

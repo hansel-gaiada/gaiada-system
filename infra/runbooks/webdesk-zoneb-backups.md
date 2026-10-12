@@ -17,7 +17,7 @@ WebDesk database, so the nightly backup produces a real dump.
 | Piece | What |
 |---|---|
 | Role | `webdesk_backup`: `LOGIN NOSUPERUSER BYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION`, **no password**, `default_transaction_read_only = on`, SELECT-only (tables and sequences). Created by `webdesk/postgres/init-roles.sh` on a new cluster; on an existing one (the live cluster) by `webdesk/ops/scripts/ensure-backup-role.sh`. |
-| Why no password | scram over TCP then fails for it; the only way in is the unix socket inside the container (`docker exec ... pg_dump -U webdesk_backup`, where the official image keeps `local all all trust`). Note the image also trusts loopback (`127.0.0.1`) *inside* the container; that still needs `docker exec`, so it adds no remote path. |
+| Why no password | scram over TCP then fails for it; the only way in is the unix socket inside the container (`DOCKER_HOST=unix:///run/user/940/docker.sock docker exec ... pg_dump -U webdesk_backup`, on the rootless daemon that has run WebDesk since 2026-10-12; where the official image keeps `local all all trust`). Note the image also trusts loopback (`127.0.0.1`) *inside* the container; that still needs `docker exec`, so it adds no remote path. |
 | Script | `webdesk/ops/scripts/webdesk-backup-nightly.sh` (bash, `set -euo pipefail`) |
 | Cron (03:05 UTC) | `5 3 * * * $HOME/gaiada-webdesk/webdesk/ops/scripts/webdesk-backup-nightly.sh >> $HOME/gaiada-backups/webdesk-backup.log 2>&1` |
 | Output | `~/gaiada-backups/webdesk-<UTC YYYYmmdd-HHMMSS>.sql.gz`, mode 0600, one file, no sidecar. Pruned after `KEEP_DAYS` (default 14), same rule as `infra/scripts/backup.sh`. |
@@ -47,7 +47,7 @@ affected by row-level security policy"); that is exactly the failure this ticket
 exits non-zero with the reason on stderr and writes nothing the puller could take. Success logs one line:
 `<UTC time> webdesk-backup ok file=<path> bytes=<n> tables=<n> tenants=<n>`.
 
-**Restore** (throwaway container, no network; same shape as `infra/scripts/restore-drill.sh`). The dump is
+**Restore** (throwaway container, no network; same shape as `infra/scripts/restore-drill.sh`). On `gda-aicenter` the supported way is `webdesk/ops/scripts/webdesk-restore-drill.sh`, which runs the throwaway Postgres on WebDesk's rootless daemon; the hand-typed form below is for a throwaway host, or add the prefix `DOCKER_HOST=unix:///run/user/940/docker.sock` to every `docker` in it if you run it on the box. The dump is
 made with `--no-owner`, but it still carries `GRANT`s and policies that name the WebDesk roles, so create
 them first (roles live in the `globals-webdesk-*` dump that `infra/scripts/backup.sh` writes; for a
 throwaway restore, empty `NOLOGIN` roles are enough):
