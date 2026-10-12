@@ -141,7 +141,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // `portal.converse` (the client's door to it, on the EXISTING portal kind). Pairs 434 -> 439, kinds 103 -> 104.
     // PV5-02 (2026-10-12): +4 pairs, NO new kind (invoice: issue, void_issued; contract: mark_certified; finance_config: set_bank_details). On top of PV4-02: 439 -> 443, kinds 104 unchanged.
     // M5-V3-f (2026-10-12): +2 pairs on the EXISTING resource_search_property kind (read_visitors, view_replay), NO new kind. 443 -> 445, kinds 104 unchanged.
-    expect(catalog.length).toBe(445);
+    // PV4-05 (2026-10-12): +1 pair, NO new kind (meeting_recording: share_minutes). On top of M5-V3-f: 445 -> 446, kinds 104 unchanged.
+    expect(catalog.length).toBe(446);
     expect(catalogKindSet.size).toBe(104);
   });
 
