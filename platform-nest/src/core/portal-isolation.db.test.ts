@@ -2,9 +2,9 @@
 // Postgres + RLS + Cerbos (skips silently without DATABASE_URL_TEST; runs on the Linux server gate).
 //
 //   1. POST /portal/runs/:runId/scope-sign decided whatever gate `body.gateId` named. A client signer could
-//      close an INTERNAL review gate on their own run. Now only a CLIENT-side gate is decided.
-//      Teeth: drop `${gateClientVisible("")}` from the completion UPDATE in portal.controller.ts and the
-//      internal gate test below ends `decided`.
+//      close an INTERNAL review gate on their own run. Now only the run's CLIENT-side `scope_signoff` gate is
+//      decided. Teeth: drop `${gateClientVisible("")}` from the completion UPDATE in portal.controller.ts and
+//      the internal gate test below ends `decided`; drop `kind = 'scope_signoff'` and the prd_sign test does.
 //   2. ownsEntity.deliverable used the project's reach without `p.deleted_at IS NULL`, so a deleted project's
 //      deliverable file stayed downloadable. Teeth: switch it back to `projectReach("p", ...)` and the
 //      deleted-project download returns 200.
@@ -160,6 +160,15 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
       expect(res.statusCode).toBe(201);
       expect(res.json()).toMatchObject({ complete: true });
       expect(await gateStatus(internal)).toEqual({ status: "pending", decision: null });
+    });
+
+    it("a client-side prd_sign gate id in the body stays pending, while the sign-off itself completes", async () => {
+      const run = await addRun();
+      const prd = await addGate(run, "prd_sign", "client");
+      const res = await sign(run, prd);
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toMatchObject({ complete: true });
+      expect(await gateStatus(prd)).toEqual({ status: "pending", decision: null });
     });
 
     it("the client's own scope sign-off gate is still decided", async () => {

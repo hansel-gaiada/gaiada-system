@@ -287,12 +287,12 @@ export class PortalController {
       // change in PipelineController.recordScopeSignoff; see that comment for the full rationale.
       if (complete && ins.rowCount === 1) {
         if (body?.gateId) {
-          // PV3-02c: `body.gateId` is client-supplied, so it may only close a gate the client can see: a
-          // CLIENT-side gate. Without `gateClientVisible` a signer could close an INTERNAL review gate on
-          // their own run (the run check above does not constrain which gate the body names).
+          // PV3-02c: `body.gateId` is client-supplied, so it may only close THE run's scope sign-off gate:
+          // a CLIENT-side gate (`gateClientVisible`, else a signer could close an INTERNAL review gate) of
+          // kind `scope_signoff` (else they could close any other client gate, e.g. `prd_sign`, as signed).
           await c.query(
             `UPDATE pipeline_gates SET status = 'decided', decision = 'signed', decided_by = $2, decided_at = now(), updated_at = now()
-             WHERE id = $1 AND run_id = $3 AND status = 'pending' AND ${gateClientVisible("")}`,
+             WHERE id = $1 AND run_id = $3 AND status = 'pending' AND kind = 'scope_signoff' AND ${gateClientVisible("")}`,
             [body.gateId, req.principal.userId, runId],
           );
         }

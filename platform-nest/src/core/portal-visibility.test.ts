@@ -130,10 +130,10 @@ const SITES: Site[] = [
            AND ($3::uuid[] IS NULL OR r.project_id = ANY($3::uuid[]))`,
     now: `g.id = $1 AND ${runInPortalScope("r", S23)} AND ${gateClientVisible("g")}` },
   // PV3-02c (intentional change): the scope-sign completion UPDATE may only decide a CLIENT-side gate.
-  // `old` is the NEW literal shape; before it had `deleted_at IS NULL` and no `actor_side` conjunct.
+  // `old` is the NEW literal shape; before it had `deleted_at IS NULL` and no `actor_side` or `kind` conjunct.
   { site: "portal scopeSign completion UPDATE (client-side gate only — PV3-02c)",
-    old: `id = $1 AND run_id = $3 AND status = 'pending' AND actor_side = 'client' AND deleted_at IS NULL`,
-    now: `id = $1 AND run_id = $3 AND status = 'pending' AND ${gateClientVisible("")}` },
+    old: `id = $1 AND run_id = $3 AND status = 'pending' AND kind = 'scope_signoff' AND actor_side = 'client' AND deleted_at IS NULL`,
+    now: `id = $1 AND run_id = $3 AND status = 'pending' AND kind = 'scope_signoff' AND ${gateClientVisible("")}` },
   { site: "portal decideGate guarded UPDATE",
     old: `g.id = $1 AND g.run_id = r.id AND r.client_id = ANY($5::uuid[])
            AND g.actor_side = 'client' AND g.status = 'pending' AND g.deleted_at IS NULL`,
@@ -235,11 +235,11 @@ describe("PV3-02 equivalence — every switched call site keeps its exact conjun
     ]);
   });
 
-  it("PV3-02c: the scope-sign completion UPDATE gained exactly one conjunct, the client-side gate", () => {
+  it("PV3-02c: the scope-sign completion UPDATE gained exactly two conjuncts, the scope_signoff kind and the client-side gate", () => {
     const old = `id = $1 AND run_id = $3 AND status = 'pending' AND deleted_at IS NULL`;
-    const now = `id = $1 AND run_id = $3 AND status = 'pending' AND ${gateClientVisible("")}`;
+    const now = `id = $1 AND run_id = $3 AND status = 'pending' AND kind = 'scope_signoff' AND ${gateClientVisible("")}`;
     expect(conjuncts(old).filter((c) => !conjuncts(now).includes(c))).toEqual([]);
-    expect(conjuncts(now).filter((c) => !conjuncts(old).includes(c))).toEqual([`actor_side = 'client'`]);
+    expect(conjuncts(now).filter((c) => !conjuncts(old).includes(c))).toEqual([`actor_side = 'client'`, `kind = 'scope_signoff'`]);
   });
 
   it("needsYou contracts: the ONLY added conjunct is `status <> 'draft'`, implied by `status = 'sent'`", () => {
