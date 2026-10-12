@@ -41,6 +41,8 @@ import { assemblePrincipal, type Principal } from "../rbac/principal";
 import { contractContentSha256 } from "./content-hash";
 import { clientIpOf, hashForEvidence, userAgentOf } from "./evidence";
 import { certifiedSigningProvider, NO_CERTIFIED_PROVIDER } from "./signature-provider";
+import { lockChangeRequest } from "./webdev-cr-lock";
+import { UUID_RE, assertAmendable, isDeadContractStatus } from "./webdev-amendment";
 
 // PV3-07: `clientVisible` (a client-wide contact of the contract's client can read it in the portal) is
 // composed from the portal's own predicate, so a draft reads `false` here for exactly the reason the
@@ -56,6 +58,10 @@ const CONTRACT_SELECT = `
          k.content_sha256 AS "contentSha256", k.content_fixed_at AS "contentFixedAt",
          k.signature_tier AS "signatureTier", k.certified_requested AS "certifiedRequested",
          k.created_by AS "createdBy", k.created_at AS "createdAt",
+         -- PV4-04: an amendment names the contract it amends (never voided or superseded by it:
+         -- supersedes_id keeps its re-issue meaning) and the change request that caused it.
+         k.kind, k.amends_id AS "amendsId", am.reference AS "amendsReference",
+         k.change_request_id AS "changeRequestId",
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client') AS "clientSigned",
          EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'provider') AS "providerSigned",
          (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded",
@@ -63,6 +69,7 @@ const CONTRACT_SELECT = `
     FROM contracts k
     LEFT JOIN clients cl ON cl.id = k.client_id
     LEFT JOIN projects p ON p.id = k.project_id
+    LEFT JOIN contracts am ON am.id = k.amends_id
    WHERE k.deleted_at IS NULL`;
 
 /** PV3-01 — may this caller countersign contracts in this tenant? Feeds the `canCountersign` row flag.
@@ -195,6 +202,8 @@ export class ContractsController {
       clientId?: string; projectId?: string; title?: string; reference?: string; bodyMd?: string;
       fileId?: string; value?: number; currency?: string; startsOn?: string; endsOn?: string;
       supersedesId?: string;
+      // PV4-04: an amendment names the SIGNED contract it amends and the change request that caused it.
+      kind?: string; amendsId?: string; changeRequestId?: string;
     },
   ) {
     // PV3-06: AUTHORIZE BEFORE VALIDATING, as on `countersign` and `decide`: an unauthorized caller gets 403
@@ -213,6 +222,23 @@ export class ContractsController {
       // Also a table CHECK. Refused here so the caller gets a field-level message instead of a
       // constraint-violation 500.
       throw new BadRequestException("endsOn cannot be before startsOn");
+    }
+    // PV4-04 · kind / amendsId / changeRequestId. Typed 400 codes, checked after authorize().
+    const kind = b.kind ?? "agreement";
+    if (kind !== "agreement" && kind !== "amendment") {
+      throw new BadRequestException({ message: "kind_invalid", field: "kind" });
+    }
+    const amendsId = b.amendsId ?? null;
+    if (amendsId !== null && (typeof amendsId !== "string" || !UUID_RE.test(amendsId))) {
+      throw new BadRequestException({ message: "amends_id_invalid", field: "amendsId" });
+    }
+    if (kind === "amendment" && !amendsId) throw new BadRequestException({ message: "amends_id_required", field: "amendsId" });
+    if (kind === "agreement" && amendsId) {
+      throw new BadRequestException({ message: "amends_id_requires_amendment", field: "amendsId" });
+    }
+    const changeRequestId = b.changeRequestId ?? null;
+    if (changeRequestId !== null && (typeof changeRequestId !== "string" || !UUID_RE.test(changeRequestId))) {
+      throw new BadRequestException({ message: "change_request_invalid", field: "changeRequestId" });
     }
     // PV3-06 / agentic-native criterion 3 (idempotent writes). The natural dedupe key is the partial
     // unique index `ix_contracts_reference_uniq` on (tenant_id, reference, version) WHERE reference IS NOT
@@ -236,6 +262,21 @@ export class ContractsController {
         );
         if (!proj.rows[0]) throw new BadRequestException("project does not belong to that client");
       }
+      if (kind === "amendment" && amendsId) await assertAmendable(c, clientId, amendsId);
+      if (changeRequestId) {
+        // Serialize with triage on the same request (webdev-cr-lock.ts), then re-read under the lock.
+        await lockChangeRequest(c, changeRequestId);
+        const cr = await c.query<{ client_id: string | null; price_impact: string }>(
+          `SELECT client_id, price_impact FROM webdev_change_requests WHERE id = $1 AND deleted_at IS NULL`, [changeRequestId],
+        );
+        // One code for "no such request" and "another client's": never an existence oracle.
+        if (!cr.rows[0] || cr.rows[0].client_id !== clientId) {
+          throw new BadRequestException({ message: "change_request_invalid", field: "changeRequestId" });
+        }
+        if (cr.rows[0].price_impact !== "changes_price") {
+          throw new BadRequestException({ message: "change_request_not_price_changing", field: "changeRequestId" });
+        }
+      }
       // A superseding contract starts at the previous version + 1, so version history is contiguous
       // without the caller having to compute it.
       let version = 1;
@@ -249,8 +290,9 @@ export class ContractsController {
       }
       const ins = await c.query(
         `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, version, supersedes_id,
-                                status, file_id, body_md, value, currency, starts_on, ends_on, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', $9, $10, $11, $12, $13::date, $14::date, $15, $16)
+                                status, file_id, body_md, value, currency, starts_on, ends_on, created_by, origin_site,
+                                kind, amends_id, change_request_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft', $9, $10, $11, $12, $13::date, $14::date, $15, $16, $17, $18, $19)
          ON CONFLICT (tenant_id, reference, version) WHERE reference IS NOT NULL AND deleted_at IS NULL DO NOTHING`,
         [
           newContractId, tenantId, clientId, b.projectId ?? null,
@@ -261,9 +303,33 @@ export class ContractsController {
           b.value ?? null, (b.currency || "IDR").slice(0, 8),
           b.startsOn ?? null, b.endsOn ?? null,
           req.principal.userId, config.originSite,
+          kind, amendsId, changeRequestId,
         ],
       );
-      if (ins.rowCount) return { id: newContractId, existing: null };
+      if (ins.rowCount) {
+        if (changeRequestId) {
+          // Link the request back to this draft, but ONLY when it is not already waiting on a live or
+          // signed contract (a declined / voided / expired one is how a request is re-pointed). This
+          // route is authorized on `contract` create, not on `triage`, so it must never be able to
+          // swap out an amendment that is on its way to a signature or already signed.
+          const cur = await c.query<{ amendment_contract_id: string | null; status: string | null }>(
+            `SELECT cr.amendment_contract_id, ac.status
+               FROM webdev_change_requests cr
+               LEFT JOIN contracts ac ON ac.id = cr.amendment_contract_id AND ac.deleted_at IS NULL
+              WHERE cr.id = $1`,
+            [changeRequestId],
+          );
+          const row = cur.rows[0];
+          if (row && row.amendment_contract_id && !isDeadContractStatus(row.status)) {
+            throw new ConflictException({ message: "change_request_already_linked", existing: { amendmentContractId: row.amendment_contract_id } });
+          }
+          await c.query(
+            `UPDATE webdev_change_requests SET amendment_contract_id = $2, updated_at = now() WHERE id = $1`,
+            [changeRequestId, newContractId],
+          );
+        }
+        return { id: newContractId, existing: null };
+      }
       // A replay (or a concurrent twin: ON CONFLICT waits for the other insert to commit). Hand back the
       // contract that holds this key, but only for the SAME client: the same reference under another
       // client is a different request that happens to collide, and answering it with that client's

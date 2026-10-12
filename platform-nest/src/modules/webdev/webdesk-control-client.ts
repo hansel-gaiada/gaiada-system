@@ -155,6 +155,10 @@ export interface WebdeskControlRequest {
    *  so the proxy-owned headers (`x-webdesk-mtls-cert-pem`, the gate header) cannot originate here.
    *  Only on writes, and redacted from every error message like the other credentials. */
   editorialAssertion?: string;
+  /** M6-P4j: a read whose answer is raw bytes (a contract artifact), not JSON. Sends an any-type accept header instead of
+   *  `application/json` and lifts the response cap from 8 MiB to `MAX_BINARY_RESPONSE_BYTES` for this call only.
+   *  Reads only. A typed flag, not a header slot: there is still no way to add an arbitrary header. */
+  binaryResponse?: boolean;
 }
 
 export interface WebdeskControlResponse {
@@ -163,6 +167,9 @@ export interface WebdeskControlResponse {
   /** Parsed JSON when the response says JSON and parses; otherwise null. */
   json: unknown;
   bodyText: string;
+  /** M6-P4j: the response body exactly as received (`bodyText` is its lossy UTF-8 decoding). Every response the
+   *  real client returns carries it; it is optional in the type only so test doubles that predate it still compile. */
+  bodyBytes?: Buffer;
 }
 
 export interface WebdeskControlClientOptions {
@@ -195,6 +202,8 @@ export interface WebdeskControlClientOptions {
 }
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+/** M6-P4j: the cap for a `binaryResponse` call; matches WebDesk's `MAX_CONTRACT_ARTIFACT_BYTES`. */
+export const MAX_BINARY_RESPONSE_BYTES = 25 * 1024 * 1024;
 const TOKEN_SKEW_MS = 30_000;
 const IDEMPOTENCY_KEY_RE = /^[\x21-\x7e]{8,200}$/;
 
@@ -534,6 +543,19 @@ export class WebdeskControlClient {
     });
   }
 
+  /** M6-P4j (WSK-D81): `GET /control/v1/tenants/:tenantSlug/contract/:contractVersion/artifacts/:artifact`
+   *  (still `contract.read`, a read: no WS4). The artifact's raw bytes are in `bodyBytes` of a 2xx answer.
+   *  `artifact` is one of `openapi | sdkTs | sdkPhp | contractMd | blockLibrary`; WebDesk answers 400 otherwise. */
+  getContractArtifact(tenantSlug: string, contractVersion: string, artifact: string): Promise<WebdeskControlResponse> {
+    return this.send({
+      command: "contract.read",
+      method: "GET",
+      path: "/control/v1/tenants/:tenantSlug/contract/:contractVersion/artifacts/:artifact",
+      params: { tenantSlug, contractVersion, artifact },
+      binaryResponse: true,
+    });
+  }
+
   /** Send one command over the channel. Resolves with ANY HTTP answer; rejects only with the four
    *  error classes above (or a programming error in the request shape). */
   async send(req: WebdeskControlRequest): Promise<WebdeskControlResponse> {
@@ -556,7 +578,7 @@ export class WebdeskControlClient {
     }
 
     const headers: Record<string, string> = {
-      accept: "application/json",
+      accept: req.binaryResponse ? "*/*" : "application/json",
       authorization: `Bearer ${token}`,
     };
     if (prepared.bodyText !== null) {
@@ -596,7 +618,7 @@ export class WebdeskControlClient {
       }
       attempt++;
       try {
-        const res = await this.#attempt(req.method, prepared.url, headers, prepared.bodyText);
+        const res = await this.#attempt(req.method, prepared.url, headers, prepared.bodyText, req.binaryResponse ? MAX_BINARY_RESPONSE_BYTES : MAX_RESPONSE_BYTES);
         this.#breaker.success();
         // An answer, never retried. A 401 means our token died early (realm restart, key rotation):
         // drop it so the NEXT call fetches a fresh one.
@@ -643,6 +665,7 @@ export class WebdeskControlClient {
         throw new Error("webdesk-control: editorialAssertion must be a compact JWS");
       }
     }
+    if (req.binaryResponse && req.method !== "GET") throw new Error("webdesk-control: a binary response belongs on a read, not a write");
     if (req.query !== undefined) {
       if (req.method !== "GET") throw new Error("webdesk-control: a query string belongs on a read, not a write");
       if (req.query === null || typeof req.query !== "object" || Array.isArray(req.query)) {
@@ -671,7 +694,7 @@ export class WebdeskControlClient {
     return { url, args: commandArgsAsZoneBSeesThem(params, req.body), bodyText };
   }
 
-  #attempt(method: string, url: URL, headers: Record<string, string>, bodyText: string | null): Promise<WebdeskControlResponse> {
+  #attempt(method: string, url: URL, headers: Record<string, string>, bodyText: string | null, maxResponseBytes: number): Promise<WebdeskControlResponse> {
     return new Promise<WebdeskControlResponse>((resolve, reject) => {
       let flushed = false;
       let settled = false;
@@ -687,8 +710,8 @@ export class WebdeskControlClient {
         let size = 0;
         res.on("data", (c: Buffer) => {
           size += c.length;
-          if (size > MAX_RESPONSE_BYTES) {
-            res.destroy(Object.assign(new Error(`response exceeded ${MAX_RESPONSE_BYTES} bytes`), { code: "WEBDESK_CONTROL_RESPONSE_TOO_LARGE" }));
+          if (size > maxResponseBytes) {
+            res.destroy(Object.assign(new Error(`response exceeded ${maxResponseBytes} bytes`), { code: "WEBDESK_CONTROL_RESPONSE_TOO_LARGE" }));
             return;
           }
           chunks.push(c);
@@ -699,7 +722,8 @@ export class WebdeskControlClient {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
-          const bodyText = Buffer.concat(chunks).toString("utf8");
+          const bodyBytes = Buffer.concat(chunks);
+          const bodyText = bodyBytes.toString("utf8");
           const contentType = typeof res.headers["content-type"] === "string" ? res.headers["content-type"] : null;
           let json: unknown = null;
           if (contentType && /\bjson\b/i.test(contentType) && bodyText.length > 0) {
@@ -709,7 +733,7 @@ export class WebdeskControlClient {
               json = null;
             }
           }
-          resolve({ status: res.statusCode ?? 0, contentType, json, bodyText });
+          resolve({ status: res.statusCode ?? 0, contentType, json, bodyText, bodyBytes });
         });
       });
 

@@ -39,8 +39,9 @@ function isNonEmptyString(v: unknown): v is string {
 
 /** Narrow, allowlist-shaped parse of the far side's response — an unrecognized shape is a thrown
  *  egress error, never a half-populated object silently passed on (the same discipline
- *  `provision-http.ts`'s `toProject()` applies). */
-function toBundleMeta(raw: unknown): ContractBundleMeta | null {
+ *  `provision-http.ts`'s `toProject()` applies). Exported (M6-P4j) so the real-channel provider
+ *  (`contract-fetch-webdesk.ts`) validates the SAME shape rather than a forked copy. */
+export function toBundleMeta(raw: unknown): ContractBundleMeta | null {
   const r = raw as Record<string, unknown> | null | undefined;
   if (!r || typeof r !== "object") return null;
   if (!isNonEmptyString(r.version) || !isNonEmptyString(r.vocabularyVersion)) return null;

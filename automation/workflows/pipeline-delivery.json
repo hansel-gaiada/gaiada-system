@@ -485,7 +485,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 6, method: \"tools/call\", params: { name: \"github.repoStatus\", arguments: { repo: $('Load + decide').first().json.slug } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 6, method: \"tools/call\", params: { name: \"github.repoStatus\", arguments: { tenantId: $('Load + decide').first().json.tenantId, repo: $('Load + decide').first().json.slug } } }) }}",
         "options": {
           "response": {
             "response": {

@@ -65,8 +65,9 @@ export class WebdevControlEgressError extends Error {
  *  fail-closed contract every egress seam in this codebase shares (see `provision-http.ts`'s own
  *  `ProvisionNotConfiguredError`). The controller maps this to a 503. */
 export class ContractControlNotConfiguredError extends Error {
-  constructor() {
-    super("webdev control-channel base URL not configured (WEBDEV_CONTROL_BASE_URL unset)");
+  /** M6-P4j: `detail` names what is missing on the real channel (`WEBDESK_CONTROL_*`); the default text is the stub's. */
+  constructor(detail?: string) {
+    super(detail ?? "webdev control-channel base URL not configured (WEBDEV_CONTROL_BASE_URL unset)");
     this.name = "ContractControlNotConfiguredError";
   }
 }

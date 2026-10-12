@@ -771,7 +771,12 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
       "Draft a contract for a client. Always created `draft`: sending it is `contracts.send`. IDEMPOTENT on " +
       "`reference` (the dedupe key): a retry with the same reference returns the existing contract's id with " +
       "`deduped:true` instead of a second draft, and the same reference under a different client is a 409. " +
-      "`projectId` must belong to that client. `supersedesId` re-issues an earlier contract as the next version.",
+      "`projectId` must belong to that client. `supersedesId` re-issues an earlier contract as the next version. " +
+      "PRICE CHANGES (PV4-04): `kind:'amendment'` drafts an amendment and REQUIRES `amendsId`, a SIGNED contract of the same " +
+      "client (400 `amends_id_invalid` otherwise); an amendment never voids or supersedes what it amends. " +
+      "`changeRequestId` ties the draft to the webdev change request whose price it records (the request must already be triaged " +
+      "`changes_price` and not waiting on a live or signed amendment) and points the request at this draft. Until that " +
+      "contract is signed, the request cannot start work (409 `amendment_not_signed`).",
     minAssurance: "verified",
     method: "POST",
     pathTemplate: "/api/:tenantId/contracts",
@@ -792,6 +797,9 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
         startsOn: { type: "string", description: "YYYY-MM-DD" },
         endsOn: { type: "string", description: "YYYY-MM-DD, not before startsOn" },
         supersedesId: { type: "string" },
+        kind: { type: "string", enum: ["agreement", "amendment"], description: "defaults to agreement; an amendment requires amendsId" },
+        amendsId: { type: "string", description: "kind 'amendment' only: the SIGNED contract of this client it amends" },
+        changeRequestId: { type: "string", description: "the webdev change request (triaged changes_price) this draft records the price of" },
       },
       required: ["tenantId", "clientId", "title", "reference"],
     },
