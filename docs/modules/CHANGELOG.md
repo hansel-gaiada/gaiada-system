@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.108.0` - DW-1: the department workspace foundations, no visible change (2026-10-13) - PROTOTYPED
+
+Department workspaces plan (`docs/plans/2026-10-13-department-workspaces.md`), phase DW-1. Nothing renders from these files yet; DW-2 draws the new shell from them.
+- **DW-1a, the registry (`lib/workspaces.ts`).** One pure, client-safe description of every workspace:
+  - Web Dev, SEO, Social Media, Creatives and the Office of the GM (the agency pack, by the `toolkitFor` rule);
+  - HR, Finance and IT (every vertical) and the generic workspace;
+  - the You, Company and Admin areas.
+
+  Each holds its Work rows and tabs with absolute hrefs, the shared Performance block, the Tools & connections set, Overview widgets, pulse tiles, quick actions, KPI starting sets and owned routes. Gates are data copied from nav.ts and the consoles. Anything unbuilt carries its DW ticket and is never rendered. The test pins that every built href lands on an existing page, that every tab of today's toolkits and of the HR, Finance and IT consoles keeps a home, and that no company is named.
+- **DW-1b, the person's workspaces (`lib/workspaceAccess.ts`, `lib/workspaces-data.ts`).** `resolveMyWorkspaces` picks the home: org placement, then a led unit, then an HR, Finance or IT role (or service scope), then the Office of the GM for GM access, else the Company area. The switcher lists every department, the Office of the GM first. `gateAllows` evaluates the registry gates, with tests proving parity with nav.ts. `concreteRows` gives a Web Dev employee 16 rows today and 19 once the planned rows land (plan §0).
+- **DW-1c, areas (`lib/areas.ts`).** `areaFor(path)` puts every page in exactly one area (a workspace, Company, Admin, personal, performance or shared), with Next.js's static-over-dynamic precedence. `resolveArea` is the last-area rule. A test walks all 230 page files and fails on a page with no area or two.
+- **DW-1d, the pilot switch (`lib/shellLayout.ts`).** A `shell` field in `gaiada_prefs` (classic by default) and `setShellLayoutAction`. Nothing calls it yet. `savePrefs` now spreads the current prefs, so saving Account settings no longer resets fields the form does not show.
+- **DW-1e, the unit-aware mirror (`lib/rbac.ts`).** Adds `leadUnits`, `isLeadOf`, `canInUnit` and `unitPathOf`. Only `org_unit_lead` at org_unit scope counts, and only in a company the person belongs to. `can()` is unchanged, so a unit grant still never answers a company-wide question.
+- **Not changed:** no page, route, gate or server call.
+- **Tests:** tsc and the eight touched suites were green locally (203 tests), as a dev loop only. The GitHub Actions run is the gate.
+
 ### platform-nest `0.111.2` - M6-P4m: a redelivered event cannot reopen an approved beat (2026-10-13) - PROTOTYPED
 
 - **The bug:** found live by the M6 P4 gate, run 1.
