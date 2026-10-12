@@ -15,9 +15,9 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1899,
+      "totalPairs": 1900,
       "perRole": {
-        "platform_admin": 418,
+        "platform_admin": 419,
         "company_admin": 384,
         "manager": 185,
         "member": 88,
@@ -101,6 +101,7 @@
       "core.company.update",
       "core.compliance_gate.read",
       "core.compliance_gate.update",
+      "core.contract.countersign",
       "core.contract.create",
       "core.contract.delete",
       "core.contract.read",

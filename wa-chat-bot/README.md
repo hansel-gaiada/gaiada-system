@@ -138,6 +138,47 @@ You should see `Gaiada WA bot on :3001`. Health check: http://localhost:3001/hea
 - Send a few messages, then `/summarize` → a project-status digest.
 - `@bot what did we decide about X?` → an answer from the group's history.
 
+## Web-lead alert relay (`POST /admin/alerts/web-lead`)
+
+Lets the ERP post ONE fixed-template alert to ONE operator-chosen chat when a gaiada.com web lead is
+created (ERP side: `platform-nest/src/core/agency-web-lead-alert.ts`, `AGENCY_WEB_LEAD_ALERT_CHAT=1`).
+It is deliberately **not** a generic send route.
+
+- **Auth:** `Authorization: Bearer <ADMIN_TOKEN>` like every admin route (503 when `ADMIN_TOKEN` is unset, 401 when wrong).
+- **Body (strict allow-list; any other key is a 400):** `{ leadId: uuid, firstName: letters only, <= 40, form: [A-Za-z0-9_.:-] <= 64, link }`.
+  `link` must equal `<WEB_LEAD_ALERT_LINK_BASE>/agency/leads/<leadId>` exactly. A first name with a digit, space,
+  dot, `@`, `:`, `/` or any control/newline character is rejected (400) rather than cleaned, so no phone number,
+  e-mail or auto-linked URL can ride in it; the ERP substitutes "someone" for such a name before it calls.
+- **Message (composed here, nothing else reaches the chat):** `New web lead from <firstName> via the <form> form.` then the link on a new line.
+  Never email, phone, message body, org name or attribution (legal/website-visitor-addendum.md R-V13).
+- **Config (bot side only; the request cannot choose the chat):**
+  - `WEB_LEAD_ALERT_CHAT_ID` = full chat id: `62811...@c.us` (WhatsApp DM) or `tg:<id>` (Telegram). Empty = **off**: 503 `alert-destination-unset`.
+  - `WEB_LEAD_ALERT_LINK_BASE` = the ERP base URL, equal to the ERP's `MAIL_LINK_BASE_URL` (compose falls back to it). Empty = 503 `alert-link-base-unset`.
+  - `WEB_LEAD_ALERT_STATE_FILE` (optional) = the sent-lead set; default `web-lead-alerts.json` beside `groups.yaml`.
+- **Never an ingested chat.** The bot stores chat history for 90 days and may send it to an AI processor, so the
+  route refuses (503 `alert-destination-refused`, and logs a config error with no lead data) when the destination
+  (1) is not a valid chat id, (2) is a monitored group in `groups.yaml`, or (3) is a group (`...@g.us`, or Telegram
+  `tg:-...`) that is **not on the ignored list**. Rule 3 exists because with no `groups.yaml` (trial mode) every
+  group is ingested, and the ignore list is the one switch that drops a group in both modes. **Use a DM or a
+  Telegram private chat**; the alert is an outbound bot message, which is never stored (`fromMe` is dropped). The
+  rule is evaluated on every request, so a registry or ignore-list edit applies at once. The alert never touches the
+  message store, so it never reaches a digest; the SurfaceRouter's echo-loop guard keeps the text in memory for ~2 minutes.
+- **Idempotent:** one alert per `leadId`. A replay answers 200 `{ sent: false, replayed: true }`; a concurrent duplicate gets 409;
+  a failed send (502 `alert-send-failed`, also when the outbound halt or ceiling blocks it) is not remembered, so a retry sends.
+  The sent set holds lead ids only and survives a restart.
+- **Goes out through `SurfaceRouter`**, so `tg:` ids use Telegram, everything else WAHA, and the outbound halt and rate ceiling apply.
+
+**Testing with Telegram (no WAHA needed):** start the bot as in the Telegram quickstart, DM it once so you know
+your numeric id, then set `ADMIN_TOKEN=t`, `WEB_LEAD_ALERT_CHAT_ID=tg:<your id>`, `WEB_LEAD_ALERT_LINK_BASE=https://erp.example.test`, and run:
+
+```
+curl -s -X POST localhost:3001/admin/alerts/web-lead -H "Authorization: Bearer t" -H "content-type: application/json" \
+  -d '{"leadId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","firstName":"Ayu","form":"contact","link":"https://erp.example.test/agency/leads/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}'
+```
+
+Expect `{"sent":true,"replayed":false}` and the message in your Telegram DM; the same call again returns `replayed:true`.
+Tests: `src/admin-web-lead-alert.test.ts`.
+
 ## Trial simplifications (to harden later)
 
 | Now (trial) | Harden to (see specs/plans) |

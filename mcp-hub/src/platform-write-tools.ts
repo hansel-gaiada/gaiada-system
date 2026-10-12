@@ -26,9 +26,20 @@ async function platformSend(
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? "platform denied the request");
   }
-  if (!res.ok) throw new Error(`platform ${path} ${res.status}`);
+  if (!res.ok) {
+    // A 400 carries the platform's typed reason (`business_type_required`, `group_company_other_root`, ...);
+    // surface it so a caller can correct the call instead of retrying blind.
+    const detail = res.status === 400 ? ((await res.json().catch(() => ({}))) as { error?: string }).error : undefined;
+    throw new Error(`platform ${path} ${res.status}${detail ? `: ${detail}` : ""}`);
+  }
   return JSON.stringify(await res.json());
 }
+
+/** The Client Centre registry's business types (platform-nest `modules/clients/centre/registry.json`,
+ *  `businessTypes`). Components are separate projects, so this is a copy: the platform re-validates every
+ *  write (400 `business_type_invalid`), so a stale entry here can only ever make the schema stricter or
+ *  looser than the server, never bypass it. Keep in step when the registry gains a type. */
+const BUSINESS_TYPES = ["hotel", "restaurant", "hospital", "spa", "agency", "services", "retail", "ecommerce", "saas", "other"];
 
 export function registerPlatformWriteTools(): void {
   registerTool({
@@ -90,32 +101,53 @@ export function registerPlatformWriteTools(): void {
 
   registerTool({
     name: "clients.create",
-    description: "Create a client in a company you belong to.",
+    description:
+      "Create a client in a company you belong to. businessType is REQUIRED (PV-D1): pick the closest of the listed types, or \"other\" if none fits. " +
+      "groupCompanyId links the client to one of the group's own companies (same root); only a platform operator may set it, anyone else gets a 403.",
     minAssurance: "low",
     write: true,
     impact: "low", // in-tenant, reversible
     inputSchema: {
       type: "object",
-      properties: { tenantId: { type: "string" }, name: { type: "string" }, contact: { type: "object" } },
-      required: ["tenantId", "name"],
+      properties: {
+        tenantId: { type: "string" }, name: { type: "string" }, contact: { type: "object" },
+        businessType: { type: "string", enum: BUSINESS_TYPES, description: "what kind of business the client is (Client Centre registry)" },
+        groupCompanyId: { type: ["string", "null"], description: "the group company this client IS (operator-only); omit for an ordinary client" },
+      },
+      required: ["tenantId", "name", "businessType"],
     },
     handler: (args, principal) =>
-      platformSend("POST", `/api/${String(args.tenantId)}/clients`, { name: args.name, contact: args.contact ?? {} }, principal),
+      platformSend(
+        "POST",
+        `/api/${String(args.tenantId)}/clients`,
+        { name: args.name, contact: args.contact ?? {}, businessType: args.businessType, groupCompanyId: args.groupCompanyId },
+        principal,
+      ),
   });
 
   registerTool({
     name: "clients.update",
-    description: "Update a client: name, contact, or status.",
+    description:
+      "Update a client: name, contact, status, businessType, or groupCompanyId (the group company this client IS; null clears it; operator-only, anyone else gets a 403).",
     minAssurance: "low",
     write: true,
     impact: "low",
     inputSchema: {
       type: "object",
-      properties: { tenantId: { type: "string" }, clientId: { type: "string" }, name: { type: "string" }, contact: { type: "object" }, status: { type: "string" } },
+      properties: {
+        tenantId: { type: "string" }, clientId: { type: "string" }, name: { type: "string" }, contact: { type: "object" }, status: { type: "string" },
+        businessType: { type: "string", enum: BUSINESS_TYPES },
+        groupCompanyId: { type: ["string", "null"] },
+      },
       required: ["tenantId", "clientId"],
     },
     handler: (args, principal) =>
-      platformSend("PATCH", `/api/${String(args.tenantId)}/clients/${String(args.clientId)}`, { name: args.name, contact: args.contact, status: args.status }, principal),
+      platformSend(
+        "PATCH",
+        `/api/${String(args.tenantId)}/clients/${String(args.clientId)}`,
+        { name: args.name, contact: args.contact, status: args.status, businessType: args.businessType, groupCompanyId: args.groupCompanyId },
+        principal,
+      ),
   });
 
   registerTool({

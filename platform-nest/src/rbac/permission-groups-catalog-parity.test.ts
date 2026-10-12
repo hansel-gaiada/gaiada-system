@@ -119,9 +119,9 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // M5-W1a (2026-10-11): 407 -> 414 (+7 on 2 EXISTING kinds). submit + comment join webdesk_content_editing;
     // request_changes/seo_signoff/approve/assign form the NEW group webdesk_editorial_review; manage_editorial is
     // advancedOnly (governance, behind the writers' room people page). Relationship set untouched.
-    // M6-P3c on top of M5-W1a (merged 2026-10-12): +4 pairs / +1 kind (webdev_site: read/create/update/
-    // request_probe_consent), so 429/102 -> 433/103 and 414 -> 418 grantable.
-    expect(grantable.length).toBe(418);
+    // M6-P3c on top of main (merged 2026-10-12): +4 pairs / +1 kind for webdev_site (read/create/update/request_probe_consent): grantable 415 -> 419.
+    // PV3-01 (2026-10-11): +1 pair on the EXISTING contract kind (`core.contract.countersign`, uiGrantable false, owner-only by a Cerbos grant rule).
+    expect(grantable.length).toBe(419);
     expect(relationshipKeys.size).toBe(15);
   });
 

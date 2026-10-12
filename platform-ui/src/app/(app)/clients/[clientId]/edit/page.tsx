@@ -8,6 +8,9 @@ import { updateClientAction } from "@/lib/clientWorkActions";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { EditClientForm } from "@/components/forms/ClientWorkForms";
+import { getClientCentre } from "@/lib/clientCentre-data";
+import { preselectedBusinessType } from "@/lib/clientBusinessType";
+import { groupCompanyOptions } from "@/lib/clientGroupCompany";
 
 // Edit the CRM client row: name, status, owner and contact details. This is the rename flow CC-D5
 // refers to. Rendered inside the hub layout, so the header and tabs stay; no tab is active.
@@ -24,10 +27,12 @@ export default async function EditClientPage({ params }: { params: Promise<{ cli
   if (!tenant) notFound();
   if (!can(me, "client.write", tenant)) return <EmptyNote>You don&apos;t have permission to edit clients.</EmptyNote>;
 
-  const [client, members] = await Promise.all([
+  const [client, members, centre] = await Promise.all([
     getClient(userId, tenant, clientId),
     // The owner picker degrades to "No owner" only if the directory read fails, never the whole form.
     listMembers(userId, tenant).catch(() => []),
+    // PV3-04: the current business type. NOT degraded: a failed read must not look like "no type chosen yet".
+    getClientCentre(userId, tenant, clientId),
   ]);
   if (!client) notFound();
   const status = client.status || "active";
@@ -49,6 +54,9 @@ export default async function EditClientPage({ params }: { params: Promise<{ cli
         contact={(client.contact as Record<string, unknown> | null) ?? {}}
         ownerUserId={client.owner_user_id ?? null}
         owners={owners}
+        businessType={preselectedBusinessType(centre)}
+        groupCompanies={groupCompanyOptions(me, tenant, client.groupCompany)}
+        groupCompanyId={client.groupCompany?.id ?? null}
       />
     </Card>
   );

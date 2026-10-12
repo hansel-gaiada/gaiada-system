@@ -74,7 +74,7 @@ describe.skipIf(!TEST_URL)("agency first-deploy daily flow (e2e)", () => {
       app.inject({ method: "GET", url: `/api/${co}${url}`, headers: as(uid) });
 
     // 1. Admin onboards a client; PM opens a client-linked project.
-    const client = await post(u.admin, "/clients", { name: "Bali Beach Resort", contact: { email: "gm@bbr.test" } });
+    const client = await post(u.admin, "/clients", { name: "Bali Beach Resort", businessType: "hotel", contact: { email: "gm@bbr.test" } });
     expect(client.statusCode).toBe(201);
     const clientId = client.json().id;
     const project = await post(u.pm, "/projects", { name: "Q3 Rebrand", clientId });

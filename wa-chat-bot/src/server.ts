@@ -29,6 +29,10 @@ import { nextRuns } from "./next-run";
 import { listSkills } from "./skills";
 import { composeCheckinReminder } from "./checkin";
 import { HubDeniedError } from "./hub";
+import {
+  validateWebLeadAlert, composeWebLeadAlertText, destinationRefusal, webLeadAlertSettings,
+  alreadyAlerted, beginAlert, endAlert,
+} from "./web-lead-alert";
 import type { Slot } from "./window";
 
 /** Constant-time string comparison (avoids timing side-channels on token checks). */
@@ -209,6 +213,40 @@ export function buildApp(gateway: WhatsAppGateway = new SurfaceRouter()): Fastif
       if (err instanceof HubDeniedError) return reply.code(403).send({ error: "denied", detail: err.message });
       return reply.code(502).send({ error: `notify failed: ${(err as Error).message}` });
     }
+  });
+
+  // Admin: M5-L5b web-lead alert relay. NOT a generic send route: the body is a strict allow-list
+  // {leadId, firstName, form, link}, the TEXT is composed here from a fixed template, and the destination
+  // chat comes only from bot-side config (WEB_LEAD_ALERT_CHAT_ID). All rules live in web-lead-alert.ts.
+  // Order: auth -> feature on? -> body -> destination safe? -> replay? -> send (through the surface).
+  app.post("/admin/alerts/web-lead", async (req, reply) => {
+    if (!config.adminToken) return reply.code(503).send({ error: "admin routes disabled — set ADMIN_TOKEN" });
+    if (!safeEqual(bearer(req), config.adminToken)) return reply.code(401).send({ error: "unauthorized" });
+    const { chatId, linkBase } = webLeadAlertSettings();
+    if (!chatId) return reply.code(503).send({ error: "alert-destination-unset" });
+    if (!linkBase) return reply.code(503).send({ error: "alert-link-base-unset" });
+    const parsed = validateWebLeadAlert(req.body, linkBase);
+    if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+    const refusal = destinationRefusal(chatId);
+    if (refusal) {
+      // A config error, not a request error. No lead data in the log line.
+      app.log.error(`web-lead alert refused: ${refusal} (WEB_LEAD_ALERT_CHAT_ID)`);
+      return reply.code(503).send({ error: "alert-destination-refused" });
+    }
+    const { leadId } = parsed.value;
+    if (alreadyAlerted(leadId)) return reply.code(200).send({ sent: false, replayed: true });
+    if (!beginAlert(leadId)) return reply.code(409).send({ error: "alert-in-flight" });
+    let delivered = false;
+    try {
+      await gateway.sendText(chatId, composeWebLeadAlertText(parsed.value));
+      delivered = true;
+    } catch (err) {
+      app.log.warn(`web-lead alert for ${leadId}: send failed (${(err as Error)?.name ?? "error"})`);
+      return reply.code(502).send({ error: "alert-send-failed" });
+    } finally {
+      endAlert(leadId, delivered);
+    }
+    return reply.code(200).send({ sent: true, replayed: false });
   });
 
   // Admin: the action kill-switch (incident response) — flip ALL mutating actions off/on at

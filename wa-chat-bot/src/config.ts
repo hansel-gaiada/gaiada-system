@@ -166,6 +166,14 @@ export const config = {
   // or early the next morning, while expiring well before the NEXT day's 17:30 reminder — so a
   // stale, unanswered reminder can never be mistaken for a reply to a newer one.
   checkinReminderTtlMs: Number(process.env.CHECKIN_REMINDER_TTL_MS ?? 12 * 60 * 60 * 1000),
+  // M5-L5b: web-lead alert relay (POST /admin/alerts/web-lead, web-lead-alert.ts). Both are bot-side only
+  // and OFF when empty (an empty string means unset; they are never parsed as numbers). The destination is a
+  // full chat id (`<digits>@c.us`, `tg:<id>`, ...) and is refused if the bot would ingest that chat. The link
+  // base must equal the ERP's MAIL_LINK_BASE_URL, since the caller's link is matched against it exactly.
+  webLeadAlertChatId: (process.env.WEB_LEAD_ALERT_CHAT_ID ?? "").trim(),
+  webLeadAlertLinkBase: (process.env.WEB_LEAD_ALERT_LINK_BASE ?? "").trim(),
+  // Sent-lead set (idempotency). Empty -> <dirname(groupsFile)>/web-lead-alerts.json.
+  webLeadAlertStateFile: process.env.WEB_LEAD_ALERT_STATE_FILE ?? "",
 };
 
 export const aiEnabled = config.geminiApiKey.length > 0;

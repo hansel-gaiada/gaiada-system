@@ -93,10 +93,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // M5-W1a (2026-10-11): +7 grantable / +7 total on 2 EXISTING kinds (webdesk_content_item: submit/
     // comment/request_changes/seo_signoff/approve/assign; webdesk_collection: manage_editorial), all
     // uiGrantable:true like every other key on those kinds. 422 -> 429 / 407 -> 414.
-    // M6-P3c on top of M5-W1a (merged 2026-10-12): +4 pairs / +1 kind (webdev_site: read/create/update/
-    // request_probe_consent), so 429/102 -> 433/103 and 414 -> 418 grantable.
-    expect(permissions.length).toBe(433);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(418);
+    // M6-P3c on top of main (merged 2026-10-12): +4 pairs / +1 kind for webdev_site (read/create/update/request_probe_consent): total 430 -> 434, grantable 415 -> 419.
+    // PV3-01 (2026-10-11): +1 grantable / +1 total on the EXISTING contract kind (`core.contract.countersign`), uiGrantable:FALSE.
+    expect(permissions.length).toBe(434);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(419);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

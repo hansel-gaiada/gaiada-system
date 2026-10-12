@@ -1,7 +1,7 @@
 // Clients (CRM) resource routes (WSA-2). Extracted from src/core/client-work.controller.ts into
 // the clients MODULE; gated by ModuleEnabledGuard("clients"). Deliverables + time_entries stay in
 // the CORE ClientWorkController (shared work substrate — NOT module-gated).
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../../db";
 import type { PoolClient } from "pg";
@@ -13,16 +13,37 @@ import { AuthGuard } from "../../auth/guards";
 import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "../../core/project-status";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { assertActiveStaff } from "../../core/agency-lead-convert.service";
+import { isPlatformOperator } from "../../admin/elevated";
 import {
-  diffForActivity, normalizeContactCreate, normalizeContactPatch, normalizeName, normalizeNoteBody,
-  normalizeOwner, normalizeStatus,
+  diffForActivity, normalizeBusinessType, normalizeContactCreate, normalizeContactPatch, normalizeGroupCompanyId,
+  normalizeName, normalizeNoteBody, normalizeOwner, normalizeStatus,
 } from "./client-input";
+import { assertGroupCompany } from "./group-company";
+import { emptyProfileState, loadProfileRow, saveProfileRow } from "./centre/store";
 
 // CC-D10: every read of a client row carries its owner (account manager) and the owner's name. The
 // users join is LEFT so an ownerless client, or one whose owner was hard-deleted, still reads.
+//
+// PV3-04 (PV-D2): and its group company, `{id, name}` or null. `companies` is a global table with no RLS,
+// so the LEFT JOIN works inside the tenant transaction; a link to a company that has since been deleted
+// reads as null (the link is dead, and the hub should not badge a retired company).
+const GROUP_COMPANY_COLUMN = `CASE WHEN gc.id IS NULL THEN NULL ELSE jsonb_build_object('id', gc.id, 'name', gc.name) END AS "groupCompany"`;
 const CLIENT_COLUMNS = `cl.id, cl.name, cl.contact, cl.status, cl.custom_fields, cl.owner_user_id, ou.name AS owner_name,
-  cl.is_internal AS "isInternal"`;
-const CLIENT_FROM = `FROM clients cl LEFT JOIN users ou ON ou.id = cl.owner_user_id`;
+  cl.is_internal AS "isInternal", ${GROUP_COMPANY_COLUMN}`;
+const CLIENT_FROM = `FROM clients cl LEFT JOIN users ou ON ou.id = cl.owner_user_id
+  LEFT JOIN companies gc ON gc.id = cl.group_company_id AND gc.deleted_at IS NULL`;
+
+// PV3-04 (PV3-Q1, lead's default until the owner rules): linking a client to one of OUR companies later
+// drives intercompany tagging of that client's invoices, so a wrong link misstates group money. Only a
+// platform operator (platform_admin, or the owner of the root: PV-D18/PV-D20) may set or change it.
+// Checked right after the Cerbos decision and BEFORE any validation of the target, so a refusal never
+// reveals whether a company exists. "Touching" = the key is present in the body, whatever its value.
+async function assertMayTouchGroupCompany(req: FastifyRequest, raw: unknown): Promise<void> {
+  if (raw === undefined) return;
+  if (!(await isPlatformOperator(req))) {
+    throw new ForbiddenException("linking a client to a group company needs a platform operator");
+  }
+}
 
 // Notes are rows in the core `comments` table with this target type. That table is staff-only by
 // policy (resource_comment.yaml grants no client/portal role), so an internal note about a client can
@@ -51,38 +72,56 @@ export class ClientsController {
     return rows.rows[0];
   }
 
+  // PV3-04 (PV-D1): `businessType` is REQUIRED and is written, as the client's Client Centre profile row,
+  // in the SAME transaction as the client, so a new client is never "not set". Lead conversion
+  // (agency-lead-convert.service.ts) is deliberately unchanged: leads carry no type, so a converted
+  // client lands on the Clients list's "Other or not set" review filter instead.
   @Post(":tenantId/clients")
   @HttpCode(201)
   async createClient(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { name?: unknown; contact?: unknown; status?: unknown; ownerUserId?: unknown; customFields?: Record<string, unknown> },
+    @Body() body: {
+      name?: unknown; contact?: unknown; status?: unknown; ownerUserId?: unknown; customFields?: Record<string, unknown>;
+      businessType?: unknown; groupCompanyId?: unknown;
+    },
   ) {
     const b = body ?? {};
     if (!b.name) throw new BadRequestException("name required");
     await authorize(req.principal, { kind: "client", tenantId }, "create");
+    // The group-company field is authorized BEFORE any validation, so its 403 never depends on the body.
+    await assertMayTouchGroupCompany(req, b.groupCompanyId);
     // Shape validation runs AFTER authorize so a denial test with a sloppy body still tests authz.
     const name = normalizeName(b.name);
     // CC-D10 fix: `status` used to be dropped here, so the New client form's Status select was
     // silently ignored and every client was born `active`.
     const status = b.status === undefined ? "active" : normalizeStatus(b.status);
+    const businessType = normalizeBusinessType(b.businessType, { required: true }) as string;
     const contact = normalizeContactCreate(b.contact);
     const owner = normalizeOwner(b.ownerUserId) ?? null;
+    const groupCompanyId = normalizeGroupCompanyId(b.groupCompanyId) ?? null;
     const customFields = b.customFields ?? {};
+    // Existence, liveness and same-root are asked of `companies` (global, no RLS) outside the tenant
+    // transaction; group-company.ts explains why the FK alone cannot do it.
+    const groupCompany = groupCompanyId ? await assertGroupCompany(tenantId, groupCompanyId) : null;
     const id = newId();
     await withTenants([tenantId], async (c) => {
       const cfError = await validateCustomFields(c, tenantId, "client", customFields);
       if (cfError) throw new BadRequestException(cfError);
       if (owner) await assertActiveStaff(c, owner, "ownerUserId");
       await c.query(
-        `INSERT INTO clients (id, tenant_id, name, contact, status, owner_user_id, custom_fields, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, tenantId, name, JSON.stringify(contact), status, owner, JSON.stringify(customFields), config.originSite],
+        `INSERT INTO clients (id, tenant_id, name, contact, status, owner_user_id, custom_fields, group_company_id, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [id, tenantId, name, JSON.stringify(contact), status, owner, JSON.stringify(customFields), groupCompany?.id ?? null, config.originSite],
       );
+      // The profile row, through the Client Centre's own store (the upsert the centre PATCH uses), same tx.
+      await saveProfileRow(c, tenantId, id, emptyProfileState(businessType), req.principal.userId);
       // Transactional outbox (same tx as the insert): powers the event→n8n bridge / consumers.
-      await emitEvent(c, tenantId, "client", id, "client.created", { name });
+      await emitEvent(c, tenantId, "client", id, "client.created", { name, businessType });
     });
-    await writeActivity(tenantId, req.principal.userId, "created", "client", id, { name, status });
+    await writeActivity(tenantId, req.principal.userId, "created", "client", id, {
+      name, status, businessType, ...(groupCompany ? { groupCompany: groupCompany.name } : {}),
+    });
     return { id };
   }
 
@@ -90,27 +129,43 @@ export class ClientsController {
   // key, null/"" deletes it, an omitted key is untouched. Before this, `contact` replaced the whole
   // object and a blank `name` was stored as "". The activity row now carries before/after per field,
   // which is what the client's History shows.
+  //
+  // PV3-04: `businessType` upserts the client's Client Centre profile row in the SAME transaction and, when
+  // it moves, emits the same `client.centre_updated` event the centre PATCH emits. `groupCompanyId` is
+  // operator-only (assertMayTouchGroupCompany): `null` clears the link, a uuid sets it.
   @Patch(":tenantId/clients/:clientId")
   async updateClient(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("clientId") clientId: string,
-    @Body() body: { name?: unknown; contact?: unknown; status?: unknown; ownerUserId?: unknown; customFields?: Record<string, unknown> },
+    @Body() body: {
+      name?: unknown; contact?: unknown; status?: unknown; ownerUserId?: unknown; customFields?: Record<string, unknown>;
+      businessType?: unknown; groupCompanyId?: unknown;
+    },
   ) {
     await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "update");
     const b = body ?? {};
+    // Authorization of the group-company field first, then every validation (validation must not pre-empt it).
+    await assertMayTouchGroupCompany(req, b.groupCompanyId);
     const name = b.name === undefined ? undefined : normalizeName(b.name);
     const status = b.status === undefined ? undefined : normalizeStatus(b.status);
     const contact = b.contact === undefined ? undefined : normalizeContactPatch(b.contact);
     const owner = normalizeOwner(b.ownerUserId);
+    const businessType = normalizeBusinessType(b.businessType, { required: false });
+    const groupCompanyId = normalizeGroupCompanyId(b.groupCompanyId);
+    const groupCompany = groupCompanyId ? await assertGroupCompany(tenantId, groupCompanyId) : null;
     const changes = await withTenants([tenantId], async (c) => {
       if (b.customFields) {
         const cfError = await validateCustomFields(c, tenantId, "client", b.customFields);
         if (cfError) throw new BadRequestException(cfError);
       }
       if (owner) await assertActiveStaff(c, owner, "ownerUserId");
+      // `FOR UPDATE OF cl`: the join to `companies` sits on the nullable side of an outer join, which
+      // Postgres will not lock. The name (not just the id) is read so History can say who it linked to.
       const prev = await c.query(
-        `SELECT name, status, owner_user_id, contact FROM clients WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        `SELECT cl.name, cl.status, cl.owner_user_id, cl.contact, gc.name AS group_company
+           FROM clients cl LEFT JOIN companies gc ON gc.id = cl.group_company_id
+          WHERE cl.id = $1 AND cl.deleted_at IS NULL FOR UPDATE OF cl`,
         [clientId],
       );
       if (!prev.rows[0]) throw new NotFoundException("client not found");
@@ -119,7 +174,9 @@ export class ClientsController {
            contact = CASE WHEN $3::jsonb IS NULL THEN contact ELSE (contact || $3::jsonb) - $4::text[] END,
            status = COALESCE($5, status),
            owner_user_id = CASE WHEN $6::boolean THEN $7::uuid ELSE owner_user_id END,
-           custom_fields = COALESCE($8, custom_fields), updated_at = now()
+           custom_fields = COALESCE($8, custom_fields),
+           group_company_id = CASE WHEN $9::boolean THEN $10::uuid ELSE group_company_id END,
+           updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL
          RETURNING name, status, owner_user_id, contact`,
         [
@@ -127,9 +184,29 @@ export class ClientsController {
           contact ? JSON.stringify(contact.set) : null, contact ? contact.remove : [],
           status ?? null, owner !== undefined, owner ?? null,
           b.customFields ? JSON.stringify(b.customFields) : null,
+          groupCompanyId !== undefined, groupCompany?.id ?? null,
         ],
       );
-      return diffForActivity(prev.rows[0], res.rows[0]);
+      // Business type lives on the Client Centre profile row. No row = "not set", so the first explicit
+      // choice (even "other") IS a change, and History shows it as set from nothing.
+      let typeBefore: string | null = null;
+      let typeAfter: string | null = null;
+      if (businessType !== undefined) {
+        const existing = await loadProfileRow(c, tenantId, clientId);
+        typeBefore = existing?.state.businessType ?? null;
+        typeAfter = businessType;
+        if (typeBefore !== typeAfter) {
+          await saveProfileRow(c, tenantId, clientId, { ...(existing?.state ?? emptyProfileState(businessType)), businessType }, req.principal.userId);
+          await emitEvent(c, tenantId, "client", clientId, "client.centre_updated", { changes: ["businessType"] });
+        }
+      }
+      const before = { ...prev.rows[0], business_type: typeBefore };
+      const after = {
+        ...res.rows[0],
+        business_type: typeAfter ?? typeBefore,
+        group_company: groupCompanyId === undefined ? prev.rows[0].group_company : (groupCompany?.name ?? null),
+      };
+      return diffForActivity(before, after);
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "client", clientId, changes.length ? { changes } : {});
     return { id: clientId };
@@ -280,7 +357,7 @@ export class ClientsController {
     await authorize(req.principal, { kind: "client", id: clientId, tenantId }, "read");
     return withTenants([tenantId], async (c) => {
       const client = await c.query(
-        `SELECT cl.id, cl.name, cl.contact, cl.status, cl.owner_user_id, ou.name AS owner_name
+        `SELECT cl.id, cl.name, cl.contact, cl.status, cl.owner_user_id, ou.name AS owner_name, ${GROUP_COMPANY_COLUMN}
            ${CLIENT_FROM} WHERE cl.id = $1 AND cl.deleted_at IS NULL`,
         [clientId],
       );

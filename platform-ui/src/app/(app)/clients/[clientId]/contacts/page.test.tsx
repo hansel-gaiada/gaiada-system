@@ -131,10 +131,10 @@ describe("staff Contacts page: Website access", () => {
     expect(screen.queryAllByRole("switch")).toHaveLength(0);
   });
 
-  it("sits right after the Client access card and before Scheduled", async () => {
+  it("sits right after the Client access card (the meetings cards moved to Projects in PV3-05)", async () => {
     const tree = (await ClientContactsPage({ params: Promise.resolve({ clientId: "cl-1" }) })) as ReactElement<{ children: ReactNode[] }>;
     const kids = tree.props.children;
-    expect(kids).toHaveLength(5);
+    expect(kids).toHaveLength(3);
     expect((kids[2] as ReactElement).type).toBe(ClientWebsiteAccessSection);
   });
 });

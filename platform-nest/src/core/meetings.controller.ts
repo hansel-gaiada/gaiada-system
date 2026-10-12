@@ -15,6 +15,7 @@ import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
+import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { storage } from "./storage";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
@@ -668,7 +669,11 @@ export class MeetingRecordingsController {
     const clauses: string[] = ["deleted_at IS NULL"];
     const args: unknown[] = [];
     if (status) clauses.push(`status = $${args.push(status)}`);
-    if (clientId) clauses.push(`client_id = $${args.push(clientId)}`);
+    // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400). It used to compare a
+    // uuid column to the raw string, so garbage and `internal` both 500ed on the cast.
+    const clientFilter = clientFilterSql(parseClientFilter(clientId, true), "client_id", args.length + 1);
+    args.push(...clientFilter.params);
+    clauses.push(clientFilter.sql);
     if (projectId) clauses.push(`project_id = $${args.push(projectId)}`);
     // W0: "what's coming" — still 'scheduled' (not yet advanced to 'recording') and in the future.
     if (scheduled === "upcoming") clauses.push(`status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at >= now()`);
