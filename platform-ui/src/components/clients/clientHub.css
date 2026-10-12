@@ -58,13 +58,16 @@
   align-items: center;
   gap: 8px;
   margin-left: auto;
-  color: var(--status-warning-fg);
+  /* Text stays --ink-strong: --status-warning-fg is only 4.65:1 on a plain surface and falls below AA on
+     the amber tint (axe, staff Contacts page, light theme). The amber lives in the tint, the dashed edge
+     and the badge border instead, which is what makes the tab read as staff-only. */
+  color: var(--ink-strong);
   background: var(--status-warning-bg);
   border-bottom: 2px dashed var(--status-warning);
 }
-.ch-tab--internal:hover { color: var(--status-warning-fg); opacity: 0.8; }
+.ch-tab--internal:hover { color: var(--ink-strong); border-bottom-style: solid; }
 .ch-tab--internal[aria-current="page"] {
-  color: var(--status-warning-fg);
+  color: var(--ink-strong);
   border-bottom-style: solid;
   border-bottom-color: var(--status-warning);
 }
@@ -72,7 +75,8 @@
   font: 700 10px/1 var(--font-body);
   letter-spacing: 0.04em;
   padding: 3px 6px;
-  border: 1px dashed currentColor;
+  color: var(--ink-strong);
+  border: 1px dashed var(--status-warning);
 }
 
 /* The banner at the top of the Internal area. Same family and the same dashed edge as the tab. */
