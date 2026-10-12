@@ -4,15 +4,15 @@
 //   1. Finding the tarball the api image baked (webdesk/api/Dockerfile, stage `blocks`):
 //        <dir>/gaiada-webdesk-blocks-<version>.tgz   and   <dir>/SHA256SUMS
 //      <dir> defaults to /app/artifacts/blocks and can be moved with WEBDESK_BLOCKS_ARTIFACT_DIR.
-//   2. The UPLOAD RULE: one shared object per library version in the `artifacts` bucket,
-//        blocks/<version>/gaiada-webdesk-blocks-<version>.tgz        (the tarball)
-//        blocks/<version>/gaiada-webdesk-blocks-<version>.tgz.sha256 (a sidecar: the hex digest + "\n")
+//   2. The UPLOAD RULE: one shared, CONTENT-ADDRESSED object per tarball in the `artifacts` bucket,
+//        blocks/<version>/<sha16>/gaiada-webdesk-blocks-<version>.tgz        (the tarball)
+//        blocks/<version>/<sha16>/gaiada-webdesk-blocks-<version>.tgz.sha256 (a sidecar: the hex digest + "\n")
 //      - tarball absent                   -> upload it, then the sidecar
 //      - present, same sha256             -> do nothing
-//      - present, DIFFERENT sha256        -> throw BlockLibraryHashConflictError. Never overwrite: the
-//        bucket is object-locked (GOVERNANCE) and two different byte sequences under one version
-//        would silently fork every site that pinned it. The fix is a version bump in
-//        webdesk/blocks/package.json, not a retry.
+//      - present, DIFFERENT sha256        -> throw BlockLibraryHashConflictError (a damaged object, or a
+//        16-hex prefix collision). Never overwrite: the bucket is object-locked (GOVERNANCE).
+//      A blocks change shipped WITHOUT a version bump gets its own key (M6 review, 2026-10-12); under a
+//      version-only key it would have failed every tenant's codegen at run time until someone bumped it.
 //
 // WHERE THE VERSION AND THE HASH COME FROM
 //   version  the FILENAME of the baked tarball (npm pack names it <name>-<version>.tgz and the
@@ -68,8 +68,8 @@ export class BlockLibraryHashConflictError extends Error {
   constructor(public readonly key: string, public readonly storedSha256: string, public readonly bakedSha256: string) {
     super(
       `block library ${key} is already stored with sha256 ${storedSha256}, but this image baked a tarball with sha256 ${bakedSha256}. ` +
-        `Refusing to overwrite (the artifacts bucket is object-locked and a version must name one byte sequence). ` +
-        `Bump the version in webdesk/blocks/package.json so the changed library ships under a new key.`,
+        `Refusing to overwrite (the artifacts bucket is object-locked). The key is content-addressed, so this means ` +
+        `two different tarballs share a 16-hex sha256 prefix, or the stored object is damaged; investigate, never overwrite.`,
     );
     this.name = "BlockLibraryHashConflictError";
   }
@@ -79,12 +79,17 @@ export function sha256OfBytes(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export function blockLibraryObjectKey(version: string): string {
-  return `blocks/${version}/gaiada-webdesk-blocks-${version}.tgz`;
+/** Content-addressed: `blocks/<version>/<sha256 prefix>/…`. A blocks change shipped WITHOUT a version bump
+ *  (easy to forget) gets its own key instead of colliding with the stored tarball and failing every
+ *  tenant's codegen at run time. Sites pin the exact bytes through their contract snapshot, not the
+ *  version range, so nothing reads the version alone. */
+export function blockLibraryObjectKey(version: string, sha256: string): string {
+  if (!SHA256_RE.test(sha256)) throw new Error(`block library: not a sha256: ${sha256}`);
+  return `blocks/${version}/${sha256.slice(0, 16)}/gaiada-webdesk-blocks-${version}.tgz`;
 }
 
-export function blockLibraryChecksumKey(version: string): string {
-  return `${blockLibraryObjectKey(version)}.sha256`;
+export function blockLibraryChecksumKey(version: string, sha256: string): string {
+  return `${blockLibraryObjectKey(version, sha256)}.sha256`;
 }
 
 export function resolveBlocksArtifactDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -142,8 +147,8 @@ export async function ensureBlockLibraryUploaded(
   bucket: string,
   baked: BakedBlockLibrary,
 ): Promise<PublishedBlockLibrary> {
-  const key = blockLibraryObjectKey(baked.version);
-  const sidecarKey = blockLibraryChecksumKey(baked.version);
+  const key = blockLibraryObjectKey(baked.version, baked.sha256);
+  const sidecarKey = blockLibraryChecksumKey(baked.version, baked.sha256);
   const published = (status: PublishedBlockLibrary["status"]): PublishedBlockLibrary => ({
     ref: baked.ref,
     key,

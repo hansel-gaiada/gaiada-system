@@ -20,7 +20,7 @@ import { join } from "node:path";
 import pg from "pg";
 import { generateTenantContract } from "../src/codegen/generator/generate-tenant.mts";
 import { createGeneratorStorageAdapter, readLatestPointer } from "../src/codegen/generator/storage-io.mts";
-import { BlockLibraryHashConflictError, blockLibraryChecksumKey, blockLibraryObjectKey } from "../src/codegen/generator/block-library.mts";
+import { blockLibraryChecksumKey, blockLibraryObjectKey } from "../src/codegen/generator/block-library.mts";
 import { S3StorageAdapter } from "../src/storage/s3-storage.adapter";
 import { storageConfig } from "../src/storage/storage.config";
 import { ContractReadService } from "../src/codegen/contract-read.service";
@@ -111,9 +111,9 @@ describe("block library: the fifth artifact, live", () => {
     const result = await generateTenantContract(appPool, storage, slugA);
     expect(result).not.toBeNull();
 
-    const key = blockLibraryObjectKey(version);
+    const key = blockLibraryObjectKey(version, sha(bytes));
     expect(puts.filter((k) => k === key)).toHaveLength(1);
-    expect(puts).toContain(blockLibraryChecksumKey(version));
+    expect(puts).toContain(blockLibraryChecksumKey(version, sha(bytes)));
 
     const pointer = (await readLatestPointer(storage, slugA))!;
     expect(pointer.blockLibrary).toEqual({ package: "@gaiada/webdesk-blocks", version, range: `^${version}` });
@@ -147,19 +147,23 @@ describe("block library: the fifth artifact, live", () => {
     expect(puts.filter((k) => k.startsWith("blocks/"))).toEqual([]);
     const a = (await readLatestPointer(storage, slugA))!;
     const b = (await readLatestPointer(storage, slugB))!;
-    expect(a.artifactKeys.blockLibrary).toBe(blockLibraryObjectKey(version));
-    expect(b.artifactKeys.blockLibrary).toBe(blockLibraryObjectKey(version));
+    expect(a.artifactKeys.blockLibrary).toBe(blockLibraryObjectKey(version, sha(bytes)));
+    expect(b.artifactKeys.blockLibrary).toBe(blockLibraryObjectKey(version, sha(bytes)));
   });
 
-  it("a DIFFERENT tarball under the same version fails the run loudly, never overwrites, and leaves the pointer as it was", async () => {
-    const { storage } = countingStorage();
-    const before = (await readLatestPointer(storage, slugA))!;
-    bake(version, Buffer.from("different bytes, same version"));
-    await expect(generateTenantContract(appPool, storage, slugA)).rejects.toBeInstanceOf(BlockLibraryHashConflictError);
-
-    const stored = await storage.getObject(BUCKET(), blockLibraryObjectKey(version));
-    expect(sha(stored.body)).toBe(sha(bytes));
-    expect((await readLatestPointer(storage, slugA))!.generatedAt).toBe(before.generatedAt);
+  it("DIFFERENT bytes under the SAME version get their own content-addressed key; the first object stays and the pointer moves", async () => {
+    const { storage, puts } = countingStorage();
+    const changed = Buffer.from("different bytes, same version");
+    bake(version, changed);
+    await generateTenantContract(appPool, storage, slugA);
+    const newKey = blockLibraryObjectKey(version, sha(changed));
+    expect(newKey).not.toBe(blockLibraryObjectKey(version, sha(bytes)));
+    expect(puts).toContain(newKey);
+    const old = await storage.getObject(BUCKET(), blockLibraryObjectKey(version, sha(bytes)));
+    expect(sha(old.body)).toBe(sha(bytes));
+    const pointer = (await readLatestPointer(storage, slugA))!;
+    expect(pointer.artifactKeys.blockLibrary).toBe(newKey);
+    expect(pointer.blockLibrarySha256).toBe(sha(changed));
   });
 
   it("with no baked tarball the pointer records no block library (nothing is invented) and the read answers null", async () => {

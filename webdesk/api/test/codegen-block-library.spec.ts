@@ -110,20 +110,27 @@ describe("readBakedBlockLibrary", () => {
 describe("ensureBlockLibraryUploaded -- the upload rule", () => {
   const baked = () => readBakedBlockLibrary(bake("0.1.0", BYTES))!;
 
-  it("absent: uploads the tarball under the SHARED key, then the sidecar", async () => {
+  const K = () => blockLibraryObjectKey("0.1.0", sha(BYTES));
+  const C = () => blockLibraryChecksumKey("0.1.0", sha(BYTES));
+
+  it("absent: uploads the tarball under the SHARED, content-addressed key, then the sidecar", async () => {
     const storage = new MemoryStorage();
     const out = await ensureBlockLibraryUploaded(storage, "artifacts", baked());
     expect(out.status).toBe("uploaded");
-    expect(out.key).toBe("blocks/0.1.0/gaiada-webdesk-blocks-0.1.0.tgz");
-    expect(out.key).toBe(blockLibraryObjectKey("0.1.0"));
+    expect(out.key).toBe(`blocks/0.1.0/${sha(BYTES).slice(0, 16)}/gaiada-webdesk-blocks-0.1.0.tgz`);
+    expect(out.key).toBe(K());
     expect(out.sha256).toBe(sha(BYTES));
-    expect(storage.puts).toEqual([blockLibraryObjectKey("0.1.0"), blockLibraryChecksumKey("0.1.0")]);
-    expect(storage.objects.get(blockLibraryObjectKey("0.1.0"))!.equals(BYTES)).toBe(true);
-    expect(storage.objects.get(blockLibraryChecksumKey("0.1.0"))!.toString()).toBe(`${sha(BYTES)}\n`);
+    expect(storage.puts).toEqual([K(), C()]);
+    expect(storage.objects.get(K())!.equals(BYTES)).toBe(true);
+    expect(storage.objects.get(C())!.toString()).toBe(`${sha(BYTES)}\n`);
   });
 
   it("the key carries no tenant: it is shared by every tenant and every contract version", () => {
-    expect(blockLibraryObjectKey("0.1.0")).not.toMatch(/contracts\//);
+    expect(K()).not.toMatch(/contracts\//);
+  });
+
+  it("the key refuses anything that is not a sha256", () => {
+    expect(() => blockLibraryObjectKey("0.1.0", "abc")).toThrow(/not a sha256/);
   });
 
   it("present with the same sha256: a no-op (no put at all)", async () => {
@@ -135,30 +142,40 @@ describe("ensureBlockLibraryUploaded -- the upload rule", () => {
     expect(storage.puts).toEqual([]);
   });
 
-  it("present with a DIFFERENT sha256: fails loudly and never overwrites", async () => {
+  it("DIFFERENT bytes under the SAME version (a blocks change shipped without a bump) get their own key; the first stays", async () => {
     const storage = new MemoryStorage();
     await ensureBlockLibraryUploaded(storage, "artifacts", baked());
     storage.puts.length = 0;
-    const other = readBakedBlockLibrary(bake("0.1.0", Buffer.from("tarball-bytes-CHANGED")))!;
-    const err = await ensureBlockLibraryUploaded(storage, "artifacts", other).catch((e: unknown) => e);
+    const changed = Buffer.from("tarball-bytes-CHANGED");
+    const other = readBakedBlockLibrary(bake("0.1.0", changed))!;
+    const out = await ensureBlockLibraryUploaded(storage, "artifacts", other);
+    expect(out.status).toBe("uploaded");
+    expect(out.key).toBe(blockLibraryObjectKey("0.1.0", sha(changed)));
+    expect(out.key).not.toBe(K());
+    expect(storage.objects.get(K())!.equals(BYTES)).toBe(true);
+  });
+
+  it("a damaged object at the SAME content-addressed key fails loudly and is never overwritten", async () => {
+    const storage = new MemoryStorage();
+    storage.objects.set(K(), Buffer.from("something else entirely"));
+    storage.objects.set(C(), Buffer.from(`${sha(Buffer.from("something else entirely"))}\n`));
+    const err = await ensureBlockLibraryUploaded(storage, "artifacts", baked()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(BlockLibraryHashConflictError);
     expect((err as Error).message).toMatch(/Refusing to overwrite/);
-    expect((err as Error).message).toMatch(/Bump the version/);
     expect(storage.puts).toEqual([]);
-    expect(storage.objects.get(blockLibraryObjectKey("0.1.0"))!.equals(BYTES)).toBe(true);
   });
 
   it("a tarball with no sidecar (a run died between the two puts) is repaired when the bytes match", async () => {
     const storage = new MemoryStorage();
-    storage.objects.set(blockLibraryObjectKey("0.1.0"), BYTES);
+    storage.objects.set(K(), BYTES);
     const out = await ensureBlockLibraryUploaded(storage, "artifacts", baked());
     expect(out.status).toBe("unchanged");
-    expect(storage.puts).toEqual([blockLibraryChecksumKey("0.1.0")]);
+    expect(storage.puts).toEqual([C()]);
   });
 
   it("a tarball with no sidecar and DIFFERENT bytes is a conflict: the stored bytes are the authority", async () => {
     const storage = new MemoryStorage();
-    storage.objects.set(blockLibraryObjectKey("0.1.0"), Buffer.from("something else entirely"));
+    storage.objects.set(K(), Buffer.from("something else entirely"));
     await expect(ensureBlockLibraryUploaded(storage, "artifacts", baked())).rejects.toBeInstanceOf(BlockLibraryHashConflictError);
     expect(storage.puts).toEqual([]);
   });
@@ -168,8 +185,8 @@ describe("ensureBlockLibraryUploaded -- the upload rule", () => {
     await ensureBlockLibraryUploaded(storage, "artifacts", baked());
     const v2 = readBakedBlockLibrary(bake("0.2.0", Buffer.from("v2 bytes")))!;
     expect((await ensureBlockLibraryUploaded(storage, "artifacts", v2)).status).toBe("uploaded");
-    expect(storage.objects.get(blockLibraryObjectKey("0.1.0"))!.equals(BYTES)).toBe(true);
-    expect(storage.objects.has(blockLibraryObjectKey("0.2.0"))).toBe(true);
+    expect(storage.objects.get(K())!.equals(BYTES)).toBe(true);
+    expect(storage.objects.has(blockLibraryObjectKey("0.2.0", sha(Buffer.from("v2 bytes"))))).toBe(true);
   });
 });
 

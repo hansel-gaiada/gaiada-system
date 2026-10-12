@@ -48,8 +48,8 @@ export interface ArtifactObjectKeys {
   sdkPhp: string;
   contractMd: string;
   /** M6-P4b0 — the block-renderer library tarball. Unlike the four above this key is SHARED across
-   *  tenants and contract versions (`blocks/<version>/gaiada-webdesk-blocks-<version>.tgz`: one object
-   *  per library version, see generator/block-library.mts). Absent in a pointer written before
+   *  tenants and contract versions (`blocks/<version>/<sha256 prefix>/gaiada-webdesk-blocks-<version>.tgz`:
+   *  one object per tarball, content-addressed, see generator/block-library.mts). Absent in a pointer written before
    *  M6-P4b0, or by a run whose image baked no tarball: ContractReadService then answers
    *  `blockLibraryUrl: null`, never a fabricated URL. */
   blockLibrary?: string;
