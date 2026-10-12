@@ -27,6 +27,15 @@ local stack). None of these mean "production-done".
 - **Routes:** list / acknowledge / file a refresh brief (as a `search_content_briefs` draft), with 3 MCP tools on the existing `resource_search_property` kind. Property owners get a bell (ids, path and reason only).
 - **Verified** on GitHub Actions 38236096298 (main + W4 + V4): DB 12/12, job 11/11, detector 17/17.
 
+### platform-ui `0.96.3` - the critical-status text passes contrast everywhere; the top-bar user menu is named by the user; the e2e suite is green again (2026-10-12) - DEV-VERIFIED
+
+WebDesk M3 follow-up: the 57 pre-existing failures of the full Playwright suite (CI mode) are down to none.
+
+- **`--status-critical-fg` #A0511F → #984D1D** (same hue): axe failed 4 checks on #A0511F text over the #ede3d6 tint at 11px (4.48:1). Now 5.30:1 on `--n-11`, 4.85:1 on that tint, 4.57:1 even on `--n-10`.
+- **The compact (top-bar) user menu is named by the user.** Since 9562f2c2 the trigger showed initials only, so its accessible name was "CH"; it now carries `aria-label={name}`. Unit-tested.
+- **Stale e2e brought up to date**, each with the commit that changed the UI: the menu follows the company's pack (PV1-04: the agency tests switch to the agency company; "Systems" is "Platform"), the real repository card is "Provisioned by the pipeline", the demo GitHub org, the org-registry note, the M6-P4f frameworks (astro / node / wp), and two assertions that depended on test order in the shared demo store.
+- Verified: the three affected spec files on sumopod (CI mode, release 365 + this change): 57 passed, 0 failed. GitHub Actions run 38235278710 green. The assistant-drawer Escape test is FLAKY (failed in earlier runs, passed here; a FAB click before hydration does a full navigation), tracked on the board.
+
 ### platform-nest `0.88.0` - M5-W4: writers' room briefs from `search`, linked to a WebDesk draft (2026-10-12) - DEV-VERIFIED
 
 - **Migration `202610122300_search_content_briefs_webdesk_link`.**

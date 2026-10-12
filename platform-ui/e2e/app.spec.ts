@@ -10,7 +10,10 @@ test("My Work dashboard loads", async ({ page }) => {
 });
 
 test("sidebar navigates the business modules", async ({ page }) => {
-  await page.goto("/");
+  // 2026-10-11 (commit d609d7c3, PV1-04): the agency rows (Deliverables, Agency, ...) follow the ACTIVE
+  // company's vertical pack; the demo opens on the holding root, whose generic menu has none of them,
+  // so this test works as the agency company.
+  await switchToAgency(page);
   // Nav groups collapse; Business holds these four and starts closed on the dashboard.
   // 2026-08-10 (commit c89fed6): Business's separate "Projects"/"Tasks" rows collapsed into one
   // "Project Management" entry (PM_TERMS.projectManagement) pointing at /project-management,
@@ -66,6 +69,7 @@ test("admin audit lists activity and filters", async ({ page }) => {
 
 test("account page + density preference", async ({ page }) => {
   await page.goto("/");
+  // 9562f2c2 (2026-08-31) moved the user menu to the compact top bar (initials only); UserMenu now names that trigger by the user.
   await page.getByRole("button", { name: /clement hansel/i }).click();
   const acct = page.getByRole("menuitem", { name: /account settings/i });
   await expect(acct).toBeVisible();
@@ -363,8 +367,11 @@ test("a project's Meetings tab is the PRD Studio flow, filed under that project"
   await page.goto("/departments/dept-1/projects/p-web-1?view=meetings");
   await expect(page.getByText(/filed under client site redesign · northwind traders/i)).toBeVisible();
   // Same cards as PRD Studio, only this project's: the Web Dev demo briefings all sit on p-web-1.
-  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
-  await expect(intake.getByRole("button", { name: "Upload a transcript" })).toBeVisible();
+  // The intake briefing is mutated by the PRD Studio tests above (the demo store is shared), so the
+  // always-transcribed scope call stands in as "a Web Dev briefing card with its primary action".
+  const scope = page.getByRole("article", { name: "Northwind — checkout flow scope call" });
+  await expect(scope.getByRole("button", { name: /convert to prd run/i })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Northwind — checkout flow intake" })).toBeVisible();
   await expect(page.getByRole("article", { name: "Cedar Group — SEO scope call" })).toHaveCount(0);
   // The project's runs with their approvals, and a way to the department-wide view.
   await expect(page.getByRole("link", { name: "Northwind — site redesign kickoff", exact: true })).toHaveAttribute("href", "/pipeline/run-demo-1");
@@ -377,7 +384,8 @@ test("a project's Meetings tab is the PRD Studio flow, filed under that project"
 test("Repositories tab is the department's code inventory — repos from provisioned runs, problems first", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-1/repositories");
-  await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+  // 2026-08-31 (commit 7c622531): the real inventory's card is titled "Provisioned by the pipeline"; only the sample preview keeps "Repositories".
+  await expect(page.getByRole("heading", { name: "Provisioned by the pipeline" })).toBeVisible();
   // run-demo-1 (Web Dev project) has two provisioned sites in the demo store: one failed, one live.
   await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
   const rows = page.locator(".repo-table .lux-table__row");
@@ -385,13 +393,14 @@ test("Repositories tab is the department's code inventory — repos from provisi
   await expect(rows.nth(0)).toContainText("Failed"); // problems first
   await expect(rows.nth(0).getByText(/that name belongs to someone else's site/i)).toBeVisible();
   await expect(rows.nth(0).getByRole("link", { name: /start a new provision/i })).toHaveAttribute("href", "/pipeline/run-demo-1");
-  await expect(rows.nth(1).getByRole("link", { name: "northwind-site-redesign-kickoff", exact: true })).toHaveAttribute("href", /github\.com\/Gaia-Digital-Agency\/northwind-site-redesign-kickoff/);
+  await expect(rows.nth(1).getByRole("link", { name: "northwind-site-redesign-kickoff", exact: true })).toHaveAttribute("href", /github\.com\/gaiadabali\/northwind-site-redesign-kickoff/); // 820051a4 (2026-08-31): the demo org login is gaiadabali
   await expect(rows.nth(1).getByText("Northwind Traders · Client site redesign")).toBeVisible();
   await expect(rows.nth(1).getByText("Live")).toBeVisible();
   await expect(rows.nth(1).getByRole("link", { name: /northwind-site-redesign-kickoff\.gaiada\.online/ })).toBeVisible();
-  // GitHub line: the demo persona has an identity-only connection, and the App isn't installed.
+  // GitHub line: the demo persona has an identity-only connection; org-wide state lives in the registry below.
   await expect(page.getByText(/github: hansel-gh · identity only/i)).toBeVisible();
-  await expect(page.getByText(/commit and pr activity appears once the github app is connected/i)).toBeVisible();
+  // 1df099f9 (2026-09-02): the App is installed, so the note points at the org registry section below instead.
+  await expect(page.getByText(/commit, pr and workflow state is in the github org registry below/i)).toBeVisible();
 });
 
 test("Repositories tab: Create repository provisions a PRD run and the row appears as Provisioning", async ({ page }) => {
@@ -414,7 +423,7 @@ test("Repositories tab: Create repository provisions a PRD run and the row appea
   if ((await lumen.count()) > 0) {
     await runSelect.selectOption({ label: "Lumen — portfolio discovery · Lumen Studio" });
     await expect(page.getByRole("textbox", { name: /repository name/i })).toHaveValue("lumen-portfolio-discovery");
-    await page.getByRole("combobox", { name: /framework/i }).selectOption("nextjs");
+    await page.getByRole("combobox", { name: /framework/i }).selectOption("node"); // M6-P4f (69a8dd36): the kinds are astro / node (Full-stack) / wp; "nextjs" is legacy and not offered
     await page.getByRole("button", { name: /^create repository$/i }).click();
     await expect(page.getByRole("status")).toContainText(/lumen-portfolio-discovery.*is being provisioned/i);
   }
@@ -488,7 +497,10 @@ test("Repositories tab: ?preview=sample shows the layout with sample rows behind
   await expect(page.getByRole("button", { name: /check status now/i })).toHaveCount(0); // samples offer no real actions
   await page.getByRole("link", { name: /back to real data/i }).click();
   await page.waitForURL(/\/departments\/dept-1\/repositories$/);
-  await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
+  // The demo store is shared with the create tests above, which add repos, so only the live/failed
+  // tallies that no test changes are pinned; the sample's "2 live" and "5 repos" are gone.
+  await expect(page.getByText(/\d+ repos · 1 live.* · 1 failed/)).toBeVisible();
+  await expect(page.getByText(/sample data/i)).toHaveCount(0);
 });
 
 test("a meeting recording links to its ingested pipeline run", async ({ page }) => {
@@ -517,7 +529,10 @@ test("the sidebar collapses to a labelled icon rail and stays collapsed", async 
 });
 
 test("rail categories open a flyout by click, hover and keyboard", async ({ page }) => {
-  await page.goto("/");
+  // 2026-10-11 (commit d609d7c3, PV1-04): Business has more than one row (so is a flyout
+  // category, not a lone link) only in a company whose pack lists the agency rows, and "Systems" became "Platform".
+  await switchToAgency(page);
+  await page.reload(); // render the menu from the persisted company, not mid-switch
   await page.getByRole("button", { name: "Close sidebar" }).click();
 
   const flyout = page.locator(".erp-railmenu");
@@ -530,12 +545,12 @@ test("rail categories open a flyout by click, hover and keyboard", async ({ page
   // and only one panel is ever open.
   await page.keyboard.press("Escape");
   await expect(category("Business")).toBeFocused();
-  await category("Systems").hover();
+  await category("Platform").hover();
   await expect(flyout).toHaveCount(1);
   await expect(flyout).toContainText("MCP Hub");
 
   // Hover must not steal focus, so the keyboard walk starts from the category itself.
-  await category("Systems").focus();
+  await category("Platform").focus();
   await page.keyboard.press("ArrowDown");
   await expect(flyout.getByRole("link", { name: "WA/TG Bot" })).toBeFocused();
   await page.keyboard.press("ArrowDown");

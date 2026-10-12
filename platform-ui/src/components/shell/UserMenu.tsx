@@ -53,6 +53,9 @@ export function UserMenu({ name, secondary, initials, compact = false, clientVie
         className="erp-side__user erp-usermenu__trigger"
         aria-haspopup="menu"
         aria-expanded={open}
+        // Compact (top bar) shows the avatar only, so the name is hidden from the accessibility tree
+        // by CSS and the button would be announced as just the initials.
+        aria-label={compact ? name : undefined}
         onClick={() => setOpen((v) => !v)}
       >
         <div className="erp-side__avatar">{initials}</div>
