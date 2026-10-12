@@ -88,6 +88,10 @@ interface GithubLedgerBase {
   /** WSK-D65: a dispatch authorised by something other than `github_repo . deploy` says so, on all three rows of the attempt
    *  (`metadata.basis`, `metadata.ruling`). Absent for every other caller: the keys are then omitted, so existing rows are byte-identical. */
   basis?: { kind: string; ruling: string };
+  /** M6-P4g: the org Actions secret a `secret_write` changed repository access to (its NAME, never a value). Recorded in
+   *  `metadata.secretName` on all three rows. Absent for every other caller: the key is then omitted, so existing rows
+   *  are byte-identical. */
+  secretName?: string;
 }
 
 /** Discriminated on `action`: `attribution` is REQUIRED for `push`/`merge` (the two commit-producing
@@ -124,6 +128,7 @@ function baseMetadata(req: GithubLedgerRequest, correlationId?: string): Record<
     ref: req.ref ?? null,
     ...(req.approvalId ? { approvalId: req.approvalId } : {}),
     ...(req.basis ? { basis: req.basis.kind, ruling: req.basis.ruling } : {}),
+    ...(req.secretName ? { secretName: req.secretName } : {}),
     ...(correlationId ? { correlationId } : {}),
     attribution: req.attribution ? { name: req.attribution.name, email: req.attribution.email } : null,
   };

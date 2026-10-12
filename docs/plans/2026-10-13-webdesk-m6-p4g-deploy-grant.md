@@ -29,9 +29,39 @@ O-3). Measured 2026-10-12: the live installation has repository `secrets: write`
 answers 403 "Resource not accessible by integration", which the ERP reports as
 `github_permission_missing: organization_secrets` (503), recorded on the site, never a generic 500.
 
+## Amendment from M6-P6a (2026-10-13): two kinds of deploy secret
+
+P6's credential model is one deploy principal per site and environment, locked to one document root. Its CI copy is an
+org Actions secret created BY HAND by an org owner, with visibility limited to exactly that site's repo. A shared
+account-wide secret would give every granted repo write access to every document root (and the staging account also
+carries live client WordPress). So a grant covers:
+
+1. **the fixed list**, `WEBDESK_DEPLOY_SECRET_NAMES` (default `WEBDESK_DEPLOY_GRANT`, the marker the templates check);
+2. **one per-site secret**, named by ONE function, `siteDeploySecretName()` in `modules/webdev/deploy-grant.ts`:
+
+   ```
+   WEBDESK_DEPLOY_<SLUG>_<ENV>_<H8>        e.g. WEBDESK_DEPLOY_ACME_SITE_STAGING_1A2B3C4D
+   ```
+
+   `<SLUG>` is the provisioned slug and `<ENV>` the registry row's `environment` (provisioned rows are `staging`), each
+   uppercased with every non-alphanumeric character turned into `_`. **The readable part alone can collide**: slugs are
+   unique only per company (`ux_wps_slug` is `(tenant_id, slug)`) while org secret names are org-wide, and the `_`
+   mapping merges slugs that differ only by `-` versus `_`. So `<H8>`, the first 8 hex of sha256(the provisioned
+   site's id), is part of the name: it is the identity. The derived name is recorded on the row at claim
+   (`deploy_grant_site_secret_name`), re-derived and compared under the lock, and only ever PUT with this site's own
+   repository id. No caller supplies it, so no other site's grant can name it.
+
+**A secret that does not exist yet (404) is not an error.** The grant is recorded as `pending`, the name goes into
+`deploy_grant_pending_names` and the answer's `pending`, `deploy_grant_error` stays empty, and a later run (the POST
+route, or the next scaffold re-submit, which is never short-circuited while `pending`) completes it once the owner has
+created the secret. Until P6, every site therefore rests at `pending` with its per-site name listed, while the fixed
+marker is already granted (so the template's "Require deploy grant" step passes). Authorization and the GitHub calls are
+unchanged: the same `GET` metadata, `PUT` and `DELETE …/repositories/{id}` per name.
+
 ## Conditions, checked fresh at every grant
 
-All are re-derived at grant time; none is trusted from the caller. The first failure is the answer, as a typed token.
+All are re-derived at grant time; none is trusted from the caller. Each failure is a typed token; the site's own facts
+(rows 2 to 5 and 7) are checked before the repo is resolved (rows 3 and 6), then the lock (8 to 10).
 
 | # | Condition | Token |
 |---|---|---|
@@ -52,7 +82,7 @@ Per secret (reported per name, never a crash):
 
 | GitHub answer | Result |
 |---|---|
-| `GET` secret 404 | `missing`: the owner has not created it. The grant stays `pending`, error `deploy_grant_secret_missing: <names>` |
+| `GET` secret 404 | `missing`: the owner has not created it YET. Not an error: the grant stays `pending` and the name is listed in `deploy_grant_pending_names` / the answer's `pending` |
 | `GET` secret, visibility `all` or `private` | `not_selected`: NOT written. A secret visible to all private repos voids the gate, so this is reported loudly: `deploy_grant_secret_not_selected: <names>` |
 | `PUT` 204 | `granted` |
 | `PUT` 409 | `not_selected` (the visibility changed between the read and the write) |
@@ -74,9 +104,11 @@ revoked ──[operator POST only]──> pending ──> granted
   approval, `basis: deploy-gate-grant / WSK-D29`, `secretName`). The names that landed are recorded even when a later
   name fails, so a partial grant is visible and a re-run completes it (GitHub's PUT is idempotent). All names granted:
   `granted`, `deploy_grant_granted_at`, error cleared, event `webdev.site.deploy_granted`.
+- `deploy_grant_site_secret_name` is the per-site name (amendment above); `deploy_grant_pending_names` the names not
+  created yet. `granted` means no name is pending.
 - `deploy_grant_secret_names` is the set the repo is known to hold. It only grows until a revoke: a name removed from the
   configuration is NOT forgotten, so a revoke still removes it.
-- **revoke** (under the lock): one `DELETE` per secret in configured ∪ recorded (`deploy-gate-revoke / WSK-D29`, with the
+- **revoke** (under the lock): one `DELETE` per secret in the fixed list ∪ recorded ∪ the per-site name (`deploy-gate-revoke / WSK-D29`, with the
   reason). 404 means nothing to revoke. Then `revoked`, `deploy_grant_revoked_at`, `_revoked_by`, `_revoke_reason`, the
   names cleared, event `webdev.site.deploy_revoked`. A 409 (the secret is visible to all repos) keeps the state and
   records `deploy_grant_secret_not_selected`, because "revoked" would then be false. A site the ERP never granted
@@ -163,9 +195,12 @@ Today a bypass can only be made by an org owner in GitHub's UI, outside the ERP,
    any non-empty marker; the template only checks that it is non-empty. Real deploy credentials (O-1, P6) are created
    the same way, with "Selected repositories", and their names added to `WEBDESK_DEPLOY_SECRET_NAMES`
    (comma-separated) in the platform's environment.
-3. Never set a deploy secret to "All repositories" or "Private repositories": that grants it to every repo and voids
+3. Per site, when P6 lands: create the per-site secret named exactly as the site's `deployGrant.siteSecretName` (also in
+   `pendingNames` and in the grant answer's `pending`), with "Selected repositories" = that site's repo only. Then
+   re-drive the grant (step 5); it completes from `pending` to `granted`.
+4. Never set a deploy secret to "All repositories" or "Private repositories": that grants it to every repo and voids
    the gate. The ERP refuses to grant through such a secret and reports `deploy_grant_secret_not_selected`.
-4. Then re-drive each site already scaffolded: `POST …/provisioned-sites/:id/deploy-grant`.
+5. Then re-drive each site already scaffolded: `POST …/provisioned-sites/:id/deploy-grant`.
 
 ## Out of scope / follow-ups
 
@@ -174,3 +209,5 @@ Today a bypass can only be made by an org owner in GitHub's UI, outside the ERP,
 - Wiring the grant into the hourly `reconcile` resume path, so pending grants heal on their own once O-3 is granted.
 - The archive path itself, which must call `revokeDeployForSite()`.
 - ai-agents' `ScaffoldCommitReply` type may name the additive `deployGrant` field (it already passes through untouched).
+- A check that the per-site secret's selected repositories hold no OTHER repo (an owner's mistake at creation), via
+  `GET …/secrets/{name}/repositories`. Not built: the amendment kept the GitHub calls unchanged.

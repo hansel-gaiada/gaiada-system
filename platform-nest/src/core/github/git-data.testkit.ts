@@ -10,6 +10,12 @@
 //   * GitHub's error shape: `GithubApiError` with `detail.httpStatus`.
 // Fault injection: `beforeRequest` runs before a request touches state (a request that never arrived), `afterRequest`
 // after (the answer was lost), and `corruptNextBlobSha` returns a wrong blob sha once.
+//
+// M6-P4g adds the deploy gate's calls: the repo's numeric `id`, the contents API (`GET …/contents/<path>?ref=<sha>`,
+// base64 wrapped at 60 columns like GitHub), and the org Actions secrets' selected-repository lists under
+// `/orgs/<owner>/actions/secrets/<name>[/repositories/<id>]`: a missing secret is 404, a secret whose visibility is not
+// `selected` is 409 on PUT/DELETE, and `orgSecretsPermission = false` answers every org-secret call with GitHub's 403
+// "Resource not accessible by integration" (the App without `organization_secrets`, O-3).
 import { createHash } from "node:crypto";
 import { GithubApiError } from "./errors";
 import { gitBlobSha, type GitCaller } from "./git-data";
@@ -31,6 +37,11 @@ export interface FakeCommit {
 
 export type FakeFile = string | { content?: string; mode?: string; type?: "blob" | "commit"; sha?: string };
 
+export interface FakeOrgSecret {
+  visibility: "all" | "private" | "selected";
+  repos: Set<number>;
+}
+
 export interface RecordedCall {
   method: string;
   path: string;
@@ -50,6 +61,12 @@ export class FakeGithub {
   beforeRequest?: (method: string, path: string) => void;
   afterRequest?: (method: string, path: string) => void;
   corruptNextBlobSha = false;
+  /** GitHub's numeric id for this repo (the org-secret endpoints take it). */
+  repoId = 424242;
+  /** org Actions secrets by name: only their visibility and selected repositories (the fake holds no value either). */
+  readonly orgSecrets = new Map<string, FakeOrgSecret>();
+  /** false: the App lacks `organization_secrets`; every org-secret call is GitHub's 403. */
+  orgSecretsPermission = true;
 
   constructor(
     readonly owner = "acme-org",
@@ -70,6 +87,22 @@ export class FakeGithub {
     const base = this.trees.get(this.commits.get(head)!.tree)!;
     const tree = this.putTree(base, files);
     const sha = this.putCommit({ tree, parents: [head], message: "human edit", author: { name: "dev" }, committer: { name: "dev" } });
+    this.refs.set(branch, sha);
+    return sha;
+  }
+
+  /** An org secret the owner created (visibility `selected` and no repository, unless said otherwise). */
+  addOrgSecret(name: string, visibility: FakeOrgSecret["visibility"] = "selected", repos: number[] = []): void {
+    this.orgSecrets.set(name, { visibility, repos: new Set(repos) });
+  }
+
+  /** A human commit that deletes paths from the branch head. Returns its sha. */
+  pushHumanDeletion(paths: string[], branch = this.defaultBranch): string {
+    const head = this.refs.get(branch) as string;
+    const flat = new Map(this.trees.get(this.commits.get(head)!.tree)!);
+    for (const p of paths) flat.delete(p);
+    const tree = this.storeTree(flat);
+    const sha = this.putCommit({ tree, parents: [head], message: "human delete", author: { name: "dev" }, committer: { name: "dev" } });
     this.refs.set(branch, sha);
     return sha;
   }
@@ -155,11 +188,34 @@ export class FakeGithub {
 
   private handle(method: string, rawPath: string, body: Record<string, unknown> | undefined): { status: number; data: unknown } {
     const [path, query = ""] = rawPath.split("?");
+    const orgPrefix = `/orgs/${encodeURIComponent(this.owner)}/actions/secrets/`;
+    if (path.startsWith(orgPrefix)) return this.handleOrgSecret(method, rawPath, path.slice(orgPrefix.length));
     const prefix = `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.name)}`;
     if (path !== prefix && !path.startsWith(`${prefix}/`)) this.fail(method, rawPath, 404, "Not Found");
     const rest = path.slice(prefix.length);
 
-    if (method === "GET" && rest === "") return { status: 200, data: { full_name: `${this.owner}/${this.name}`, default_branch: this.defaultBranch } };
+    if (method === "GET" && rest === "") {
+      return { status: 200, data: { id: this.repoId, full_name: `${this.owner}/${this.name}`, default_branch: this.defaultBranch } };
+    }
+
+    const c = /^\/contents\/(.+)$/.exec(rest);
+    if (method === "GET" && c) {
+      const filePath = c[1].split("/").map(decodeURIComponent).join("/");
+      const ref = new URLSearchParams(query).get("ref") ?? this.defaultBranch;
+      const commitSha = this.commits.has(ref) ? ref : this.refs.get(ref);
+      const commit = commitSha ? this.commits.get(commitSha) : undefined;
+      if (!commit) this.fail(method, rawPath, 404, "No commit found for the ref");
+      const flat = this.trees.get(commit.tree)!;
+      const entry = flat.get(filePath);
+      if (!entry) {
+        const children = [...flat.keys()].filter((p) => p.startsWith(`${filePath}/`));
+        if (children.length === 0) this.fail(method, rawPath, 404, "Not Found");
+        return { status: 200, data: children.map((p) => ({ type: "file", path: p })) };
+      }
+      if (entry.type !== "blob" || entry.mode === "120000") return { status: 200, data: { type: entry.type === "commit" ? "submodule" : "symlink", path: filePath } };
+      const b64 = (this.blobs.get(entry.sha) ?? Buffer.alloc(0)).toString("base64").replace(/(.{60})/g, "$1\n");
+      return { status: 200, data: { type: "file", path: filePath, sha: entry.sha, encoding: "base64", content: b64 } };
+    }
 
     let m = /^\/git\/ref\/heads\/(.+)$/.exec(rest);
     if (method === "GET" && m) {
@@ -235,6 +291,30 @@ export class FakeGithub {
       return { status: 200, data: { ref: `refs/heads/${branch}`, object: { sha: next, type: "commit" } } };
     }
 
+    return this.fail(method, rawPath, 404, "Not Found");
+  }
+
+  private handleOrgSecret(method: string, rawPath: string, rest: string): { status: number; data: unknown } {
+    if (!this.orgSecretsPermission) this.fail(method, rawPath, 403, "Resource not accessible by integration");
+    const m = /^([^/]+)(?:\/repositories\/(\d+))?$/.exec(rest);
+    if (!m) this.fail(method, rawPath, 404, "Not Found");
+    const name = decodeURIComponent(m[1]);
+    const secret = this.orgSecrets.get(name);
+    if (!secret) this.fail(method, rawPath, 404, "Not Found");
+    if (m[2] === undefined) {
+      if (method !== "GET") this.fail(method, rawPath, 404, "Not Found");
+      return { status: 200, data: { name, visibility: secret.visibility, created_at: "2026-10-13T00:00:00Z", updated_at: "2026-10-13T00:00:00Z" } };
+    }
+    if (secret.visibility !== "selected") this.fail(method, rawPath, 409, "Conflict when visibility type not set to selected");
+    const id = Number(m[2]);
+    if (method === "PUT") {
+      secret.repos.add(id);
+      return { status: 204, data: undefined };
+    }
+    if (method === "DELETE") {
+      secret.repos.delete(id);
+      return { status: 204, data: undefined };
+    }
     return this.fail(method, rawPath, 404, "Not Found");
   }
 }

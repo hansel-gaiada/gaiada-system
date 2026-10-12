@@ -497,6 +497,19 @@ export function commitMessage(a: { snapshotId: string; siteId: string; fileCount
   );
 }
 
+/** `https://github.com/<owner>/<name>[.git][/]`, case-insensitive on owner and name (GitHub's own rule). */
+export function repoUrlNames(repoUrl: string, owner: string, name: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(repoUrl);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:" || u.hostname.toLowerCase() !== "github.com") return false;
+  const parts = u.pathname.replace(/\/+$/, "").replace(/\.git$/i, "").split("/").filter(Boolean);
+  return parts.length === 2 && parts[0].toLowerCase() === owner.toLowerCase() && parts[1].toLowerCase() === name.toLowerCase();
+}
+
 const repoName = (r: RepoRef): string => `${r.owner}/${r.name}`;
 
 /**

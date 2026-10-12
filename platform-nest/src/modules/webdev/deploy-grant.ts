@@ -1,0 +1,583 @@
+// M6-P4g — the deploy gate is the org secret grant. Design: docs/plans/2026-10-13-webdesk-m6-p4g-deploy-grant.md (read it
+// first: the conditions, the state, the trigger, the authorization decision, the live dependency on O-3).
+//
+// This file is the CONDITIONS and the STATE MACHINE, written against ports so it runs without a database
+// (deploy-grant.unit.test.ts, against the in-memory GitHub of core/github/git-data.testkit.ts).
+// `deploy-grant.service.ts` binds the ports to Postgres, the ERP App and the ledger, and authorizes.
+//
+// ═══ WHAT A GRANT IS ═════════════════════════════════════════════════════════════════════════════════
+// The repo is added to each configured org Actions secret's "selected repositories" list
+// (`PUT /orgs/{org}/actions/secrets/{name}/repositories/{repo_id}`), so its own workflows may READ the secret. The ERP never
+// holds, reads or writes a secret VALUE (WSK-D29); core/github/org-secrets.ts has no function that could.
+//
+// ═══ THE CONDITIONS (re-derived at every grant; nothing is trusted from the caller) ═══════════════════
+//   the site is an ERP repo control row · §08 completion is `complete` (the pin exists) · its `webdev_sites` row exists,
+//   is live and `provisioned` · P4b2's scaffold is `committed` · the repo is the one GH-12 created for it · the registry
+//   row names that repo · the default branch's head carries a root CONTRACT.lock that parses (P4b2's parser) and names the
+//   PINNED snapshot (P4b2's check). The site facts are read again under the lock immediately before any GitHub write.
+//
+// ═══ THE STATE MACHINE (webdev_provisioned_sites.deploy_grant_state; migration 202610130100) ═════════════
+//
+//   NULL ──[claim]──> pending ──[every secret granted]──> granted
+//   pending | granted ──[revoke]──> revoked          revoked ──[operator only]──> pending ──> granted
+//
+//   claim    under the site lock, in its OWN transaction, committed before any write to GitHub: the snapshot the lock
+//            names, the repository id, the head the lock was read at, the requester. Once a PUT may have landed, the row
+//            already says `pending`, so a crash can never leave a grant the ERP does not know about.
+//   grant    a second transaction under the same lock (a grant and a revoke never interleave): one PUT per secret, each
+//            ledgered. The names that landed are recorded even when a later one fails, so a re-run completes a partial
+//            grant (GitHub's PUT is idempotent). `deploy_grant_secret_names` only grows until a revoke.
+//   revoke   under the lock: one DELETE per secret in the fixed list ∪ recorded ∪ the per-site name. A 404 means nothing
+//            to revoke.
+//
+// ═══ TWO KINDS OF SECRET (the M6-P6a amendment) ═════════════════════════════════════════════════════
+//   1. the fixed list, `WEBDESK_DEPLOY_SECRET_NAMES` (default `WEBDESK_DEPLOY_GRANT`, the marker the templates check);
+//   2. ONE per-site secret, `siteDeploySecretName()`: P6's deploy principal for this site and environment, locked to one
+//      document root, whose CI copy an org owner creates BY HAND with visibility limited to this site's repo. Its name
+//      is derived from the site alone and recorded on the row, so no other site's grant can ever name it.
+//
+// A secret that does not exist YET (404) is not an error: the grant stays `pending`, the name is listed as pending on
+// the row and in the answer, and the next grant run (the route, or the next trigger) completes it once the owner has
+// created it. A secret not set to "selected repositories" IS an error (a secret visible to every repo voids the gate),
+// recorded and never written through. A missing App permission (O-3) stops the whole grant as
+// `github_permission_missing: organization_secrets`.
+//
+// The automatic trigger (after the scaffold commit) never re-grants a `revoked` site: only an operator's POST undoes an
+// operator's revoke.
+import { createHash } from "node:crypto";
+import { getBranchHead, type GitCaller, type RepoRef } from "../../core/github/git-data";
+import {
+  addRepoToOrgSecret, getFileAtRef, getOrgSecret, getRepoInfo, isValidSecretName, removeRepoFromOrgSecret,
+  type OrgSecretVisibility, type SecretAccessResult,
+} from "../../core/github/org-secrets";
+import {
+  CONTRACT_LOCK_PATH, ScaffoldRefusal, checkLockAgainstPin, parseContractLock, repoUrlNames, type ContractLock, type SnapshotFacts,
+} from "./scaffold-commit";
+
+export const DEFAULT_DEPLOY_SECRET_NAMES: readonly string[] = ["WEBDESK_DEPLOY_GRANT"];
+export const REVOKE_REASON_MIN = 8;
+export const REVOKE_REASON_MAX = 500;
+
+// ── refusals ────────────────────────────────────────────────────────────────────────────────────────
+
+/** Every typed reason a grant or a revoke can be refused, with the HTTP status the route answers. */
+export const DEPLOY_GRANT_REFUSALS = {
+  deploy_grant_not_configured: 503,
+  deploy_grant_reason_required: 422,
+  // the site, the registry, the repo (409)
+  deploy_grant_repo_unresolved: 409,
+  deploy_grant_site_not_complete: 409,
+  deploy_grant_no_registry_row: 409,
+  deploy_grant_registry_mismatch: 409,
+  deploy_grant_not_committed: 409,
+  deploy_grant_no_lock: 409,
+  deploy_grant_lock_invalid: 409,
+  deploy_grant_lock_mismatch: 409,
+  deploy_grant_superseded: 409,
+  // the far side
+  github_permission_missing: 503,
+  github_app_not_installed: 503,
+  github_not_configured: 503,
+  github_org_unavailable: 503,
+  github_rate_limited: 429,
+  github_request_failed: 502,
+  not_found: 404,
+} as const;
+export type DeployGrantRefusalCode = keyof typeof DEPLOY_GRANT_REFUSALS;
+
+export class DeployGrantRefusal extends Error {
+  readonly status: number;
+  constructor(
+    readonly code: DeployGrantRefusalCode,
+    readonly detail: string,
+    /** A short qualifier recorded with the token on the row, e.g. `organization_secrets` or a secret name. */
+    readonly qualifier?: string,
+  ) {
+    super(`${code}: ${detail}`);
+    this.name = "DeployGrantRefusal";
+    this.status = DEPLOY_GRANT_REFUSALS[code];
+  }
+
+  /** What `deploy_grant_error` records: the token, and its qualifier when there is one. Never a response body. */
+  get rowToken(): string {
+    return this.qualifier ? `${this.code}: ${this.qualifier}` : this.code;
+  }
+}
+
+const refuse = (code: DeployGrantRefusalCode, detail: string, qualifier?: string): never => {
+  throw new DeployGrantRefusal(code, detail, qualifier);
+};
+
+// ── configuration ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `WEBDESK_DEPLOY_SECRET_NAMES`: comma-separated org Actions secret NAMES. Empty means the default. Every name must be a
+ * valid GitHub secret name and may appear once; anything else refuses (an operator typo must not silently grant less).
+ */
+export function parseDeploySecretNames(raw: string | undefined | null): string[] {
+  const text = (raw ?? "").trim();
+  if (!text) return [...DEFAULT_DEPLOY_SECRET_NAMES];
+  const names = text.split(",").map((s) => s.trim());
+  const seen = new Set<string>();
+  for (const n of names) {
+    if (!isValidSecretName(n)) {
+      refuse("deploy_grant_not_configured", `WEBDESK_DEPLOY_SECRET_NAMES holds ${JSON.stringify(n)}, which is not a GitHub secret name`);
+    }
+    if (seen.has(n.toUpperCase())) refuse("deploy_grant_not_configured", `WEBDESK_DEPLOY_SECRET_NAMES names ${n} twice`);
+    seen.add(n.toUpperCase());
+  }
+  return names;
+}
+
+/**
+ * THE per-site deploy secret's name (P6: one deploy principal per site and environment, locked to one document root).
+ *
+ *   WEBDESK_DEPLOY_<SLUG>_<ENV>_<H8>      e.g. WEBDESK_DEPLOY_ACME_SITE_STAGING_1A2B3C4D
+ *
+ * `<SLUG>` and `<ENV>` are uppercased with every non-alphanumeric run kept as `_` per character (readable for the owner
+ * who creates the secret by hand). That readable part ALONE CAN COLLIDE: slugs are unique only per company
+ * (`ux_wps_slug` is `(tenant_id, slug)`) while org secret names are org-wide, and any mapping of `-`/`_` to `_` merges
+ * slugs that differ only there. So `<H8>`, the first 8 hex of sha256(the provisioned site's id), uppercased, is part of
+ * the name: it is the identity, and two sites can only share a name if their ids share a 32-bit hash prefix, which a
+ * grant additionally never acts on (each site only ever PUTs its OWN repo id into its OWN derived name).
+ */
+export function siteDeploySecretName(site: { id: string; slug: string; environment: string }): string {
+  const part = (v: string): string => v.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const slug = part(site.slug.trim());
+  const env = part(site.environment.trim());
+  if (!slug || !env) throw new Error("a per-site deploy secret needs a slug and an environment");
+  const h8 = createHash("sha256").update(site.id.trim().toLowerCase()).digest("hex").slice(0, 8).toUpperCase();
+  const name = `WEBDESK_DEPLOY_${slug}_${env}_${h8}`;
+  if (!isValidSecretName(name)) throw new Error(`derived an invalid secret name: ${name}`);
+  return name;
+}
+
+// ── the row and the ports ───────────────────────────────────────────────────────────────────────────
+
+export type DeployGrantState = "pending" | "granted" | "revoked";
+
+export interface DeployGrantRow {
+  id: string;
+  tenantId: string;
+  slug: string;
+  provider: string;
+  providerRef: string | null;
+  status: string;
+  repoUrl: string | null;
+  completionState: string | null;
+  contractSnapshotId: string | null;
+  webdevSiteId: string | null;
+  scaffoldState: string | null;
+  grantState: DeployGrantState | null;
+  /** The secrets the repo is known to hold access to ([] when none). */
+  grantSecretNames: string[];
+  grantSnapshotId: string | null;
+  grantRepositoryId: number | null;
+  grantHeadSha: string | null;
+  grantError: string | null;
+  /** The per-site secret's derived name, recorded at claim (`siteDeploySecretName`). */
+  grantSiteSecretName: string | null;
+  /** Names the owner has not created yet (404): the grant completes when they exist. [] when none. */
+  grantPendingNames: string[];
+}
+
+/** The linked `webdev_sites` row, as the conditions need it. */
+export interface RegistryFacts {
+  id: string;
+  deleted: boolean;
+  origin: string;
+  repoUrl: string | null;
+  /** `webdev_sites.environment`: the `<ENV>` of the per-site secret. */
+  environment: string;
+}
+
+export interface GrantClaim {
+  snapshotId: string;
+  repositoryId: number;
+  headSha: string;
+  requestedBy: string;
+  siteSecretName: string;
+}
+
+/** One transaction holding the site's provisioning lock. */
+export interface DeployGrantTx {
+  read(): Promise<DeployGrantRow | null>;
+  readRegistry(webdevSiteId: string): Promise<RegistryFacts | null>;
+  /** NULL | revoked -> pending (names cleared on a fresh claim); pending | granted keep their state, facts refreshed. */
+  claim(c: GrantClaim): Promise<void>;
+  /** The secrets the repo is known to hold, without a state change (a partial grant or revoke). */
+  recordSecretNames(names: string[]): Promise<void>;
+  /** The names still waiting for the owner (404), and the error (null when the only shortfall is waiting). */
+  recordPending(pending: string[], error: string | null): Promise<void>;
+  /** pending | granted -> granted, with these names; clears the error and the pending names. */
+  markGranted(names: string[]): Promise<void>;
+  /** pending | granted | revoked -> revoked; names cleared. */
+  markRevoked(r: { reason: string; revokedBy: string; repositoryId: number; revokedNames: string[] }): Promise<void>;
+  recordError(token: string): Promise<void>;
+}
+
+export interface DeployGrantDeps {
+  withLockedSite<T>(fn: (tx: DeployGrantTx) => Promise<T>): Promise<T>;
+  readSnapshot(snapshotId: string): Promise<SnapshotFacts | null>;
+  /** The repo GH-12 created for this row, or null when it cannot be proven. */
+  resolveRepo(row: DeployGrantRow): Promise<RepoRef | null>;
+  /** The ERP App (production: `erpGitCaller`). */
+  git: GitCaller;
+  /** The configured FIXED deploy secret names (`parseDeploySecretNames`). The per-site one is derived, never configured. */
+  secretNames: string[];
+  /** Wraps one org-secret write in the activities ledger (`github.secret_write`). */
+  ledger<T>(op: "grant" | "revoke", target: { repo: RepoRef; secretName: string }, perform: () => Promise<T>): Promise<T>;
+  actor: { userId: string };
+  /** Maps a far-side error to a typed refusal (recorded on the row); null leaves it unrecorded and rethrown. */
+  classifyError?(err: unknown): DeployGrantRefusal | null;
+}
+
+export interface SecretOutcome {
+  name: string;
+  result: SecretAccessResult;
+}
+
+export interface DeployGrantResult {
+  /** granted: every secret is granted · already_granted: the scaffold re-submit found it granted, no GitHub call ·
+   *  pending: every secret that exists is granted, the ones named in `pending` do not exist yet (not an error) ·
+   *  partial: some secret is not set to "selected repositories" (an error, recorded) · skipped_revoked: the automatic
+   *  trigger found an operator's revoke and left it. */
+  outcome: "granted" | "already_granted" | "pending" | "partial" | "skipped_revoked";
+  siteId: string;
+  /** This site's derived per-site secret name (null only when the site was refused before it could be derived). */
+  siteSecretName: string | null;
+  /** Secret names the owner has not created yet. */
+  pending: string[];
+  state: DeployGrantState | null;
+  repo: string | null;
+  repositoryId: number | null;
+  snapshotId: string | null;
+  headSha: string | null;
+  secrets: SecretOutcome[];
+  error: string | null;
+}
+
+export interface DeployRevokeResult {
+  /** revoked: recorded · not_granted: the ERP never granted this site (swept anyway, nothing recorded) · partial: a
+   *  secret is visible to all repos, so the repo still reads it (named in `secrets`). */
+  outcome: "revoked" | "not_granted" | "partial";
+  siteId: string;
+  state: DeployGrantState | null;
+  repo: string;
+  repositoryId: number;
+  secrets: SecretOutcome[];
+  error: string | null;
+}
+
+// ── the conditions ──────────────────────────────────────────────────────────────────────────────────
+
+/** The site's own facts (before the repo is resolved). Throws the first refusal. */
+export function checkSiteConditions(row: DeployGrantRow, registry: RegistryFacts | null): void {
+  if (row.provider !== "erp_repo" || !row.providerRef) {
+    return refuse("deploy_grant_repo_unresolved", "only a repo created by ERP repo control (GH-12) is granted deploy access");
+  }
+  if (row.completionState !== "complete" || !row.contractSnapshotId) {
+    return refuse("deploy_grant_site_not_complete", `provisioning is not complete (state: ${row.completionState ?? "none"})`);
+  }
+  if (row.status !== "provisioned" && row.status !== "live") return refuse("deploy_grant_site_not_complete", `the repo step is ${row.status}`);
+  if (!row.repoUrl) return refuse("deploy_grant_repo_unresolved", "the provisioned row has no repo_url");
+  if (!row.webdevSiteId || !registry || registry.deleted) {
+    return refuse("deploy_grant_no_registry_row", "the site has no live webdev_sites row: an unregistered repo is never granted deploy access");
+  }
+  if (registry.origin !== "provisioned") {
+    return refuse("deploy_grant_no_registry_row", `the linked webdev_sites row has origin ${registry.origin}, not provisioned`);
+  }
+  if (row.scaffoldState !== "committed") {
+    return refuse("deploy_grant_not_committed", `the scaffold's first fill is not committed (state: ${row.scaffoldState ?? "none"})`);
+  }
+}
+
+/** The registry row must name the repo GH-12 created. */
+export function checkRegistryNamesRepo(registry: RegistryFacts, repo: RepoRef): void {
+  if (!registry.repoUrl || !repoUrlNames(registry.repoUrl, repo.owner, repo.name)) {
+    refuse("deploy_grant_registry_mismatch", `the webdev_sites row does not name ${repo.owner}/${repo.name}`);
+  }
+}
+
+/** The lock at the head: present, well-formed, and naming the pinned snapshot. Returns it. */
+export function checkLockBytes(bytes: Buffer | null, pinned: SnapshotFacts | null, where: string): ContractLock {
+  if (!bytes) return refuse("deploy_grant_no_lock", `${where} carries no ${CONTRACT_LOCK_PATH} at its root`);
+  let lock: ContractLock;
+  try {
+    lock = parseContractLock(bytes);
+  } catch (err) {
+    if (err instanceof ScaffoldRefusal) return refuse("deploy_grant_lock_invalid", `${where}: ${err.detail}`);
+    throw err;
+  }
+  if (!pinned) return refuse("deploy_grant_lock_mismatch", "the site's pinned snapshot is not readable");
+  try {
+    checkLockAgainstPin(lock, pinned);
+  } catch (err) {
+    if (err instanceof ScaffoldRefusal) return refuse("deploy_grant_lock_mismatch", `${where}: ${err.detail}`);
+    throw err;
+  }
+  return lock;
+}
+
+const repoName = (r: RepoRef): string => `${r.owner}/${r.name}`;
+const union = (a: readonly string[], b: readonly string[]): string[] => [...new Set([...a, ...b])];
+
+/** The row token for secrets not set to "selected repositories" (an error), or null. A missing secret is NOT an error:
+ *  it is listed as pending instead. */
+export function shortfallToken(short: readonly SecretOutcome[]): string | null {
+  const notSelected = short.filter((s) => s.result === "not_selected").map((s) => s.name);
+  return notSelected.length ? `deploy_grant_secret_not_selected: ${notSelected.join(",")}` : null;
+}
+
+/** The reason an operator gives for a revoke: required, trimmed, 8 to 500 characters. */
+export function parseRevokeReason(body: unknown): string {
+  const b = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  const reason = typeof b.reason === "string" ? b.reason.trim() : "";
+  if (reason.length < REVOKE_REASON_MIN || reason.length > REVOKE_REASON_MAX) {
+    refuse("deploy_grant_reason_required", `a revoke needs a reason of ${REVOKE_REASON_MIN} to ${REVOKE_REASON_MAX} characters`);
+  }
+  return reason;
+}
+
+// ── the grant ───────────────────────────────────────────────────────────────────────────────────────
+
+export interface GrantRequest {
+  siteId: string;
+  /** scaffold: the automatic follow-on of the scaffold commit · operator: the explicit POST (re-checks and re-grants). */
+  trigger: "scaffold" | "operator";
+}
+
+/**
+ * Grant the site's repo READ access to every configured deploy secret, once every condition holds. Safe to call again at
+ * any point (a crash, a partial grant, a lost answer): it completes what is missing. Throws `DeployGrantRefusal`.
+ */
+export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantRequest): Promise<DeployGrantResult> {
+  const fixedNames = deps.secretNames;
+  if (fixedNames.length === 0) refuse("deploy_grant_not_configured", "no deploy secret names are configured");
+
+  const first = await deps.withLockedSite(async (tx) => {
+    const row = await tx.read();
+    return { row, registry: row?.webdevSiteId ? await tx.readRegistry(row.webdevSiteId) : null };
+  });
+  const row0 = first.row;
+  if (!row0) return refuse("not_found", "provisioned site not found");
+
+  const result = (row: DeployGrantRow, outcome: DeployGrantResult["outcome"], repo: RepoRef | null, secrets: SecretOutcome[]): DeployGrantResult => ({
+    outcome,
+    siteId: row.id,
+    siteSecretName: row.grantSiteSecretName,
+    pending: row.grantPendingNames,
+    state: row.grantState,
+    repo: repo ? repoName(repo) : null,
+    repositoryId: row.grantRepositoryId,
+    snapshotId: row.grantSnapshotId,
+    headSha: row.grantHeadSha,
+    secrets,
+    error: row.grantError,
+  });
+
+  // An operator's revoke is never undone by the automatic path.
+  if (req.trigger === "scaffold" && row0.grantState === "revoked") return result(row0, "skipped_revoked", null, []);
+
+  const recordAndThrow = async (err: unknown): Promise<never> => {
+    const typed = err instanceof DeployGrantRefusal ? err : (deps.classifyError?.(err) ?? null);
+    if (typed && typed.code !== "not_found") {
+      await deps.withLockedSite(async (tx) => {
+        if (await tx.read()) await tx.recordError(typed.rowToken);
+      });
+    }
+    throw typed ?? err;
+  };
+
+  try {
+    checkSiteConditions(row0, first.registry);
+    const repo = await deps.resolveRepo(row0);
+    if (!repo) return refuse("deploy_grant_repo_unresolved", "the GH-12 repo for this site could not be proven (approval, org or repo_url disagree)");
+    const registry0 = first.registry as RegistryFacts;
+    checkRegistryNamesRepo(registry0, repo);
+    // The fixed list, then THIS site's own per-site secret (derived from the site, never from the caller).
+    const siteSecretName = siteDeploySecretName({ id: row0.id, slug: row0.slug, environment: registry0.environment });
+    const names = [...new Set([...fixedNames, siteSecretName])];
+
+    // The scaffold job re-submitting the same tree: already granted for these names and this pin, nothing to do.
+    if (
+      req.trigger === "scaffold" && row0.grantState === "granted" && row0.grantSnapshotId === row0.contractSnapshotId
+      && row0.grantSiteSecretName === siteSecretName && names.every((n) => row0.grantSecretNames.includes(n))
+    ) {
+      return result(row0, "already_granted", repo, names.map((name) => ({ name, result: "granted" as const })));
+    }
+
+    // Fresh reads at GitHub: which repo (its id), its default branch's head, the lock at that head.
+    const info = await getRepoInfo(deps.git, repo);
+    const head = await getBranchHead(deps.git, repo, info.defaultBranch);
+    if (!head) return refuse("deploy_grant_no_lock", `the default branch ${info.defaultBranch} does not exist`);
+    const where = `${info.defaultBranch}@${head.slice(0, 12)}`;
+    const lockBytes = await getFileAtRef(deps.git, repo, CONTRACT_LOCK_PATH, head);
+    const pinned = await deps.readSnapshot(row0.contractSnapshotId as string);
+    const lock = checkLockBytes(lockBytes, pinned, where);
+
+    // Each secret's metadata (never its value), before any write: a missing App permission stops everything here.
+    const visibility = new Map<string, OrgSecretVisibility | "unknown" | null>();
+    for (const name of names) visibility.set(name, (await getOrgSecret(deps.git, repo.owner, name))?.visibility ?? null);
+
+    // CLAIM: its own transaction, committed before any write, the site facts re-checked under the lock.
+    const claimed = await deps.withLockedSite(async (tx) => {
+      const r = await tx.read();
+      if (!r) return refuse("not_found", "provisioned site not found");
+      if (req.trigger === "scaffold" && r.grantState === "revoked") return null;
+      const reg = r.webdevSiteId ? await tx.readRegistry(r.webdevSiteId) : null;
+      checkSiteConditions(r, reg);
+      if (r.providerRef !== row0.providerRef || r.repoUrl !== row0.repoUrl || reg?.environment !== registry0.environment) {
+        return refuse("deploy_grant_superseded", "the site's repo changed while the grant was being checked");
+      }
+      if (r.contractSnapshotId !== lock.snapshotId) {
+        return refuse("deploy_grant_lock_mismatch", `the site's pin moved to ${r.contractSnapshotId} while the grant was being checked`);
+      }
+      await tx.claim({ snapshotId: lock.snapshotId, repositoryId: info.id, headSha: head, requestedBy: deps.actor.userId, siteSecretName });
+      return tx.read();
+    });
+    if (claimed === null) return result(row0, "skipped_revoked", repo, []);
+
+    // GRANT: under the lock, so a revoke cannot interleave. Per-name answers are data; a thrown error stops the loop.
+    const done = await deps.withLockedSite(async (tx) => {
+      const r = await tx.read();
+      if (!r) return refuse("not_found", "provisioned site not found");
+      if (r.grantState === "revoked" || r.grantRepositoryId !== info.id || r.grantSiteSecretName !== siteSecretName) {
+        return refuse("deploy_grant_superseded", "the grant was revoked or re-claimed while this one was being written");
+      }
+      const secrets: SecretOutcome[] = [];
+      const landed: string[] = [];
+      let failure: unknown = null;
+      for (const name of names) {
+        const v = visibility.get(name);
+        if (v === null) {
+          secrets.push({ name, result: "missing" });
+          continue;
+        }
+        if (v !== "selected") {
+          // "all" or "private" makes the secret readable by every (private) repo: writing through it would void the gate.
+          secrets.push({ name, result: "not_selected" });
+          continue;
+        }
+        try {
+          const res = await deps.ledger("grant", { repo, secretName: name }, () => addRepoToOrgSecret(deps.git, repo.owner, name, info.id));
+          secrets.push({ name, result: res });
+          if (res === "granted") landed.push(name);
+        } catch (err) {
+          failure = err;
+          break;
+        }
+      }
+      const held = union(r.grantSecretNames, landed);
+      if (failure !== null) {
+        // What landed is recorded (this transaction commits); the error is recorded by recordAndThrow.
+        await tx.recordSecretNames(held);
+        return { failure, secrets, row: null };
+      }
+      const short = secrets.filter((s) => s.result !== "granted");
+      if (short.length === 0) {
+        await tx.markGranted(held);
+      } else {
+        await tx.recordSecretNames(held);
+        await tx.recordPending(secrets.filter((s) => s.result === "missing").map((s) => s.name), shortfallToken(short));
+      }
+      return { failure: null, secrets, row: await tx.read() };
+    });
+    if (done.failure !== null) throw done.failure;
+    const row = done.row as DeployGrantRow;
+    const outcome = done.secrets.every((s) => s.result === "granted")
+      ? "granted"
+      : done.secrets.some((s) => s.result === "not_selected") ? "partial" : "pending";
+    return result(row, outcome, repo, done.secrets);
+  } catch (err) {
+    return recordAndThrow(err);
+  }
+}
+
+// ── the revoke ──────────────────────────────────────────────────────────────────────────────────────
+
+export interface RevokeRequest {
+  siteId: string;
+  reason: string;
+}
+
+/**
+ * Remove the site's repo from every deploy secret it may hold (fixed list ∪ recorded ∪ per-site). Idempotent. A site the ERP never
+ * granted is still swept (the DELETEs are harmless) but nothing is recorded. Throws `DeployGrantRefusal`.
+ */
+export async function revokeDeploySecrets(deps: DeployGrantDeps, req: RevokeRequest): Promise<DeployRevokeResult> {
+  const reason = req.reason.trim();
+  if (reason.length < REVOKE_REASON_MIN || reason.length > REVOKE_REASON_MAX) {
+    refuse("deploy_grant_reason_required", `a revoke needs a reason of ${REVOKE_REASON_MIN} to ${REVOKE_REASON_MAX} characters`);
+  }
+  const row0 = await deps.withLockedSite((tx) => tx.read());
+  if (!row0) return refuse("not_found", "provisioned site not found");
+
+  const recordAndThrow = async (err: unknown): Promise<never> => {
+    const typed = err instanceof DeployGrantRefusal ? err : (deps.classifyError?.(err) ?? null);
+    if (typed && typed.code !== "not_found") {
+      await deps.withLockedSite(async (tx) => {
+        if (await tx.read()) await tx.recordError(typed.rowToken);
+      });
+    }
+    throw typed ?? err;
+  };
+
+  try {
+    if (row0.provider !== "erp_repo" || !row0.providerRef) {
+      refuse("deploy_grant_repo_unresolved", "only a repo created by ERP repo control (GH-12) holds an ERP deploy grant");
+    }
+    const repo = await deps.resolveRepo(row0);
+    if (!repo) return refuse("deploy_grant_repo_unresolved", "the GH-12 repo for this site could not be proven (approval, org or repo_url disagree)");
+    const knownId = row0.grantRepositoryId ?? (await getRepoInfo(deps.git, repo)).id;
+
+    const done = await deps.withLockedSite(async (tx) => {
+      const r = await tx.read();
+      if (!r) return refuse("not_found", "provisioned site not found");
+      const repositoryId = r.grantRepositoryId ?? knownId;
+      // The fixed list, what the row recorded, and this site's own per-site secret (recorded, else derived now).
+      const reg = r.webdevSiteId ? await tx.readRegistry(r.webdevSiteId) : null;
+      const siteSecret = r.grantSiteSecretName ?? (reg ? siteDeploySecretName({ id: r.id, slug: r.slug, environment: reg.environment }) : null);
+      const names = union(union(deps.secretNames, r.grantSecretNames), siteSecret ? [siteSecret] : []);
+      let remaining = [...r.grantSecretNames];
+      const secrets: SecretOutcome[] = [];
+      let failure: unknown = null;
+      for (const name of names) {
+        try {
+          const res = await deps.ledger("revoke", { repo, secretName: name }, () => removeRepoFromOrgSecret(deps.git, repo.owner, name, repositoryId));
+          secrets.push({ name, result: res });
+          if (res === "revoked" || res === "missing") remaining = remaining.filter((n) => n !== name);
+        } catch (err) {
+          failure = err;
+          break;
+        }
+      }
+      if (failure !== null) {
+        if (r.grantState !== null) await tx.recordSecretNames(remaining);
+        return { failure, secrets, repositoryId, outcome: null, row: null };
+      }
+      if (r.grantState === null) return { failure: null, secrets, repositoryId, outcome: "not_granted" as const, row: r };
+      const stuck = secrets.filter((s) => s.result === "not_selected");
+      if (stuck.length > 0) {
+        await tx.recordSecretNames(remaining);
+        await tx.recordError(shortfallToken(stuck) as string);
+        return { failure: null, secrets, repositoryId, outcome: "partial" as const, row: await tx.read() };
+      }
+      await tx.markRevoked({ reason, revokedBy: deps.actor.userId, repositoryId, revokedNames: names });
+      return { failure: null, secrets, repositoryId, outcome: "revoked" as const, row: await tx.read() };
+    });
+    if (done.failure !== null) throw done.failure;
+    const row = done.row as DeployGrantRow;
+    return {
+      outcome: done.outcome as DeployRevokeResult["outcome"],
+      siteId: row.id,
+      state: row.grantState,
+      repo: repoName(repo),
+      repositoryId: done.repositoryId,
+      secrets: done.secrets,
+      error: row.grantError,
+    };
+  } catch (err) {
+    return recordAndThrow(err);
+  }
+}
