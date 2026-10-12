@@ -851,6 +851,63 @@ export function can(me: Me, cap: Capability, companyId?: string | null): boolean
   });
 }
 
+/*
+ * Unit-aware mirror (DW-1e). A MIRROR of the server, never the authority: Cerbos + Postgres RLS
+ * decide; this only answers "should the UI offer this". Company-wide `can()` is deliberately left
+ * untouched, so a unit-scoped grant can never satisfy a company-wide question.
+ *
+ * Only `org_unit_lead` counts: it is the one role whose server rule matches at `org_unit` scope
+ * (`g.scopeId in resource.attr.unitAncestors`, cascading DOWN the unit's subtree). A role like
+ * `manager` granted at org_unit scope is inert server-side, so it is ignored here too.
+ *
+ * Limit: an org_unit grant's scopeId is a bare org node id with NO company id, and node ids are
+ * unique only per company. So a unit grant can answer only a question asked against a specific
+ * company the person belongs to (`me.companies`); with no companyId it answers false. The server
+ * stays authoritative if ids ever repeat across companies.
+ *
+ * `unitPath` is the unit plus its ancestors, inclusive, nearest first (see `unitPathOf`).
+ */
+type UnitTree = { id: string; children?: readonly UnitTree[] };
+
+/** Distinct unit ids the person leads (`org_unit_lead` at org_unit scope), in grant order. */
+export function leadUnits(me: Me): string[] {
+  const out: string[] = [];
+  for (const g of me.roles) {
+    if (g.role === "org_unit_lead" && g.scopeType === "org_unit" && g.scopeId && !out.includes(g.scopeId)) {
+      out.push(g.scopeId);
+    }
+  }
+  return out;
+}
+
+/** True when the person leads any unit in `unitPath` (leading an ancestor cascades down). */
+export function isLeadOf(me: Me, unitPath: readonly string[]): boolean {
+  const led = leadUnits(me);
+  return unitPath.some((id) => led.includes(id));
+}
+
+/** `can()` OR a unit-lead grant covering `unitPath` in a company the person belongs to. */
+export function canInUnit(
+  me: Me,
+  cap: Capability,
+  companyId: string | null | undefined,
+  unitPath: readonly string[],
+): boolean {
+  if (can(me, cap, companyId)) return true;
+  if (companyId == null || !me.companies.some((c) => c.id === companyId)) return false;
+  return ROLE_CAPS.org_unit_lead.includes(cap) && isLeadOf(me, unitPath);
+}
+
+/** `[nodeId, parent, ..., root.id]` (inclusive, nearest first), or `[]` when nodeId is not in the tree. */
+export function unitPathOf(root: UnitTree, nodeId: string): string[] {
+  if (root.id === nodeId) return [root.id];
+  for (const child of root.children ?? []) {
+    const sub = unitPathOf(child, nodeId);
+    if (sub.length > 0) return [...sub, root.id];
+  }
+  return [];
+}
+
 // "Elevated" = a global superadmin grant. Kept as a named concept because several surfaces
 // (People directory, org editing default) key off it.
 //
