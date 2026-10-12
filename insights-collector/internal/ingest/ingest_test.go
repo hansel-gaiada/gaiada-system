@@ -39,6 +39,9 @@ type recorded struct {
 	Body         string
 }
 
+// docRange is where every pseudonym must fall: 2001:db8::/32 (see pseudonym.go).
+var docRange = netip.MustParsePrefix("2001:db8::/32")
+
 func (r recorded) everything() string {
 	var b strings.Builder
 	b.WriteString(r.Method + " " + r.Path + "\n")
@@ -203,11 +206,11 @@ func TestTestIPNeverAppearsInLogsForwardedRequestResponsesOrStoredRows(t *testin
 	if len(fwd) != 2 {
 		t.Fatalf("exactly the two real-visitor hits must be forwarded, got %d", len(fwd))
 	}
-	// What Umami received: an fd00::/8 pseudonym and the geo headers, never the address.
+	// What Umami received: a 2001:db8::/32 pseudonym and the geo headers, never the address.
 	first := fwd[0]
 	pseudo, err := netip.ParseAddr(first.Header.Get("X-Real-IP"))
-	if err != nil || pseudo.As16()[0] != 0xfd || pseudo.Is4() {
-		t.Fatalf("Umami must get an fd00::/8 address, got %q", first.Header.Get("X-Real-IP"))
+	if err != nil || !docRange.Contains(pseudo) || pseudo.Is4() {
+		t.Fatalf("Umami must get a 2001:db8::/32 address, got %q", first.Header.Get("X-Real-IP"))
 	}
 	if first.Header.Get("cf-ipcountry") != "DE" || first.Header.Get("cf-ipcity") != "Berlin" || first.Header.Get("cf-region-code") != "BE" {
 		t.Errorf("geo headers missing: %v", first.Header)
@@ -491,7 +494,7 @@ func TestMissingGeoFilesStillForwardWithoutGeoHeaders(t *testing.T) {
 			t.Errorf("%s must be absent without geo data", h)
 		}
 	}
-	if !strings.HasPrefix(got.Header.Get("X-Real-IP"), "fd") {
+	if !strings.HasPrefix(got.Header.Get("X-Real-IP"), "2001:db8:") {
 		t.Errorf("pseudonym still required: %q", got.Header.Get("X-Real-IP"))
 	}
 	// The bot check still works by user agent alone, and cannot use the ASN.
@@ -523,8 +526,13 @@ func TestPseudonymIsStablePerDayDiffersPerAddressAndRotates(t *testing.T) {
 	k := NewDayKey(func() time.Time { return now })
 	a := netip.MustParseAddr(testIP)
 	p1 := k.Pseudonym(a)
-	if p1.As16()[0] != 0xfd || p1 == a {
+	if !docRange.Contains(p1) || p1 == a {
 		t.Fatalf("pseudonym shape: %v", p1)
+	}
+	// Umami 3.4.0's is-localhost-ip treats fc00::/7 (and the IPv4 private ranges) as local and then drops the
+	// location (M5-V2-d); the pseudonym must never fall in those ranges.
+	if p1.IsPrivate() || p1.IsLoopback() || p1.IsLinkLocalUnicast() || p1.As16()[0]&0xfe == 0xfc {
+		t.Fatalf("pseudonym %v is in a range Umami treats as local", p1)
 	}
 	if k.Pseudonym(a) != p1 {
 		t.Error("same address, same day: same pseudonym (Umami sessions depend on it)")

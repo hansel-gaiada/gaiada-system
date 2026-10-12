@@ -140,7 +140,7 @@ func TestServeEndToEnd(t *testing.T) {
 	if resp.StatusCode != 200 || string(b) != `{"cache":"c"}` {
 		t.Fatalf("collect: %d %s", resp.StatusCode, b)
 	}
-	if !strings.HasPrefix(gotHeaders.Get("X-Real-IP"), "fd") || gotHeaders.Get("cf-ipcountry") != "DE" || strings.Contains(gotBody, `"id"`) {
+	if !strings.HasPrefix(gotHeaders.Get("X-Real-IP"), "2001:db8:") || gotHeaders.Get("cf-ipcountry") != "DE" || strings.Contains(gotBody, `"id"`) {
 		t.Errorf("forwarded request: %v %s", gotHeaders, gotBody)
 	}
 

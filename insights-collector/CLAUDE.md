@@ -59,7 +59,7 @@ when resolved. Umami's status and body come back to the tracker; 3 s timeout, th
 ## Invariants (each has a test; do not weaken)
 
 - **The visitor's address never leaves the request's memory**: not in a log line (no access log; errors are typed constants), not in a
-  response, not in a stored row, not in what Umami receives. Umami gets `fd00::/8` = `0xfd` + the first 15 bytes of HMAC-SHA256(**day key**, IP).
+  response, not in a stored row, not in what Umami receives. Umami gets `2001:db8::/32` (the IPv6 documentation range) + the first 12 bytes of HMAC-SHA256(**day key**, IP). Not fd00::/8: Umami 3.4.0's `is-localhost-ip` treats fc00::/7 as local and then stores no location at all (proved on sumopod in M5-V2-d).
   The day key is 32 random bytes, in memory only, replaced at 00:00 UTC and on restart (`internal/ingest/pseudonym.go`). It is never
   written anywhere; that is what stops anyone testing guessed addresses against the pseudonym.
   *Only exception:* `FORWARD_IP_MODE=real`, the documented fallback if V2-d shows Umami 3.4.0 mishandles the pseudonym. Not the default; it
