@@ -4,6 +4,8 @@
 //   GET  /api/:tenantId/modules/webdev/provisioned-sites[?runId=]       -> 200 [site]
 //   GET  /api/:tenantId/modules/webdev/provisioned-sites/:id            -> 200 site (+ `completion`, M6-P4c)
 //   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/reconcile  -> 200 site (+ `completion`, M6-P4c)
+//   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/scaffold-commit -> 200 commit | 404 | 409 | 422 | 429 | 502 | 503
+//        (M6-P4b2: the first fill of the provisioned repo with the scaffolded tree; scaffold-commit.ts)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
 // authorizes, builds the driver, and maps a typed outcome onto a status code. Every decision that
@@ -40,7 +42,7 @@
 // (422 from the driver, mapped to 503 by the switch below, unchanged from how a `wp` request was
 // always refused before this ticket) — it does not block construction of the driver itself.
 import {
-  BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException,
+  BadRequestException, Body, ConflictException, Controller, Get, HttpCode, HttpException, NotFoundException,
   Param, Patch, Post, Query, Req, Res, ServiceUnavailableException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -57,6 +59,10 @@ import {
   completeAfterPoll, readProvisionCompletion, reconcileAndComplete, type ProvisionCompletionDto,
 } from "./provision-completion.service";
 import { createWebdevSite, getWebdevSite, patchWebdevSiteVaultRef, type WebdevSiteDto } from "./site-registry.service";
+import { ScaffoldRefusal, type ScaffoldCommitResult } from "./scaffold-commit";
+import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto } from "./scaffold-commit.service";
+
+const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Test seam: suites drive a fake `ProvisionProvider` (or, for PRV-02's own historical idempotency
  *  suite, the real `provision-http` driver against the PRV-00 mock over real sockets). Nothing in
@@ -109,12 +115,42 @@ export class WebdevController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-  ): Promise<SiteDto & { completion: ProvisionCompletionDto | null }> {
+  ): Promise<SiteDto & { completion: ProvisionCompletionDto | null; scaffold: ScaffoldCommitDto | null }> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "read");
     const site = await getProvisionedSite(tenantId, id);
     if (!site) throw new NotFoundException("provisioned site not found");
     // M6-P4c: where §08's completion stands (registry row, WebDesk tenant, pinned contract). Additive.
-    return { ...site, completion: await readProvisionCompletion(tenantId, id) };
+    // M6-P4b2: where the scaffold's first fill stands (state, commit, last error). Additive.
+    return { ...site, completion: await readProvisionCompletion(tenantId, id), scaffold: await readScaffoldCommit(tenantId, id) };
+  }
+
+  /**
+   * M6-P4b2 — commit the tree `code.scaffold` v2 composed as the FIRST FILL of this site's provisioned repo, with the
+   * ERP App (hub tool `webdev.provisionedSites.commitScaffold`, called by the scaffold job). Body:
+   * `{runId, goalId?, contractSnapshotId?, files: [{path, base64, sha256, bytes}]}`. Everything is decided in
+   * `scaffold-commit.ts` (integrity, first-fill-only, crash-resume) and `scaffold-commit.service.ts` (the repo, the
+   * `github_repo · push` check on the org tenant). This route gates `webdev_provisioned_site · provision`: the first
+   * fill is the last leg of §08's provisioning. Refusals are `{error: <token>, reason}` with the token's status.
+   */
+  @Post("provisioned-sites/:id/scaffold-commit")
+  @HttpCode(200)
+  async commitScaffold(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<ScaffoldCommitResult> {
+    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "provision");
+    if (!SITE_ID_RE.test(id)) throw new NotFoundException("provisioned site not found");
+    try {
+      return await commitScaffoldForSite(req.principal, tenantId, id, body);
+    } catch (err) {
+      if (err instanceof ScaffoldRefusal) {
+        if (err.code === "not_found") throw new NotFoundException("provisioned site not found");
+        throw new HttpException({ message: err.code, reason: err.detail }, err.status);
+      }
+      throw err;
+    }
   }
 
   /**
