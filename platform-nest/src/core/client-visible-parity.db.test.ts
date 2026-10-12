@@ -31,6 +31,7 @@ import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { variantArgsSha256 } from "../modules/social/canonical-args";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { FIXTURE_TERMS, FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
 import { newId, withTenants, withGlobal } from "../db";
 import { NEVER_CLIENT_VISIBLE } from "./portal-visibility";
@@ -133,9 +134,12 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
       // Contracts: a draft (hidden), a project-less sent one, a sent one on p2.
       const contract = (id: string, projectId: string | null, status: string, title: string) =>
         c.query(
-          `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, status, currency, sent_at, created_by, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, 'IDR', CASE WHEN $6 = 'draft' THEN NULL ELSE now() END, $7, $8)`,
-          [id, co, client, projectId, title, status, admin, site()],
+          `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, status, currency, sent_at, body_md,
+                                  content_sha256, content_fixed_at, signature_tier, created_by, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, 'IDR', CASE WHEN $6 = 'draft' THEN NULL ELSE now() END, $9,
+                   CASE WHEN $6 = 'draft' THEN NULL ELSE $10 END, CASE WHEN $6 = 'draft' THEN NULL ELSE now() END,
+                   CASE WHEN $6 = 'draft' THEN NULL ELSE 'attested' END, $7, $8)`,
+          [id, co, client, projectId, title, status, admin, site(), FIXTURE_TERMS, FIXTURE_TERMS_SHA256],
         );
       await contract(f.kDraft, null, "draft", "Draft SOW");
       await contract(f.kSent, null, "sent", "Master agreement");

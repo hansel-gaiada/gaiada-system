@@ -19,6 +19,7 @@ import type { PoolClient } from "pg";
 import { newId } from "../db";
 import { config } from "../config";
 import { storage } from "./storage";
+import { sha256Hex } from "./content-hash";
 import { scrubText, isScrubbableText } from "./scrub";
 
 export type ConversationSide = "client" | "staff";
@@ -119,9 +120,9 @@ export async function storeAttachments(
     await storage().put(storageKey, f.bytes);
     await c.query(
       `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename,
-                          content_type, byte_size, storage_key, scrubbed, origin_site)
-       VALUES ($1, $2, $3, 'conversation', $4, $5, $6, $7, $8, $9, $10)`,
-      [fileId, tenantId, uploaderId, messageId, f.filename, f.contentType, f.bytes.byteLength, storageKey, f.scrubbed, config.originSite],
+                          content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+       VALUES ($1, $2, $3, 'conversation', $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [fileId, tenantId, uploaderId, messageId, f.filename, f.contentType, f.bytes.byteLength, storageKey, sha256Hex(f.bytes), f.scrubbed, config.originSite],
     );
     ids.push(fileId);
   }

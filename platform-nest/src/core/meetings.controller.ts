@@ -18,6 +18,7 @@ import { authorize, writeActivity } from "./http";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { staffNeverClientVisible } from "./portal-visibility";
 import { storage } from "./storage";
+import { sha256Hex } from "./content-hash";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 
@@ -384,9 +385,9 @@ export class MeetingRecordingsController {
     await storage().put(storageKey, buf);
     await withTenants([tenantId], async (c) => {
       await c.query(
-        `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
-         VALUES ($1, $2, $3, 'meeting_recording', $4, $5, $6, $7, $8, false, $9)`,
-        [fileId, tenantId, req.principal.userId, id, filename, contentType, buf.byteLength, storageKey, config.originSite],
+        `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+         VALUES ($1, $2, $3, 'meeting_recording', $4, $5, $6, $7, $8, $9, false, $10)`,
+        [fileId, tenantId, req.principal.userId, id, filename, contentType, buf.byteLength, storageKey, sha256Hex(buf), config.originSite],
       );
       await c.query(
         `UPDATE meeting_recordings SET audio_ref = $2, status = 'transcribing', updated_at = now() WHERE id = $1`,
