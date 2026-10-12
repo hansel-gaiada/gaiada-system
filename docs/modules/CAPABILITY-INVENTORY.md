@@ -43,10 +43,10 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 14 |
-| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 31 |
+| core | `agency` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `positions` · `role-grants` | 33 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
-| invoice | `invoices` | 6 |
+| invoice | `invoices` | 7 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 3 |

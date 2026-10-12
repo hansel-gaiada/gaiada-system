@@ -462,6 +462,8 @@ export interface ArCreditNoteLineInput {
   creditAccountCode: string;
   /** Percent, e.g. 12. Omit for a line that carries no PPN. */
   taxRate?: number | null;
+  /** PV5-04: required on a taxed line; the server computes the tax from this code (finance_tax_compute). */
+  taxCode?: string;
 }
 
 /** Raise a credit note and post it. Optionally applies it to an invoice in the same call —
@@ -530,6 +532,8 @@ export interface ApVendorCreditLineInput {
   creditAccountCode: string;
   /** Percent, e.g. 12. Omit for a line that carries no PPN. */
   taxRate?: number | null;
+  /** PV5-04: required on a taxed line; the server computes the tax from this code (finance_tax_compute). */
+  taxCode?: string;
 }
 
 /**

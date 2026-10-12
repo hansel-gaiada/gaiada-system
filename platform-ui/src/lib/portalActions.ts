@@ -118,6 +118,9 @@ export async function portalSignContract(_prev: PortalActionResult | null, formD
   // `agree` is a checkbox: absent from FormData entirely when unticked, so this must test presence
   // rather than a truthy value. The server refuses without it too — this is the fast path, not the gate.
   const agree = formData.get("agree") !== null;
+  // PV5-06: the hash of the agreement this page showed (the GET's `contentSha256`). The server compares it with the hash
+  // it fixed at send, so the client signs what they saw. Empty for a contract sent before PV5-06, which has none.
+  const contentSha256 = String(formData.get("contentSha256") ?? "").trim();
   if (!contractId) return { ok: false, error: "Missing contract." };
   if (signerName.length < 2) return { ok: false, error: "Please type your full name.", field: "signerName" };
   if (!agree) return { ok: false, error: "Please confirm you agree to the terms.", field: "agree" };
@@ -127,12 +130,22 @@ export async function portalSignContract(_prev: PortalActionResult | null, formD
     // toast would. Both are success.
     await platformFetch<{ complete: boolean; alreadySigned: boolean }>(
       `/api/${c.tenant}/portal/contracts/${contractId}/sign`, c.userId,
-      { method: "POST", body: JSON.stringify({ signerName, signerTitle: signerTitle || undefined, agree: true }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ signerName, signerTitle: signerTitle || undefined, agree: true, contentSha256: contentSha256 || undefined }),
+      },
     );
     revalidatePortal();
     revalidatePath(`/portal/contracts/${contractId}`);
     return { ok: true, id: contractId };
   } catch (e) {
+    // PV5-06: 409 `content_changed` (or the 400 `content_hash_required` of a page opened before this shipped) means the
+    // agreement is not what this page showed. Nothing was signed. Reload the page so the client reads the current text,
+    // and say so in one short sentence: never leave a signature button on a page the server has just refused.
+    if (e instanceof PlatformError && (e.status === 409 || e.reason === "content_hash_required")) {
+      revalidatePath(`/portal/contracts/${contractId}`);
+      return { ok: false, error: "This agreement changed since you opened it. We've reloaded it. Please read it again before signing." };
+    }
     return fail(e);
   }
 }

@@ -24,7 +24,54 @@ local stack). None of these mean "production-done".
   - Detail returns the lead id only when the caller may `read` that `agency_lead`; otherwise "a lead you cannot open".
 - **MCP tools:** `search.visitors.list`, `.get`, `.rules.list`, `.rules.set` and `.status`. All are reads except `rules.set`, which is a low write. The hub forwards path params only, so the list tool binds a first-page path twin.
 - **Other changes:** `insights-client.ts` gains `readBotCounts`. BFF §28f. The capability inventory is regenerated.
-- **Tests:** 32 unit tests. The `visitors.db.test.ts` suite runs on the Linux gate.
+- **Tests:** 32 unit tests; GitHub Actions 38285548866 green, including the `visitors.db.test.ts` suite.
+
+### insights-collector `0.3.1` - M5-V2-d: the pseudonym moves to 2001:db8::/32 so Umami keeps the country (2026-10-13) - PROTOTYPED
+
+- **The bug:** proved on sumopod in a throwaway project. Umami 3.4.0 runs `is-localhost-ip` on the client address before it reads any location header, and that package treats fc00::/7 as local. With the `fd…` pseudonym, Umami stored NO country, region or city for any visitor.
+- **The fix:** the pseudonym is now an address in 2001:db8::/32, the IPv6 documentation range, which is never assigned to anyone. It is built from 96 HMAC bits under the in-memory daily key. A direct test stored GB / GB-ENG / London with it.
+- Umami still never sees an IP. This is not the `FORWARD_IP_MODE=real` fallback.
+- **Other V2-d results** (runbook §13, C5):
+  - `check-config.sh` ALL PASS;
+  - the 367 image's provenance verified;
+  - test IPs 0 times in both dumps and every log;
+  - bots dropped and counted, by UA and by datacenter ASN.
+- Steps 1, 3 and 4 are re-run with the first image that carries this fix.
+- The design §3.2, the addendum F6 and `CLAUDE.md` are updated.
+
+### platform-ui `0.105.0` - M5-V5-d: the Experiments tab in Website → Analytics (2026-10-13) - PROTOTYPED
+
+- **List:** in server order, with the status, the goal, the visitors needed per variant and the projected days, all in words.
+- **Register form:**
+  - a refusal for being underpowered shows the projected days against the 56-day cap in words;
+  - α and power are shown as the fixed 0.05 and 0.8;
+  - two variants;
+  - the page and section are typed in for now, because there is no item picker yet.
+- **Detail view:**
+  - before the horizon, progress and the sample-ratio check only (the parser drops any rate, difference, interval or p even if one were sent);
+  - at the horizon, the full result, with small cells shown as "fewer than 5".
+- **Actions:** sync, stop, abort and decide, shown only when the status allows them and the user can manage search.
+- Every refusal token and every `unavailable` reason is a sentence.
+- The tab 404s without the analytics toolkit or `search.view`.
+- **Tests:** vitest 114 scoped (5352 wider), tsc and `next build` green locally; GitHub Actions 38282541845 green.
+
+### insights-collector `0.3.0` + infra `0.13.13` - M5-V6-a: the session replay channel (OFF; not deployed) (2026-10-13) - PROTOTYPED
+
+- **`POST /lib/kestrel/r`** takes one rrweb chunk (base64 gzip, or a JSON array) for a consented visitor and consent id.
+  - It is a plain 404 unless `REPLAY_ENABLED` is exactly `1`.
+  - A tombstoned id gets 410.
+- **Input is refused:** any typed input, including a masked value, makes the WHOLE chunk a 422, and nothing is stored.
+- **Size limits:** a decompression bomb is refused (256 KB compressed, 4 MB inflated). Caps per site per day, per visitor per day and a storage budget answer `{record:false}`.
+- **A leaked recording id cannot be appended to** from another visitor or website (403).
+- **Retention:** recordings go after 30 days at most (`REPLAY_RETENTION_DAYS` is 1–30). `forget` and `/f` remove them too.
+- **Ops** (read key only):
+  - `GET /ops/v1/replay/sessions` returns metadata;
+  - `GET /ops/v1/replay/chunks` returns content. Per O7, the ERP's MCP tool may call only the sessions route.
+- **Migration `0003_replay`** adds `replay_sessions` and `replay_chunks`, with no IP or UA column. `backup.sh` already excludes both, and a static test checks the names.
+- **Sumopod compose:** the five `REPLAY_*` variables are listed under `environment:` (empty = default).
+- The edge `/lib/kestrel/r` location stays off.
+- `go test -race` green locally and on GitHub Actions 38283161570, including the Postgres replay test.
+- **For the site (V6-d):** chunks are sent as base64 gzip strings, and input elements must be blocked in rrweb, or chunks carrying them are refused.
 
 ### platform-nest `0.107.0` - M5-V3-e: consented visitor profiles, the ingest, withdrawal sweep and purge jobs (dark until `SEARCH_VISITORS_ENABLED=1`) (2026-10-13) - PROTOTYPED
 

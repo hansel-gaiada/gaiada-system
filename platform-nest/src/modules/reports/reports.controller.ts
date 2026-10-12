@@ -50,6 +50,7 @@ import { config } from "../../config";
 import { AuthGuard } from "../../auth/guards";
 import { authorize, writeActivity } from "../../core/http";
 import { storage } from "../../core/storage";
+import { sha256Hex } from "../../core/content-hash";
 import type { Principal } from "../../rbac/principal";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { recomputeFactWindow } from "./fact-job";
@@ -655,9 +656,9 @@ export class ReportsController {
     await storage().put(storageKey, bytes);
     await withTenants([tenantId], (c) =>
       c.query(
-        `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
-         VALUES ($1, $2, $3, 'report_export', $1, $4, $5, $6, $7, false, $8)`,
-        [jobId, tenantId, req.principal.userId, filename, contentType, bytes.byteLength, storageKey, config.originSite],
+        `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+         VALUES ($1, $2, $3, 'report_export', $1, $4, $5, $6, $7, $8, false, $9)`,
+        [jobId, tenantId, req.principal.userId, filename, contentType, bytes.byteLength, storageKey, sha256Hex(bytes), config.originSite],
       ),
     );
     await writeActivity(tenantId, req.principal.userId, "exported", "report_document", jobId, {

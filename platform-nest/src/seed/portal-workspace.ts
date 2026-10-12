@@ -28,6 +28,9 @@
 //   DATABASE_URL=... node dist/seed/portal-workspace.js
 import { newId, withGlobal, withTenants, closePool } from "../db";
 import { config } from "../config";
+import { sha256Hex } from "../core/content-hash";
+import { createIssuedInvoice, ensureBillingSetup, recordConfirmedPayment } from "./billing-setup";
+import { voidIssuedInvoice } from "../modules/invoice/issue";
 
 const site = () => config.originSite;
 const IDR = "IDR";
@@ -420,7 +423,7 @@ const INVOICES: Record<Shape, InvoicePlan[]> = {
       lines: [line("Discovery & brand direction", 60, 550_000)],
       payments: [{ amount: 33_000_000, onOffset: -85, state: "confirmed", byClient: false }] },
     // OVERDUE and PARTIALLY paid: exercises the danger styling and a non-zero balance at once.
-    { startOffset: -60, endOffset: -31, status: "sent", total: 48_400_000,
+    { startOffset: -60, endOffset: -31, status: "sent", total: 48_800_000,
       lines: [line("Design — 6 templates", 56, 550_000), line("Front-end build", 60, 300_000)],
       payments: [{ amount: 20_000_000, onOffset: -20, state: "confirmed", byClient: false }] },
     // Current, with a payment the CLIENT recorded that finance has not confirmed. This is the state
@@ -461,29 +464,44 @@ const INVOICES: Record<Shape, InvoicePlan[]> = {
   ],
 };
 
+// PV5-04: a `sent` or `paid` invoice now means an ISSUED one (PV5-01b's CHECK), so every invoice below is issued through
+// the real path (billing-setup.ts: finance setup + a billing profile with fake issuer/bank data, then issueInvoice), as
+// of a past date so the overdue and settled states still exist today. `paid` is never written: it FOLLOWS from the
+// confirmed payments, which are posted to the ledger like any confirmed payment (receipt + allocation). Pending and
+// rejected claims post nothing, exactly as in the decide route. The voided invoice is issued and then voided (a credit
+// note in the ledger). Re-running finds each invoice by its period start and each payment by date and amount, as before;
+// an invoice that already exists (on an estate seeded before PV-5, a legacy row) is left as it is.
 async function seedInvoices(
   tenantId: string, clientId: string, shape: Shape, staff: string | null, clientUser: string | null,
 ): Promise<void> {
+  if (!staff) {
+    console.warn(`  ! no staff user in ${tenantId}: invoices need an issuer, so none were seeded for this client`);
+    return;
+  }
+  await ensureBillingSetup(tenantId);
   for (const inv of INVOICES[shape]) {
     let id: string;
+    let issued = true;
     const found = await withTenants([tenantId], (c) =>
-      c.query<{ id: string }>(
-        `SELECT id FROM invoices WHERE client_id=$1 AND period_start=$2::date AND deleted_at IS NULL`,
+      c.query<{ id: string; issued: boolean }>(
+        `SELECT id, (issued_at IS NOT NULL) AS issued FROM invoices
+          WHERE client_id=$1 AND period_start=$2::date AND deleted_at IS NULL`,
         [clientId, day(inv.startOffset)],
       ),
     );
     if (found.rows[0]) {
       id = found.rows[0].id;
+      issued = found.rows[0].issued;
     } else {
-      id = newId();
-      await withTenants([tenantId], (c) =>
-        c.query(
-          `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site)
-           VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10)`,
-          [id, tenantId, clientId, day(inv.startOffset), day(inv.endOffset), inv.status, IDR,
-           JSON.stringify(inv.lines), inv.total, site()],
-        ),
-      );
+      // Issued on the earlier of the period end and the first payment, so no receipt predates its invoice.
+      const issueOffset = Math.min(inv.endOffset, ...inv.payments.map((p) => p.onOffset));
+      id = (await createIssuedInvoice(tenantId, {
+        clientId, actorId: staff, lines: inv.lines, currency: IDR,
+        periodStart: day(inv.startOffset), periodEnd: day(inv.endOffset), issueDate: day(issueOffset),
+      })).id;
+      if (inv.status === "void") {
+        await voidIssuedInvoice(tenantId, id, staff, "Seed: the change request was cancelled before any work was billed.");
+      }
     }
     for (const p of inv.payments) {
       const has = await withTenants([tenantId], (c) =>
@@ -494,19 +512,25 @@ async function seedInvoices(
       // `recorded_by` is the CLIENT for a client-recorded claim and staff otherwise — the two columns
       // exist precisely so "who claimed" and "who verified" cannot collapse into one actor.
       const recordedBy = p.byClient ? clientUser : staff;
-      const confirmedBy = p.state === "confirmed" || p.state === "rejected" ? staff : null;
+      const reference = `TRX-${String(Math.abs(p.onOffset)).padStart(4, "0")}${p.amount.toString().slice(0, 4)}`;
+      if (p.state === "confirmed" && issued) {
+        await recordConfirmedPayment(tenantId, id, {
+          recordedBy, confirmedBy: staff, amount: p.amount, paidOn: day(p.onOffset), reference, byClient: p.byClient,
+        });
+        continue;
+      }
+      // A pending or rejected claim posts nothing (a legacy invoice's confirmed payment stays a plain row too).
       await withTenants([tenantId], (c) =>
         c.query(
           `INSERT INTO invoice_payments
              (id, tenant_id, invoice_id, client_id, amount, currency, paid_on, method, reference,
-              status, note, recorded_by, confirmed_by, confirmed_at, rejected_reason, origin_site)
-           VALUES ($1,$2,$3,$4,$5,$6,$7::date,'bank_transfer',$8,$9,NULL,$10,$11,$12,$13,$14)`,
+              status, note, recorded_by, confirmed_by, confirmed_at, rejected_reason, origin_site, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::date,'bank_transfer',$8,$9,NULL,$10,$11,$12,$13,$14,$15)`,
           [
-            newId(), tenantId, id, clientId, p.amount, IDR, day(p.onOffset),
-            `TRX-${String(Math.abs(p.onOffset)).padStart(4, "0")}${p.amount.toString().slice(0, 4)}`,
-            p.state, recordedBy, confirmedBy,
+            newId(), tenantId, id, clientId, p.amount, IDR, day(p.onOffset), reference,
+            p.state, recordedBy, p.state === "pending" ? null : staff,
             p.state === "pending" ? null : new Date().toISOString(),
-            p.reason ?? null, site(),
+            p.reason ?? null, site(), p.byClient ? "client_claim" : "staff",
           ],
         ),
       );
@@ -617,12 +641,15 @@ async function seedContracts(
       const signedAt = k.signed.length === 2 ? new Date().toISOString() : null;
       await withTenants([tenantId], (c) =>
         c.query(
+          // PV5-06: every seeded contract here was SENT, so it carries what a real send leaves: the SHA-256 of
+          // its exact terms, the stamp, and the attested tier (the database refuses a sent row without them).
           `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, version, status,
-                                  body_md, value, currency, starts_on, ends_on, sent_at, signed_at, created_by, origin_site)
-           VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11::date,$12::date,now(),$13,$14,$15)`,
+                                  body_md, value, currency, starts_on, ends_on, sent_at, signed_at,
+                                  content_sha256, content_fixed_at, signature_tier, created_by, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11::date,$12::date,now(),$13,$16,now(),'attested',$14,$15)`,
           [
             id, tenantId, clientId, k.onProject ? projectId : null, k.title, k.reference, k.status,
-            k.bodyMd, k.value, IDR, day(k.startOffset), day(k.endOffset), signedAt, staff, site(),
+            k.bodyMd, k.value, IDR, day(k.startOffset), day(k.endOffset), signedAt, staff, site(), sha256Hex(k.bodyMd ?? ""),
           ],
         ),
       );
@@ -634,14 +661,15 @@ async function seedContracts(
       if (has.rows[0]) continue;
       await withTenants([tenantId], (c) =>
         c.query(
-          `INSERT INTO contract_signatures (id, tenant_id, contract_id, party, signer, signer_name, signer_title, origin_site)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (contract_id, party) DO NOTHING`,
+          `INSERT INTO contract_signatures (id, tenant_id, contract_id, party, signer, signer_name, signer_title, content_sha256, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$9,$8) ON CONFLICT (contract_id, party) DO NOTHING`,
           [
             newId(), tenantId, id, party,
             party === "provider" ? staff : clientUser,
             party === "provider" ? "D. Syrowatka" : "Authorised signatory",
             party === "provider" ? "Director" : null,
             site(),
+            sha256Hex(k.bodyMd ?? ""),
           ],
         ),
       );

@@ -21,7 +21,7 @@
 // Contract signing mirrors `scope_signoffs`: one row per party, UNIQUE, idempotent on re-sign, and the
 // contract flips to `signed` only on the transition where BOTH parties are present.
 import {
-  BadRequestException, Body, Controller, Get, HttpCode, NotFoundException,
+  BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException,
   Param, Post, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -31,6 +31,8 @@ import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { storage } from "./storage";
+import { sha256Hex } from "./content-hash";
+import { clientIpOf, hashForEvidence, userAgentOf } from "./evidence";
 import { scrubText, isScrubbableText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
 import { requireSigner, resolvePortalScope, type PortalScope } from "./portal-scope";
@@ -40,6 +42,7 @@ import {
   invoiceInPortalScope, invoicePaymentClientVisible, projectInPortalScope,
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
+import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
 
 const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
 /** Proof receipts are photos of a transfer slip or a small PDF. 10 MB is generous for both and well
@@ -48,9 +51,8 @@ const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
  *  The ONE definition: `core/upload-body-limits.ts` derives this route's Fastify `bodyLimit` from it
  *  (PV4-03b) — change it here and the request-body limit follows. */
 export const MAX_PROOF_BYTES = 10 * 1024 * 1024;
-/** Overpayment tolerance: rounding and bank fees legitimately push a transfer a hair over. Anything
- *  beyond this is a typo, not a payment. */
-const OVERPAY_TOLERANCE = 1.01;
+// (PV5-04 removed the 1% overpayment tolerance: a claim is bounded by the LEDGER's outstanding amount, because an AR
+// allocation can never exceed what is owed. See recordPayment.)
 
 type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation";
 
@@ -66,6 +68,32 @@ const DOWNLOADABLE: Record<string, DownloadableKind> = {
   // message -> thread -> conversationThreadInPortalScope in ownsEntity below.
   conversation: "conversation",
 };
+
+/**
+ * PV5-04 — the invoice OF RECORD as the client sees it (portal list and detail). Needs `i` (invoices) and `ar` (the
+ * LEFT-joined finance_ar_invoices on i.ar_invoice_id, read under the finance module scope).
+ *  - `invoiceNo`, `issueDate`, `dueDate`, `subtotal`, `taxTotal`, `taxCode`: NULL on a legacy (pre-issue) invoice.
+ *  - `issuer`: the snapshot frozen at issue (legal name, address, NPWP, the bank block clients pay into).
+ *  - `outstanding`: the ledger's (AR total - paid - credited - written off) for an issued invoice; total - confirmed
+ *    claims for a legacy one. Never negative.
+ *  - `payable`: the invoice accepts a payment claim now (issued, `sent`, something still outstanding after the claims
+ *    already being verified). The portal hides the "Tell us you've paid" form when false.
+ *  - `overdue` (decision 10): past its DUE date and not fully paid; a legacy invoice has no due date, so its period end
+ *    stands in.
+ */
+const PORTAL_INVOICE_RECORD_COLUMNS = `
+  i.invoice_no AS "invoiceNo", to_char(i.issue_date, 'YYYY-MM-DD') AS "issueDate",
+  to_char(i.due_date, 'YYYY-MM-DD') AS "dueDate", i.subtotal::float8 AS subtotal, i.tax_total::float8 AS "taxTotal",
+  i.tax_code AS "taxCode", i.issuer,
+  GREATEST(CASE WHEN ar.id IS NOT NULL THEN ar.total - ar.amount_paid - ar.amount_credited - ar.amount_written_off
+                ELSE i.total - COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
+                                          WHERE pp.invoice_id = i.id AND pp.status = 'confirmed' AND pp.deleted_at IS NULL), 0)
+           END, 0)::float8 AS outstanding,
+  (ar.id IS NOT NULL AND i.status = 'sent'
+     AND ar.total - ar.amount_paid - ar.amount_credited - ar.amount_written_off
+         - COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
+                      WHERE pp.invoice_id = i.id AND pp.status = 'pending' AND pp.deleted_at IS NULL), 0) > 0) AS payable,
+  (i.status = 'sent' AND COALESCE(i.due_date, i.period_end) < current_date) AS overdue`;
 
 function dispositionHeader(filename: string): string {
   const ascii = filename.replace(/[\r\n"\\]/g, "_").replace(/[^\x20-\x7e]/g, "_");
@@ -89,18 +117,21 @@ export class PortalCommerceController {
   @Get(":tenantId/portal/invoices")
   async listInvoices(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
+    // PV5-04: the finance scope is declared because an issued invoice's `outstanding` is the LEDGER's (the AR invoice,
+    // module walled). Without it the join reads zero AR rows and every issued invoice would show nothing outstanding.
     return withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       const rows = await c.query(
         `SELECT i.id, i.status, i.currency, i.total::float8 AS total,
                 to_char(i.period_start, 'YYYY-MM-DD') AS "periodStart",
                 to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
-                i.created_at AS "issuedAt", cl.name AS "clientName",
+                COALESCE(i.issued_at, i.created_at) AS "issuedAt", cl.name AS "clientName",
                 COALESCE(pay.confirmed, 0)::float8 AS paid,
                 COALESCE(pay.pending, 0)::float8 AS "pendingConfirmation",
-                (i.status = 'sent' AND i.period_end < current_date) AS overdue
+                ${PORTAL_INVOICE_RECORD_COLUMNS}
            FROM invoices i
            LEFT JOIN clients cl ON cl.id = i.client_id
+           LEFT JOIN finance_ar_invoices ar ON ar.id = i.ar_invoice_id
            LEFT JOIN LATERAL (
              SELECT COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'confirmed'), 0) AS confirmed,
                     COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'pending'), 0) AS pending
@@ -114,7 +145,7 @@ export class PortalCommerceController {
         ...r,
         balance: Math.round(((r.total as number) - (r.paid as number)) * 100) / 100,
       }));
-    });
+    }, { modules: ["finance"] });
   }
 
   /** One invoice with its frozen line items and its payment history. */
@@ -140,13 +171,29 @@ export class PortalCommerceController {
       const paid = payments.rows
         .filter((p: Record<string, unknown>) => p.status === "confirmed")
         .reduce((s: number, p: Record<string, unknown>) => s + (p.amount as number), 0);
+      // PV5-04: the tax lines of an issued invoice, from the ledger lines it was posted with (code, statutory rate,
+      // base, amount). Empty for an untaxed or a legacy invoice.
+      const taxLines = inv.arInvoiceId
+        ? (await c.query(
+            `SELECT l.tax_code AS code, l.tax_rate::float8 AS rate, sum(l.line_subtotal)::float8 AS base,
+                    sum(l.tax_amount)::float8 AS amount
+               FROM finance_ar_invoice_lines l
+              WHERE l.invoice_id = $1 AND l.tax_code IS NOT NULL
+              GROUP BY l.tax_code, l.tax_rate ORDER BY l.tax_code`,
+            [inv.arInvoiceId],
+          )).rows
+        : [];
+      // The ledger link is internal: the client gets the invoice of record, not our AR row id.
+      const visible: Record<string, unknown> = { ...inv };
+      delete visible.arInvoiceId;
       return {
-        ...inv,
+        ...visible,
+        taxLines,
         payments: payments.rows,
         paid: Math.round(paid * 100) / 100,
         balance: Math.round((inv.total - paid) * 100) / 100,
       };
-    });
+    }, { modules: ["finance"] });
   }
 
   /** Record a payment against one of the caller's invoices.
@@ -167,34 +214,48 @@ export class PortalCommerceController {
       proof?: { filename?: string; contentType?: string; content?: string };
     },
   ) {
+    // Authorization before validation (PV5 rule): a caller who may not pay gets 403 whatever they sent.
+    await authorize(req.principal, { kind: "portal", tenantId }, "pay");
     const b = body ?? {};
     const amount = Number(b.amount);
     if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be a positive number");
+    // The decimal text of the JSON number travels to Postgres as numeric; no float arithmetic on it below.
+    const amountText = String(b.amount).trim();
+    if (!/^\d+(\.\d+)?$/.test(amountText)) throw new BadRequestException("amount must be a plain decimal number");
     if (!b.paidOn || !/^\d{4}-\d{2}-\d{2}$/.test(b.paidOn)) throw new BadRequestException("paidOn must be YYYY-MM-DD");
     // A transfer dated in the future has not happened. Compared in UTC against the DB's own clock
     // below rather than here, where the server's local date could differ from the client's by a day.
     const method = b.method ?? "bank_transfer";
     if (!PAYMENT_METHODS.has(method)) throw new BadRequestException("method must be bank_transfer|card|cash|other");
-    await authorize(req.principal, { kind: "portal", tenantId }, "pay");
 
     const id = newId();
     const result = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       const inv = await this.ownedInvoice(c, scope, invoiceId);
       if (inv.status === "void") throw new BadRequestException("this invoice has been cancelled");
+      // PV5-04: only an ISSUED invoice accepts a claim. A legacy invoice (sent before invoices were issued through the
+      // ledger) has no ledger record to settle, so a claim on it could never be confirmed (409, nothing written).
+      if (!inv.arInvoiceId) {
+        throw new ConflictException({
+          message: "this invoice cannot take a payment here; please contact us about it",
+          reason: "not_issued",
+        });
+      }
       const future = await c.query<{ future: boolean }>(`SELECT $1::date > current_date AS future`, [b.paidOn]);
       if (future.rows[0]?.future) throw new BadRequestException("paidOn cannot be in the future");
 
-      // Rule 4: bound the claim by what is actually outstanding on the invoice.
-      const prior = await c.query<{ sum: string }>(
-        `SELECT COALESCE(sum(amount), 0) AS sum FROM invoice_payments
-          WHERE invoice_id = $1 AND status <> 'rejected' AND deleted_at IS NULL`,
-        [invoiceId],
-      );
-      const already = Number(prior.rows[0]?.sum ?? 0);
-      if (already + amount > inv.total * OVERPAY_TOLERANCE) {
+      // Rule 4: bound the claim by what is actually outstanding — the LEDGER's outstanding on the AR invoice (PV5-04),
+      // less the claims still pending, compared in numeric. No tolerance: an allocation can never exceed what is owed,
+      // so a claim beyond it could never be confirmed.
+      const room = await claimHeadroom(c, invoiceId);
+      if (!room) throw new ConflictException({ message: "this invoice cannot take a payment here; please contact us about it", reason: "not_issued" });
+      if (!(await hasCurrencyPrecision(c, amountText, room.minorUnit))) {
+        throw new BadRequestException(`amount has more decimals than ${inv.currency} allows`);
+      }
+      const fits = await c.query<{ fits: boolean }>(`SELECT $1::numeric <= $2::numeric AS fits`, [amountText, room.headroom]);
+      if (!fits.rows[0]?.fits) {
         throw new BadRequestException(
-          `amount exceeds the outstanding balance (${Math.max(0, Math.round((inv.total - already) * 100) / 100)} ${inv.currency})`,
+          `amount exceeds the outstanding balance (${room.headroom} ${inv.currency}, after claims still being verified)`,
         );
       }
 
@@ -210,7 +271,7 @@ export class PortalCommerceController {
         [
           id, tenantId, invoiceId,
           // Rule 1: from the invoice row, not the body.
-          inv.clientId, amount, inv.currency, b.paidOn, method,
+          inv.clientId, amountText, inv.currency, b.paidOn, method,
           b.reference ? scrubText(b.reference).text.slice(0, 200) : null,
           proofFileId,
           b.note ? scrubText(b.note).text.slice(0, 1000) : null,
@@ -221,7 +282,7 @@ export class PortalCommerceController {
         invoiceId, clientId: inv.clientId, amount, currency: inv.currency, via: "portal",
       });
       return { inv, proofFileId };
-    });
+    }, { modules: ["finance"] });
 
     await writeActivity(tenantId, req.principal.userId, "recorded", "invoice_payment", id, {
       invoiceId, amount, via: "portal",
@@ -301,7 +362,10 @@ export class PortalCommerceController {
         // `canSign` is the exact conjunction the POST below enforces, surfaced so the UI disables the
         // button for the same reasons the server would refuse — rather than offering an action that
         // 403s. Kept as ONE expression in ONE place for that reason.
-        canSign: scope.canSign && k.status === "sent" && !signatures.rows.some((s: Record<string, unknown>) => s.party === "client"),
+        // PV5-06: a certified-tier contract is signed through a provider, never by typed name, so it is never
+        // offered to the typed-name form (the POST refuses it the same way).
+        canSign: scope.canSign && k.status === "sent" && k.signatureTier !== "certified"
+          && !signatures.rows.some((s: Record<string, unknown>) => s.party === "client"),
         viewOnly: !scope.canSign,
         signatures: signatures.rows,
         document: doc.rows[0] ?? null,
@@ -321,15 +385,21 @@ export class PortalCommerceController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("contractId") contractId: string,
-    @Body() body: { signerName?: string; signerTitle?: string; agree?: boolean },
+    @Body() body: { signerName?: string; signerTitle?: string; agree?: boolean; contentSha256?: string },
   ) {
     const b = body ?? {};
+    // PV5-06: AUTHORIZE BEFORE VALIDATING. This used to read the body first, so a caller who may not sign got
+    // a 400 about the body instead of a 403, and a denial test with a thin body silently stopped testing
+    // authorization.
+    await authorize(req.principal, { kind: "portal", tenantId }, "sign");
     // An explicit attestation is what makes a typed name a signature rather than a form field. Refused
     // server-side so the record can never contain a signature the signer did not affirm.
     if (b.agree !== true) throw new BadRequestException("you must confirm you agree to the terms");
     const signerName = (b.signerName ?? "").trim();
     if (signerName.length < 2) throw new BadRequestException("signerName required");
-    await authorize(req.principal, { kind: "portal", tenantId }, "sign");
+    // PV5-06: the client signs WHAT THEY SAW. `contentSha256` is the hash the GET handed them; it is only an
+    // echo, compared below against the hash the server fixed at send. It is never stored and never trusted.
+    const echoed = typeof b.contentSha256 === "string" ? b.contentSha256.trim().toLowerCase() : "";
 
     const out = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
@@ -356,18 +426,43 @@ export class PortalCommerceController {
         throw new BadRequestException(`this agreement is ${k.status} and cannot be signed`);
       }
       if (k.termEnded) throw new BadRequestException("this agreement's term has ended — ask your account manager to re-issue it");
+      // PV5-06: a certified-tier contract is signed through a certified provider, never by a typed name.
+      if (k.signatureTier === "certified") {
+        throw new BadRequestException({
+          message: "this agreement is signed through a certified signing provider, not by typed name",
+          reason: "certified_tier",
+        });
+      }
+      // PV5-06: sign what you saw. A contract sent since PV5-06 carries the hash fixed at send; the echo must
+      // match it, else NOTHING is written. A contract sent before PV5-06 carries none (it cannot be repaired:
+      // nothing recorded what it said), so it signs as it always did and its signature records no hash.
+      if (k.contentSha256) {
+        if (!echoed) {
+          throw new BadRequestException({
+            message: "contentSha256 is required: reload the agreement and sign again",
+            reason: "content_hash_required",
+          });
+        }
+        if (echoed !== k.contentSha256) {
+          throw new ConflictException({
+            message: "this agreement changed since you opened it; reload it and read it again before signing",
+            reason: "content_changed",
+          });
+        }
+      }
 
       const ins = await c.query(
         `INSERT INTO contract_signatures
-           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, origin_site)
-         VALUES ($1, $2, $3, 'client', $4, $5, $6, $7, $8, $9)
+           (id, tenant_id, contract_id, party, signer, signer_name, signer_title, ip_hash, user_agent, content_sha256, origin_site)
+         VALUES ($1, $2, $3, 'client', $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (contract_id, party) DO NOTHING`,
         [
           newId(), tenantId, contractId, req.principal.userId,
           scrubText(signerName).text.slice(0, 200),
           b.signerTitle ? scrubText(b.signerTitle).text.slice(0, 200) : null,
           hashForEvidence(clientIpOf(req), tenantId),
-          String(req.headers["user-agent"] ?? "").slice(0, 400),
+          userAgentOf(req),
+          k.contentSha256,
           config.originSite,
         ],
       );
@@ -465,13 +560,21 @@ export class PortalCommerceController {
   // Ownership helpers — every one of them applies the scope predicate; none takes an id on trust
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
+  /** `c` must declare the finance module scope (the AR join; see listInvoices). */
   private async ownedInvoice(c: PoolClient, scope: PortalScope, invoiceId: string) {
-    const r = await c.query<{ id: string; clientId: string; status: string; currency: string; total: number; lines: unknown; periodStart: string | null; periodEnd: string | null; issuedAt: string; clientName: string | null }>(
+    const r = await c.query<{
+      id: string; clientId: string; status: string; currency: string; total: number; lines: unknown;
+      periodStart: string | null; periodEnd: string | null; issuedAt: string; clientName: string | null;
+      payable: boolean; arInvoiceId: string | null;
+    }>(
       `SELECT i.id, i.client_id AS "clientId", i.status, i.currency, i.total::float8 AS total, i.lines,
               to_char(i.period_start, 'YYYY-MM-DD') AS "periodStart",
               to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
-              i.created_at AS "issuedAt", cl.name AS "clientName"
+              COALESCE(i.issued_at, i.created_at) AS "issuedAt", cl.name AS "clientName",
+              i.ar_invoice_id AS "arInvoiceId",
+              ${PORTAL_INVOICE_RECORD_COLUMNS}
          FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
+         LEFT JOIN finance_ar_invoices ar ON ar.id = i.ar_invoice_id
         WHERE i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}`,
       [invoiceId, scope.clientIds],
     );
@@ -480,9 +583,13 @@ export class PortalCommerceController {
   }
 
   private async ownedContract(c: PoolClient, scope: PortalScope, contractId: string) {
-    const r = await c.query<{ id: string; clientId: string; title: string; status: string; termEnded: boolean; fileId: string | null }>(
+    const r = await c.query<{
+      id: string; clientId: string; title: string; status: string; termEnded: boolean; fileId: string | null;
+      contentSha256: string | null; signatureTier: string | null;
+    }>(
       `SELECT k.id, k.client_id AS "clientId", k.title, k.reference, k.version, k.status,
               k.value::float8 AS value, k.currency, k.body_md AS "bodyMd", k.file_id AS "fileId",
+              k.content_sha256 AS "contentSha256", k.signature_tier AS "signatureTier",
               to_char(k.starts_on, 'YYYY-MM-DD') AS "startsOn",
               to_char(k.ends_on, 'YYYY-MM-DD') AS "endsOn",
               k.sent_at AS "sentAt", k.signed_at AS "signedAt", k.decline_reason AS "declineReason",
@@ -559,9 +666,9 @@ export class PortalCommerceController {
     await storage().put(storageKey, bytes);
     await c.query(
       `INSERT INTO files (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename,
-                          content_type, byte_size, storage_key, scrubbed, origin_site)
-       VALUES ($1, $2, $3, 'invoice_payment', $4, $5, $6, $7, $8, $9, $10)`,
-      [fileId, tenantId, uploaderId, paymentId, filename, contentType, bytes.byteLength, storageKey, scrubbed, config.originSite],
+                          content_type, byte_size, storage_key, sha256, scrubbed, origin_site)
+       VALUES ($1, $2, $3, 'invoice_payment', $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [fileId, tenantId, uploaderId, paymentId, filename, contentType, bytes.byteLength, storageKey, sha256Hex(bytes), scrubbed, config.originSite],
     );
     return fileId;
   }
@@ -585,26 +692,4 @@ export class PortalCommerceController {
     if (!ids.length) return;
     await notifyBestEffort(tenantId, actorId, ids, type, payload);
   }
-}
-
-/** The client's IP as the proxy reports it, or the socket's. Read for EVIDENCE only and immediately
- *  hashed — never stored, logged or compared raw. `x-forwarded-for` is spoofable by the client, which
- *  is fine for its purpose here (weak corroboration in a dispute) and would NOT be fine if anything
- *  authorized on it. Nothing does. */
-function clientIpOf(req: FastifyRequest): string {
-  const fwd = req.headers["x-forwarded-for"];
-  const first = Array.isArray(fwd) ? fwd[0] : (fwd ?? "").split(",")[0];
-  return (first || req.ip || "").trim();
-}
-
-/** Salted, truncated SHA-256. The tenant id is the salt so the same address does not produce the same
- *  digest across companies, and the digest is truncated because 128 bits is ample for "same browser?"
- *  and the shorter value is less useful to anyone who exfiltrates the table. */
-function hashForEvidence(value: string, salt: string): string | null {
-  if (!value) return null;
-  // Local require rather than a top-level import: this is the only crypto use in the file, and
-  // node:crypto at module scope would load in the edge-ish test paths that never call it.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createHash } = require("node:crypto") as typeof import("node:crypto");
-  return createHash("sha256").update(`${salt}:${value}`).digest("hex").slice(0, 32);
 }

@@ -2665,6 +2665,26 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Invoices — POST computes billable hours in the period.
   // IAM-GAP-01/02: mirrors the real controller's maker/checker seam (invoice.controller.ts) so demo
   // mode can actually demonstrate the Approve control and its refusals, not just the happy path.
+  // PV5-04 — issue readiness and issue (the demo has no ledger: an approved invoice is always ready, and issuing numbers
+  // it DEMO/<year>/<n> and moves it to `sent`, which the UI labels "Issued").
+  const invIssue = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)\/(issue-readiness|issue)$/);
+  if (invIssue) {
+    const inv = INVOICES.find((x) => x.id === invIssue[1]) as { status: string; invoiceNo?: string | null; issueDate?: string | null; dueDate?: string | null } | undefined;
+    if (!inv) return { status: 404, json: { error: "invoice not found" } };
+    const blockers = inv.status === "approved" ? [] : [{ code: "NOT_APPROVED", message: `only an approved invoice can be issued (this one is ${inv.status})` }];
+    if (invIssue[2] === "issue-readiness") {
+      return ok({ invoiceId: invIssue[1], status: inv.status, issued: !!inv.invoiceNo, invoiceNo: inv.invoiceNo ?? null, ready: !inv.invoiceNo && blockers.length === 0, blockers: inv.invoiceNo ? [] : blockers });
+    }
+    if (m === "POST") {
+      if (inv.invoiceNo) return ok({ id: invIssue[1], invoiceNo: inv.invoiceNo, alreadyIssued: true });
+      if (blockers.length) return { status: 409, json: { error: `this invoice cannot be issued yet: ${blockers[0].message}`, reason: "issue_blocked", blockers } };
+      const n = INVOICES.filter((x) => (x as { invoiceNo?: string | null }).invoiceNo).length + 1;
+      Object.assign(inv, {
+        status: "sent", invoiceNo: `DEMO/2026/${String(n).padStart(4, "0")}`, issueDate: "2026-07-16", dueDate: "2026-08-15", updatedBy: userId,
+      });
+      return ok({ id: invIssue[1], invoiceNo: inv.invoiceNo, alreadyIssued: false });
+    }
+  }
   const invApprove = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)\/approve$/);
   if (invApprove && m === "POST") {
     const inv = INVOICES.find((x) => x.id === invApprove[1]) as { status: string; createdBy: string | null } | undefined;
@@ -2691,13 +2711,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     if (m === "PATCH") {
       const b = JSON.parse(body || "{}");
       const status = String(b.status ?? "");
-      if (!["draft", "sent", "paid", "void"].includes(status)) {
-        return { status: 400, json: { error: "valid status required (draft|sent|paid|void)" } };
+      // PV5-04: mirrors invoice.controller.ts — `sent` only by issuing, `paid` only from confirmed payments.
+      if (status === "sent" || status === "paid") {
+        return { status: 400, json: { error: status === "sent" ? "an invoice becomes sent only by issuing it: POST /api/:tenantId/invoices/:invoiceId/issue" : "an invoice becomes paid only when a confirmed payment settles it in the ledger" } };
       }
-      // IAM-GAP-01: 'sent'/'paid' require the invoice to already be 'approved' — mirrors
-      // invoice.controller.ts's REQUIRES_APPROVED_STATUS gate.
-      if ((status === "sent" || status === "paid") && inv.status !== "approved") {
-        return { status: 400, json: { error: `invoice must be approved before it can be marked '${status}' (currently '${inv.status}')` } };
+      if (!["draft", "void"].includes(status)) {
+        return { status: 400, json: { error: "valid status required (draft|void)" } };
       }
       inv.status = status;
       inv.updatedBy = userId;

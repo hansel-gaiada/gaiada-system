@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610131840_pv5_intercompany_ar_posting.sql`
+- Head: `202610131850_pv5_enforce_invoice_issued.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 273 (121 legacy `NNNN_`, 152 timestamped)
+- Applied files on disk: 275 (121 legacy `NNNN_`, 154 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -238,6 +238,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
+| `/api` | `platform-nest/src/modules/invoice/billing-profile.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/invoice.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
@@ -401,6 +402,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/analytics`
 - `/departments/[deptId]/website/analytics/[tenant]/[site]`
 - `/departments/[deptId]/website/analytics/[tenant]/[site]/ai-visibility`
+- `/departments/[deptId]/website/analytics/[tenant]/[site]/experiments`
+- `/departments/[deptId]/website/analytics/[tenant]/[site]/experiments/[experimentId]`
 - `/departments/[deptId]/website/content`
 - `/departments/[deptId]/website/content/[tenant]/[site]`
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]`

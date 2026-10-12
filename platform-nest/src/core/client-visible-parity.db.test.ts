@@ -34,9 +34,12 @@ import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { variantArgsSha256 } from "../modules/social/canonical-args";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { FIXTURE_TERMS, FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
 import { newId, withTenants, withGlobal } from "../db";
 import { NEVER_CLIENT_VISIBLE } from "./portal-visibility";
+import { ensureBillingSetup } from "../seed/billing-setup";
+import { issueInvoice } from "../modules/invoice/issue";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -139,24 +142,29 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
       // Contracts: a draft (hidden), a project-less sent one, a sent one on p2.
       const contract = (id: string, projectId: string | null, status: string, title: string) =>
         c.query(
-          `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, status, currency, sent_at, created_by, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, 'IDR', CASE WHEN $6 = 'draft' THEN NULL ELSE now() END, $7, $8)`,
-          [id, co, client, projectId, title, status, admin, site()],
+          `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, status, currency, sent_at, body_md,
+                                  content_sha256, content_fixed_at, signature_tier, created_by, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, 'IDR', CASE WHEN $6 = 'draft' THEN NULL ELSE now() END, $9,
+                   CASE WHEN $6 = 'draft' THEN NULL ELSE $10 END, CASE WHEN $6 = 'draft' THEN NULL ELSE now() END,
+                   CASE WHEN $6 = 'draft' THEN NULL ELSE 'attested' END, $7, $8)`,
+          [id, co, client, projectId, title, status, admin, site(), FIXTURE_TERMS, FIXTURE_TERMS_SHA256],
         );
       await contract(f.kDraft, null, "draft", "Draft SOW");
       await contract(f.kSent, null, "sent", "Master agreement");
       await contract(f.kSentP2, p2, "sent", "Campaign SOW");
 
-      // Invoices: draft (hidden), issued, and an issued one with no client (hidden: nobody can read it).
+      // Invoices: draft (hidden), issued, and a client-visible status with no client (hidden: nobody can read it).
+      // PV5-04: `sent` means ISSUED (PV5-01b), so iSent is inserted `approved` and issued through the real path once
+      // this transaction commits (below); an invoice with no client cannot be issued, so iNoClient is a `void` one.
       const invoice = (id: string, clientId: string | null, status: string) =>
         c.query(
           `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site)
-           VALUES ($1, $2, $3, current_date - 30, current_date - 1, $4, 'IDR', '[]'::jsonb, 1000, $5)`,
+           VALUES ($1, $2, $3, current_date - 30, current_date - 1, $4, 'IDR', '[{"description":"Work","amount":1000}]'::jsonb, 1000, $5)`,
           [id, co, clientId, status, site()],
         );
       await invoice(f.iDraft, client, "draft");
-      await invoice(f.iSent, client, "sent");
-      await invoice(f.iNoClient, null, "sent");
+      await invoice(f.iSent, client, "approved");
+      await invoice(f.iNoClient, null, "void");
 
       // Payments: pending + confirmed on the issued invoice; a pending claim on the draft (hidden through
       // its invoice, even though the payment row itself names the client).
@@ -289,6 +297,8 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
       }
     }, SOCIAL);
 
+    await ensureBillingSetup(co);
+    await issueInvoice(co, f.iSent, admin);
     app = await buildApp();
   }, 120_000);
 

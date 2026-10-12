@@ -34,6 +34,8 @@ import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
 import { newId, withTenants } from "../db";
+import { FIXTURE_TERMS, FIXTURE_TERMS_SHA256 } from "../testing/contract-fixtures";
+import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -93,6 +95,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
 
     clientA = await createClient(co, "Acme Inc");
     clientB = await createClient(co, "Rival Ltd");
+    await ensureBillingSetup(co);
     projectA1 = await createProject(co, "Acme site", admin);
     projectA2 = await createProject(co, "Acme campaign", admin);
     projectB = await createProject(co, "Rival site", admin);
@@ -123,16 +126,18 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
         [deliverableA1, co, projectA1, null, site()],
       );
 
-      invoiceA = newId();
-      invoiceB = newId();
-      for (const [id, client] of [[invoiceA, clientA], [invoiceB, clientB]] as Array<[string, string]>) {
-        await c.query(
-          `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site)
-           VALUES ($1, $2, $3, current_date - 30, current_date - 1, 'sent', 'IDR',
-                   '[{"description":"Design","hours":10,"rate":100,"amount":1000}]', 1000, $4)`,
-          [id, co, client, site()],
-        );
+      // PV5-04: a `sent` invoice is an ISSUED one (PV5-01b), so both are issued through the real path, as of 31 days
+      // ago so that, on 30-day terms, each is one day past its due date (overdue by DUE date, decision 10). The
+      // issue runs on its own connection; this transaction has not touched invoices.
+      const issueDate = new Date(Date.now() - 31 * 86_400_000).toISOString().slice(0, 10);
+      const ids: string[] = [];
+      for (const client of [clientA, clientB]) {
+        ids.push((await createIssuedInvoice(co, {
+          clientId: client, actorId: admin, issueDate,
+          lines: [{ description: "Design", hours: 10, rate: 100, amount: 1000 }],
+        })).id);
       }
+      [invoiceA, invoiceB] = ids;
       contractA = newId();
       contractB = newId();
       // References are EXPLICIT literals, not derived from the id.
@@ -153,10 +158,11 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
       ] as Array<[string, string, string, string]>) {
         await c.query(
           `INSERT INTO contracts (id, tenant_id, client_id, project_id, title, reference, status, value, currency,
-                                  starts_on, ends_on, sent_at, created_by, origin_site)
+                                  starts_on, ends_on, sent_at, body_md, content_sha256, content_fixed_at, signature_tier,
+                                  created_by, origin_site)
            VALUES ($1, $2, $3, $4, 'Master Services Agreement', $5, 'sent', 25000, 'IDR',
-                   current_date - 1, current_date + 365, now(), $6, $7)`,
-          [id, co, client, project, reference, admin, site()],
+                   current_date - 1, current_date + 365, now(), $8, $9, now(), 'attested', $6, $7)`,
+          [id, co, client, project, reference, admin, site(), FIXTURE_TERMS, FIXTURE_TERMS_SHA256],
         );
       }
     });
@@ -187,7 +193,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     // Portfolio = mean of PROJECT means = 31, not the pooled task mean.
     expect(b.progress.percent).toBe(31);
     expect(b.nextMilestone.name).toBe("Launch");
-    // 1000 invoiced, nothing confirmed yet, and period_end is in the past on a 'sent' invoice.
+    // 1000 invoiced, nothing confirmed yet, and the due date is in the past on a 'sent' (issued) invoice.
     expect(b.finance.primary).toMatchObject({ currency: "IDR", invoiced: 1000, paid: 0, outstanding: 1000, overdueCount: 1 });
   });
 
@@ -324,7 +330,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
   it("a VIEWER cannot sign a contract", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${contractA}/sign`, headers: asUser(viewerA),
-      payload: { signerName: "Vic Viewer", agree: true },
+      payload: { signerName: "Vic Viewer", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.statusCode).toBe(403);
     expect(r.json().error).toMatch(/view-only/i);
@@ -341,7 +347,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
   it("a signer signs; the contract stays 'sent' until the provider countersigns", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${contractA}/sign`, headers: asUser(signerA),
-      payload: { signerName: "Sam Signer", signerTitle: "CEO", agree: true },
+      payload: { signerName: "Sam Signer", signerTitle: "CEO", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ complete: false, alreadySigned: false });
@@ -354,7 +360,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
   it("re-signing is idempotent, not an error", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${contractA}/sign`, headers: asUser(signerA),
-      payload: { signerName: "Sam Signer", agree: true },
+      payload: { signerName: "Sam Signer", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.statusCode).toBe(200);
     expect(r.json().alreadySigned).toBe(true);
@@ -373,9 +379,10 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     const c2 = newId();
     await withTenants([co], (c) =>
       c.query(
-        `INSERT INTO contracts (id, tenant_id, client_id, title, status, currency, sent_at, created_by, origin_site)
-         VALUES ($1, $2, $3, 'Addendum', 'sent', 'IDR', now(), $4, $5)`,
-        [c2, co, clientA, admin, site()],
+        `INSERT INTO contracts (id, tenant_id, client_id, title, status, currency, sent_at, body_md, content_sha256,
+                                content_fixed_at, signature_tier, created_by, origin_site)
+         VALUES ($1, $2, $3, 'Addendum', 'sent', 'IDR', now(), $6, $7, now(), 'attested', $4, $5)`,
+        [c2, co, clientA, admin, site(), FIXTURE_TERMS, FIXTURE_TERMS_SHA256],
       ),
     );
     await withTenants([co], (c) =>
@@ -387,7 +394,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     );
     const r = await app.inject({
       method: "POST", url: `/api/${co}/portal/contracts/${c2}/sign`, headers: asUser(signerA),
-      payload: { signerName: "Sam Signer", agree: true },
+      payload: { signerName: "Sam Signer", agree: true, contentSha256: FIXTURE_TERMS_SHA256 },
     });
     expect(r.json().complete).toBe(true);
     const detail = await app.inject({ method: "GET", url: `/api/${co}/portal/contracts/${c2}`, headers: asUser(signerA) });
