@@ -34,8 +34,8 @@ APICT=wdproof-api-1
 
 proof_healthy() { [ "$(dp inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null)" = healthy ]; }
 healthz_200() { [ "$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H "Host: $PUBLIC_HOST" "http://127.0.0.1:$PROOF_PORT/healthz")" = 200 ]; }
-api_listening() { dp logs "$APICT" 2>&1 | grep -q 'listening on :3000'; }
-api_jwks() { dp logs "$APICT" 2>&1 | grep -q 'editorial JWKS loaded'; }
+api_listening() { dp logs "$APICT" 2>&1 | grep -c 'listening on :3000' >/dev/null; }
+api_jwks() { dp logs "$APICT" 2>&1 | grep -c 'editorial JWKS loaded' >/dev/null; }
 api_tick0() { dp logs "$APICT" 2>&1 | grep -E 'content tick @ .* errors=[0-9]+' | tail -n 1 | grep -Eq 'errors=0([^0-9]|$)'; }
 problem401() {
   local r p

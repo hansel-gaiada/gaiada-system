@@ -52,7 +52,7 @@ cleanup() {
 
 set_pids() { ps -e -o pid= -o uid= | awk -v u="$PROOF_UID" -v s="$SUB_FIRST" -v e="$SUB_LAST" '$2 == u || ($2 >= s && $2 <= e) { print $1 }'; }
 no_set_pids() { [ -z "$(set_pids)" ]; }
-port_listening() { ss -ltn "sport = :$PROOF_PORT" 2>/dev/null | grep -q ":$PROOF_PORT"; }
+port_listening() { ss -ltn "sport = :$PROOF_PORT" 2>/dev/null | grep -c ":$PROOF_PORT" >/dev/null; }
 port_silent() { ! port_listening; }
 healthz_200() { [ "$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H "Host: $PUBLIC_HOST" "http://127.0.0.1:$PROOF_PORT/healthz")" = 200 ]; }
 guard_active() { [ "$(systemctl is-active "$PROOF_GUARD_UNIT" 2>/dev/null)" = active ]; }
@@ -96,7 +96,7 @@ main() {
   guard_active && guard_check && pass "the proof guard is ACTIVE and passes check" || die "REFUSED: the proof guard is not active/clean before we start"
   unit_active || die "REFUSED: $UNIT is not active"
   LIVE_BEFORE="$(live_snapshot)"
-  printf '%s\n' "$LIVE_BEFORE" | grep -q '^/webdesk-api-1 ' || die "REFUSED: the live container webdesk-api-1 was not found; cannot prove the live stack untouched"
+  printf '%s\n' "$LIVE_BEFORE" | grep -c '^/webdesk-api-1 ' >/dev/null || die "REFUSED: the live container webdesk-api-1 was not found; cannot prove the live stack untouched"
   info "live StartedAt before: $(printf '%s\n' "$LIVE_BEFORE" | grep '^/webdesk-api-1 ' | cut -d' ' -f2)"
   EV="$(ev_dir a8)"
   CONF_BAK="$EV/guard-config.orig"
@@ -165,7 +165,7 @@ main() {
   case " $after " in *" $PROOF_GUARD_UNIT "*) pass "$UNIT is ordered After= $PROOF_GUARD_UNIT" ;; *) fail "$UNIT is not ordered after the guard" ;; esac
   case " $wants " in *" $PROOF_GUARD_UNIT "*) pass "$UNIT Wants= $PROOF_GUARD_UNIT" ;; *) fail "$UNIT does not want the guard" ;; esac
   case " $(systemctl show "$PROOF_GUARD_UNIT" -p Before --value) " in *" $UNIT "*) pass "the guard is ordered Before= $UNIT" ;; *) fail "the guard is not ordered before $UNIT" ;; esac
-  systemctl show "$UNIT" -p ExecStartPre --value 2>/dev/null | grep -q 'webdesk-rootless-guard.sh' && pass "$UNIT has the guard check as ExecStartPre" || fail "$UNIT has no guard ExecStartPre"
+  systemctl show "$UNIT" -p ExecStartPre --value 2>/dev/null | grep -c 'webdesk-rootless-guard.sh' >/dev/null && pass "$UNIT has the guard check as ExecStartPre" || fail "$UNIT has no guard ExecStartPre"
   systemd-analyze critical-chain "$UNIT" --no-pager 2>/dev/null | head -n 8 | sed 's/^/        /'
 
   hdr "6. the live stack, end to end"

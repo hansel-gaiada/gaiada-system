@@ -206,6 +206,12 @@ preflight() {
   pass "dump pair: $(basename "$DUMP_F") + $(basename "$GLOBALS_F")"
 
   CLEAN_OK=1
+  # A previous run's evidence moves aside, never mixes in: wd-volume-copy's --keep refuses an existing manifest dir
+  # (found in P2 A4 run 3, 2026-10-12), and A5/A7 read THIS run's counts from the fixed path $PROOF_EVID/a4.
+  if [ -e "$PROOF_EVID/a4" ]; then
+    mv "$PROOF_EVID/a4" "$PROOF_EVID/a4.prev-$(date -u +%Y%m%dT%H%M%SZ)" || die "cannot move the previous a4 evidence aside"
+    info "previous a4 evidence moved to $PROOF_EVID/a4.prev-*"
+  fi
   EV="$(ev_dir a4)"
   W="$(mktemp -d -p "$EV" work.XXXXXX)" || die "cannot make a work dir"
 
@@ -251,7 +257,7 @@ create_proof_volumes() {
   done
 }
 
-pg_throwaway_ready() { dr logs "$PGC" 2>&1 | grep -q 'PostgreSQL init process complete' && dr exec "$PGC" pg_isready -q -U "$SU" -d "$DB"; }
+pg_throwaway_ready() { dr logs "$PGC" 2>&1 | grep -c 'PostgreSQL init process complete' >/dev/null && dr exec "$PGC" pg_isready -q -U "$SU" -d "$DB"; }
 pgq() { dr exec -i "$PGC" psql -U "$SU" -d "$DB" -X -q -A -t -v ON_ERROR_STOP=1 "$@"; }
 
 a4_postgres() {
@@ -308,7 +314,10 @@ SQL
   if [ "${nt:-0}" -gt 0 ] && [ "${tn:-0}" -gt 0 ]; then pass "row counts recorded: $nt tables, tenants=$tn (-> $EV/counts.rootful.txt)"; else fail "row counts look empty (tables=$nt, tenants=${tn:-none})"; fi
 
   rf_stop "$PGC" -t 120 >/dev/null
-  if [ "$(dr inspect -f '{{.State.ExitCode}}' "$PGC")" = 0 ] && dr logs "$PGC" 2>&1 | grep -q 'database system is shut down'; then pass "postgres stopped cleanly (fast shutdown, exit 0)"; else fail "postgres did not stop cleanly"; fi
+  local pg_exit pg_tail
+  pg_exit="$(dr inspect -f '{{.State.ExitCode}}' "$PGC" 2>/dev/null)"
+  pg_tail="$(dr logs --tail 3 "$PGC" 2>&1 | tr '\n' '|')"
+  if [ "$pg_exit" = 0 ] && dr logs "$PGC" 2>&1 | grep -c 'database system is shut down' >/dev/null; then pass "postgres stopped cleanly (fast shutdown, exit 0)"; else fail "postgres did not stop cleanly (exit ${pg_exit:-?}; last log lines: ${pg_tail})"; fi
 
   copy_vol "$V_PG" || return 1
 
