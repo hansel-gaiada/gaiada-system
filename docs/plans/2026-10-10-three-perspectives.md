@@ -429,6 +429,10 @@ clients still on `other`. This is the client's industry, never our vertical (§2
 
 ### 4.1 Where an employee works
 
+> **Realised by the [Department workspaces plan](2026-10-13-department-workspaces.md) (DW-*, all decisions ruled 2026-10-13).**
+> My work becomes the Overview and the You block, and Me becomes personal admin. My department becomes the employee's
+> whole workspace, and My clients becomes each department's Clients row. That plan is now the source for this section.
+
 The standing decision that `/me` stays a section inside the staff app (employee-portal foundation)
 is kept. What changes is that duplicates are folded and the tiers are made visible.
 
