@@ -14,7 +14,7 @@
 //
 // THE LEAD LINK. A profile's consent id is matched to `agency_leads.visitor_consent->>'consentId'` in the same tenant, inside the one
 // withTenants (as P2 joins agency_leads). The lead id is returned only when the principal may `read` that agency_lead (a Cerbos
-// probe through authorize(), so an acting-for human is intersected too); otherwise the row says "a lead you cannot open".
+// probe through authorize(), on the DETAIL route only (one audit row per opened visitor; list rows say only linked or none), so an acting-for human is intersected too); otherwise the row says "a lead you cannot open".
 import {
   BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, Put, Query, Req, UseGuards,
 } from "@nestjs/common";
@@ -61,7 +61,7 @@ export class SearchVisitorsController {
     let out;
     try {
       const filters = parseListFilters(q);
-      out = await listVisitors(tenantId, propertyId, filters, this.leadProbe(req, tenantId));
+      out = await listVisitors(tenantId, propertyId, filters);
     } catch (e) { throw asHttp(e); }
     if (!out) throw new NotFoundException("property not found");
     return { propertyId, ...out };

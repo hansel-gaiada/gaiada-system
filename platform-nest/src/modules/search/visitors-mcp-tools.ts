@@ -13,7 +13,7 @@ export const VISITOR_MCP_TOOLS: McpToolDef[] = [
     name: "search.visitors.list",
     description:
       "List a property's consented visitors (only people who accepted analytics): last seen, visits, country and city, network or company, top interests, score 0-100 " +
-      "and whether a lead is linked (the lead id only if you may open leads, otherwise \"a lead you cannot open\"). minScore 0 means everyone; order is score or recent. " +
+      "and whether a lead is linked (linked or none; never the lead id: open the visitor with search.visitors.get for that). minScore 0 means everyone; order is score or recent. " +
       "First page of 25, server order. A score is a guide for follow-up, never a decision about a person (M5-V3-g).",
     minAssurance: "low",
     method: "GET",

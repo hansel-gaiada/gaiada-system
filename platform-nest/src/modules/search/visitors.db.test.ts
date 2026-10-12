@@ -235,24 +235,32 @@ describe.skipIf(!TEST_URL)("M5-V3-g · consented visitor routes", () => {
 
   // ── the lead link ───────────────────────────────────────────────────────────────────────────────────────────────
   describe("the lead link", () => {
-    it("returns the lead id only for a principal who may read that agency_lead, and probes read on the agency_lead kind", async () => {
+    it("detail returns the lead id only for a principal who may read that agency_lead, and probes read on the agency_lead kind", async () => {
       const res = await get(`${base()}/${v.hi.visitor}`);
       expect(res.json().visitor.lead).toEqual({ state: "readable", id: leadOpen });
       expect(calls.some((c) => c.kind === "agency_lead" && c.action === "read" && c.id === leadOpen && c.tenantId === A)).toBe(true);
-      const list = (await get(base())).json().visitors as Array<{ visitorId: string; lead: unknown }>;
-      expect(list.find((x) => x.visitorId === v.midNew.visitor)!.lead).toEqual({ state: "readable", id: leadOnly });
-      expect(list.find((x) => x.visitorId === v.midOld.visitor)!.lead).toEqual({ state: "none" });
     });
-    it("a reader of visitors who may NOT read leads gets words, and the lead id appears nowhere in the body", async () => {
+    it("list rows say only linked or none: never a lead id, and agency_lead is never probed", async () => {
+      calls.length = 0;
+      const res = await get(base());
+      const list = res.json().visitors as Array<{ visitorId: string; lead: unknown }>;
+      expect(list.find((x) => x.visitorId === v.hi.visitor)!.lead).toEqual({ state: "linked" });
+      expect(list.find((x) => x.visitorId === v.midNew.visitor)!.lead).toEqual({ state: "linked" });
+      expect(list.find((x) => x.visitorId === v.midOld.visitor)!.lead).toEqual({ state: "none" });
+      expect(res.body).not.toContain(leadOpen);
+      expect(res.body).not.toContain(leadOnly);
+      expect(calls.filter((c) => c.kind === "agency_lead")).toHaveLength(0);
+    });
+    it("a reader of visitors who may NOT read leads gets words on detail, and the lead id appears nowhere", async () => {
       denied.add("agency_lead:read");
-      for (const url of [`${base()}/${v.hi.visitor}`, base()]) {
-        const res = await get(url);
-        expect(res.statusCode).toBe(200);
-        expect(res.body).not.toContain(leadOpen);
-        expect(res.body).not.toContain(leadOnly);
-        expect(res.body).toContain("a lead you cannot open");
-      }
-      expect((await get(`${base()}/${v.hi.visitor}`)).json().visitor.lead).toEqual({ state: "restricted", message: "a lead you cannot open" });
+      const res = await get(`${base()}/${v.hi.visitor}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).not.toContain(leadOpen);
+      expect(res.body).toContain("a lead you cannot open");
+      expect(res.json().visitor.lead).toEqual({ state: "restricted", message: "a lead you cannot open" });
+      const list = await get(base());
+      expect(list.statusCode).toBe(200);
+      expect(list.body).not.toContain(leadOpen);
     });
     it("a lead of another company never links", async () => {
       // A lead in B carrying A's consent id must not surface in A.

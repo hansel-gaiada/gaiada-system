@@ -104,6 +104,7 @@ export function parseListFilters(q: Q): ListFilters {
 
 export type LeadLink =
   | { state: "none" }
+  | { state: "linked" } // list rows only: a lead is linked, no id and no probe
   | { state: "readable"; id: string }
   | { state: "restricted"; message: string };
 
@@ -189,7 +190,7 @@ async function propertyExists(c: PoolClient, propertyId: string): Promise<boolea
 }
 
 export async function listVisitors(
-  tenantId: string, propertyId: string, f: ListFilters, mayRead: LeadReadProbe,
+  tenantId: string, propertyId: string, f: ListFilters,
 ): Promise<{ visitors: VisitorRow[]; nextCursor: string | null } | null> {
   return withTenants([tenantId], async (c) => {
     if (!(await propertyExists(c, propertyId))) return null;
@@ -220,10 +221,11 @@ export async function listVisitors(
       `SELECT ${PROFILE_COLS} FROM search_visitor_profiles p WHERE ${where.join(" AND ")} ORDER BY ${orderBy} LIMIT ${arg(f.limit + 1)}`, args,
     );
     const page = rows.slice(0, f.limit);
-    const links = await leadLinks(c, tenantId, page.map((r) => r.consent_id), mayRead);
+    // List rows say only WHETHER a lead is linked: no id, and no authorize() call per row (it would write a denial audit row for each).
+    const linked = await leadIdsFor(c, tenantId, [...new Set(page.map((r) => r.consent_id.toLowerCase()))]);
     const last = page[page.length - 1];
     return {
-      visitors: page.map((r) => rowOf(r, links.get(r.consent_id.toLowerCase()) ?? { state: "none" })),
+      visitors: page.map((r) => rowOf(r, linked.has(r.consent_id.toLowerCase()) ? { state: "linked" } : { state: "none" })),
       nextCursor: rows.length > f.limit && last ? encodeCursor({ s: f.order === "score" ? Number(last.score) : null, t: last.ts, v: last.visitor_id }) : null,
     };
   }, SEARCH);
