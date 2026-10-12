@@ -13,6 +13,7 @@
 | `ai-gateway-go/` | go | `gaiada/ai-gateway-go` | `cmd/gateway` | yes | yes |
 | `capture-helper/` | node | `gaiada-capture-helper` | `start` | — | **missing** |
 | `hermes-gateway/` | node | `hermes-gateway` | `start` | — | **missing** |
+| `insights-collector/` | go | `gaiada/insights-collector` | `cmd/collector` | yes | yes |
 | `lab-runner/` | node | `gaiada-lab-runner` | `dev · start` | yes | **missing** |
 | `mcp-hub/` | node | `gaiada-mcp-hub` | `dev · start` | yes | yes |
 | `platform-nest/` | node | `gaiada-platform-nest` | `start` | yes | yes |
@@ -614,5 +615,5 @@ Runbooks (`infra/runbooks/`): `ai-crawler-log.md`, `alerting-wire-a-real-receive
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `client-targets-forced-command.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `pull-client-property-targets.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 
-Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `simulation/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
+Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `insights-collector/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `simulation/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
 
