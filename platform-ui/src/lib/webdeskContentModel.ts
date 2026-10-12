@@ -65,7 +65,14 @@ export interface CollectionComposition {
 
 /** `domain` is nullable in WebDesk (`environments.domain`): an environment can exist before it has a hostname. */
 export interface EnvironmentRef { envId: string; name: string; domain: string | null; status: string }
-export interface SiteRef { siteId: string; name: string; kind: string; environments: EnvironmentRef[] }
+export interface SiteRef {
+  siteId: string; name: string; kind: string; environments: EnvironmentRef[];
+  /** 'active' | 'archived' (WebDesk 0019). Absent from an older Zone B: read as active. */
+  status?: string;
+}
+
+/** A WebDesk site that was archived (irreversible): the site page shows it as such and offers no archive control. */
+export const isSiteArchived = (site: { status?: string }): boolean => site.status !== undefined && site.status !== "active";
 export interface TenantRef {
   slug: string; status: string; defaultLocale: string; locales: string[]; sites: SiteRef[];
 }
@@ -904,6 +911,69 @@ export function parseKeyMintArgs(raw: unknown): KeyMintArgs | null {
 /** A key.mint approval, however the detail names it: the workflow (`key.mint`) or the tool (`webdesk.key.mint`). */
 export function isKeyMintApproval(row: { workflowId?: string | null; toolName?: string | null }): boolean {
   return row.workflowId === "key.mint" || row.toolName === "webdesk.key.mint";
+}
+
+// ── "Archive site" (filing) — owner ruling 2026-10-12: archiving a site TAKES an approval ─────────────
+//
+//   file    POST /api/:t/modules/webdev/control/sites/:siteId/archive   {tenantSlug}
+//             -> 202 {approvalId} | 202 {approvalId, alreadyPending: true}     (FILES an approval; archives NOTHING)
+//   decide  POST /api/:t/approvals/:id/decide  (the unified façade) by a DIFFERENT authorised user; the ERP then sends the one
+//             WS4-asserted `site.archive` to WebDesk. The decide response carries `webdesk:{command:"site.archive", executionStatus, …}`
+//             and no secret, so the generic decide form is enough (no custody component, unlike a key mint).
+// IRREVERSIBLE: WebDesk has no un-archive. Every sentence of the control lives in ARCHIVE_SITE_COPY so the component, the approval
+// summary and the tests agree.
+
+/** The filing answer has the key request's exact shape (`{approvalId, alreadyPending?}`), so the type is shared. */
+export type ArchiveRequestFiled = KeyRequestFiled;
+
+export const ARCHIVE_SITE_COPY = {
+  heading: "Archive this site",
+  button: "Archive site…",
+  explain: "Archiving takes the site out of service and cannot be undone. It needs approval from a second person first.",
+  consequences: [
+    "The site stops serving content: its API keys and previews stop working.",
+    "Nothing can be edited, published or scheduled on it any more, and scheduled changes never go live.",
+    "Its content and history are kept, but WebDesk has no way to un-archive a site.",
+  ],
+  confirmTitle: "Request to archive this site?",
+  confirmBody: "This files a request. Nothing is archived until someone else approves it.",
+  confirm: "Request archive",
+  cancel: "Cancel",
+  filed: "Archive requested — waiting for approval.",
+  alreadyPending: "Already requested — waiting for approval.",
+  viewRequest: "View the request",
+  archivedNote: "This site is archived. It serves no content and accepts no changes.",
+  forbidden: "You can't request archiving this site.",
+  alreadyArchived: "This site is already archived.",
+  unavailable: "Archiving is unavailable. WebDesk can't be reached. Nothing has been changed.",
+} as const;
+
+/** The control's failure sentence for any non-ok result. Plain words; never a raw slug. */
+export function archiveFailureCopy(r: Exclude<WdResult<unknown>, { kind: "ok" }>): string {
+  switch (r.kind) {
+    case "forbidden": return ARCHIVE_SITE_COPY.forbidden;
+    case "not_found": return "That site doesn't exist or isn't one of your company's.";
+    case "not_enabled": return r.reason === "module_disabled" ? "The Web Dev module is switched off for this company." : "Archiving a site isn't available on this deployment yet.";
+    case "invalid": return r.message;
+    case "conflict": return r.slug === "site-archived" ? ARCHIVE_SITE_COPY.alreadyArchived : r.message;
+    case "unavailable": return r.code === "contract_drift" ? `WebDesk answered with something unexpected (${r.reason}).` : ARCHIVE_SITE_COPY.unavailable;
+  }
+}
+
+/** The approval's `tool_args` for a site.archive row (`{command, tenantSlug, siteId, summary, commandHash}`). Never trusted:
+ *  anything that does not match is `null` and the page says it is unrecognised instead of guessing. */
+export interface SiteArchiveArgs { tenantSlug: string; siteId: string }
+
+export function parseSiteArchiveArgs(raw: unknown): SiteArchiveArgs | null {
+  if (!isRecord(raw)) return null;
+  const { command, tenantSlug, siteId } = raw;
+  if (command !== "site.archive" || typeof tenantSlug !== "string" || tenantSlug === "" || typeof siteId !== "string" || siteId === "") return null;
+  return { tenantSlug, siteId };
+}
+
+/** A site.archive approval, however the detail names it: the workflow (`site.archive`) or the tool (`webdesk.site.archive`). */
+export function isSiteArchiveApproval(row: { workflowId?: string | null; toolName?: string | null }): boolean {
+  return row.workflowId === "site.archive" || row.toolName === "webdesk.site.archive";
 }
 
 /** What WSK-66's in-band mint reported, as the approver's browser needs it. `plaintextOnce` exists ONLY here, in transit

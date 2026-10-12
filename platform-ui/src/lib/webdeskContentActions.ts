@@ -43,13 +43,13 @@ import { getSessionUserId } from "./session-server";
 import { getMe } from "./platform";
 import { getActiveTenant } from "./tenant";
 import {
-  wdCall, siteBase, controlSiteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus, parseKeyRequest, parsePreviewLink,
+  wdCall, siteBase, controlSiteBase, parseItemWriteResult, parseItemOnly, parseApprovalId, parseWithdraw, parseBuildStatus, parseKeyRequest, parseArchiveRequest, parsePreviewLink,
   loadEditorBundle, getItem, pollApproval,
   type EditorBundle,
 } from "./webdeskContent";
 import { KEY_SCOPES } from "./webdeskContentModel";
 import type {
-  Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, KeyRequestFiled, KeyScope, PreviewLink, WdResult, WebdeskApprovalRow,
+  ArchiveRequestFiled, Block, BuildStatus, ItemDetail, ItemRef, ItemWriteResult, KeyRequestFiled, KeyScope, PreviewLink, WdResult, WebdeskApprovalRow,
 } from "./webdeskContentModel";
 
 export interface SiteScope { tenantSlug: string; siteId: string }
@@ -256,6 +256,21 @@ export async function requestKeyAction(scope: SiteScope, envId: string, keyScope
   return wdCall(
     `${controlSiteBase(c.company, clean(scope.siteId))}/keys`, c.userId, parseKeyRequest,
     json({ tenantSlug: clean(scope.tenantSlug), envId: clean(envId), scope: keyScope }),
+  );
+}
+
+// ── Archive site ─────────────────────────────────────────────────────────────────────────────────
+
+/** "Archive site": FILES one site.archive approval (HIGH, WS4). Nothing is archived here — a DIFFERENT authorised user approves it and the
+ *  ERP then sends the one command to WebDesk. Archiving is IRREVERSIBLE there. Same route family and answer as `requestKeyAction`:
+ *  `POST …/control/sites/:siteId/archive` with `tenantSlug` in the body; `alreadyPending` = the open request for this site was returned.
+ *  A 403 (Cerbos `promote`) is `forbidden`; a foreign site `not_found`; an already-archived site `conflict/site-archived`. */
+export async function requestSiteArchiveAction(scope: SiteScope): Promise<WdResult<ArchiveRequestFiled>> {
+  const c = await ctx(); if (!isCtx(c)) return c;
+  if (!scopeOk(scope)) return badScope;
+  return wdCall(
+    `${controlSiteBase(c.company, clean(scope.siteId))}/archive`, c.userId, parseArchiveRequest,
+    json({ tenantSlug: clean(scope.tenantSlug) }),
   );
 }
 
