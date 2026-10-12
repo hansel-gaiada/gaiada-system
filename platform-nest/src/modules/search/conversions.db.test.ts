@@ -577,7 +577,8 @@ describe.skipIf(!TEST_URL)("M5-P2 · ad-platform conversion uploads", () => {
     const unknownStage = await app.inject({ method: "POST", url, headers: asUser(uA), payload: { ...body, stage: "nonesuch" } });
     expect(unknownStage.statusCode).toBe(400);
     expect(unknownStage.json()).toMatchObject({ reason: "stage_unknown" });
-    const unsupported = await app.inject({ method: "POST", url, headers: asUser(uA), payload: { ...body, platform: "meta_capi" } });
+    // M5-P3/P4 gave meta_capi and linkedin_capi adapters; a platform with no adapter is still refused before the CHECK.
+    const unsupported = await app.inject({ method: "POST", url, headers: asUser(uA), payload: { ...body, platform: "tiktok" } });
     expect(unsupported.json()).toMatchObject({ reason: "platform_unsupported" });
 
     // Another tenant's property id is invisible (404), and no row is written for it.
