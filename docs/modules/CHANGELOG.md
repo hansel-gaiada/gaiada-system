@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.111.2` - M6-P4m: a redelivered event cannot reopen an approved beat (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate, run 1.
+  - The n8n bridge is at-least-once. A delivery execution that outlived `N8N_BRIDGE_TIMEOUT_MS` (120 s at the time, against a ~130 s design call) was redelivered.
+  - Its twin reopened `pm_review` on the same design stage 13 s after a human had approved the first.
+  - WD-29 deduplicated only a PENDING twin.
+- **The fix:** `POST pipeline/gates` also returns the existing gate when a STAGE-scoped twin of the same kind and side is already decided `approved` or `signed` (`deduped: true` with that gate's real status).
+  - A run-level gate (no stage: `prd_sign`, `scope_signoff`) and a beat decided `changes_requested` or `rejected` can still be opened again.
+  - The live trigger was already removed on 2026-10-13 (`N8N_BRIDGE_TIMEOUT_MS=300000`).
+- **Tests:** three DB cases in `pipeline-race.test.ts`:
+  - the redelivered open after approval returns the decided gate, with no new row and no phantom audit row;
+  - a re-request after `changes_requested` opens;
+  - a signed `prd_sign` does not suppress a new one.
+
 ### platform-ui `0.107.0` - M5-V6-c: the session-replay player and the recordings list (2026-10-13) - PROTOTYPED
 
 - **The visitor detail** shows recordings (date, length, pages) only to a holder of `search.replay.view`. Without it there is no card and no read.

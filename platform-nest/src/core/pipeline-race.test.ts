@@ -332,6 +332,58 @@ describe.skipIf(!TEST_URL)("WD-29 — pipeline state-transition idempotency unde
     expect(g2.json().id).not.toBe(g1.json().id);
   });
 
+  // ── M6-P4m: a redelivery after the human already decided the beat ───────────────────────────────
+  const openBeat = (runId: string, stageId: string | undefined, kind: string, actorSide: string) =>
+    app.inject({
+      method: "POST", url: `/api/${co}/pipeline/gates`, headers: asWorkflow("wf:delivery"),
+      payload: { runId, ...(stageId ? { stageId } : {}), kind, actorSide },
+    });
+  const decideGate = (gateId: string, decision: string) =>
+    app.inject({ method: "POST", url: `/api/${co}/pipeline/gates/${gateId}/decide`, headers: asUser(admin), payload: { decision } });
+
+  it("M6-P4m: a redelivered open AFTER the twin was approved returns that gate, not a second beat", async () => {
+    // Live 2026-10-13 (P4 gate run 1): the bridge redelivered scope.signed after 120 s; the twin execution
+    // reopened pm_review 13 s after a human approved the first, so the PM saw beat 1 twice.
+    const runId = await newRun();
+    const stageId = (await createDesign(runId, "# design")).json().id;
+    const first = await openBeat(runId, stageId, "pm_review", "internal");
+    expect(first.statusCode).toBe(201);
+    expect((await decideGate(first.json().id, "approved")).statusCode).toBe(200);
+
+    const again = await openBeat(runId, stageId, "pm_review", "internal");
+    expect(again.json()).toMatchObject({ id: first.json().id, deduped: true, status: "decided" });
+    const gates = await adminPool().query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pipeline_gates WHERE run_id = $1 AND stage_id = $2 AND kind = 'pm_review' AND deleted_at IS NULL`,
+      [runId, stageId],
+    );
+    expect(gates.rows[0].n).toBe(1);
+    const acts = await adminPool().query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM activities WHERE target_entity_type = 'pipeline_gate' AND verb = 'opened' AND target_entity_id = $1`,
+      [first.json().id],
+    );
+    expect(acts.rows[0].n).toBe(1);
+  });
+
+  it("M6-P4m: after changes_requested a human can still re-request the same beat on the same stage", async () => {
+    const runId = await newRun();
+    const stageId = (await createDesign(runId, "# design")).json().id;
+    const first = await openBeat(runId, stageId, "customer_feedback", "client");
+    expect((await decideGate(first.json().id, "changes_requested")).statusCode).toBe(200);
+    const again = await openBeat(runId, stageId, "customer_feedback", "client");
+    expect(again.statusCode).toBe(201);
+    expect(again.json().deduped).toBeUndefined();
+    expect(again.json().id).not.toBe(first.json().id);
+  });
+
+  it("M6-P4m: a run-level gate (no stage) is NOT suppressed by a signed twin: unchanged behaviour", async () => {
+    const runId = await newRun();
+    const first = await openBeat(runId, undefined, "prd_sign", "client");
+    expect((await decideGate(first.json().id, "signed")).statusCode).toBe(200);
+    const again = await openBeat(runId, undefined, "prd_sign", "client");
+    expect(again.statusCode).toBe(201);
+    expect(again.json().deduped).toBeUndefined();
+  });
+
   // ── Single-shot stage identity + the 0052 schema backstop ───────────────────────────────────────
   it("concurrent release_code / deploy deciders each create exactly one stage", async () => {
     const runId = await newRun();
