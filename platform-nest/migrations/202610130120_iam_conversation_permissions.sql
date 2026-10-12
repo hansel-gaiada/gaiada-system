@@ -94,20 +94,20 @@ BEGIN
   SELECT count(*) INTO got FROM permissions
    WHERE cerbos_kind = 'conversation' AND class = 'grantable' AND module_key = 'core';
   IF got <> 4 THEN
-    RAISE EXCEPTION '202610130010: expected 4 conversation permissions, found %', got;
+    RAISE EXCEPTION '202610130120: expected 4 conversation permissions, found %', got;
   END IF;
 
   SELECT count(*) INTO got FROM permissions
    WHERE key = 'portal.converse' AND class = 'grantable' AND module_key = 'portal'
      AND sensitive = false AND ui_grantable = false;
   IF got <> 1 THEN
-    RAISE EXCEPTION '202610130010: expected exactly 1 grantable, non-sensitive, ui_grantable=false portal.converse row, found %', got;
+    RAISE EXCEPTION '202610130120: expected exactly 1 grantable, non-sensitive, ui_grantable=false portal.converse row, found %', got;
   END IF;
 
   SELECT count(*) INTO got FROM permissions
    WHERE cerbos_kind = 'conversation' AND sensitive = true AND action IN ('post', 'manage');
   IF got <> 2 THEN
-    RAISE EXCEPTION '202610130010: expected conversation post and manage to be sensitive, found % of 2', got;
+    RAISE EXCEPTION '202610130120: expected conversation post and manage to be sensitive, found % of 2', got;
   END IF;
 
   FOR expected IN
@@ -124,7 +124,7 @@ BEGIN
      WHERE r.company_id IS NULL AND r.name = expected.role_name
        AND p.cerbos_kind = 'conversation';
     IF got <> expected.expected_count THEN
-      RAISE EXCEPTION '202610130010: role "%": expected % bundled conversation permission(s), found % (missing/typo''d role name or key, or a prior partial application)',
+      RAISE EXCEPTION '202610130120: role "%": expected % bundled conversation permission(s), found % (missing/typo''d role name or key, or a prior partial application)',
         expected.role_name, expected.expected_count, got;
     END IF;
   END LOOP;
@@ -137,7 +137,7 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND r.name IN ('client', 'platform_admin') AND p.key = 'portal.converse';
   IF got <> 2 THEN
-    RAISE EXCEPTION '202610130010: expected exactly 2 (client|platform_admin, portal.converse) bundle rows, found %', got;
+    RAISE EXCEPTION '202610130120: expected exactly 2 (client|platform_admin, portal.converse) bundle rows, found %', got;
   END IF;
   SELECT count(*) INTO got
     FROM role_permissions rp
@@ -145,7 +145,7 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE p.key = 'portal.converse' AND NOT (r.company_id IS NULL AND r.name IN ('client', 'platform_admin'));
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610130010: portal.converse leaked to % other role row(s)', got;
+    RAISE EXCEPTION '202610130120: portal.converse leaked to % other role row(s)', got;
   END IF;
 
   -- Every global role that holds any action on the kind also holds `read` (no write without read).
@@ -160,7 +160,7 @@ BEGIN
        AND NOT bool_or(p.action = 'read')
   ) gap;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610130010: % role(s) hold a conversation action without `read`', got;
+    RAISE EXCEPTION '202610130120: % role(s) hold a conversation action without `read`', got;
   END IF;
 
   -- owner ≡ company_admin, in BOTH directions (equal counts alone would not catch the wrong keys).
@@ -186,7 +186,7 @@ BEGIN
         AND p.cerbos_kind = 'conversation')
   ) diff;
   IF got <> 0 THEN
-    RAISE EXCEPTION '202610130010: owner''s conversation bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
+    RAISE EXCEPTION '202610130120: owner''s conversation bundle diverges from company_admin''s by % key(s) — owner-role.db.test.ts will fail', got;
   END IF;
 
   SELECT count(*) INTO total_got
@@ -195,8 +195,8 @@ BEGIN
     JOIN permissions p ON p.id = rp.permission_id
    WHERE r.company_id IS NULL AND p.cerbos_kind = 'conversation';
   IF total_got <> 21 THEN
-    RAISE EXCEPTION '202610130010: total bundled conversation permissions on global roles: expected 21 (5x4 + 1x1), found %', total_got;
+    RAISE EXCEPTION '202610130120: total bundled conversation permissions on global roles: expected 21 (5x4 + 1x1), found %', total_got;
   END IF;
 
-  RAISE NOTICE '202610130010: role_permissions seeded — % conversation rows across 6 global roles, plus portal.converse on client + platform_admin', total_got;
+  RAISE NOTICE '202610130120: role_permissions seeded — % conversation rows across 6 global roles, plus portal.converse on client + platform_admin', total_got;
 END $$;
