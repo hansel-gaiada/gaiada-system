@@ -470,7 +470,13 @@ The only lasting change is the two packages (uidmap, slirp4netns), which the liv
 **A2 in detail (T1).** From throwaway containers on the proof daemon, with controls:
 - Must work: the own-bridge peer, DNS, and `1.1.1.1:443`.
 - Must be dropped (timeout): metadata `:80`; every host address `:22`; `172.17.0.1:{5432,6379,4310,9443}`; a
-  WireGuard peer; `10.0.2.2:22` (no rootful control exists for that one: the address exists only inside slirp).
+  WireGuard peer.
+- Must be unreachable: `10.0.2.2:22`, slirp's alias for host loopback. No rootful control exists for it: the address
+  exists only inside slirp. Measured in P2 (2026-10-12), it answers `ENETUNREACH`, not a timeout.
+  - The reason: with `--disable-host-loopback`, slirp4netns refuses it inside its own process before any host socket
+    exists, so the OUTPUT guard never sees it.
+  - The pass rule is therefore "anything but open". It is valid because the host listens on `0.0.0.0:22`, so reaching
+    the host would read "open".
 - Controls: the same host targets answer from the **rootful** default bridge.
 - Published ports: the declared one (`127.0.0.1:18380`) answers from the host. An **undeclared** one
   (`127.0.0.1:18381`, and one on `0.0.0.0`) times out, which proves the REPLY mute.
