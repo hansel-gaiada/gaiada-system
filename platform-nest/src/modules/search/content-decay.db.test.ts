@@ -67,7 +67,7 @@ describe.skipIf(!TEST_URL)("M5-V4 · content decay", () => {
        SELECT gen_random_uuid(), $1, $2, d::date, 'q', $3, 'DESKTOP',
               CASE WHEN d::date >= DATE '2026-09-12' THEN $5::int ELSE $4::int END,
               CASE WHEN d::date >= DATE '2026-09-12' THEN $5::int * 20 ELSE $4::int * 20 END,
-              8, md5($2::text || $3 || d::text), $6
+              8, md5($2::uuid::text || $3 || d::text), $6
          FROM generate_series(DATE '2026-08-15', DATE '2026-10-09', interval '1 day') AS d`,
       [A, propertyId, page, base, rec, simulated],
     ), S);
