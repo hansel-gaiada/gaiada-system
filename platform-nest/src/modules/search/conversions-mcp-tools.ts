@@ -10,7 +10,7 @@ export const CONVERSION_MCP_TOOLS: McpToolDef[] = [
   {
     name: "search.listConversionTargets",
     description:
-      "List a property's ad-platform conversion targets: which pipeline stage of which website maps to which Google Ads conversion action, " +
+      "List a property's ad-platform conversion targets: which pipeline stage of which website maps to which Google Ads conversion action, Meta event or LinkedIn conversion rule, " +
       "whether the deal value is sent, and whether the platform is in simulate or live mode (M5-P2).",
     minAssurance: "low",
     method: "GET",
@@ -21,7 +21,8 @@ export const CONVERSION_MCP_TOOLS: McpToolDef[] = [
     name: "search.setConversionTarget",
     description:
       "Create or update (idempotent) the conversion target for a website slug, platform and pipeline stage on a property. LOW impact: it sends " +
-      "nothing by itself. Each upload that follows still needs its own human approval, and only goes out for a lead with marketing consent (M5-P2).",
+      "nothing by itself. Each upload that follows still needs its own human approval, and only goes out for a lead with marketing consent. " +
+      "conversionAction is a Google conversion action, a Meta event name (meta_capi) or a LinkedIn conversion rule (linkedin_capi). Meta and LinkedIn are simulate-only (M5-P2, P3, P4).",
     minAssurance: "verified",
     write: true,
     impact: "low",
@@ -32,7 +33,7 @@ export const CONVERSION_MCP_TOOLS: McpToolDef[] = [
       properties: {
         ...ids,
         webSiteSlug: { type: "string" },
-        platform: { type: "string", enum: ["google_ads"] },
+        platform: { type: "string", enum: ["google_ads", "meta_capi", "linkedin_capi"] },
         stage: { type: "string" },
         conversionKey: { type: "string" },
         conversionAction: { type: "string" },

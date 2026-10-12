@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 161,
-      "grantablePermissionsInCatalog": 428,
-      "permissionsCoveredByGroups": 389,
+      "groups": 163,
+      "grantablePermissionsInCatalog": 430,
+      "permissionsCoveredByGroups": 391,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
-      "sensitiveGroups": 111
+      "sensitiveGroups": 113
     }
   },
   "groups": [
@@ -839,6 +839,26 @@
       "description": "Record an attested property fact (CMS, hosting, security posture) that a dependent audit check can resolve from on a later run. An accountability record, not a routine property edit.",
       "permissions": [
         "search.property.attest"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_read_visitors",
+      "name": "View Website Visitor Profiles",
+      "domain": "search",
+      "description": "See the consented visitors of a client website: the visitor list, each visitor's timeline, interests and score, and whether visitor collection is running. Personal data of identified visitors, so it is held by search managers and company admins and is not part of plain search work.",
+      "permissions": [
+        "search.property.read_visitors"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_view_replay",
+      "name": "Watch Visitor Session Replays",
+      "domain": "search",
+      "description": "Open a recorded session of a website visitor. Kept apart from View Website Visitor Profiles because a recording is more intrusive than a profile; every viewing is audited.",
+      "permissions": [
+        "search.property.view_replay"
       ],
       "sensitive": true
     },

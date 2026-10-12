@@ -1791,6 +1791,8 @@ No new Cerbos kind, action, role or permission key, no policy change, no restart
 
 Two properties of the data worth knowing: the consent gate is strictly `visitor_consent.marketing === true` and runs at planning and again at execution; and the lead's contact fields and click id are read at execution, hashed in memory and never written down (the ledger, the approval args, the outbox and the logs hold ids, stages, kinds and typed reasons). Stage moves stay `triage`-tier (manager and up) as P1 ruled; a move is LOW because it cannot send anything: the upload needs its own approval. Proof: `modules/search/conversions.test.ts`, `conversions-consumer-wiring.test.ts` (no services) and `conversions.db.test.ts` (Linux gate).
 
+**M5-P3 (Meta Conversions API) and M5-P4 (LinkedIn Conversions API, ERP side) add nothing to this table** (2026-10-13, PROTOTYPED). They are adapters on the same flow, so the same authorities apply unchanged: configuring a `meta_capi` or `linkedin_capi` target is `resource_search_property · update`, the reads are `read`, and an upload of either needs its own approval decided by someone holding the generic `decide` AND `update` on the row's property. No new kind, action, role or permission key, no policy change, no restart. Tenancy: every row is reached through `withTenants([tenantId], {modules:['search']})`, so another company's property is 404 and the lead's facts are read on the same tenant-scoped connection; no cross-tenant scope set is ever passed. Two properties worth stating for these platforms: the browser identifiers (`fbc`, `fbp`, `li_fat_id`) are used only when `visitor_consent.marketing === true`, checked by the gate at planning, again at execution, and a third time inside each request builder; and both platforms are simulate-only, so no personal data leaves the system at all today (the boot guard refuses either as a live platform). Proof: `modules/search/conversions-meta-linkedin.test.ts` (no services) and `conversions-meta-linkedin.db.test.ts` (Linux gate).
+
 ---
 
 ## 32. PV-5 billing actions (2026-10-12, PROTOTYPED)
@@ -1865,3 +1867,54 @@ Every other AP rule is byte-identical. The notification to all owners is wired b
 roles allowed, `company_admin` denied `set_bank_details`, a delegated bot call denied, and the PV-D26 assurance matrix for `set_bank_details` and `vendor_master`: owner, finance_manager and platform_admin each denied at `linked`, allowed at `high`), plus the static pins above and
 `iam-04-reg1-mirror-reach-invariant` (the new mirrors are no wider than `company_admin`'s or `manager`'s role arm). **Restart
 `gaiada-test-cerbos` and the live sidecar after deploying the policy files** (nothing hot-reloads).
+
+---
+
+## 33. M5-V3-f — visitor profiles and session replay: `read_visitors` and `view_replay` on `resource_search_property` (2026-10-12, PROTOTYPED)
+
+Ticket: `docs/plans/2026-10-12-m5-phase5-design.md` section 8, V3-f; design sections 4.8 and 6.3; owner default O5. Seeded by
+`202610131730_iam_m5_v3f_visitor_actions.sql`. **Two new actions on the EXISTING `resource_search_property` kind: no new kind, no new role.** No handler
+calls them yet: the visitors controller is V3-g and the replay routes are V6-b, so until those land nothing changes in behaviour.
+
+Both are **sensitive**: they expose personal data of identified website visitors (consented profiles, V3; our own sampled recordings, V6).
+They are two keys on purpose. A recording is more intrusive than a profile, so each can be granted without the other, and neither is implied by
+`search.property.read`.
+
+| Action | Key | Who | Perm mirror | `uiGrantable` | Group |
+|---|---|---|---|---|---|
+| `read_visitors` | `search.property.read_visitors` | `search_manager` (derived role `module_manager`) and `company_admin`, `inTenant && notLow`; `owner` by the permission arm; `platform_admin` by the wildcard. **Not `search_staff`** | yes, `perm_resource_search_property_read_visitors` | true | new `search_read_visitors` |
+| `view_replay` | `search.property.view_replay` | the same set. **Not `search_staff`** | yes, `perm_resource_search_property_view_replay` | true | new `search_view_replay` |
+
+**Plain `module_staff` keeps aggregate `read` only.** The new rule names `["read_visitors", "view_replay"]` alone, so neither action can ride the
+baseline `read / create / update` rule. No `member`, `viewer`, `client`, generic `manager`, `webdev_*` or any other module tier holds either key.
+
+**What a granted permission grants.** One mirror per action, each keyed on its own permission, with the kind's usual condition
+(`inTenant && notLow && inRoot`). A holder of `search.property.read_visitors` reaches `read_visitors` and nothing else: not `view_replay`, not
+`read`, not `attest`. The reverse holds for `view_replay`. This is how plain search staff can be given the right, by an explicit grant. The
+mirrors are not mediated by `resource.attr.module`; the role arm is (it needs a `search_manager` grant and module `search`). Every handler of this
+kind passes module `search`, so the difference is unreachable today; it is recorded in `iam-04-reg1-mirror-reach-invariant` next to `attest`'s
+identical entry. **The V3-g and V6-b handlers must pass `module: "search"` and `tenantId: <the served company>`** like `SearchController`.
+
+**Bundles (regenerated by `scripts/generate-role-bundles.mjs`, not hand-edited; no resolver change was needed, the kind already maps).** Exactly
+`platform_admin`, `company_admin`, `search_manager` and `owner` gain both keys (+8 pairs). `search_staff` gains nothing. The migration asserts the
+holder set in both directions and that `owner` still equals `company_admin` on the two keys.
+
+**Pinned counts moved (deliberately)**, on the tree at `origin/main` db9803ba:
+
+| Pin | before | delta | after |
+|---|---|---|---|
+| Catalog pairs (`cerbos-catalog-alignment`, `ui-grantable-catalog`) | 443 | +2 | 445 |
+| Grantable (`permission-groups-catalog-parity`, `ui-grantable-catalog`) | 428 | +2 | 430 |
+| Sensitive (`_meta.counts`) | 208 | +2 | 210 |
+| Kinds | 104 | 0 | 104 |
+| `ui_grantable = false` (`iam-phase2-ui-grantable-guard`) | 26 | 0 | 26 |
+| `ui_grantable = true` (`_meta.uiGrantable`) | 417 | +2 | 419 |
+| Authoring groups / covered by groups / sensitive groups | 161 / 389 / 111 | +2 / +2 / +2 | 163 / 391 / 113 |
+| Role bundle pairs (regenerated) | 1934 | +8 (platform_admin +2, company_admin +2, search_manager +2, owner +2) | 1942 |
+
+**Proof.** `cerbos/tests/search_visitors_test.yaml` (23 principals x 4 resources x 7 actions; run with `cerbos compile --tests` on the Linux gate);
+`src/rbac/search-visitor-actions-cerbos.test.ts` (live Cerbos: staff denied, manager and company admin allowed, other tenant denied, a granted key grants
+exactly its action, root and assurance bounds); `src/rbac/search-visitor-actions-catalog.db.test.ts` (static agreement of catalog, groups, bundles, policy
+and migration, plus the DB rows after migrating); and the pinned counts above. **Deploy: restart the Cerbos container and the live sidecar** (nothing hot-reloads),
+then probe: a `search_staff` principal is denied `read_visitors` and `view_replay`, a `search_manager` of the same company is allowed both, and a permission-only
+principal holding one key is allowed that one action.

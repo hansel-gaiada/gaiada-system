@@ -11,6 +11,83 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### insights-collector `0.2.0` + infra `0.13.10` - M5-V3-b: the consented channel, forget, the ops events read and the 72-hour purge (not deployed) (2026-10-13) - PROTOTYPED
+
+- **`POST /lib/kestrel/v`** (consented events):
+  - A missing or invalid `consentId` is a 400, and a tombstoned visitor or consent id is a 410; nothing is stored in either case.
+  - Only allow-listed data keys with id-like values are kept.
+  - At most 50 events and 16 KB per request.
+  - Geo, network and company come from the same single lookup as the aggregate channel.
+- **`POST /lib/kestrel/f`** (withdrawal) deletes that visitor and consent pair and tombstones the visitor id.
+- **Ops API** (port 8081):
+  - `GET /ops/v1/events` (read key) pages by id with a cursor and never returns a row younger than 15 s. It takes the insert lock exclusively for one page, so a batch that commits late with a lower id is never skipped.
+  - `POST /ops/v1/forget` needs a separate forget key: the read key gets 403. It tombstones and is idempotent.
+- **Tombstones** use the ERP's hash contract, `sha256(utf8(lower-case uuid))`, pinned by a known-vector test.
+- **Inserts and forgets** serialise on one advisory lock, so a batch cannot land after its forget.
+- **Purge:** buffered events go after 72 h at most (`BUFFER_RETENTION_HOURS` is 1–72, and 0 refuses to start); tombstones go after 14 months.
+- **Migration `0002_consented_events`:** no IP or user-agent column; a schema test pins the column list.
+- **Sumopod compose:** `OPS_FORGET_KEY_SHA256` is now required. `CONSENT_EVENT_NAMES`, `CONSENT_RATE_PER_SECOND`, `BUFFER_RETENTION_HOURS` and `PURGE_INTERVAL_MINUTES` are passed through. `check-config.sh` and runbook C2 are updated.
+- `/v` and `/f` stay unrouted at the edge until V3-c.
+- `go test -race` is green locally. The Postgres contract test runs in CI.
+
+### platform-nest `0.104.0` - M5-V3-f: two sensitive Cerbos actions for visitor data, `read_visitors` and `view_replay` (2026-10-13) - PROTOTYPED
+
+- Both are new actions on the existing `resource_search_property` kind (design §4.8, §6.3, O5).
+- **Who holds them:**
+  - The role arm gives both to the search manager and the served company's admin, in tenant.
+  - Plain search staff keep aggregate `read` only.
+  - No member, client or webdev role gets them.
+- **Permission keys:** `search.property.read_visitors` and `search.property.view_replay`. Both are sensitive and UI-grantable, each in its own group, and each mirror grants exactly its own action.
+  - Neither implies the other, and `read` implies neither.
+- **Migration `202610131730_iam_m5_v3f_visitor_actions`** seeds the catalog rows and the bundles for `platform_admin`, `company_admin`, `search_manager` and `owner`, and checks the exact holder set in both directions.
+- **Pinned counts:** catalog 443→445, bundle pairs 1934→1942.
+- **Tests:** a Cerbos YAML matrix (23 principals × 4 resources × 7 actions), a live Cerbos test and a DB catalog test. PERMISSION-CONTRACT §33.
+- **Deploy:** restart Cerbos, then probe that staff are denied and a manager is allowed.
+- No routes yet (V3-g, V6-b).
+
+### infra `0.13.9` - M5-V2-c: the insights-collector in the Umami compose project on sumopod (files only, not deployed) (2026-10-13) - PROTOTYPED
+
+- **`infra/sumopod/umami/docker-compose.yml`** gains two services, both on the `internal` network only (no egress):
+  - `collector`: read-only, every variable it reads listed under `environment:`, with resource limits and a healthcheck;
+  - `vdb`: its own Postgres.
+  - The image pin is a PLACEHOLDER until the first signed release; `check-config.sh --deploy` refuses it.
+- **The edge** sends the collect path to `${EDGE_COLLECT_UPSTREAM}`:
+  - it is `collector:8080` by default, and `app:3000` is the rollback;
+  - it is resolved per request, so a stopped collector never blocks the edge;
+  - `/lib/kestrel/v`, `/f` and `/r` are templated but off (404) until V3-b/V6-a.
+- **Umami's `SKIP_LOCATION_HEADERS`** stays `1` until V2-d proves the pseudonym and geo headers.
+- **`geo-refresh.sh`** also fetches DB-IP ASN Lite and restarts the collector.
+- **`backup.sh`** also dumps `vdb`, without the data of `consented_events` and `replay_*` (design O2), and refuses a dump that carries any. The aicenter receiver accepts `vdb-*` names.
+- **`check-config.sh`** (new) is the static gate for sumopod: compose config per profile, pins, networks, env passthrough, `nginx -t` on every template.
+- **Runbook** `infra/runbooks/umami-sumopod.md` §13, steps C0–C6:
+  - preflight;
+  - `cosign verify`, then the image pin;
+  - the keys;
+  - `check-config.sh`;
+  - first deploy;
+  - the V2-d proof steps;
+  - rollback.
+- **Not run:** `docker compose config` and `nginx -t`, because there is no Docker locally. They run on sumopod as V2-d's first step.
+
+### platform-nest `0.103.0` - M5-P3/P4: Meta and LinkedIn conversion adapters, SIMULATE-ONLY (2026-10-13) - DEV-VERIFIED (simulate)
+
+- **New files:** `conversions-meta.ts` (Meta Conversions API, `POST /{dataset_id}/events`) and `conversions-linkedin.ts` (LinkedIn Conversions API).
+- **What they do:** each builds the request the platform WOULD receive, plus a non-personal summary. They follow each platform's own normalisation:
+  - Meta: `em`/`ph` SHA-256, with no gmail dot-removal; `fbc`/`fbp` sent unhashed and only with marketing consent.
+  - Both: `event_id` dedup with the browser Pixel's `Lead`; value/currency only on `won`.
+- **Simulate only:**
+  - Neither has a live transport or reads a token.
+  - The boot guard refuses `meta_capi` or `linkedin_capi` in `SEARCH_CONVERSIONS_LIVE_PLATFORMS`.
+  - `conversion-targets` now accept both platforms.
+  - An unknown platform is a typed 400 `platform_unknown`.
+- **Docs:** BFF §28b.1 and the capability inventory are updated.
+- **Verified** on GitHub Actions 38273062655: unit tests and DB tests green.
+- **Open before any live upload:**
+  - where the credentials live;
+  - Meta's `client_user_agent` (Meta requires it for website events, and the system stores no user agent);
+  - the currency case;
+  - Meta Business Verification (O-7).
+
 ### platform-nest `0.102.0` - GitHub repo requests reach the Approvals inbox; provisioned sites are reconciled on a schedule (2026-10-12) - DEV-VERIFIED
 
 WebDesk M6-P4h and M6-P4i, found while mapping the P4 gate. Built by the M6 session.

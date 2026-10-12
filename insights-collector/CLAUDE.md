@@ -1,7 +1,7 @@
 # CLAUDE.md — insights-collector
 
 Scope: `insights-collector/` — the **enrichment collector** of M5 phase 5 (`module gaiada/insights-collector`, go 1.26).
-Design of record: `docs/plans/2026-10-12-m5-phase5-design.md` section 3 (V2) and ticket V2-a in section 8. Status: **PROTOTYPED**
+Design of record: `docs/plans/2026-10-12-m5-phase5-design.md` section 3 (V2), section 4.1/4.2/4.4/4.7 (V3-b: the consented channel) and tickets V2-a, V3-b in section 8. Status: **PROTOTYPED** (V3-b adds the consented channel; its Postgres tests run on CI only)
 (unit-tested; nothing deployed, never run against a real Umami). Root `../CLAUDE.md` has the program rules.
 
 ```
@@ -18,7 +18,9 @@ no egress). The site's Umami tracker is unchanged; its hits for `COLLECT_API_END
 
 ```
 edge nginx ──X-Real-IP──> :8080  POST /lib/kestrel/e  ──resolve once──> Umami app:3000 (fd… pseudonym + cf-* geo headers)
-Docker / read-gate ─────> :8081  GET /healthz · GET /ops/v1/bots        (never reads X-Real-IP)
+                         :8080  POST /lib/kestrel/v   consented events (needs consentId)  ──> vdb consented_events (72 h buffer)
+                         :8080  POST /lib/kestrel/f   withdrawal: delete the pair's rows, tombstone the visitor id
+Docker / read-gate ─────> :8081  GET /healthz · GET /ops/v1/bots · GET /ops/v1/events (read key) · POST /ops/v1/forget (forget key)   (never reads X-Real-IP)
 ```
 
 Per hit (`internal/ingest`): parse `X-Real-IP` (400 if absent or invalid) → body ≤ `MAX_BODY_BYTES` → only `type:"event"` (`identify` and every
@@ -27,6 +29,32 @@ other type: 400 and dropped) → `payload.website` must be in `INSIGHTS_WEBSITES
 (bots are not forwarded, are counted in `bot_counts`, and are answered `{"beep":"boop"}` like Umami does) → forward a FRESH request to Umami
 with only: `Content-Type`, `User-Agent`, `x-umami-cache` (passed through, ≤ 4 KB), `X-Real-IP: fd…` and `cf-ipcountry`/`cf-region-code`/`cf-ipcity`
 when resolved. Umami's status and body come back to the tracker; 3 s timeout, then 502.
+
+## The consented channel (V3-b; `internal/consent`, `internal/ops/events.go`, `internal/store/events*.go`)
+
+- `POST /lib/kestrel/v` `{website, visitorId, consentId, events:[{t, kind, path, name?, data?}]}`, body <= 16 KB, <= 50 events, `text/plain` or JSON (the
+  Content-Type is ignored). Answers: 204; 400 (`no-consent-id` first: no valid `consentId`, no storage; `bad-visitor-id`, `no-events`, `too-many-events`,
+  `no-valid-events`, `bad-body`, `no-client-address`); 403 unknown website; 410 `visitor-forgotten` (visitor id OR consent id tombstoned; nothing stored);
+  413; 429 (global bucket `CONSENT_RATE_PER_SECOND`, plus a per-visitor-id burst of 10 refilling 1 per 2 s; no address is kept for it); 503 vdb down.
+  A bot (isbot UA, WebDesk's `bot` bucket, or a datacenter ASN) gets a silent 204 and is not stored.
+- Per event, an invalid one is DROPPED, not the batch: `kind` pageview|event; `path` starts with `/`, no query, hash, backslash or control character, <= 512; an
+  `event` needs a `name` from `CONSENT_EVENT_NAMES`; `data` keeps only `section_id link_location form_id language_to` (`[A-Za-z0-9_.:-]{1,64}`) and
+  `step_index` (whole number 0..1000), everything else is dropped; `t` is epoch milliseconds (number) or RFC 3339, clamped to +-10 min of receipt (missing = receipt).
+- Stored per row (`migrations/0002_consented_events.sql`): website, visitor_id, consent_id, received_at, occurred_at, kind, path, name, data, device
+  (WebDesk `classifyUserAgent` buckets, ported in `consent/device.go`), country, city, asn, network_name, company (the CompanyResolver result as JSON). The
+  geo, ASN and resolver result all come from ONE lookup of the request's address. **No IP column, no user-agent column** (static test + live catalogue check).
+- `POST /lib/kestrel/f` `{website, visitorId, consentId}`: always 204 for a well-formed body (unknown pair or website: still 204, no oracle); deletes rows only
+  where BOTH ids match; tombstones the visitor id (`withdraw`).
+- `GET /ops/v1/events?website&after&limit<=1000` (read key) -> `{events:[{id, visitorId, consentId, receivedAt, occurredAt, kind, path, name|null, data|null,
+  device, geo:{country, city}, network:{asn, name}|null, company:{kind,name,domain?,confidence,source,version?}|null}], next}`. `next` is the last id returned (or `after`
+  when none). Rows younger than 15 s are never returned, and the page stops at the first young row, so a cursor cannot skip a late commit.
+- `POST /ops/v1/forget` `{website, visitorIds<=100, consentIds<=100, mode:"withdraw"|"erase"}` (FORGET key) -> `{website, mode, deleted:{events}, tombstoned:{visitors, consents}}`.
+  Deletes rows of either id and tombstones both kinds; idempotent (an `erase` upgrades a `withdraw` tombstone, never the reverse). Keys: no/unknown key 401; the
+  read key on forget 403; the forget key on events or bots 403.
+- **Tombstones hold `sha256(utf8(lower-case uuid text))` only**, the same contract as the ERP's `search_visitor_tombstones` (pinned by a known-vector test). Inserts and
+  forgets serialise on one advisory lock (inserts shared, forgets exclusive), so a batch can never land after a forget has deleted that visitor's rows.
+- Purge loop (`store.Purger`, at start and every `PURGE_INTERVAL_MINUTES`): rows older than `BUFFER_RETENTION_HOURS` (default and MAXIMUM 72) and tombstones older than 14 months.
+- Logs name outcomes only, never an id or an address; the leak tests search logs, every response, every stored row and the ops output.
 
 ## Invariants (each has a test; do not weaken)
 
@@ -55,6 +83,11 @@ when resolved. Umami's status and body come back to the tracker; 3 s timeout, th
 | `INSIGHTS_WEBSITES` | required | comma-separated Umami website UUIDs; empty refuses to start (cannot silently admit or block all) |
 | `DATABASE_URL` | required | vdb. The pool is lazy: vdb down at start does not stop the aggregate channel |
 | `OPS_READ_KEY_SHA256` | required | 64 hex = SHA-256 of the ERP's read key; sent as `Authorization: Bearer <key>` |
+| `OPS_FORGET_KEY_SHA256` | required | SHA-256 of the SEPARATE forget key; must differ from the read hash (the read key cannot forget) |
+| `CONSENT_EVENT_NAMES` | the site's goal events + form steps + `language_switch` | comma list, `[a-z][a-z0-9_]{0,49}`. ASSUMPTION: the site's real list (`gaiada-web-revamp/.../events.ts`) is confirmed by V3-j |
+| `CONSENT_RATE_PER_SECOND` | `100` | 1-10000; global ceiling on `/v` and `/f` |
+| `BUFFER_RETENTION_HOURS` | `72` | 1-72 (a shorter buffer is allowed, a longer one is refused: 72 h is a promise in the notice) |
+| `PURGE_INTERVAL_MINUTES` | `15` | 1-1440 |
 | `LISTEN_ADDR` / `OPS_ADDR` | `:8080` / `:8081` | must differ |
 | `UMAMI_URL` | `http://app:3000` | no path |
 | `UMAMI_TIMEOUT_MS` | `3000` | 100–30000 |
@@ -101,5 +134,4 @@ API vendor cannot be a resolver without a ruling and a network change.
 
 ## Not here yet
 
-`/lib/kestrel/v|f|r`, `consented_events`, `/ops/v1/events|forget` (V3-b); replay (V6-a); CI (V2-b); compose, nginx and `geo-refresh.sh` (V2-c).
-The `tombstones` table exists in `0001` so the schema is one step, but nothing reads or writes it until V3-b.
+`/lib/kestrel/r` and replay (V6-a); the compose/nginx/edge routes for `/lib/kestrel/v|f`, the two key hashes in `.env.example` and the new env variables under `environment:` (V3-c; **V2-c's compose must also list `OPS_FORGET_KEY_SHA256`, or the collector refuses to start**).

@@ -1,4 +1,4 @@
-# Runbook — Umami on sumopod (M5-A3, WSK-D66)
+# Runbook — Umami on sumopod (M5-A3, WSK-D66) + the insights collector (M5-V2-c, section 13)
 
 **Status: PLANNED.** Every artifact here is written and statically checked (see "What was checked") but
 nothing has run on a server. The orchestrator performs every step below; nothing is automated from CI.
@@ -258,7 +258,8 @@ sudo systemctl start umami-retention.service && journalctl -u umami-retention -n
   `heatmap_event`, `session_replay`, `revenue`, `website_event`, `session_link` older than 14 months, then
   sessions that are old and have no events. Table and column names are the `@@map`/`@map` names in Umami v3.4.0's
   `prisma/schema.prisma`, every one with a `created_at timestamptz`. Re-read the schema on every version bump.
-* **Geo refresh:** monthly (5th, 04:20 UTC); downloads DB-IP Lite, swaps atomically, restarts `umami-app-1`.
+* **Geo refresh:** monthly (5th, 04:20 UTC); downloads DB-IP Lite **City and ASN**, each checked and swapped atomically, restarts
+  `umami-app-1` and (when running) `umami-collector-1`. The ASN file is `geo/dbip-asn-lite.mmdb` (M5-V2-c, section 13).
 
 ## 10. Backup and the off-box copy
 
@@ -287,7 +288,7 @@ mkdir -p ~/bin ~/umami-backups && chmod 700 ~/umami-backups
 # copy umami-backup-receive.sh to ~/bin/ and chmod +x, then ONE line in ~/.ssh/authorized_keys:
 #   restrict,from="10.88.0.2",command="/home/Hansel/bin/umami-backup-receive.sh" ssh-ed25519 AAAA... umami-push@sumopod
 # aicenter retention (cron, daily 05:10): 90 days, keep 1st-of-month copies 12 months
-#   10 5 * * * find $HOME/umami-backups -maxdepth 1 -type f -name 'umami-*.sql.gz.age' \( -name 'umami-????????-*' \) -mtime +90 ! -name 'umami-??????01-*' -delete; find $HOME/umami-backups -maxdepth 1 -type f -name 'umami-??????01-*' -mtime +365 -delete
+#   10 5 * * * find $HOME/umami-backups -maxdepth 1 -type f \( -name 'umami-????????-*' -o -name 'vdb-????????-*' \) -mtime +90 ! -name '*-??????01-*' -delete; find $HOME/umami-backups -maxdepth 1 -type f \( -name 'umami-??????01-*' -o -name 'vdb-??????01-*' \) -mtime +365 -delete
 ```
 
 Prove the key is restricted (run after any `authorized_keys` change):
@@ -306,6 +307,11 @@ ls -l ~/umami-backup/data/                        # .age, .sha256, .pushed
 ssh Hansel@10.88.0.1 'ls -l ~/umami-backups/'     # the same file, same size (from an operator login)
 cat /var/lib/node_exporter/textfile/umami_backup.prom
 ```
+
+**M5-V2-c:** the same run also dumps the collector's `vdb` (`vdb-<stamp>.sql.gz.age`) with the DATA of `consented_events`,
+`replay_sessions` and `replay_chunks` excluded (design O2: deliberately not backed up, so the backup holds hashes and aggregates
+only). The receiver on aicenter must be the NEW `umami-backup-receive.sh` (it accepts `vdb-` names too) and the cron line above
+the new one BEFORE the first backup that includes vdb; otherwise the vdb push is refused and the run exits non-zero (section 13, C4).
 
 Alerting hook: `umami_backup_last_run_ok` and `umami_backup_last_success_timestamp_seconds` land in the node_exporter
 textfile directory; add a stale rule beside `infra/observability/prometheus/rules/backup-offsite.yml` (not done here).
@@ -358,3 +364,137 @@ not on a single slow probe.
 * NOT run: the compose project, erp-edge on a server (Traefik 3.3.7 did load the route file locally), CORS single-header behaviour through Traefik's
   `headers` middleware (the strip + cors middleware order is reasoned, Verify step 1 proves it), the DOCKER-USER
   rules, the mimi-bridge to docker0 path, `retention.sql` against a real Umami database (it was run against stub tables with the same names and columns, postgres 16.15: deleted old rows and orphan sessions, kept recent ones), the MMDB field fit.
+
+## 13. The insights collector (M5-V2-c) — status: PLANNED, artifacts written, nothing deployed
+
+Design of record: `docs/plans/2026-10-12-m5-phase5-design.md` section 3. The collector (`insights-collector/`, Go, distroless) sits
+between the `edge` and Umami on the collect path; `vdb` is its own Postgres. Both are on `internal` only (no egress by
+construction; `egress-guard.sh` is unchanged); nothing new is published.
+
+```
+edge nginx --/lib/kestrel/e (X-Real-IP)--> collector :8080 --fd.. pseudonym + cf-* geo headers--> app (Umami)      collector --> vdb
+edge nginx --/lib/kestrel.js-------------------------------------------------------------------> app (Umami)
+```
+
+What changed in `infra/sumopod/umami/`: `docker-compose.yml` (`vdb`, `collector`, `vdb-data` volume; the edge waits for the collector
+only softly, `required: false`), `nginx/edge.conf.template` (collect location -> `${EDGE_COLLECT_UPSTREAM}`, resolved per request;
+`/lib/kestrel/v`, `/f`, `/r` templated and commented out: they 404 until V3-b / V6-a), `geo-refresh.sh` (ASN Lite + collector restart),
+`backup.sh` and `umami-backup-receive.sh` (vdb), `.env.example`, and `check-config.sh` (the static gate).
+`read-gate` is NOT changed here: its `/ops/v1/` route (and the forget `POST`) is V3-c.
+
+### C0. Preflight (before anything is copied)
+
+The step-0 checks above still apply, plus:
+
+```bash
+free -m          # the collector and vdb add ~450 MiB of limits: need >= 2 GiB "available" in total
+df -h / /var/lib/docker   # V6 replay needs >= 25 GB free later; today only measure and record it (81% used when last measured)
+docker network inspect umami_internal >/dev/null 2>&1 && echo "project exists (upgrade)" || echo "first install"
+```
+
+Confirm the release CI produced a signed image for this component (V2-b) and note its tag and digest.
+
+### C1. Verify the signed image, then pin it (never build on a host)
+
+```bash
+OWNER=hansel-gaiada; TAG=<release tag, e.g. 1.0.0-alpha.NNN>        # from the V2-b release run
+IMG=ghcr.io/$OWNER/gaiada-insights-collector:$TAG
+cosign verify "$IMG" \
+  --certificate-identity-regexp "https://github.com/$OWNER/.+/.github/workflows/release.yml@.+" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com      # exactly the verify in the header of .github/workflows/release.yml
+docker buildx imagetools inspect "$IMG" | grep -m1 '^Digest:'               # sha256:... = the pin
+```
+
+Edit `docker-compose.yml`: replace the collector's `image:` line (the `0.0.0-PLACEHOLDER` tag AND the all-zero digest) with
+`ghcr.io/<owner>/gaiada-insights-collector:<tag>@sha256:<digest>` and commit that change on a branch (it is how the pin reaches the repo).
+A failing `cosign verify` is a stop, not a warning. (Private package: `docker login ghcr.io` first.)
+
+### C2. Keys and `.env`
+
+```bash
+cd ~/umami
+# The ERP READ key: shown ONCE; the orchestrator puts it in platform-nest (INSIGHTS_READ_KEY). The collector keeps only the hash.
+K=$(openssl rand -hex 32); printf '%s' "$K" | sha256sum | cut -d' ' -f1      # hash -> OPS_READ_KEY_SHA256 in .env
+# The FORGET key (M5-V3-b; REQUIRED, the collector refuses to start without it or with the read key's hash): same recipe,
+# a DIFFERENT key; the orchestrator puts it in platform-nest (the forget key variable V3-c names); hash -> OPS_FORGET_KEY_SHA256
+F=$(openssl rand -hex 32); printf '%s' "$F" | sha256sum | cut -d' ' -f1      # hash -> OPS_FORGET_KEY_SHA256 in .env
+openssl rand -hex 32                                                          # -> VDB_PASSWORD (hex, URL-safe)
+```
+
+Fill `.env`: `VDB_PASSWORD`, `OPS_READ_KEY_SHA256`, `OPS_FORGET_KEY_SHA256`, `INSIGHTS_WEBSITES` (a well-formed placeholder UUID until the website exists, section 7),
+and `COLLECTOR_GEO_REQUIRED=1`. Leave `UMAMI_SKIP_LOCATION_HEADERS` and `COLLECTOR_FORWARD_IP_MODE` unset (defaults: Umami ignores
+location headers; the collector pseudonymises). Set `COLLECTOR_CONSENT_EVENT_NAMES` to the site's event list (V3-j) before the
+consented channel is routed (V3-c). Keys never go in git, a ticket, a log or chat; hand `$K` and `$F` to the orchestrator only.
+Rotate a key: new key, new hash in `.env`, `docker compose up -d collector`, then the new key in platform-nest.
+
+### C3. Static gate (changes nothing)
+
+```bash
+cd ~/umami && ./check-config.sh               # all PASS; the collector pin WARNs until C1 is done
+./check-config.sh --deploy                    # all PASS with NO placeholder: required before `up`
+```
+
+It runs `docker compose config -q` for every profile, checks pins, networks and the collector's `environment:` list, and renders all three
+nginx templates in the pinned image under `nginx -t` (and the rollback rendering). Dummy values only; it reads no `.env`.
+
+### C4. First deploy of the collector
+
+Order matters: geo files first (the collector is `GEO_REQUIRED`), the backup receiver and cron before the first vdb backup.
+
+```bash
+cd ~/umami
+./geo-refresh.sh && ls -l geo/                # dbip-city-lite.mmdb, dbip-asn-lite.mmdb, VERSION, VERSION-asn (record the ASN size: the floor is a guess)
+docker compose config -q && docker compose pull collector vdb
+docker compose up -d vdb collector            # does not touch app/db/edge; the collector waits for vdb + app healthy
+docker compose ps                             # vdb, collector: healthy
+docker compose logs --tail 20 collector       # migrations applied, geo ok (not degraded); no address, key or password anywhere
+docker exec umami-edge-1 wget -q -T 3 -O- http://127.0.0.1:8080/__ping_collector     # the collector's /healthz via the edge, loopback only
+docker compose up -d edge                     # re-renders the template: the collect path now goes to the collector
+docker exec umami-edge-1 nginx -T 2>/dev/null | grep -E 'collect_upstream|resolver'
+```
+
+Then the backup path: on aicenter copy the new `umami-backup-receive.sh` to `~/bin/` and replace the cron line (section 10); on sumopod
+`sudo systemctl start umami-backup.service` and expect `dump ok ...umami-...`, `dump ok ...vdb-...`, `ok pushed=2`. The geo timer unit is
+unchanged (the script now refreshes both editions and restarts both containers).
+
+### C5. The proof steps V2-d runs (in a throwaway project, never the live `umami` one; V2-e repeats 1 to 4 live)
+
+Send the agreed public test IP (V2-d names it) through the edge exactly as section 8 step 6 does (from inside erp-edge's container, the trusted source).
+
+1. **Country stored.** `docker exec umami-db-1 psql -U umami -d umami -c "select country, region, city from session order by created_at desc limit 1;"`
+   shows the test IP's country (region and city if DB-IP has them). Empty means Umami ignored the headers (`UMAMI_SKIP_LOCATION_HEADERS` still 1) or the
+   MMDB fields do not match; record which. To let Umami read the collector's headers set `UMAMI_SKIP_LOCATION_HEADERS=` (EMPTY, not 0) in `.env`,
+   `docker compose up -d app`, resend. Also record whether a non-ASCII city (percent-encoded by the collector) is stored decoded
+   (`insights-collector/CLAUDE.md`, open items).
+2. **The test IP appears 0 times** in a dump of both databases and in every log. All of these must print 0; anything else is a stop:
+   ```bash
+   docker exec umami-db-1 pg_dump -U umami -d umami | grep -c '<test-ip>'
+   docker exec umami-vdb-1 pg_dump -U vdb -d vdb | grep -c '<test-ip>'
+   docker compose logs --no-color | grep -c '<test-ip>'
+   docker logs umami-edge-1 2>&1 | grep -c '<test-ip>'
+   ```
+3. **The pseudonym is accepted, or the fallback is recorded.** The event must be stored (a `website_event` row for the test URL) and the session stable
+   for the day. If Umami 3.4.0 rejects or mishandles the `fd..` address: `COLLECTOR_FORWARD_IP_MODE=real` (the D2 fallback; the real address crosses
+   `internal` to Umami, never logged or stored by the collector; it logs a warning at start), `docker compose up -d collector`, and RECORD the decision.
+4. **A public `cf-ipcountry` does not land:** send one with `cf-ipcountry: XX` to the public path; the stored country must not be `XX`.
+5. **Bots are dropped and counted:** one hit with a bot user-agent answers `{"beep":"boop"}`, adds no `website_event`, and
+   `docker exec umami-vdb-1 psql -U vdb -d vdb -c "select * from bot_counts"` shows a row. `identify` and an unknown website id: 400 and 403.
+6. **Every other path still 404s** publicly (section 8 step 2 list, plus `/lib/kestrel/v`, `/f`, `/r`, `/ops/v1/bots`, `/healthz`, `/__ping_collector`).
+7. **The vdb backup holds no personal data:** after `backup.sh`, decrypt on the laptop (restore test, section 10) and
+   `zcat | grep -E '^COPY public\.(consented_events|replay_)'` prints nothing.
+
+### C6. Rollback (collector out of the path; Umami collects directly)
+
+```bash
+cd ~/umami
+# .env: EDGE_COLLECT_UPSTREAM=app:3000   and   UMAMI_SKIP_LOCATION_HEADERS=1 (or delete the line)
+docker compose up -d edge app
+docker exec umami-edge-1 nginx -T 2>/dev/null | grep collect_upstream          # "app:3000"
+curl -si -X OPTIONS http://172.17.0.1:18742/lib/kestrel/e | head -3            # the collect path answers again (Umami direct)
+docker compose stop collector                                                  # optional: frees its 192 MiB; vdb can stay
+```
+
+The edge does not need the collector to start (`required: false`, resolved per request), so this works with the collector crashed.
+Rehearse it once before the first live cutover (V2-e). A bad collector image: re-pin the previous `image:` (tag and digest) and
+`docker compose up -d collector`. Remove entirely: `docker compose rm -sf collector vdb`; delete `vdb-data` only after a verified off-box vdb dump.
+Backups outlive deletions: the vdb dump holds hashes and aggregates only; after any restore, tombstones must be re-applied before ingest resumes (V3-e).
