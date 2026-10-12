@@ -2,7 +2,7 @@
   "id": "ws11delivery0001",
   "name": "WS11 delivery track (hard gate -> design -> 3-beat -> revise loop -> Claude Code -> staging -> prod)",
   "meta": {
-    "description": "WS11 build item 8 (full) + tails. Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed. Path: hard gate (prd_sign+scope) -> design.prototype -> claude_design -> pm_review(b1) -> customer_feedback(b2) -> [changes_requested => BOUNDED REVISE LOOP: regenerate prototype from feedback -> new claude_design revision -> reopen b1, up to 3 designs then escalate to PM AND park the run 'blocked' (WD-05) so a later retrigger stops re-evaluating it] -> pm_approval(b3) -> release_code (repoStatus gate -> the run's provisioned site must be COMPLETE with a pinned contract snapshot, else parked/retryable -> code.scaffold v2 with contractSnapshotId + siteKind + stage: artifact refs) -> web-dev review -> deploy.staging -> staging stage + notify -> client staging sign-off (customer_feedback on staging) -> pm_approval (prod) -> deploy.production -> production stage + notify. A run already 'blocked' short-circuits to noop on any retrigger (WD-05). github.repoStatus/deploy.staging/deploy.production fail SOFT. All actions OBO as wf:delivery. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID; hub creds GITHUB_TOKEN/GITHUB_ORG/DEPLOY_STAGING_URL/DEPLOY_PRODUCTION_URL."
+    "description": "WS11 build item 8 (full) + tails. Stateless event-driven delivery state machine; state lives in the DB. Triggers ev/pipeline.gate.decided + ev/scope.signed, plus ev/webdev.site.contract_pinned (M6-P4e2), which can only RESUME a parked code stage. Path: hard gate (prd_sign+scope) -> design.prototype -> claude_design -> pm_review(b1) -> customer_feedback(b2) -> [changes_requested => BOUNDED REVISE LOOP: regenerate prototype from feedback -> new claude_design revision -> reopen b1, up to 3 designs then escalate to PM AND park the run 'blocked' (WD-05) so a later retrigger stops re-evaluating it] -> pm_approval(b3) -> release_code (repoStatus gate -> the run's provisioned site must be COMPLETE with a pinned contract snapshot, else parked/retryable -> code.scaffold v2 with contractSnapshotId + siteKind + stage: artifact refs) -> web-dev review -> deploy.staging -> staging stage + notify -> client staging sign-off (customer_feedback on staging) -> pm_approval (prod) -> deploy.production -> production stage + notify. A run already 'blocked' short-circuits to noop on any retrigger (WD-05). github.repoStatus/deploy.staging/deploy.production fail SOFT. All actions OBO as wf:delivery. Env: N8N_BRIDGE_SECRET, HUB_SERVICE_TOKEN, NOTIFY_USER_ID; hub creds GITHUB_TOKEN/GITHUB_ORG/DEPLOY_STAGING_URL/DEPLOY_PRODUCTION_URL."
   },
   "nodes": [
     {
@@ -109,7 +109,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst designs = stages.filter(s=>s.name==='claude_design'); const design = designs[designs.length-1];\nconst code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging'); const prodStage = stages.find(s=>s.name==='production');\nconst MAX_DESIGNS = 3;\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='',note='';\n// WD-05: a run already parked 'blocked' (revise-budget exhausted) short-circuits to noop on any\n// later retrigger (a second gate.decided/scope.signed on the same run must not re-escalate it).\nif(run.status==='blocked'){ /* noop */ }\nelse if(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else {\n    const cfd=gof('customer_feedback',design.id);\n    if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;note='Submission beat 2 — client feedback';}\n    else if(cfd&&cfd.status==='decided'&&cfd.decision==='changes_requested'){ if(designs.length<MAX_DESIGNS){action='revise_design';note=cfd.note||'';} else {action='escalate_revise';note=cfd.note||'';} }\n    else if(ok(cfd)&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;note='Submission beat 3 — PM approval';}\n    else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n    else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n    else if(staging&&ok(gof('customer_feedback',staging.id))&&!has('pm_approval',staging.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=staging.id;note='Production approval';}\n    else if(staging&&ok(gof('pm_approval',staging.id))&&!prodStage){action='deploy_prod';}\n  }\n}\nconst proto=(design||{}).artifact_ref||'';\n// M6-P4e: the artifact refs code.scaffold needs. artifact_ref holds the TEXT itself, which pipeline.artifacts.get cannot resolve by value\n// (resolvable:false), so hand it the STAGE (stage:<id>) and the platform resolves that stage's stored text.\nconst prdStage=stages.find(s=>s.name==='prd_extract');\nconst prdRef=prdStage&&prdStage.artifact_ref?('stage:'+prdStage.id):'';\nconst protoRef=design&&design.artifact_ref?('stage:'+design.id):'';\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, note, prd, proto, prdRef, protoRef, slug } }];"
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'getRun failed');\nconst run = JSON.parse(rpc.result?.content?.[0]?.text ?? '{}');\nconst stages = run.stages||[], gates = run.gates||[], signoffs = run.scopeSignoffs||[];\nconst prdSigned = gates.some(g=>g.kind==='prd_sign'&&g.decision==='signed');\nconst scopeSigned = (signoffs.some(s=>s.party==='provider')&&signoffs.some(s=>s.party==='client'))||gates.some(g=>g.kind==='scope_signoff'&&g.decision==='signed');\nconst designs = stages.filter(s=>s.name==='claude_design'); const design = designs[designs.length-1];\nconst code = stages.find(s=>s.name==='claude_code'); const staging = stages.find(s=>s.name==='staging'); const prodStage = stages.find(s=>s.name==='production');\nconst MAX_DESIGNS = 3;\nconst gof=(kind,sid)=>gates.filter(g=>g.kind===kind&&g.stage_id===sid).sort((a,b)=>a.created_at<b.created_at?-1:1).pop();\nconst ok=g=>g&&g.status==='decided'&&g.decision==='approved';\nconst has=(kind,sid)=>gates.some(g=>g.kind===kind&&g.stage_id===sid);\nconst prd=(stages.find(s=>s.name==='prd_extract')||{}).artifact_ref||'';\nconst slug=String(run.title||('run-'+run.id)).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);\nlet action='noop',nextKind='',nextActor='',stageId='',note='';\n// WD-05: a run already parked 'blocked' (revise-budget exhausted) short-circuits to noop on any\n// later retrigger (a second gate.decided/scope.signed on the same run must not re-escalate it).\nif(run.status==='blocked'){ /* noop */ }\nelse if(prdSigned&&scopeSigned){\n  if(!design){action='release_design';}\n  else {\n    const cfd=gof('customer_feedback',design.id);\n    if(ok(gof('pm_review',design.id))&&!has('customer_feedback',design.id)){action='open_gate';nextKind='customer_feedback';nextActor='client';stageId=design.id;note='Submission beat 2 — client feedback';}\n    else if(cfd&&cfd.status==='decided'&&cfd.decision==='changes_requested'){ if(designs.length<MAX_DESIGNS){action='revise_design';note=cfd.note||'';} else {action='escalate_revise';note=cfd.note||'';} }\n    else if(ok(cfd)&&!has('pm_approval',design.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=design.id;note='Submission beat 3 — PM approval';}\n    else if(ok(gof('pm_approval',design.id))&&!code){action='release_code';}\n    else if(code&&ok(gof('pm_review',code.id))&&!staging){action='deploy';}\n    else if(staging&&ok(gof('customer_feedback',staging.id))&&!has('pm_approval',staging.id)){action='open_gate';nextKind='pm_approval';nextActor='internal';stageId=staging.id;note='Production approval';}\n    else if(staging&&ok(gof('pm_approval',staging.id))&&!prodStage){action='deploy_prod';}\n  }\n}\nconst proto=(design||{}).artifact_ref||'';\n// M6-P4e: the artifact refs code.scaffold needs. artifact_ref holds the TEXT itself, which pipeline.artifacts.get cannot resolve by value\n// (resolvable:false), so hand it the STAGE (stage:<id>) and the platform resolves that stage's stored text.\nconst prdStage=stages.find(s=>s.name==='prd_extract');\nconst prdRef=prdStage&&prdStage.artifact_ref?('stage:'+prdStage.id):'';\nconst protoRef=design&&design.artifact_ref?('stage:'+design.id):'';\n// M6-P4e2: the ev/webdev.site.contract_pinned trigger may only RESUME the code stage. Every other action this node can pick (release the design,\n// open a gate, revise, deploy) belongs to the gate/scope triggers, so from there it is a noop. 'Parse pinned site' has an item only in an\n// execution that came in through that trigger (for any other execution the node never ran: n8n throws or returns nothing).\nlet viaPinned=false; try{ viaPinned=!!$('Parse pinned site').first()?.json; }catch(e){ viaPinned=false; }\nlet reason='';\nif(viaPinned&&action!=='release_code'){ reason='contract_pinned only resumes the code stage; this run is not waiting at it (next action would be: '+action+')'; action='noop'; }\nreturn [{ json: { tenantId: run.tenant_id, runId: run.id, action, nextKind, nextActor, stageId, note, prd, proto, prdRef, protoRef, slug, reason } }];"
       },
       "name": "Load + decide",
       "type": "n8n-nodes-base.code",
@@ -2010,7 +2010,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok:true, action:'noop' }) }}"
+        "responseBody": "={{ JSON.stringify({ ok:true, action:'noop', reason:$json.reason || undefined }) }}"
       },
       "name": "Respond (noop)",
       "type": "n8n-nodes-base.respondToWebhook",
@@ -2095,6 +2095,124 @@
       "position": [
         660,
         340
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ev/webdev.site.contract_pinned",
+        "responseMode": "responseNode"
+      },
+      "name": "Trigger: site.contract_pinned",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        560
+      ],
+      "webhookId": "e4b7c3d2-delivery-contract-pinned-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const got = $input.first().json.headers?.['x-gaiada-bridge-secret'];\nif (!got || got !== $env.N8N_BRIDGE_SECRET) throw new Error('bad bridge secret');\nconst e = $input.first().json.body ?? {};\nif (e.v !== 1) throw new Error('bad envelope v');\nconst store = $getWorkflowStaticData('global'); store.seen = store.seen || {};\nconst dup = Object.prototype.hasOwnProperty.call(store.seen, e.id);\nif (!dup) { store.seen[e.id] = Date.now(); const ids = Object.keys(store.seen); if (ids.length > 1000) for (const k of ids.slice(0, ids.length - 1000)) delete store.seen[k]; }\n// M6-P4e2: `dup` is informational. The STATE decides (the code stage row, the site's scaffold state): a retried delivery whose first attempt died\n// before it did anything must still resume, so a seen id is never a reason to skip. The envelope names the provisioned site, not the run.\nconst eventOk = e.eventType === 'webdev.site.contract_pinned' && e.entityType === 'webdev_provisioned_site';\nreturn [{ json: { dup, eventOk, tenantId: e.tenantId, siteId: e.entityId, snapshotId: e.payload?.snapshotId ?? '' } }];"
+      },
+      "name": "Verify (pinned)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:delivery"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 25, method: \"tools/call\", params: { name: \"webdev.provisionedSites.get\", arguments: { tenantId: $json.tenantId, siteId: $json.siteId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP webdev.provisionedSites.get (pinned)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        420,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const v=$('Verify (pinned)').first().json;\n// Anything that is not a site waiting at the code stage is a noop: the response says why, nothing else runs.\nconst noop=(reason)=>[{ json: { proceed:'false', reason, tenantId:v.tenantId, siteId:v.siteId } }];\nif(!v.eventOk) return noop('not a webdev.site.contract_pinned event for a provisioned site');\nif(!v.tenantId||!v.siteId) return noop('the envelope has no tenant or site id');\nconst raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nlet rpc; try{ rpc=JSON.parse(line.slice(5).trim()); }catch(e){ throw new Error('provisioned-site read unreadable'); }\n// A definite 'no such site' is a noop; any other failure THROWS, so the bridge sees a 5xx and redelivers (at-least-once): a lost read must not lose the resume.\nif(rpc.result?.isError){ const t=String(rpc.result.content?.[0]?.text||'error'); if(/not found|\\b404\\b/i.test(t)) return noop('provisioned site not found: '+t); throw new Error('provisioned-site read failed: '+t); }\nlet site; try{ site=JSON.parse(rpc.result?.content?.[0]?.text ?? '{}'); }catch(e){ throw new Error('provisioned-site read unreadable'); }\nconst c=site.completion||{};\nif(site.tenantId&&site.tenantId!==v.tenantId) return noop('the site belongs to another company');\nif(!site.pipelineRunId) return noop('the site is not tied to a pipeline run');\nif(site.status==='failed') return noop('the site failed provisioning');\nif(c.state!=='complete'||!c.contractSnapshotId) return noop('the site completion is not complete (state: '+(c.state||'none')+')');\nif(v.snapshotId&&v.snapshotId!==c.contractSnapshotId) return noop('the event names a snapshot that is no longer the pinned one');\n// The scaffold's first fill is claimed on the site row once the job starts committing: a started scaffold is never started again from here.\nif(site.scaffold&&site.scaffold.state) return noop('the scaffold already started for this site (state: '+site.scaffold.state+')');\nreturn [{ json: { proceed:'true', reason:'', tenantId:v.tenantId, runId:site.pipelineRunId, siteId:v.siteId } }];"
+      },
+      "name": "Parse pinned site",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Resume code?",
+              "leftValue": "={{ $json.proceed }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Resume code?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        560
       ]
     }
   ],
@@ -2843,6 +2961,68 @@
         [
           {
             "node": "Respond (code parked)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger: site.contract_pinned": {
+      "main": [
+        [
+          {
+            "node": "Verify (pinned)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify (pinned)": {
+      "main": [
+        [
+          {
+            "node": "MCP webdev.provisionedSites.get (pinned)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP webdev.provisionedSites.get (pinned)": {
+      "main": [
+        [
+          {
+            "node": "Parse pinned site",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse pinned site": {
+      "main": [
+        [
+          {
+            "node": "Resume code?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume code?": {
+      "main": [
+        [
+          {
+            "node": "MCP getRun",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond (noop)",
             "type": "main",
             "index": 0
           }

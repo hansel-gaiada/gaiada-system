@@ -11,6 +11,87 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.19.0` - compose passes the live Turnstile switch through (empty = stub); the M5 phase 3 go-live runbook (2026-10-12) - PROTOTYPED
+
+- `webdesk/docker-compose.yml` now passes `TURNSTILE_MODE` and `TURNSTILE_SECRET_KEY` to the api, with EMPTY defaults. Before this, turning live Turnstile on for gaiada.com's forms would have needed a code change.
+  - `forms.config.ts` reads both with `||`, so an empty value keeps the built-in stub.
+  - `TURNSTILE_REQUEST_TIMEOUT_MS` is deliberately not passed: it is read with `??`, so an empty value would mean a 0 ms timeout.
+- `infra/runbooks/m5-phase3-go-live.md` puts the website → lead go-live in order:
+  - preconditions (counsel, Turnstile keys, privacy page, the site switch);
+  - live Turnstile on the rootless WebDesk daemon;
+  - the site's domains as WebDesk environments;
+  - applying the three form definitions, then the ERP leads flag and alerts;
+  - the site build env and CSP;
+  - a staging-then-production smoke test with privacy-tool cleanup, and a rollback.
+- GitHub Actions 38229648127 green. Nothing is switched on by this release.
+
+### platform-ui `0.96.2` - the agency lead convert report survives the refresh that converts the lead (2026-10-12) - DEV-VERIFIED
+
+The last case of the Next 16.3 unmount sweep (WebDesk M3 follow-up).
+
+- The convert action revalidates the lead page; the refreshed lead is `converted`, so ConvertCard unmounted with its "what was delegated" report and the page said "This lead is already converted." The report now lives in `AgencyLeadDetail`, which stays mounted: the Converted card shows "Converted.", the run link and the delegation report from the convert answer. A later visit still reads "already converted" (the report is not stored; the tasks are on the project). No server change.
+- Tests: the report survives a rerender with the converted lead (fails on the old component), plus a control. GitHub Actions run 38229574581 green.
+
+### platform-nest `0.86.0` - the ERP renders the MON-01 probe-target file (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P3d (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`). Built by the M6 session.
+
+- **`modules/monitoring/client-targets.ts`.**
+  - A loop (first run 15 s after boot, then every 5 min, `CLIENT_PROPERTY_TARGETS_INTERVAL_MS`) renders exactly what `gen-client-property-targets.mjs` produced: verified, active, not-deleted `search_properties` only, private and reserved hosts refused, the same labels including `internal`, file_sd JSON.
+  - It reads one tenant per transaction under the `search` RLS scope, the way the monitoring runner does. No new DB role, no migration.
+  - It writes atomically (temp + rename) to `CLIENT_PROPERTY_TARGETS_PATH`, and only on change. A read failure leaves the old file. An empty list replaces a non-empty one only after 3 consecutive runs agree.
+  - Unset means off (logged once).
+- `client-targets-parity.test.ts` runs 17 fixtures through both this and the infra generator (output, skip reasons, rendered bytes, the SQL predicate).
+- Verified on the Linux gate (sumopod, `m6b7c`): 626 files / 9345 passed / 0 failed, incl. `client-targets.db.test.ts`. (0.85.x is M5's and M3's.)
+
+### infra `0.13.4` - MON-01 ships: sumopod pulls the target file over a one-file forced-command key (2026-10-12) - DEV-VERIFIED
+
+- `infra/scripts/client-targets-forced-command.sh`: prints that one file and nothing else. It refuses any other `SSH_ORIGINAL_COMMAND` and a missing, symlinked, empty or oversized file. `--selftest`.
+- `infra/scripts/pull-client-property-targets.sh` (sumopod cron, every 5 min): ssh in BatchMode, a strict validator (`python3 -I`: shape, http(s) targets, no private hosts, label allow-list, at most 2000), and an atomic replace of the Prometheus file_sd file. On any failure it keeps the previous file. `--selftest`.
+- `docker-compose.vps.yml`: the platform service mounts `/var/lib/gaiada/client-targets` and passes `CLIENT_PROPERTY_TARGETS_PATH` / `_INTERVAL_MS` (empty by default).
+- `sync-client-property-targets.sh` is superseded; the generator stays as the reference (its `main()` now runs only when executed directly; selftest 12/12).
+- Runbook `enable-estate-blackbox-and-alert-routing.md` §7 has the box steps.
+- **Box (done by the M6 session):**
+  - the host dir;
+  - the env var in the box `.env`;
+  - a dedicated ed25519 key on sumopod;
+  - one `restrict,command="/bin/sh …/client-targets-forced-command.sh",from="10.88.0.2"` line on gda-aicenter (a test showed an arbitrary command does not run);
+  - the cron line after this release.
+
+### automation (n8n) `0.5.3` - a parked delivery code stage resumes by itself on webdev.site.contract_pinned (2026-10-12) - PROTOTYPED
+
+- M6-P4e2. `pipeline-delivery.json` gains `Trigger: site.contract_pinned` (`ev/webdev.site.contract_pinned`, the same bridge-secret check as the other triggers). It loads the provisioned site and re-enters the existing code-stage path only when the run is waiting there.
+  - "Waiting" is derived from the run's existing `release_code` condition; parking writes nothing.
+  - Every other state is a `noop` with a reason, and a guard in `Load + decide` stops this trigger from doing anything but release the code stage.
+  - A non-404 read failure throws, so the bridge redelivers.
+- Idempotent by state (a replay finds the single-shot `claude_code` stage). The near-simultaneous window is closed by M6-P4e3 (ai-agents 0.15.0).
+- `automation-prd-kind.test.ts` walks the shipped graph: 47/47.
+- **Box:** append `webdev.site.contract_pinned` to `N8N_BRIDGE_EVENTS` and `webdev_provisioned_site` to `N8N_BRIDGE_ENTITY_TYPES` on the platform service; re-import `ws11delivery0001` with the CLI.
+
+### webdesk `0.18.0` - the fullstack template on Nest 11 and Tailwind 4 (high advisories) (2026-10-12) - DEV-VERIFIED
+
+- M6-P4d3. `templates/fullstack-next-nest`:
+  - `apps/api`: `@nestjs/*` `^10.4.4` → `^11.2.7`, no source change.
+  - `apps/web`: `tailwindcss` `^3.4.14` → `^4.3.3` with `@tailwindcss/postcss`; `postcss` `^8.5.6`; `autoprefixer` dropped; `globals.css` is `@import "tailwindcss";`; the empty `tailwind.config.ts` deleted.
+- `npm audit`: 16 (8 high) → 2 (1 high, 1 moderate). Both remaining entries come through Next (its bundled postcss) and clear only with Next 16.4.
+- `templates/qa/build-templates.sh` fails a Tailwind build that emits no utilities: the built CSS must carry the v4 banner and `.p-8`, for the template and for a scaffolded site.
+- Verified on `sumopod` (`node:24-bookworm`): `build-templates.sh` 12/12 PASS.
+
+### ai-agents `0.15.0` - one scaffold goal per provisioned site and pinned snapshot; the scaffolded site matches the Tailwind 4 template (2026-10-12) - DEV-VERIFIED
+
+- **M6-P4e3.** `POST /goals` for `code-scaffold-v2` derives a dedupe key in the runner.
+  - The key is `scaffold:site=<id>:snapshot=<id>`, or a hash of the whole envelope for a dry run without a site.
+  - The goal is inserted with `INSERT … ON CONFLICT DO NOTHING` against a partial unique index (`agent_goals (tenant_id, dedupe_key)` while queued, running or ok). So of N concurrent creates exactly one inserts, and the others get `{id, status, deduped: true}` (200, nothing enqueued).
+  - A failed, cancelled or interrupted goal frees the key. Other agents are unaffected.
+  - The DDL is additive in the store's `init()` (a nullable column and the index).
+- **M6-P4d3.** `templates/node-site.ts` emits the same `apps/web` devDependencies as the Tailwind 4 template (the drift test compares them).
+- Verified on the Linux gate (sumopod, `m6b7b`, with Postgres): tsc clean, 52 files / 468 passed, incl. `store.test.ts`'s 12-concurrent-creates case. (0.14.0 is M5's.)
+
+### mcp-hub `0.14.1` - code.scaffold reports a deduplicated job (2026-10-12) - DEV-VERIFIED
+
+- M6-P4e3. `code.scaffold` returns `deduped: boolean`; a deduplicated call returns the existing goal's id and status. The goal text is unchanged.
+- Verified on the Linux gate (sumopod, `m6b7b`): tsc clean, 29 files / 396 passed.
+
 ### platform-nest `0.85.1` - the website-access contact list uses the portal People predicate (2026-10-12) - DEV-VERIFIED
 
 WebDesk M3 follow-up (flagged by 9e, 2026-10-11).

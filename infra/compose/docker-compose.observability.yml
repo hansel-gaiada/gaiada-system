@@ -66,8 +66,8 @@ services:
     # WSK-D63 (2) / WebDesk M4 T6a: the WebDesk-only OTLP/HTTP receiver `otlp/webdesk` (config.yaml).
     #  * The publish is on the docker0 address ONLY, with BOTH sides literal: never `0.0.0.0`, and never a
     #    `${VAR}` that could resolve empty (an empty host in a ports mapping means every interface).
-    #    The webdesk egress guard (webdesk/ops/host/webdesk-egress-guard.sh) opens exactly this
-    #    address:port to the webdesk network and nothing else; the ERP's own receivers (4317/4318),
+    #    WebDesk's egress guard (since 2026-10-12 the ROOTLESS one, webdesk/ops/host/rootless/
+    #    webdesk-rootless-guard.sh, matched by the daemon's uid) opens exactly this address:port and nothing else; the ERP's own receivers (4317/4318),
     #    the self-metrics (8888) and the Prometheus exporter (8889) stay unpublished.
     #  * WEBDESK_OTLP_BEARER_TOKEN: when EMPTY or UNSET (the state of every deploy before the token is
     #    minted) the receiver REFUSES EVERY REQUEST and the collector still starts. The default is a

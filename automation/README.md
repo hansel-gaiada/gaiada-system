@@ -99,7 +99,7 @@ in the platform's own env).
 | `on-inbound-lead.json` | `POST /webhook/ingest/lead` **(gated)** | inbound lead → intake task; inert unless `INGEST_ENABLED=1` (legal Gate 1) | `wf:inbound-lead-intake` |
 | `mtg-dispatcher.json` | `POST /webhook/mtg/recording-complete` (bridge secret, dedupe on `meetingId`) | **WS11** meeting → `llm.summarize` (MOM) → 3 separate `llm.extract` passes (prd/report/scope) → `pipeline.createRun` with all three stages populated. Fan-out to delivery/report/scope is event-driven via `pipeline.run.created`. **WD-08-R1:** a bad/missing bridge secret now short-circuits to an explicit `401 {"error":"unauthorized"}` (no detail leakage) via a `Secret bad?` gate, instead of relying on n8n's default 200-on-uncaught-throw behavior — 0 rows are created either way. **WD-08-R2:** the dedupe branch now calls `meeting.recordingContext` (already allow-listed for this workflow) to echo the ALREADY-linked `runId` alongside `deduped:true`, instead of `runId:null` — best-effort (falls back to `null` if the meetingId never went through the `meeting_recordings` registry, e.g. a raw pasted-transcript test). | `wf:mtg-dispatcher` |
 | `pipeline-fanout.json` | event bridge `POST /webhook/ev/pipeline.run.created` | **WS11** scope track: open the client `scope_signoff` gate + notify PM (`wf:scope`); report track: route to internal process — STUB in-app notify (`wf:report`). | `wf:scope`, `wf:report` |
-| `pipeline-delivery.json` | event bridge `ev/pipeline.gate.decided` + `ev/scope.signed` | **WS11** delivery spine: on PRD signed **AND** scope signed → `design.prototype` → add `claude_design` stage → open first Submission (`pm_review`) → notify PM. (v1 spine; code/deploy/3-beat/revise are the documented extension.) **DEF-3 (2026-07-30):** `deploy.production` is impact:`high`, so the D14 write gate ALWAYS suspends it for the automation principal (`wf:delivery`) regardless of upstream pipeline-gate approvals — that suspend is now routed to `approvals.request` (a real WS4 `automation_approvals` row, `origin:'automation'`, `tool_name:'deploy.production'`) instead of silently dead-ending into the fail-soft `production` stage write. The fail-soft path (write `production`=`failed` + notify) is unchanged and still fires for genuine (non-suspend) dispatch failures. **Known boundary, unchanged by this fix:** approving the WS4 row does NOT itself re-drive the deploy — there is no generic "resume a D14-suspended automation write" mechanism in this codebase (confirmed live: deciding the approval leaves the run with no `production` stage). The only existing precedent for resuming after an `automation_approval.decided` event is HR's bespoke `leave-decision.ts` handler, which mutates its own domain row directly rather than replaying a suspended hub tool call — building a generic equivalent for `deploy.production` is a Temporal/durable-callback-class design decision (see the impact-gate note above: "v1 records + decides; it does not auto-resume the approved call"), not wiring, and is left to the architect. | `wf:delivery` |
+| `pipeline-delivery.json` | event bridge `ev/pipeline.gate.decided` + `ev/scope.signed` + `ev/webdev.site.contract_pinned` (resumes a parked code stage; see "Resuming a parked code stage") | **WS11** delivery spine: on PRD signed **AND** scope signed → `design.prototype` → add `claude_design` stage → open first Submission (`pm_review`) → notify PM. (v1 spine; code/deploy/3-beat/revise are the documented extension.) **DEF-3 (2026-07-30):** `deploy.production` is impact:`high`, so the D14 write gate ALWAYS suspends it for the automation principal (`wf:delivery`) regardless of upstream pipeline-gate approvals — that suspend is now routed to `approvals.request` (a real WS4 `automation_approvals` row, `origin:'automation'`, `tool_name:'deploy.production'`) instead of silently dead-ending into the fail-soft `production` stage write. The fail-soft path (write `production`=`failed` + notify) is unchanged and still fires for genuine (non-suspend) dispatch failures. **Known boundary, unchanged by this fix:** approving the WS4 row does NOT itself re-drive the deploy — there is no generic "resume a D14-suspended automation write" mechanism in this codebase (confirmed live: deciding the approval leaves the run with no `production` stage). The only existing precedent for resuming after an `automation_approval.decided` event is HR's bespoke `leave-decision.ts` handler, which mutates its own domain row directly rather than replaying a suspended hub tool call — building a generic equivalent for `deploy.production` is a Temporal/durable-callback-class design decision (see the impact-gate note above: "v1 records + decides; it does not auto-resume the approved call"), not wiring, and is left to the architect. | `wf:delivery` |
 | `reports-nightly-facts.json` | CRON daily 02:00 | **TR-11** (tracker/reporting §10 flow 1). `POST facts/recompute {from:D-2, to:D-1}` **DIRECT to platform-nest** (not the hub — recompute is deliberately never an MCP tool, §9.2) under its own `PLATFORM_SERVICE_TOKEN`; idempotent (recompute the same window twice → byte-identical rows). Retries ×3 (native `retryOnFail`), then dead-letters an in-app notification via hub `notify` (no ntfy reachable from n8n's own docker network in this deployment — see the note below). | `wf:reports-nightly-facts` |
 | `reports-eod-reminder.json` | CRON daily 17:30 | **TR-11** (§10 flow 2). `GET checkins/pending-reminders` **DIRECT to platform-nest** (also not an MCP tool — service/admin tier, not agent-callable) → for each pending person with a verified WA link (the additive `waExternalId` field), the **bot's** `POST /admin/notify` fetches THEIR OWN prefill (D4 OBO, never asserted) and awaits their reply; everyone else gets an in-app notification (hub `notify`). §5.3's guard means a holiday/leave day returns `pending: []` and this flow delivers **nothing** — quiet by construction, not a special case in this workflow. | `wf:reports-eod-reminder` |
 | `reports-morning-escalation.json` | CRON daily 09:00 | **TR-11** (§10 flow 3). `GET checkins/missed-yesterday` **DIRECT to platform-nest** — the platform (not this workflow) groups yesterday's misses by unit and resolves each unit's own lead server-side (no per-org-node Cerbos primitive exists, so it narrows in-app the same way TR-09 already does elsewhere); this flow only fans out one hub `notify` per (unit, lead) pair the platform already resolved. A unit with no resolvable lead is skipped, never broadcast to someone outside it. | `wf:reports-morning-escalation` |
@@ -264,6 +264,42 @@ tenantId, entityId, originSite, createdAt, payload }`. It's at-least-once — n8
 (must match the workflows' `N8N_BRIDGE_SECRET`), `N8N_BRIDGE_EVENTS` (comma list, e.g.
 `org_structure.updated,client.created`), and `N8N_BRIDGE_ENTITY_TYPES` (the streams to watch, e.g.
 `org_structure,client`). All four must be set or the bridge stays off (fail-closed).
+
+### Resuming a parked code stage (`ev/webdev.site.contract_pinned`, M6-P4e2)
+
+The delivery code stage **parks** (`code_parked`, `retryable: true`) until the run's provisioned site has finished
+§08 completion with a pinned contract snapshot. Parking writes nothing: "waiting at the code stage" is derived from
+the run itself (design accepted by `pm_approval`, no `claude_code` stage row). The platform emits
+`webdev.site.contract_pinned` (entity `webdev_provisioned_site`, id = the provisioned site id, payload
+`{snapshotId, contractVersion}`) at the moment completion reaches `complete`, and `pipeline-delivery.json` now has a
+third trigger on it, `POST /webhook/ev/webdev.site.contract_pinned`, so the parked stage resumes by itself.
+
+Flow: verify the bridge secret (same check as the other two triggers) → `webdev.provisionedSites.get` (tenant from
+the envelope) → the site must be tied to a run, not failed, `completion.state = complete`, the event's `snapshotId`
+still the pinned one, and no scaffold started on the site → the EXISTING `MCP getRun` → `Load + decide` → the
+existing code-stage nodes, so `code.scaffold` is called exactly as the gate path calls it (one node, no copy). `Load +
+decide` turns any action other than `release_code` into `noop` when the execution came in through this trigger: the
+event can resume the code stage and nothing else (never a design release, a gate, a revision or a deploy). Every other
+state answers `{ok:true, action:'noop', reason}`: no run, a run past the code stage or blocked, a code stage already
+started or running (its row exists), a site in another state.
+
+**Idempotency.** The state decides, not the envelope id (the `seen` list is recorded for visibility only: a retried
+delivery whose first attempt died early must still resume). A replay finds the `claude_code` stage the first delivery
+created and is a `noop`; platform-nest's `pipeline.createStage` is single-shot for `claude_code` under the run lock and
+`openGate` drops a duplicate pending gate. **Two executions in one window (M6-P4e3):** n8n has no lock, so two executions
+that read the run inside the same few-second window (`getRun` → `createStage`) can both reach `code.scaffold`. That no
+longer queues a second job: the ai-agents runner files a scaffold goal idempotently on the provisioned site plus the
+pinned snapshot (an atomic partial unique index), so while a goal for that pair is queued, running or finished ok the
+second call gets the SAME goal id back (`deduped: true`) and the stage is created once; a failed or cancelled goal frees
+the pair for a retry. (`scaffold-commit.ts` stays first-fill-only and idempotent behind it.) A read failure (not a definite 404) fails the execution so the bridge gets a 5xx and redelivers.
+
+**Enabling it on the box.** Append to the `platform` service's bridge allow-lists (keep what is already there):
+
+- `N8N_BRIDGE_EVENTS`: add `webdev.site.contract_pinned`
+- `N8N_BRIDGE_ENTITY_TYPES`: add `webdev_provisioned_site`
+
+then re-import `pipeline-delivery.json` with the CLI (it gains a webhook; verify the landed id is `ws11delivery0001`) and
+re-activate it. The hub needs no change: `wf:delivery` already lists `webdev.provisionedSites.get`.
 
 ## Admin console
 

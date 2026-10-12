@@ -1044,8 +1044,20 @@ services:
       # readIntervalMs() (floor 1s) precisely so an empty passthrough cannot become a 0 ms busy loop
       # hammering client sites. Do not "simplify" that parse back to `Number(x ?? 60_000)`.
       MONITORING_RUNNER_INTERVAL_MS: ${MONITORING_RUNNER_INTERVAL_MS:-}
+
+      # M6-P3d — the MON-01 probe-target file. Empty/unset = the renderer is OFF (logged once at boot),
+      # so nothing changes until the box sets it. Set to /var/lib/gaiada/client-targets/client-properties.json
+      # (the bind mount below) and sumopod pulls it over the forced-command key. A var only in `.env`
+      # never reaches the container, which is why it is listed here. Interval parsed by readIntervalMs().
+      CLIENT_PROPERTY_TARGETS_PATH: ${CLIENT_PROPERTY_TARGETS_PATH:-}
+      CLIENT_PROPERTY_TARGETS_INTERVAL_MS: ${CLIENT_PROPERTY_TARGETS_INTERVAL_MS:-}
     volumes:
       - platform-files:/data/files
+      # M6-P3d — host dir the platform writes the probe-target file into (the image runs as root; the
+      # file is 0644 so the pull key's login user can read it through client-targets-forced-command.sh).
+      # Outside the deploy-synced tree. Create it before enabling (runbook §7): if absent, compose
+      # creates it root-owned and empty, and the renderer writes there anyway.
+      - /var/lib/gaiada/client-targets:/var/lib/gaiada/client-targets
       # WSK-63b — the control channel's mTLS material, FILE-MOUNTED and read-only: client.crt,
       # client.key (CN platform-nest-webdesk, synccert internal CA) and ca.crt. Never env vars: a
       # multi-line PEM through env_file arrives empty or truncated depending on the compose version

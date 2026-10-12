@@ -34,6 +34,24 @@ export interface GoalInput {
   envelopeExternalId: string;
   requestedBy?: string;
   budget: BudgetCaps;
+  /** M6-P4e3 — the idempotency key of a goal that must exist at most once per (tenant, key) while it is
+   *  queued, running or finished ok (see `DEDUPE_BLOCKING_STATUSES`). Set ONLY through `insertGoalOnce`;
+   *  `insertGoal` ignores it. Absent for every goal before this ticket and for every non-keyed agent. */
+  dedupeKey?: string | null;
+}
+
+/** M6-P4e3 — the statuses in which a keyed goal blocks a new one with the same key: still to run, running,
+ *  or finished successfully. Every other status (failed, cancelled, interrupted, budget_exhausted,
+ *  suspended) leaves the key free, so a retry creates a new goal. This list is ALSO the predicate of the
+ *  partial unique index in `PgGoalStore.init()`; keep the two identical. */
+export const DEDUPE_BLOCKING_STATUSES: readonly GoalStatus[] = ["queued", "running", "ok"];
+
+/** What `insertGoalOnce` returns: the goal that now owns the key, and whether it already existed. */
+export interface GoalOnceResult {
+  id: string;
+  /** The owning goal's status: "queued" for a newly created goal, its current status when `deduped`. */
+  status: GoalStatus;
+  deduped: boolean;
 }
 
 /** The minimum a worker needs to execute a claimed goal (no PII beyond the goal text + envelope). */
@@ -187,6 +205,11 @@ export type CancelResult = "cancelled" | "not_found" | "conflict";
 export interface GoalStore {
   init(): Promise<void>;
   insertGoal(input: GoalInput): Promise<string>;
+  /** M6-P4e3 — insert a goal carrying `dedupeKey`, or return the goal that already owns that key (queued,
+   *  running or ok, same tenant). ATOMIC: two concurrent calls with one key create exactly one goal (the
+   *  Pg impl rests on a partial unique index, not on a read-then-write). A failed/cancelled/interrupted
+   *  goal does not own its key. */
+  insertGoalOnce(input: GoalInput & { dedupeKey: string }): Promise<GoalOnceResult>;
   /** Atomic queued→running claim. Returns null if the goal is no longer queued (e.g. cancelled) —
    *  the worker then does nothing, so a cancel between enqueue and claim is race-safe. */
   claimForRun(id: string): Promise<GoalRunContext | null>;
@@ -296,6 +319,14 @@ export class PgGoalStore implements GoalStore {
         );
         CREATE INDEX IF NOT EXISTS idx_agent_goals_tenant ON agent_goals (tenant_id, created_at DESC);
 
+        -- M6-P4e3 — at most one ACTIVE goal per (tenant, dedupe_key). Additive and nullable: every
+        -- pre-existing row has dedupe_key NULL, which the partial index ignores, so this cannot fail on
+        -- old data. The predicate must equal DEDUPE_BLOCKING_STATUSES (and insertGoalOnce's ON CONFLICT).
+        ALTER TABLE agent_goals ADD COLUMN IF NOT EXISTS dedupe_key text;
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_goals_dedupe_active
+          ON agent_goals (tenant_id, dedupe_key)
+          WHERE dedupe_key IS NOT NULL AND status IN ('queued','running','ok');
+
         CREATE TABLE IF NOT EXISTS agent_runs (
           run_id       text PRIMARY KEY,
           goal_id      uuid NOT NULL REFERENCES agent_goals(id) ON DELETE CASCADE,
@@ -383,6 +414,40 @@ export class PgGoalStore implements GoalStore {
       ],
     );
     return rows[0].id;
+  }
+
+  async insertGoalOnce(input: GoalInput & { dedupeKey: string }): Promise<GoalOnceResult> {
+    // The unique index is the arbiter: ON CONFLICT DO NOTHING waits for a concurrent in-flight insert of
+    // the same key to commit or abort, so exactly one of N racing calls inserts and the rest see no row
+    // back. A loser then reads the owner. The owner can leave the active set (failed, cancelled) between
+    // our conflict and our read; then the key is free and we simply try the insert again.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const ins = await this.pool.query<{ id: string }>(
+        `INSERT INTO agent_goals (tenant_id, goal, agent, envelope_provider, envelope_external_id, requested_by, budget, dedupe_key)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+         ON CONFLICT (tenant_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued','running','ok') DO NOTHING
+         RETURNING id`,
+        [
+          input.tenantId,
+          input.goal,
+          input.agent,
+          input.envelopeProvider,
+          input.envelopeExternalId,
+          input.requestedBy ?? null,
+          JSON.stringify(input.budget),
+          input.dedupeKey,
+        ],
+      );
+      if (ins.rows.length === 1) return { id: ins.rows[0].id, status: "queued", deduped: false };
+      const owner = await this.pool.query<{ id: string; status: GoalStatus }>(
+        `SELECT id, status FROM agent_goals
+         WHERE tenant_id=$1 AND dedupe_key=$2 AND status IN ('queued','running','ok')
+         ORDER BY created_at DESC LIMIT 1`,
+        [input.tenantId, input.dedupeKey],
+      );
+      if (owner.rows.length === 1) return { id: owner.rows[0].id, status: owner.rows[0].status, deduped: true };
+    }
+    throw new Error("insertGoalOnce: the goal owning this key kept changing state; retry the request");
   }
 
   async claimForRun(id: string): Promise<GoalRunContext | null> {

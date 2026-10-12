@@ -384,3 +384,33 @@ describe("summary", () => {
     expect(screen.getAllByText("In review").length).toBeGreaterThan(0);
   });
 });
+
+// Next 16.3 applies the convert action's refresh at once: the lead comes back `converted`, ConvertCard unmounts, and
+// the "what was delegated" report it held went with it (the page then said "already converted"). The report now
+// lives in AgencyLeadDetail, which survives the refresh.
+describe("the convert report survives the refresh that converts the lead", () => {
+  it("after the refreshed lead is `converted`, the Converted card still shows what was delegated", async () => {
+    const convert = vi.fn(async (_p: unknown, _fd: FormData) => ({
+      ok: true, runId: "r1",
+      delegations: [{ role: "pm", title: "Kick-off with the client", assigneeId: "m1", source: "position" as const }],
+    }));
+    const members = [{ id: "m1", name: "Ayu" }];
+    const props = { submissionsResult: { kind: "ok" as const, data: [] }, members, canWrite: true, canTriage: true, canConvert: true, reference: refOk, history: NO_HISTORY, actions: actions({ convert }) };
+    const { rerender } = render(<AgencyLeadDetail lead={lead({ status: "submitted", stage: "proposal" })} {...props} />);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Convert lead" }));
+    await waitFor(() => expect(screen.getByText("Kick-off with the client")).toBeTruthy());
+    // The refresh: the same component, the lead now converted (ConvertCard is gone).
+    rerender(<AgencyLeadDetail lead={lead({ status: "converted", stage: "won", pipelineRunId: "r1" })} {...props} />);
+    expect(screen.queryByRole("button", { name: "Convert lead" })).toBeNull();
+    expect(screen.getByText("Kick-off with the client")).toBeTruthy();
+    expect(screen.getByText(/What was delegated/)).toBeTruthy();
+    expect(screen.queryByText(/already converted/)).toBeNull();
+  });
+
+  it("a lead that was converted earlier (no report in this view) still says it is already converted", () => {
+    renderDetail({ lead: lead({ status: "converted", stage: "won", pipelineRunId: "r1" }) });
+    expect(screen.getByText(/already converted/)).toBeTruthy();
+    expect(screen.queryByText(/What was delegated/)).toBeNull();
+  });
+});
