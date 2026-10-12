@@ -286,10 +286,12 @@ started or running (its row exists), a site in another state.
 **Idempotency.** The state decides, not the envelope id (the `seen` list is recorded for visibility only: a retried
 delivery whose first attempt died early must still resume). A replay finds the `claude_code` stage the first delivery
 created and is a `noop`; platform-nest's `pipeline.createStage` is single-shot for `claude_code` under the run lock and
-`openGate` drops a duplicate pending gate. **Limit:** n8n has no lock, so two executions that read the run inside the
-same few-second window (`getRun` → `createStage`) can both reach `code.scaffold`; the second job's commit is then
-refused or is a no-op on the same tree (`scaffold-commit.ts` is first-fill-only and idempotent), but the second goal is
-still queued. A read failure (not a definite 404) fails the execution so the bridge gets a 5xx and redelivers.
+`openGate` drops a duplicate pending gate. **Two executions in one window (M6-P4e3):** n8n has no lock, so two executions
+that read the run inside the same few-second window (`getRun` → `createStage`) can both reach `code.scaffold`. That no
+longer queues a second job: the ai-agents runner files a scaffold goal idempotently on the provisioned site plus the
+pinned snapshot (an atomic partial unique index), so while a goal for that pair is queued, running or finished ok the
+second call gets the SAME goal id back (`deduped: true`) and the stage is created once; a failed or cancelled goal frees
+the pair for a retry. (`scaffold-commit.ts` stays first-fill-only and idempotent behind it.) A read failure (not a definite 404) fails the execution so the bridge gets a 5xx and redelivers.
 
 **Enabling it on the box.** Append to the `platform` service's bridge allow-lists (keep what is already there):
 

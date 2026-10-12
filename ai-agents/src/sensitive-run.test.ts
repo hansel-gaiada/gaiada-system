@@ -9,8 +9,9 @@ import type { FastifyInstance } from "fastify";
 import { buildRunnerApp, type AgentRegistry } from "./runner/service";
 import type {
   GoalStore, GoalInput, GoalRunContext, FinishGoalPatch, GoalListItem, GoalDetail, RunInput, RunRow, CancelResult,
-  RunEventInput, RunEventRow,
+  RunEventInput, RunEventRow, GoalOnceResult,
 } from "./runner/store";
+import { DEDUPE_BLOCKING_STATUSES } from "./runner/store";
 import { subscribeTenant } from "./runner/events-bus";
 import { EpisodicStore } from "./memory/episodic";
 import { ObservabilityCollector } from "./obs/collector";
@@ -59,6 +60,14 @@ class MemGoalStore implements GoalStore {
       blackboard: null, seq: this.n++, createdAt: new Date().toISOString(), startedAt: null, endedAt: null,
     });
     return id;
+  }
+  async insertGoalOnce(input: GoalInput & { dedupeKey: string }): Promise<GoalOnceResult> {
+    for (const g of this.goals.values()) {
+      if (g.tenantId === input.tenantId && g.dedupeKey === input.dedupeKey && DEDUPE_BLOCKING_STATUSES.includes(g.status)) {
+        return { id: g.id, status: g.status, deduped: true };
+      }
+    }
+    return { id: await this.insertGoal(input), status: "queued", deduped: false };
   }
   async claimForRun(id: string): Promise<GoalRunContext | null> {
     const g = this.goals.get(id);
