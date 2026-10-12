@@ -3,7 +3,7 @@
 # entry's numeric owner re-mapped by the DESTINATION daemon's user namespace, then prove it (M4 F6, WSK-D73).
 # Plan: docs/plans/2026-10-12-webdesk-rootless-plan.md §5 (cut-over) and P2 (rehearsal).
 #
-#   sudo bash wd-volume-copy.sh copy   --from HOST --to HOST --volume NAME [--to-volume NAME] [--image REF] [--replace] [--keep DIR]
+#   sudo bash wd-volume-copy.sh copy   --from HOST --to HOST --volume NAME [--to-volume NAME] [--image REF] [--replace [--replace-rootful-rollback-copy]] [--keep DIR]
 #   sudo bash wd-volume-copy.sh verify --from HOST --to HOST --volume NAME [--to-volume NAME] [--keep DIR]
 #   HOST = rootful | unix:///run/user/<uid>/docker.sock
 #
@@ -20,7 +20,17 @@
 #
 # REFUSES: a source volume that a RUNNING container uses (a copy of a live Postgres is not consistent); a missing
 # destination volume (compose creates it, so its labels are right); a non-empty destination without --replace;
-# a helper image that is not on both daemons.
+# a helper image that is not on both daemons;
+# --replace of a destination that is the ROOTFUL daemon's volume (during a cut-over that volume is the ROLLBACK
+# copy, and its containers are stopped, so a swapped --from/--to would empty it) or that ANY container, running or
+# stopped, still references, unless --replace-rootful-rollback-copy says so explicitly;
+# a source that holds extended attributes, POSIX ACLs or multiply-linked regular files: the copy does not carry
+# them (tar runs without --xattrs/--acls; the manifest ignores them), so such a volume would not be a faithful copy.
+# The scan runs in the helper image (GNU find -links, and GNU tar --xattrs --acls --format=pax whose extended headers
+# carry SCHILY.xattr.* / SCHILY.acl.* records), so it needs the default Debian image or one with GNU tar and find.
+# Today's data has none of these (plan section 2), so refusing is the safe, documented limit.
+# --keep must be a NEW path (it is created 0700; an existing path is never chmod'ed or reused) in a directory
+# that only root or the sudo caller owns and nobody else can write.
 # --log-driver none matters: with the default json-file driver the source helper's stdout, the whole tar stream,
 # would also be written to the daemon's container log.
 # Root only: it reads both volumes' host paths for the manifest, and root may use the rootless daemon's socket.
@@ -49,10 +59,10 @@ ns_id() {
 
 # map_manifest <uid> <gid> <ufirst> <ucount> <gfirst> <gcount>: stdin manifest (host ids) -> stdout (namespace ids)
 map_manifest() {
-  local du=$1 dg=$2 us=$3 uc=$4 gs=$5 gc=$6 path rest t m u g s sum
+  local du=$1 dg=$2 us=$3 uc=$4 gs=$5 gc=$6 path rest t m u g s sum mt
   while IFS=$'\t' read -r path rest; do
-    read -r t m u g s sum <<<"$rest"
-    printf '%s\t%s %s %s %s %s %s\n' "$path" "$t" "$m" "$(ns_id "$u" "$du" "$us" "$uc")" "$(ns_id "$g" "$dg" "$gs" "$gc")" "$s" "$sum"
+    read -r t m u g s sum mt <<<"$rest"
+    printf '%s\t%s %s %s %s %s %s %s\n' "$path" "$t" "$m" "$(ns_id "$u" "$du" "$us" "$uc")" "$(ns_id "$g" "$dg" "$gs" "$gc")" "$s" "$sum" "$mt"
   done
 }
 
@@ -61,24 +71,47 @@ map_manifest() {
 # read as "nothing unmapped".
 has_unmapped() { awk -F'\t' '$2 ~ /\?/ { f = 1 } END { exit f ? 0 : 1 }' "$@"; }
 
-# manifest <dir>: one line per entry, LC_ALL=C sorted: <%q path> TAB <type> <mode> <uid> <gid> <size|-> <sha256|->
+# manifest <dir>: one line per entry, LC_ALL=C sorted:
+#   <%q path> TAB <type> <mode> <uid> <gid> <size|-> <sha256|-> <mtime|->
 # Directory sizes are filesystem history, not content: "-". A symlink's "sha" is the sha256 of its target.
+# mtime is whole seconds (GNU tar's default format stores no more) for files and directories; a symlink's is "-".
+# Hard links, xattrs and ACLs are NOT in the manifest: the copy refuses a source that has any (scan_source).
 manifest() {
-  local dir=$1 rec t m u g s p sum
-  (cd "$dir" && find . -xdev -printf '%y %m %U %G %s %p\0') | while IFS= read -r -d '' rec; do
+  local dir=$1 rec t m u g s p sum mt
+  (cd "$dir" && find . -xdev -printf '%y %m %U %G %s %T@ %p\0') | while IFS= read -r -d '' rec; do
     t=${rec%% *}; rec=${rec#* }
     m=${rec%% *}; rec=${rec#* }
     u=${rec%% *}; rec=${rec#* }
     g=${rec%% *}; rec=${rec#* }
-    s=${rec%% *}; p=${rec#* }
+    s=${rec%% *}; rec=${rec#* }
+    mt=${rec%% *}; p=${rec#* }
+    mt=${mt%%.*}
     case "$t" in
       f) sum="$(sha256sum <"$dir/$p" | cut -d' ' -f1)" ;;
-      l) sum="$(readlink -- "$dir/$p" | sha256sum | cut -d' ' -f1)" ;;
+      l) sum="$(readlink -- "$dir/$p" | sha256sum | cut -d' ' -f1)"; mt=- ;;
       d) s=-; sum=- ;;
-      *) sum=- ;;
+      *) sum=-; mt=- ;;
     esac
-    printf '%q\t%s %s %s %s %s %s\n' "$p" "$t" "$m" "$u" "$g" "$s" "$sum"
+    printf '%q\t%s %s %s %s %s %s %s\n' "$p" "$t" "$m" "$u" "$g" "$s" "$sum" "$mt"
   done | LC_ALL=C sort
+}
+
+# count_xattr_records: stdin = a pax tar stream; prints how many SCHILY.xattr.* / SCHILY.acl.* extended-header
+# records it holds. awk reads to the end on purpose (no early exit that could SIGPIPE tar under pipefail), and
+# always exits 0, so a tar failure is the pipeline's, not this function's.
+count_xattr_records() { LC_ALL=C awk '/[0-9]+ SCHILY\.(xattr|acl)\./ { n++ } END { print n + 0 }'; }
+
+# scan_verdict <xattr-records> <multiply-linked-files> <first-linked-paths>: the refusal message, or nothing.
+scan_verdict() {
+  local x=$1 l=$2 paths=${3:-}
+  [[ "$x" =~ ^[0-9]+$ ]] && [[ "$l" =~ ^[0-9]+$ ]] || { echo "the source scan gave no usable answer (xattr records '$x', linked files '$l')"; return 0; }
+  if [ "$x" != 0 ]; then
+    echo "the source holds extended attributes or POSIX ACLs ($x records): this copy does not carry them. Refusing rather than make an unfaithful copy"
+    return 0
+  fi
+  if [ "$l" != 0 ]; then
+    echo "the source holds $l multiply-linked regular file(s) (first: $paths): the copy would split the links. Refusing rather than make an unfaithful copy"
+  fi
 }
 
 # subid_of <file> <user> <uid> -> "start count": exactly one entry, or fail.
@@ -89,9 +122,9 @@ subid_of() {
   printf '%s\n' "$lines"
 }
 
-FROM="" TO="" VOL="" TOVOL="" IMAGE="$DEFAULT_IMAGE" REPLACE=0 KEEP=""
+FROM="" TO="" VOL="" TOVOL="" IMAGE="$DEFAULT_IMAGE" REPLACE=0 REPLACE_RB=0 KEEP=""
 
-parse_args() { # pure: sets FROM TO VOL TOVOL IMAGE REPLACE KEEP, dies on anything malformed
+parse_args() { # pure: sets FROM TO VOL TOVOL IMAGE REPLACE REPLACE_RB KEEP, dies on anything malformed
   while [ $# -gt 0 ]; do
     case "$1" in
       --from | --to | --volume | --to-volume | --image | --keep)
@@ -102,12 +135,14 @@ parse_args() { # pure: sets FROM TO VOL TOVOL IMAGE REPLACE KEEP, dies on anythi
         esac
         shift 2 ;;
       --replace) REPLACE=1; shift ;;
+      --replace-rootful-rollback-copy) REPLACE_RB=1; shift ;;
       *) die "unknown option $1" ;;
     esac
   done
   TOVOL="${TOVOL:-$VOL}"
   valid_host "$FROM" && valid_host "$TO" || die "--from/--to must be rootful or unix:///run/user/<uid>/docker.sock"
   [ "$FROM" != "$TO" ] || die "--from and --to are the same daemon"
+  [ "$REPLACE_RB" = 0 ] || [ "$REPLACE" = 1 ] || die "--replace-rootful-rollback-copy only makes sense together with --replace"
   valid_volume "$VOL" && valid_volume "$TOVOL" || die "bad volume name"
   valid_image "$IMAGE" || die "bad --image reference"
   [ -z "$KEEP" ] || [[ "$KEEP" =~ ^/[A-Za-z0-9._/-]+$ ]] || die "--keep must be an absolute path"
@@ -148,6 +183,53 @@ not_in_use() { # not_in_use <HOST> <volume>
   [ -z "$ids" ] || die "volume $2 on $1 is used by a RUNNING container ($ids): stop it first"
 }
 
+# refs_count <HOST> <volume>: how many containers, RUNNING OR STOPPED, reference the volume.
+refs_count() { local ids; ids="$(dk "$1" ps -aq --filter "volume=$2")" || return 1; [ -z "$ids" ] && echo 0 || grep -c . <<<"$ids"; }
+
+# replace_refusal <to-host> <referencing-containers> <explicit-flag 0|1>: why --replace must be refused, or nothing.
+# not_in_use only sees RUNNING containers; during a cut-over the rootful stack is stopped, so "nobody is using it"
+# is not evidence that a volume may be emptied.
+replace_refusal() {
+  local to=$1 refs=$2 flag=$3
+  [ "$flag" != 1 ] || return 0
+  if [ "$to" = rootful ]; then
+    echo "the destination is the ROOTFUL daemon's volume: during a cut-over that is the ROLLBACK copy (are --from and --to swapped?). If you really mean to overwrite it, add --replace-rootful-rollback-copy"
+    return 0
+  fi
+  if [ "$refs" != 0 ]; then
+    echo "$refs container(s) (running or stopped) still reference the destination volume: it is in use by a stack, not an empty shell. If you really mean to overwrite it, add --replace-rootful-rollback-copy"
+  fi
+}
+
+# scan_source: refuse a source the copy cannot reproduce faithfully (xattrs, POSIX ACLs, hard links).
+scan_source() {
+  local x l paths why
+  x="$(helper "$FROM" --cap-add DAC_READ_SEARCH -v "$VOL:/src:ro" --entrypoint tar "$IMAGE" -C /src --xattrs --acls --format=pax -cf - . | count_xattr_records)" ||
+    die "the xattr/ACL scan of $VOL on $FROM failed (is GNU tar in $IMAGE?)"
+  paths="$(helper "$FROM" --cap-add DAC_READ_SEARCH -v "$VOL:/src:ro" --entrypoint find "$IMAGE" /src -xdev -type f -links +1 -printf '%p\n')" ||
+    die "the hard-link scan of $VOL on $FROM failed (is GNU find in $IMAGE?)"
+  l="$([ -z "$paths" ] && echo 0 || grep -c . <<<"$paths")"
+  why="$(scan_verdict "$x" "$l" "$(head -n 3 <<<"$paths" | tr '\n' ' ')")"
+  [ -z "$why" ] || die "$why"
+  say "source scan: no extended attributes, no POSIX ACLs, no multiply-linked files (GNU tar --xattrs --acls --format=pax, GNU find -links, run in $IMAGE)"
+}
+
+# prepare_work_dir: prints the directory verify writes its manifests to. --keep must be NEW: an existing path is
+# refused (install -d would chmod it), and its parent must be writable by nobody but the invoking user.
+prepare_work_dir() {
+  local parent m owner
+  if [ -z "$KEEP" ]; then mktemp -d; return; fi
+  if [ -e "$KEEP" ] || [ -L "$KEEP" ]; then die "--keep $KEEP already exists: it must be a new path (nothing existing is reused or chmod'ed)"; fi
+  parent="$(dirname "$KEEP")"
+  [ -d "$parent" ] && [ ! -L "$parent" ] || die "--keep: $parent is not a plain directory"
+  owner="$(stat -c %u "$parent")"
+  [ "$owner" = "$(id -u)" ] || [ "$owner" = "${SUDO_UID:-x}" ] || die "--keep: $parent is owned by uid $owner, neither root nor the sudo caller"
+  m="$(stat -c %a "$parent")"
+  [ $((8#$m & 022)) = 0 ] || die "--keep: $parent is group- or other-writable (mode $m)"
+  mkdir -m 0700 -- "$KEEP"
+  printf '%s\n' "$KEEP"
+}
+
 # --- commands -------------------------------------------------------------------------------------------------
 
 cmd_copy() {
@@ -158,12 +240,17 @@ cmd_copy() {
   done
   not_in_use "$FROM" "$VOL"
   not_in_use "$TO" "$TOVOL"
+  scan_source
   # Fail closed: an unreadable destination must never read as an empty one (find's own status decides).
   entries="$(helper "$TO" --cap-add DAC_READ_SEARCH -v "$TOVOL:/dst:ro" --entrypoint sh "$IMAGE" -c \
     'n="$(find /dst -mindepth 1 -maxdepth 1 -printf x)" || exit 1; printf "%s" "${#n}"')" || die "cannot list the destination $TOVOL on $TO"
   [[ "$entries" =~ ^[0-9]+$ ]] || die "cannot list the destination $TOVOL on $TO ($entries)"
   if [ "$entries" != 0 ]; then
     [ "$REPLACE" = 1 ] || die "destination $TOVOL on $TO is not empty ($entries entries): pass --replace to overwrite it"
+    local refs why
+    refs="$(refs_count "$TO" "$TOVOL")" || die "cannot count the containers that reference $TOVOL on $TO"
+    why="$(replace_refusal "$TO" "$refs" "$REPLACE_RB")"
+    [ -z "$why" ] || die "REFUSED --replace of $TOVOL on $TO: $why"
     say "emptying $TOVOL on $TO (--replace)"
     helper "$TO" --cap-add DAC_OVERRIDE --cap-add FOWNER -v "$TOVOL:/dst" --entrypoint sh "$IMAGE" -c 'find /dst -mindepth 1 -delete'
   fi
@@ -180,8 +267,7 @@ cmd_copy() {
 
 cmd_verify() {
   local w m1 m2 ids n bytes
-  w="${KEEP:-$(mktemp -d)}"
-  install -d -m 0700 "$w"
+  w="$(prepare_work_dir)" || exit 1
   m1="$(dk "$FROM" volume inspect -f '{{.Mountpoint}}' "$VOL")"
   m2="$(dk "$TO" volume inspect -f '{{.Mountpoint}}' "$TOVOL")"
   [ -d "$m1" ] && [ -d "$m2" ] || die "cannot see the host paths of $VOL ($m1) or $TOVOL ($m2)"
@@ -206,7 +292,7 @@ cmd_verify() {
   fi
 }
 
-usage() { die "usage: $0 copy|verify --from HOST --to HOST --volume NAME [--to-volume NAME] [--image REF] [--replace] [--keep DIR]"; }
+usage() { die "usage: $0 copy|verify --from HOST --to HOST --volume NAME [--to-volume NAME] [--image REF] [--replace [--replace-rootful-rollback-copy]] [--keep DIR]"; }
 
 main() {
   local cmd="${1:-}"

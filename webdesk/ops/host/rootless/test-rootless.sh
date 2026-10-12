@@ -683,14 +683,25 @@ section_copy() {
   assert "the last subuid is container uid 65536" test "$(ns_id 700065535 940 700000000 65536)" = 65536
   assert "one past the range is unmappable" test "$(ns_id 700065536 940 700000000 65536)" = "?700065536"
   assert "webdesk-svc (999) is unmappable" test "$(ns_id 999 940 700000000 65536)" = "?999"
-  printf './PG_VERSION\tf 600 700000069 700000069 3 abc\n.\td 700 700000069 700000069 - -\n' >"$T/c.host"
-  assert "map_manifest rewrites both owner columns" \
-    test "$(map_manifest 940 940 700000000 65536 700000000 65536 <"$T/c.host" | tr '\t' '|' | tr '\n' ';')" = "./PG_VERSION|f 600 70 70 3 abc;.|d 700 70 70 - -;"
-  { printf './unmapped\tf 600 ?999 70 1 x\n'; for n in $(seq 1 3000); do printf './f%05d\tf 600 70 70 3 %064d\n' "$n" "$n"; done; } >"$T/c.big"
-  assert "has_unmapped finds a ?<id> owner at the top of a >64 KiB manifest (no SIGPIPE blind spot)" has_unmapped "$T/c.big"
+  printf './PG_VERSION\tf 600 700000069 700000069 3 abc 1700000000\n.\td 700 700000069 700000069 - - 1700000001\n' >"$T/c.host"
+  assert "map_manifest rewrites both owner columns and keeps the mtime" \
+    test "$(map_manifest 940 940 700000000 65536 700000000 65536 <"$T/c.host" | tr '\t' '|' | tr '\n' ';')" = "./PG_VERSION|f 600 70 70 3 abc 1700000000;.|d 700 70 70 - - 1700000001;"
+  # The pipeline shape the tool really runs (a manifest streamed into has_unmapped), under pipefail, with ~190 KiB
+  # (three pipe buffers) and the match on line 1: a consumer that exits at the first match would SIGPIPE the writer.
+  big() { awk -v n=2000 'BEGIN { printf "./unmapped\tf 600 ?999 70 1 x 5\n"; for (i = 1; i <= n; i++) printf "./f%05d\tf 600 70 70 3 %064d 7\n", i, i }'; }
+  assert "the test input is larger than a pipe buffer (>64 KiB)" test "$(big | wc -c)" -gt 131072
+  (set -o pipefail; big | has_unmapped)
+  assert "has_unmapped finds a ?<id> owner on line 1 of a >64 KiB stream, in a pipeline, under pipefail" test $? = 0
+  (set -o pipefail; big | sed 1d | has_unmapped)
+  refute "has_unmapped: the same stream with that line removed passes, in a pipeline, under pipefail" test $? = 0
+  (set -o pipefail; big | grep -q '?')
+  if [ $? = 0 ]; then echo "  note  the naive early-exit consumer did not SIGPIPE the writer on this shell: the control is inconclusive here"; else
+    t_ok "control: a consumer that exits at the first match (grep -q) DOES fail this pipeline under pipefail, so the check above can fail"; fi
+  big >"$T/c.big"
+  assert "has_unmapped on a file argument too" has_unmapped "$T/c.big"
   sed 1d "$T/c.big" >"$T/c.clean"
   refute "has_unmapped: a fully mapped manifest passes" has_unmapped "$T/c.clean"
-  printf './what?\tf 600 70 70 1 x\n' >"$T/c.q"
+  printf './what?\tf 600 70 70 1 x 5\n' >"$T/c.q"
   refute "has_unmapped: a ? in the PATH is not an owner" has_unmapped "$T/c.q"
   printf 'u:1:2\nwdproof-rootless:700065536:65536\n' >"$T/c.sub"
   assert "subid_of: one entry" test "$(subid_of "$T/c.sub" wdproof-rootless 941)" = "700065536 65536"
@@ -709,7 +720,8 @@ section_copy() {
     assert "one line per entry (root, 2 dirs, 2 files, maybe a symlink)" test "$n" -ge 5
     assert "a file's line carries its sha256" grep -q "$(sha256sum <"$T/src/a.txt" | cut -d' ' -f1)" "$T/m1"
     assert "a path with a space is quoted, not split" grep -q 'sub\\ dir/b\\ file' "$T/m1"
-    assert "directories carry no size" grep -qE '^\.	d [0-7]+ [0-9]+ [0-9]+ - -$' "$T/m1"
+    assert "directories carry no size, but a whole-second mtime" grep -qE '^\.	d [0-7]+ [0-9]+ [0-9]+ - - [0-9]+$' "$T/m1"
+    assert "a file's line ends with its whole-second mtime" grep -qE "^\./a\.txt	f [0-7]+ [0-9]+ [0-9]+ 6 [0-9a-f]{64} [0-9]+$" "$T/m1"
     assert "sorted (LC_ALL=C)" test "$(cut -f1 "$T/m1")" = "$(cut -f1 "$T/m1" | LC_ALL=C sort)"
     cp -a "$T/src" "$T/dst"
     manifest "$T/dst" >"$T/m2"
@@ -717,7 +729,129 @@ section_copy() {
     printf 'hellO\n' >"$T/dst/a.txt"
     touch -r "$T/src/a.txt" "$T/dst/a.txt"
     refute "one changed byte is caught" test "$(manifest "$T/dst")" = "$(cat "$T/m1")"
+    printf 'hello\n' >"$T/dst/a.txt"
+    touch -d @1700000000 "$T/dst/a.txt"
+    touch -d @1700000500 "$T/src/a.txt"
+    refute "an mtime-only difference is caught" test "$(manifest "$T/dst")" = "$(manifest "$T/src")"
+    touch -r "$T/src/a.txt" "$T/dst/a.txt"
+    assert "  ... and equal again once the mtimes agree" test "$(manifest "$T/dst")" = "$(manifest "$T/src")"
   fi
+
+  echo "== volume copy: M4 - a --replace may not empty the rollback copy or a volume a stack still references"
+  (parse_args --from unix:///run/user/940/docker.sock --to rootful --volume v --replace --replace-rootful-rollback-copy && echo "$REPLACE $REPLACE_RB") >"$T/c.rb" 2>&1
+  assert "the explicit flag parses" test "$(cat "$T/c.rb")" = "1 1"
+  dies "--replace-rootful-rollback-copy without --replace is refused" parse_args --from rootful --to unix:///run/user/940/docker.sock --volume v --replace-rootful-rollback-copy
+  same "no flag, a ROOTFUL destination: refused" "refused" "$(replace_refusal rootful 0 0 | grep -q 'ROLLBACK copy' && echo refused)"
+  same "no flag, a rootless destination with no container: allowed" "" "$(replace_refusal unix:///run/user/940/docker.sock 0 0)"
+  same "no flag, a rootless destination a (stopped) container references: refused" "refused" \
+    "$(replace_refusal unix:///run/user/940/docker.sock 2 0 | grep -q '2 container' && echo refused)"
+  same "the explicit flag allows a rootful destination" "" "$(replace_refusal rootful 0 1)"
+  same "the explicit flag allows a referenced volume" "" "$(replace_refusal unix:///run/user/940/docker.sock 3 1)"
+  # cmd_copy end to end with stub daemons: nothing may be emptied before the refusal
+  EMPTIED="$T/emptied"
+  dk() { # dk <HOST> docker-args...
+    shift
+    case "$1 ${2:-}" in
+      "image inspect") echo sha256:stub ;;
+      "volume inspect") return 0 ;;
+      "ps -q") return 0 ;;
+      "ps -aq") printf '%s' "$STUB_REFS" ;;
+    esac
+    return 0
+  }
+  helper() { # helper <HOST> docker-run-args...
+    case "$*" in
+      *"find /dst -mindepth 1 -delete"*) : >"$EMPTIED"; return 0 ;;
+      *"find /dst -mindepth 1 -maxdepth 1"*) printf 5 ;;
+      *"--entrypoint stat"*) echo "0 0 755" ;;
+    esac
+    return 0
+  }
+  cp_run() { ( FROM=$1 TO=$2 VOL=v TOVOL=v IMAGE=node:22 REPLACE=1 REPLACE_RB=${3:-0} KEEP=""; cmd_verify() { echo VERIFY-REACHED; }; cmd_copy ) 2>&1; }
+  rm -f "$EMPTIED"; STUB_REFS=""
+  out="$(cp_run unix:///run/user/940/docker.sock rootful)"
+  assert "cmd_copy: swapped --from/--to with --replace toward rootful is REFUSED" grep -q 'REFUSED --replace' <<<"$out"
+  refute "  ... and the destination was not emptied" test -e "$EMPTIED"
+  out="$(cp_run rootful unix:///run/user/940/docker.sock)"
+  assert "cmd_copy: --replace into a rootless volume with no container proceeds" grep -q 'emptying' <<<"$out"
+  assert "  ... and empties it" test -e "$EMPTIED"
+  rm -f "$EMPTIED"; STUB_REFS="abc123"
+  out="$(cp_run rootful unix:///run/user/940/docker.sock)"
+  assert "cmd_copy: --replace of a volume a STOPPED container references is REFUSED (not_in_use only sees running ones)" grep -q 'REFUSED --replace' <<<"$out"
+  refute "  ... and the destination was not emptied" test -e "$EMPTIED"
+  out="$(cp_run rootful unix:///run/user/940/docker.sock 1)"
+  assert "cmd_copy: the explicit flag lets it through" grep -q 'emptying' <<<"$out"
+  rm -f "$EMPTIED"; STUB_REFS=""
+  out="$(cp_run unix:///run/user/940/docker.sock rootful 1)"
+  assert "cmd_copy: the explicit flag lets a rootful rollback copy be overwritten" grep -q 'emptying' <<<"$out"
+
+  echo "== volume copy: M5 - a source the copy cannot reproduce is refused"
+  printf '%s\n' '27 SCHILY.xattr.user.k=v' '30 SCHILY.acl.access=user::rw-' | count_xattr_records >"$T/x.n"
+  same "count_xattr_records counts SCHILY.xattr and SCHILY.acl records" 2 "$(cat "$T/x.n")"
+  same "count_xattr_records: a stream with none counts 0" 0 "$(printf 'plain file data\nSCHILY mentioned loosely\n' | count_xattr_records)"
+  # a stream > 64 KiB with the record first: the counter must read it all (no SIGPIPE on the writer under pipefail)
+  (set -o pipefail; { echo '28 SCHILY.xattr.user.a=b'; awk 'BEGIN { for (i = 0; i < 4000; i++) print "filler line number " i " xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }'; } | count_xattr_records >"$T/x.n2")
+  assert "count_xattr_records reads a >64 KiB stream to the end, in a pipeline, under pipefail" test "$(cat "$T/x.n2")" = 1
+  same "scan_verdict: nothing found, no refusal" "" "$(scan_verdict 0 0 '')"
+  assert "scan_verdict: xattr/ACL records are refused" grep -q 'extended attributes or POSIX ACLs (3 records)' <<<"$(scan_verdict 3 0 '')"
+  assert "scan_verdict: hard links are refused and named" grep -q 'multiply-linked.*first: /src/a /src/b' <<<"$(scan_verdict 0 2 '/src/a /src/b ')"
+  assert "scan_verdict: garbage from the scan is refused, not read as zero" grep -q 'no usable answer' <<<"$(scan_verdict '' 0 '')"
+  # scan_source against stub helpers
+  helper() {
+    case "$*" in
+      *"--entrypoint tar"*) printf '%s\n' "$STUB_TAR" ;;
+      *"--entrypoint find"*) printf '%s' "$STUB_FIND" ;;
+    esac
+    return 0
+  }
+  FROM=rootful VOL=v IMAGE=node:22
+  STUB_TAR="plain" STUB_FIND=""
+  out="$( (scan_source) 2>&1)"
+  assert "scan_source: a clean source passes and says what it ran" grep -q 'source scan: no extended attributes' <<<"$out"
+  STUB_TAR="27 SCHILY.xattr.user.k=v" STUB_FIND=""
+  out="$( (scan_source) 2>&1)"
+  assert "scan_source: a source with an xattr is refused with a clear message" grep -q 'extended attributes or POSIX ACLs' <<<"$out"
+  STUB_TAR="plain" STUB_FIND="/src/data/a
+/src/data/b"
+  out="$( (scan_source) 2>&1)"
+  assert "scan_source: a source with a hard link is refused and the paths are named" grep -q 'multiply-linked.*/src/data/a' <<<"$out"
+  helper() { return 3; }
+  out="$( (scan_source) 2>&1)"
+  assert "scan_source: a failing helper is an error, not a clean source" grep -q 'scan of v on rootful failed' <<<"$out"
+  dk() { shift; case "$1 ${2:-}" in "ps -aq") printf 'a\nb\n' ;; esac; }
+  same "refs_count counts the containers, running or stopped" 2 "$(refs_count rootful v)"
+  dk() { shift; case "$1 ${2:-}" in "ps -aq") : ;; esac; }
+  same "refs_count: none is 0" 0 "$(refs_count rootful v)"
+  unset -f dk helper
+
+  echo "== volume copy: m4 - --keep must be a new path"
+  mkdir -p "$T/kp"
+  KEEP="$T/kp/exists"
+  mkdir -p "$KEEP"
+  chmod 755 "$KEEP"
+  out="$( (prepare_work_dir) 2>&1)"
+  assert "an existing --keep directory is refused" grep -q 'already exists' <<<"$out"
+  same "  ... and its mode was not touched" "755" "$(stat -c %a "$KEEP")"
+  printf x >"$T/kp/afile"
+  KEEP="$T/kp/afile"
+  assert "an existing --keep file is refused" grep -q 'already exists' <<<"$( (prepare_work_dir) 2>&1)"
+  KEEP="$T/kp/new"
+  out="$(prepare_work_dir)"
+  same "a new path is created and returned" "$T/kp/new" "$out"
+  assert "  ... as a directory" test -d "$T/kp/new"
+  KEEP="$T/kp/new"
+  assert "  ... and a second use of the same path is refused" grep -q 'already exists' <<<"$( (prepare_work_dir) 2>&1)"
+  KEEP="$T/kp/nodir/x"
+  assert "a --keep whose parent is missing is refused" grep -q 'not a plain directory' <<<"$( (prepare_work_dir) 2>&1)"
+  if [ "$(chmod 777 "$T/kp"; stat -c %a "$T/kp")" = 777 ]; then
+    KEEP="$T/kp/new2"
+    assert "a world-writable parent is refused" grep -q 'group- or other-writable' <<<"$( (prepare_work_dir) 2>&1)"
+    refute "  ... and nothing was created" test -e "$T/kp/new2"
+    chmod 755 "$T/kp"
+    same "a created --keep is 0700" "700" "$(stat -c %a "$T/kp/new")"
+  else echo "  note  this shell ignores chmod: the parent-mode and 0700 checks run on the Linux gate"; fi
+  KEEP=""
+  assert "no --keep: a fresh temp directory" test -d "$(prepare_work_dir)"
   echo "  END   copy"
 }
 
