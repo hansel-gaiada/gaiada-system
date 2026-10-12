@@ -20,11 +20,17 @@ import { ClientVisibilityMarker } from "@/components/clients/ClientVisibilityMar
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { ScheduleMeetingPanel } from "@/components/meetings/ScheduleMeetingPanel";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { can } from "@/lib/rbac";
+import { listThreads } from "@/lib/conversation-data";
+import { startConversationAction } from "@/lib/conversationActions";
+import { ThreadList } from "@/components/clients/conversation/ThreadList";
+import { StartConversation } from "@/components/clients/conversation/StartConversation";
 
 // CC-3 — the Work tab; PV3-05 — now the hub's PROJECTS area (the label changed, the URL did not).
 //
 // One page for everything about the work, in this order:
 //   1. projects, with their tasks grouped under them
+//   1b. conversation (PV4-09) — the threads with this client, "awaiting our reply" first
 //   2. deliverables
 //   3. approvals — this client's pipeline runs with their client-side gates
 //   4. requests — change requests, and post reviews
@@ -57,7 +63,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
   const { clientId } = await params;
   if (!tenant) notFound();
 
-  const [projectsRes, tasksRes, deliverablesRes, runsRes, changeRequestsRes, overviewRes, meetingsResult, upcomingResult] =
+  const [projectsRes, tasksRes, deliverablesRes, runsRes, changeRequestsRes, overviewRes, meetingsResult, upcomingResult, threadsRes] =
     await Promise.all([
       readResult(listProjects(userId, tenant, clientId)),
       // `includeClosed` defaults to true in the reader; kept explicit because "Done" tasks are part of
@@ -72,6 +78,8 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
       listRecordings(userId, tenant, { clientId }),
       // W1 (D-3): what is coming up for this client, server-filtered to future scheduled rows.
       listRecordings(userId, tenant, { clientId, scheduled: "upcoming" }),
+      // PV4-09: this client's conversation threads (BFF §29b). A refusal renders as one, never as "no conversations".
+      readResult(listThreads(userId, tenant, { clientId })),
     ]);
 
   const projects = projectsRes.kind === "ok" ? projectsRes.data : [];
@@ -209,6 +217,27 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
     <div className="ch-sections">
       <Section id="projects" title="Projects">
         {renderProjects()}
+      </Section>
+
+      <Section id="conversation" title="Conversation">
+        {threadsRes.kind !== "ok" ? (
+          <ReadRefusal subject="this client's conversations" kind={threadsRes.kind} reason={reasonOf(threadsRes)} />
+        ) : (
+          <Card
+            title={`Conversations${threadsRes.data.length ? ` · ${threadsRes.data.length}` : ""}`}
+            hint="Messages between this client and our team. The client reads and answers them in their portal."
+          >
+            <ThreadList threads={threadsRes.data} clientId={clientId} />
+            {can(me, "client.write", tenant) && (
+              <StartConversation
+                clientId={clientId}
+                clientName={overviewRes.kind === "ok" && overviewRes.data ? overviewRes.data.client.name : "this client"}
+                projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+                start={startConversationAction}
+              />
+            )}
+          </Card>
+        )}
       </Section>
 
       <Section id="deliverables" title="Deliverables">

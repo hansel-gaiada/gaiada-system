@@ -6,6 +6,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { listChangeRequests } from "@/lib/webdevChangeRequests-data";
 import { ChangeRequestsPanel } from "@/components/departments/ChangeRequestsPanel";
+import { listSignedContractsAction } from "@/lib/conversationActions";
 import { getChangeRequestDetailAction, triageChangeRequestAction } from "./actions";
 
 type Params = Promise<{ deptId: string }>;
@@ -43,6 +44,7 @@ export default async function ChangeRequestsPage({ params }: { params: Params })
   const actions = {
     getDetail: getChangeRequestDetailAction.bind(null, tenant),
     triage: triageChangeRequestAction.bind(null, tenant, deptId),
+    listSignedContracts: listSignedContractsAction,
   };
 
   return <ChangeRequestsPanel rows={rows} canTriage={canTriage} actions={actions} />;

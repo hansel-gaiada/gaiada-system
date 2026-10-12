@@ -1,0 +1,79 @@
+/* PV4-09 — the staff conversation screens. Hub tokens only (clientHub.css, ui.css); no new palette.
+   The one deliberate shape: an agent's DRAFT is clipped to the thread as a slip with the Internal area's
+   grammar (warning tint, dashed edge, "Not sent" in words), so it cannot be read as something the client has. */
+
+.cv-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.cv-list__item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: baseline;
+  padding: 11px 0; border-bottom: 1px solid var(--hairline); font: 400 13px/1.45 var(--font-body);
+}
+.cv-list__item:last-child { border-bottom: 0; }
+.cv-list__title { color: var(--ink-strong); font-weight: 600; text-decoration: none; }
+.cv-list__title:hover { color: var(--erp-accent); text-decoration: underline; text-underline-offset: 3px; }
+.cv-list__meta { grid-column: 1; color: var(--ink-muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.cv-list__flags { grid-row: 1; grid-column: 2; display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.cv-pill {
+  display: inline-block; padding: 1px 8px; border-radius: var(--radius-pill); font: 600 11px/1.5 var(--font-body);
+  color: var(--ink-strong); white-space: nowrap; border: 1px solid var(--hairline);
+}
+.cv-pill--waiting { border-color: var(--status-warning); background: var(--status-warning-bg); }
+.cv-pill--count { border-color: var(--erp-accent); }
+.cv-pill--draft { border: 1px dashed var(--status-warning); background: var(--status-warning-bg); }
+
+.cv-start { display: grid; gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--hairline); }
+.cv-field { display: grid; gap: 4px; }
+.cv-field__label { font: 500 12px var(--font-body); color: var(--ink-muted); }
+.cv-field input, .cv-field select, .cv-field textarea {
+  font: 400 13px/1.5 var(--font-body); padding: 8px 10px; border: 1px solid var(--line, var(--hairline)); border-radius: var(--radius-md);
+  background: transparent; color: var(--ink-strong); width: 100%; box-sizing: border-box;
+}
+.cv-field textarea { resize: vertical; min-height: 84px; }
+.cv-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.cv-help { margin: 0; color: var(--ink-muted); font: 400 12px/1.5 var(--font-body); }
+.cv-error { margin: 0; color: var(--status-critical-fg, var(--status-danger)); font: 500 13px/1.5 var(--font-body); }
+.cv-count { margin-left: auto; color: var(--ink-muted); font: 400 11px var(--font-body); }
+.cv-count--over { color: var(--status-critical-fg, var(--status-danger)); font-weight: 600; }
+
+/* thread */
+.cv-thread { display: grid; gap: 20px; }
+.cv-thread__head { display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.cv-thread__title { margin: 0; font: 600 18px/1.3 var(--font-body); color: var(--ink-strong); }
+.cv-messages { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+
+/* A message is a letter, not a bubble: the side shows as an edge (ours accent, theirs neutral) AND in words. */
+.cv-msg {
+  display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--hairline); border-left-width: 3px;
+  border-radius: var(--radius-md); max-width: 46rem;
+}
+.cv-msg--client { border-left-color: var(--ink-muted); }
+.cv-msg--staff { border-left-color: var(--erp-accent); margin-left: 24px; }
+.cv-msg:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.cv-msg__head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
+.cv-msg__who { color: var(--ink-strong); font-weight: 600; font-size: 13px; }
+.cv-msg__body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 14px/1.6 var(--font-body); color: var(--ink-strong); }
+.cv-msg__body a { color: var(--erp-accent); text-decoration: underline; text-underline-offset: 3px; }
+.cv-msg--removed .cv-msg__body { color: var(--ink-muted); font-style: italic; }
+.cv-msg__tools { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.cv-msg__prov { color: var(--ink-muted); font: 500 12px var(--font-body); }
+.cv-files { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0; list-style: none; font: 400 12px var(--font-body); }
+.cv-files a { color: var(--erp-accent); text-underline-offset: 3px; }
+
+/* the draft slip: Internal's grammar */
+.cv-draft {
+  display: grid; gap: 10px; padding: 12px 14px; border: 1px dashed var(--status-warning); border-radius: var(--radius-md);
+  background: var(--status-warning-bg); color: var(--ink-strong); max-width: 46rem;
+}
+.cv-draft__head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font: 700 13px/1.4 var(--font-body); }
+.cv-draft__head .ch-vis { margin-left: 0; }
+.cv-draft__body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 14px/1.6 var(--font-body); }
+
+.cv-composer { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--hairline); max-width: 46rem; }
+.cv-composer__files { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0; list-style: none; font: 400 12px var(--font-body); }
+.cv-closed { margin: 0; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-md); font: 400 13px/1.5 var(--font-body); color: var(--ink-strong); }
+
+.cv-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* minutes */
+.cv-minutes { display: grid; gap: 12px; }
+.cv-minutes textarea { min-height: 220px; }
+.cv-frozen { margin: 0; padding: 10px 12px; border: 1px solid var(--status-ok); background: var(--status-ok-bg); border-radius: var(--radius-md); font: 500 13px/1.5 var(--font-body); color: var(--ink-strong); }

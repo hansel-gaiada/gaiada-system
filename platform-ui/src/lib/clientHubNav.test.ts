@@ -41,3 +41,13 @@ describe("isHubTabActive (PV3-05: segment-boundary matching)", () => {
     expect(hubTabHref(id, "notes")).toBe("/clients/cl-1/notes");
   });
 });
+
+describe("PV4-09: the conversation thread page keeps Projects lit", () => {
+  it("lights the Projects tab (and only it) for a thread under /work/conversation", () => {
+    const path = "/clients/cl-1/work/conversation/7f1c2b3a-0000-4000-8000-000000000001";
+    expect(isHubTabActive(path, "cl-1", "work")).toBe(true);
+    expect(isHubTabActive(path, "cl-1", "")).toBe(false);
+    expect(isHubTabActive(path, "cl-1", "billing")).toBe(false);
+    expect(isHubTabActive(path, "cl-1", "notes")).toBe(false);
+  });
+});

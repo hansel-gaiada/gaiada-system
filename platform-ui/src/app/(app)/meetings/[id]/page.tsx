@@ -13,6 +13,12 @@ import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { formatDateTime } from "@/lib/format";
 import type { ReactNode } from "react";
+import { can } from "@/lib/rbac";
+import { getClient } from "@/lib/entities";
+import { readResult } from "@/lib/readResult";
+import { getMeetingMinutes } from "@/lib/meetingMinutes-data";
+import { saveMinutesAction, shareMinutesAction } from "@/lib/conversationActions";
+import { MinutesPanel } from "@/components/meetings/MinutesPanel";
 
 function mb(bytes: number | null): string {
   if (!bytes || bytes <= 0) return "—";
@@ -59,6 +65,13 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
     // A person can be both staff and a client contact in contrived cases; offer them once.
     .filter((c, i, all) => all.findIndex((x) => x.userId === c.userId) === i);
 
+  // PV4-09 — the minutes (BFF §29c). A refused or failed read says so in words, never "no minutes yet". The client's
+  // name is only for the Share confirm; if it cannot be read the confirm says "the client".
+  const [minutesRes, minutesClient] = await Promise.all([
+    readResult(getMeetingMinutes(userId, tenant, rec.id)),
+    rec.client_id ? getClient(userId, tenant, rec.client_id).catch(() => null) : Promise.resolve(null),
+  ]);
+
   const meta: [string, ReactNode][] = [
     ["Kind", rec.kind === "video" ? "Audio + Video" : "Audio"],
     ["Meeting ID", rec.meeting_id],
@@ -102,6 +115,20 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
               </div>
             ))}
           </dl>
+        </Card>
+
+        <Card title="Minutes" hint="Written as a draft that only our team sees. Share it with the client when it is ready.">
+          {minutesRes.kind !== "ok" ? (
+            <ReadRefusal subject="this meeting's minutes" kind={minutesRes.kind} reason={minutesRes.kind === "unavailable" ? minutesRes.reason : undefined} inline />
+          ) : (
+            <MinutesPanel
+              meetingId={rec.id}
+              clientName={minutesClient?.name ?? "the client"}
+              initial={minutesRes.data}
+              canWrite={can(me, "client.write", tenant)}
+              actions={{ save: saveMinutesAction, share: shareMinutesAction }}
+            />
+          )}
         </Card>
 
         <Card title="Workbench">
