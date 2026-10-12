@@ -211,6 +211,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/client-work.controller.ts` |
 | `/api` | `platform-nest/src/core/collab.controller.ts` |
 | `/api` | `platform-nest/src/core/contracts.controller.ts` |
+| `/api` | `platform-nest/src/core/conversation.controller.ts` |
 | `/api` | `platform-nest/src/core/core.controller.ts` |
 | `/api` | `platform-nest/src/core/creative.controller.ts` |
 | `/api` | `platform-nest/src/core/custom-fields.controller.ts` |
@@ -221,6 +222,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/pipeline.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-centre.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-commerce.controller.ts` |
+| `/api` | `platform-nest/src/core/portal-conversation.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-profile.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-workspace.controller.ts` |
