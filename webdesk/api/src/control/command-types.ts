@@ -72,6 +72,8 @@ export type CommandName =
   | "forms.define"
   | "forms.def.list"
   | "forms.def.get"
+  // M5-V3-a -- the consent log's latest record per consent id (the ERP's proof of visitor consent).
+  | "consent.status"
   // M5-W2b — the writers' room review flow (design docs/plans/2026-10-11-m5-writers-room-design.md section 4.3).
   // The nine writes carry an editorial principal (EDITORIAL_COMMANDS); board and history are plain reads.
   | "editorial.submit"
@@ -209,6 +211,10 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "forms.define": { command: "forms.define", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "forms.def.list": { command: "forms.def.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "forms.def.get": { command: "forms.def.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-V3-a (design 4.3): read / webdesk:read, un-audited, like forms.submission.get. It returns no personal data
+  // (a random consent id, two flags, a notice version, a time), and it is the only way the ERP can PROVE a visitor's
+  // consent, so a scopeless caller must still be refused. Another tenant's ids are omitted, not refused.
+  "consent.status": { command: "consent.status", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-W2b (design 4.3): every review write is MEDIUM / operate. None is HIGH, because none changes what a
   // production key sees: approval is a recorded decision, and the publish gate that ENFORCES it (W2c) sits on
   // content.publish / content.schedule, which stay HIGH. policySet turns review on or off for a collection, and

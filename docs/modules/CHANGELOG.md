@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.24.0` - M5-V3-a: `consent.status`, the latest consent record per id (2026-10-12) - DEV-VERIFIED
+
+- **The read:** `POST /control/v1/tenants/:tenantSlug/consent/status`, body `{siteSlug?, consentIds: uuid[1..100]}`. It returns `200 {statuses:[{consentId, analytics, marketing, action, noticeVersion, recordedAt}]}`.
+- **Semantics:**
+  - The latest record per id wins (`recorded_at`, then id).
+  - Another tenant's ids are simply omitted.
+  - 101 ids, or any malformed body, is a 400. A scopeless caller is a 403, before the body is read.
+  - It is a read (`webdesk:read`): no audit row, no Idempotency-Key, not editorial, not on the client-editor list.
+  - No user-agent class and no row ids are returned.
+- **Consumers must key on `analytics === false`, never on `action`:** an analytics-only withdrawal arrives as `update`.
+- It is what M5 phase 5 (V3) uses to prove consent server-side.
+- No migration.
+- **Verified** on GitHub Actions 38268390774: the DB/HTTP spec and the unit + registry specs green.
+
 ### platform-nest `0.98.0` - M5-P2: Google Ads conversion uploads on a lead stage change (simulate only; consent- and WS4-gated) (2026-10-12) - DEV-VERIFIED
 
 The lead-pipeline design's §8 interface (built by the M5 session).
