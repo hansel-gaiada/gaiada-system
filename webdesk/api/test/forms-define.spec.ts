@@ -255,5 +255,13 @@ describe("M5-L1d forms.define", () => {
     expect(sub.data_subject_phone_ref).toBe("6281234567890");
     // the stored definition is what is enforced: a missing required field is refused
     expect((await submit({ name: "Jane", email_address: "jane@example.com" })).statusCode).toBe(400);
+    // M5-L1d: a blank OPTIONAL value is absent (the browser sends "" for an untouched input); a blank REQUIRED one is still a 400
+    const blank = await submit({ name: "Jane", email_address: "jane@example.com", phone_number: "", message: "Hello" });
+    expect(blank.statusCode, blank.body).toBe(201);
+    const stored = await asTenant(a.tenantId, async (c) => (await c.query(`SELECT payload, data_subject_phone_ref FROM submissions WHERE id = $1`, [blank.json().id])).rows[0]);
+    expect(stored.payload.fields).not.toHaveProperty("phone_number");
+    expect(stored.data_subject_phone_ref).toBeNull();
+    expect((await submit({ name: "", email_address: "jane@example.com", message: "Hello" })).statusCode).toBe(400);
+    expect((await submit({ name: "Jane", email_address: "", message: "Hello" })).statusCode).toBe(400);
   });
 });

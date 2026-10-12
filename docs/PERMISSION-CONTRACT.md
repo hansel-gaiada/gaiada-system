@@ -40,6 +40,19 @@ build against.
 > need the two-person appointment (`owner` is in `ELEVATED_TIER`), so system power still has no
 > single-step path. Ruling: decision log of `docs/plans/2026-10-10-three-perspectives.md`.
 
+> **⚠ PV3-01 (2026-10-11): a company `owner` may countersign that company's contracts.** Cerbos
+> `contract` / `countersign` gains one rule (`resource_contract.yaml`): `roles: ["user"]`, allowed when
+> the principal holds `owner` at company scope ON the contract's tenant (plus `inTenant && notLow`),
+> the shape of PV1-06a's `report_document` / `read_company` rule. This implements the recorded intent
+> ("owner-only, deliberately narrower than company_admin"); it is not a new ruling. Until now only the
+> `platform_admin` wildcard reached the action. The pair is catalogued as `core.contract.countersign`
+> (grantable, sensitive, **`uiGrantable: false`**, migration `202610112330`) only because every literal
+> policy action must be (`cerbos-catalog-alignment.test.ts` (b)). **Holding the key grants nothing:** no
+> `perm_*` rule names it, it is bundled onto `platform_admin` alone (its wildcard), and not onto
+> `company_admin` or `owner`. So `company_admin`, `manager` and every custom role stay refused, whatever
+> `core.contract.*` keys they hold, the new one included. An owner of another company is refused too. The staff contract reads expose the outcome as a
+> `canCountersign` row flag (BFF §16e).
+
 > **⚠ NEW AXIS (2026-08-13, P2-03): `ui_grantable`.** Every catalog entry now carries a REQUIRED
 > `uiGrantable: boolean` (and a DB-side `permissions.ui_grantable`, migration 0110). It answers a
 > DIFFERENT question than `sensitive` or `class`: **may this permission ever appear in a role bundle
@@ -1557,14 +1570,55 @@ name lists agree across the TS, the migration and `derived_roles.yaml`; scope at
 scope-less grant probing DENY through the real `check()`, atomicity, revoke); `src/modules/webdev/webdesk-editorial-grants.test.ts`
 (the routes over `app.inject` with real Cerbos: denials with valid bodies and no egress, the wall, the generic refusals with positive controls).
 
-### 27.2 M5-L1d — WebDesk form definitions reuse `webdesk_collection` (2026-10-12, PROTOTYPED)
+### 27.2 M5-W1c — the transport that makes the writers' room rules live: the two-phase gate and attribute provenance (2026-10-12, PROTOTYPED)
+
+Design [`plans/2026-10-11-m5-writers-room-design.md`](plans/2026-10-11-m5-writers-room-design.md) §2.3, §8. Code: `platform-nest/src/modules/webdev/webdesk-content.{controller,service}.ts`,
+`webdesk-media.service.ts`. **No policy, role, catalog, bundle or migration change**: §27's rules read `siteId` and `reviewState`, which `resourcePayload()` already carried (W1a);
+until this ticket no handler sent them, so every editorial rule read `""` and denied (§11.1's lesson, stated in §27 up front). Now they are fed. FRONTEND-BFF-CONTRACT §27 "The two-phase gate" lists every route.
+
+**Where every attribute comes from** (the only sources; a body or a query is never one):
+
+| Attribute | Source | Never from |
+|---|---|---|
+| `tenantId` | route `:tenantId`, validated by `AuthGuard` | body, query |
+| `siteId` | route `:siteId`; phase 2 uses the id the cross-company wall (`resolveEditableSite`) proved, never an unproven one | body, query |
+| `collectionKey`, `locale` | WebDesk `item.get` of the item in the route. `create`: the route's collection (proven by `collection.get`) and the body's `locale` (WebDesk validates it); list: the route's collection | any other caller input |
+| `ownerId` | WebDesk `editorial.authorSub` (`""` for a legacy item with no author: nobody owns it) | body |
+| `reviewState` | WebDesk `editorial.state` (`""` when WebDesk sends none or an unknown value: the review rules deny); for a locale twin `create`, the SOURCE item's | body |
+| `published` | `publishedVersion !== null` of the same read; for a twin `create`, the source's | body |
+| `creatorId` (`approve`) | WebDesk's creator of the SUBMITTED version (`editorial.submittedVersion`), via the version in hand or one more `item.get?version=n`; `""` when it cannot be read | body |
+
+**The gate.** *Phase 1* (the controller's first statement, `ContentGate.openSite`): `webdesk_collection:read` on `{tenantId, module, siteId}`. *Phase 2* (inside the service, before any
+body or query validation): the real action with the attributes above, through an `ItemGate` that has a private constructor and whose factories demand a value built from a WebDesk read
+(`ItemAttrs` / `CollectionProof`, branded with a module-private symbol); every write method sends through one, so a write cannot be reached without the read and the check
+(`webdesk-content-two-phase.unit.test.ts` pins this with `@ts-expect-error`). A principal that holds no writers' room grant (and is not delegating) is also asked the OLD attribute-free
+question in phase 1: for them it is exactly the old first statement (a denied staff caller sees no egress and no 404-before-403), and it can only deny earlier, never allow. `GET sites` asks Cerbos per site
+for a writers' room grant (`check`, no denial row per hidden site) and answers 403, never `[]`, when none is readable.
+
+**`allowed` on `item.get`.** One `CheckResources` (`checkActions`) on the same resource phase 2 used (`ItemGate.resourceOf`): `read, update, submit, comment, request_changes, seo_signoff, approve, assign,
+request_publish, unpublish, delete`. Advisory (each action is checked again when taken), absent rather than `false` when Cerbos cannot answer or the call is delegated, and not sent on the client
+portal. `publish`/`schedule` are decide()-only and not listed.
+
+**Known limits, recorded so nobody rediscovers them.**
+1. *Existence oracle inside a site.* Phase 2 reads the item before it can be denied, so a scoped caller sees 404 `item-not-found` for an unknown id and 403 for an item it may not touch. Ids are uuids and phase 1 already
+   proved the caller may read the site; it is not closed here.
+2. *Filing re-asks with the same attributes.* `fileWebdeskCommandApproval` runs its own defence-in-depth `request_publish` check; `publish-requests` now passes it the attribute-carrying resources phase 2 built (`itemResources`; empty or absent = the old attribute-free check), so a scoped `webdesk_editor` can file. Listing and withdrawing one's OWN requests (`GET/POST …/publish-requests[/:a/withdraw]`) need only phase 1 and the own-rows filter for a writers' room grant (a writer or translator can never have filed one).
+3. *WebDesk can pre-empt a 403 on a read of a named version.* `publish-requests` reads each named item at its named version (for the content hash the approver sees); a version WebDesk does not have is its typed 404 before the check on that tuple.
+4. *A scoped principal's malformed `publish-requests` body is 403, not 400*: with no readable item the check is asked at site level, which a scoped editor cannot pass. Authorization first.
+
+**What proves it.** `src/modules/webdev/webdesk-content-two-phase.unit.test.ts` (service-free; a Cerbos stub emulates the W1a decisions, so it proves the TRANSPORT, the ORDER and the shapes: forged values never reach Cerbos, a denied write sends nothing,
+`allowed` equals the batch answer, `GET sites` filtering, twin provenance, the controller's first statement); `src/modules/webdev/webdesk-content-two-phase.test.ts` (real Cerbos + Postgres + the real principal assembly over `app.inject`, every denial
+beside a positive control, `allowed` against a direct `checkActions` for the same principal and resource; needs the Linux gate). The existing webdev suites (`webdesk-content.test.ts`, `webdesk-media.test.ts`, the client suites, the preview suite) pin the staff behaviour.
+
+### 27.3 M5-L1d — WebDesk form definitions reuse `webdesk_collection` (2026-10-12, PROTOTYPED)
 
 **No new kind, role, permission, bundle row or policy rule.** `forms.define` (WebDesk, MEDIUM / `webdesk:operate`) is authorised in the ERP as Cerbos
 `webdesk_collection` · **`apply_schema`** (company_admin, webdev_manager / module_manager, platform_admin; sensitive publisher tier), and `forms.def.list` / `forms.def.get` as
 `webdesk_collection` · **`read`**. Why `apply_schema`: a form definition is the composition of a PUBLIC intake (the fields it accepts, the consent notice it records, how long it keeps
 submissions), the same family as a collection's composition, which `apply_schema` already guards; WebDesk classifies both MEDIUM / operate. No `client` rule exists on this kind
-for either action, the BFF opens the STAFF gate (`authorizeContent`, never `openClient`), and WebDesk's `forms.define` carries no editorial assertion (like `schema.apply`), so a
+for either action, the BFF opens the STAFF gate (`authorizeSite`, never `openClient`), and WebDesk's `forms.define` carries no editorial assertion (like `schema.apply`), so a
 client-editor principal (`ce`) cannot be expressed on it. MCP: `webdesk.forms.define` (**medium**, PATCH alias), `webdesk.forms.list` / `webdesk.forms.get` (read), assurance `low`.
+**Two-phase (W1c, §27.2):** each handler's first statement is `authorizeSite(…, siteId, "webdesk_collection", action)` (phase 1: `read` on the route's site; for a principal with no writers' room grant also the old attribute-free question). The write then asks its REAL action, `webdesk_collection:apply_schema` with `siteId` set, for EVERY principal inside `defineFormDefinition`, before body validation and before any WebDesk call, so a writer or editor holding a grant on the site (who passes phase 1) is denied. The reads need nothing beyond phase 1.
 FRONTEND-BFF-CONTRACT §27 "WebDesk form definitions". **Open follow-up:** `webdesk.forms.define` is NOT a D14 executable (`core/approval-executables.ts` + `resource_mcp_tool.yaml`'s list are
 outside this change), so an unattended suspension, once approved, re-drives nothing: only an attended human can define a form until the pair is added.
 
@@ -1611,3 +1665,23 @@ tenant in `companies`, with the other action's key only; manager keeps `manage_a
 `owner` assembled from the REAL migrated bundle grants/revokes the website editor and assigns/removes admin over HTTP, audited; an owner of
 another company and an owner on the portal route are refused), and the live probe matrix against Cerbos 0.54.0 (the new rows FAIL on the
 previous policy and pass on this one).
+
+---
+
+## 29. M5-G5b — `agency_privacy.*` may be called unattended; the approval holds hashes, never the identifier (2026-10-12, PROTOTYPED)
+
+No new Cerbos kind, action, role or permission key. Three facts about who may do what, stated so nobody re-derives them:
+
+| Step | Authority | Where |
+|---|---|---|
+| Call a privacy tool (attended, or an agent acting for a person) | `agency_lead:convert` on the tenant (company_admin; platform_admin), checked FIRST by the route | `core/agency-privacy.controller.ts` |
+| **File** the approval an unattended call is suspended into (`POST /automation-approvals`, tool name `agency_privacy.*`) | the generic `automation_approval:create` **and ALSO** `agency_lead:convert` (G5b). The generic `create` is held by manager and member, so without the second check any of them could plant a privacy approval the route would never have filed | `core/approval-arg-minimisers.ts` policy `authorizeFiling` |
+| Decide it | `automation_approval:decide` (company_admin), by someone other than the requester | unchanged |
+| Run it | the requester only, `convert` again, by `approvalId`; maker != checker is re-read from the stored decision | `core/agency-privacy.service.ts` |
+
+What changed in the data, not the permissions: for these three tools the filing path stores `tool_args` as the subject hashes (the G5
+ledger's own SHA-256 helper) plus a display hint, the filed `reason` is generated, the `automation_approval.decided` event carries the hashes
+without the hints, and the ledger's `filed` row is written in the approval's transaction. Still HIGH, still two-person, still never D14
+auto-run (the bar in `core/approval-executables.ts` stands; `execution_status` stays `not_applicable`). The earlier "attended-only" caveat on
+these tools is withdrawn. Proof: `core/agency-privacy.filing.test.ts`, `core/approval-filing-minimise.test.ts` (no service) and
+`core/agency-privacy-unattended.db.test.ts` (Linux gate).

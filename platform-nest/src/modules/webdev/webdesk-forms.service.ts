@@ -6,12 +6,13 @@
 //   GET /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey    MCP webdesk.forms.get
 //   PUT /api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/forms/:formKey    MCP webdesk.forms.define (PATCH alias)
 //
-// AUTHORIZATION. Cerbos `webdesk_collection`, no new kind: `apply_schema` for the write (company_admin,
+// AUTHORIZATION (M5-W1c two-phase gate). Cerbos `webdesk_collection`, no new kind: `apply_schema` for the write (company_admin,
 // webdev_manager / module_manager, platform_admin: the publisher tier) and `read` for the two reads. The reasoning: a form
 // definition is the composition of a PUBLIC intake (what it accepts, which consent notice it records, how long it keeps
 // submissions), the same family as a collection's composition, which `apply_schema` already guards; WebDesk classifies
-// forms.define MEDIUM / operate exactly like schema.apply. The controller's FIRST statement is `authorizeContent(...)`
-// (the "validation pre-empts authz" rule), so a denied caller is denied whatever it sent. A client editor holds
+// forms.define MEDIUM / operate exactly like schema.apply. The controller's FIRST statement is `authorizeSite(...)` (M5-W1c
+// phase 1: `webdesk_collection:read` on the route's site); the write asks its REAL action, `apply_schema` with `siteId`, again in
+// `defineFormDefinition` before any body validation or egress (phase 2), so a denied caller is denied whatever it sent. A client editor holds
 // none of these actions (no `client` rule on `webdesk_collection`), and the client portal BFF does not route here.
 //
 // WHAT THE ERP CHECKS ITSELF, AND WHAT IT LEAVES TO WEBDESK. The cross-company wall (the site must belong to THIS
@@ -22,7 +23,8 @@
 //
 // LEDGER. Like every egress write: two `webdesk.forms.define` rows (attempted, then the outcome). Non-secret
 // identifiers only: tenant slug, site id, form key and the notice VERSION. Never the notice text, never a field.
-import { invalidRequest, isPlainObject, strictBody, webdeskZoneB, type ContentGate, type SiteRef, type ZoneBResult, UUID_RE } from "./webdesk-content.service";
+import { authorize } from "../../core/http";
+import { invalidRequest, isPlainObject, strictBody, webdeskZoneB, type SiteGate, type SiteRef, type ZoneBResult, UUID_RE } from "./webdesk-content.service";
 
 /** WebDesk's own form-key rule (webdesk/api/src/control/forms/form-definition.ts FORM_KEY_RE). */
 const FORM_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -37,14 +39,14 @@ const PATH_LIST = "/control/v1/tenants/:tenantSlug/sites/:siteId/forms";
 const PATH_ONE = "/control/v1/tenants/:tenantSlug/sites/:siteId/forms/:formKey";
 
 /** `forms.def.list`: the site's form definitions. The caller holds `webdesk_collection:read`. */
-export async function listFormDefinitions(gate: ContentGate, site: SiteRef): Promise<ZoneBResult> {
+export async function listFormDefinitions(gate: SiteGate, site: SiteRef): Promise<ZoneBResult> {
   gate.require("webdesk_collection", "read");
   await gate.resolveSite(webdeskZoneB, site);
   return webdeskZoneB.read({ command: "forms.def.list", path: PATH_LIST, params: { tenantSlug: site.tenantSlug, siteId: site.siteId } });
 }
 
 /** `forms.def.get`: one definition by its key. The caller holds `webdesk_collection:read`. */
-export async function getFormDefinition(gate: ContentGate, site: SiteRef, formKey: string): Promise<ZoneBResult> {
+export async function getFormDefinition(gate: SiteGate, site: SiteRef, formKey: string): Promise<ZoneBResult> {
   gate.require("webdesk_collection", "read");
   const key = formKeyOf(formKey);
   await gate.resolveSite(webdeskZoneB, site);
@@ -62,13 +64,17 @@ export async function getFormDefinition(gate: ContentGate, site: SiteRef, formKe
  * WebDesk answers `{ form, created, consentNoticeChanged, replayed }`; its typed 409 / 422 pass through untouched.
  */
 export async function defineFormDefinition(
-  gate: ContentGate,
+  gate: SiteGate,
   site: SiteRef,
   formKey: string,
   rawBody: unknown,
   idempotencyKey: string,
 ): Promise<ZoneBResult> {
   gate.require("webdesk_collection", "apply_schema");
+  // M5-W1c phase 2: phase 1 (the controller's `authorizeSite`) only proved `webdesk_collection:read` on this site, which every
+  // writers' room grant can answer. The REAL action is asked here, for EVERY principal, with the route's siteId, before any body
+  // validation or egress: a writer or editor with a grant on the site is denied here.
+  await authorize(gate.principal, { kind: "webdesk_collection", tenantId: gate.tenantId, module: "webdev", siteId: site.siteId }, "apply_schema");
   const key = formKeyOf(formKey);
   const b = strictBody(rawBody, ["schema", "notify", "retentionDays", "consentNoticeVersion"]);
   if (!isPlainObject(b.schema)) throw invalidRequest("schema must be a JSON object ({ fields, honeypotField?, consentNotice, attachments? })");

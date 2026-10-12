@@ -3,10 +3,13 @@
 //
 // All under `/api/:tenantId/modules/webdev/content/`, all `@UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))`.
 //
-// **THE FIRST STATEMENT OF EVERY HANDLER IS `authorizeContent(...)`** (Cerbos, as the caller, module
-// `webdev`), before any body or query validation: a denied caller gets 403 whatever it sent, so a denial
-// test with a valid body really tests authorization (the "validation pre-empts authz" trap). The returned
-// `ContentGate` is then handed to the service, which will not run without one.
+// **THE FIRST STATEMENT OF EVERY HANDLER IS `authorizeSite(...)`** (M5-W1c phase 1: Cerbos, as the caller,
+// module `webdev`, `webdesk_collection:read` on the route's site; `GET sites` has no site and uses
+// `authorizeSites`). PHASE 2, the real action with attributes from the route and from a WebDesk read, runs inside
+// the service BEFORE any body or query validation: a denied caller gets 403 whatever it sent, so a denial test
+// with a valid body really tests authorization (the "validation pre-empts authz" trap). The returned
+// `ContentGate` is then handed to the service, which will not run without one, and a service method that writes
+// sends through an `ItemGate` only the WebDesk-read path can build. Attribute provenance: PERMISSION-CONTRACT 27.2.
 //
 // Zone B's typed problems (409 `version-conflict`, 422 `composition-violation`, …) leave here byte-for-byte
 // as `application/problem+json` (`WebdeskProblemFilter`); the global filter would rename them to `{error}`
@@ -20,7 +23,8 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import {
   WebdeskProblem,
-  authorizeContent,
+  authorizeSite,
+  authorizeSites,
   idempotencyKeyOf,
   webdeskContent,
   type ZoneBResult,
@@ -48,7 +52,7 @@ export class WebdeskContentController {
   // ── reads ──────────────────────────────────────────────────────────────────────────────────────
   @Get("sites")
   async listSites(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Res() reply: FastifyReply) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "read");
+    const gate = await authorizeSites(req.principal, tenantId);
     send(reply, await webdeskContent.listSites(gate));
   }
 
@@ -57,7 +61,7 @@ export class WebdeskContentController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "read");
     send(reply, await webdeskContent.listCollections(gate, { tenantSlug, siteId }));
   }
 
@@ -67,7 +71,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Param("collectionKey") collectionKey: string, @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
     send(reply, await webdeskContent.listItems(gate, { tenantSlug, siteId }, collectionKey, query));
   }
 
@@ -77,7 +81,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Param("itemId") itemId: string, @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
     send(reply, await webdeskContent.getItem(gate, { tenantSlug, siteId }, itemId, query));
   }
 
@@ -87,7 +91,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Param("itemId") itemId: string, @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
     send(reply, await webdeskContent.listVersions(gate, { tenantSlug, siteId }, itemId, query));
   }
 
@@ -97,7 +101,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Param("itemId") itemId: string, @Param("n") n: string, @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "read");
     send(reply, await webdeskContent.getVersion(gate, { tenantSlug, siteId }, itemId, n, query));
   }
 
@@ -110,7 +114,7 @@ export class WebdeskContentController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "read");
     send(reply, await listFormDefinitions(gate, { tenantSlug, siteId }));
   }
 
@@ -120,7 +124,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Param("formKey") formKey: string, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "read");
     send(reply, await getFormDefinition(gate, { tenantSlug, siteId }, formKey));
   }
 
@@ -131,7 +135,7 @@ export class WebdeskContentController {
     @Param("formKey") formKey: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "apply_schema");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "apply_schema");
     send(reply, await defineFormDefinition(gate, { tenantSlug, siteId }, formKey, body, idempotencyKeyOf(idem)));
   }
 
@@ -143,7 +147,7 @@ export class WebdeskContentController {
     @Param("formKey") formKey: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_collection", "apply_schema");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_collection", "apply_schema");
     send(reply, await defineFormDefinition(gate, { tenantSlug, siteId }, formKey, body, idempotencyKeyOf(idem)));
   }
 
@@ -157,7 +161,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "read");
     send(reply, await webdeskMedia.list(gate, { tenantSlug, siteId }, query));
   }
 
@@ -167,7 +171,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Param("assetId") assetId: string, @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "read");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "read");
     send(reply, await webdeskMedia.usage(gate, { tenantSlug, siteId }, assetId, query));
   }
 
@@ -178,7 +182,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Headers("idempotency-key") idem: string | undefined, @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "upload");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "upload");
     const r = await webdeskMedia.mintUploadToken(gate, { tenantSlug, siteId }, body, idempotencyKeyOf(idem));
     void reply.header("cache-control", "no-store");
     send(reply, r);
@@ -191,7 +195,7 @@ export class WebdeskContentController {
     @Param("assetId") assetId: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "update");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "update");
     send(reply, await webdeskMedia.update(gate, { tenantSlug, siteId }, assetId, body, idempotencyKeyOf(idem)));
   }
 
@@ -203,7 +207,7 @@ export class WebdeskContentController {
     @Param("assetId") assetId: string, @Headers("idempotency-key") idem: string | undefined,
     @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_media_asset", "delete");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_media_asset", "delete");
     send(reply, await webdeskMedia.delete(gate, { tenantSlug, siteId }, assetId, query, idempotencyKeyOf(idem)));
   }
 
@@ -215,7 +219,7 @@ export class WebdeskContentController {
     @Param("collectionKey") collectionKey: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "create");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "create");
     send(reply, await webdeskContent.createItem(gate, { tenantSlug, siteId }, collectionKey, body, idempotencyKeyOf(idem)));
   }
 
@@ -226,7 +230,7 @@ export class WebdeskContentController {
     @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "update");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "update");
     send(reply, await webdeskContent.updateItem(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
   }
 
@@ -238,7 +242,7 @@ export class WebdeskContentController {
     @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "update");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "update");
     send(reply, await webdeskContent.updateItem(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
   }
 
@@ -249,7 +253,7 @@ export class WebdeskContentController {
     @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "update");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "update");
     send(reply, await webdeskContent.restoreVersion(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
   }
 
@@ -261,7 +265,7 @@ export class WebdeskContentController {
     @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "update");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "update");
     send(reply, await webdeskContent.previewItem(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
   }
 
@@ -272,7 +276,7 @@ export class WebdeskContentController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Body() body: unknown,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "request_publish");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "request_publish");
     return (await webdeskContent.requestPublish(gate, { tenantSlug, siteId }, body)).body;
   }
 
@@ -283,7 +287,7 @@ export class WebdeskContentController {
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string,
     @Query() query: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "request_publish");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "request_publish");
     send(reply, await webdeskContent.listOwnPublishRequests(gate, { tenantSlug, siteId }, query));
   }
 
@@ -294,7 +298,7 @@ export class WebdeskContentController {
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Param("tenantSlug") tenantSlug: string, @Param("siteId") siteId: string, @Param("approvalId") approvalId: string,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "request_publish");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "request_publish");
     return (await webdeskContent.withdrawPublishRequest(gate, { tenantSlug, siteId }, approvalId)).body;
   }
 
@@ -305,7 +309,7 @@ export class WebdeskContentController {
     @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "unpublish");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "unpublish");
     send(reply, await webdeskContent.unpublish(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
   }
 
@@ -316,7 +320,7 @@ export class WebdeskContentController {
     @Param("itemId") itemId: string, @Headers("idempotency-key") idem: string | undefined,
     @Body() body: unknown, @Res() reply: FastifyReply,
   ) {
-    const gate = await authorizeContent(req.principal, tenantId, "webdesk_content_item", "delete");
+    const gate = await authorizeSite(req.principal, tenantId, siteId, "webdesk_content_item", "delete");
     send(reply, await webdeskContent.deleteItem(gate, { tenantSlug, siteId }, itemId, body, idempotencyKeyOf(idem)));
   }
 }

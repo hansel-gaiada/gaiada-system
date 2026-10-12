@@ -40,7 +40,7 @@ body: the file's contents without "key"
 `:companyId` is the Gaiada company; `gaiada` is the WebDesk tenant slug; `:siteId` comes from `GET /api/:companyId/modules/webdev/content/sites`
 (`webdesk.content.listSites`). Do it for `contact`, `audit` and `onboard`. The answer's `form.formId` is the id the site posts to
 (`POST /v1/t/gaiada/forms/<formId>/submit`); it **stays the same** when a definition is applied again. Read it back with `GET …/forms` (`webdesk.forms.list`).
-An unattended agent or n8n caller suspends for approval and nothing is re-driven yet (`forms.define` is not a D14 executable, see PERMISSION-CONTRACT 27.2), so an attended person does this.
+An unattended agent or n8n caller suspends for approval and nothing is re-driven yet (`forms.define` is not a D14 executable, see PERMISSION-CONTRACT 27.3), so an attended person does this.
 
 **Changing a definition later.** Edit the JSON, run the spec, apply. If `consentNotice.text` changes, **`consentNoticeVersion` must change too** (WebDesk refuses
 with 409 `consent-version-unchanged` otherwise): every submission stores the notice text and version it was accepted under. All three files carry the same notice and version
@@ -120,7 +120,7 @@ Every id L4 maps exists in the right form with the right type (the contract test
 
 These follow from how the submit route validates (`webdesk/api/src/forms/forms.service.ts`, `form-schema.service.ts`). They are site-side changes, listed so the switch does not fail on the first real visitor:
 
-1. **Send JSON `fields`, and OMIT a blank optional field.** A blank `email_address`, `phone_number`, `website_url` or an unchosen `business_type` select is `""` in a browser form, and WebDesk rejects `""` for an `email` field and for a `select` (400). The site must leave blank optional values out of `fields`.
+1. **Send JSON `fields`.** A blank OPTIONAL value (`""` or whitespace, which is what a browser sends for an untouched `email_address`, `phone_number`, `website_url` or an unchosen `business_type` select) is accepted by WebDesk and treated as absent: nothing is stored under that key. A blank REQUIRED value (`name`, `message`, `selectcontact`, `org_name`, `contact_name`, `contact_email`) is a 400. The site may therefore send blanks as they are, but should still validate required fields before sending.
 2. **The honeypot is `_hp`** and is a top-level member of the request body, beside `fields` (not inside it). Any non-empty value is silently dropped as spam. (The site's `botcheck` is renamed when it switches.)
 3. **Chips become one string.** `business_type[]` and `success_metrics[]` (checkboxes) are sent as `business_type` / `success_metrics`, the chosen options joined with `, ` (no option contains a comma); the free-text "Something else" fields keep their ids `business_type_other` / `success_metrics_other`. WebDesk has no multi-value field type, and an array would be dropped as an unknown shape. If a structured array is wanted later, that is a new field type in `form-schema.service.ts`, not a data change here.
 4. **`consent: true`** (the literal boolean) and a `turnstileToken` are required in the request body; neither is a field. The Web3Forms-only members (`access_key`, `subject`, `from_name`, `redirect`) are not sent: `attribution.form_page` carries which page produced the enquiry.

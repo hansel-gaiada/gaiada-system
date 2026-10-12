@@ -11,6 +11,152 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.75.0` - M5-W1c: the writers' room two-phase gate on every content route (2026-10-12) - DEV-VERIFIED
+
+The transport that makes the W1a writers' room rules live (built by the M5 session). Until now those rules read `""` for `siteId` and `reviewState` and denied.
+
+- **Phase 1**, the controller's first statement on every `/content` route: `webdesk_collection:read` on `{tenantId, module, siteId}`, with the route's site.
+- **Phase 2**, before any body or query validation: the real action on attributes built only from a WebDesk read.
+  - The attributes: `item.get`, or `collection.get` for a create, gives `collectionKey`, `locale`, `ownerId` = the author, `reviewState`, `published` and `creatorId`.
+  - A branded `ItemAttrs`/`ItemGate` means a write cannot be reached without that read and that check.
+  - A body or query can never set those attributes.
+- Staff tiers are still asked their old company-level question, so nothing changes for them.
+- `GET …/content/sites` is filtered per site for a writers' room grant. When nothing is readable it is a 403, never `[]`.
+- `GET …/items/:id` gains `allowed: {…}` from one Cerbos batch. It is absent, never false, when Cerbos cannot answer.
+- A scoped `webdesk_editor` files publish requests: `fileWebdeskCommandApproval` re-checks on the item resources the caller already proved, instead of an attribute-free resource. Every other caller is unchanged.
+- PERMISSION-CONTRACT §27.2 (attribute provenance); FRONTEND-BFF-CONTRACT updated.
+- Verified on GitHub Actions 38199879858: the real-Cerbos HTTP suite 25/25 (a writer's PUT on another author's item is 403 with a valid body and no WebDesk write; forged attributes ignored; `allowed` equals Cerbos), unit 30/30, filer 6/6. platform-nest has 0 failures across all shards.
+
+### platform-ui `0.94.0` - M5-W1c: the item read's `allowed` member is typed and parsed (2026-10-12) - DEV-VERIFIED
+
+- `ItemAllowed` in `webdeskContentModel.ts`; `parseItemDetail` reads an optional `allowed`. No UI behaviour yet (W2e uses it). CI 38199879858: 5780 passed.
+
+### webdesk `0.12.0` - M5-W3c: content-check settings per collection; vocabulary 1.3.0 (2026-10-12) - DEV-VERIFIED
+
+- A collection composition may carry an optional `lint.content` member. It holds:
+  - a master switch;
+  - per-rule `enabled`;
+  - the knobs the rules actually have: meta lengths, internal-link minimum, answer-first word range, question-heading share and starters, banned phrases per language, the ID twin map, AEO paragraph length, and the h1, keyword and alt field names.
+- **Defaults:** an absent member or key gives today's constants. 11 fixtures produce byte-identical reports through 5 equivalent compositions.
+- **Validation:** unknown keys and out-of-range values are refused at `schema.apply`. A stored row that fails validation falls back to the defaults and never throws.
+- The save path and `item.get` share one resolution (W3b's read == save holds). The checks stay advisory.
+- **Vocabulary 1.3.0 (MINOR):** the breaking-change classifier gains a `lintKeys` dimension and pins the bump as minor. It is re-vendored into the api, the blocks package and platform-nest (`src/modules/webdev/vocabulary`). The new `w3c-lint-content` suite now runs in CI and in the Linux gate.
+- Verified on GitHub Actions 38199176963: webdesk-api 1605 passed / 2 skipped, blocks 32/0, every vocabulary suite green.
+
+### platform-nest `0.73.0` - M5-P1-g and M5-G5b: a race-safe lead convert with no name on the bus; privacy approvals store no identifiers (2026-10-12) - DEV-VERIFIED
+
+Two defects found by the M5-P1-f end-to-end QA, and the G5 privacy tools made safe to file unattended (built by the M5 session).
+
+- **Contact race.** Convert find-or-creates the contact's `users` row before it takes the lead lock, and `users.email` is UNIQUE. Concurrent converts of a lead whose contact had no row could 500 on the unique index instead of the clean 409. Now `INSERT … ON CONFLICT (email) DO NOTHING` plus a re-select, so every racer reaches the lock. An email held by a deactivated account is now a typed 400 instead of an untyped 500. This was also the real cause of the old convert-race test flake.
+- **No personal data on the bus.** Convert's `pipeline.run.created` payload is now exactly `{sourceMeetingId, actorId}`. It used to carry `title = org_name`, which is the person's full name for /contact/ and /audit/ web leads. The work-activity consumer now looks the run title up from `pipeline_runs`. n8n's `pipeline-fanout` never read the payload. The knowledge-graph bridge labels such a run by its id.
+- Verified on GitHub Actions 38198059657 (main + P1-g): pipeline e2e 26/26 with both defects asserted fixed, convert race 8/8, convert unit 34/34, work-activity consumer 19/19, all shards green.
+- **Privacy approvals store no identifiers (M5-G5b).** Filing an `agency_privacy.*` approval no longer persists the data subject's email or phone.
+  - **The approval row:** `automation_approvals.tool_args` holds `{minimised, subject hashes, ***@domain / ***NN hints}` and a generated reason. A static per-tool args-policy registry applies this at the single INSERT chokepoint.
+  - **The decided event and notifications:** hashes only. The DSR ledger's `filed` row is written in the same transaction.
+  - **Running it:** after approval, the request runs by `approvalId` and rebuilds the subject from the ledger hashes (no vault, no migration).
+  - **Filing authority:** filing one through `POST /automation-approvals` also needs `agency_lead:convert`.
+  - **Other tools:** a tool without a policy is stored exactly as before. The tools stay HIGH and two-person, and D14 never runs them.
+  - **Not covered:** ai-agents keeps its own copy of tool-call args (a separate pass).
+  - Verified on GitHub Actions 38198281158: the unattended suite 9/9 and the G5 privacy DB suite 9/9, all shards green.
+
+### platform-nest `0.72.0` - M5 wave 3: data-subject rights and retention for website leads, the web-leads read, a staff alert, writers' room grants (2026-10-12) - DEV-VERIFIED
+
+WebDesk M5 wave 3, built by the M5 session (main `2e032678`).
+
+- **Migrations.**
+  - `202610111816_iam_editorial_grant_scopes` (M5-W1b): `user_role_editorial_scopes`, the per-site, collection and locale scope of a writers' room grant. FORCE RLS plus a `principal_lookup` policy, so principal assembly sees a user's own scopes and nobody else's. Guard triggers keep the four writers' room roles at `company` scope, as manual grants only and never on positions.
+  - `202610121835_agency_lead_privacy_retention` (M5-G5): `agency_leads.status_changed_at` as the retention clock (per-tenant backfill; if that backfill matches nothing, a lead is only kept longer) and the hashed suppression list. Every step is additive.
+- **Cerbos:** `resource_mcp_tool.yaml` lists `webdesk.editorial.grantRole` and `revokeRole` for the D14 re-drive. **Cerbos restart on deploy.**
+- **Writers' room grants (W1b):**
+  - One dedicated grant path writes the grant and its scope rows together and bumps the target's session.
+  - BFF `GET/POST/DELETE …/editorial/grants`.
+  - MCP `webdesk.editorial.grantRole` (HIGH) and `revokeRole` (MEDIUM).
+  - Legacy admin, the `ui` origin and positions refuse the four roles with `editorial_role_dedicated_path`.
+  - The roles take effect only when W1c wires the content routes. Until then the rules deny.
+- **Data-subject rights for website leads (G5):**
+  - `POST /api/:t/agency/privacy/{find|export|erase}` and MCP `agency_privacy.*` (HIGH, two-person WS4, never auto-run by D14).
+  - Attended use only until M5-G5b minimises the hub's stored arguments.
+  - Erase scrubs the person's fields and keeps the row.
+  - The suppression list stops an erased person from being re-imported.
+  - The 24-month retention purge is OFF unless `AGENCY_LEAD_RETENTION_PURGE_ENABLED=1`, and compose does not pass that variable through yet.
+- **Web-leads read (L6):** `GET /api/:t/agency/web-leads/:siteSlug` and MCP `agency_intake.listWebLeads`. Cerbos `agency_lead:read` runs before the slug is read. Attribution is an allow-list projection (click-id names only).
+- **Staff alert (L5):** an in-app (bell) notification on a new web lead, sent to `AGENCY_WEB_LEAD_ALERT_USER_IDS` (empty means nobody). The payload is the lead id, first name, form and link only. Web leads themselves stay off until `AGENCY_WEB_LEADS_ENABLED` is set, after counsel.
+- **The same alert to chat (L5b, main `91932305`):** beside the bell, only when `AGENCY_WEB_LEAD_ALERT_CHAT=1` and the bot is configured. It sends the same four fields to wa-chat-bot's new route. One allow-list builds both channels. It is fail-soft with a 5 s timeout. A token that is not a plain first name becomes "someone". CI run 38197371511 green (nest alert tests 20/20).
+- Verified on GitHub Actions 38196529791 on the merged tree: platform-nest 591 files / 8655 tests passed, 0 failed.
+
+### platform-ui `0.92.0` - M5 wave 3: the lead pipeline UI, a Leads tab and a Content checks card (2026-10-12) - DEV-VERIFIED
+
+- **Lead pipeline (P1-e):**
+  - Stage and value columns, plus stage chips that filter without re-sorting.
+  - A Pipeline card that offers moves only for open stages.
+  - Deal values in the currency's minor unit, sent as strings and never rounded.
+  - Stage history, newest first, and every typed refusal in plain words.
+- **Leads tab (L6)** in the Website workspace: web leads with an allow-listed attribution view and a consent badge. "Unknown" is never shown as consent.
+- **Content checks card (W3b-UI)** in the item editor: findings by severity with jump-to-field, and the AEO score. It is hidden in client mode.
+- Verified on GitHub Actions 38196529791: platform-ui 294 files / 5734 tests passed.
+
+### webdesk `0.11.0` - M5 wave 3: a server-side consent log (2026-10-12) - DEV-VERIFIED
+
+- **Migration 0017_consent_records:** FORCE RLS, no IP and no raw user agent stored, UPDATE refused.
+- **Public `POST /v1/t/:tenantSlug/consent`** (and `OPTIONS`):
+  - An allow-listed body; the server mints the consent ids.
+  - Fail-closed rate limits (`WEBDESK_CONSENT_RATE_LIMIT_*`) and no cookie.
+  - `consent` is now a reserved collection key.
+- **Links to the rest:**
+  - A submission may carry `visitor_consent.consentId`.
+  - The privacy find/export/erase commands reach consent ids.
+  - The purge runs at `WEBDESK_CONSENT_RETENTION_MONTHS` (default 26).
+- Applies through the release's automatic deploy-webdesk job. Nothing records until the site posts its banner decisions.
+- Verified on GitHub Actions 38196529791: webdesk-api 127 files / 1582 tests passed.
+
+### infra `0.13.0` - M5 wave 3: compose passes the web-lead alert recipients through (2026-10-12) - PROTOTYPED
+
+- `AGENCY_WEB_LEAD_ALERT_USER_IDS` with an EMPTY default, so nobody is alerted until it is set.
+- M5-L5b: `AGENCY_WEB_LEAD_ALERT_CHAT` (platform; only exactly `1` enables it). On the bot: `WEB_LEAD_ALERT_CHAT_ID` and `WEB_LEAD_ALERT_LINK_BASE`, which falls back to `MAIL_LINK_BASE_URL`. All of them are EMPTY by default, which means off.
+
+### wa-chat-bot `0.10.0` - M5-L5b: a fixed-template web-lead alert route (2026-10-12) - PROTOTYPED
+
+- `POST /admin/alerts/web-lead`, authenticated with the existing admin token.
+  - **The body:** exactly `{leadId, firstName, form, link}`. An unknown key is a 400. The link must be `<WEB_LEAD_ALERT_LINK_BASE>/agency/leads/<leadId>`. The first name must be letters only, at most 40.
+  - **The message:** the bot composes it from a fixed template. The destination comes ONLY from `WEB_LEAD_ALERT_CHAT_ID`.
+  - **Refused destinations:** a monitored registry group, and any group not on the ignored list. Both are refused with 503 `alert-destination-refused`, logged without lead data. Use a DM or a Telegram private chat.
+  - **One alert per lead:** the sent set holds lead ids only and survives a restart. A replay returns 200 `replayed`.
+  - **Sending:** through the surface router, so the halt switch and the outbound ceiling apply. The alert is never written to chat history.
+- Off until `WEB_LEAD_ALERT_CHAT_ID` is set (503 `alert-destination-unset`). Live use needs the env set and the bot container recreated.
+- CI run 38197371511: wa-chat-bot 540 passed / 16 skipped (the Postgres-backed ones); the new route's suite is 45/45.
+
+### platform-nest `0.71.0` - PV-3 wave 1: company owners can countersign; one set of portal visibility predicates; strict client facets; a group-company link and a required business type (2026-10-12) - PROTOTYPED
+
+PV-3 wave 1 (tickets `docs/plans/2026-10-11-pv3-hub-symmetry-tickets.md`, PV3-01 to PV3-04; plan `docs/plans/2026-10-10-three-perspectives.md`).
+
+- **Migrations.**
+  - `202610111322_clients_group_company`: `clients.group_company_id` → `companies(id)`, a not-self CHECK and a partial index. No backfill (PV-D13: names are data). Same-root is enforced in the app, because `companies` has no RLS.
+  - `202610112330_iam_contract_countersign_permission`: catalogues `core.contract.countersign` (grantable, sensitive, `ui_grantable = false`), held by `platform_admin` only. It asserts that no other role holds it.
+- **Cerbos (PV3-01, plan trap 7):** company owners can countersign their company's contracts. Until now no countersign rule existed, so only `platform_admin` could countersign, and a contract a client signed first waited forever. The new rule is `roles: ["user"]` with an `owner` grant on the contract's tenant (PV-1's shape). No permission-arm rule reads the key, so `company_admin` and custom roles stay out. **Cerbos restart on deploy, then probe: owner ALLOW, company_admin DENY.**
+- `canCountersign` on the contract reads (one Cerbos check per request).
+- **PV3-02:** the portal's row-visibility SQL moves into `core/portal-visibility.ts`; 6 portal controllers and 32 call sites switched, each proven equivalent. A guard scans every portal-scope importer for re-inlined predicates. Mail threads and the client-website-access list sit on a ratchet. No portal response changes.
+- **PV3-01/PV3-03:** a strict `clientId` facet (uuid, `internal`, 400 on anything else; it used to 500 or return `[]`) on contracts, deliverables, pipeline runs, meeting recordings, change requests, social engagements and accounts; `invoice-payments` gains `clientId`.
+- **PV3-04:** `POST /clients` requires a registry `businessType` and writes the client-centre profile row in the same transaction. `PATCH` accepts it and records history. Only a platform operator may set or change `groupCompanyId`, with a 403 before any validation; this is PV3-Q1's default until the owner rules. Reads return `groupCompany`.
+- Verified on the Linux gate (sumopod) on the merged tree over 359: nest 573/573 files passed, repo checks PASS (MAP and capability inventory regenerated on Linux). Every new rule has teeth: a deliberate break fails a named test.
+
+### platform-ui `0.91.0` - PV-3 wave 1: the client hub mirrors the portal; the client form needs a business type (2026-10-12) - PROTOTYPED
+
+- **PV3-05 (PV-D4):**
+  - The hub tabs read Overview · Projects · Business · People · Internal; every path is kept.
+  - Internal is styled staff-only.
+  - Projects holds tasks, deliverables (filtered on the server), approvals (runs with their client gates), requests (change requests, plus post reviews from the overview) and meetings, moved from People.
+  - Each read refuses explicitly, never an empty list.
+  - Tab matching uses a segment boundary, so `/work` no longer lights up for `/workshop`.
+- **PV3-04:**
+  - A required business-type select on New and Edit; with no profile row the Edit form doesn't preselect.
+  - An operator-only Group company picker, and a Group company badge in the hub header.
+  - A Clients-list filter "Business type: Other or not set", which refuses rather than empties when the profile read fails.
+- Verified on the Linux gate on the merged tree: ui 292/292 files passed, next build ok. Hub e2e and portal e2e on the merged tree.
+
+### mcp-hub `0.13.0` - `clients.create` requires a business type; `clients.update` sets it and the group company (2026-10-12) - PROTOTYPED
+
+- **PV3-04:** `clients.create` requires `businessType` (the registry's enum) and accepts `groupCompanyId`. `clients.update` accepts both, and `null` clears the link. A platform 400 now surfaces its typed code. Verified in a Linux container (`npm ci`, typecheck, `npm test`: 376 passed).
+
 ### platform-nest `0.70.0` - M5 wave 2: a lead pipeline on agency_leads, the writers' room roles and review gate, the Umami read path (2026-10-12) - DEV-VERIFIED
 
 WebDesk M5 wave 2 (rulings WSK-D66 to D69), built by the M5 session.

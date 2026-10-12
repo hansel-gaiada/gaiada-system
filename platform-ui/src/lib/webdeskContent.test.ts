@@ -92,6 +92,14 @@ describe("wire validation: a 2xx body that does not match the spec is DRIFT, nev
     expect(() => parseItemDetail({ ...detail(), editorial: { reviewRequired: true, state: "draft" } })).toThrow(WireDrift);
   });
 
+  it("M5-W1c: item.get's `allowed` member is optional (absent = unknown, never denied) and an object of booleans when present", () => {
+    expect(parseItemDetail(detail()).allowed).toBeUndefined();
+    expect(parseItemDetail({ ...detail(), allowed: { read: true, update: false, approve: false } }).allowed).toEqual({ read: true, update: false, approve: false });
+    expect(parseItemDetail({ ...detail(), allowed: {} }).allowed).toEqual({});
+    expect(() => parseItemDetail({ ...detail(), allowed: { read: "yes" } })).toThrow(WireDrift);
+    expect(() => parseItemDetail({ ...detail(), allowed: [true] })).toThrow(WireDrift);
+  });
+
   it("lint with no placeholder rules is empty, but a malformed placeholders block is drift", () => {
     expect(parseLint({}, "lint")).toEqual({ unresolvedTokens: [], markers: {} });
     expect(() => parseLint({ placeholders: { unresolvedTokens: "x", markers: {} } }, "lint")).toThrow(WireDrift);

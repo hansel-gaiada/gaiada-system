@@ -14,6 +14,7 @@ import type { PoolClient } from "pg";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
+import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { storage } from "./storage";
@@ -305,12 +306,15 @@ export class PipelineController {
     await authorize(req.principal, { kind: "pipeline_run", tenantId }, "read");
     const withGates = (include ?? "").split(",").map((s) => s.trim()).includes("gates");
     const conditions = ["deleted_at IS NULL"];
-    const params: string[] = [];
+    const params: unknown[] = [];
     if (status) { params.push(status); conditions.push(`status = $${params.length}`); }
     if (sourceMeetingId) { params.push(sourceMeetingId); conditions.push(`source_meeting_id = $${params.length}`); }
-    // Compared as text, not cast to uuid: a malformed id from a hand-edited query string then matches
-    // nothing instead of erroring the whole request with a 500 on an invalid-uuid cast.
-    if (clientId) { params.push(clientId); conditions.push(`client_id::text = $${params.length}`); }
+    // PV3-03 / CC-1: `?clientId=<uuid>|internal`, strict (a non-uuid is a 400; it used to match
+    // nothing, and `internal` used to match nothing too). Parsed after authorize above. The id is
+    // still compared as text inside clientFilterSql.
+    const clientFilter = clientFilterSql(parseClientFilter(clientId, true), "client_id", params.length + 1);
+    params.push(...clientFilter.params);
+    conditions.push(clientFilter.sql);
     if (projectId) { params.push(projectId); conditions.push(`project_id::text = $${params.length}`); }
     return withTenants([tenantId], async (c) => {
       const rows = await c.query<{ id: string }>(

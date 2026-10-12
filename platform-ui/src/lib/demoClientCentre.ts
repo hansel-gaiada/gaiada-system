@@ -50,6 +50,8 @@ const CLIENT_META: Record<string, { name: string; status: string | null }> = {
   "cl-2": { name: "Cedar Group", status: "active" },
   "cl-3": { name: "Lumen Studio", status: "prospect" },
   "cl-harbour": { name: "Demo Harbour Hotel", status: "active" },
+  // PV3-04: the demo's group client (see demoFixtures.ts CLIENTS) has a profile, so the list reads "Hotel".
+  "cl-4": { name: "Viceroy", status: "active" },
 };
 
 const CALLER_NAME: Record<string, string> = {
@@ -129,6 +131,40 @@ const STORE: Record<string, StoredCentre> = {
     updatedBy: { id: "demo-hansel", name: "Clement Hansel" },
   },
 };
+
+// ── PV3-04 · the client write path's side of the profile row ─────────────────────────────────────────
+// The real `POST /clients` writes the profile row (business type) in the same transaction, and `PATCH`
+// upserts it. demoFixtures.ts calls these two so a demo client created or retyped shows up in the centre
+// list and the Edit form exactly as it would live.
+
+STORE["cl-4"] = {
+  businessType: "hotel",
+  profile: { legal: "Viceroy", trading: "Viceroy", industry: "Hospitality", city: "Ubud", country: "Indonesia", currency: "IDR", languages: "Indonesian, English" },
+  connections: {}, departments: {}, customConnections: {},
+  revision: 1, updatedAt: "2026-10-11T08:00:00Z", updatedBy: { id: "demo-hansel", name: "Clement Hansel" },
+};
+
+/** Is `id` one of the registry's business types? (the demo twin of the backend's `business_type_invalid`) */
+export function demoIsBusinessType(id: unknown): id is string {
+  return typeof id === "string" && registry.businessTypes.some((b) => b.id === id);
+}
+
+/** A client created in the demo gets its profile row now, with the chosen type (revision 1). */
+export function demoCentreRegisterClient(clientId: string, name: string, status: string, businessType: string, byUserId: string): void {
+  CLIENT_META[clientId] = { name, status };
+  STORE[clientId] = { ...emptyCentre(), businessType, revision: 1, updatedAt: new Date().toISOString(), updatedBy: { id: byUserId, name: CALLER_NAME[byUserId] ?? null } };
+}
+
+/** What the type was before (`null` = no profile row, i.e. "not set"), and whether this call moved it.
+ *  A same-type call writes nothing, as on the backend. */
+export function demoCentreSetBusinessType(clientId: string, businessType: string, byUserId: string): { before: string | null; changed: boolean } {
+  const existing = STORE[clientId];
+  const before = existing && existing.revision > 0 ? existing.businessType : null;
+  if (before === businessType) return { before, changed: false };
+  const base = existing ?? emptyCentre();
+  STORE[clientId] = { ...base, businessType, revision: base.revision + 1, updatedAt: new Date().toISOString(), updatedBy: { id: byUserId, name: CALLER_NAME[byUserId] ?? null } };
+  return { before, changed: true };
+}
 
 function toListItem(clientId: string, s: StoredCentre) {
   const meta = CLIENT_META[clientId] ?? { name: clientId, status: null };

@@ -57,8 +57,9 @@ export interface FakeItem {
   deletedAt: string | null;
   /** WSK-49c: a version may carry `seo` and generic blocks (after the fields block); both default to empty, as before. */
   versions: Array<{ version: number; fields: unknown; contentHash: string; createdBy: string; createdAt: string; note: string | null; seo?: Record<string, unknown>; blocks?: unknown[] }>;
-  /** M5-W2b/W2c: `item.get`'s `editorial` member. Absent = a WebDesk older than M5-W2b (the member is not sent). */
-  editorial?: { reviewRequired: boolean; state: string; approvedVersion: number | null };
+  /** M5-W2b/W2c: `item.get`'s `editorial` member. Absent = a WebDesk older than M5-W2b (the member is not sent).
+   *  M5-W1c: `authorSub` (editorial_items.author_sub, the Cerbos ownerId) and `submittedVersion` ride it as the real view does. */
+  editorial?: { reviewRequired: boolean; state: string; approvedVersion: number | null; authorSub?: string | null; submittedVersion?: number | null };
 }
 
 export interface FakeCall {

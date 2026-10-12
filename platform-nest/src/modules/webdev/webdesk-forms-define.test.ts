@@ -46,7 +46,7 @@ describe.skipIf(!live)("M5-L1d · WebDesk form definitions over the ERP BFF", ()
   let app: NestFastifyApplication;
   let A: string; // owns the `gaiada` tenant
   let B: string; // owns the `othertenant` tenant
-  let adminA: string, publisherA: string, editorA: string, memberA: string, adminB: string;
+  let adminA: string, publisherA: string, editorA: string, memberA: string, adminB: string, writerHere: string, writerElsewhere: string;
   let zb: FakeZoneB;
   const signer = makeTestSigner();
 
@@ -80,6 +80,21 @@ describe.skipIf(!live)("M5-L1d · WebDesk form definitions over the ERP BFF", ()
     editorA = await mk(A, "l1d-editor-a@ex.test", "webdev_staff");
     memberA = await mk(A, "l1d-member-a@ex.test", "member");
     adminB = await mk(B, "l1d-admin-b@ex.test", "company_admin");
+    // M5-W1c: writers' room grants (one scope row each), as webdesk-content-two-phase.test.ts builds them.
+    const editorial = async (userId: string, siteId: string) => {
+      const roleId = await createRole("webdesk_writer");
+      await grantRole(userId, roleId, "company", A);
+      const g = (await adminPool().query(`SELECT id FROM user_roles WHERE user_id = $1 AND role_id = $2`, [userId, roleId])).rows[0].id;
+      await adminPool().query(
+        `INSERT INTO user_role_editorial_scopes (user_role_id, tenant_id, webdesk_tenant_slug, site_id, all_collections, collections, all_locales, locales, origin_site)
+         VALUES ($1, $2, $3, $4, true, '{}', true, '{}', $5)`,
+        [g, A, GAIADA_SLUG, siteId, config.originSite],
+      );
+    };
+    writerHere = await mk(A, "l1d-writer-here@ex.test", "member");
+    writerElsewhere = await mk(A, "l1d-writer-else@ex.test", "member");
+    await editorial(writerHere, GAIADA_SITE);
+    await editorial(writerElsewhere, "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a");
     zb = new FakeZoneB(A, B);
     app = await buildApp();
   }, 120_000);
@@ -192,6 +207,17 @@ describe.skipIf(!live)("M5-L1d · WebDesk form definitions over the ERP BFF", ()
       expect((await define(adminA, "audit")).statusCode).toBe(200);
       // the PATCH alias is gated identically
       expect((await call("PATCH", forms(A, GAIADA_SLUG, GAIADA_SITE, "contact"), editorA, body())).statusCode).toBe(403);
+    });
+
+    it("M5-W1c two-phase: a writers' room grant on THIS site passes phase 1 (reads 200) but is denied the write's real action apply_schema (403, valid body, no egress); a grant on ANOTHER site cannot even read", async () => {
+      const put = (as: string) => call("PUT", forms(A, GAIADA_SLUG, GAIADA_SITE, "contact"), as, body());
+      expect((await call("GET", forms(), writerHere)).statusCode).toBe(200);
+      zb.reset();
+      expect((await put(writerHere)).statusCode).toBe(403);
+      expect((await call("PATCH", forms(A, GAIADA_SLUG, GAIADA_SITE, "contact"), writerHere, body())).statusCode).toBe(403);
+      noEgress();
+      expect((await call("GET", forms(), writerElsewhere)).statusCode).toBe(403);
+      expect((await put(publisherA)).statusCode).toBe(200); // the identical request, allowed
     });
 
     it("the reads need read: a plain member is 403, webdev_staff and webdev_manager succeed", async () => {

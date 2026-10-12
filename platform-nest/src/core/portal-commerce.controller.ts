@@ -34,6 +34,11 @@ import { storage } from "./storage";
 import { scrubText, isScrubbableText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
 import { requireSigner, resolvePortalScope, type PortalScope } from "./portal-scope";
+// PV3-02: every row-visibility predicate below comes from portal-visibility.ts.
+import {
+  contractInPortalScope, deliverableClientVisible, invoiceInPortalScope, invoicePaymentClientVisible,
+  invoicePaymentInPortalScope, projectInPortalScope, projectReach,
+} from "./portal-visibility";
 import type { PoolClient } from "pg";
 
 const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
@@ -92,9 +97,9 @@ export class PortalCommerceController {
            LEFT JOIN LATERAL (
              SELECT COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'confirmed'), 0) AS confirmed,
                     COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'pending'), 0) AS pending
-               FROM invoice_payments pp WHERE pp.invoice_id = i.id AND pp.deleted_at IS NULL
+               FROM invoice_payments pp WHERE pp.invoice_id = i.id AND ${invoicePaymentClientVisible("pp", "detail")}
            ) pay ON true
-          WHERE i.client_id = ANY($1::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'
+          WHERE ${invoiceInPortalScope("i", { clients: 1 })}
           ORDER BY i.created_at DESC LIMIT 200`,
         [scope.clientIds],
       );
@@ -121,7 +126,7 @@ export class PortalCommerceController {
                 pp.method, pp.reference, pp.status, pp.note, pp.proof_file_id AS "proofFileId",
                 pp.created_at AS "recordedAt", pp.confirmed_at AS "confirmedAt", pp.rejected_reason AS "rejectedReason"
            FROM invoice_payments pp
-          WHERE pp.invoice_id = $1 AND pp.deleted_at IS NULL
+          WHERE pp.invoice_id = $1 AND ${invoicePaymentClientVisible("pp", "detail")}
           ORDER BY pp.paid_on DESC, pp.created_at DESC`,
         [invoiceId],
       );
@@ -252,8 +257,7 @@ export class PortalCommerceController {
                 -- because a cron missed a night would be worse than computing it on read.
                 (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded"
            FROM contracts k LEFT JOIN projects p ON p.id = k.project_id
-          WHERE k.client_id = ANY($1::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft'
-            AND ($2::uuid[] IS NULL OR k.project_id = ANY($2::uuid[]) OR k.project_id IS NULL)
+          WHERE ${contractInPortalScope("k", { clients: 1, projects: 2 })}
           ORDER BY k.created_at DESC LIMIT 200`,
         [scope.clientIds, scope.projectIds],
       );
@@ -461,7 +465,7 @@ export class PortalCommerceController {
               to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
               i.created_at AS "issuedAt", cl.name AS "clientName"
          FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
-        WHERE i.id = $1 AND i.client_id = ANY($2::uuid[]) AND i.deleted_at IS NULL AND i.status <> 'draft'`,
+        WHERE i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}`,
       [invoiceId, scope.clientIds],
     );
     if (!r.rows[0]) throw new NotFoundException("invoice not found");
@@ -478,8 +482,7 @@ export class PortalCommerceController {
               k.project_id AS "projectId",
               (k.ends_on IS NOT NULL AND k.ends_on < current_date) AS "termEnded"
          FROM contracts k
-        WHERE k.id = $1 AND k.client_id = ANY($2::uuid[]) AND k.deleted_at IS NULL AND k.status <> 'draft'
-          AND ($3::uuid[] IS NULL OR k.project_id = ANY($3::uuid[]) OR k.project_id IS NULL)`,
+        WHERE k.id = $1 AND ${contractInPortalScope("k", { clients: 2, projects: 3 })}`,
       [contractId, scope.clientIds, scope.projectIds],
     );
     if (!r.rows[0]) throw new NotFoundException("contract not found");
@@ -495,18 +498,17 @@ export class PortalCommerceController {
       // Ownership travels through the project, because `deliverables.client_id` is nullable and a
       // deliverable on the client's project with a NULL client_id is the common case.
       deliverable: `SELECT 1 FROM deliverables d JOIN projects p ON p.id = d.project_id
-                     WHERE d.id = $1 AND d.deleted_at IS NULL
-                       AND p.client_id = ANY($2::uuid[]) AND ($3::uuid[] IS NULL OR p.id = ANY($3::uuid[]))`,
-      project: `SELECT 1 FROM projects p WHERE p.id = $1 AND p.deleted_at IS NULL
-                  AND p.client_id = ANY($2::uuid[]) AND ($3::uuid[] IS NULL OR p.id = ANY($3::uuid[]))`,
-      contract: `SELECT 1 FROM contracts k WHERE k.id = $1 AND k.deleted_at IS NULL AND k.status <> 'draft'
-                   AND k.client_id = ANY($2::uuid[])
-                   AND ($3::uuid[] IS NULL OR k.project_id = ANY($3::uuid[]) OR k.project_id IS NULL)`,
+                     WHERE d.id = $1 AND ${deliverableClientVisible("d")}
+                       AND ${projectReach("p", { clients: 2, projects: 3 })}`,
+      project: `SELECT 1 FROM projects p WHERE p.id = $1
+                  AND ${projectInPortalScope("p", { clients: 2, projects: 3 })}`,
+      contract: `SELECT 1 FROM contracts k WHERE k.id = $1
+                   AND ${contractInPortalScope("k", { clients: 2, projects: 3 })}`,
       // Their own receipt. Scoped on client_id (denormalised onto the row for exactly this reason)
       // and NOT on recorded_by: a colleague at the same client legitimately reads it, and a
       // staff-recorded payment has no client recorder at all.
-      invoice_payment: `SELECT 1 FROM invoice_payments pp WHERE pp.id = $1 AND pp.deleted_at IS NULL
-                          AND pp.client_id = ANY($2::uuid[])`,
+      invoice_payment: `SELECT 1 FROM invoice_payments pp WHERE pp.id = $1
+                          AND ${invoicePaymentInPortalScope("pp", "detail", { clients: 2 })}`,
     }[kind];
     const r = await c.query(q, [id, scope.clientIds, scope.projectIds]);
     return r.rows.length > 0;

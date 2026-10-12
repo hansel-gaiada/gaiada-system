@@ -6,12 +6,15 @@
 // that proof would take (`describe.skipIf(!TEST_URL)`, a pre-taken lock, `pg_locks` polling). This
 // repo's DATABASE_URL_TEST is not set and the 16-container stack is OFF by owner decision, so that
 // proof is NOT attempted here and this file's tests are the only ones actually run for this ticket.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import {
   AGENCY_LEAD_LOCK_NS,
   CANONICAL_DELEGATIONS,
   computeDelegationPlan,
+  CONVERT_RUN_CREATED_KEYS,
+  convertRunCreatedPayload,
+  findOrCreateContactUser,
   normalizeDelegationsInput,
   renderRequirementDoc,
   renderScopeNote,
@@ -310,5 +313,61 @@ describe("AD-6 / design §8(b) — agency lead convert now HAS a D14 executor en
     for (const name of ["agency_lead.convert", "agency.lead.convert"]) {
       expect(getExecutable(name), `${name} was never the shipped tool name and must stay unregistered`).toBeUndefined();
     }
+  });
+});
+
+
+// ── M5-P1-g: the contact find-or-create is race-safe (ON CONFLICT), and the run-created event has no title ──────
+// No DB: a scripted `query` stands in for the autocommit connection. The REAL race (two converts, one contact row
+// that appears between SELECT and INSERT) is proven in agency-lead-convert-race.db.test.ts on the Linux gate.
+describe("findOrCreateContactUser", () => {
+  type Rows = { rows: Array<{ id: string }> };
+  const scripted = (...replies: Rows[]) => {
+    const query = vi.fn();
+    for (const r of replies) query.mockResolvedValueOnce(r);
+    return { query } as unknown as { query: typeof query } & Parameters<typeof findOrCreateContactUser>[0];
+  };
+
+  it("returns the existing row without inserting", async () => {
+    const c = scripted({ rows: [{ id: "u-1" }] });
+    expect(await findOrCreateContactUser(c, "a@b.test", "A", "central")).toBe("u-1");
+    expect(c.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("inserts with ON CONFLICT (email) DO NOTHING and returns the new id", async () => {
+    const c = scripted({ rows: [] }, { rows: [{ id: "u-new" }] });
+    expect(await findOrCreateContactUser(c, "a@b.test", "Ann", "central")).toBe("u-new");
+    const [sql, params] = c.query.mock.calls[1] as [string, unknown[]];
+    expect(sql).toMatch(/INSERT INTO users/);
+    expect(sql).toMatch(/ON CONFLICT \(email\) DO NOTHING/);
+    expect(sql).toMatch(/RETURNING id/);
+    expect(params.slice(1)).toEqual(["a@b.test", "Ann", "central"]);
+  });
+
+  it("falls back to the email local part when the lead has no contact name", async () => {
+    const c = scripted({ rows: [] }, { rows: [{ id: "u-new" }] });
+    await findOrCreateContactUser(c, "dewi@b.test", null, "central");
+    expect((c.query.mock.calls[1] as [string, unknown[]])[1][2]).toBe("dewi");
+  });
+
+  it("LOSES the race (INSERT does nothing): re-selects and returns the winner's row instead of failing", async () => {
+    const c = scripted({ rows: [] }, { rows: [] }, { rows: [{ id: "u-winner" }] });
+    expect(await findOrCreateContactUser(c, "a@b.test", "A", "central")).toBe("u-winner");
+    expect(c.query).toHaveBeenCalledTimes(3);
+    expect((c.query.mock.calls[2] as [string])[0]).toMatch(/SELECT id FROM users WHERE lower\(email\)/);
+  });
+
+  it("an address held by a deactivated account is a typed 400, not an untyped unique-index 500", async () => {
+    const c = scripted({ rows: [] }, { rows: [] }, { rows: [] });
+    await expect(findOrCreateContactUser(c, "a@b.test", "A", "central")).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe("convert's pipeline.run.created payload (no personal data on the bus)", () => {
+  it("has exactly the keys {actorId, sourceMeetingId}: no title, no org or contact name", () => {
+    const p = convertRunCreatedPayload("user-1");
+    expect(Object.keys(p).sort()).toEqual([...CONVERT_RUN_CREATED_KEYS]);
+    expect(p).toEqual({ sourceMeetingId: null, actorId: "user-1" });
+    expect(p).not.toHaveProperty("title");
   });
 });

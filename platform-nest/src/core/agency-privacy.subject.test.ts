@@ -3,8 +3,8 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import {
-  AD1_PERSON_FIELDS, ERASED_MARKER, SUBJECT_HASH_DOMAIN, contactHashes, contactMatches, normalizeEmail, normalizePhone,
-  parseSubject, scrubAnswers, subjectHash,
+  AD1_PERSON_FIELDS, ERASED_MARKER, SUBJECT_HASH_DOMAIN, collectStrings, contactHashes, contactMatches, findNormalisedByHash,
+  normalizeEmail, normalizePhone, parseSubject, recoverIdentifiersFromText, scrubAnswers, subjectHash,
 } from "./agency-privacy.subject";
 import { QUESTIONNAIRE_SECTIONS } from "./agency-discovery-questionnaire";
 
@@ -161,5 +161,50 @@ describe("scrubAnswers", () => {
   it("a needle with regex metacharacters is matched literally", () => {
     const { answers: out } = scrubAnswers({ note: "mail a.b+c@x.co now; aXb+c@x.co stays" }, { emails: ["a.b+c@x.co"] });
     expect(out.note).toBe(`mail ${ERASED_MARKER} now; aXb+c@x.co stays`);
+  });
+});
+
+// M5-G5b — subjects known only by their hash.
+describe("findNormalisedByHash", () => {
+  const stored = ["  Ayu.Sari@Example.COM ", "other@example.com", null, undefined];
+  it("returns the NORMALISED stored value whose hash matches, for either key", () => {
+    expect(findNormalisedByHash("email", subjectHash("ayu.sari@example.com"), stored)).toBe("ayu.sari@example.com");
+    expect(findNormalisedByHash("phone", subjectHash("6281234567890"), ["+62 812-3456-7890", "0812 000 000"])).toBe("6281234567890");
+  });
+  it("null when no stored value hashes to it (an identifier no lead holds), and the wrong kind never matches", () => {
+    expect(findNormalisedByHash("email", subjectHash("nobody@example.com"), stored)).toBeNull();
+    expect(findNormalisedByHash("phone", subjectHash("ayu.sari@example.com"), ["+62 812-3456-7890"])).toBeNull();
+    expect(findNormalisedByHash("email", subjectHash("x@y.z"), [])).toBeNull();
+  });
+});
+
+describe("recoverIdentifiersFromText", () => {
+  const eh = subjectHash("ayu.sari@example.com");
+  const ph = subjectHash("6281234567890");
+  it("finds the subject's email and phone in free text, as written, by hashing the tokens", () => {
+    const r = recoverIdentifiersFromText(
+      ["Reach me at Ayu.Sari@Example.com, or +62 812 3456 7890.", "ref 2026-10-12 and 12345 and bob@example.com"],
+      { emailHash: eh, phoneHash: ph },
+    );
+    expect(r.emails).toEqual(["Ayu.Sari@Example.com"]);
+    expect(r.phones).toEqual(["+62 812 3456 7890"]);
+  });
+  it("only looks for the keys it is asked about, and finds nothing for someone else", () => {
+    expect(recoverIdentifiersFromText(["Ayu.Sari@Example.com +62 812 3456 7890"], { emailHash: eh })).toEqual({ emails: ["Ayu.Sari@Example.com"], phones: [] });
+    expect(recoverIdentifiersFromText(["Ayu.Sari@Example.com +62 812 3456 7890"], {})).toEqual({ emails: [], phones: [] });
+    expect(recoverIdentifiersFromText(["bob@example.com 0811 222 3333"], { emailHash: eh, phoneHash: ph })).toEqual({ emails: [], phones: [] });
+  });
+  it("what it finds feeds scrubAnswers, so a hash-only erase scrubs the same free text a typed one would", () => {
+    const answers = { anything_else: "Reach me at Ayu.Sari@Example.com or +62 812 3456 7890.", offering: "Surf school" };
+    const found = recoverIdentifiersFromText(collectStrings(answers), { emailHash: eh, phoneHash: ph });
+    const { answers: out } = scrubAnswers(answers, { emails: found.emails, phones: found.phones });
+    expect(out).toEqual({ anything_else: `Reach me at ${ERASED_MARKER} or ${ERASED_MARKER}.`, offering: "Surf school" });
+  });
+});
+
+describe("collectStrings", () => {
+  it("walks arrays and objects and ignores non-strings", () => {
+    expect(collectStrings({ a: "x", b: ["y", { c: "z", d: 4 }], e: null })).toEqual(["x", "y", "z"]);
+    expect(collectStrings(7)).toEqual([]);
   });
 });

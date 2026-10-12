@@ -119,7 +119,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // M5-W1a (2026-10-11): 407 -> 414 (+7 on 2 EXISTING kinds). submit + comment join webdesk_content_editing;
     // request_changes/seo_signoff/approve/assign form the NEW group webdesk_editorial_review; manage_editorial is
     // advancedOnly (governance, behind the writers' room people page). Relationship set untouched.
-    expect(grantable.length).toBe(414);
+    // PV3-01 (2026-10-11): +1 pair on the EXISTING contract kind (`core.contract.countersign`, uiGrantable false, owner-only by a Cerbos grant rule).
+    expect(grantable.length).toBe(415);
     expect(relationshipKeys.size).toBe(15);
   });
 
