@@ -192,7 +192,8 @@ services:
       # empty disables the local provider and the chain goes straight to cloud/echo.
       OLLAMA_URL: ${OLLAMA_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
-      # OpenAI-compatible cloud brain (Ollama Cloud https://ollama.com/v1). When OPENAI_API_KEY is
+      # OpenAI-compatible cloud brain (live since 2026-10-13: OpenRouter https://openrouter.ai/api/v1 with
+      # z-ai/glm-5.3-flash, set in the box .env; previously Ollama Cloud, whose key died 2026-09-30). When OPENAI_API_KEY is
       # set, LLM_CHAIN below routes text to it first; media/embeds fail over to whisper/gemini/ollama.
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -287,7 +288,10 @@ services:
       HERMES_TOKEN: ${HERMES_TOKEN:-}
       # Model-assisted DLP classifier stays opt-in; enable only where Ollama is reachable.
       DLP_CLASSIFIER_ENABLED: ${DLP_CLASSIFIER_ENABLED:-false}
-      EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,whisper,host.docker.internal
+      # openrouter.ai added 2026-10-13 (owner): the live OpenAI-compatible slot is the company OpenRouter key with
+      # GLM 5.3 Flash (OPENAI_BASE_URL/OPENAI_MODEL in the box .env), because the Ollama Cloud key has been dead since
+      # 2026-09-30 and every LLM call was falling back to the echo provider. ollama.com stays for a later switch back.
+      EGRESS_ALLOWLIST: generativelanguage.googleapis.com,api.anthropic.com,ollama.com,openrouter.ai,whisper,host.docker.internal
       # WA-hardening D: telemetry is a BASE default (not only the observability.yml overlay) so it
       # survives a plain `up -d --build ai-gateway` with vps+local files only. Fail-soft (WS9): a
       # no-op unless OTEL_ENABLED is truthy; unreachable collector just drops spans, never crashes.
@@ -816,6 +820,19 @@ services:
       UMAMI_BASE_URL: ${UMAMI_BASE_URL:-}
       UMAMI_API_KEY: ${UMAMI_API_KEY:-}
       UMAMI_TIMEOUT_MS: ${UMAMI_TIMEOUT_MS:-}
+      # M5-V3-c — the insights collector's ops API (consented visitor channel), reached over WireGuard through the
+      # same read-gate as Umami (e.g. http://10.88.0.2:18743). INSIGHTS_READ_KEY lists events and bots; INSIGHTS_FORGET_KEY
+      # is a DIFFERENT key that only POSTs forget. Empty = "not configured". SEARCH_VISITORS_ENABLED: exactly "1" turns the
+      # visitor feature on (empty = off, never 0). Further SEARCH_VISITORS_* knobs arrive with V3-e at merge.
+      INSIGHTS_BASE_URL: ${INSIGHTS_BASE_URL:-}
+      INSIGHTS_READ_KEY: ${INSIGHTS_READ_KEY:-}
+      INSIGHTS_FORGET_KEY: ${INSIGHTS_FORGET_KEY:-}
+      SEARCH_VISITORS_ENABLED: ${SEARCH_VISITORS_ENABLED:-}
+      # M5-V3-e: the visitor job cadences and the remote-call timeout (ms). Empty or 0 = the default (10 min / 1 h / 24 h / 10 s).
+      SEARCH_VISITORS_INGEST_INTERVAL_MS: ${SEARCH_VISITORS_INGEST_INTERVAL_MS:-}
+      SEARCH_VISITORS_SWEEP_INTERVAL_MS: ${SEARCH_VISITORS_SWEEP_INTERVAL_MS:-}
+      SEARCH_VISITORS_PURGE_INTERVAL_MS: ${SEARCH_VISITORS_PURGE_INTERVAL_MS:-}
+      SEARCH_VISITORS_TIMEOUT_MS: ${SEARCH_VISITORS_TIMEOUT_MS:-}
       # M5-V4: the daily content-decay job. OFF unless this is exactly "1" (empty = off, never 0). It only reads
       # our own Search Console rows and Umami (above); set SEARCH_DECAY_INTERVAL_MS (>= 60000) to change the daily cadence.
       SEARCH_DECAY_ENABLED: ${SEARCH_DECAY_ENABLED:-}

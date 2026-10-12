@@ -25,6 +25,7 @@ import {
   conversationAttachmentClientVisible, conversationMessageClientVisible, conversationThreadClientVisible,
   conversationThreadInPortalScope, staffConversationDraftClientVisible, staffConversationMessageClientVisible,
   staffConversationThreadClientVisible,
+  meetingMinutesClientVisible, meetingMinutesInPortalScope, staffMeetingMinutesClientVisible,
 } from "./portal-visibility";
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -362,6 +363,44 @@ describe("PV4-03 conversation predicates", () => {
     expect(staffConversationMessageClientVisible("m", "t")).toBe("(t.client_id IS NOT NULL AND (t.deleted_at IS NULL) AND (TRUE))");
     expect(staffConversationDraftClientVisible("d")).toBe("FALSE");
     expect(() => staffConversationDraftClientVisible("d;x")).toThrow(/invalid table alias/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// 2c. PV4-05 — meeting minutes predicates
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe("PV4-05 meeting minutes predicates", () => {
+  it("minutes are reached by the MEETING's client and project (decision 8: no copy), only once shared, with NO project-less admission (PV4-Q1)", () => {
+    expect(meetingMinutesInPortalScope("mm", "m", S12)).toBe(
+      `m.client_id = ANY($1::uuid[]) AND mm.status = 'shared' AND m.deleted_at IS NULL AND ($2::uuid[] IS NULL OR m.project_id = ANY($2::uuid[]))`,
+    );
+    // The contract/change-request shape admits project_id IS NULL; the minutes shape must not (same as runs and threads).
+    expect(meetingMinutesInPortalScope("mm", "m", S12)).not.toContain("project_id IS NULL");
+    expect(conjuncts(meetingMinutesInPortalScope("mm", "m", S12)).filter((c) => c.includes("project_id"))).toEqual(
+      conjuncts(runInPortalScope("m", S12)).filter((c) => c.includes("project_id")),
+    );
+  });
+
+  it("binds whatever indexes the caller names, and the row-state half binds none (so the staff side can reuse it)", () => {
+    expect(meetingMinutesInPortalScope("a", "b", S23)).toContain("b.client_id = ANY($2::uuid[])");
+    expect(meetingMinutesInPortalScope("a", "b", S23)).toContain("($3::uuid[] IS NULL OR b.project_id = ANY($3::uuid[]))");
+    expect(meetingMinutesClientVisible("mm", "m")).not.toMatch(/\$\d/);
+    expect(meetingMinutesClientVisible("mm", "m")).toBe(`mm.status = 'shared' AND m.deleted_at IS NULL`);
+  });
+
+  it("a draft is never visible: the row-state half names `shared`, and `meeting` stays in NEVER_CLIENT_VISIBLE", () => {
+    expect(meetingMinutesClientVisible("mm", "m")).toContain(`mm.status = 'shared'`);
+    expect([...NEVER_CLIENT_VISIBLE]).toContain("meeting");
+  });
+
+  it("staff flag: the meeting has a client AND the minutes are shared on a live meeting", () => {
+    expect(staffMeetingMinutesClientVisible("mm", "m")).toBe("(m.client_id IS NOT NULL AND (mm.status = 'shared' AND m.deleted_at IS NULL))");
+  });
+
+  it("refuses an alias that is not a plain identifier", () => {
+    expect(() => meetingMinutesClientVisible("mm; DROP TABLE x", "m")).toThrow(/invalid table alias/);
+    expect(() => meetingMinutesInPortalScope("mm", "M", S12)).toThrow(/invalid table alias/);
   });
 });
 

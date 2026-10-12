@@ -106,6 +106,14 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // automation/README.md).
   "wf:reports-weekly-seal": ["notify"],
   "wf:reports-monthly-seal": ["notify"],
+  // PV-D28 (owner ruling 2026-10-12): the billing chaser (automation/workflows/billing-chaser.json).
+  // A daily CRON READ + notify job over the contract and payment tools: payment claims waiting >2 days
+  // for confirmation, client-signed contracts waiting >1 day for our countersignature, contracts sent
+  // >7 days ago and still unsigned by the client. It NEVER sends, countersigns, confirms or rejects:
+  // contracts.send / contracts.countersign / invoicePayments.decide / contracts.createDraft /
+  // contracts.updateDraft are deliberately NOT here and must never be added (n8n never decides a gate
+  // or records a signature; those stay human, or agent-behind-D14). Pinned in automation-policy.test.ts.
+  "wf:billing-chaser": ["clients.list", "contracts.list", "invoicePayments.list", "notify"],
 };
 
 /** An automation (n8n workflow) principal? Its scope comes from AUTOMATION_ALLOWLIST, not assurance. */

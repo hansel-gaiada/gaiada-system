@@ -249,7 +249,8 @@ export const NEVER_CLIENT_VISIBLE_REASONS: Readonly<Record<NeverClientVisibleKin
     "plus aggregate progress and per-status counts, never the task list (portal-workspace.controller.ts header).",
   meeting:
     "No portal read of meeting_recordings or meeting_participants exists. Meetings are internal records " +
-    "(recordings, transcripts, attendees) and reach a client only through deliberate follow-up.",
+    "(recordings, transcripts, attendees) and reach a client only through deliberate follow-up: since PV4-05 " +
+    "that follow-up is a separate object, `meeting_minutes`, with its own predicate (meetingMinutesInPortalScope).",
   note:
     "comments are staff notes on an entity, written for colleagues. No portal read exists and none may be " +
     "added without a client-visible flag that the table does not have.",
@@ -374,4 +375,42 @@ export function staffConversationMessageClientVisible(messageAlias: string, thre
 export function staffConversationDraftClientVisible(draftAlias: string): string {
   col(draftAlias, "id");
   return "FALSE";
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Meeting minutes (PV4-05): the ONLY part of a meeting a client ever reads
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-05; finding 8; design decisions 8 and 9; PV4-Q1).
+// `meeting` STAYS in NEVER_CLIENT_VISIBLE: the recording, transcript, participants and pipeline run are internal and no
+// portal read names them. Minutes are a NEW object (`meeting_minutes`, PV4-01) that a staff member deliberately SHARES, and
+// they are a visible kind of their own with their own predicate below.
+//
+// DESIGN DECISION 8: minutes carry NO client_id / project_id of their own. The client and the project are read THROUGH the
+// meeting (`meeting_recordings`), so re-linking a meeting moves its minutes with it and nothing is ever a stale copy. Every
+// builder here therefore takes TWO aliases: the minutes row and its meeting.
+
+/** Minutes are visible once SHARED, and only while their meeting is live (a soft-deleted meeting takes its minutes with
+ *  it). A `draft` is the agency's working copy, however complete: this is the clause that keeps an agent's or a colleague's
+ *  half-written notes out of the portal. */
+export function meetingMinutesClientVisible(minutesAlias: string, meetingAlias: string): string {
+  return `${col(minutesAlias, "status")} = 'shared' AND ${col(meetingAlias, "deleted_at")} IS NULL`;
+}
+
+/** The full portal predicate for shared minutes: the caller's clients and, for a project-scoped contact, their projects,
+ *  both taken from the MEETING (`meetingAlias` is the minutes' own `meeting_recordings` row, joined on
+ *  `meeting_recording_id`).
+ *
+ *  ⚠ NO NULL-PROJECT ADMISSION, UNLIKE CONTRACTS AND CHANGE REQUESTS (PV4-Q1's default, applied to minutes). A meeting with no
+ *  project is a client-wide meeting, and its minutes are visible only to a client-wide contact; a contact limited to some
+ *  projects may be someone outside the client's organisation. Same shape as runs and conversation threads
+ *  (`allowNullProject = false`). Changing it to `true` would show a project-scoped contact every client-wide meeting's minutes. */
+export function meetingMinutesInPortalScope(minutesAlias: string, meetingAlias: string, params: PortalScopeParams): string {
+  return `${inCallerClients(meetingAlias, params.clients)} AND ${meetingMinutesClientVisible(minutesAlias, meetingAlias)} AND ${inCallerProjects(col(meetingAlias, "project_id"), params.projects, false)}`;
+}
+
+/** Staff `clientVisible` for minutes: the meeting has a client AND the minutes are shared on a live meeting. `m` must be the
+ *  minutes' own meeting (the client is the MEETING's, because that is the column the portal's own query filters on). */
+export function staffMeetingMinutesClientVisible(minutesAlias: string, meetingAlias: string): string {
+  return staffClientVisible(meetingAlias, meetingMinutesClientVisible(minutesAlias, meetingAlias));
 }

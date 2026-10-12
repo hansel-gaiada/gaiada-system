@@ -1,0 +1,371 @@
+{
+  "id": "wspv3billchase01",
+  "name": "billing-chaser (CRON)",
+  "meta": {
+    "description": "PV-D28. Daily 09:00 Asia/Makassar: read-and-remind, never decide. clients.list -> per client contracts.list + invoicePayments.list (via the hub, clientId in the path) -> collect (a) payment claims status=pending recorded >2 days ago, (b) contracts status=sent that the client signed and we have not (clientSigned && !providerSigned) sent >1 day ago, (c) contracts status=sent with clientSigned=false sent >7 days ago. If none qualify the run stops silently. Otherwise ONE in-app digest (counts + client names, linking /clients/<id>/billing) via the hub `notify` tool, delivered once per recipient id in BILLING_NOTIFY_USER_IDS (comma list; falls back to NOTIFY_USER_ID, the ops lead): `notify` takes a single recipientId and the allow-list has no owner lookup, so the owners / client account owners are CONFIGURED, not resolved. It never sends, countersigns, confirms or rejects (those stay human, or agent-behind-D14). Scoped identity wf:billing-chaser -> [clients.list, contracts.list, invoicePayments.list, notify]; the platform service account is a manager (reads contract/invoice/client, notify). Env: HUB_SERVICE_TOKEN, AGENCY_TENANT_ID, BILLING_NOTIFY_USER_IDS or NOTIFY_USER_ID."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Daily 09:00 Asia/Makassar",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:billing-chaser"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"clients.list\", arguments: { tenantId: $env.AGENCY_TENANT_ID } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP tools/call clients.list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the hub's SSE-framed JSON-RPC reply -> the tool's JSON result. A refusal or tool error THROWS (a 403 is\n// never an empty list: a silent chaser that cannot read is worse than a loud one).\nconst rpcOf = (raw) => {\n  const line = String(raw ?? '').split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (rpc.error) throw new Error(rpc.error.message ?? 'hub error');\n  if (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\n  const out = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\n  if (!Array.isArray(out)) throw new Error('expected a list from the tool');\n  return out;\n};\nconst rawOf = (it) => it.json.data ?? it.json.body ?? '';\n// One item per client. No clients -> return [] -> the run stops here, silently.\nconst clients = rpcOf(rawOf($input.first()));\nreturn clients\n  .filter((c) => c && c.id)\n  .map((c) => ({ json: { clientId: c.id, clientName: c.name ?? c.id } }));"
+      },
+      "name": "Split clients (skip if none)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:billing-chaser"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"contracts.list\", arguments: { tenantId: $env.AGENCY_TENANT_ID, clientId: $json.clientId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP tools/call contracts.list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the hub's SSE-framed JSON-RPC reply -> the tool's JSON result. A refusal or tool error THROWS (a 403 is\n// never an empty list: a silent chaser that cannot read is worse than a loud one).\nconst rpcOf = (raw) => {\n  const line = String(raw ?? '').split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (rpc.error) throw new Error(rpc.error.message ?? 'hub error');\n  if (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\n  const out = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\n  if (!Array.isArray(out)) throw new Error('expected a list from the tool');\n  return out;\n};\nconst rawOf = (it) => it.json.data ?? it.json.body ?? '';\n// Carry the client context across the contracts.list reply (paired by item index).\nconst ctx = $('Split clients (skip if none)').all();\nreturn $input.all().map((it, i) => {\n  const c = ctx[it.pairedItem?.item ?? i].json;\n  return { json: { clientId: c.clientId, clientName: c.clientName, contracts: rpcOf(rawOf(it)) } };\n});"
+      },
+      "name": "Parse contracts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:billing-chaser"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"invoicePayments.list\", arguments: { tenantId: $env.AGENCY_TENANT_ID, clientId: $json.clientId } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP tools/call invoicePayments.list",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the hub's SSE-framed JSON-RPC reply -> the tool's JSON result. A refusal or tool error THROWS (a 403 is\n// never an empty list: a silent chaser that cannot read is worse than a loud one).\nconst rpcOf = (raw) => {\n  const line = String(raw ?? '').split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (rpc.error) throw new Error(rpc.error.message ?? 'hub error');\n  if (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'tool error');\n  const out = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\n  if (!Array.isArray(out)) throw new Error('expected a list from the tool');\n  return out;\n};\nconst rawOf = (it) => it.json.data ?? it.json.body ?? '';\n// The three PV-D28 reminders. Read-only: nothing here sends, countersigns, confirms or rejects.\n//   (a) payment claims status=pending, recorded more than 2 days ago        -> waiting on us to confirm\n//   (b) contracts status=sent, clientSigned, NOT providerSigned, sent >1 day -> waiting on our countersignature\n//   (c) contracts status=sent, NOT clientSigned, sent more than 7 days ago  -> waiting on the client\nconst DAY = 86400000;\nconst now = Date.now();\nconst ageMs = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? now - t : null; };\nconst ctx = $('Parse contracts').all();\nconst per = [];\n$input.all().forEach((it, i) => {\n  const c = ctx[it.pairedItem?.item ?? i].json;\n  const payments = rpcOf(rawOf(it));\n  const pay = payments.filter((p) => p.status === 'pending' && (ageMs(p.recordedAt ?? p.createdAt) ?? -1) > 2 * DAY).length;\n  const sent = c.contracts.filter((k) => k.status === 'sent');\n  const counter = sent.filter((k) => k.clientSigned === true && k.providerSigned === false && (ageMs(k.sentAt) ?? -1) > 1 * DAY).length;\n  const unsigned = sent.filter((k) => k.clientSigned === false && (ageMs(k.sentAt) ?? -1) > 7 * DAY).length;\n  if (pay + counter + unsigned > 0) per.push({ clientId: c.clientId, clientName: c.clientName, pay, counter, unsigned, total: pay + counter + unsigned });\n});\nif (per.length === 0) return []; // nothing qualifies -> stop, no notification\nper.sort((a, b) => b.total - a.total);\nconst sum = (k) => per.reduce((n, c) => n + c[k], 0);\nconst pay = sum('pay'), counter = sum('counter'), unsigned = sum('unsigned');\nconst s = (n, one, many) => n + ' ' + (n === 1 ? one : many);\nconst parts = [];\nif (pay) parts.push(s(pay, 'payment claim', 'payment claims') + ' waiting over 2 days for confirmation');\nif (counter) parts.push(s(counter, 'contract', 'contracts') + ' signed by the client and waiting over 1 day for our countersignature');\nif (unsigned) parts.push(s(unsigned, 'contract', 'contracts') + ' sent over 7 days ago and still unsigned by the client');\nconst shown = per.slice(0, 10).map((c) => c.clientName + ' (' + c.total + ')');\nconst more = per.length > 10 ? ', and ' + (per.length - 10) + ' more' : '';\nconst body = parts.join('; ') + '. Clients: ' + shown.join(', ') + more + '.';\nconst href = (id) => '/clients/' + id + '/billing';\nconst payload = {\n  title: 'Billing needs attention',\n  href: href(per[0].clientId),\n  body,\n  severity: 'warning',\n  counts: { paymentsAwaitingConfirmation: pay, contractsAwaitingCountersignature: counter, contractsUnsignedByClient: unsigned },\n  clients: per.map((c) => ({ id: c.clientId, name: c.clientName, payments: c.pay, countersign: c.counter, unsigned: c.unsigned })),\n  links: per.slice(0, 10).map((c) => ({ label: c.clientName, href: href(c.clientId) })),\n  ...(per.length === 1 ? { entityType: 'client', entityId: per[0].clientId } : {}),\n};\n// notify takes ONE recipient user id, so the digest is delivered once per configured recipient.\nconst recipients = String($env.BILLING_NOTIFY_USER_IDS || $env.NOTIFY_USER_ID || '').split(',').map((x) => x.trim()).filter(Boolean);\nif (recipients.length === 0) throw new Error('billing digest has content but no recipient: set BILLING_NOTIFY_USER_IDS (or NOTIFY_USER_ID)');\nreturn recipients.map((recipientId) => ({ json: { tenantId: $env.AGENCY_TENANT_ID, recipientId, payload } }));"
+      },
+      "name": "Evaluate (skip if nothing qualifies)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            },
+            {
+              "name": "x-obo-provider",
+              "value": "n8n"
+            },
+            {
+              "name": "x-obo-external-id",
+              "value": "wf:billing-chaser"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $json.recipientId, type: \"billing_chaser_digest\", payload: $json.payload } } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "name": "MCP notify (in-app digest)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nfor (const it of items) {\n  const raw = it.json.data ?? it.json.body ?? '';\n  const line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\n  const rpc = JSON.parse(line.slice(5).trim());\n  if (rpc.error) throw new Error(rpc.error.message ?? 'notify failed');\n  if (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'notify failed');\n}\nreturn [{ json: { ok: true, delivered: items.length } }];"
+      },
+      "name": "Parse notify result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 09:00 Asia/Makassar": {
+      "main": [
+        [
+          {
+            "node": "MCP tools/call clients.list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP tools/call clients.list": {
+      "main": [
+        [
+          {
+            "node": "Split clients (skip if none)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split clients (skip if none)": {
+      "main": [
+        [
+          {
+            "node": "MCP tools/call contracts.list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP tools/call contracts.list": {
+      "main": [
+        [
+          {
+            "node": "Parse contracts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse contracts": {
+      "main": [
+        [
+          {
+            "node": "MCP tools/call invoicePayments.list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP tools/call invoicePayments.list": {
+      "main": [
+        [
+          {
+            "node": "Evaluate (skip if nothing qualifies)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate (skip if nothing qualifies)": {
+      "main": [
+        [
+          {
+            "node": "MCP notify (in-app digest)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP notify (in-app digest)": {
+      "main": [
+        [
+          {
+            "node": "Parse notify result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Makassar"
+  },
+  "pinData": {}
+}
