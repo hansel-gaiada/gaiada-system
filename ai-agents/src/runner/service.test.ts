@@ -8,8 +8,9 @@ import type { FastifyInstance } from "fastify";
 import { buildRunnerApp, type AgentRegistry } from "./service";
 import type {
   GoalStore, GoalInput, GoalRunContext, FinishGoalPatch, GoalListItem, GoalDetail, RunInput, RunRow, CancelResult,
-  RunEventInput, RunEventRow,
+  RunEventInput, RunEventRow, GoalOnceResult,
 } from "./store";
+import { DEDUPE_BLOCKING_STATUSES } from "./store";
 import { EpisodicStore } from "../memory/episodic";
 import { ObservabilityCollector } from "../obs/collector";
 import { supervisor as realSupervisor, taskTriager } from "../specialists";
@@ -60,6 +61,15 @@ class MemGoalStore implements GoalStore {
   }
   async insertGoal(input: GoalInput): Promise<string> {
     return this.seed({ ...input, status: "queued" });
+  }
+  async insertGoalOnce(input: GoalInput & { dedupeKey: string }): Promise<GoalOnceResult> {
+    // Single-threaded and synchronous up to the insert, so check-then-insert is atomic here (Pg: partial unique index).
+    for (const g of this.goals.values()) {
+      if (g.tenantId === input.tenantId && g.dedupeKey === input.dedupeKey && DEDUPE_BLOCKING_STATUSES.includes(g.status)) {
+        return { id: g.id, status: g.status, deduped: true };
+      }
+    }
+    return { id: await this.insertGoal(input), status: "queued", deduped: false };
   }
   async claimForRun(id: string): Promise<GoalRunContext | null> {
     const g = this.goals.get(id);

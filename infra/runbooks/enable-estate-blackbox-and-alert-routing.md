@@ -157,22 +157,78 @@ curl -s http://10.88.0.2:19090/api/v1/targets | grep -o '"job":"[^"]*"' | sort -
 curl -s http://10.88.0.2:19090/api/v1/rules | grep -o '"name":"[^"]*"' | sort -u | grep -E 'blackbox|client_prop'
 ```
 
-## 7. Wire the client-property target generator (gda-aicenter side)
+## 7. Wire the client-property targets (M6-P3d: the ERP renders, sumopod pulls)
 
-```sh
-crontab -l 2>/dev/null | { cat; echo "*/5 * * * * DATABASE_URL=\$(cat /path/to/db-url-secret) OBS_HUB_SSH_ALIAS=sumopod infra/scripts/sync-client-property-targets.sh >> /var/log/gaiada-client-targets.log 2>&1"; } | crontab -
-```
-Do not paste a real `DATABASE_URL` into crontab in plaintext if a secrets file already exists for
-this box — reference it the same way `deploy-vps.md` documents for other cron entries.
+Why this shape: gda-aicenter has no Node and no DB login that can read `search_properties` across
+tenants, so the old `sync-client-property-targets.sh` (push from aicenter) never ran and the target
+file stayed `[]`. Now the platform container renders the file itself (same selection and labels as
+`gen-client-property-targets.mjs`, pinned by a parity test), and sumopod pulls ONLY that file over
+an SSH key whose `command=` prints that one file and nothing else. No DB role, no new port, no
+inventory on sumopod.
 
-First run, by hand, to confirm before trusting the cron:
+Placeholders: `<erp-host>` / `<erp-user>` = gda-aicenter address and a login user that can read the
+host dir; `<sumopod-ip>` = sumopod's address as aicenter sees it (the WireGuard address). Substitute on the box.
+
+**7a. gda-aicenter: host dir, env, deploy**
 ```sh
-DATABASE_URL="$(cat /path/to/db-url-secret)" infra/scripts/sync-client-property-targets.sh
-ssh sumopod "cat ~/gaiada-obs/infra/observability/prometheus/targets/client-properties.json | head -5"
+# Host directory the platform container writes into (bind-mounted by docker-compose.vps.yml).
+sudo install -d -m 0755 -o root -g root /var/lib/gaiada/client-targets
+# Env (box .env, the file the compose invocation reads), then recreate ONLY platform:
+#   CLIENT_PROPERTY_TARGETS_PATH=/var/lib/gaiada/client-targets/client-properties.json
+# (CLIENT_PROPERTY_TARGETS_INTERVAL_MS stays blank = 5 minutes.)
+# Tag parity first (infra/CLAUDE.md "stale .env"), then, per the file-set rule:
+cd ~/gaiada/infra/compose
+docker compose -f docker-compose.vps.yml -f docker-compose.hostdata.yml up -d --no-build platform
 ```
-Expect either real entries (if verified `search_properties` rows exist) or an empty `[]` with a
-line in the generator's own log for each skipped row and its reason — never a silent empty file
-with no explanation logged.
+The first render happens about 15 s after boot. Verify:
+```sh
+docker compose ... logs platform | grep 'MON-01 probe-target file on'
+ls -l /var/lib/gaiada/client-targets/client-properties.json      # 0644, root, non-zero size
+head -c 600 /var/lib/gaiada/client-targets/client-properties.json
+```
+Expect real entries once any property is verified (`[]` only if the DB truly has none; the renderer
+never writes `[]` over a non-empty file until three consecutive runs agree). A `render failed` log line
+means the previous file was left in place.
+
+**7b. sumopod: a dedicated key (no passphrase, used only for this)**
+```sh
+ssh-keygen -t ed25519 -N '' -C 'sumopod client-targets pull' -f ~/.ssh/gaiada_client_targets
+cat ~/.ssh/gaiada_client_targets.pub        # paste into 7c
+```
+
+**7c. gda-aicenter: the authorized_keys entry** (in `~<erp-user>/.ssh/authorized_keys`, ONE line; the
+checkout path is wherever the repo is deployed, and the script must be executable by that user):
+```
+command="/home/<erp-user>/gaiada/infra/scripts/client-targets-forced-command.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty,from="<sumopod-ip>" ssh-ed25519 AAAA... sumopod client-targets pull
+```
+Check it on the box itself before touching sumopod:
+```sh
+sh ~/gaiada/infra/scripts/client-targets-forced-command.sh --selftest
+SSH_ORIGINAL_COMMAND="" sh ~/gaiada/infra/scripts/client-targets-forced-command.sh | head -c 300
+```
+
+**7d. sumopod: first pull by hand, then cron**
+```sh
+command -v python3    # needed by the validator
+sh ~/gaiada-obs/infra/scripts/pull-client-property-targets.sh --selftest
+~/gaiada-obs/infra/scripts/pull-client-property-targets.sh <erp-user>@<erp-host> ~/.ssh/gaiada_client_targets
+head -c 600 ~/gaiada-obs/infra/observability/prometheus/targets/client-properties.json
+```
+Negative checks (each must FAIL, never print the file): `ssh -i ~/.ssh/gaiada_client_targets <erp-user>@<erp-host> id`
+(refused), and with the key but a different source address (the `from=` pin).
+```sh
+# Every 5 minutes. sumopod's cron ignores CRON_TZ; "*/5" has no hour in it, so that does not matter.
+( crontab -l 2>/dev/null; echo '*/5 * * * * $HOME/gaiada-obs/infra/scripts/pull-client-property-targets.sh <erp-user>@<erp-host> $HOME/.ssh/gaiada_client_targets >> $HOME/gaiada-client-targets-pull.log 2>&1' ) | crontab -
+```
+Prometheus re-reads file_sd on its own (`refresh_interval` in the job); no reload is needed.
+
+**7e. Verify end to end**
+```sh
+curl -s http://10.88.0.2:19090/api/v1/targets?scrapePool=client-properties | head -c 800   # activeTargets > 0
+tail -3 ~/gaiada-client-targets-pull.log     # silent when unchanged; one "updated" line per change
+```
+A failed pull logs one line (`ssh ... failed` or `payload rejected (<reason>)`), exits non-zero and
+leaves the previous file untouched.
 
 ## 8. Wire the outside-SumoPod dead-man's-switch leg (gda-aicenter cron)
 
@@ -206,9 +262,11 @@ curl -fsS -m 10 http://10.88.0.2:9093/-/healthy && echo "restored OK"
 1. **Dead-man's-switch cron leg:** revert the crontab line to drop `SUMOPOD_OBS_URL`/
    `SUMOPOD_DEADMANSSWITCH_URL` — the script no-ops that check when the var is unset (`if [ -n
    "${SUMOPOD_OBS_URL:-}" ]`), so removing it from the env is sufficient; no code change needed.
-2. **Client-property generator cron:** `crontab -e`, remove the `sync-client-property-targets.sh`
-   line. The last-synced `client-properties.json` on SumoPod is harmless left in place (it is just
-   a target list) but can be emptied: `ssh sumopod "echo '[]' > ~/gaiada-obs/infra/observability/prometheus/targets/client-properties.json"`.
+2. **Client-property targets (§7):** on sumopod `crontab -e` and remove the
+   `pull-client-property-targets.sh` line; on gda-aicenter delete the `command=` line from
+   authorized_keys and blank `CLIENT_PROPERTY_TARGETS_PATH` (recreate `platform`) to turn the renderer
+   off. The last pulled `client-properties.json` on SumoPod is harmless left in place (it is just a
+   target list) but can be emptied: `ssh sumopod "echo '[]' > ~/gaiada-obs/infra/observability/prometheus/targets/client-properties.json"`.
 3. **Alertmanager routing/receiver:**
    ```sh
    ssh sumopod "cp ~/gaiada-obs/infra/observability/alertmanager/alertmanager.yml{,.rollback-bak}"

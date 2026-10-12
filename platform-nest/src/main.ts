@@ -50,6 +50,7 @@ import { registerDriver } from "./modules/monitoring/drivers/registry";
 import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
 import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
 import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
+import { startClientTargetsLoop } from "./modules/monitoring/client-targets";
 import { rebuildTargets, startSiteBuildsLoop } from "./modules/webdev/site-builds.service";
 import { sweepScheduledRebuilds } from "./modules/webdev/scheduled-rebuilds.service";
 import { invoiceModule } from "./modules/invoice";
@@ -749,6 +750,15 @@ async function bootstrap(): Promise<void> {
     startMonitoringRunnerLoop(config.monitoring.runnerIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`monitoring runner on: re-asking due-ness every ${config.monitoring.runnerIntervalMs}ms`);
+  }
+  // M6-P3d: render the MON-01 probe-target file. Fail-soft and OFF until CLIENT_PROPERTY_TARGETS_PATH is set.
+  if (config.clientTargets.path) {
+    startClientTargetsLoop(config.clientTargets.path, config.clientTargets.intervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`MON-01 probe-target file on: ${config.clientTargets.path} every ${config.clientTargets.intervalMs}ms`);
+  } else {
+    // eslint-disable-next-line no-console
+    console.log("MON-01 probe-target file off: CLIENT_PROPERTY_TARGETS_PATH is unset");
   }
   // WSK-60: the staging-rebuild stamp poller. It reads only rows that exist and GETs only the staging URL
   // an operator put in WEBDESK_REBUILD_TARGETS, so "a target is configured" is its whole gate: with none,

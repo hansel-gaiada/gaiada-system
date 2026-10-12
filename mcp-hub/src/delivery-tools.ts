@@ -95,6 +95,15 @@ export function registerDeliveryTools(): void {
   // with the same OBO identity; platform-nest verifies it and writes the first fill with its ERP App, or refuses. This
   // handler still sends no remote, no mode and no credential: it cannot select a push.
   //
+  // AT MOST ONE JOB PER SITE AND SNAPSHOT (M6-P4e3). The workflow calls this tool, then creates the single-shot `claude_code`
+  // stage afterwards, so two near-simultaneous deliveries (a gate decision plus the contract_pinned resume, or a redelivery
+  // after a first attempt died between the two calls) both reach this handler. The idempotency key is derived by the RUNNER
+  // from the goal text this handler sends, never chosen here: `provisionedSiteId` + `contractSnapshotId` when a commit is
+  // asked for, else the envelope's identifying fields. While a goal with that key is queued, running or finished ok, the
+  // runner answers 200 with THAT goal's id and status and queues nothing, and this tool returns the same shape with
+  // `deduped: true` (the goalId is the existing goal's). A failed or cancelled goal frees the key: a retry is a new goal.
+  // The atomic check lives in ai-agents (a partial unique index on the goal table), so there is no window to close here.
+  //
   // INPUT. Required: tenantId, contractSnapshotId (webdev_contract_snapshots.id, THE pin), siteKind
   // ("astro" | "node" | "wp"), prdArtifact, prototypeArtifact (pipeline_stages.artifact_ref, resolved by the job
   // through pipeline.artifacts.get). Optional: repoUrl, runId, blockLibraryVersion (default: the snapshot's own),
@@ -105,7 +114,7 @@ export function registerDeliveryTools(): void {
   registerTool({
     name: "code.scaffold",
     description:
-      "Claude Code v2: start a code.scaffold job that composes a site repo (siteKind astro, node = Next + Nest apps/web, or wp) from a pinned contract snapshot, the signed PRD and the accepted prototype. The job never pushes. With provisionedSiteId, the finished job hands the tree to platform-nest, which commits it as the FIRST FILL of that site's repo with the ERP App (webdev.provisionedSites.commitScaffold), or refuses. ASYNCHRONOUS: returns { goalId, status: 'queued', mode: 'dry_run', commitRequested, content } at once; poll agents.status for the file list, the CONTRACT.lock and the commit result.",
+      "Claude Code v2: start a code.scaffold job that composes a site repo (siteKind astro, node = Next + Nest apps/web, or wp) from a pinned contract snapshot, the signed PRD and the accepted prototype. The job never pushes. With provisionedSiteId, the finished job hands the tree to platform-nest, which commits it as the FIRST FILL of that site's repo with the ERP App (webdev.provisionedSites.commitScaffold), or refuses. ASYNCHRONOUS: returns { goalId, status: 'queued', mode: 'dry_run', commitRequested, deduped, content } at once (IDEMPOTENT: while a goal for the same provisioned site and contract snapshot is queued, running or finished ok, returns THAT goal's id and status with deduped: true instead of filing another; a failed or cancelled one allows a retry); poll agents.status for the file list, the CONTRACT.lock and the commit result.",
     minAssurance: "low",
     write: true,
     impact: "low",
@@ -168,7 +177,8 @@ export function registerDeliveryTools(): void {
         ...(typeof args.requestedBy === "string" ? { requestedBy: args.requestedBy } : {}),
         envelope: { provider: principal.provider, externalId: principal.externalId },
       });
-      const accepted = JSON.parse(passthrough("POST /goals (code.scaffold)", r)) as { id?: string; status?: string };
+      const accepted = JSON.parse(passthrough("POST /goals (code.scaffold)", r)) as { id?: string; status?: string; deduped?: boolean };
+      const deduped = accepted.deduped === true;
       return JSON.stringify({
         goalId: accepted.id,
         status: accepted.status ?? "queued",
@@ -176,7 +186,10 @@ export function registerDeliveryTools(): void {
         siteKind,
         contractSnapshotId,
         commitRequested: Boolean(provisionedSiteId),
-        content: provisionedSiteId
+        deduped,
+        content: deduped
+          ? `code.scaffold v2 job ${accepted.id} already exists for this ${provisionedSiteId ? `provisioned site (${provisionedSiteId}) and contract snapshot` : "request"} (status ${accepted.status}); no new job was queued. Poll agents.status with { goalId, tenantId }.`
+          : provisionedSiteId
           ? `code.scaffold v2 job ${accepted.id} queued (${siteKind}); when it finishes, platform-nest commits the tree to provisioned site ${provisionedSiteId} (first fill). Poll agents.status with { goalId, tenantId } for the commit result.`
           : `code.scaffold v2 job ${accepted.id} queued (dry run, ${siteKind}); poll agents.status with { goalId, tenantId } for the file list and CONTRACT.lock.`,
       });
