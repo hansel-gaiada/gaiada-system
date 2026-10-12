@@ -80,9 +80,10 @@ describe.skipIf(!TEST_URL)("invoice-payments decide -> invoice.paid revision (IA
     const invoiceId = await insertInvoice(500);
     const paymentId = await insertPayment(invoiceId, 500);
 
-    // Baseline: the invoice was ISSUED through the real path (PV5-04), which records exactly one 'issued' revision.
+    // Baseline: the invoice was ISSUED through the real path (PV5-04), which records exactly one revision
+    // (approved -> sent, as `status_changed`).
     const baseline = await getRevisions(invoiceId);
-    expect(baseline.map((r) => r.action)).toEqual(["issued"]);
+    expect(baseline.map((r) => r.action)).toEqual(["status_changed"]);
 
     const r = await app.inject({
       method: "POST", url: `/api/${tenant}/invoice-payments/${paymentId}/decide`,

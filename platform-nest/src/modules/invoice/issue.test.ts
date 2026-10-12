@@ -217,7 +217,7 @@ describe.skipIf(!TEST_URL)("PV5-04 — issue an invoice through the ledger", () 
 
       const evt = await row(`SELECT count(*)::int AS n FROM outbox_events WHERE entity_id = $1 AND event_type = 'invoice.issued'`, [id]);
       expect(evt.n).toBe(1);
-      const rev = await row(`SELECT count(*)::int AS n FROM invoice_revisions WHERE invoice_id = $1 AND action = 'issued'`, [id]);
+      const rev = await row(`SELECT count(*)::int AS n FROM invoice_revisions WHERE invoice_id = $1 AND action = 'status_changed' AND 'invoiceNo' = ANY(changed_fields)`, [id]);
       expect(rev.n).toBe(1);
 
       const again = await issue(A, id);

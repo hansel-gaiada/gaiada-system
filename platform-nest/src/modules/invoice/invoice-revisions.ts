@@ -16,8 +16,8 @@
 //   - src/modules/invoice/invoice.controller.ts: create() / setStatus() / approve()
 //   - src/core/contracts.controller.ts: decidePayment() (the ONLY other place invoices.status
 //     moves — 'sent' -> 'paid' once the confirmed payment ledger covers the total)
-//   - src/modules/invoice/issue.ts (PV5-04): issueInvoice() ('approved' -> 'sent', "issued"),
-//     voidIssuedInvoice() ("voided_after_issue") and postConfirmedPayment() ('sent' -> 'paid', called by
+//   - src/modules/invoice/issue.ts (PV5-04): issueInvoice() ('approved' -> 'sent') and
+//     voidIssuedInvoice() ('sent' -> 'void'), both recorded as "status_changed" and postConfirmedPayment() ('sent' -> 'paid', called by
 //     decidePayment for an issued invoice)
 // `src/seed/agency.ts` and `src/seed/portal-workspace.ts` insert invoices directly with no
 // authenticated principal (dev/test bootstrap data, not a live mutation path) — deliberately NOT

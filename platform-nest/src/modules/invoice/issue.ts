@@ -11,7 +11,7 @@
 //      (never arithmetic in a handler, decision 8);
 //   5. write the AR invoice and its lines and post it with `finance_ar_issue_invoice()` (balanced journal);
 //   6. write the invoice-of-record columns and the frozen issuer snapshot, and set `sent` (shown as "Issued");
-//   7. emit `invoice.issued` and record a revision.
+//   7. emit `invoice.issued` and record a revision (`status_changed`, the closed 0108 action list).
 // After this the row is immutable (202610130400's trigger) except status -> paid | void.
 //
 // ── NUMBERS ARE `numeric`, NEVER JS FLOATS ─────────────────────────────────────────────────────────────
@@ -458,7 +458,9 @@ export async function issueInvoice(
       await emitEvent(c, tenantId, "invoice", invoiceId, "invoice.issued", {
         invoiceNo, arInvoiceId: arId, clientId: f.clientId, currency: f.currency, subtotal, taxTotal,
       });
-      await recordInvoiceRevision(c, tenantId, invoiceId, actorId, "issued", before);
+      // `status_changed`: invoice_revisions.action is a closed CHECK list (0108) and issuing IS a status change
+      // (approved -> sent); changed_fields records every invoice-of-record column it set.
+      await recordInvoiceRevision(c, tenantId, invoiceId, actorId, "status_changed", before);
       return issuedView(c, invoiceId, false);
     }),
   );
@@ -552,7 +554,7 @@ export async function voidIssuedInvoice(
       );
       if (upd.rowCount !== 1) throw new ConflictException({ message: "the invoice changed while it was being voided; nothing was written", reason: "conflict" });
       await emitEvent(c, tenantId, "invoice", invoiceId, "invoice.voided", { arInvoiceId: row.arInvoiceId, creditNoteId: cnId, creditNoteNo: cnNo });
-      await recordInvoiceRevision(c, tenantId, invoiceId, actorId, "voided_after_issue", before);
+      await recordInvoiceRevision(c, tenantId, invoiceId, actorId, "status_changed", before);
       return { id: invoiceId, status: "void" as const, creditNoteId: cnId, alreadyVoid: false };
     }),
   );
