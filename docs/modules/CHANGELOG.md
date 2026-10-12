@@ -11,6 +11,20 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### ai-agents `0.11.0` - M5-G5c: an agent run keeps no raw identifiers from a privacy tool call (2026-10-12) - PROTOTYPED
+
+The ai-agents half of M5-G5b (built by the M5 session). No agent holds the `agency_privacy.*` tools today, so live behaviour is unchanged until one does.
+
+- **The policy registry** (`src/sensitive-tools.ts`) is static and opt-in; built-ins cannot be removed. `agency_privacy.find`, `.export` and `.erase` are built in.
+- **What is stored instead:**
+  - Args: the persisted and model-facing copy is `{minimised, hashes, hints}`. The ERP's subject hash and normalisers are ported byte-for-byte, with test vectors computed from the ERP's own code.
+  - Results: reduced to counts, ids and status words.
+- **Scrubbing:** a per-goal scrubber replaces the person's email and phone (raw, case and punctuation variants) in every place they were held: goal and run rows, run events and the SSE bus, the transcript the model sees next, eval traces and episodic memory.
+- The live hub call is unchanged.
+- **Known gap:** the assistant's suspended intent keeps raw args for 15 minutes. That is a platform-nest follow-up.
+- **Verified:** GitHub Actions 38209313115 green (sensitive-tools 21/21, sensitive-run 11/11; ai-agents 340 passed locally).
+  - The DB-gated `runner/store.test.ts` case is skipped in CI's ai-agents job (no Postgres there), so it has not run on Linux. Hence PROTOTYPED.
+
 ### platform-ui `0.96.0` - M5-W2e: the writers' room UI (2026-10-12) - DEV-VERIFIED
 
 - **Editorial panel in the item editor:**
