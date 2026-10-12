@@ -6,7 +6,7 @@
 // (404) when the module is disabled for the tenant, mirroring ModuleEnabledGuard, (4) a bad
 // `origin` is a 400, (5) decision-shape validation still lives in the origin handler (façade
 // doesn't reimplement it) — an invalid decision for a given origin still 400s.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { buildApp } from "../main";
@@ -18,6 +18,15 @@ import { seedAutomationAccounts } from "../seed/automation";
 import { agencyModule } from "../modules/agency";
 import { newId, withTenants } from "../db";
 import { registerExecutableApproval, resetExecutableApprovals } from "./approval-executables";
+import * as githubAppService from "./github/github-app.service";
+import { GITHUB_CREATE_REPO_WORKFLOW } from "./github/repo-creation";
+
+// GH-12 façade tests: `githubRequest` is the ONLY thing mocked (the GH-01/GH-02 chokepoint, same discipline as
+// github/repo-creation.db.test.ts); Postgres, Cerbos and the ledger are real.
+vi.mock("./github/github-app.service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./github/github-app.service")>();
+  return { ...actual, githubRequest: vi.fn() };
+});
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -234,6 +243,76 @@ describe.skipIf(!TEST_URL)("POST /api/:tenantId/approvals/:id/decide — unified
       [id],
     );
     expect(ev.rowCount).toBe(1);
+  });
+
+  // ── GH-12: origin='github' (a repo-creation request) is decidable through the façade ────────────
+  async function fileGithubRow(name: string, requestedBy: string): Promise<string> {
+    const id = newId();
+    await withTenants([co], (c) =>
+      c.query(
+        `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, origin_site)
+         VALUES ($1,$2,$3,'github.createRepo',$4,'high',$5,$6,'github',$7)`,
+        [id, co, GITHUB_CREATE_REPO_WORKFLOW, JSON.stringify({ name, private: true }), `create GitHub repo '${name}'`, requestedBy, config.originSite],
+      ),
+    );
+    return id;
+  }
+  const statusOf = async (id: string) => (await adminPool().query(`SELECT status FROM automation_approvals WHERE id = $1`, [id])).rows[0].status;
+
+  describe("origin=github", () => {
+    const savedOrg = config.githubOrg;
+    beforeEach(() => {
+      vi.mocked(githubAppService.githubRequest).mockReset();
+      config.githubOrg = "gaiadabali";
+    });
+    afterAll(() => { config.githubOrg = savedOrg; });
+
+    it("a VALID body from a plain member is DENIED (403), the row stays pending and GitHub is never called (authz, not validation)", async () => {
+      const id = await fileGithubRow("facade-denied", admin);
+      const r = await app.inject({ method: "POST", url: `/api/${co}/approvals/${id}/decide`, headers: asUser(member), payload: { origin: "github", decision: "approved" } });
+      expect(r.statusCode).toBe(403);
+      expect(await statusOf(id)).toBe("pending");
+      expect(githubAppService.githubRequest).not.toHaveBeenCalled();
+    });
+
+    it("approve: company_admin decides via the façade, the row is approved and the GH-12 executor reaches GitHub exactly once", async () => {
+      vi.mocked(githubAppService.githubRequest).mockResolvedValue({
+        data: { full_name: "gaiadabali/facade-ok", html_url: "https://github.com/gaiadabali/facade-ok", default_branch: "main" },
+        status: 201,
+        rateLimit: { limit: 12500, remaining: 12499, resetAtMs: null },
+      });
+      const id = await fileGithubRow("facade-ok", member);
+      const r = await app.inject({ method: "POST", url: `/api/${co}/approvals/${id}/decide`, headers: asUser(admin), payload: { origin: "github", decision: "approved" } });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ ok: true });
+      expect(await statusOf(id)).toBe("approved");
+      expect(githubAppService.githubRequest).toHaveBeenCalledTimes(1);
+      const ledger = await adminPool().query(
+        `SELECT metadata->>'outcome' AS outcome FROM activities WHERE tenant_id = $1 AND verb = 'github.create_repo' AND metadata->>'repo' = 'gaiadabali/facade-ok'`,
+        [co],
+      );
+      expect(ledger.rows.map((x) => x.outcome)).toContain("succeeded");
+    });
+
+    it("reject: the row is rejected and GitHub is never called", async () => {
+      const id = await fileGithubRow("facade-rejected", member);
+      const r = await app.inject({ method: "POST", url: `/api/${co}/approvals/${id}/decide`, headers: asUser(admin), payload: { origin: "github", decision: "rejected" } });
+      expect(r.statusCode).toBe(200);
+      expect(await statusOf(id)).toBe("rejected");
+      expect(githubAppService.githubRequest).not.toHaveBeenCalled();
+    });
+
+    it("the façade authorizes against the row's REAL origin: claiming origin=github on a non-github row gets no softer gate", async () => {
+      const created = await app.inject({
+        method: "POST", url: `/api/${co}/automation-approvals`, headers: asWorkflow("wf:new-client-seed"),
+        payload: { workflowId: "wf:new-client-seed", toolName: "money.transfer", impact: "high", reason: "origin-claim test" },
+      });
+      const id = created.json().id;
+      const denied = await app.inject({ method: "POST", url: `/api/${co}/approvals/${id}/decide`, headers: asUser(member), payload: { origin: "github", decision: "approved" } });
+      expect(denied.statusCode).toBe(403);
+      expect(await statusOf(id)).toBe("pending");
+      expect(githubAppService.githubRequest).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects an invalid origin (400) and does not touch any row", async () => {
