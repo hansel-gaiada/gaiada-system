@@ -158,3 +158,61 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_invoice_delete"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+
+    # ══════════ PV5-02 (2026-10-12) — issuing an invoice through the ledger. TWO NEW ACTIONS on this
+    # existing kind (no new kind). Every rule above is byte-for-byte unchanged; these are appended.
+    #
+    # `issue` (PV-D7): numbers an `approved` invoice and posts the matching ledger AR invoice in one
+    # transaction. Held by exactly the roles that hold `approve` today (company_admin, manager), at
+    # the same reach (`inTenant && notLow`). It is NOT maker/checker-bound: the two-person step is
+    # `approve`, already done before an invoice can be issued, and the issuer need not differ from the
+    # creator. So, unlike `approve`, a flat permission mirror CAN express it (no attribute-instance
+    # condition to lose), and one is wired below: that is also how the permission-native `owner`
+    # reaches it (owner has no role rules; its bundle is company_admin's).
+    - actions: ["issue"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # `void_issued`: reverses an ISSUED invoice in the ledger (credit note for the full amount). The
+    # tracker-level `delete`/`update` cannot do this once `issued_at` is set. company_admin only on the
+    # role arm; `owner` reaches it by the permission arm below (owner's bundle is company_admin's), so
+    # the pair is exactly company_admin + owner (+ the platform_admin wildcard at the top of this file).
+    # `manager` deliberately does NOT hold it: a manager may issue, but undoing a legal document in the
+    # books is the company tier's call.
+    - actions: ["void_issued"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Bots and automation never issue or void an issued invoice, for ANY grant (T7's `roles: ["user"]`
+    # shape, resource_webdesk_content_item.yaml): under deny-overrides this beats the platform_admin
+    # wildcard and every ALLOW, mirrors included. An agent reaches these two only through a D14
+    # proposal; once a human approves, the call re-runs as that human (approval-execute.ts invariant 1),
+    # who must hold the action themselves. An n8n workflow is an `automation` principal and can never
+    # issue (PV5-12). `has()` makes a raw caller that omits `kind` evaluate to false (no deny) rather
+    # than raise a CEL error; principalPayload() always sends it, "" when unknown.
+    #
+    # WHAT THIS DOES NOT COVER: an agent running under a human's own identity envelope assembles as
+    # that human (kind `employee`), so this DENY cannot see it. That path is held back by the tool
+    # registry's D14 impact tier (PV5-12), not by this rule.
+    - actions: ["issue", "void_issued"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # Permission-arm mirrors for the two new actions (same generic global-or-company shape as the four
+    # mirrors above). Both are safe: neither role-arm rule carries an attribute-instance condition the
+    # flat `perms` array would lose, and the mirror is no wider than either holder's role arm.
+    - actions: ["issue"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_invoice_issue"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["void_issued"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_invoice_void_issued"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
