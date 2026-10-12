@@ -11,6 +11,35 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.108.0` - M6-P4j: the contract pin runs over the real control channel (WSK-D81) (2026-10-13) - PROTOTYPED
+
+- **Bug (live 2026-10-13):** provision completion could never pin a contract snapshot, so no provisioned site got a `CONTRACT.lock` and `code.scaffold` could not run.
+  - **Wrong channel:** completion, the console reads and the snapshots controller used the WSK-19 bearer stub (`WEBDEV_CONTROL_BASE_URL`, unset in production). The configured four-layer client was never used for it.
+  - **Unreachable URLs:** the artifact URLs in the contract body are presigned against WebDesk's internal object store, unreachable from the ERP (`ENOTFOUND rustfs`).
+- **`webdesk-control-client.ts`:**
+  - every response carries `bodyBytes` (the exact bytes; `bodyText` and `json` are unchanged; optional in the type only so older test doubles compile);
+  - `getContractArtifact(tenantSlug, contractVersion, artifact)` reads the new WebDesk route;
+  - new `binaryResponse` request flag: `accept: */*`, and a 25 MiB response cap instead of 8 MiB, for that call only (reads only).
+- **New `contract-fetch-webdesk.ts`:** `WebdeskChannelContractProvider` (key `webdesk-control`). It validates the bundle with the same validator as the stub (now exported), remembers which artifact each returned URL stands for, and fetches the bytes through the client; it never requests a URL. An unknown URL is refused.
+- **Error mapping:**
+  - not configured -> `ContractControlNotConfiguredError`;
+  - transport, token and breaker-open errors, and any non-2xx -> `WebdevControlEgressError` (credential-free). The bundle read says "returned 404" as the stub did, because the completion port reads that as "contract not published yet".
+- **New `contract-control-provider.ts`:** `resolveContractControlProvider()`: the real channel when `WEBDESK_CONTROL_BASE_URL` is set, else the stub when `WEBDEV_CONTROL_BASE_URL` is set (dev), else not configured. The three call sites (`pinContractSnapshot`, `resolveConsoleProvider`, the snapshots controller) use it and keep their test overrides and not-configured mappings.
+- **No new env, no migration.** The mirror still verifies `contentHash` and the block-library sha256 over the bytes it fetched.
+- **Tests:** provider and selector unit tests, client `bodyBytes` and binary-read wire tests (TLS fixture), an egress-inventory row, and a DB-backed refresh over the real-channel provider. Not run locally (no Docker, no installed dependencies); the server gate runs them.
+
+### webdesk `0.26.0` - M6-P4j: contract artifact bytes over the control channel (WSK-D81) (2026-10-13) - PROTOTYPED
+
+- **New route:** `GET /control/v1/tenants/:tenantSlug/contract/:contractVersion/artifacts/:artifact` on the existing `ContractController`.
+  - `:artifact` is `openapi`, `sdkTs`, `sdkPhp`, `contractMd` or `blockLibrary` (anything else: 400).
+  - Raw bytes with `content-type` and `content-length`; 25 MiB cap (larger: 500, `contract-artifact-too-large`).
+  - A version this tenant has no artifacts for, or an artifact absent for it (`sdkPhp` and `blockLibrary` legitimately can be): 404, `contract-artifact-not-found`. The block library's key comes from `latest.json`, which only describes the latest version, so an older version has none.
+  - An inactive or unknown tenant: 404.
+- **Same capability as `contract.read`:** same guards, scope (`webdesk:read`) and audit command; the artifact and version go in the audit args, with the outcome. No new command, no policy or command-registry change, no WS4.
+- **Why:** the presigned URLs in the contract body name WebDesk's internal object store, unreachable from the ERP across the airlock (WSK-D81). The URLs stay in the body unchanged for in-estate consumers.
+- **`ContractReadService.readArtifact`** resolves the key with the same `artifactKey` rule it presigns with; the version must be plain semver, so nothing else reaches an object key.
+- **Tests:** a no-service spec for the service and handler (`contract-artifact-route.spec.ts`), and HTTP cases added to `codegen-contract-controller.spec.ts` (needs the DB and storage containers; server gate).
+
 ### platform-ui `0.105.0` - M5-V5-d: the Experiments tab in Website → Analytics (2026-10-13) - PROTOTYPED
 
 - **List:** in server order, with the status, the goal, the visitors needed per variant and the projected days, all in words.
