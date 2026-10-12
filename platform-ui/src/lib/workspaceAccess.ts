@@ -25,6 +25,7 @@ import {
   type Gate, type Workspace, type WorkspaceRow,
 } from "@/lib/workspaces";
 import type { IconName } from "@/components/shell/icons";
+import type { Area } from "@/lib/areas";
 
 /** The parts of an org node this file reads (`lib/org.ts`'s `OrgNode`, which is server-only). */
 export interface OrgTreeNode {
@@ -160,6 +161,14 @@ export function resolveMyWorkspaces(input: { me: Me; tenantId: string | null; ro
   for (const r of own) if (!mine.some((m) => m.workspace.key === r.workspace.key && m.deptId === r.deptId)) mine.push(r);
   const home: HomeArea = mine.length > 0 ? { kind: "workspace", ref: mine[0] } : { kind: "company" };
   return { home, mine, all };
+}
+
+/** The area `resolveArea` (`lib/areas.ts`) falls back to: the home workspace by its department id, or
+ *  by its slug when it has no org node yet, else the Company area. */
+export function homeArea(home: HomeArea): Area {
+  if (home.kind === "company") return { kind: "company" };
+  const { workspace, deptId } = home.ref;
+  return deptId ? { kind: "workspace", deptId } : { kind: "workspace", slug: workspace.key };
 }
 
 // ── What a person is offered ──────────────────────────────────────────────────────────────────────
