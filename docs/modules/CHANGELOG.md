@@ -30,6 +30,21 @@ local stack). None of these mean "production-done".
 - `/v` and `/f` stay unrouted at the edge until V3-c.
 - `go test -race` is green locally. The Postgres contract test runs in CI.
 
+### platform-nest `0.104.0` - M5-V3-f: two sensitive Cerbos actions for visitor data, `read_visitors` and `view_replay` (2026-10-13) - PROTOTYPED
+
+- Both are new actions on the existing `resource_search_property` kind (design §4.8, §6.3, O5).
+- **Who holds them:**
+  - The role arm gives both to the search manager and the served company's admin, in tenant.
+  - Plain search staff keep aggregate `read` only.
+  - No member, client or webdev role gets them.
+- **Permission keys:** `search.property.read_visitors` and `search.property.view_replay`. Both are sensitive and UI-grantable, each in its own group, and each mirror grants exactly its own action.
+  - Neither implies the other, and `read` implies neither.
+- **Migration `202610131730_iam_m5_v3f_visitor_actions`** seeds the catalog rows and the bundles for `platform_admin`, `company_admin`, `search_manager` and `owner`, and checks the exact holder set in both directions.
+- **Pinned counts:** catalog 443→445, bundle pairs 1934→1942.
+- **Tests:** a Cerbos YAML matrix (23 principals × 4 resources × 7 actions), a live Cerbos test and a DB catalog test. PERMISSION-CONTRACT §33.
+- **Deploy:** restart Cerbos, then probe that staff are denied and a manager is allowed.
+- No routes yet (V3-g, V6-b).
+
 ### infra `0.13.9` - M5-V2-c: the insights-collector in the Umami compose project on sumopod (files only, not deployed) (2026-10-13) - PROTOTYPED
 
 - **`infra/sumopod/umami/docker-compose.yml`** gains two services, both on the `internal` network only (no egress):
