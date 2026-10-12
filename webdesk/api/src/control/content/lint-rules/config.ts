@@ -3,10 +3,12 @@
 // rule reads its number or list from a ContentRulesConfig, so a client tenant is served by passing its own
 // config, never by editing a rule.
 //
-// Where the config comes from today: the caller passes it. There is no per-site settings store yet, and
-// the composition's `lint` object is a closed key set (vocabulary 1.1.0), so a tenant-declared
-// `lint.content` needs a vocabulary MINOR. Until then the service passes DEFAULT_CONTENT_RULES.
-// `resolveContentRules` is the one place a partial, untrusted override is sanitised.
+// Where the config comes from (M5-W3c, vocabulary 1.3.0): the collection's composition may declare
+// `lint.content`; `resolveContentRulesFromComposition` maps it onto this config. ABSENT member (or an
+// absent key inside it) = DEFAULT_CONTENT_RULES, so a site that declares nothing is served byte-identically
+// to before. Save, item.get and the sign-off snapshot all call that one function, so they cannot disagree.
+// `resolveContentRules` is the one place a partial, untrusted FLAT override is sanitised.
+import { validateContentLintSettings } from "../../../delivery/vocabulary/composition";
 
 export interface ContentRulesConfig {
   /** Master switch: false = no `content` member is added to the lint report. */
@@ -39,6 +41,8 @@ export interface ContentRulesConfig {
   bannedPhrases: Record<string, string[]>;
   /** Paragraphs longer than this many words are "long" for the AEO short-paragraph factor. */
   shortParagraphMaxWords: number;
+  /** Rule ids (see CONTENT_LINT_RULE_IDS; `aeo` is the score) the composition switched off. Empty by default. */
+  disabledRules: string[];
 }
 
 export const DEFAULT_CONTENT_RULES: ContentRulesConfig = {
@@ -67,6 +71,7 @@ export const DEFAULT_CONTENT_RULES: ContentRulesConfig = {
     ],
   },
   shortParagraphMaxWords: 80,
+  disabledRules: [],
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -106,5 +111,57 @@ export function resolveContentRules(override?: unknown): ContentRulesConfig {
     twin: locMap(override.twin, d.twin),
     bannedPhrases: locMap(override.bannedPhrases, d.bannedPhrases),
     shortParagraphMaxWords: num(override.shortParagraphMaxWords, d.shortParagraphMaxWords, 1, 10000),
+    disabledRules: strList(override.disabledRules, d.disabledRules),
+  };
+}
+
+type Dict = Record<string, unknown>;
+const lowerKeys = (m: unknown): Record<string, string[]> => {
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(m as Dict)) out[k.toLowerCase()] = (v as string[]).slice();
+  return out;
+};
+const pick = <T>(v: unknown, fallback: T): T => (v === undefined ? fallback : (v as T));
+
+/**
+ * Map a collection composition's `lint.content` (vocabulary 1.3.0) onto a ContentRulesConfig.
+ *  - absent member  -> DEFAULT_CONTENT_RULES itself (the same object: nothing is recomputed, nothing differs);
+ *  - absent key     -> that key's default;
+ *  - an invalid stored value (the write plane refuses it, so only a hand-edited row can hold one) -> the
+ *    defaults, wholesale. It never throws, and never half-applies a setting it could not validate.
+ * A `twin` / `phrases` map REPLACES the default map (a site that sets `phrases: { id: [...] }` has no English list).
+ */
+export function resolveContentRulesFromComposition(composition: { lint?: { content?: unknown } } | null | undefined): ContentRulesConfig {
+  const raw = composition?.lint?.content;
+  if (raw === undefined) return DEFAULT_CONTENT_RULES;
+  try {
+    if (validateContentLintSettings("lint.content", raw).length > 0) return DEFAULT_CONTENT_RULES;
+  } catch {
+    return DEFAULT_CONTENT_RULES;
+  }
+  const c = raw as Dict;
+  const rules = (c.rules ?? {}) as Record<string, Dict>;
+  const d = DEFAULT_CONTENT_RULES;
+  const meta = rules.meta ?? {};
+  const af = rules["answer-first"] ?? {};
+  const qh = rules["question-headings"] ?? {};
+  return {
+    enabled: pick(c.enabled, d.enabled),
+    longFormMinWords: pick(c.longFormMinWords, d.longFormMinWords),
+    metaTitleMax: pick(meta.titleMax, d.metaTitleMax),
+    metaDescriptionMin: pick(meta.descriptionMin, d.metaDescriptionMin),
+    metaDescriptionMax: pick(meta.descriptionMax, d.metaDescriptionMax),
+    answerFirstMinWords: pick(af.minWords, d.answerFirstMinWords),
+    answerFirstMaxWords: pick(af.maxWords, d.answerFirstMaxWords),
+    questionHeadingShare: pick(qh.minShare, d.questionHeadingShare),
+    minInternalLinks: pick(rules["internal-links"]?.min, d.minInternalLinks),
+    questionStarters: qh.starters === undefined ? d.questionStarters : (qh.starters as string[]).map((s) => s.toLowerCase()),
+    h1Field: pick(c.h1Field, d.h1Field),
+    primaryKeywordField: pick(c.primaryKeywordField, d.primaryKeywordField),
+    altFields: c.altFields === undefined ? d.altFields : (c.altFields as string[]).slice(),
+    twin: rules["id-twin"]?.twin === undefined ? d.twin : lowerKeys(rules["id-twin"].twin),
+    bannedPhrases: rules["banned-language"]?.phrases === undefined ? d.bannedPhrases : lowerKeys(rules["banned-language"].phrases),
+    shortParagraphMaxWords: pick(rules.aeo?.shortParagraphMaxWords, d.shortParagraphMaxWords),
+    disabledRules: Object.entries(rules).filter(([, r]) => r.enabled === false).map(([id]) => id).sort(),
   };
 }

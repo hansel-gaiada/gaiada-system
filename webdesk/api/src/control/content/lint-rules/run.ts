@@ -29,7 +29,9 @@ export function lintContent(
   }
   const findings: ContentFinding[] = [];
   const unavailable: ContentLintReport["unavailable"] = [];
+  const off = new Set(cfg.disabledRules);
   for (const rule of rules) {
+    if (off.has(rule.id)) continue; // switched off by the site's composition (lint.content.rules.<id>.enabled)
     try {
       findings.push(...rule.run(view, cfg));
     } catch (e) {
@@ -37,7 +39,7 @@ export function lintContent(
     }
   }
   let aeo: AeoScore | null = null;
-  try {
+  if (!off.has("aeo")) try {
     const blocks = Array.isArray(input.blocks) ? input.blocks : [];
     const hasFaqBlock = blocks.some((b) => typeof b === "object" && b !== null && (b as { type?: unknown }).type === "faq");
     aeo = aeoScore(view, cfg, hasFaqBlock);

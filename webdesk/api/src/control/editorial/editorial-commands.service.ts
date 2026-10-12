@@ -31,7 +31,7 @@ import { computeCommandHash } from "../auth/ws4-assertion";
 import { ContentCommandsService } from "../content/content-commands.service";
 import { problems } from "../content/content-problem";
 import { validateCollectionComposition, type CollectionComposition } from "../../delivery/vocabulary/composition";
-import { DEFAULT_CONTENT_RULES, lintContent } from "../content/content-lint";
+import { lintContent, resolveContentRulesFromComposition } from "../content/content-lint";
 import { evaluateTransition, type TransitionCommand } from "./editorial-model";
 import { editorialProblems } from "./editorial-problems";
 import {
@@ -285,9 +285,11 @@ export class EditorialCommandsService {
         `SELECT locale FROM content_items WHERE site_id = $1 AND localization_group_id = $2 AND deleted_at IS NULL`,
         [ctx.siteId, item.groupId],
       );
+      const cfg = resolveContentRulesFromComposition(col.rows[0].schema as CollectionComposition); // M5-W3c: the site's settings
+      if (!cfg.enabled) return { version, computedAt }; // the site switched the content checks off: no `content` member
       const report = lintContent(
         { blocks: v.rows[0].blocks, seo: v.rows[0].seo, composition: col.rows[0].schema as CollectionComposition, locale: item.locale, groupLocales: twins.rows.map((r) => r.locale) },
-        DEFAULT_CONTENT_RULES,
+        cfg,
       );
       const snap: Record<string, unknown> = { version, computedAt, content: report };
       if (Buffer.byteLength(JSON.stringify(snap)) > SNAPSHOT_MAX_BYTES) {
