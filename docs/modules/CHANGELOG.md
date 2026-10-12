@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.111.1` - M6-P4o: the contract mirror hashes exactly as WebDesk does (2026-10-13) - PROTOTYPED
+
+- **The bug:** found live by the M6 P4 gate right after 368 made the pin reach WebDesk (M6-P4j).
+  - Every pin was refused as `contract_hash_mismatch`.
+  - The ERP hashed its own reading of §05: compact JSON with key `openapi`.
+  - WebDesk's generator hashes `stableStringify` of the digests keyed `openapiJson`: sorted keys, 2-space indent, trailing newline.
+  - Proved on live bytes for `m6-gate-static-prd`: WebDesk's form reproduced the claimed `sha256:a0e75f24…` exactly, and the old ERP form gave `sha256:5618a218…`.
+- **The fix:** new `contentHashFromDigests()` in `contract-snapshot.service.ts` computes WebDesk's form.
+  - A missing PHP SDK omits the `sdkPhp` key; it is no longer hashed as `null`.
+  - `computeContentHash()` keeps returning the ERP-keyed manifest (stored as `artifacts.hashes`) and derives the hash through it.
+  - No live snapshot row exists yet, so nothing on file changes.
+- **Tests:**
+  - `contract-content-hash.test.ts` pins the live digests and hash (5 tests).
+  - `webdesk/api/test/contract-content-hash-parity.spec.ts` pins the same constants against WebDesk's own `stableStringify` (no WebDesk version bump: test only).
+  - A canonical-form change on either side now fails a test on that side.
+
 ### platform-ui `0.107.0` - M5-V6-c: the session-replay player and the recordings list (2026-10-13) - PROTOTYPED
 
 - **The visitor detail** shows recordings (date, length, pages) only to a holder of `search.replay.view`. Without it there is no card and no read.
