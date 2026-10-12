@@ -74,7 +74,13 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
   it("every tool requires a verified caller", () => {
     // These read and propose changes to who holds which authority. A low-assurance door here would be
     // wider than the human UI's, which is the line the agentic-native bar draws.
-    for (const t of tools) expect(t.minAssurance, t.name).toBe("verified");
+    // ONE deliberate exception (PV-D28): the two per-client billing LIST reads the daily wf:billing-chaser calls.
+    // An n8n principal is capped at "low" and never elevated, so at "verified" the workflow the owner ruled in
+    // would be refused on assurance before its allow-list scope is consulted. Reads only; the Cerbos read check
+    // at the endpoint is unchanged. This set is exact: widening it is a decision, not a drive-by.
+    const LOW_READS = new Set(["contracts.list", "invoicePayments.list"]);
+    for (const t of tools) expect(t.minAssurance, t.name).toBe(LOW_READS.has(t.name) ? "low" : "verified");
+    for (const n of LOW_READS) expect(byName.get(n)?.write, n).toBeUndefined();
   });
 
   it("the path templates name every parameter their inputSchema requires", () => {

@@ -59,6 +59,16 @@ describe("PV3-06 · the billing tool defs (no database)", () => {
     }
   });
 
+  // PV-D28: an n8n principal is capped at "low" assurance and never elevated, so the two lists the daily
+  // wf:billing-chaser reads must be "low" or the hub refuses it on assurance before its scope is consulted.
+  // Nothing else is lowered: every write, and `contracts.get`, stays "verified".
+  it("🔴 assurance: exactly the two list reads are \"low\" (the billing chaser's); every write and contracts.get stay \"verified\"", () => {
+    for (const n of ["contracts.list", "invoicePayments.list"]) expect(defs.get(n)!.minAssurance, n).toBe("low");
+    for (const n of names.filter((x) => !["contracts.list", "invoicePayments.list"].includes(x))) {
+      expect(defs.get(n)!.minAssurance, n).toBe("verified");
+    }
+  });
+
   it("🔴 the three medium/high writes are registry-listed (an approved row executes, it never sits at not_applicable)", () => {
     for (const n of ["contracts.send", "contracts.countersign", "invoicePayments.decide"]) {
       expect(!!getExecutable(n), `${n} must have a D14 executor`).toBe(true);
