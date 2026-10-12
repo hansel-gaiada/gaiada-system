@@ -563,6 +563,7 @@ Browser-facing route handlers (`route.ts`) — these exist only where the browse
 - `/api/admin/bot/session/events`
 - `/api/admin/bot/skills`
 - `/api/assistant/threads/[id]/stream`
+- `/api/files/[fileId]`
 - `/api/meetings/[id]/audio`
 - `/api/meetings/[id]/status`
 - `/api/portal/stream`
