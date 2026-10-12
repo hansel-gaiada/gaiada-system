@@ -4,7 +4,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 import {
   AGENCY_PRIVACY_TOOL_NAMES, MINIMISED_MARKER, SUBJECT_HASH_DOMAIN, SensitiveScope, emailHint, getSensitiveToolPolicy,
-  holdsSensitiveTool, listSensitiveToolNames, normalizeEmail, normalizePhone, phoneHint, registerSensitiveToolPolicy,
+  holdsSensitiveTool, intentArgsFor, listSensitiveToolNames, normalizeEmail, normalizePhone, phoneHint, registerSensitiveToolPolicy,
   subjectHash, unregisterSensitiveToolPolicy, type SensitiveToolPolicy,
 } from "./sensitive-tools";
 
@@ -219,10 +219,53 @@ describe("SensitiveScope: scrubbing the literals a policy tool call revealed", (
   });
 });
 
+describe("M5-G5d: intentArgsFor, the shape a SUSPENDED call is handed over in", () => {
+  const APPROVAL = "33333333-3333-4333-8333-333333333333";
+
+  it("a policy tool gets the ERP's already-minimised shape: kind from the tool name, hashes and hints, safe ids", () => {
+    const out = intentArgsFor("agency_privacy.erase", {
+      tenantId: "t1", email: "  Jane.Doe@Example.com ", phone: "+62 812-3456-7890", approvalId: APPROVAL, query: "jane.doe@example.com", reason: "because",
+    });
+    expect(out).toEqual({
+      minimised: MINIMISED_MARKER, kind: "erase", identifiers: ["email", "phone"], tenantId: "t1", approvalId: APPROVAL,
+      subject: {
+        emailHash: subjectHash("jane.doe@example.com"), emailHint: "***@example.com",
+        phoneHash: subjectHash("6281234567890"), phoneHint: "***90",
+      },
+    });
+    const text = JSON.stringify(out).toLowerCase();
+    for (const f of ["jane.doe", "6281234567890", "812-3456", "because"]) expect(text).not.toContain(f);
+    expect(intentArgsFor("agency_privacy.find", { phone: "0812 3456 789" })).toMatchObject({ kind: "find", identifiers: ["phone"] });
+    expect(intentArgsFor("agency_privacy.export", { email: "a@b.co" })).toMatchObject({ kind: "export", identifiers: ["email"] });
+  });
+
+  it("is idempotent in effect: an approvalId-only call keeps just the id and no subject", () => {
+    expect(intentArgsFor("agency_privacy.erase", { approvalId: APPROVAL })).toEqual({
+      minimised: MINIMISED_MARKER, kind: "erase", identifiers: [], approvalId: APPROVAL,
+    });
+  });
+
+  it("a present-but-malformed identifier empties the whole shape (no silent narrowing); an unsafe id is dropped", () => {
+    expect(intentArgsFor("agency_privacy.erase", { email: "jane@example.com", phone: "nope", approvalId: APPROVAL })).toEqual({
+      minimised: MINIMISED_MARKER, kind: "erase", identifiers: [],
+    });
+    expect(intentArgsFor("agency_privacy.erase", { email: "not an email" })).toEqual({ minimised: MINIMISED_MARKER, kind: "erase", identifiers: [] });
+    expect(intentArgsFor("agency_privacy.erase", { email: "a@b.co", tenantId: "x y; drop" })).not.toHaveProperty("tenantId");
+    // never throws on junk
+    for (const junk of [{}, { email: 5 }, { email: ["a@b.co"] }, { phone: {} }] as Record<string, unknown>[]) expect(() => intentArgsFor("agency_privacy.erase", junk)).not.toThrow();
+  });
+
+  it("a tool with no policy gets the SAME args object back (regression)", () => {
+    const args = { email: "jane.doe@example.com", other: 1 };
+    expect(intentArgsFor("crm.lookup", args)).toBe(args);
+  });
+});
+
 describe("the registry is generic: another tool can opt in; a tool with no policy is untouched", () => {
   const fixture: SensitiveToolPolicy = {
     toolName: "crm.lookupPerson",
     minimiseArgs: (a) => ({ minimised: "fixture.v1", nameLen: typeof a.name === "string" ? a.name.length : 0 }),
+    minimiseIntentArgs: () => ({ minimised: "fixture.v1" }),
     minimiseResult: (r) => JSON.stringify({ minimised: "fixture.v1", bytes: r.length }),
     secretsOf: (a) => (typeof a.name === "string" ? [{ kind: "text", value: a.name }] : []),
   };

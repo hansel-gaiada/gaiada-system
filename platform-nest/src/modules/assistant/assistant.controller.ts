@@ -48,7 +48,7 @@ import {
 import { assembleCapabilities } from "./capabilities";
 import { resolveCitation } from "./citations";
 import { createHandoff, fetchEpisodicHistory, fetchRoster, listHandoffsForThread } from "./handoffs";
-import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, type ToolCallIntent } from "./write-intents";
+import { confirmWriteIntent, dismissWriteIntent, reapExpiredIntents, storableIntentArgs, type ToolCallIntent } from "./write-intents";
 import { notifyApprovalFiled } from "../../core/approval-filing";
 import { deriveServerThreadTitle } from "./thread-title";
 import { lockAssistantThread } from "./thread-lock";
@@ -795,7 +795,7 @@ export class AssistantController {
           // T3b (§7.2.1/§7.2.4) — the draft write-intent row, in the SAME transaction as the ledger
           // row it belongs to, and AFTER `persistToolCalls` above so `tool_call_id`'s composite FK
           // (migration 0085) resolves against a row that already exists. `tool_args` here are the
-          // REAL (unredacted) args from `turn.intent` — the ONLY durable pre-filing home for them
+          // args from `turn.intent` (M5-G5d: minimised for a tool with an approval-args policy; otherwise the real ones) — the ONLY durable pre-filing home for them
           // (§7.2.4's custody-chain step 2); the ledger row `persistToolCalls` just wrote carries only
           // the redacted copy. `owner_user_id` is `authorityUserId` — the SAME chatting-user id every
           // other row in this transaction is attributed to, never read off anything client-supplied.
@@ -814,7 +814,8 @@ export class AssistantController {
                 authorityUserId,
                 turn.intent.agent,
                 turn.intent.toolName,
-                JSON.stringify(turn.intent.args ?? {}),
+                // M5-G5d: the writer's own gate. The broker already reduced a policy tool's args; this is idempotent.
+                JSON.stringify(storableIntentArgs(turn.intent.toolName, turn.intent.args)),
                 turn.intent.impact,
                 turn.intent.expiresAt,
                 config.originSite,

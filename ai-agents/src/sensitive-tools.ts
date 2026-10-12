@@ -19,6 +19,11 @@
 // RESULT {minimised, outcome?, kind?, replayed?, approvalId?, requestId?, counts?, leads: [{leadId, status}]?,
 //        outOfScopeLeadIds?}: counts, ids and status words only. No names, emails, phones, answers or free text.
 //
+// A FOURTH COPY, M5-G5d: a call SUSPENDED with `fileOnSuspend:false` is handed to the ERP assistant as a
+// `SuspendedIntent` (parked in memory, returned on `GET /goals/:id`). For a policy tool its args are
+// `intentArgsFor(tool, args)`: the ERP's own already-minimised shape (see `minimiseIntentArgs`), so the confirm
+// chip can file the approval from it and no raw identifier ever leaves this service in an intent.
+//
 // ── THREE LAYERS (a policy is the first; the other two catch what it cannot) ─────────────────────────
 // 1. STRUCTURED: a call to a policy tool is recorded in its minimised form (step detail, trace, transcript).
 // 2. LITERAL SCRUB: once a policy tool is called, the real identifiers are registered with the goal's
@@ -111,6 +116,13 @@ export interface SensitiveToolPolicy {
   minimiseResult(result: string): string;
   /** The real values in these args, so the scope can scrub them from free text. */
   secretsOf(args: Record<string, unknown>): SecretLiteral[];
+  /**
+   * M5-G5d. PURE, never throws. The args of a SUSPENDED call (`SuspendedIntent.args`) in the shape the ERP's own
+   * approval-args policy accepts as already minimised (platform-nest `core/approval-arg-minimisers.ts`), so the
+   * assistant can store it and later file the approval WITHOUT this service ever handing over the real value.
+   * A different shape from `minimiseArgs` (the record shape): that one is ours, this one is the ERP's input.
+   */
+  minimiseIntentArgs(args: Record<string, unknown>): Record<string, unknown>;
 }
 
 const policies = new Map<string, SensitiveToolPolicy>();
@@ -134,6 +146,15 @@ export function getSensitiveToolPolicy(toolName: string): SensitiveToolPolicy | 
 
 export function listSensitiveToolNames(): string[] {
   return [...policies.keys()];
+}
+
+/**
+ * M5-G5d. The args a suspended call may be HANDED OVER with (`SuspendedIntent.args`): the policy's ERP-shaped copy
+ * for a policy tool, the args themselves (untouched, same object) for every other tool.
+ */
+export function intentArgsFor(tool: string, args: Record<string, unknown>): Record<string, unknown> {
+  const p = policies.get(tool);
+  return p ? p.minimiseIntentArgs(args) : args;
 }
 
 /** True when an agent's allow-list names at least one policy tool (the scope is then seeded from the goal). */
@@ -164,6 +185,43 @@ function minimiseAgencyPrivacyArgs(args: Record<string, unknown>): Record<string
   const phone = validPhone(a.phone);
   if (phone) { hashes.phoneHash = subjectHash(phone); hints.phoneHint = phoneHint(phone); }
   return { minimised: MINIMISED_MARKER, hashes, hints };
+}
+
+const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const KIND_OF_TOOL: Readonly<Record<string, "find" | "export" | "erase">> = Object.freeze({
+  "agency_privacy.find": "find",
+  "agency_privacy.export": "export",
+  "agency_privacy.erase": "erase",
+});
+
+/**
+ * M5-G5d: the suspended call's args as the ERP's `agency_privacy.*` args policy takes them as ALREADY minimised
+ * (platform-nest `core/agency-privacy.filing.ts` `minimiseAgencyPrivacyArgs`, the `alreadyMinimised` branch):
+ * `{minimised, kind, identifiers, subject: {emailHash?, emailHint?, phoneHash?, phoneHint?}, tenantId?, approvalId?}`.
+ * Allow-list again. The ERP re-validates every field, so a forged shape gains nothing there.
+ *
+ * A value the ERP's route rules would refuse (present but malformed) is NOT narrowed away: the whole call is
+ * reduced to an empty shape, which the ERP refuses with its own `subject_invalid`. Dropping the bad phone and
+ * keeping the good email would quietly turn "erase this person by email AND phone" into "by email".
+ */
+function minimiseAgencyPrivacyIntent(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
+  const a = obj(args) ?? {};
+  const kind = KIND_OF_TOOL[toolName];
+  const present = (v: unknown) => v !== undefined && v !== null;
+  const email = validEmail(a.email);
+  const phone = validPhone(a.phone);
+  const identifiers: ("email" | "phone")[] = [];
+  const subject: Record<string, string> = {};
+  if ((present(a.email) && !email) || (present(a.phone) && !phone)) {
+    return { minimised: MINIMISED_MARKER, kind, identifiers };
+  }
+  if (email) { identifiers.push("email"); subject.emailHash = subjectHash(email); subject.emailHint = emailHint(email); }
+  if (phone) { identifiers.push("phone"); subject.phoneHash = subjectHash(phone); subject.phoneHint = phoneHint(phone); }
+  const out: Record<string, unknown> = { minimised: MINIMISED_MARKER, kind, identifiers };
+  if (identifiers.length > 0) out.subject = subject;
+  if (typeof a.tenantId === "string" && SAFE_ID_RE.test(a.tenantId)) out.tenantId = a.tenantId;
+  if (typeof a.approvalId === "string" && UUID_RE.test(a.approvalId)) out.approvalId = a.approvalId;
+  return out;
 }
 
 /** Counts, ids and status words only. Anything that does not parse is reduced to its size. */
@@ -215,6 +273,7 @@ for (const toolName of AGENCY_PRIVACY_TOOL_NAMES) {
     minimiseArgs: minimiseAgencyPrivacyArgs,
     minimiseResult: minimiseAgencyPrivacyResult,
     secretsOf: agencyPrivacySecrets,
+    minimiseIntentArgs: (args) => minimiseAgencyPrivacyIntent(toolName, args),
   });
   builtIn.add(toolName);
 }

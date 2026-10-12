@@ -375,18 +375,42 @@ describe("M5-G5c: an agent run that calls agency_privacy.erase holds no email or
     expect(episodeFromTrace(dirty, TENANT).goal).toBe(`erase ${EMAIL}`);
   });
 
-  it("KNOWN GAP (reported, not hidden): a fileOnSuspend:false intent hands the real args to its caller, in memory, for the confirm chip", async () => {
+  it("M5-G5d (the G5c known gap, closed): a fileOnSuspend:false intent hands over the ERP's minimised shape, never the identifier", async () => {
     const deps = scripted([erase()]);
     const h = build(deps);
     const id = await runGoal(h.app, `erase ${EMAIL}`, "privacy-gated", { fileOnSuspend: false });
+    const detail = (await h.app.inject({ method: "GET", url: `/goals/${id}?tenant=${TENANT}`, headers: AUTH })).json() as { suspendedIntent?: { tool: string; impact: string; args: Record<string, unknown> } };
+    // The shape platform-nest's `agency_privacy.*` args policy takes as ALREADY minimised: the confirm chip can
+    // file the approval from it, and the hub path re-derives the subject from the ledger's hashes.
+    expect(detail.suspendedIntent).toEqual({
+      tool: "agency_privacy.erase",
+      impact: "high",
+      args: {
+        minimised: "agency-privacy.v1", kind: "erase", identifiers: ["email", "phone"], tenantId: TENANT,
+        subject: { emailHash: EMAIL_HASH, emailHint: "***@example.com", phoneHash: PHONE_HASH, phoneHint: "***90" },
+      },
+    });
+    // Nothing was run and nothing was filed: the live hub was never called.
+    expect(deps.calls).toHaveLength(0);
+    // Every store AND the HTTP read the ERP assistant polls: no identifier in any form.
+    expectClean(await everything(h, id));
+  });
+
+  it("M5-G5d: a malformed identifier is not narrowed away; the intent is an empty shape the ERP refuses", async () => {
+    const deps = scripted([erase({ tenantId: TENANT, email: EMAIL, phone: "call me" })]);
+    const h = build(deps);
+    const id = await runGoal(h.app, "erase her", "privacy-gated", { fileOnSuspend: false });
     const detail = (await h.app.inject({ method: "GET", url: `/goals/${id}?tenant=${TENANT}`, headers: AUTH })).json() as { suspendedIntent?: { args: Record<string, unknown> } };
-    // Not persisted (in-memory, TTL'd, returned to platform-nest), but it IS the raw args: the confirm flow needs
-    // them to file the approval later. The ERP's minimiser accepts only ITS OWN minimised shape, so swapping this
-    // for ours would break the confirm chip; the follow-up is for platform-nest's assistant (see the ticket report).
-    expect(detail.suspendedIntent?.args).toMatchObject({ email: EMAIL, phone: PHONE });
-    const dump = await everything(h, id);
-    delete dump["http reads"]; // the GET above returns the intent by design
-    expectClean(dump);
+    expect(detail.suspendedIntent?.args).toEqual({ minimised: "agency-privacy.v1", kind: "erase", identifiers: [] });
+    expectClean(await everything(h, id));
+  });
+
+  it("M5-G5d: with fileOnSuspend:true (the default) the HUB still receives the real args, exactly as before", async () => {
+    const deps = scripted([erase()], { "approvals.request": JSON.stringify({ id: "44444444-4444-4444-8444-444444444444" }) });
+    const h = build(deps);
+    await runGoal(h.app, "erase her", "privacy-gated");
+    const filing = deps.calls.find((c) => c.name === "approvals.request");
+    expect(filing?.args).toMatchObject({ toolName: "agency_privacy.erase", toolArgs: { email: EMAIL, phone: PHONE } });
   });
 });
 
@@ -413,6 +437,7 @@ describe("M5-G5c: a tool with no policy is stored exactly as before (regression)
     registerSensitiveToolPolicy({
       toolName: "contacts.lookup",
       minimiseArgs: () => ({ minimised: "fixture.v1" }),
+      minimiseIntentArgs: () => ({ minimised: "fixture.v1" }),
       minimiseResult: (r) => JSON.stringify({ minimised: "fixture.v1", bytes: r.length }),
       secretsOf: (a) => (typeof a.email === "string" ? [{ kind: "email" as const, value: a.email }] : []),
     });
