@@ -1857,8 +1857,11 @@ contract is not `signed`, so it leaves the request blocked until staff re-triage
 **Event:** `contract.signed` (consumed from the `contract` stream by `core/amendment-signed-handler.ts`, a core handler registered in `main.ts`)
 notifies the request's `triaged_by` user, type `webdev.change_request.unblocked`, once per request (a redelivery is a no-op).
 
-**Not built here (PV4 FE wave):** the staff triage panel must add the "does this change the price?" answer and an amendsId picker, show
-`priceImpact`/`amendmentContractId`/`amendmentStatus` on the row, and link "blocked: waiting on amendment" to `/clients/[id]/billing`.
+**Staff UI (PV4-04b, same release):** the triage panel (`components/departments/ChangeRequestsPanel.tsx`) asks "Does this change the
+price?" with no default (Convert stays disabled until it is answered), sends `priceImpact`, shows a blocked convert as "Waiting for the
+amendment to be signed" linked to `/clients/[clientId]/billing`, and renders `amendment_not_signed`, `amendment_exists` and
+`client_required_for_price_change` as plain messages. **Not built yet (PV4-09):** an `amendsId` picker (the server default applies), and
+`priceImpact`/`amendmentContractId`/`amendmentStatus` shown on the request rows.
 
 ### 16g. Site Provisioning (PRV-00..04) — `src/modules/webdev/webdev.controller.ts` — **STATUS: PROTOTYPED**
 
