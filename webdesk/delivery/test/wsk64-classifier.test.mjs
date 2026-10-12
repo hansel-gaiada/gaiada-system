@@ -44,7 +44,7 @@ const v100 = load(FIXTURE)
 const current = currentVocabularySnapshot()
 
 check('the fixture is the 1.0.0 snapshot', v100.vocabularyVersion === '1.0.0', v100.vocabularyVersion)
-check('VOCABULARY_VERSION is 1.3.0 (M5-W3c: a MINOR on top of 1.2.0; see wsk49-client-editable.test.mjs and w3c-lint-content.test.mjs)', VOCABULARY_VERSION === '1.3.0', VOCABULARY_VERSION)
+check('VOCABULARY_VERSION is 1.4.0 (M5-W8b: a MINOR on top of 1.3.0; see wsk49-client-editable.test.mjs, w3c-lint-content.test.mjs and w8b-route-pattern.test.mjs)', VOCABULARY_VERSION === '1.4.0', VOCABULARY_VERSION)
 
 // Each expected reason, tagged with the §2.3 row it realises. Exact strings, exact order.
 const EXPECTED = [

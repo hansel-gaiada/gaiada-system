@@ -9,8 +9,8 @@ import { resolveBlocks, partitionResolvedBlocks, isNonVisualBlockType, NON_VISUA
 import { BLOCK_TYPE_NAMES, COMPOSABLE_BLOCK_TYPE_NAMES, FIELDS_BLOCK_TYPE, validateBlock } from '../../src/vocabulary/blocks.ts'
 import { VOCABULARY_VERSION } from '../../src/vocabulary/version.ts'
 
-test('the vendored vocabulary is 1.3.0 (M5-W3c, a MINOR on 1.2.0) and knows the fields block', () => {
-  assert.equal(VOCABULARY_VERSION, '1.3.0')
+test('the vendored vocabulary is 1.4.0 (M5-W8b, a MINOR on 1.3.0) and knows the fields block', () => {
+  assert.equal(VOCABULARY_VERSION, '1.4.0')
   assert.ok(BLOCK_TYPE_NAMES.includes(FIELDS_BLOCK_TYPE))
   assert.ok(!COMPOSABLE_BLOCK_TYPE_NAMES.includes(FIELDS_BLOCK_TYPE))
   assert.equal(COMPOSABLE_BLOCK_TYPE_NAMES.length, 9)
