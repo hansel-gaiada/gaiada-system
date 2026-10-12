@@ -37,6 +37,7 @@ import { emitEvent } from "../events/outbox.service";
 import { insertGrantRow, revokeClientWebsiteEditor, CLIENT_WEBSITE_EDITOR_ROLE } from "../admin/grant-write.service";
 import { writeClientAccessAuditTx } from "./client-website-access.controller";
 import { createInvite, consumeInvite, generatePassword } from "./client-invites";
+import { clientContactClientVisible, staffClientVisible } from "./portal-visibility";
 import {
   createUser as kcCreateUser,
   findUserByEmail as kcFindUserByEmail,
@@ -60,8 +61,10 @@ interface ContactRow {
 }
 
 /** The masked shape every response uses. No token, no password, and `hasAccount` rather than any
- *  credential detail — the same discipline the connections vault applies with `hasToken`. */
-function view(r: ContactRow & { has_account?: boolean }) {
+ *  credential detail — the same discipline the connections vault applies with `hasToken`.
+ *  PV3-07: `clientVisible` = the portal People area lists this contact to the client's contacts
+ *  (computed in SQL by SELECT_CONTACT from portal-visibility.ts; a revoked contact reads `false`). */
+function view(r: ContactRow & { has_account?: boolean; client_visible?: boolean }) {
   return {
     id: r.id,
     clientId: r.client_id,
@@ -74,13 +77,15 @@ function view(r: ContactRow & { has_account?: boolean }) {
     invitedAt: r.invited_at,
     activatedAt: r.activated_at,
     hasAccount: r.has_account === true,
+    clientVisible: r.client_visible === true,
   };
 }
 
 const SELECT_CONTACT = `
   SELECT cc.id, cc.client_id, cc.user_id, cc.project_id, cc.capability, cc.status,
          cc.invited_at, cc.activated_at, u.email, u.name,
-         (u.idp_subject IS NOT NULL) AS has_account
+         (u.idp_subject IS NOT NULL) AS has_account,
+         ${staffClientVisible("cc", clientContactClientVisible("cc"))} AS client_visible
     FROM client_contacts cc JOIN users u ON u.id = cc.user_id
    WHERE cc.deleted_at IS NULL`;
 

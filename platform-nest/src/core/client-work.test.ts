@@ -120,36 +120,62 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
     expect(r.statusCode).toBe(404);
   });
 
-  it("PV3-03: deliverables?clientId= is a strict facet (uuid / internal / garbage)", async () => {
+  // PV3-03 made this a strict facet; the PV3-07 follow-up made it decide ownership by the deliverable's
+  // PROJECT, exactly as the portal reaches deliverables (and as `clientVisible` is computed). A
+  // deliverable's own `client_id` no longer decides which client's list it is in.
+  //
+  // Teeth: in client-work.controller.ts set the facet column back to "d.client_id" and the
+  // "no client_id of its own" and "own client_id but internal project" assertions fail.
+  it("PV3-03 / PV3-07: deliverables?clientId= is a strict facet keyed on the PROJECT's client (uuid / internal / garbage)", async () => {
     const other = (await app.inject({
       method: "POST", url: `/api/${co}/clients`, headers: asUser(member), payload: { name: "Facet Other Retail", businessType: "retail" },
     })).json().id as string;
-    const mk = async (name: string, cid?: string) => {
+    // `projectId` (the suite's project) has no client: it is internal. Give each client a project of its own.
+    const clientProject = await createProject(co, "Facet — client project");
+    const otherProject = await createProject(co, "Facet — other client project");
+    await withTenants([co], async (c) => {
+      await c.query(`UPDATE projects SET client_id = $2 WHERE id = $1`, [clientProject, clientId]);
+      await c.query(`UPDATE projects SET client_id = $2 WHERE id = $1`, [otherProject, other]);
+    });
+    const mk = async (onProject: string, name: string, cid?: string) => {
       const r = await app.inject({
         method: "POST", url: `/api/${co}/deliverables`, headers: asUser(member),
-        payload: { projectId, name, ...(cid ? { clientId: cid } : {}) },
+        payload: { projectId: onProject, name, ...(cid ? { clientId: cid } : {}) },
       });
       expect(r.statusCode).toBe(201);
       return r.json().id as string;
     };
-    const theirs = await mk("facet-theirs", other);
-    const clientless = await mk("facet-clientless");
+    const ownNull = await mk(clientProject, "facet-on-client-project-no-client-id");
+    const theirs = await mk(otherProject, "facet-theirs", other);
+    const onInternal = await mk(projectId, "facet-on-internal-project");
+    // `deliverableId` (created above) names `clientId` itself but sits on the INTERNAL project: the
+    // client's portal cannot reach it, so it is internal by the project rule.
     const get = (qs: string) => app.inject({ method: "GET", url: `/api/${co}/deliverables${qs}`, headers: asUser(member) });
+    type D = { id: string; client_id: string | null; clientVisible?: unknown };
 
     const byClient = await get(`?clientId=${clientId}`);
     expect(byClient.statusCode).toBe(200);
-    const clientRows = byClient.json() as Array<{ id: string; client_id: string | null }>;
-    expect(clientRows.map((d) => d.id)).toContain(deliverableId);
-    expect(clientRows.map((d) => d.id)).not.toContain(theirs);
-    expect(clientRows.map((d) => d.id)).not.toContain(clientless);
-    expect(clientRows.every((d) => d.client_id === clientId)).toBe(true);
+    const clientRows = byClient.json() as D[];
+    const clientIds = clientRows.map((d) => d.id);
+    expect(clientIds, "a deliverable with no client_id of its own, on the client's project, is the client's").toContain(ownNull);
+    expect(clientRows.find((d) => d.id === ownNull)?.clientVisible, "and its client can see it").toBe(true);
+    expect(clientIds).not.toContain(theirs);
+    expect(clientIds).not.toContain(onInternal);
+    expect(clientIds, "own client_id set but on an internal project: not the client's").not.toContain(deliverableId);
+    expect(clientRows.every((d) => d.clientVisible === true)).toBe(true);
 
     const internal = await get(`?clientId=internal`);
     expect(internal.statusCode).toBe(200);
-    const internalRows = internal.json() as Array<{ id: string; client_id: string | null }>;
-    expect(internalRows.map((d) => d.id)).toContain(clientless);
-    expect(internalRows.map((d) => d.id)).not.toContain(deliverableId);
-    expect(internalRows.every((d) => d.client_id === null)).toBe(true);
+    const internalRows = internal.json() as D[];
+    const internalIds = internalRows.map((d) => d.id);
+    expect(internalIds).toContain(onInternal);
+    expect(internalIds).toContain(deliverableId);
+    expect(internalIds).not.toContain(ownNull);
+    expect(internalIds).not.toContain(theirs);
+    expect(internalRows.every((d) => d.clientVisible === false)).toBe(true);
+
+    const byOther = (await get(`?clientId=${other}`)).json() as D[];
+    expect(byOther.map((d) => d.id)).toEqual([theirs]);
 
     // Garbage used to 500 on the `$2::uuid` cast.
     expect((await get(`?clientId=not-a-uuid`)).statusCode).toBe(400);

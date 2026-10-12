@@ -326,6 +326,66 @@ Drop rules (`src/forms/attribution.ts`; the submission always succeeds):
 - M5-G6: `visitor_consent.consentId` is OPTIONAL and allow-listed: the uuid the browser got from `POST /v1/t/:tenantSlug/consent` (below). A missing or non-uuid value drops that one key only (the snapshot stays valid); it is stored lower-cased inside `submissions.visitor_consent`, so a submission can be tied to the server-side proof of the banner decision. It is not checked against `consent_records` (a browser may submit before its consent post lands, and the log is evidence, not a gate).
 - Drops are counted in one log line per submission, never with values.
 
+### Form definitions: `forms.define` / `forms.def.list` / `forms.def.get` (M5-L1d, PROTOTYPED)
+
+Before this, a `form_defs` row could only be created by raw SQL (the forms module only reads it). Status: PROTOTYPED
+(the validator is unit-tested; `test/forms-define.spec.ts` needs the Linux gate). Code: `src/control/forms/form-definition.ts`
+(validator), `form-defs.service.ts`, `form-defs.controller.ts`.
+
+| Command | Route | Class / scope |
+|---|---|---|
+| `forms.define` | `PUT /control/v1/tenants/:tenantSlug/sites/:siteId/forms/:formKey` | medium / `webdesk:operate`, `Idempotency-Key` required |
+| `forms.def.list` | `GET /control/v1/tenants/:tenantSlug/sites/:siteId/forms` | read / `webdesk:read` |
+| `forms.def.get` | `GET /control/v1/tenants/:tenantSlug/sites/:siteId/forms/:formKey` | read / `webdesk:read` |
+
+`forms.define` is an upsert by `(site, key)` (the table's own `UNIQUE (site_id, key)`; no migration). **Redefining keeps the
+form's `id`**, because the site posts to `/v1/t/:tenantSlug/forms/:formId/submit`. It runs in the shared command envelope
+(audit row `control.forms.define` first, effect, idempotency record, one transaction; a replay answers `replayed: true`).
+It is MEDIUM, like `schema.apply`, whose family it belongs to: it changes what a public form accepts but never touches `/v1`
+delivery or published content. It is **not an editorial command** (no content principal; on neither `EDITORIAL_COMMANDS` nor
+`CLIENT_EDITOR_COMMANDS`), so a client-editor assertion cannot be expressed on it, exactly as for `schema.apply`; the ERP route
+in front of it is staff-only. Reads are live SELECTs: no audit row.
+
+Body (the key is the route parameter; a body `key` is refused with 400):
+
+```jsonc
+{
+  "schema": {
+    "fields": [ { "key": "email_address", "type": "email", "required": true, "maxLength": 320 }, ... ],
+    "honeypotField": "_hp",                       // optional; default is the config's `_hp`
+    "consentNotice": { "text": "..." },           // required, non-empty, <= 4000
+    "attachments": { "allowed": false, "maxCount": 0 }   // optional
+  },
+  "notify": {},                                   // optional: { to: {email, name?}, templateKey?, autoresponder?, autoresponderTemplateKey? }
+  "retentionDays": 90,                            // required, integer 1..3650
+  "consentNoticeVersion": "site-2026-10-11"       // required, 1..64 of [A-Za-z0-9._:-]
+}
+```
+
+Answer: `{ form: { formId, key, siteId, schema, notify, retentionDays, consentNoticeVersion, createdAt, updatedAt }, created, consentNoticeChanged, replayed }`.
+
+Field types (`FORM_FIELD_TYPES`): `text`, `textarea`, `email`, **`tel`** (new, additive: a phone field, validated as short text), `number`,
+`boolean`, `date`, `select` (needs `options`). Rules, every problem listed at once in a 422 `form-definition-invalid` (`issues: [{path, message}]`),
+before anything is claimed or audited:
+- (submit side, M5-L1d) a blank OPTIONAL value (`""` or whitespace) is treated as absent and not stored; a blank REQUIRED value is a 400 for every field type (a required text field used to accept `""`);
+- field keys `[a-z0-9_]{1,64}`, unique, 1 to 60 fields; no unknown members anywhere (`format` is not a field member here);
+- a field whose key looks like an email or a phone (`email_address`, `contact_phone`, ...) but is typed `text`/`textarea` is refused: the data-subject
+  correlators (`privacy.find` / `erase`, `data_subject_ref`) come from the first `email` / `tel` TYPED field (M5-L1), so a mistyped one would make its
+  submitters unfindable and its PAN/NIK scrub would also apply to it;
+- the honeypot key is `[a-z0-9_]{1,64}`, is not a field key and is not a member of the submit body (`consent`, `fields`, ...);
+- `consentNotice.text` is required for EVERY form (consent is universal on the submit route and every submission snapshots the notice); there is no consent-typed field;
+- `retentionDays` 1 (the table's CHECK) to 3650 (a sanity cap; the purge compares `expires_at < now()` and has no ceiling). It applies to NEW submissions;
+  rows already stored keep the `expires_at` they were given.
+
+**The notice rule.** `form_defs` has a version column but no text column; the text lives in `schema.consentNotice.text`. Changing the text without
+changing `consentNoticeVersion` is refused with 409 `consent-version-unchanged` (nothing changes), because each submission snapshots the text AND version
+it was accepted under. The comparison is against what a submission would snapshot today (a raw-SQL form with no notice is compared against the defaults it
+has been recording). A new version with identical text is accepted (`consentNoticeChanged: false`).
+
+Other answers: 404 `site-not-found` (a site that is not this tenant's, the uniform wall), 404 `form-not-found`, 409 `idempotency-key-reused`,
+409 `form-define-conflict` (two first-time definitions of one key racing; retry). The gaiada.com definitions are data in `webdesk/sites/gaiada-com/forms/`
+(its README says how to apply them).
+
 ### Consent log API (M5-G6) — a server-side record of the visitor's banner decision
 
 Status: PROTOTYPED (unit-tested; the DB and HTTP specs and migration 0017 await the Linux gate). Context: `legal/website-visitor-addendum.md` R-V3 / F17 / section 3.6 (consent snapshot) / section 5 (retention), WSK-D67. The site still keeps the choice in localStorage `gaia-consent`; this is the evidence the site cannot forge afterwards.
@@ -555,6 +615,7 @@ stub bindings — same rule, same reasoning, as WSK-05's `api-keys.controller.ts
 | `release.triggerRebuild` | `POST .../environments/:envId/rebuild` | medium | `webdesk:operate` | no | **yes** |
 | `job.get` / `job.list` | `GET .../jobs/:jobId` / `GET .../jobs` | read | `webdesk:read` | no | n/a — reads a job |
 | `contract.read` | `GET /control/v1/tenants/:slug/contract` | read | `webdesk:read` | no | no — always 501, see below |
+| `contract.regenerate` | `POST /control/v1/tenants/:slug/contract/regenerate` (one) / `POST /control/v1/contract/regenerate` (all active) | medium | `webdesk:operate` | no | no — queues runs, see "Live contract codegen" |
 
 The full map lives in code at `src/control/command-types.ts`'s `COMMAND_REGISTRY` (the single
 source of truth every guard and `test/control-command-registry.spec.ts` read from) — this table
@@ -564,6 +625,29 @@ Two documented departures from design §07's literal wording: `schema.propose` i
 `read` (this ticket's own brief narrows the AC to three tiers; propose never persists anything,
 which is what `read` means everywhere else in this map) and `job.get`/`job.list` are this
 ticket's own addition (job-tracking wasn't in the original C-05 list).
+
+### Live contract codegen (M6-P4r-b)
+
+A tenant's `contracts/<slug>/latest.json` (what the ERP's contract mirror reads) is produced inside the api, no manual step.
+
+- **Triggers.** `tenant.provision` and `schema.apply` enqueue a `contract-codegen` job **after** their command commits (the
+  command envelope's post-commit `after` hook, via `ContractCodegenTrigger`). It is fail-soft: an enqueue error or timeout (3 s) is
+  logged and changes nothing about the command's response, status or stored idempotency record. A replay enqueues nothing.
+  `schema.apply` still refuses a MAJOR change (`409 contract-major-change`) before anything is enqueued.
+- **Queue.** The job carries only `{ tenantSlug }`; its id is derived from the tenant, so a burst coalesces into one waiting job
+  (a change that commits while a run is active queues exactly one follow-up). Attempts 3, exponential backoff from 10 s, per-attempt
+  timeout 120 s, completed AND failed jobs removed (a failed job would otherwise occupy its id and swallow later enqueues).
+- **Worker.** In the api process, concurrency 1. It takes a Postgres advisory lock keyed on the tenant, runs the compiled generator
+  (`dist/codegen/generator.mjs`, loaded by `CompiledContractCodegenRunner` through a native `import()`), and releases the lock when
+  the run really ends, even after a timeout. Output goes only to RustFS (the api's own `webdesk-api` key, `artifacts` bucket).
+  A stored contract that already matches the tenant's composition and the vocabulary version is left alone (`unchanged`): the
+  generator would otherwise mint a PATCH version for an identical composition.
+- **Re-run and backfill.** `contract.regenerate` (above). Idempotent, never a deploy step. A run that failed all its attempts logs
+  `... FAILED ... re-run it with the contract.regenerate control command`.
+- **Config** (all optional): `WEBDESK_CONTRACT_CODEGEN_ENABLED` (default on; **off under `NODE_ENV=test`**),
+  `_QUEUE_NAME`, `_TIMEOUT_SECONDS` (120), `_ATTEMPTS` (3), `_BACKOFF_SECONDS` (10), and `WEBDESK_CODEGEN_BUNDLE` (a bundle path
+  override). Specs: `test/contract-codegen-{queue,processor,triggers}.spec.ts` need no services; `contract-codegen-live.spec.ts` needs
+  Postgres, Redis, RustFS and `npm run build`.
 
 ### `tenant.provision` and the tenant's locales (WSK-D18, WSK-D48)
 

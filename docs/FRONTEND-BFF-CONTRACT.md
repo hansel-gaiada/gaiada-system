@@ -1737,7 +1737,7 @@ Topics: `approvals · projects · deliverables · invoices · contracts · profi
 `portal-live.service.ts` is an **allowlist** — an unmapped event type produces no frame, so adding an
 internal event cannot wake a client's browser by default.
 
-### 16e. Staff counterpart — `src/core/contracts.controller.ts` (**no UI yet — see deferrals**)
+### 16e. Staff counterpart — `src/core/contracts.controller.ts` (**UI built: `/clients/[id]/billing`, PV3-08, PROTOTYPED**)
 
 Shipped in the same change because without it the portal's contracts section is permanently empty and
 a client-recorded payment can never leave `pending`.
@@ -1746,23 +1746,39 @@ a client-recorded payment can never leave `pending`.
 |---|---|---|---|
 | ✅ | GET | `/api/:t/contracts` | `?clientId`, `?status`. Authz: `contract` read (company_admin/manager). **PV3-01 (PROTOTYPED):** `?clientId` is the strict CC-1 facet (`parseClientFilter(raw, true)`): a uuid, or `internal` (`client_id IS NULL`, always empty here since a contract always has a client); anything else is a **400** (it used to 500 on a uuid cast). Parsed after the read check, so an unauthorized caller still gets 403. Every row carries `canCountersign` (below). |
 | ✅ | GET | `/api/:t/contracts/:contractId` | Adds `signatures[]`, and `canCountersign` (PV3-01). |
-| ✅ | POST | `/api/:t/contracts` | Always created `draft`. Validates the project belongs to the named client; `supersedesId` bumps `version`. |
-| ✅ | PATCH | `/api/:t/contracts/:contractId` | Draft-only, except `status:'void'`. A sent/signed contract is re-issued via `supersedesId`, never edited. |
+| ✅ | POST | `/api/:t/contracts` | Always created `draft`. Validates the project belongs to the named client; `supersedesId` bumps `version`. **PV3-06 (PROTOTYPED):** authorizes before it validates (a caller who may not draft gets 403 for any body). **Idempotent on `reference`** (readiness-bar criterion 3): the insert is `ON CONFLICT (tenant_id, reference, version) … DO NOTHING` against `ix_contracts_reference_uniq`; a repeat returns `{id, status, deduped:true}` for the existing contract (still 201, status is its real status), the same reference under another client is a **409**. A draft with no `reference` has no natural key and is not deduped. |
+| ✅ | PATCH | `/api/:t/contracts/:contractId` | Draft-only, except `status:'void'`. A sent/signed contract is re-issued via `supersedesId`, never edited. **PV3-06 (PROTOTYPED):** a call that arrives through an OBO envelope (an agent or n8n via the hub; `currentVia()` set) is refused **400 `status_not_allowed_via_automation`** if the body carries any `status`, checked after authorize(); void stays a human act (a staff browser session carries no envelope). There is no `contracts.void` tool. |
 | ✅ | POST | `/api/:t/contracts/:contractId/send` | `draft → sent` + notifies signer contacts. Refuses with no document or `bodyMd`. Action `send`. |
-| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign`. **Corrected 2026-10-11 (PV3-01, PROTOTYPED):** allowed for an **`owner` of the contract's company** (company-scope `owner` grant on this tenant) and for `platform_admin` (its wildcard). `group_executive` no longer exists. company_admin, manager, an owner of another company, and any custom role (even one holding every `core.contract.*` key, `core.contract.countersign` included) get 403: no permission-arm rule reads that key, which is catalogued `uiGrantable: false` only because the policy names the action. Validates `signerName` before it authorizes. |
+| ✅ | POST | `/api/:t/contracts/:contractId/countersign` | `{signerName, signerTitle?}`. Action `countersign`. **Corrected 2026-10-11 (PV3-01, PROTOTYPED):** allowed for an **`owner` of the contract's company** (company-scope `owner` grant on this tenant) and for `platform_admin` (its wildcard). `group_executive` no longer exists. company_admin, manager, an owner of another company, and any custom role (even one holding every `core.contract.*` key, `core.contract.countersign` included) get 403: no permission-arm rule reads that key, which is catalogued `uiGrantable: false` only because the policy names the action. **PV3-06 (PROTOTYPED):** authorizes BEFORE it validates `signerName`, so a company_admin with an empty body gets 403, not 400 (it used to read the body first). A repeat returns `{alreadySigned:true}` and writes no second activity. |
 | ✅ | GET | `/api/:t/invoice-payments` | `?status`, `?clientId=<uuid>\|internal` — finance's confirmation queue. `clientId` is the strict §22a facet (PV3-03, PROTOTYPED): a uuid lists only that client's payments (filters `invoice_payments.client_id`), `internal` lists payments whose invoice names no client (the column is nullable), a non-uuid is **400**. Authz: `invoice` read, checked before `clientId` is validated. |
-| ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update. |
+| ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update, checked before the body is validated (PV3-06). |
 
 **`canCountersign` (PV3-01, PROTOTYPED).** On every row of both GETs. True only when all three hold: Cerbos allows `countersign` on `{kind:"contract", tenantId}` for this caller (ONE soft check per request, never per row; for an `actFor` call the acting user must be allowed too), the status is `sent`, and there is no `provider` signature. It is a hint for showing the Countersign control; the POST stays the authority. A probe failure reads as `false`, never a 500.
 
-**⚠ STILL NO STAFF UI FOR §16e's WRITES.** Contracts must be created/sent and payments confirmed via
-API. Whoever owns finance needs to know the decide endpoint exists, or client payments accumulate as
-`pending` with nobody looking.
+**Staff UI — PV3-08 (PROTOTYPED, 2026-10-12): `/clients/[clientId]/billing`**, the hub's "Contracts & billing" tab (between Business and People). Three sections:
 
-**Partly addressed 2026-08-24 (CC-2, §22b):** the pending payment and the unsent draft contract are now
-SURFACED — the client hub's `needsUs` list names them per client, with an age, so they stop
-accumulating invisibly. That is visibility, not the write UI: the Commercial tab that actually calls
-`send`/`countersign`/`decide` is slice 2 of the CC-* program and is **not built**.
+- **Contracts**, grouped Draft · Sent · Signed · Void (plus "Declined or expired" when a row has that status, so none is dropped). Draft form (title, reference, a project of this client, value and currency, term dates, terms in markdown, optional PDF), Edit (draft only), Send (disabled with its reason when there are neither terms nor a file), Void (any state, with a confirm), and Countersign **only on a row whose `canCountersign` is `true`**. A sent contract shows who has signed (party, name, title, date; from `GET …/contracts/:id`, one read per sent contract). The PDF goes up through `POST /files` with `entityType:"contract"` once the draft exists, then `PATCH {fileId}`; if the draft saves and the file does not, the message says the draft WAS saved.
+- **Payments to confirm**: `GET /invoice-payments?clientId=&status=pending`. Confirm, or Reject with a required reason. The maker-checker 403 is shown in words ("You recorded this payment…").
+- **Invoices**: a list only (`GET /invoices?clientId=`), linking to `/invoices/[id]`. D7 is open, so nothing deeper.
+
+Every read goes through `readResult()` and refuses explicitly (`<ReadRefusal>`); there is no `.catch(() => [])`, and the invoices read deliberately does not use `listInvoices` (which folds 403 into `[]`). **Tab badge** = pending payments (from the overview's `needsUs`) + contracts the caller may countersign (one `GET /contracts?clientId=` in the layout, fail-soft to "no figure", never `0`). The Overview's payment and contract items link to this page. No "who sees this" markers yet (PV3-09). **Known gap:** no staff route serves a contract's or a payment's file bytes to the browser (`GET /files/:id/content` has no UI proxy), so the page says "PDF attached" / "Proof of payment attached" without a link.
+
+**MCP tools — PV3-06 (PROTOTYPED, 2026-10-12)**, in `core/core-tools.ts`, each a thin front over the endpoint above with that endpoint's authorization. The hub fills `:param` tokens and sends the rest as the body; a GET's remaining args are dropped, so the two list tools carry `clientId` as a query token and require it.
+
+| Tool | Method + path | Impact | D14 |
+|---|---|---|---|
+| `contracts.list` | GET `/api/:t/contracts?clientId=` | read | no |
+| `contracts.get` | GET `/api/:t/contracts/:contractId` | read | no |
+| `invoicePayments.list` | GET `/api/:t/invoice-payments?clientId=` | read | no |
+| `contracts.createDraft` | POST `/api/:t/contracts` (`reference` required: the idempotency key) | low | no |
+| `contracts.updateDraft` | PATCH `/api/:t/contracts/:contractId` (no `status`: voiding is not a tool) | low | no |
+| `contracts.send` | POST `…/send` | medium | yes: `contracts.send` entry, precondition `contract_not_draft` / `contract_has_no_document` |
+| `contracts.countersign` | POST `…/countersign` | high | yes: precondition `contract_not_sent` / `contract_already_countersigned` |
+| `invoicePayments.decide` | POST `…/decide` | high | yes: precondition `payment_not_pending` / `payment_decision_invalid` / `payment_reject_reason_required` |
+
+Approving a medium/high call executes it as the ORIGINAL filing principal (D14 invariant 1), so a company_admin's approved `contracts.countersign` is refused at execution (403) and the recorder's approved `invoicePayments.decide` is refused (maker-checker). `send`, `countersign` and `decide` write an `activities` row with the actor, `metadata.via` (the agent or workflow) and the approval, so the actor may be non-human.
+
+**History (2026-08-24, CC-2, §22b).** Before PV3-08 the pending payment and the unsent draft were only SURFACED, in the client hub's `needsUs` list with an age; the write UI (the "Commercial" tab, slice 2 of the CC-* program) was never built. PV3-08 is that slice, under its new name.
 
 ### 16f. Change Requests (maintenance intake) — `src/core/webdev-change-requests{,-portal}.controller.ts` — **STATUS: DEV-VERIFIED (MI-01..05)**
 
@@ -1809,16 +1825,17 @@ every row that ever entered it was a direct test SQL INSERT. `vaultRef` is a POI
 must resolve to a real, same-tenant connection row, and a regression test asserts `webdev_sites`
 carries no column matching `/token|secret|password|credential/i`.
 
-Authz reuses the ALREADY-REGISTERED `webdev_provisioned_site` kind's existing literal actions
-(`provision` for create, `operate` for the vault-ref patch) rather than minting a new kind/action for
-this table — a deliberate, flagged trade-off (see `webdev.controller.ts`'s own VLT-2 comment): the
-`id` Cerbos sees for the PATCH names a `webdev_sites` row, not a `webdev_provisioned_sites` one.
+Authz (**M6-P3c, 2026-10-12**): the registry has its OWN Cerbos kind, `webdev_site` (`resource_webdev_site.yaml`:
+`read`/`create`/`update`/`request_probe_consent`), replacing the borrowed `webdev_provisioned_site`
+`provision`/`operate`/`read` that VLT-2 shipped with. Behaviour-preserving: each action carries the exact reach of the one
+it replaced (`create`<-`provision`, `update`<-`operate`, `read`<-`read`, `request_probe_consent`<-`read`), pinned by
+`src/rbac/cerbos-webdev-site.test.ts`. The `id` Cerbos sees for GET/PATCH names a `webdev_sites` row.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | POST | `/api/:t/modules/webdev/sites` | `{domain, environment?, projectId?, clientId?, hostKind?, hostRef?, access?, kind?, repoUrl?, repoBranch?, adoption?, contractVersion?, origin?, notes?}` → `201 WebdevSiteDto`. `vaultRef` is NOT accepted here (400 if present) — set it via the PATCH below, the one place that resolves it. `clientId` is deliberately nullable with no default (WSK-D35: an internal site with no client is a legitimate fact). 409 on a duplicate domain or a second `production` row for the same project (the table's own partial unique indexes). Authz: `webdev_provisioned_site` provision. |
-| ✅ | GET | `/api/:t/modules/webdev/sites/:id` | `WebdevSiteDto`. Authz: `webdev_provisioned_site` read. |
-| ✅ | PATCH | `/api/:t/modules/webdev/sites/:id` | Body must be EXACTLY `{vaultRef: string\|null}` — any other top-level key is a 400 (proves this cannot become a backdoor write path for any other column). `vaultRef` a string must resolve to an `integration_connections.id` in the SAME tenant (400 otherwise) or `null` to clear the pointer. Authz: `webdev_provisioned_site` operate. |
+| ✅ | POST | `/api/:t/modules/webdev/sites` | `{domain, environment?, projectId?, clientId?, hostKind?, hostRef?, access?, kind?, repoUrl?, repoBranch?, adoption?, contractVersion?, origin?, notes?}` → `201 WebdevSiteDto`. `vaultRef` is NOT accepted here (400 if present) — set it via the PATCH below, the one place that resolves it. `clientId` is deliberately nullable with no default (WSK-D35: an internal site with no client is a legitimate fact). 409 on a duplicate domain or a second `production` row for the same project (the table's own partial unique indexes). Authz: `webdev_site` create (M6-P3c; was `webdev_provisioned_site` provision, same reach). |
+| ✅ | GET | `/api/:t/modules/webdev/sites/:id` | `WebdevSiteDto`. Authz: `webdev_site` read (M6-P3c; was `webdev_provisioned_site` read, same reach). |
+| ✅ | PATCH | `/api/:t/modules/webdev/sites/:id` | Body must be EXACTLY `{vaultRef: string\|null}` — any other top-level key is a 400 (proves this cannot become a backdoor write path for any other column). `vaultRef` a string must resolve to an `integration_connections.id` in the SAME tenant (400 otherwise) or `null` to clear the pointer. Authz: `webdev_site` update (M6-P3c; was `webdev_provisioned_site` operate, same reach). |
 | — | — | — | `WebdevSiteDto`: `{id, tenantId, domain, environment, projectId, clientId, hostKind, hostRef, access, kind, repoUrl, repoBranch, adoption, contractVersion, origin, vaultRef, notes, createdAt, updatedAt}`. `getPortfolio()`'s read model (§24-adjacent) now also carries `vaultRef` on each `PortfolioSite`. |
 
 ### 16h. Social post client-review (SMM-31, D-16) — `src/core/social-client-review-portal.controller.ts` — **STATUS: DEV-VERIFIED backend; portal UI IN PROGRESS (SMM-32)**
@@ -3817,7 +3834,7 @@ existed. Its own module key is the EXISTING `webdev` (WSK-12/19/PRV-02 already o
 | GET | `/api/:t/modules/webdev/console/sites/:slug/releases` | `{ releases: ReleaseFact[], meta: DegradeMeta }` | `webdev_provisioned_site:read` |
 | GET | `/api/:t/modules/webdev/console/sites/:slug/submissions[?formId=]` | `{ submissions: SubmissionFact[], meta: DegradeMeta }` — slim projection only (`submissionId, formId, hasAttachments, receivedAt`); Zone A never receives submission content over the bridge, so this is PII-aware by construction, not by filtering | `webdev_provisioned_site:read` |
 | GET | `/api/:t/modules/webdev/console/contract-pins[?slug=]` | `{ pins: ContractPinStatus[] }` — WSK-19's pinned snapshot × the live-or-degraded "latest published" read | `webdev_contract_snapshot:read` (existing kind/action, WSK-19) |
-| GET | `/api/:t/modules/webdev/console/portfolio` | `{ projects: PortfolioProject[], counts }` — the ESTATE portfolio, grouped by project with each environment (`production`/`staging`/`preview`/`development`) as its own row. **Reads Zone A tables only — no `DegradeMeta`, because there is no egress and nothing to be stale about.** Left-joins `search_properties` for hosting topology and the `crawlConsent` gate rather than duplicating either. Distinct from `console/sites` above, which answers "which Zone B tenants exist"; this answers "what does the estate consist of", including the sites we do not host and must not touch | `webdev_provisioned_site:read` (existing kind/action) | **UI: `platform-ui/src/app/(app)/departments/[deptId]/sites/portfolio/page.tsx` (+ `[siteId]/page.tsx`, which resolves one row out of this same list read — there is no single-site GET) via `lib/webdeskPortfolio.ts`. As of 2026-09-03 this is Web Dev's ONLY site surface; `sites` `permanentRedirect`s here. See the `lastSeenAt`/`lastHttpStatus` warning below.** |
+| GET | `/api/:t/modules/webdev/console/portfolio` | `{ projects: PortfolioProject[], counts }` — the ESTATE portfolio, grouped by project with each environment (`production`/`staging`/`preview`/`development`) as its own row. **Reads Zone A tables only — no `DegradeMeta`, because there is no egress and nothing to be stale about.** Left-joins `search_properties` for hosting topology and the `crawlConsent` gate rather than duplicating either. Distinct from `console/sites` above, which answers "which Zone B tenants exist"; this answers "what does the estate consist of", including the sites we do not host and must not touch | `webdev_site:read` (M6-P3c; was `webdev_provisioned_site:read`, same reach) | **UI: `platform-ui/src/app/(app)/departments/[deptId]/sites/portfolio/page.tsx` (+ `[siteId]/page.tsx`, which resolves one row out of this same list read — there is no single-site GET) via `lib/webdeskPortfolio.ts`. As of 2026-09-03 this is Web Dev's ONLY site surface; `sites` `permanentRedirect`s here. See the `lastSeenAt`/`lastHttpStatus` warning below.** |
 
 ### ⚠ `lastSeenAt` / `lastHttpStatus` are returned and MUST NOT be rendered (2026-09-03)
 
@@ -3868,7 +3885,7 @@ Two consequences worth recording here, because they are contract-shaped:
 
 | Method | Path | Returns | Cerbos |
 |---|---|---|---|
-| POST | `/api/:t/modules/webdev/console/probe-consent-requests` | `{ ok, approvalId, domain, attestation }` — files an `automation_approvals` row with `origin='search'`, `workflow_id='search:probe_consent'`. 400 on a missing/short/oversized reference note; 404 unknown property; **409** already-consented; **409** an open request for the same property | `webdev_provisioned_site:read` (the SAME action the portfolio read uses — see below) | **UI: `platform-ui/src/lib/probeConsentActions.ts`, rendered by `components/webdesk/ProbeConsentRequest.tsx`** |
+| POST | `/api/:t/modules/webdev/console/probe-consent-requests` | `{ ok, approvalId, domain, attestation }` — files an `automation_approvals` row with `origin='search'`, `workflow_id='search:probe_consent'`. 400 on a missing/short/oversized reference note; 404 unknown property; **409** already-consented; **409** an open request for the same property | `webdev_site:request_probe_consent` (M6-P3c; was `webdev_provisioned_site:read`, same reach — its own action so it can diverge from `webdev_site:read` later) | **UI: `platform-ui/src/lib/probeConsentActions.ts`, rendered by `components/webdesk/ProbeConsentRequest.tsx`** |
 
 Owner rulings: `docs/plans/2026-09-03-probe-consent-rulings.md`. `search_properties.verified_at` is
 what the monitoring sweep builds its SSRF allowlist from, so setting it is the record that we may
@@ -3878,7 +3895,7 @@ this exists so that nobody sets it for themselves.
 Four things about this are contract-shaped and easy to get wrong:
 
 - **The requester is gated on a WEBDEV action, not a search one.** Web Dev reads consent and hosting
-  topology *through* §24's portfolio, which authorizes `webdev_provisioned_site:read`; requiring
+  topology *through* §24's portfolio, which authorizes `webdev_site:read` (so the request itself is `webdev_site:request_probe_consent`, M6-P3c — the same reach, its own action); requiring
   `resource_search_property:read` here would lock out exactly the people the flow is for. Filing
   grants nothing and mutates no domain state.
 - **The APPROVER is gated on `resource_search_property:update`** — the exact gate that endpoint uses
@@ -4500,7 +4517,7 @@ reachable from no scope at all. `is_internal` stays a data-quality signal, not t
 | ✅ NEW | GET | `/api/:t/projects?clientId=` | `core/core.controller.ts`. Was unfiltered; the client page used to fetch the tenant and narrow in the browser. |
 | ✅ NEW | GET | `/api/:t/pm/tasks?clientId=` | `modules/pm/pm.controller.ts`. Joins through `projects` — there is no `pm_tasks.client_id`, by decision (one source of truth, no backfill, no sync trigger). Cheap: the task CTE already joins `projects`. **`pm_tasks.project_id` is `NOT NULL`, so no clientless-task branch is needed and adding one would be dead code.** |
 | ✅ NEW | GET | `/api/:t/invoices?clientId=` | `modules/invoice/invoice.controller.ts`. This list previously accepted no query parameters at all. |
-| ✅ PV3-03 | GET | `/api/:t/{deliverables,pipeline/runs,meetings/recordings,webdev/change-requests,invoice-payments}?clientId=` | Honour the full vocabulary (uuid / `internal` / absent) in **strict** mode. `core/client-work.controller.ts`, `pipeline.controller.ts`, `meetings.controller.ts`, `webdev-change-requests.controller.ts`, `contracts.controller.ts` (`invoice-payments` only). `internal` = `client_id IS NULL`. |
+| ✅ PV3-03 | GET | `/api/:t/{deliverables,pipeline/runs,meetings/recordings,webdev/change-requests,invoice-payments}?clientId=` | Honour the full vocabulary (uuid / `internal` / absent) in **strict** mode. `core/client-work.controller.ts`, `pipeline.controller.ts`, `meetings.controller.ts`, `webdev-change-requests.controller.ts`, `contracts.controller.ts` (`invoice-payments` only). `internal` = `client_id IS NULL`. **Deliverables key on the PROJECT's client** (PV3-07 follow-up), the way the portal reaches them: `<uuid>` = the deliverable's project belongs to that client, `internal` = its project has no client. `deliverables.client_id` does not decide the facet: a deliverable on a client's project with no `client_id` of its own is that client's, and one naming a client but sitting on an internal project is `internal`. |
 | ✅ PV3-03 | GET | `/api/:t/modules/social/{engagements,accounts}?clientId=` | Same strict facet. `social_engagements.client_id` and `social_accounts.client_id` are NOT NULL, so `internal` is a valid, always-empty selection there. There is no staff "post-review list" endpoint: the per-variant `GET variants/:id/client-review` (§16h) takes no list parameters. |
 | PV3-01 | GET | `/api/:t/contracts?clientId=` | Same strict facet; owned by PV3-01, not this ticket. |
 
@@ -4528,8 +4545,10 @@ this, decide that); `needsUs` is its mirror and **nothing in the ERP rendered it
 is exactly how a client-recorded payment sat `pending` with no screen ever saying someone had to
 confirm it. Both lists answer one question: who is holding the ball. `needsUs` sources: a `pending`
 `invoice_payments` row · a `changes_requested` post review · a `new` change request · a `draft`
-contract never sent. Items carry `{kind,id,label,context,href,since}`; `since` is rendered as an AGE,
-and our side marks anything ≥7 days stale (one finance cycle).
+contract never sent. Items carry `{kind,id,label,context,href,since,clientVisible}`; `since` is rendered as an AGE,
+and our side marks anything ≥7 days stale (one finance cycle). `clientVisible` is §22d's flag (PV3-07). The
+`payment` and `contract` items (both lists) link to `/clients/:id/billing` (PV3-08's page); they used to
+point at `/invoices/:id` and the nonexistent `/clients/:id/commercial`.
 
 `money` mirrors `portal-workspace.controller.ts:finance` — **per currency, never summed across them** —
 with one deliberate difference: `draft` invoices are included as their own `drafted` figure. The portal
@@ -4558,6 +4577,44 @@ both reads apply the same server-side predicate, so a row there means the two fi
 Surfaced rather than dropped, because a dropped row is invisible. Demo fixtures mirror the facet
 (including `internal`) for the same reason: a fixture that ignored `?clientId=` would make every
 client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
+
+### 22d. `clientVisible` on staff payloads (PV3-07, 2026-10-12) — **STATUS: PROTOTYPED**
+
+Every row of the staff readers below carries `clientVisible: boolean`. It means exactly one thing:
+**a client-wide contact of the row's client can read this row in the client portal.** The backend
+computes it in SQL from the portal's own predicates (`core/portal-visibility.ts`, PV3-02), as
+`<client>.client_id IS NOT NULL AND <portal row-state builder>`, so the staff marker and the portal
+cannot drift (plan trap 9). Consumers render it ("Client sees this" / "Internal", PV3-09) and must
+**never derive it in the browser**. `client-visible-parity.db.test.ts` proves, per kind, that the staff
+ids marked `true` equal the ids the portal returns to a client-wide signer.
+
+⚠ **A project-scoped contact may see less.** Such a contact sees only rows of their own projects, plus
+the project-less contracts and change requests (a master agreement, a client-wide request); they do
+not see a project-less run. `clientVisible: true` therefore says "the client's people can see this",
+not "every contact of the client can". There is no per-contact flag.
+
+| Method | Path | `clientVisible` is | Builder (`portal-visibility.ts`) |
+|---|---|---|---|
+| GET | `/api/:t/projects` | client set, not deleted | `projectClientVisible` |
+| GET | `/api/:t/deliverables` | through the deliverable's **project**: the project has a client and is not deleted, and the deliverable is not deleted. `deliverables.client_id` is ignored (the portal reads deliverables by project). The `?clientId=` facet uses the same project rule (§22a), so every row of `?clientId=<uuid>` reads `true` and every row of `?clientId=internal` reads `false`. | `staffDeliverableClientVisible` |
+| GET | `/api/:t/contracts`, `/contracts/:id` | client set, not deleted, not `draft` | `contractClientVisible` |
+| GET | `/api/:t/invoices`, `/invoices/:id` | client set, not deleted, not `draft` (so `approved`, `sent`, `paid` and `void` all read `true`, as the portal shows them) | `invoiceClientVisible` |
+| GET | `/api/:t/invoice-payments` | through the **invoice** ("detail" context: the invoice's payment history, where pending and rejected claims show too): the invoice is client-visible and the payment is not deleted | `staffInvoicePaymentClientVisible` |
+| GET | `/api/:t/pipeline/runs` (and `include=gates`), `/pipeline/runs/:id` | run: client set, not deleted. Gate: through the run, and `actor_side = 'client'`. Stage (detail only): through the run, and not the `report` track. | `runClientVisible`, `staffGateClientVisible`, `staffRunStageClientVisible` |
+| GET | `/api/:t/webdev/change-requests` | client set, not deleted (a staff-logged request with no client reads `false`) | `changeRequestClientVisible` |
+| GET | `/api/:t/meetings/recordings` | always `false` (no portal read of meetings exists) | `NEVER_CLIENT_VISIBLE` (`meeting`) |
+| GET | `/api/:t/pm/tasks` | always `false` (the portal lists no tasks) | `NEVER_CLIENT_VISIBLE` (`task`) |
+| GET | `/api/:t/clients/:id/contacts` | listed in the portal People area: not revoked | `clientContactClientVisible` |
+| GET | `/api/:t/clients/:id/overview` → `needsUs[]`, `needsClient[]` | per item kind: `payment` through its invoice, `gate` through its run, `contract`, `request` and `review` on their own row (a post review is always visible to its client) | as above, plus `postReviewClientVisible` |
+
+Notes:
+- **No staff post-review list exists**, so post reviews carry the flag only through the overview items.
+- Notes (`comments`) and history (`activities`) are in `NEVER_CLIENT_VISIBLE` too; their staff readers are
+  not part of PV3-07, and PV3-09 styles the Internal area instead of marking rows.
+- The detail reads of projects, deliverables, meetings and tasks do not carry the flag (they were not in
+  PV3-07's scope); it is optional in the UI types for that reason and for older servers.
+- PV3-08's new `lib/contracts.ts` types should declare `clientVisible?: boolean` on the contract and
+  payment rows; this ticket added it to the existing types only.
 
 ---
 
@@ -5430,6 +5487,31 @@ A site that is not this company's is the uniform **404 problem `…/errors/site-
 **MCP tools** (`modules/webdev/index.ts`, same routes): `webdesk.editorial.listGrants` (read) · `webdesk.editorial.grantRole` (`write:true, impact:"high"`) ·
 `webdesk.editorial.revokeRole` (`write:true, impact:"medium"`), `minAssurance: "verified"`. An unattended caller suspends for approval; both writes are D14
 executables and re-drive as the original requester.
+
+### WebDesk form definitions (M5-L1d, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suites are written and need the Linux gate; UI: none yet)
+
+Before this, a WebDesk `form_defs` row could only be created by raw SQL. Code: `webdesk-forms.service.ts` + three handlers in `webdesk-content.controller.ts`; WebDesk side:
+`webdesk/api/src/control/forms/*` (README "Form definitions"). Same guards as the content routes; **the first statement of every handler is `authorizeSite(…, siteId, "webdesk_collection", …)`**
+(M5-W1c phase 1: `read` on the route's site). The write then asks `webdesk_collection` · **`apply_schema`** with `siteId` set (company_admin, webdev_manager, platform_admin; a writers' room grant
+does not carry it) before any body validation, and the reads need `read` on the site, so a denied caller gets **403 for any
+body** and nothing reaches WebDesk. No new kind. The wall is the content routes' (a site that is not this company's is the uniform 404 `…/errors/site-not-found`).
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/forms` | → `{forms: [{formId, key, siteId, schema, notify, retentionDays, consentNoticeVersion, createdAt, updatedAt}]}` ordered by key (WebDesk `forms.def.list`) |
+| GET | `…/forms/:formKey` | → `{form: {…}}`; unknown key 404 problem `…/errors/form-not-found` (WebDesk `forms.def.get`) |
+| PUT | `…/forms/:formKey` | `{schema: {fields: [{key,type,required?,maxLength?,min?,max?,options?}], honeypotField?, consentNotice: {text}, attachments?}, notify?, retentionDays (1..3650), consentNoticeVersion}` (strict: an unknown or route-parameter member is 400) → **200** `{form, created, consentNoticeChanged, replayed}` (WebDesk `forms.define`, MEDIUM; an upsert by (site, key), **redefining keeps `form.formId`**). Optional `Idempotency-Key`. |
+| PATCH | `…/forms/:formKey` | alias of the PUT (the MCP hub's method union has no PUT) |
+
+Field types: `text`, `textarea`, `email`, `tel`, `number`, `boolean`, `date`, `select` (needs `options`). WebDesk's typed problems pass through untouched as
+`application/problem+json`: **422 `form-definition-invalid`** (`issues: [{path, message}]`, every problem at once: bad field key or type, an email- or phone-looking field typed
+`text`, a honeypot that is also a field key, an empty consent notice, retention outside 1..3650, an unknown member) and **409 `consent-version-unchanged`** (the notice text
+changed but `consentNoticeVersion` did not: every submission snapshots both). The write writes two `activities` rows (`webdesk.forms.define`: attempted, then the outcome;
+tenant slug, site id, form key and notice VERSION only, never the notice text); the reads write none. WebDesk unavailable: the typed 503s of this section.
+
+**MCP tools** (`modules/webdev/index.ts`, same routes): `webdesk.forms.list` (read) · `webdesk.forms.get` (read) · `webdesk.forms.define` (`write:true, impact:"medium"`, PATCH),
+`minAssurance: "low"`. An unattended caller suspends for approval; `forms.define` is **not yet a D14 executable** (see PERMISSION-CONTRACT §27.3), so approving that suspension re-drives nothing and
+only an attended human can define a form today. The three gaiada.com definitions are data: `webdesk/sites/gaiada-com/forms/{contact,audit,onboard}.json` (its README has the field-id table and how to apply them).
 
 ### Writers' room review flow (M5-W2d, 2026-10-12 — STATUS: PROTOTYPED (backend): typechecked + unit-tested locally; the DB/Cerbos/HTTP suite `webdesk-editorial.test.ts` is written and needs the Linux gate; UI: M5-W2e)
 

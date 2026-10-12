@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.77.0` - M5-W2d: the writers' room review flow over the ERP (routes, MCP tools, notifications) (2026-10-12) - DEV-VERIFIED
+### platform-nest `0.78.0` - M5-W2d: the writers' room review flow over the ERP (routes, MCP tools, notifications) (2026-10-12) - DEV-VERIFIED
 
 - **Routes.** 11 routes under `…/content/sites/:tenantSlug/:siteId/`:
   - item routes: `items/:itemId/editorial/{submit,withdraw,request-changes,seo-signoff,approve,assign}`, `…/editorial/comments` and `…/comments/:c/resolve`, `GET items/:itemId/editorial` (history);
@@ -26,6 +26,79 @@ local stack). None of these mean "production-done".
 - **The board:** filtered per (collection, locale) for a scoped grant, with `countsWithheld`.
 - PERMISSION-CONTRACT §27.4; FRONTEND-BFF-CONTRACT §27 rows.
 - Verified on GitHub Actions 38201900188: the real-DB suite 24/24 (denials with valid bodies and no WebDesk write, bot and automation approve 403, self-approve 403, notification recipients incl. another tenant's editor), units 10/10, grants 17/17 + 31/31.
+
+### webdesk `0.14.0` - M5-L1d: form definitions get a write path; blank optional form values are absent (2026-10-12) - DEV-VERIFIED
+
+- **The write path.** `forms.define` (`PUT /control/v1/tenants/:tenantSlug/sites/:siteId/forms/:formKey`) is MEDIUM / `webdesk:operate`, needs an Idempotency-Key and writes its audit row first. The audit holds identifiers and counts, never the notice text.
+  - It upserts by (site, key), and a redefinition keeps the form id.
+  - A 422 `form-definition-invalid` lists every issue at once.
+  - A changed notice text under the same consent version is refused with 409 `consent-version-unchanged`.
+  - Reads: `forms.def.list` and `forms.def.get`.
+  - Until now a form could only be created by raw SQL.
+- The form schema gains a `tel` field type (phone subject refs come from `tel`-typed fields).
+- **Behaviour change on the public submit:**
+  - An OPTIONAL field sent as `""` or whitespace is treated as absent. It is accepted and stored without the key, and no subject ref is derived from it.
+  - A REQUIRED text, textarea or tel field now refuses `""` (it used to accept it).
+- gaiada.com's contact, audit and onboard definitions live as data in `webdesk/sites/gaiada-com/forms/*.json`. They use the site's field ids, honeypot `_hp`, consent version `site-2026-10-11` and 90-day retention, and the notice text is a DRAFT for counsel. CI validates them with the same parser the command uses. **Nothing is applied to any tenant**: that waits for G2 and the Turnstile keys.
+- Verified on GitHub Actions 38201574048: forms-define.spec 16/16 (define → public submit → consent snapshot and typed refs), the gaiada definitions 15/15, blank optionals 6/6.
+
+### platform-nest `0.77.0` - M5-L1d: website form definitions from the ERP (2026-10-12) - DEV-VERIFIED
+
+- `PUT|PATCH / GET /api/:t/modules/webdev/content/sites/:tenantSlug/:siteId/forms[/:formKey]`, opened by W1c's `authorizeSite`.
+  - The write also needs `webdesk_collection:apply_schema` on the site, before the body is read (the publisher tier, like composition changes). The reads need phase 1 only.
+- MCP tools `webdesk.forms.define` (medium), `webdesk.forms.list` and `webdesk.forms.get`.
+- A contract test checks the L4 lead mapping against the gaiada.com definitions.
+- Verified on GitHub Actions 38201574048: webdesk-forms-define 14/14 (denials with valid bodies and positive controls; a scoped writer reads but cannot define), contract 11/11.
+
+### webdesk `0.13.0` - contract codegen runs live (queued after tenant.provision and schema.apply), the headless WordPress theme, render-time XSS safety in both renderers, a PHP SDK timeout, the three site templates (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6 (plan `docs/plans/2026-10-11-webdesk-m6-plan.md`). Built by the M6 session.
+
+- **Renderer safety (M6-P5c), both renderers.** A link-scheme allow-list (`http`, `https`, `mailto`, `tel`, relative paths, `?`, `#`; a backslash or a colon in the first segment refused), image sources limited to `http`/`https`/relative, inline JSON in `<script type="application/json">` escaped so it cannot close its tag, and rich text sanitised at render: `sanitize-html` 2.17.7 (exact pin) in `webdesk/blocks`, `wp_kses_post()` inside WordPress (escape-all outside). WebDesk validates content shape only, so with client editors (WSK-D58 to D60) this closes a stored-XSS path on delivered sites.
+- **The WordPress theme (M6-P5a, P5e).** One canonical copy at `webdesk/wordpress/theme/gaiada-webdesk/`: a router testable without WordPress, configuration only from `wp-config.php` or the environment (never the database), a read-only settings page, and the PHP block templates now read the vocabulary's own field names (`richText` read `value` and `cta` read `label`/`href`, so both rendered empty). `scaffold-template/wp-site.ts` is retired.
+- **PHP SDK timeout (M6-P5d).** The generated SDK takes `float $timeoutSeconds = 5.0` (non-positive refused; connect capped at 2 s); it was a fixed 10 s.
+- **Compiled contract generator (M6-P4r-a).** The generator was dev-only (`tsx`, not in the image, nothing called it). It is now bundled by esbuild into `dist/codegen/generator.mjs`, with determinism proven on the compiled form (`codegen:gate:dist`, also a legacy-suite step).
+- **Contract codegen runs live (M6-P4r-b).** `tenant.provision` and `schema.apply` enqueue a `contract-codegen` BullMQ job in the CommandEnvelope's post-commit hook (fail-soft: an enqueue or codegen error never changes the command's response or idempotency record; bounded at 3 s). One worker, a per-tenant Postgres advisory lock, coalescing per tenant, and an `unchanged` guard (the generator would otherwise mint a PATCH version for an unchanged composition). The new control command `contract.regenerate` (one tenant or all) is the backfill and re-run path; existing tenants get no contract until it runs. Output goes to RustFS with the api's existing key (no policy change).
+- **The api image** builds from `./webdesk` with `-f api/Dockerfile` (a `.dockerignore` admits only `api/`, `blocks/`, `delivery/`) and carries the packed `@gaiada/webdesk-blocks` tarball at `/app/artifacts/blocks/` with its sha256 in a LABEL. 353 to 366 MB. **Goes live through the WebDesk api swap**; watch the release's `deploy-webdesk` job, the first with the larger image.
+- **Site templates (M6-P4d, WSK-D74).** `webdesk/templates/{static-astro,fullstack-next-nest,wp}` are the reviewed sources of the `gaiadabali/template-*` repos (published, their workflows green on GitHub): skip while a template, require `CONTRACT.lock` once scaffolded, deploy gated on `WEBDESK_DEPLOY_GRANT`. `wp` carries the canonical theme byte for byte (`check-wp-theme.mjs`, now part of `webdesk` `npm test`). `fullstack` ships no database layer (the unified-DB question is open).
+- A WSK-27 code comment renamed to WSK-70 in the vocabulary source and its vendored copy.
+- Verified: WebDesk gate on sumopod, main `7e5ef63b` + the branch (`m6b2wd`): root 25, blocks 40, vocabulary 267, migrations 749, legacy 16/0/1 (incl. `m6-p4ra-codegen-gate-dist`); webdesk-api 1652/0/3 after two live-spec fixes (`m6b2api2`; the 13 live codegen tests run the real compiled generator against Postgres, Redis and RustFS); root + blocks again with the templates (`m6b2root`). Image proofs for P4r-a: reproducible blocks tarball, wrong-hash build refused, read-only load. Later main (`61295678`, `da3641e3`) merged without a re-gate: no code conflict; generated files regenerated.
+
+### platform-nest `0.76.0` - read a pinned WebDesk contract snapshot by id; the portfolio registry gets its own Cerbos kind `webdev_site` (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4a (design §06's named blocker).
+
+- `GET /api/:t/modules/webdev/contracts/:snapshotId` and `.../artifacts/:artifact` (`openapi`, `sdkTs`, `sdkPhp`, `contractMd`): the file id comes only from the snapshot's own pointer, and the bytes are re-hashed against the mirror-time sha256 (`502 artifact_hash_mismatch`; a null pointer is `404 artifact_absent`). Cerbos `webdev_contract_snapshot` `read`; no policy change.
+- Two read-only MCP tools, `webdev.contracts.get` and `webdev.contracts.artifact`.
+- **The portfolio registry's own Cerbos kind (M6-P3c), behaviour-preserving.** `webdev_site` (`read`, `create`, `update`, `request_probe_consent`) replaces the borrowed `webdev_provisioned_site` actions on the five registry routes, with exactly the same roles. **Migration `202610111808_iam_webdev_site_permissions.sql`** seeds 22 `role_permissions` rows and copies every role holding the old keys onto the new ones (DO-block assertions: no lost reach, `owner` mirrors `company_admin`). **Cerbos restart on deploy** (new policy `resource_webdev_site.yaml`; nothing hot-reloads). Catalog 434 pairs / 103 kinds / 419 grantable / 202 sensitive; contract §16g-i notes updated.
+- Verified on the Linux gate on sumopod (`m6b2`, main `7e5ef63b` + the branch): platform-nest 598 files / 8847 passed / 0 failed incl. the new `webdev_site` matrix and the migration; repo checks PASS. Later main merged without a re-gate (no code conflict); capability inventory regenerated (186).
+
+### platform-ui `0.95.0` - site provisioning offers all three kinds, shows awaiting-approval and the failure reason (2026-10-12) - DEV-VERIFIED
+
+WebDesk M6-P4f.
+
+- WordPress is offered and enabled (its "disabled" reason was stale: all three kinds go through the ERP's repo control).
+- A pending repo-control row reads "Awaiting approval" with a link to its approval; a failed row shows its raw reason as text; failure tokens are matched on own keys only.
+- Verified on the Linux gate (sumopod, `m6b2`): platform-ui 302 files / 5790 passed; `next build` exit 0.
+
+### mcp-hub `0.13.1` - the delivery workflow may read pinned contract snapshots (2026-10-12) - DEV-VERIFIED
+
+- `wf:delivery` gains the two read-only tools `webdev.contracts.get` and `webdev.contracts.artifact` (M6-P4a). No other entry changes.
+- Verified on the Linux gate (sumopod, `m6b2`): mcp-hub 384 passed / 29 skipped.
+
+### ai-agents `0.9.0` - code.scaffold reads the pinned snapshot through real hub tools; the WordPress kind emits the canonical theme (2026-10-12) - PROTOTYPED
+
+- `HubContractSnapshotProvider` uses `webdev.contracts.get` / `webdev.contracts.artifact` (M6-P4a). The block-library download is still unregistered (M6-P4b0).
+- The `wp` template emits the canonical theme byte for byte, renderer included (it previously emitted no `inc/` at all), with a drift test (M6-P5a, P5c, P5e).
+- `code.scaffold` v2 still has no live caller (M6-P4b1).
+- Verified on the Linux gate (sumopod, `m6b2`): ai-agents 361 passed.
+
+### infra `0.13.1` - CI runs the WordPress theme's PHP checks; release builds webdesk-api from ./webdesk (2026-10-12) - PROTOTYPED
+
+- `ci.yml`: a `webdesk_wordpress` CI group gates one `webdesk-light` step (`php -l`, five probes in digest-pinned `php:8.3-cli`, the vendored block-list `--check`) (M6-P5b). Its first run is on this merge.
+- `release.yml`: webdesk-api builds from `./webdesk` with `file: ./webdesk/api/Dockerfile` and a pre-pack step that passes the block-library sha256 as build args (M6-P4r-a). Reviewed by the M4 session.
+- `scripts/ci`: `webdesk/blocks/` in the `webdesk_api` group; release components may list `deps` (webdesk-api: `webdesk/blocks/`, `webdesk/delivery/vocabulary/`), so a blocks-only change rebuilds instead of re-tagging. One planner assertion that had been failing since WSK-49c is corrected.
+- `docker-compose.vps.yml`: `platform` receives `ERP_REPO_TEMPLATE_STATIC|FULLSTACK|WP` (M6-P4d); the three values are already in the box's `.env`.
 
 ### platform-nest `0.75.0` - M5-W1c: the writers' room two-phase gate on every content route (2026-10-12) - DEV-VERIFIED
 
@@ -58,6 +131,46 @@ The transport that makes the W1a writers' room rules live (built by the M5 sessi
 - The save path and `item.get` share one resolution (W3b's read == save holds). The checks stay advisory.
 - **Vocabulary 1.3.0 (MINOR):** the breaking-change classifier gains a `lintKeys` dimension and pins the bump as minor. It is re-vendored into the api, the blocks package and platform-nest (`src/modules/webdev/vocabulary`). The new `w3c-lint-content` suite now runs in CI and in the Linux gate.
 - Verified on GitHub Actions 38199176963: webdesk-api 1605 passed / 2 skipped, blocks 32/0, every vocabulary suite green.
+
+### platform-nest `0.74.0` - PV-3 waves 2-3: client visibility on staff payloads, contract and payment tools, portal isolation fixes (2026-10-12) - PROTOTYPED
+
+PV-3 waves 2 and 3 (tickets `docs/plans/2026-10-11-pv3-hub-symmetry-tickets.md`: PV3-02b, 02c, 02d, 06, 07). No migration.
+
+- **PV3-07:** every staff hub payload carries `clientVisible`, computed in SQL from `core/portal-visibility.ts`:
+  - covered: projects, deliverables (through the project), contracts, invoices, invoice payments (through the invoice), pipeline runs, gates and stages, change requests, client contacts, and the overview's `needsUs` / `needsClient` items;
+  - tasks and meetings are always `false`;
+  - a parity test proves the staff `true` set equals what the portal returns to a client-wide contact, kind by kind, plus the NULL-project rules for a project-scoped contact;
+  - the deliverables `?clientId=` facet now goes by the project's client, as the portal does;
+  - the overview's payment and contract items link to `/clients/:id/billing`.
+- **PV3-06 (agentic-native bar):** `contracts.list/get/createDraft/updateDraft/send/countersign` and `invoicePayments.list/decide`:
+  - send is MEDIUM; countersign and decide are HIGH, each with a D14 executor;
+  - `createDraft` is idempotent on `ix_contracts_reference_uniq`;
+  - countersign, decide and create authorize before they validate;
+  - an agent or n8n can no longer set a contract `status` through PATCH (`status_not_allowed_via_automation`), so void stays human-only.
+- **Portal isolation fixes:**
+  - PV3-02b: mail threads follow the portal's run scope.
+  - PV3-02c:
+    - scope sign-off can decide only the run's client-side `scope_signoff` gate;
+    - a deleted project's deliverable file is 404;
+    - a payment shows only through a visible invoice;
+    - the receipt download no longer 500s on an unused parameter.
+  - PV3-02d: an `approved` (not yet sent) invoice is hidden from the client like a draft.
+- Verified: targeted Linux runs per ticket with teeth, plus the full platform-nest gate of wave 2 on sumopod and main's CI on the merged tree.
+
+### platform-ui `0.93.0` - PV-3 waves 2-3: the Contracts & billing page; every hub row says who sees it (2026-10-12) - PROTOTYPED
+
+- **PV3-08:** `/clients/[id]/billing` ("Contracts & billing", between Business and People, with a badge).
+  - Contracts: draft (with optional PDF), edit, void, send (disabled with its reason), and countersign shown only when `canCountersign`, with the signatures.
+  - Invoices as a list (D7 open).
+  - Payments to confirm: confirm, or reject with a reason; the "you recorded this payment" refusal is shown in words.
+  - Every read refuses explicitly.
+  - A stateful demo store mirrors the backend's rules.
+- **PV3-09:** every row on the hub's Overview, Projects, Contracts & billing and People shows **Client sees this** or **Internal**, from the backend's `clientVisible` only.
+  - A missing field renders nothing; it never defaults.
+  - Each state has a text label and a distinct edge, not colour alone.
+  - The Business area notes "The client sees and edits this profile".
+  - A new hub axe sweep covers light and dark.
+- Verified on the merged tree: hub, markers, hub-axe, billing-flow and portal e2e on sumopod; ui suite and `next build` in main's CI.
 
 ### platform-nest `0.73.0` - M5-P1-g and M5-G5b: a race-safe lead convert with no name on the bus; privacy approvals store no identifiers (2026-10-12) - DEV-VERIFIED
 

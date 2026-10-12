@@ -121,7 +121,12 @@ describe("runCodeScaffold — siteKind gating (WSK-D28 / webdesk-design-v2.md §
     expect(result.files).toContain("style.css");
     expect(result.files).toContain("vendor/gaiada-sdk/sdk.php");
     expect(result.files).toContain("functions.php");
-    expect(result.files).toContain("page.php");
+    expect(result.files).toContain("index.php");
+    // the renderer + router (the pre-M6-P5a template omitted inc/ entirely)
+    expect(result.files).toContain("inc/block-renderer.php");
+    expect(result.files).toContain("inc/router.php");
+    expect(result.files).toContain("inc/config.php");
+    expect(result.files).not.toContain("page.php");
     expect(result.files).toContain("CONTRACT.lock");
     // wp is not built from page-composer (a different, PHP-templated content model) — it must
     // never carry astro/node-only artifacts.

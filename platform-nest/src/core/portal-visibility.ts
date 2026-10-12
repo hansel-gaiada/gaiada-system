@@ -154,10 +154,11 @@ export function contractInPortalScope(alias: string, params: PortalScopeParams):
   return `${inCallerClients(alias, params.clients)} AND ${contractClientVisible(alias)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, true)}`;
 }
 
-/** An invoice is visible unless soft-deleted or still a `draft` (a number the agency has not
- *  committed to). */
+/** An invoice is visible unless soft-deleted, still a `draft` (a number the agency has not committed to),
+ *  or `approved` (PV3-02d: the internal maker/checker step BEFORE the invoice is sent; the client must not
+ *  see an invoice the agency has not yet issued). Visible: `sent`, `paid`, `void`. */
 export function invoiceClientVisible(alias: string): string {
-  return `${col(alias, "deleted_at")} IS NULL AND ${col(alias, "status")} <> 'draft'`;
+  return `${col(alias, "deleted_at")} IS NULL AND ${col(alias, "status")} NOT IN ('draft','approved')`;
 }
 
 /** The full portal predicate for an invoice. Invoices carry no project, so reach is the client only. */
@@ -256,3 +257,59 @@ export const NEVER_CLIENT_VISIBLE_REASONS: Readonly<Record<NeverClientVisibleKin
     "activities records every internal verb by every actor. The portal timeline is composed from " +
     "client-visible OBJECTS instead, so a new internal verb can never leak into the client's feed.",
 };
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Staff side (PV3-07): the `clientVisible` flag on staff payloads
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `clientVisible` answers ONE question: can a CLIENT-WIDE contact of the row's client read this row in
+// the portal? It is composed only from the row-state builders above, never retyped, so the staff marker
+// and the portal cannot disagree (plan trap 9). Three consequences a caller must keep:
+//   * A row with no client is never client-visible: there is no contact who could read it.
+//   * A row whose portal reach travels through a PARENT (deliverable -> project, gate/stage -> run,
+//     payment -> invoice) is visible only when the parent is, and "the row's client" is the PARENT's
+//     client, because that is the column the portal's own query filters on.
+//   * A PROJECT-SCOPED contact sees a subset (only their projects, plus the project-less contracts and
+//     change requests). The flag never claims to describe them; the BFF rows say so.
+// The parity test (`client-visible-parity.db.test.ts`) proves every staff use of these against the
+// ids the portal endpoints actually return.
+
+/** `(alias.client_id IS NOT NULL AND <row-state>...)`, as a boolean SQL expression for a SELECT list.
+ *  `clientAlias` is the table whose `client_id` names the row's client: the row itself, or the parent
+ *  its visibility travels through. Each `rowState` argument must be the output of a row-state builder
+ *  above (`<entity>ClientVisible`), never a hand-written predicate. */
+export function staffClientVisible(clientAlias: string, ...rowState: string[]): string {
+  if (rowState.length === 0) throw new Error("portal-visibility: staffClientVisible needs at least one row-state predicate");
+  return `(${col(clientAlias, "client_id")} IS NOT NULL AND ${rowState.map((s) => `(${s})`).join(" AND ")})`;
+}
+
+/** A kind in NEVER_CLIENT_VISIBLE: the flag is the SQL constant FALSE, taken from that list (so a kind
+ *  removed from it stops compiling here instead of silently staying false). */
+export function staffNeverClientVisible(kind: NeverClientVisibleKind): string {
+  if (!(NEVER_CLIENT_VISIBLE as readonly string[]).includes(kind)) {
+    throw new Error(`portal-visibility: ${JSON.stringify(kind)} is not in NEVER_CLIENT_VISIBLE`);
+  }
+  return "FALSE";
+}
+
+/** A deliverable, through its project (`p` must be the deliverable's own project, LEFT JOINed: a
+ *  deliverable with no project is never visible, since the portal reads deliverables by project). */
+export function staffDeliverableClientVisible(deliverableAlias: string, projectAlias: string): string {
+  return staffClientVisible(projectAlias, projectClientVisible(projectAlias), deliverableClientVisible(deliverableAlias));
+}
+
+/** A gate, through its run: a client-side, undeleted gate on a run the portal shows. */
+export function staffGateClientVisible(gateAlias: string, runAlias: string): string {
+  return staffClientVisible(runAlias, runClientVisible(runAlias), gateClientVisible(gateAlias));
+}
+
+/** A run stage, through its run: any track but `report`, on a run the portal shows. */
+export function staffRunStageClientVisible(stageAlias: string, runAlias: string): string {
+  return staffClientVisible(runAlias, runClientVisible(runAlias), runStageClientVisible(stageAlias));
+}
+
+/** An invoice payment, through its invoice, in the portal's "detail" context (an invoice's payment
+ *  history, where pending and rejected claims show too). `i` must be the payment's own invoice. */
+export function staffInvoicePaymentClientVisible(paymentAlias: string, invoiceAlias: string): string {
+  return staffClientVisible(invoiceAlias, invoiceClientVisible(invoiceAlias), invoicePaymentClientVisible(paymentAlias, "detail"));
+}

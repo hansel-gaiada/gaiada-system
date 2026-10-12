@@ -219,11 +219,13 @@ function repoCells(row: RepoRow, opts: { mayReconcile: boolean; withActions: boo
     <span key="lineage" className="repo-cell">{lineage || <em className="repo-cell__muted">{row.run ? "no client or project" : STANDALONE}</em>}</span>,
     // Status — the badge, and for a failure the reason in plain words right under it.
     <span key="status" className="repo-cell repo-cell--stack">
-      <StatusBadge label={REPO_STATUS_LABEL[row.status]} />
+      <StatusBadge label={row.statusLabel ?? REPO_STATUS_LABEL[row.status]} />
+      {row.approvalHref && <a className="repo-cell__sub" href={row.approvalHref}>Review the approval</a>}
       {row.failure && (
         <details className="repo-why">
           <summary className="repo-why__summary">{row.failure.title}</summary>
           <span className="repo-cell__why">{row.failure.body}</span>
+          {row.failureDetail && <span className="repo-cell__why">Reason: {row.failureDetail}</span>}
         </details>
       )}
     </span>,

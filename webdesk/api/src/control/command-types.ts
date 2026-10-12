@@ -36,6 +36,8 @@ export type CommandName =
   | "job.get"
   | "job.list"
   | "contract.read"
+  // M6-P4r-b -- the re-run / backfill path of the live contract codegen: queues a run for one tenant or all.
+  | "contract.regenerate"
   // WSK-41 — the content authoring commands (write-plane design §3.1). Every one carries an
   // editorial principal (EDITORIAL_COMMANDS below).
   | "content.create"
@@ -66,6 +68,10 @@ export type CommandName =
   | "media.usage"
   // M5-L1/L2 — one form submission read back by the ERP after it sees a Zone B form.received fact.
   | "forms.submission.get"
+  // M5-L1d — a site's form definitions: the write (an upsert by (site, key)) and the two reads.
+  | "forms.define"
+  | "forms.def.list"
+  | "forms.def.get"
   // M5-W2b — the writers' room review flow (design docs/plans/2026-10-11-m5-writers-room-design.md section 4.3).
   // The nine writes carry an editorial principal (EDITORIAL_COMMANDS); board and history are plain reads.
   | "editorial.submit"
@@ -147,6 +153,10 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "job.get": { command: "job.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "job.list": { command: "job.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "contract.read": { command: "contract.read", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M6-P4r-b: queues contract-codegen runs (the re-run path for a failed run and the backfill for tenants
+  // that predate the live trigger). MEDIUM/operate like schema.apply, which triggers the same runs: it
+  // changes no tenant content, only (re)publishes a contract derived from compositions already stored.
+  "contract.regenerate": { command: "contract.regenerate", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   // WSK-41 (design §3.1, rulings WSK-D45/D46). Draft writes are MEDIUM/operate: a draft is never
   // live (content_items is the live projection; a version is the working copy). publish/schedule
   // are HIGH for EVERY principal class, so the PolicyDecisionPoint demands a WS4 assertion.
@@ -190,6 +200,15 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   // purged/erased row (410) and is never served from a cache; the DSR commands, which look a PERSON up
   // across a tenant, stay high/WS4 (privacy.*). No audit row, like the other reads.
   "forms.submission.get": { command: "forms.submission.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // M5-L1d: forms.define changes what a PUBLIC form accepts (its fields, its consent notice, how long submissions
+  // are kept), so it is a write, MEDIUM / operate like schema.apply, whose family it belongs to: it never touches
+  // /v1 delivery or published content, so there is no WS4 approval; an operator can redefine a form, and the
+  // consent notice cannot change without a new version (409 consent-version-unchanged). It carries no editorial
+  // assertion and is on neither EDITORIAL_COMMANDS nor CLIENT_EDITOR_COMMANDS, exactly like schema.apply: a
+  // client-editor principal cannot be expressed on it. The two reads are read / webdesk:read, un-audited.
+  "forms.define": { command: "forms.define", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  "forms.def.list": { command: "forms.def.list", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "forms.def.get": { command: "forms.def.get", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   // M5-W2b (design 4.3): every review write is MEDIUM / operate. None is HIGH, because none changes what a
   // production key sees: approval is a recorded decision, and the publish gate that ENFORCES it (W2c) sits on
   // content.publish / content.schedule, which stay HIGH. policySet turns review on or off for a collection, and

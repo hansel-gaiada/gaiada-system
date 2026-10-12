@@ -30,6 +30,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { changeRequestClientVisible, staffClientVisible } from "./portal-visibility";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
@@ -161,6 +162,8 @@ export class WebdevChangeRequestsController {
     args.push(...clientFilter.params);
     clauses.push(clientFilter.sql);
     if (projectId) clauses.push(`cr.project_id::text = $${args.push(projectId)}`);
+    // PV3-07: `clientVisible` = a client-wide contact of the request's client can read it in the portal
+    // (portal-visibility.ts). A staff-logged request with no client reads `false`.
     const rows = await withTenants([tenantId], (c) =>
       c.query(
         `SELECT cr.id, cr.client_id AS "clientId", cl.name AS "clientName",
@@ -169,7 +172,8 @@ export class WebdevChangeRequestsController {
                 cr.pipeline_run_id AS "pipelineRunId", cr.pm_task_id AS "pmTaskId",
                 cr.requested_by AS "requestedBy", ru.name AS "requestedByName",
                 cr.triaged_by AS "triagedBy", tu.name AS "triagedByName", cr.triaged_at AS "triagedAt",
-                cr.declined_reason AS "declinedReason", cr.created_at AS "createdAt", cr.updated_at AS "updatedAt"
+                cr.declined_reason AS "declinedReason", cr.created_at AS "createdAt", cr.updated_at AS "updatedAt",
+                ${staffClientVisible("cr", changeRequestClientVisible("cr"))} AS "clientVisible"
            FROM webdev_change_requests cr
            LEFT JOIN clients cl ON cl.id = cr.client_id
            LEFT JOIN projects p ON p.id = cr.project_id

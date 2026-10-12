@@ -12,6 +12,7 @@ import {
   canCountersign,
   type ClientContact,
 } from "@/lib/clientContactsView";
+import { ClientVisibilityMarker } from "./ClientVisibilityMarker";
 import "@/components/departments/departments.css";
 
 // W0-5 — the PM's "external setup" surface (owner decision D-2: a PM delegates internally AND starts
@@ -86,6 +87,8 @@ export function ClientContactsPanel({
                 <div style={{ flex: "1 1 200px", minWidth: 0 }}>
                   <div style={{ font: "500 13px var(--font-body)", color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {c.name || c.email}
+                    {/* PV3-09: listed in the portal People area, from the backend's `clientVisible` (BFF §22d). */}
+                    <ClientVisibilityMarker clientVisible={c.clientVisible} />
                   </div>
                   <div style={{ font: "400 12px var(--font-body)", color: "var(--ink-subtle)" }}>{c.email}</div>
                 </div>

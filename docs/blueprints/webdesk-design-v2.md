@@ -487,9 +487,9 @@ and it reuses the estate's own stack rather than building a probe harness:
 | Ticket | What it is | State |
 |---|---|---|
 | **SM-70** | the Nexus importer — lands ~63 client properties into `search_properties` | ✅ **built** (inert, opt-in) |
-| **SM-74** | *"property hosting topology field set on `search_properties` — host, **control panel**, stack, plugin surface"* | ⬜ designed, `junior` |
-| **MON-01** | blackbox-exporter extended to client properties: `targets.yml` generated from `search_properties` (**verified rows only**), `http_2xx` + `ssl_expiry` | ⬜ designed |
-| **MON-04** | Grafana "Client Properties" dashboard — uptime, cert days remaining, per-property drill-down | ⬜ designed |
+| **SM-74** | *"property hosting topology field set on `search_properties` — host, **control panel**, stack, plugin surface"* | in code: `202608300818_sm74_property_hosting_topology.sql`; whether any row carries data is unmeasured (M6-P3a, 2026-10-11) |
+| **MON-01** | blackbox-exporter extended to client properties: `targets.yml` generated from `search_properties` (**verified rows only**), `http_2xx` + `ssl_expiry` | in code: `infra/observability/scripts/gen-client-property-targets.mjs` (verified rows only, private ranges refused) + `infra/scripts/sync-client-property-targets.sh` + the `client-properties` job in `prometheus.remote.yml`; whether it runs live is measured by M6-P3a (2026-10-11) |
+| **MON-04** | Grafana "Client Properties" dashboard — uptime, cert days remaining, per-property drill-down | ⬜ designed (M6-P3e) |
 
 **Consent is not optional and not implied.** `search_properties.verified_at` exists because
 scheduled requests to someone else's server is a permissions question. MON-01's "verified rows
@@ -542,7 +542,7 @@ would mean three different things. The canonical vocabulary is **`static` · `wp
 |---|---|---|---|---|
 | `static` | template-static (from `-nonssg`) | `astro` | widen CHECK | works as `vite`/`astro` |
 | `fullstack` | template-fullstack (from `-nextjs`) | `node` | widen CHECK | works as `nextjs`/`node` |
-| `wp` | **template-wp (new)** — theme exists at `webdesk/wordpress/scaffold-template/` | lift `rejected_site_kind`, wire the PHP SDK path | widen CHECK | **refused in 4 places** |
+| `wp` | **template-wp (new)** — the theme is `webdesk/wordpress/theme/gaiada-webdesk/` (one canonical copy since M6-P5a, 2026-10-11; the old `scaffold-template/` is retired) | lift `rejected_site_kind`, wire the PHP SDK path | widen CHECK | **refused in 4 places** |
 
 **Lifting the refusals is a ruling, not a code tweak.** WordPress and full-stack are refused
 deliberately at four points — `webdev_provisioned_sites.framework CHECK`, the tool's `framework`
@@ -618,7 +618,7 @@ largest lever is architectural, not operational.
 GitHub-hosted, metered. **Zero self-hosted runners.** The ERP repo is a **personal-account** repo
 (`hansel-gaiada/gaiada-system`); the operator token sees **no orgs**, so the client repos in
 `Gaia-Digital-Agency` bill against a different account entirely. **Two billing buckets.** The actual
-figures could not be read (billing endpoints need `admin:org`) — OQ-2.5.
+figures could not be read (billing endpoints need `admin:org`) — OQ-2.5. *Re-counted 2026-10-11 (M6 plan): **19 jobs across 5 workflows** (`deploy-webdesk.yml` added), all `ubuntu-latest`, still zero self-hosted.*
 
 Levers, in size order:
 
@@ -688,7 +688,7 @@ else and pays for itself immediately.
 
 | # | Question | Default if unanswered |
 |---|---|---|
-| OQ-2.1 | Ratify: repo creation stays manual **except** through the scoped, template-only, WS4-gated ERP path; `github.createRepo` stays fail-closed forever | Adopt as written (§08) |
+| ~~OQ-2.1~~ | **RESOLVED 2026-10-12 — see WSK-D74.** Adopted as written: repo creation stays manual except through the scoped, template-only, WS4-gated ERP path; `github.createRepo` stays fail-closed forever. | — |
 | ~~OQ-2.2~~ | **RESOLVED 2026-10-10 for the `webdesk` compose project only — see WSK-D43.** Act directly, inside that project, with a volume backup first and a rollback path. Every other change on `gda-aicenter` keeps the runbook default. | — |
 | ~~OQ-2.3~~ | **RESOLVED 2026-10-10 — see WSK-D43.** A real subdomain: `api.gaiada.online` serves `/v1`, `/forms` and `/media`. | — |
 | OQ-2.4 | Do client engagements permit scheduled auditing of their sites? | **Unverified per client** — `verified_at` stays false, nothing is probed |
@@ -759,6 +759,7 @@ Decisions **WSK-D1…D26 carry** from v1.1 §14 except where amended below.
 | **WSK-D71** | **ERP pages on sumopod enter through the ERP's own `erp-edge` Traefik, reached by ONE TLS-passthrough rule in the owner's `mimi` Traefik (owner-ruled 2026-10-11, M5; amends WSK-D70's mechanism).** The owner's answers, in order: "open new ports so it wont conflict with other project"; then "new traefik setup for erp"; then, shown that only one process can hold 80/443, "Behind one passthrough rule". So: a separate compose project `erp-edge` on sumopod runs its own Traefik with its own file provider and its own certificates. `mimi`'s Traefik gets exactly ONE file, a TCP router on `websecure` matching every `*.erp.gaiada.com` SNI with `tls.passthrough`, forwarding the untouched TLS stream to `erp-edge`'s entrypoint published only on `172.17.0.1`. Nothing else in `mimi` changes, and later ERP names on sumopod need no further edit there; D70's per-name files in mimi's directory go away at the cut-over. `erp-edge` terminates TLS and issues certificates by **TLS-ALPN-01** (the HTTP challenge cannot work: mimi redirects all of :80, which stays as it is). The passthrough sends **PROXY protocol**, and `erp-edge` trusts it only from the address mimi's connections arrive from, so services still see the visitor's real IP (Umami needs it for location and session hashing; never trust it from anywhere else). Services keep D70's rules: each publishes ONLY on `172.17.0.1` (status page 18480, Umami edge 18742), none joins mimi's network, Umami's admin UI is refused at `erp-edge`'s router. **The cut-over is one step:** with `erp-edge` already running and already holding every route, the passthrough file is written and `erp-status.yml` removed from mimi's directory in the same command; rollback restores that file and removes the passthrough. | The owner wants the ERP's edge to be its own, so ERP routing and certificates never live in, or depend on edits to, another project; one passthrough line is the least that can reach 443 while `mimi` holds it. A non-standard public port was rejected: no HTTP or TLS-ALPN challenge without 80/443, and networks that block it lose visits. |
 | **WSK-D72** | **WebDesk runs on a 1.0 vCPU budget (owner-ruled 2026-10-12, M4).** gda-aicenter is now an `e2-highmem-2` (2 vCPU / 16 GiB, down from the 4 vCPU of the 2026-08-31 survey), shared with the whole ERP. WebDesk's CPU ceilings (`webdesk/docker-compose.aicenter.yml`) sum to 1.0 vCPU: api 0.40, postgres 0.30, proxy/redis/rustfs 0.10 each, so WebDesk alone can never take more than half the box. Memory ceilings are unchanged. Revisit before a second tenant. | The old ceilings summed to 3.25 vCPU, more than the box. The owner chose the no-cost option over a resize. Measured at rest ~0.1 vCPU; the boot proof passes 44/44 under the new limits on sumopod (postgres and rustfs healthy). |
 | **WSK-D73** | **Build rootless Docker for the WebDesk project now (owner-ruled 2026-10-12, M4; closes design §03 AC 7 / board F6).** WebDesk's containers move off the box's rootful daemon onto a rootless daemon owned by a dedicated unprivileged user, so a container escape lands as that user, not as root on the ERP's kernel. Mechanism, migration and the egress guard's rebasing (a rootless daemon's traffic leaves as that user's processes, not from a bridge subnet) are designed and proven before the live move: M4 plan §F6. | AC 7 was the one §03 hardening item never built. The owner chose to build it now rather than accept the risk until WebDesk serves client tenants. |
+| **WSK-D74** | **Repo control: OQ-2.1 adopted as written, and the P4 defaults (owner-ruled 2026-10-12, M6).** (1) **OQ-2.1:** repo creation stays manual except through the scoped, template-only, WS4-gated ERP path (`ErpRepoControlProvider` filing a D14 approval; the repo is generated only at a company admin's `decide()`), and `github.createRepo` stays fail-closed forever. (2) **Template repos:** the owner creates three empty private repos in `gaiadabali` (`template-static-astro`, `template-fullstack-next-nest`, `template-wp`) and marks them as templates; sessions fill them by pull request (M6-P4d). (3) **The P4 gate's repos** (3 kinds × staff click and signed PRD) are created in a separate test org, so the gate can be re-run without leaving repos in `gaiadabali`. | The owner accepted the M6 plan's defaults for O-2, O-4 and O-5 (`docs/plans/2026-10-11-webdesk-m6-plan.md` §2). O-1 (P6's target) is deferred; O-3 (the App's `organization_secrets: write`) stays open. |
 
 ---
 

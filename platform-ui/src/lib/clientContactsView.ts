@@ -25,6 +25,8 @@ export interface ClientContact {
   activatedAt: string | null;
   /** A boolean, never a credential — the same discipline the connections vault applies with `hasToken`. */
   hasAccount: boolean;
+  /** PV3-07: the portal People area lists this contact to the client's contacts (false once revoked). */
+  clientVisible?: boolean;
 }
 
 export const CAPABILITY_LABEL: Record<ContactCapability, string> = {

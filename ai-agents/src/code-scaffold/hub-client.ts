@@ -4,20 +4,23 @@
 // opens an HTTP connection to platform-nest itself — that would bypass Cerbos/RLS/OBO the same way a
 // direct-DB agent would.
 //
-// ── A REAL, NAMED GAP (report this) ──────────────────────────────────────────────────────────────
-// No hub tool exists today that (a) reads one `webdev_contract_snapshots` row by id (WSK-19 only
-// exposes `POST .../contracts/refresh` — which FETCHES A NEW ONE FROM ZONE B, the wrong operation for
-// a scaffolder that must read an ALREADY-MIRRORED, already-hashed snapshot — and `GET .../contracts`,
-// a recent-200 list with no id filter) or (b) downloads arbitrary file bytes by id
-// (`platform-nest/src/core/files.controller.ts`'s `GET :tenantId/files/:fileId/content` has no hub
-// tool wrapper), or (c) resolves a `pipeline_stages.artifact_ref` to text (the PRD/prototype are WS11
-// delivery-pipeline artifacts, a different subsystem again). `mcp-hub/src/*.ts` registers none of
-// these three read tools as of this ticket (grepped: zero `webdev.`/`webdesk.`/`files.` tool
-// registrations exist). The three interfaces below (`ToolCaller`, `ContractSnapshotProvider`,
-// `ArtifactFetcher`) are this ticket's own seam for that missing plumbing — a HUB-owning ticket must
-// register the tool names documented on each Hub* adapter below before a live run can succeed; until
-// then this goal is exercised through the `Fake*` test doubles only. This is reported as a blocker in
-// the ticket's own final report, not silently worked around with a direct HTTP call.
+// ── WHAT EXISTS AND WHAT IS STILL OPEN (updated M6-P4a) ────────────────────────────────────────
+// CLOSED (M6-P4a): reading ONE already-mirrored `webdev_contract_snapshots` row and its stored files by
+// id. platform-nest serves `GET .../modules/webdev/contracts/:snapshotId` and
+// `.../contracts/:snapshotId/artifacts/:artifact`, and the webdev module manifest registers them as the
+// read-only hub tools `webdev.contracts.get` and `webdev.contracts.artifact` (the latter resolves the file
+// from the snapshot's own pointer and verifies its sha256; `wf:delivery` is allow-listed for both).
+// `HubContractSnapshotProvider` calls exactly those two.
+//
+// STILL OPEN: (a) the pinned `@gaiada/webdesk-blocks` tarball — NOT stored on the snapshot (its
+// `artifacts.blockLibrary` is only `{package, version, range}`); `webdev.artifacts.downloadBlockLibrary`
+// is an unregistered placeholder name until M6-P4b defines where those bytes live; (b) arbitrary file
+// bytes by id are deliberately NOT exposed (`files.controller.ts`'s `GET :tenantId/files/:fileId/content`
+// has no hub wrapper, and the snapshot artifact route is intentionally not a general file reader);
+// (c) `pipeline_stages.artifact_ref` text is served by `pipeline.artifacts.get` (see artifact-fetcher.ts).
+// The interfaces below (`ToolCaller`, `ContractSnapshotProvider`, `ArtifactFetcher`) remain the seam; a
+// live run still cannot finish until (a) lands, so this goal is exercised end to end through the `Fake*`
+// test doubles only. This goal never opens an HTTP connection to platform-nest itself.
 import type { Envelope } from "../agent";
 
 /** Identical shape to `AgentDeps["callTool"]` (ai-agents/src/agent.ts) — this goal is driven the same

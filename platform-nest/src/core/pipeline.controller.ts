@@ -15,6 +15,7 @@ import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { clientFilterSql, parseClientFilter } from "./client-filter";
+import { runClientVisible, staffClientVisible, staffGateClientVisible, staffRunStageClientVisible } from "./portal-visibility";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { storage } from "./storage";
@@ -321,16 +322,22 @@ export class PipelineController {
         // C4/C6: client_id + project_id are selected here so the list can show WHOSE work a run is and
         // link to it. Their absence is why `lib/pipeline.ts` had to cross-reference the recordings
         // registry to render a client column, and why run->project navigation did not exist at all.
+        // PV3-07: `clientVisible` = a client-wide contact of the run's client can read it in the portal
+        // (portal-visibility.ts builds it; the portal's report-stage and gate filters apply to the
+        // run's CHILDREN, not to the run row).
         `SELECT id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id,
-                created_by, created_at, updated_at
+                created_by, created_at, updated_at, ${staffClientVisible("", runClientVisible(""))} AS "clientVisible"
          FROM pipeline_runs WHERE ${conditions.join(" AND ")}
          ORDER BY created_at DESC LIMIT 200`,
         params,
       );
       if (!withGates || rows.rows.length === 0) return withGates ? [] : rows.rows;
+      // PV3-07: a gate's `clientVisible` travels through its run (a client-side gate on a visible run).
       const gates = await c.query<{ run_id: string }>(
-        `SELECT id, run_id, stage_id, kind, actor_side, status, decision, note, decided_by, decided_at, created_at
-         FROM pipeline_gates WHERE run_id = ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY created_at ASC`,
+        `SELECT g.id, g.run_id, g.stage_id, g.kind, g.actor_side, g.status, g.decision, g.note, g.decided_by, g.decided_at, g.created_at,
+                ${staffGateClientVisible("g", "gr")} AS "clientVisible"
+         FROM pipeline_gates g JOIN pipeline_runs gr ON gr.id = g.run_id
+         WHERE g.run_id = ANY($1::uuid[]) AND g.deleted_at IS NULL ORDER BY g.created_at ASC`,
         [rows.rows.map((r) => r.id)],
       );
       const byRun = new Map<string, Array<{ run_id: string }>>();
@@ -420,20 +427,25 @@ export class PipelineController {
     return withTenants([tenantId], async (c) => {
       const run = await c.query(
         // C6: project_id added so the run workspace can link to the project this delivery belongs to.
+        // PV3-07: `clientVisible` on the run and on each stage and gate, all from portal-visibility.ts.
         `SELECT id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id,
-                created_by, created_at, updated_at
+                created_by, created_at, updated_at, ${staffClientVisible("", runClientVisible(""))} AS "clientVisible"
          FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`,
         [runId],
       );
       if (!run.rows[0]) throw new NotFoundException("run not found");
       const stages = await c.query(
-        `SELECT id, track, name, status, artifact_ref, confidence, updated_at FROM pipeline_stages
-         WHERE run_id = $1 ORDER BY created_at ASC`,
+        `SELECT s.id, s.track, s.name, s.status, s.artifact_ref, s.confidence, s.updated_at,
+                ${staffRunStageClientVisible("s", "sr")} AS "clientVisible"
+           FROM pipeline_stages s JOIN pipeline_runs sr ON sr.id = s.run_id
+         WHERE s.run_id = $1 ORDER BY s.created_at ASC`,
         [runId],
       );
       const gates = await c.query(
-        `SELECT id, stage_id, kind, actor_side, status, decision, note, decided_by, decided_at, created_at
-         FROM pipeline_gates WHERE run_id = $1 AND deleted_at IS NULL ORDER BY created_at ASC`,
+        `SELECT g.id, g.stage_id, g.kind, g.actor_side, g.status, g.decision, g.note, g.decided_by, g.decided_at, g.created_at,
+                ${staffGateClientVisible("g", "gr")} AS "clientVisible"
+           FROM pipeline_gates g JOIN pipeline_runs gr ON gr.id = g.run_id
+         WHERE g.run_id = $1 AND g.deleted_at IS NULL ORDER BY g.created_at ASC`,
         [runId],
       );
       const signoffs = await c.query(

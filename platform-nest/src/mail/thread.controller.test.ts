@@ -28,6 +28,9 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
   let adminB: string; // company_admin @ coB — the cross-tenant probe
   let clientContactA: string; // portal contact of client A
   let clientContactB: string; // portal contact of client B — the cross-client probe
+  let scopedContactA: string; // PV3-02b: contact of client A restricted to projectA only (project-scoped)
+  let runNoProject: string; // PV3-02b: client A's run with NO project (visible to client-wide contacts only)
+  let gateInternalA: string; // PV3-02b: an INTERNAL gate on runA — no client may read its thread
 
   let runA: string; // pipeline_run in coA, owned by client A
   let approvalA: string; // automation_approval in coA
@@ -98,8 +101,9 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     adminB = await createUser("thread-admin-b@a.test");
     clientContactA = await createUser("thread-client-a@a.test");
     clientContactB = await createUser("thread-client-b@a.test");
+    scopedContactA = await createUser("thread-client-a-scoped@a.test");
 
-    for (const u of [adminGlobal, adminA, memberA, clientContactA, clientContactB]) await addMembership(coA, u);
+    for (const u of [adminGlobal, adminA, memberA, clientContactA, clientContactB, scopedContactA]) await addMembership(coA, u);
     await addMembership(coB, adminB);
 
     await grantRole(adminGlobal, await createRole("platform_admin"), "global", null);
@@ -110,6 +114,7 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     const clientRole = await createRole("client");
     await grantRole(clientContactA, clientRole, "company", coA);
     await grantRole(clientContactB, clientRole, "company", coA);
+    await grantRole(scopedContactA, clientRole, "company", coA);
 
     // Portal ownership: two clients, one contact each. `createClient`'s third argument sets the legacy
     // `clients.portal_user_id`, which `resolvePortalScope` unions in — the shortest real ownership path.
@@ -141,6 +146,28 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
        VALUES ($1,$2,$3,'prd_sign','client','pending',$4,'test')`,
       [gateA, coA, runA, adminA],
     );
+
+    // PV3-02b: a project-scoped contact of client A (a `client_contacts` row naming projectA), a run of
+    // client A with no project, and an internal gate on runA, each with a mail thread of its own.
+    await adminPool().query(
+      `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, project_id, capability, status, activated_at, origin_site)
+       VALUES ($1,$2,$3,$4,$5,'viewer','active',now(),'test')`,
+      [newId(), coA, clientA, scopedContactA, projectA],
+    );
+    runNoProject = newId();
+    await adminPool().query(
+      `INSERT INTO pipeline_runs (id, tenant_id, title, status, client_id, project_id, origin_site)
+       VALUES ($1,$2,'Project-less run','delivery_active',$3,NULL,'test')`,
+      [runNoProject, coA, clientA],
+    );
+    gateInternalA = newId();
+    await adminPool().query(
+      `INSERT INTO pipeline_gates (id, tenant_id, run_id, kind, actor_side, status, opened_by, origin_site)
+       VALUES ($1,$2,$3,'pm_review','internal','pending',$4,'test')`,
+      [gateInternalA, coA, runA, adminA],
+    );
+    await seedMessage({ mailLogId: await seedMailLog(coA, "pipeline_run", runNoProject), tenantId: coA, entityType: "pipeline_run", entityId: runNoProject });
+    await seedMessage({ mailLogId: await seedMailLog(coA, "pipeline_gate", gateInternalA), tenantId: coA, entityType: "pipeline_gate", entityId: gateInternalA });
 
     mailLogRun = await seedMailLog(coA, "pipeline_run", runA);
     mailLogApproval = await seedMailLog(coA, "automation_approval", approvalA);
@@ -376,6 +403,51 @@ describe.skipIf(!TEST_URL)("mail thread reads — parent-entity authorization (A
     // 404 not 403: to a client, another client's run must be indistinguishable from a nonexistent one.
     expect(theirs.statusCode).toBe(404);
     expect(theirs.body).not.toContain("the reply body");
+  });
+
+  // ── PV3-02b — the run branch follows the portal's own run scope ───────────────────────────────────
+  // Teeth: put `OR r.project_id IS NULL` back into the runId branch of `portalThread` and the project-scoped
+  // 404 below returns 200.
+  it("PV3-02b: a project-scoped contact gets 404 for a project-less run's thread; a client-wide contact gets 200", async () => {
+    const scoped = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?runId=${runNoProject}`, headers: asUser(scopedContactA),
+    });
+    expect(scoped.statusCode).toBe(404);
+    expect(scoped.body).not.toContain("the reply body");
+
+    const wide = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?runId=${runNoProject}`, headers: asUser(clientContactA),
+    });
+    expect(wide.statusCode).toBe(200);
+    expect((wide.json() as { messages: unknown[] }).messages).toHaveLength(1);
+  });
+
+  it("PV3-02b: the project-scoped contact still reads the thread of a run on their OWN project", async () => {
+    const mine = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?runId=${runA}`, headers: asUser(scopedContactA),
+    });
+    expect(mine.statusCode).toBe(200);
+    expect((mine.json() as { messages: unknown[] }).messages.length).toBeGreaterThan(0);
+  });
+
+  it("PV3-02b: a soft-deleted run's thread is 404 even to its own client-wide contact", async () => {
+    const gone = newId();
+    await adminPool().query(
+      `INSERT INTO pipeline_runs (id, tenant_id, title, status, client_id, project_id, deleted_at, origin_site)
+       VALUES ($1,$2,'Deleted run','delivery_active',(SELECT client_id FROM pipeline_runs WHERE id = $3),NULL,now(),'test')`,
+      [gone, coA, runA],
+    );
+    const res = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?runId=${gone}`, headers: asUser(clientContactA),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("PV3-02b: an INTERNAL gate's thread is 404 to a client contact even on their own run (gateClientVisible)", async () => {
+    const res = await app.inject({
+      method: "GET", url: `/api/${coA}/portal/mail/threads?gateId=${gateInternalA}`, headers: asUser(clientContactA),
+    });
+    expect(res.statusCode).toBe(404);
   });
 
   it("portal: a client contact CANNOT use the staff entity route (the portal predicate is not a Cerbos run grant)", async () => {

@@ -69,6 +69,29 @@ test("release: a webdesk-only diff builds only webdesk-api and re-tags the other
   } finally { r.cleanup(); }
 });
 
+test("release: a webdesk/blocks or webdesk/delivery/vocabulary diff rebuilds webdesk-api, it is not re-tagged (M6-P4r-a)", () => {
+  // The api image packs webdesk/blocks into a tarball and the contract generator inlines the vocabulary, so a diff
+  // there changes the image even though it is outside webdesk/api/. Anything else under webdesk/ does not.
+  const planFor = (file) => {
+    const r = makeRepo();
+    try {
+      r.commit("base", T0, { "x": "1" });
+      r.tag("v1.0.0-alpha.1");
+      r.commit("change", T0 + DAY, { [file]: "changed" });
+      return planRelease({ head: r.head(), currentTag: "v1.0.0-alpha.2", now: (T0 + 2 * DAY) * 1000, git: gitAdapter(r.dir), registry: registry() });
+    } finally { r.cleanup(); }
+  };
+  for (const f of ["webdesk/blocks/src/components/Hero.astro", "webdesk/blocks/package.json", "webdesk/delivery/vocabulary/blocks.ts"]) {
+    const plan = planFor(f);
+    assert.deepEqual(names(plan.build), ["webdesk-api"], f);
+    assert.match(plan.reasons["webdesk-api"], /changed since/, f);
+  }
+  for (const f of ["webdesk/migrations/0099_x.sql", "webdesk/delivery/test/vocabulary.test.mjs", "webdesk/ops/x.sh"]) {
+    const plan = planFor(f);
+    assert.deepEqual(plan.build, [], f);
+  }
+});
+
 test("release: a shared-file diff (release.yml) rebuilds every component", () => {
   const r = makeRepo();
   try {
@@ -189,9 +212,11 @@ test("ci: a webdesk-only change runs only webdesk groups", () => {
   const { outputs } = planCi({ files: ["webdesk/api/src/a.ts"] });
   assert.deepEqual(on(outputs), ["webdesk_api"]);
   const both = planCi({ files: ["webdesk/delivery/vocabulary/primitives.ts"] }).outputs;
-  assert.deepEqual(on(both), ["webdesk_api", "webdesk_blocks"]);
+  assert.deepEqual(on(both), ["nest", "webdesk_api", "webdesk_blocks", "webdesk_wordpress"]);
   // The vocabulary tests (webdesk/delivery/test/) run in the webdesk-api job; the blocks package only vendors vocabulary/.
   assert.deepEqual(on(planCi({ files: ["webdesk/delivery/test/vocabulary.test.mjs"] }).outputs), ["webdesk_api"]);
+  // M6-P4r-a: the api image packs webdesk/blocks, so a blocks-only change runs the webdesk-api group as well.
+  assert.deepEqual(on(planCi({ files: ["webdesk/blocks/src/index.ts"] }).outputs), ["webdesk_api", "webdesk_blocks"]);
 });
 
 test("ci: a platform-nest-only change runs the nest group (+ nothing else); migrations also run sync-engine", () => {
@@ -218,6 +243,15 @@ test("ci: any_test / any_webdesk_light roll up the merged-job conditions", () =>
   assert.equal(planCi({ files: ["mcp-hub/src/a.ts"] }).outputs.any_webdesk_light, false);
   assert.equal(planCi({ files: ["webdesk/deploy/src/a.ts"] }).outputs.any_webdesk_light, true);
   assert.equal(planCi({ files: ["webdesk/api/src/a.ts"] }).outputs.any_test, false);
+});
+
+test("ci: webdesk_wordpress fires on the theme, the vocabulary and the PHP SDK generator only (M6-P5b)", () => {
+  const wp = (f) => planCi({ files: [f] }).outputs;
+  assert.equal(wp("webdesk/wordpress/test/router-probe.php").webdesk_wordpress, true);
+  assert.equal(wp("webdesk/delivery/vocabulary/blocks.ts").webdesk_wordpress, true);
+  assert.equal(wp("webdesk/api/src/codegen/generator/sdk-php.mts").webdesk_wordpress, true);
+  assert.equal(wp("webdesk/api/src/codegen/generator/sdk-ts.mts").webdesk_wordpress, false);
+  assert.equal(wp("webdesk/wordpress/test/router-probe.php").any_webdesk_light, true);
 });
 
 // ------------------------------------------------------------------ repo coherence guards
