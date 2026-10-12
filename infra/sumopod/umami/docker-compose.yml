@@ -4,6 +4,9 @@
 # Shape (read this before changing anything):
 #
 #   erp-edge Traefik (behind mimi's passthrough, WSK-D71) --> 172.17.0.1:18742 --> [edge: nginx] --internal net--> [app: Umami] --> [db: Postgres]
+#   M5-V2-c adds the enrichment collector on the collect path (design docs/plans/2026-10-12-m5-phase5-design.md section 3):
+#     [edge] --COLLECT_API_ENDPOINT--> [collector :8080] --pseudonymised, geo headers--> [app: Umami]      [collector] --> [vdb: Postgres]
+#     the tracker script path still goes edge -> app. The collector and vdb sit on `internal` only (no egress by construction).
 #
 #   * `internal` is `internal: true`: no gateway, no route out. db and app sit only on it, so they have NO
 #     egress by construction (not by a firewall rule that can be flushed, forgotten, or lose a race with a
@@ -19,7 +22,8 @@
 #     OFF unless started on purpose. See the runbook.
 #
 # Run:  cd infra/sumopod/umami && cp .env.example .env  (fill it in)  &&  docker compose up -d
-# Project name is pinned so container names are stable (umami-db-1, umami-app-1, umami-edge-1).
+# Project name is pinned so container names are stable (umami-db-1, umami-app-1, umami-edge-1,
+# umami-collector-1, umami-vdb-1).
 name: umami
 
 x-hardening: &hardening
@@ -117,7 +121,10 @@ services:
       # Umami never trusts a client-supplied X-Forwarded-For.
       CLIENT_IP_HEADER: x-real-ip
       # Never trust geo headers from the request (cf-ipcountry etc. would be visitor-spoofable); the MMDB decides.
-      SKIP_LOCATION_HEADERS: "1"
+      # Stays "1" until V2-d proves the collector's pseudonym and cf-* headers (design D2); then set
+      # UMAMI_SKIP_LOCATION_HEADERS= (EMPTY, which is falsy) in .env so Umami reads the collector's cf-ipcountry etc.
+      # `-` not `:-`: an empty value in .env is honoured as empty. Rollback = put 1 back. Runbook "Rollback (collector)".
+      SKIP_LOCATION_HEADERS: ${UMAMI_SKIP_LOCATION_HEADERS-1}
       # Runtime geo database: Umami's detect.ts opens GEOLITE_DB_PATH (GEO_DATABASE_URL is BUILD-time only).
       GEOLITE_DB_PATH: /geo/dbip-city-lite.mmdb
       SALT_ROTATION: day
@@ -142,13 +149,126 @@ services:
       retries: 5
       start_period: 60s
 
+  # ---- M5-V2-c: the enrichment collector and its own database ---------------------------------------
+  # vdb: the collector's database (bot counts, tombstones; later the 72 h consented buffer and recordings).
+  # It holds NO IP and NO user-agent column (insights-collector schema test). Same pinned image as `db`.
+  vdb:
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    <<: *hardening
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=4m,mode=0775
+    environment:
+      POSTGRES_DB: vdb
+      POSTGRES_USER: vdb
+      POSTGRES_PASSWORD: ${VDB_PASSWORD:?set VDB_PASSWORD in .env}
+    command:
+      - postgres
+      - -c
+      - max_connections=20
+      - -c
+      - shared_buffers=64MB
+    volumes:
+      - vdb-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    cpus: 0.25
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  collector:
+    # Built and cosign-signed by release CI (M5-V2-b); NEVER built on a host. PLACEHOLDER pin: the runbook step
+    # "First deploy of the collector" verifies the signed image with `cosign verify`, then replaces BOTH the tag
+    # and the digest below with the first signed release's. check-config.sh --deploy refuses the placeholder.
+    image: ghcr.io/hansel-gaiada/gaiada-insights-collector:0.0.0-PLACEHOLDER@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    <<: *hardening
+    read_only: true
+    init: true
+    depends_on:
+      app:
+        condition: service_healthy
+      vdb:
+        condition: service_healthy
+    # Every variable the collector reads is listed here (a `.env` line alone does nothing: the compose passthrough
+    # trap). Optional ones use `:-` with an EMPTY default: the collector treats empty as "use my default",
+    # never as 0 (insights-collector/CLAUDE.md "Env discipline"). Fixed values are not .env knobs.
+    environment:
+      COLLECT_API_ENDPOINT: ${COLLECT_API_ENDPOINT:?set COLLECT_API_ENDPOINT in .env}
+      INSIGHTS_WEBSITES: ${INSIGHTS_WEBSITES:?set INSIGHTS_WEBSITES in .env (comma-separated Umami website ids; runbook step C2)}
+      DATABASE_URL: postgresql://vdb:${VDB_PASSWORD:?set VDB_PASSWORD in .env}@vdb:5432/vdb?sslmode=disable
+      OPS_READ_KEY_SHA256: ${OPS_READ_KEY_SHA256:?set OPS_READ_KEY_SHA256 in .env (sha256 of the ERP read key, runbook step C2)}
+      # M5-V3-b: the forget key's hash. Required (the collector refuses to start without it) and must differ from the read hash.
+      OPS_FORGET_KEY_SHA256: ${OPS_FORGET_KEY_SHA256:?set OPS_FORGET_KEY_SHA256 in .env (sha256 of the ERP forget key, a different key, runbook step C2)}
+      LISTEN_ADDR: ":8080"
+      OPS_ADDR: ":8081"
+      UMAMI_URL: http://app:3000
+      UMAMI_TIMEOUT_MS: ${COLLECTOR_UMAMI_TIMEOUT_MS:-}
+      MAX_BODY_BYTES: ${COLLECTOR_MAX_BODY_BYTES:-}
+      BOT_FLUSH_SECONDS: ${COLLECTOR_BOT_FLUSH_SECONDS:-}
+      GEO_DIR: /geo
+      GEO_CITY_FILE: dbip-city-lite.mmdb
+      GEO_ASN_FILE: dbip-asn-lite.mmdb
+      # On for the live deploy so a missing geo file stops the start instead of silently degrading (set 1 in .env).
+      GEO_REQUIRED: ${COLLECTOR_GEO_REQUIRED:-}
+      # `pseudonym` (default). `real` is the recorded D2 fallback ONLY if V2-d shows Umami mishandles the pseudonym.
+      FORWARD_IP_MODE: ${COLLECTOR_FORWARD_IP_MODE:-}
+      COMPANY_RESOLVER: ${COLLECTOR_COMPANY_RESOLVER:-}
+      LOG_LEVEL: ${COLLECTOR_LOG_LEVEL:-}
+      # M5-V3-b, the consented channel. Empty = the collector's default; BUFFER_RETENTION_HOURS 0 or over 72 refuses to start.
+      CONSENT_EVENT_NAMES: ${COLLECTOR_CONSENT_EVENT_NAMES:-}
+      CONSENT_RATE_PER_SECOND: ${COLLECTOR_CONSENT_RATE_PER_SECOND:-}
+      BUFFER_RETENTION_HOURS: ${COLLECTOR_BUFFER_RETENTION_HOURS:-}
+      PURGE_INTERVAL_MINUTES: ${COLLECTOR_PURGE_INTERVAL_MINUTES:-}
+    volumes:
+      # Same directory the app mounts: city + ASN files, refreshed by geo-refresh.sh (which restarts the collector).
+      - ./geo:/geo:ro
+    networks:
+      - internal
+    cpus: 0.5
+    mem_limit: 192m
+    memswap_limit: 192m
+    pids_limit: 64
+    # The image is distroless (no curl/wget) and ships its own HEALTHCHECK (`/collector -healthcheck`, ops port);
+    # restated here so the compose project owns the timings and `depends_on: service_healthy` has a definition.
+    healthcheck:
+      test: ["CMD", "/collector", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   edge:
     # The ONLY always-on published service.
     <<: *nginx-gate
+    depends_on:
+      app:
+        condition: service_healthy
+      # Not required: a broken collector must never stop the edge from starting, or the rollback (collect path
+      # back to Umami) could not be applied. The edge resolves `collector` at request time (see the template).
+      collector:
+        condition: service_started
+        required: false
     environment:
       # Same values as the app's: nginx's envsubst fills them into the two `location =` blocks.
       TRACKER_SCRIPT_NAME: ${TRACKER_SCRIPT_NAME:?set TRACKER_SCRIPT_NAME in .env}
       COLLECT_API_ENDPOINT: ${COLLECT_API_ENDPOINT:?set COLLECT_API_ENDPOINT in .env}
+      # Switches the collect location's upstream. Rollback (collector out of the path): set EDGE_COLLECT_UPSTREAM=app:3000
+      # in .env and `docker compose up -d edge`; the template reads it (design 3.4). Default is the collector.
+      EDGE_COLLECT_UPSTREAM: ${EDGE_COLLECT_UPSTREAM:-collector:8080}
       # The one source address allowed to state the client address (erp-edge as this edge sees it).
       ERP_EDGE_SOURCE: ${ERP_EDGE_SOURCE:?set ERP_EDGE_SOURCE in .env, see the runbook section Which source does the edge see}
       NGINX_ENVSUBST_OUTPUT_DIR: /tmp
@@ -208,3 +328,4 @@ networks:
 
 volumes:
   umami-db-data:
+  vdb-data:

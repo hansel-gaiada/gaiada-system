@@ -9,15 +9,18 @@ import (
 const (
 	site1   = "11111111-2222-3333-4444-555555555555"
 	keyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	// forgetHash differs from keyHash: the read key must not be able to forget.
+	forgetHash = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 )
 
 // baseEnv is the smallest valid environment: only the variables that have no safe default.
 func baseEnv() map[string]string {
 	return map[string]string{
-		"COLLECT_API_ENDPOINT": "/lib/kestrel/e",
-		"INSIGHTS_WEBSITES":    site1,
-		"DATABASE_URL":         "postgres://collector:s3cret-pw@vdb:5432/vdb",
-		"OPS_READ_KEY_SHA256":  keyHash,
+		"COLLECT_API_ENDPOINT":  "/lib/kestrel/e",
+		"INSIGHTS_WEBSITES":     site1,
+		"DATABASE_URL":          "postgres://collector:s3cret-pw@vdb:5432/vdb",
+		"OPS_READ_KEY_SHA256":   keyHash,
+		"OPS_FORGET_KEY_SHA256": forgetHash,
 	}
 }
 
@@ -197,5 +200,86 @@ func TestErrorNeverEchoesSecrets(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "s3cret-pw") {
 		t.Fatalf("config error leaked DATABASE_URL: %v", err)
+	}
+}
+
+func TestConsentedChannelDefaultsWhenEmpty(t *testing.T) {
+	env := baseEnv()
+	for _, k := range []string{"CONSENT_EVENT_NAMES", "CONSENT_RATE_PER_SECOND", "BUFFER_RETENTION_HOURS", "PURGE_INTERVAL_MINUTES"} {
+		env[k] = "  "
+	}
+	c, err := load(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BufferRetention != 72*time.Hour || c.PurgeInterval != 15*time.Minute || c.ConsentRatePerSec != 100 {
+		t.Errorf("defaults: %v %v %d", c.BufferRetention, c.PurgeInterval, c.ConsentRatePerSec)
+	}
+	if _, ok := c.ConsentEventNames["cta_click"]; !ok || len(c.ConsentEventNames) != 10 {
+		t.Errorf("event names: %v", c.ConsentEventNames)
+	}
+}
+
+func TestConsentedChannelExplicitZeroAndOutOfRangeRefuse(t *testing.T) {
+	for name, vals := range map[string][]string{
+		"CONSENT_RATE_PER_SECOND": {"0", "-1", "10001", "x"},
+		"BUFFER_RETENTION_HOURS":  {"0", "73", "-5", "x"}, // 72 h is a promise in the notice: never lengthened
+		"PURGE_INTERVAL_MINUTES":  {"0", "1441", "x"},
+	} {
+		for _, v := range vals {
+			env := baseEnv()
+			env[name] = v
+			_, err := load(env)
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s=%q must refuse and name the variable: %v", name, v, err)
+			}
+		}
+	}
+	env := baseEnv()
+	env["BUFFER_RETENTION_HOURS"] = "24"
+	if c, err := load(env); err != nil || c.BufferRetention != 24*time.Hour {
+		t.Errorf("a shorter retention is allowed: %v %v", c.BufferRetention, err)
+	}
+}
+
+func TestForgetKeyIsRequiredSeparateAndValidated(t *testing.T) {
+	env := baseEnv()
+	env["OPS_FORGET_KEY_SHA256"] = ""
+	if _, err := load(env); err == nil || !strings.Contains(err.Error(), "OPS_FORGET_KEY_SHA256") {
+		t.Errorf("empty forget key must refuse: %v", err)
+	}
+	env["OPS_FORGET_KEY_SHA256"] = "abc"
+	if _, err := load(env); err == nil {
+		t.Error("a short forget key hash must refuse")
+	}
+	env["OPS_FORGET_KEY_SHA256"] = keyHash // same as the read key: the separation would be void
+	if _, err := load(env); err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Errorf("forget key equal to the read key must refuse: %v", err)
+	}
+	c, err := load(baseEnv())
+	if err != nil || c.OpsForgetKeySHA256 == c.OpsReadKeySHA256 || c.OpsForgetKeySHA256 == [32]byte{} {
+		t.Errorf("distinct hashes expected: %v", err)
+	}
+}
+
+func TestConsentEventNamesAndPathCollisions(t *testing.T) {
+	for _, bad := range []string{"Cta_Click", "1abc", "a-b", "a b", strings.Repeat("a", 51), " , "} {
+		env := baseEnv()
+		env["CONSENT_EVENT_NAMES"] = bad
+		if _, err := load(env); err == nil {
+			t.Errorf("CONSENT_EVENT_NAMES=%q must refuse", bad)
+		}
+	}
+	env := baseEnv()
+	env["CONSENT_EVENT_NAMES"] = "cta_click, section_view,"
+	if c, err := load(env); err != nil || len(c.ConsentEventNames) != 2 {
+		t.Errorf("%v %v", c.ConsentEventNames, err)
+	}
+	for _, p := range []string{ConsentPath, ForgetPath} {
+		env := baseEnv()
+		env["COLLECT_API_ENDPOINT"] = p
+		if _, err := load(env); err == nil {
+			t.Errorf("COLLECT_API_ENDPOINT=%q collides with the consented channel and must refuse", p)
+		}
 	}
 }

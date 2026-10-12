@@ -1,5 +1,5 @@
-// Package ops serves the collector's second port (8081): /healthz for Docker and the ERP's read key reads
-// under /ops/v1/. This port is only reachable on the internal network and through the read-gate.
+// Package ops serves the collector's second port (8081): /healthz for Docker, the ERP's read key reads under
+// /ops/v1/ (events, bots) and the ERP's SEPARATE forget key for /ops/v1/forget. This port is only reachable on the internal network and through the read-gate.
 //
 // RULE (design 3.2 step 1 and the V2-a acceptance): this port NEVER reads X-Real-IP, X-Forwarded-For or the
 // connection's remote address. Its handlers are not given the geo database or the address-handling code, so
@@ -31,7 +31,12 @@ type Options struct {
 	Stats     *stats.Counters
 	Resolver  string // name of the selected CompanyResolver
 	Now       func() time.Time
+	// ReadLag is how old a buffered row must be before /ops/v1/events returns it; 15 s when zero (design 4.4).
+	ReadLag time.Duration
 }
+
+// DefaultReadLag keeps a row that commits late from being skipped by a cursor that has moved past it.
+const DefaultReadLag = 15 * time.Second
 
 // Handler serves /healthz and /ops/v1/*.
 type Handler struct {
@@ -43,6 +48,9 @@ func New(o Options) *Handler {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.ReadLag <= 0 {
+		o.ReadLag = DefaultReadLag
+	}
 	return &Handler{o: o}
 }
 
@@ -51,6 +59,8 @@ func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", h.healthz)
 	mux.HandleFunc("/ops/v1/bots", h.bots)
+	mux.HandleFunc("/ops/v1/events", h.events)
+	mux.HandleFunc("/ops/v1/forget", h.forget)
 	return mux
 }
 
@@ -100,15 +110,48 @@ func (h *Handler) healthz(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// authorised checks `Authorization: Bearer <read key>` against the configured SHA-256, in constant time.
-func (h *Handler) authorised(r *http.Request) bool {
+// role is what a presented key may do.
+type role int
+
+const (
+	roleNone   role = iota // no key, or a key that matches neither hash
+	roleRead               // the read key: GET /ops/v1/events and /ops/v1/bots
+	roleForget             // the forget key: POST /ops/v1/forget, and nothing else
+)
+
+// keyRole resolves `Authorization: Bearer <key>` against the two configured SHA-256 hashes, in constant time.
+func (h *Handler) keyRole(r *http.Request) role {
 	const prefix = "Bearer "
 	v := r.Header.Get("Authorization")
 	if len(v) <= len(prefix) || !strings.EqualFold(v[:len(prefix)], prefix) {
-		return false
+		return roleNone
 	}
 	sum := sha256.Sum256([]byte(strings.TrimSpace(v[len(prefix):])))
-	return subtle.ConstantTimeCompare(sum[:], h.o.Config.OpsReadKeySHA256[:]) == 1
+	read := subtle.ConstantTimeCompare(sum[:], h.o.Config.OpsReadKeySHA256[:]) == 1
+	forget := subtle.ConstantTimeCompare(sum[:], h.o.Config.OpsForgetKeySHA256[:]) == 1
+	switch {
+	case read:
+		return roleRead
+	case forget:
+		return roleForget
+	}
+	return roleNone
+}
+
+// require answers 401 for no valid key and 403 for a valid key that may not do this; it reports whether the
+// request may go on. The two keys are separate on purpose (design 4.4, O1): the read key cannot forget.
+func (h *Handler) require(w http.ResponseWriter, r *http.Request, want role) bool {
+	got := h.keyRole(r)
+	switch {
+	case got == want:
+		return true
+	case got == roleNone:
+		w.Header().Set("WWW-Authenticate", `Bearer realm="insights-ops"`)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorised"})
+	default:
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+	}
+	return false
 }
 
 // bots serves GET /ops/v1/bots?website=<uuid>&from=YYYY-MM-DD&to=YYYY-MM-DD: daily counts by reason.
@@ -117,9 +160,7 @@ func (h *Handler) bots(w http.ResponseWriter, r *http.Request) {
 	if !methodGET(w, r) {
 		return
 	}
-	if !h.authorised(r) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="insights-ops"`)
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorised"})
+	if !h.require(w, r, roleRead) {
 		return
 	}
 	q := r.URL.Query()

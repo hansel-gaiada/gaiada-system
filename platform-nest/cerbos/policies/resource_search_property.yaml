@@ -14,6 +14,19 @@
 # `security.wp_salts` from "not verified" to passing. SENSITIVE and elevated-only (grouped with
 # `delete` below), same tier as monitoring's `maintenance.create`/`channel.manage`: an attested fact
 # is an accountability record, not a routine property edit, and requires `recorded_by` (app-enforced).
+#
+# M5-V3-f (docs/plans/2026-10-12-m5-phase5-design.md §4.8, §6.3, O5) adds two SENSITIVE actions on this
+# same kind, both personal data of identified website visitors (consented visitor profiles, V3; our own
+# sampled session replay, V6):
+#   read_visitors  list / read visitor profiles, timelines, interests, scores and the visitor-ingest status
+#   view_replay    open a session recording (a separate action: a recording is more intrusive than a profile)
+# Role arm: search manager (`module_manager`) and the served company's admin, in tenant, and nobody else.
+# Plain `module_staff` keeps aggregate `read` only. They are NOT in the baseline rule above on purpose, and
+# NOT granted to any member/client/webdev role. Perm arm: one mirror per action, each keyed on its own
+# permission (search.property.read_visitors / search.property.view_replay), so holding one grants exactly
+# that one action: neither implies the other, and neither is implied by `read`. The kind's usual root gate
+# applies to the mirrors. `owner` reaches both through its role bundle (company_admin's set) via the mirror.
+# Deploy: a Cerbos restart (nothing hot-reloads) and a probe (staff denied, manager allowed) at release.
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -33,6 +46,11 @@ resourcePolicy:
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Destructive + attest: manager + company admin only (NOT plain staff/member).
     - actions: ["delete", "attest"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # M5-V3-f: visitor profiles + session replay. Search manager + company admin ONLY (NOT module_staff).
+    - actions: ["read_visitors", "view_replay"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager", "company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -63,4 +81,13 @@ resourcePolicy:
     - actions: ["attest"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_property_attest"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    # M5-V3-f: one mirror per action, each on its own key; neither bleeds into the other or into `read`.
+    - actions: ["read_visitors"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_resource_search_property_read_visitors"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["view_replay"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_resource_search_property_view_replay"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

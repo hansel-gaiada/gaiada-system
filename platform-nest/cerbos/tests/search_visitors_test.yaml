@@ -1,0 +1,698 @@
+# M5-V3-f - resource_search_property read_visitors + view_replay (docs/plans/2026-10-12-m5-phase5-design.md sections 4.8, 8, O5).
+# Every principal is asked every action on every resource, and every action is listed explicitly, ALLOW or DENY, so each
+# row is the complete answer for that principal, negatives included. Run on the Linux gate, not on the laptop (from
+# platform-nest/; Git Bash needs MSYS_NO_PATHCONV=1):
+#   docker run --rm -v "$PWD/cerbos/policies:/policies:ro" -v "$PWD/cerbos/tests:/tests:ro" \
+#     ghcr.io/cerbos/cerbos:0.54.0 compile --tests=/tests /policies
+# Principals carry grants/perms exactly as rbac/cerbos.ts::principalPayload() sends them. Fixture key: prop = company 1's
+# property, module "search"; prop_t2 = company 2's; prop_nomodule / prop_webdev carry module "" / "webdev" (the role arm
+# is module-mediated; company_admin and the permission arm are not). The live twin is
+# src/rbac/search-visitor-actions-cerbos.test.ts.
+name: SearchVisitorActions
+description: M5-V3-f read_visitors and view_replay x principals x resources, with every negative case.
+principals:
+  staff:
+    id: "u-staff"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_staff", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  manager:
+    id: "u-mgr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  company_admin:
+    id: "u-cadmin"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "company_admin", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  platform_admin:
+    id: "u-padmin"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "platform_admin", "scopeType": "global", "scopeId": ""}]
+      clientAdminOf: []
+      perms: []
+  manager_t2:
+    id: "u-mgr2"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000002"}]
+      clientAdminOf: []
+      perms: []
+  generic_manager:
+    id: "u-gmgr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  member:
+    id: "u-member"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "member", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  viewer:
+    id: "u-viewer"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "viewer", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  client:
+    id: "u-client"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "client", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  webdev_manager:
+    id: "u-wdm"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "webdev_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  webdev_staff:
+    id: "u-wds"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "webdev_staff", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  perm_read_visitors:
+    id: "u-prv"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_view_replay:
+    id: "u-pvr"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.view_replay", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_both_owner:
+    id: "u-owner"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "owner", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}, {"key": "search.property.view_replay", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_read_only:
+    id: "u-pread"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_attest_only:
+    id: "u-patt"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.attest", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  staff_granted_read_visitors:
+    id: "u-sgrv"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_staff", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+  perm_read_visitors_global:
+    id: "u-prvg"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "global", "scopeId": ""}]
+  perm_global_outside_root:
+    id: "u-prvo"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001"]
+      rootCompanies: ["dddddddd-7030-0000-0000-0000000000ff"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "global", "scopeId": ""}]
+  perm_other_tenant_only:
+    id: "u-prvt"
+    roles: ["user"]
+    attr:
+      assurance: "high"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000002"}]
+  manager_low:
+    id: "u-mgrl"
+    roles: ["user"]
+    attr:
+      assurance: "low"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "search_manager", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  company_admin_low:
+    id: "u-cal"
+    roles: ["user"]
+    attr:
+      assurance: "low"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: [{"role": "company_admin", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+      clientAdminOf: []
+      perms: []
+  perm_both_low:
+    id: "u-pbl"
+    roles: ["user"]
+    attr:
+      assurance: "low"
+      kind: "employee"
+      companies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      rootCompanies: ["dddddddd-7030-0000-0000-000000000001", "dddddddd-7030-0000-0000-000000000002"]
+      grants: []
+      clientAdminOf: []
+      perms: [{"key": "search.property.read_visitors", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}, {"key": "search.property.view_replay", "scopeType": "company", "scopeId": "dddddddd-7030-0000-0000-000000000001"}]
+resources:
+  prop:
+    kind: resource_search_property
+    id: "prop"
+    attr: {"id": "prop", "tenantId": "dddddddd-7030-0000-0000-000000000001", "ownerId": "", "projectId": "", "teamId": "", "module": "search"}
+  prop_t2:
+    kind: resource_search_property
+    id: "prop_t2"
+    attr: {"id": "prop_t2", "tenantId": "dddddddd-7030-0000-0000-000000000002", "ownerId": "", "projectId": "", "teamId": "", "module": "search"}
+  prop_nomodule:
+    kind: resource_search_property
+    id: "prop_nomodule"
+    attr: {"id": "prop_nomodule", "tenantId": "dddddddd-7030-0000-0000-000000000001", "ownerId": "", "projectId": "", "teamId": "", "module": ""}
+  prop_webdev:
+    kind: resource_search_property
+    id: "prop_webdev"
+    attr: {"id": "prop_webdev", "tenantId": "dddddddd-7030-0000-0000-000000000001", "ownerId": "", "projectId": "", "teamId": "", "module": "webdev"}
+tests:
+  - name: staff
+    input:
+      principals: [staff]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: staff
+        resource: prop
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: staff
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: staff
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: staff
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: manager
+    input:
+      principals: [manager]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: manager
+        resource: prop
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: manager
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: manager
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: manager
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: company_admin
+    input:
+      principals: [company_admin]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: company_admin
+        resource: prop
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: company_admin
+        resource: prop_nomodule
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: company_admin
+        resource: prop_webdev
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+  - name: platform_admin
+    input:
+      principals: [platform_admin]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: platform_admin
+        resource: prop
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: prop_t2
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: prop_nomodule
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: platform_admin
+        resource: prop_webdev
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+  - name: manager_t2
+    input:
+      principals: [manager_t2]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: manager_t2
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: manager_t2
+        resource: prop_t2
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_ALLOW, attest: EFFECT_ALLOW, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: manager_t2
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: manager_t2
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: generic_manager
+    input:
+      principals: [generic_manager]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: generic_manager
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: generic_manager
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: generic_manager
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: generic_manager
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: member
+    input:
+      principals: [member]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: member
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: member
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: member
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: member
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: viewer
+    input:
+      principals: [viewer]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: viewer
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: viewer
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: viewer
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: viewer
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: client
+    input:
+      principals: [client]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: client
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: client
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: client
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: client
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: webdev_manager
+    input:
+      principals: [webdev_manager]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: webdev_manager
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: webdev_manager
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: webdev_manager
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: webdev_manager
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: webdev_staff
+    input:
+      principals: [webdev_staff]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: webdev_staff
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: webdev_staff
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: webdev_staff
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: webdev_staff
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: perm_read_visitors
+    input:
+      principals: [perm_read_visitors]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_read_visitors
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+      - principal: perm_read_visitors
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_read_visitors
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+      - principal: perm_read_visitors
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+  - name: perm_view_replay
+    input:
+      principals: [perm_view_replay]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_view_replay
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_ALLOW}
+      - principal: perm_view_replay
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_view_replay
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_ALLOW}
+      - principal: perm_view_replay
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_ALLOW}
+  - name: perm_both_owner
+    input:
+      principals: [perm_both_owner]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_both_owner
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: perm_both_owner
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_both_owner
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+      - principal: perm_both_owner
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_ALLOW}
+  - name: perm_read_only
+    input:
+      principals: [perm_read_only]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_read_only
+        resource: prop
+        actions: {read: EFFECT_ALLOW, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_read_only
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_read_only
+        resource: prop_nomodule
+        actions: {read: EFFECT_ALLOW, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_read_only
+        resource: prop_webdev
+        actions: {read: EFFECT_ALLOW, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: perm_attest_only
+    input:
+      principals: [perm_attest_only]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_attest_only
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_ALLOW, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_attest_only
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_attest_only
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_ALLOW, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_attest_only
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_ALLOW, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: staff_granted_read_visitors
+    input:
+      principals: [staff_granted_read_visitors]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: staff_granted_read_visitors
+        resource: prop
+        actions: {read: EFFECT_ALLOW, create: EFFECT_ALLOW, update: EFFECT_ALLOW, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+      - principal: staff_granted_read_visitors
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: staff_granted_read_visitors
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+      - principal: staff_granted_read_visitors
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+  - name: perm_read_visitors_global
+    input:
+      principals: [perm_read_visitors_global]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_read_visitors_global
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+      - principal: perm_read_visitors_global
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+      - principal: perm_read_visitors_global
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+      - principal: perm_read_visitors_global
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_ALLOW, view_replay: EFFECT_DENY}
+  - name: perm_global_outside_root
+    input:
+      principals: [perm_global_outside_root]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_global_outside_root
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_global_outside_root
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_global_outside_root
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_global_outside_root
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: perm_other_tenant_only
+    input:
+      principals: [perm_other_tenant_only]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_other_tenant_only
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_other_tenant_only
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_other_tenant_only
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_other_tenant_only
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: manager_low
+    input:
+      principals: [manager_low]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: manager_low
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: manager_low
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: manager_low
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: manager_low
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: company_admin_low
+    input:
+      principals: [company_admin_low]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: company_admin_low
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: company_admin_low
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: company_admin_low
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: company_admin_low
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+  - name: perm_both_low
+    input:
+      principals: [perm_both_low]
+      resources: [prop, prop_t2, prop_nomodule, prop_webdev]
+      actions: [read, create, update, delete, attest, read_visitors, view_replay]
+    expected:
+      - principal: perm_both_low
+        resource: prop
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_both_low
+        resource: prop_t2
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_both_low
+        resource: prop_nomodule
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}
+      - principal: perm_both_low
+        resource: prop_webdev
+        actions: {read: EFFECT_DENY, create: EFFECT_DENY, update: EFFECT_DENY, delete: EFFECT_DENY, attest: EFFECT_DENY, read_visitors: EFFECT_DENY, view_replay: EFFECT_DENY}

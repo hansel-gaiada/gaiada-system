@@ -1,5 +1,5 @@
-// Package store is the collector's only database access: vdb, holding aggregate bot counts (and, from V3-b,
-// the buffer and tombstones). No row holds an IP address or a user agent.
+// Package store is the collector's only database access: vdb, holding aggregate bot counts, the 72-hour
+// consented-event buffer and the tombstones. No row holds an IP address or a user agent.
 package store
 
 import (
@@ -28,6 +28,7 @@ type BotCount struct {
 
 // Store is what the rest of the collector needs from vdb.
 type Store interface {
+	EventStore
 	// AddBotCounts adds the given counts to bot_counts, all or nothing.
 	AddBotCounts(ctx context.Context, rows []BotCount) error
 	// BotCounts returns daily counts for one website in [from, to] (UTC dates, inclusive), oldest first.

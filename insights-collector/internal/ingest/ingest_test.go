@@ -104,12 +104,13 @@ type rig struct {
 
 func env(umamiURL string, extra map[string]string) func(string) string {
 	m := map[string]string{
-		"COLLECT_API_ENDPOINT": collect,
-		"INSIGHTS_WEBSITES":    website,
-		"DATABASE_URL":         "postgres://u:p@vdb/vdb",
-		"OPS_READ_KEY_SHA256":  strings.Repeat("ab", 32),
-		"UMAMI_URL":            umamiURL,
-		"UMAMI_TIMEOUT_MS":     "400",
+		"COLLECT_API_ENDPOINT":  collect,
+		"INSIGHTS_WEBSITES":     website,
+		"DATABASE_URL":          "postgres://u:p@vdb/vdb",
+		"OPS_READ_KEY_SHA256":   strings.Repeat("ab", 32),
+		"OPS_FORGET_KEY_SHA256": strings.Repeat("cd", 32),
+		"UMAMI_URL":             umamiURL,
+		"UMAMI_TIMEOUT_MS":      "400",
 	}
 	for k, v := range extra {
 		m[k] = v

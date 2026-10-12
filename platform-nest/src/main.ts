@@ -53,6 +53,7 @@ import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
 import { startClientTargetsLoop } from "./modules/monitoring/client-targets";
 import { rebuildTargets, startSiteBuildsLoop } from "./modules/webdev/site-builds.service";
 import { sweepScheduledRebuilds } from "./modules/webdev/scheduled-rebuilds.service";
+import { provisionReconcileStartLine, startProvisionReconcileLoop } from "./modules/webdev/provision-reconcile-loop";
 import { invoiceModule } from "./modules/invoice";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -176,8 +177,16 @@ import { registerRequestContext } from "./core/request-context";
 // 2026-08-24 — `:tenantId` shape validation. See src/core/tenant-param.ts for why this is a root
 // hook rather than a pipe on 602 `@Param("tenantId")` call sites.
 import { registerTenantParamValidation } from "./core/tenant-param";
+// PV4-03b — per-route body limits for the inline-base64 upload routes (the 1 MiB global default stays).
+import { installUploadBodyLimits, describeUploadRoutes, type UploadRoute } from "./core/upload-body-limits";
 
-export async function buildApp(): Promise<NestFastifyApplication> {
+export interface BuildAppOptions {
+  /** TEST SEAM ONLY: replaces the upload-route table so a test can prove the boot-time drift guard
+   *  throws on an entry that matches no registered route. Production passes nothing. */
+  uploadRoutes?: readonly UploadRoute[];
+}
+
+export async function buildApp(opts: BuildAppOptions = {}): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
   // default preserved for the test oracle).
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -264,7 +273,20 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // is what triggers. A hook added after it would apply to no Nest route at all — and would fail
   // silently, since "nothing rejected" is indistinguishable from "nothing malformed arrived".
   registerTenantParamValidation(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
-  await app.init();
+  // PV4-03b — raise `bodyLimit` on the inline-upload routes ONLY (payment proof + conversation
+  // attachments). Same placement rule as every hook above: this is an `onRoute` hook, so it must be
+  // installed before `app.init()` registers the routes. Fastify's 1 MiB default is untouched for every
+  // other route. See src/core/upload-body-limits.ts for the derivation of each limit.
+  const uploadLimits = installUploadBodyLimits(app.getHttpAdapter().getInstance() as unknown as FastifyInstance, opts.uploadRoutes);
+  try {
+    await app.init();
+    // Fail closed: a table entry that matched no (or two) registered routes means a renamed route has
+    // silently fallen back to 1 MiB. Refuse to boot rather than ship that.
+    uploadLimits.assertAllMatched();
+  } catch (err) {
+    await app.close().catch(() => undefined);
+    throw err;
+  }
   return app;
 }
 
@@ -778,6 +800,13 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log("MON-01 probe-target file off: CLIENT_PROPERTY_TARGETS_PATH is unset");
   }
+  // M6-P4c2: the provisioned-site reconcile. Nothing else advanced a site whose WebDesk codegen outlasted the
+  // 5-minute poll, so its contract was never pinned and the delivery code stage never resumed. It finishes
+  // work a company_admin already approved, through the manual route's own functions, so it has no off switch:
+  // PROVISION_RECONCILE_INTERVAL_MS is the whole control (see provision-reconcile-loop.ts).
+  startProvisionReconcileLoop(config.provision.reconcileIntervalMs);
+  // eslint-disable-next-line no-console
+  console.log(provisionReconcileStartLine());
   // WSK-60: the staging-rebuild stamp poller. It reads only rows that exist and GETs only the staging URL
   // an operator put in WEBDESK_REBUILD_TARGETS, so "a target is configured" is its whole gate: with none,
   // no build can have been dispatched and there is nothing to poll. WSK-61 rides the same tick: a
@@ -840,6 +869,8 @@ async function bootstrap(): Promise<void> {
     console.warn("GITHUB_REPO_SYNC_ENABLED=true but GITHUB_REPO_SYNC_TENANT_ID is unset — sweep NOT started");
   }
   const app = await buildApp();
+  // eslint-disable-next-line no-console
+  for (const line of describeUploadRoutes()) console.log(`[upload-body-limits] ${line}`);
   const port = Number(process.env.PLATFORM_PORT ?? 3004);
   const host = process.env.HOST ?? "0.0.0.0";
   await app.listen({ port, host });
