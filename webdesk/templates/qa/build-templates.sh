@@ -16,6 +16,8 @@
 #   7  scaffolded site: typecheck (tsc --noEmit)
 #   8  scaffolded site: next build
 #   9  scaffolded site: vitest run (offline tests only; the conformance probe self-skips with no WEBDESK_* env)
+#   4b, 8b  Tailwind 4 really emitted utilities: a class used in a page (`.p-8`) is in the built CSS (a v4 build with a
+#        wrong PostCSS/CSS setup succeeds and silently emits NO utilities)
 #   10 npm audit --omit=dev is printed per project (informational, never fails the run)
 set -uo pipefail
 
@@ -34,6 +36,10 @@ step() { # step <name> <dir> <command...>
     echo "FAIL  $name   (last 25 log lines follow)"; tail -25 "$log" | sed 's/^/      | /'; FAILED=1
     return 1
   fi
+}
+css_has_utility() { # css_has_utility <apps/web dir> <class>: the built CSS is Tailwind 4 and holds that utility
+  local css; css="$(cat "$1"/.next/static/css/*.css 2>/dev/null)"
+  [ -n "$css" ] && printf '%s' "$css" | grep -q 'tailwindcss v4' && printf '%s' "$css" | grep -qF ".$2{"
 }
 copy_tree() { # copy_tree <from> <to>: no node_modules/.next/dist/.git
   mkdir -p "$2"; (cd "$1" && tar --exclude=node_modules --exclude=.next --exclude=dist --exclude=.git -cf - .) | (cd "$2" && tar -xf -)
@@ -57,6 +63,7 @@ copy_tree "$SRC/webdesk/templates/fullstack-next-nest" "$WORK/full"
 step "2  fullstack-next-nest: npm install" "$WORK/full" npm install --no-audit
 step "3  fullstack-next-nest: typecheck" "$WORK/full" npm run typecheck
 step "4  fullstack-next-nest: build" "$WORK/full" npm run build
+step "4b fullstack-next-nest: built CSS has the .p-8 utility (Tailwind 4)" "$WORK/full" css_has_utility apps/web p-8
 ( cd "$WORK/full" && echo "--- audit fullstack (omit dev)" && npm audit --omit=dev 2>&1 | tail -4; echo "--- audit fullstack (all)" && npm audit 2>&1 | tail -4 ) || true
 
 # ---- one scaffolded fullstack site ----------------------------------------------------------------------
@@ -67,6 +74,7 @@ if step "5a ai-agents: npm install (scaffolder deps)" "$WORK/repo/ai-agents" npm
   step "6  scaffolded site: npm install" "$WORK/site" npm install --no-audit
   step "7  scaffolded site: typecheck" "$WORK/site" npm run typecheck
   step "8  scaffolded site: next build" "$WORK/site/apps/web" npm run build
+  step "8b scaffolded site: built CSS has the .p-8 utility (Tailwind 4)" "$WORK/site" css_has_utility apps/web p-8
   step "9  scaffolded site: vitest run (offline)" "$WORK/site/apps/web" npm test
   ( cd "$WORK/site" && echo "--- audit scaffolded site (omit dev)" && npm audit --omit=dev 2>&1 | tail -4 ) || true
 else
