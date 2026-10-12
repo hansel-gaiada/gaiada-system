@@ -205,6 +205,79 @@ put_file() {
   step "write $dst ($mode $own)" install -D -m "$mode" -o "${own%%:*}" -g "${own##*:}" "$src" "$dst"
 }
 
+# --- writes into the daemon user's tree (B1) -----------------------------------------------------------------
+# The daemon user OWNS its home, so it can replace any directory in it with a symlink. Root must therefore never
+# install, ln, chown or rm inside that tree: `install -D` follows a symlinked parent, and `ln ~/.config/systemd/user
+# -> /etc/systemd/system` would turn the next apply into a root write of /etc/systemd/system/docker.service. Every
+# such write runs AS the daemon user (what that user can reach it could always reach), with the content on stdin,
+# and ALSO refuses a symlinked or foreign-owned path component (defence in depth, and what the tests can drive
+# without root).
+as_user() { runuser -u "$RL_USER" -- "$@"; }
+# shellcheck disable=SC2016
+USER_WRITE_SH='
+set -eu
+anchor=$1 dest=$2 kind=$3 arg=${4:-}
+umask 077
+refuse() { echo "user-write: refused: $*" >&2; exit 3; }
+case "$anchor$dest" in *..*) refuse ".. in a path" ;; esac
+case "$dest" in "$anchor"/*) ;; *) refuse "$dest is outside $anchor" ;; esac
+me=$(id -u)
+[ -d "$anchor" ] && [ ! -L "$anchor" ] || refuse "$anchor is not a plain directory"
+[ "$(stat -c %u "$anchor")" = "$me" ] || refuse "$anchor is not owned by uid $me"
+p=$anchor
+rest=${dest%/*}
+rest=${rest#"$anchor"}
+set -f
+IFS=/
+for c in $rest; do
+  [ -n "$c" ] || continue
+  p=$p/$c
+  [ ! -L "$p" ] || refuse "$p is a symlink"
+  [ -e "$p" ] || mkdir "$p"
+  [ -d "$p" ] || refuse "$p is not a directory"
+  [ "$(stat -c %u "$p")" = "$me" ] || refuse "$p is not owned by uid $me"
+done
+unset IFS
+case "$kind" in
+  file)
+    [ ! -L "$dest" ] && [ ! -d "$dest" ] || refuse "$dest is a symlink or a directory"
+    t=$dest.wd-new.$$
+    cat >"$t"
+    chmod "$arg" "$t"
+    mv -f "$t" "$dest" ;;
+  link)
+    [ -L "$dest" ] || [ ! -e "$dest" ] || refuse "$dest exists and is not a symlink"
+    ln -sfn "$arg" "$dest" ;;
+  dir)
+    [ ! -L "$dest" ] || refuse "$dest is a symlink"
+    [ -d "$dest" ] || mkdir "$dest"
+    [ "$(stat -c %u "$dest")" = "$me" ] || refuse "$dest is not owned by uid $me"
+    chmod "$arg" "$dest" ;;
+  *) refuse "unknown kind $kind" ;;
+esac
+'
+user_write() { as_user sh -c "$USER_WRITE_SH" user-write "$HOME_DIR" "$2" file "$3" <"$1"; }  # <src> <dest> <mode>
+user_link() { as_user sh -c "$USER_WRITE_SH" user-write "$HOME_DIR" "$1" link "$2" </dev/null; } # <dest> <target>
+user_dir() { as_user sh -c "$USER_WRITE_SH" user-write "$HOME_DIR" "$1" dir "$2" </dev/null; }  # <dest> <mode>
+
+# put_user_file <rendered-src> <dest> <mode>: put_file for a path inside the daemon user's tree.
+put_user_file() {
+  local src=$1 dst=$2 mode=$3
+  # shellcheck disable=SC2016
+  if as_user sh -c 'f=$1; [ ! -L "$f" ] && [ -f "$f" ] && cmp -s - "$f" && [ "$(stat -c %a "$f")" = "$2" ]' user-cmp "$dst" "${mode#0}" <"$src" 2>/dev/null; then
+    say "  OK    $dst (unchanged)"
+    return 0
+  fi
+  CHANGED_DAEMON=1
+  step "write $dst ($mode, written as $RL_USER)" user_write "$src" "$dst" "$mode"
+}
+
+# home_ok: the home is the plain directory root created for this user, not a symlink, owned by it.
+home_ok() {
+  [ -d "$HOME_DIR" ] && [ ! -L "$HOME_DIR" ] && [ "$(stat -c %U "$HOME_DIR")" = "$RL_USER" ] &&
+    [ "$(getent passwd "$RL_USER" | cut -d: -f6)" = "$HOME_DIR" ]
+}
+
 user_systemctl() { # systemctl --user as the daemon user, without a login session
   runuser -u "$RL_USER" -- env XDG_RUNTIME_DIR="$RUNTIME" DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNTIME/bus" systemctl --user "$@"
 }
@@ -344,22 +417,21 @@ do_systemd() {
 }
 
 do_home() {
-  say "== 6 the daemon user's docker.service + daemon.json"
+  say "== 6 the daemon user's docker.service + daemon.json (all written AS $RL_USER)"
+  if [ "$MODE" = apply ]; then home_ok || die "$HOME_DIR is not the plain home directory of $RL_USER (symlink, wrong owner or wrong passwd home)"; fi
   local t
   t="$(mktemp -d)"
   render_template "$FILES/docker.service.in" USER="$RL_USER" OPERATOR="$OPERATOR" >"$t/unit" || die "render docker.service"
   render_template "$FILES/daemon.json.in" DATA_ROOT="$DATA_ROOT" >"$t/json" || die "render daemon.json"
-  put_file "$t/unit" "$UNIT_FILE" 0644 "$RL_USER:$RL_USER" daemon
-  put_file "$t/json" "$DAEMON_JSON" 0644 "$RL_USER:$RL_USER" daemon
+  put_user_file "$t/unit" "$UNIT_FILE" 0644
+  put_user_file "$t/json" "$DAEMON_JSON" 0644
   rm -rf "$t"
-  local wants="$HOME_DIR/.config/systemd/user/default.target.wants"
-  if [ -L "$wants/docker.service" ]; then say "  OK    docker.service enabled for default.target"; else
-    # The enablement symlink `systemctl --user enable` would make; made by root, then handed over below.
-    step "enable docker.service for default.target" sh -c "install -d '$wants' && ln -sfn ../docker.service '$wants/docker.service'"
+  local link="$HOME_DIR/.config/systemd/user/default.target.wants/docker.service"
+  if [ "$(as_user readlink "$link" 2>/dev/null)" = ../docker.service ]; then say "  OK    docker.service enabled for default.target"; else
+    # The enablement symlink `systemctl --user enable` would make, made by the user itself.
+    step "enable docker.service for default.target" user_link "$link" ../docker.service
   fi
-  # install -D created the parent directories as root: the whole ~/.config belongs to the daemon user.
-  step "own ~/.config" chown -R "$RL_USER:$RL_USER" "$HOME_DIR/.config"
-  step "data root $DATA_ROOT" install -d -m 0700 -o "$RL_USER" -g "$RL_USER" "$DATA_ROOT"
+  step "data root $DATA_ROOT (0700, as $RL_USER)" user_dir "$DATA_ROOT" 0700
 }
 
 acl_has_x() { grep -qx "user:$2:--x" <<<"$(getfacl -cp "$1" 2>/dev/null)"; } # exact entry, not masked
@@ -448,7 +520,6 @@ bridge_not_docker0() { # the rootless default bridge must not shadow the host's 
   s="$(rl_docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null)"
   [ -n "$s" ] && case " $s" in *" 172.17."*) return 1 ;; *) return 0 ;; esac
 }
-as_user() { runuser -u "$RL_USER" -- "$@"; }
 etc_access_ok() {
   local f
   for f in $ETC_READ_OK; do as_user test -r "$f" || return 1; done

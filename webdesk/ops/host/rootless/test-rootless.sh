@@ -311,6 +311,45 @@ section_install() {
   refute "envelope_ok fails when the CPU quota is gone" envelope_ok
   printf 'memory pids\n' >"$CGROUP_ROOT/user.slice/user-940.slice/user@940.service/cgroup.controllers"
   refute "delegated fails without the cpu controller" delegated
+
+  echo "== install: B1 - root never writes through the daemon user's tree"
+  # Without root: as_user runs the command as the test's own user. The symlink attack is what matters here:
+  # ~/.config/systemd/user -> a root-only directory ("etc"). The helper must refuse and write nothing there.
+  as_user() { "$@"; }
+  local H="$T/home" E="$T/etc-sys"
+  HOME_DIR="$H"
+  RL_USER=wdtest
+  mkdir -p "$H/.config/systemd" "$E"
+  echo '[Service]' >"$T/unit.in"
+  assert "user_write creates the missing parent directories and the file" quiet user_write "$T/unit.in" "$H/.config/docker/daemon.json" 0644
+  same "  ... with the content" "[Service]" "$(cat "$H/.config/docker/daemon.json")"
+  same "  ... and the mode" "644" "$(stat -c %a "$H/.config/docker/daemon.json")"
+  ln -s "$E" "$T/probe-link" 2>/dev/null
+  if [ ! -L "$T/probe-link" ]; then echo "  note  this shell cannot make real symlinks (Git Bash copies): the symlink-attack checks run on the Linux gate"; else
+    ln -s "$E" "$H/.config/systemd/user"
+    refute "user_write refuses a symlinked directory in the path (the attack: ~/.config/systemd/user -> /etc/systemd/system)"       quiet user_write "$T/unit.in" "$H/.config/systemd/user/docker.service" 0644
+    same "  ... and wrote nothing into the target" "" "$(ls -A "$E")"
+    refute "user_link refuses the same symlinked directory" quiet user_link "$H/.config/systemd/user/default.target.wants/docker.service" ../docker.service
+    same "  ... and made nothing there" "" "$(ls -A "$E")"
+    refute "user_dir refuses a symlinked data root" quiet bash -c '. "$1"; HOME_DIR=$2; as_user() { "$@"; }; ln -s "$3" "$2/docker"; user_dir "$2/docker" 0700' _ "$HERE/install-rootless.sh" "$H" "$E"
+    same "  ... and chmod nothing there" "" "$(ls -A "$E")"
+    rm -f "$H/.config/systemd/user" "$H/docker"
+    mkdir -p "$H/.config/systemd/user"
+    ln -s "$E/victim" "$H/.config/systemd/user/docker.service"
+    refute "user_write refuses a symlinked destination file" quiet user_write "$T/unit.in" "$H/.config/systemd/user/docker.service" 0644
+    same "  ... and wrote nothing through it" "" "$(ls -A "$E")"
+    refute "a path outside the home is refused" quiet user_write "$T/unit.in" "$E/x" 0644
+    refute "a .. path is refused" quiet user_write "$T/unit.in" "$H/../etc-sys/x" 0644
+    mv "$H" "$T/home-real" && ln -s "$T/home-real" "$H"
+    refute "a symlinked home (the anchor itself) is refused" quiet user_write "$T/unit.in" "$H/f" 0644
+    rm -f "$H"; mv "$T/home-real" "$H"
+    assert "user_link creates the enablement symlink as the user" quiet user_link "$H/.config/systemd/user/default.target.wants/docker.service" ../docker.service
+    same "  ... pointing at ../docker.service" "../docker.service" "$(readlink "$H/.config/systemd/user/default.target.wants/docker.service")"
+    assert "user_dir creates the data root 0700" quiet user_dir "$H/docker" 0700
+    same "  ... mode 700" "700" "$(stat -c %a "$H/docker")"
+  fi
+  # The static guard: no root-side install/ln/chown/rm names a path in the user's tree.
+  refute "do_home contains no root install/ln/chown/rm on the user's tree" bash -c     "sed -n '/^do_home() {/,/^}/p' '$HERE/install-rootless.sh' | grep -E '(^|[^_a-z])(install|ln|chown|rm) '| grep -v 'rm -rf \"\$t\"'"
   echo "  END   install"
 }
 
