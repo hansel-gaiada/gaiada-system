@@ -678,7 +678,7 @@ export function ItemEditor({
               )}
             </section>
 
-            <ContentChecksCard lint={lint} />
+            {!clientMode && <ContentChecksCard lint={lint} />}
 
             {/* WSK-46: preview the DRAFT on the site's own /preview/ page. Off exactly when Save is off (`canWrite`). */}
             {!item.deletedAt && (
