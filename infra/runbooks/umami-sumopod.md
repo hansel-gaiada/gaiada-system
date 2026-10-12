@@ -503,7 +503,15 @@ Send the agreed public test IP (V2-d names it) through the edge exactly as secti
   - A direct test into the app showed it plainly: `fd12:…` with `cf-ipcountry: GB` stored nothing, while `2001:db8:…` with the same headers stored GB / GB-ENG / London.
   - **Fix:** the pseudonym moved to 2001:db8::/32 (insights-collector 0.3.1). This is NOT the `FORWARD_IP_MODE=real` fallback: Umami still never sees an IP.
 - **Step 4** (spoofed `cf-ipcountry: XX`) was inconclusive, because no location was stored at all.
-- **To finish:** re-run steps 1, 3 and 4 with the first image that carries 0.3.1. The proof project is STOPPED, not removed (`cd ~/umami-proof && docker compose up -d`). Remove it afterwards with `docker compose down -v && rm -rf ~/umami-proof`.
+- **Re-proof with 368's image, PASSED (2026-10-13).** The image is `…:v1.0.0-alpha.368@sha256:66219e94b1674a607742952bd33efc1cb1f0abdc8de2748383be77701c80c81e`, insights-collector 0.3.1, provenance verified.
+  - Step 1: through the edge and the collector, 81.2.69.142 stored GB / GB-England / London.
+  - Step 3: the 2001:db8 pseudonym is accepted, and the event is stored with its location.
+  - Step 4: 8.8.4.4 sent with `cf-ipcountry: XX` / `cf-ipcity: Spoofville` stored US / California / Mountain View, and "XX" / "Spoofville" appear 0 times in the Umami dump.
+  - Step 2 again: both IPs appear 0 times in both dumps and every log.
+  - Step 6: every public path is 404 (`/lib/kestrel/r` while replay is off, `/ops/v1/*`, `/healthz`, `/api/*`, `/login`, `/`), and the loopback pings are 403.
+  - Step 7: a vdb dump with `backup.sh`'s exclusions has the five schemas and data only for `bot_counts` and `tombstones`, with 0 COPY blocks for the personal tables. The off-box push was not exercised in the proof.
+  - The proof project, its volumes and the 367 image were removed, and the live `umami` project was untouched.
+  - V2-e (live) waits for G2 and O-11.
 
 ### C6. Rollback (collector out of the path; Umami collects directly)
 

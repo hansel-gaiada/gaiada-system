@@ -2331,6 +2331,41 @@ export function registerInvoiceIssueExecutableApprovals(): void {
   });
 }
 
+// PV4-07 — the client-reaching conversation and minutes tools: BARRED, because agents draft and staff send (PV-D23).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `conversation.post` / `conversation.open` (a message to a client), `conversation.sendDraft` (a drafted message to a client)
+// and `meetings.shareMinutes` (minutes to a client) are `impact: "medium"` (core-tools.ts), so an unattended caller's call
+// is SUSPENDED for a human to approve. Without a bar, that approval would be the one path by which an agent's words reach a
+// client with a human only clicking "approve" on a card. The ruling is stricter: a message is the sender's, and the sender
+// is a named person who read it, so it is sent by that person from the conversation screen (or their own MCP client), never
+// by a re-drive that runs as the agent's filing principal.
+//
+// A bar adds nothing to the absence that already fails closed (no entry means the executor marks the row `not_executable`
+// and never calls the hub): it makes the decision a fact in code. `registerExecutableApproval` throws for these names, so a
+// later ticket cannot make one executable without deleting this registration and saying why in the same change. Cerbos
+// independently denies the same actions to `bot`/`automation` principals, and the endpoints answer them with the typed
+// `agents_draft_staff_send` refusal (core/agent-refusal.ts).
+export const CONVERSATION_BARRED_TOOLS = [
+  "conversation.post",
+  "conversation.open",
+  "conversation.sendDraft",
+  "meetings.shareMinutes",
+] as const;
+
+/** The reason TOKEN of the bars, the same code the endpoints answer an agent with. */
+export const CONVERSATION_BAR_REASON = "agents_draft_staff_send";
+
+export function registerConversationBars(): void {
+  for (const toolName of CONVERSATION_BARRED_TOOLS) {
+    registerBarredExecutable({
+      toolName,
+      reason: CONVERSATION_BAR_REASON,
+      note: "PV-D23: agents draft, staff send — nothing an agent writes reaches a client until a staff member approves it",
+    });
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // THE production bootstrap — one list, so it cannot go stale
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2370,6 +2405,7 @@ export function registerAllExecutableApprovals(): void {
   registerSearchConversionBars();
   registerContractBillingExecutableApprovals();
   registerInvoiceIssueExecutableApprovals();
+  registerConversationBars();
 }
 
 registerAllExecutableApprovals();

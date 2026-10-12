@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **254** capabilities across **16** owners
-- **134** writes · 120 reads
-- Writes by impact: **high 26** · medium 37 · low 71
+- **265** capabilities across **16** owners
+- **142** writes · 123 reads
+- Writes by impact: **high 26** · medium 41 · low 75
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -43,7 +43,7 @@ unfalsifiable after.
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 15 |
-| core | `agency` · `billing-profile` · `contracts` · `contracts?clientId=:clientId` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `positions` · `role-grants` | 40 |
+| core | `agency` · `billing-profile` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 45 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 8 |
@@ -89,6 +89,14 @@ unfalsifiable after.
 | core | `contracts.list` | `GET` | `/api/:tenantId/contracts?clientId=:clientId` | read | — |
 | core | `contracts.send` | `POST` | `/api/:tenantId/contracts/:contractId/send` | write | `medium` |
 | core | `contracts.updateDraft` | `PATCH` | `/api/:tenantId/contracts/:contractId` | write | `low` |
+| core | `conversation.closeThread` | `PATCH` | `/api/:tenantId/conversation/:threadId` | write | `low` |
+| core | `conversation.draftReply` | `POST` | `/api/:tenantId/conversation/:threadId/drafts` | write | `low` |
+| core | `conversation.getThread` | `GET` | `/api/:tenantId/conversation/:threadId` | read | — |
+| core | `conversation.listThreads` | `GET` | `/api/:tenantId/conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` | read | — |
+| core | `conversation.open` | `POST` | `/api/:tenantId/conversation` | write | `medium` |
+| core | `conversation.post` | `POST` | `/api/:tenantId/conversation/:threadId/messages` | write | `medium` |
+| core | `conversation.reopenThread` | `PATCH` | `/api/:tenantId/conversation/:threadId` | write | `low` |
+| core | `conversation.sendDraft` | `POST` | `/api/:tenantId/conversation/drafts/:draftId/send` | write | `medium` |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
 | core | `iam.listAttachableRoles` | `GET` | `/api/:tenantId/positions/attachable-roles` | read | — |
@@ -103,6 +111,9 @@ unfalsifiable after.
 | core | `invoices.issue` | `POST` | `/api/:tenantId/invoices/:invoiceId/issue` | write | `high` |
 | core | `invoices.issueReadiness` | `GET` | `/api/:tenantId/invoices/:invoiceId/issue-readiness` | read | — |
 | core | `invoices.voidIssued` | `POST` | `/api/:tenantId/invoices/:invoiceId/void` | write | `high` |
+| core | `meetings.getMinutes` | `GET` | `/api/:tenantId/meetings/:meetingId/minutes` | read | — |
+| core | `meetings.saveMinutes` | `PUT` | `/api/:tenantId/meetings/:meetingId/minutes` | write | `low` |
+| core | `meetings.shareMinutes` | `POST` | `/api/:tenantId/meetings/:meetingId/minutes/share` | write | `medium` |
 | finance | `finance.apAging` | `GET` | `/api/:tenantId/finance/ap/aging` | read | — |
 | finance | `finance.arAging` | `GET` | `/api/:tenantId/finance/ar/aging` | read | — |
 | finance | `finance.balanceSheet` | `GET` | `/api/:tenantId/finance/balance-sheet` | read | — |
