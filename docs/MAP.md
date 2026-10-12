@@ -404,6 +404,9 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/media/[tenant]/[site]`
 - `/departments/[deptId]/website/writers`
 - `/departments/[deptId]/website/writers/[tenant]/[site]`
+- `/departments/[deptId]/website/writers/briefs/[tenant]/[site]/[briefId]`
+- `/departments/[deptId]/website/writers/calendar`
+- `/departments/[deptId]/website/writers/calendar/[tenant]/[site]`
 - `/departments/[deptId]/website/writers/people`
 - `/departments/[deptId]/website/writers/people/[tenant]/[site]`
 - `/finance`
