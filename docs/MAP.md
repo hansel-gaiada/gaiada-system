@@ -168,7 +168,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610112330_iam_contract_countersign_permission.sql`
+- Head: `202610121835_agency_lead_privacy_retention.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
@@ -199,6 +199,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/agency-intake-portal.controller.ts` |
 | `/api` | `platform-nest/src/core/agency-lead-convert.controller.ts` |
 | `/api` | `platform-nest/src/core/agency-leads.controller.ts` |
+| `/api` | `platform-nest/src/core/agency-privacy.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals-decide.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals.controller.ts` |
 | `/api` | `platform-nest/src/core/authz-check.controller.ts` |
@@ -265,6 +266,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/webdev.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
 | `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-content.controller.ts` |
+| `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-editorial-grants.controller.ts` |
 | `/api/:tenantId/modules/webdev/content` | `platform-nest/src/modules/webdev/webdesk-site-clients.controller.ts` |
 | `/api/:tenantId/modules/webdev/control` | `platform-nest/src/modules/webdev/webdesk-control.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
@@ -393,6 +395,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/[slug]`
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/[slug]/history`
 - `/departments/[deptId]/website/content/[tenant]/[site]/[collection]/~new`
+- `/departments/[deptId]/website/leads`
+- `/departments/[deptId]/website/leads/[tenant]/[site]`
 - `/departments/[deptId]/website/media`
 - `/departments/[deptId]/website/media/[tenant]/[site]`
 - `/finance`

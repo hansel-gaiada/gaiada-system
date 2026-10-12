@@ -813,6 +813,9 @@ services:
       # M5-L4 — a gaiada.com form submission becomes an agency lead ONLY when this is exactly "1". Leave it
       # empty until counsel has reviewed the website-visitor addendum (WSK-D67).
       AGENCY_WEB_LEADS_ENABLED: ${AGENCY_WEB_LEADS_ENABLED:-}
+      # M5-L5 — comma-separated ERP user ids alerted (bell) on a new web lead. Empty = nobody. Never a group the
+      # work-summary bot ingests (addendum R-V13).
+      AGENCY_WEB_LEAD_ALERT_USER_IDS: ${AGENCY_WEB_LEAD_ALERT_USER_IDS:-}
       N8N_BRIDGE_ENTITY_TYPES: ${N8N_BRIDGE_ENTITY_TYPES:-}
       # Event → knowledge-graph bridge (WS8 Step E). Forwards business events on these entity streams
       # to the knowledge service /graph/ingest (reuses KNOWLEDGE_URL/TOKEN above). Off unless set.

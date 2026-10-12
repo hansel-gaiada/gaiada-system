@@ -24,6 +24,12 @@
 // `AGENCY_WEB_LEADS_ENABLED=1` is required. Owner ruling: each phase waits for counsel. Read at call time
 // (not at import) so a test or an operator flips it without a rebuild.
 //
+// ── SUPPRESSION (M5-G5) ─────────────────────────────────────────────────────────────────────────────
+// A person who had their data erased is on `agency_contact_suppressions` (hashed). If the mapped email or
+// phone is suppressed for 'intake', NOTHING is stored: no lead, no event, and only the typed outcome
+// `suppressed` (with the submission id) is logged. Checked inside the insert transaction, so a concurrent
+// erase cannot slip a row in between the check and the insert unnoticed for longer than that transaction.
+//
 // ── PLAIN TENANT WALL ───────────────────────────────────────────────────────────────────────────────
 // Like every other `agency_leads` access (agency-leads.service.ts header, design §3.1): `withTenants` with NO
 // `{ modules }` option; passing one would read/write zero rows.
@@ -32,6 +38,8 @@ import { config } from "../config";
 import { newId, withTenants } from "../db";
 import { emitEvent } from "../events/outbox.service";
 import { scrubText } from "./scrub";
+import { alertStaffOfWebLead, type WebLeadAlertSender } from "./agency-web-lead-alert";
+import { isContactSuppressed } from "./agency-privacy.service";
 import { webdeskZoneB, WebdeskProblem } from "../modules/webdev/webdesk-content.service";
 
 const logger = new Logger("AgencyWebLeads");
@@ -124,6 +132,8 @@ export type WebLeadOutcome =
   | { outcome: "existing"; leadId: string }
   | { outcome: "gone" }
   | { outcome: "unmapped_form" }
+  /** M5-G5: the submitter's email or phone is on the suppression list (they were erased). Nothing stored. */
+  | { outcome: "suppressed" }
   | { outcome: "disabled" }
   | { outcome: "invalid" };
 
@@ -133,6 +143,8 @@ export interface WebLeadsDeps {
   assertTenantOwnsSite(tenantId: string, siteSlug: string): Promise<void>;
   /** `forms.submission.get`; resolves the parsed body, or `"gone"` for a 410. Other failures throw. */
   fetchSubmission(siteSlug: string, submissionId: string): Promise<Record<string, unknown> | "gone">;
+  /** M5-L5 staff alert, swappable by a test. Defaults to the ERP's `notify()` path. */
+  alertSender?: WebLeadAlertSender;
 }
 
 export const defaultWebLeadsDeps: WebLeadsDeps = {
@@ -209,6 +221,9 @@ export async function createLeadFromWebSubmission(
   const visitorConsent = plainObjectOrNull(fetched.visitorConsent, ATTRIBUTION_MAX_BYTES);
   const id = newId();
   const result = await withTenants([tenantId], async (c) => {
+    if (await isContactSuppressed(c, tenantId, { email: mapped.contactEmail, phone: mapped.contactPhone }, "intake")) {
+      return { suppressed: true as const };
+    }
     const ins = await c.query<{ id: string }>(
       `INSERT INTO agency_leads
          (id, tenant_id, org_name, contact_name, contact_email, contact_phone, source, status,
@@ -229,13 +244,116 @@ export async function createLeadFromWebSubmission(
       await emitEvent(c, tenantId, "agency_lead", id, "agency.lead.created", {
         source: "web", originForm: formKey, submissionRef: submissionId,
       });
-      return { created: true as const, leadId: id };
+      return { suppressed: false as const, created: true as const, leadId: id };
     }
     const again = await c.query<{ id: string }>(
       `SELECT id FROM agency_leads WHERE tenant_id = $1 AND submission_ref = $2`,
       [tenantId, submissionId],
     );
-    return { created: false as const, leadId: again.rows[0].id };
+    return { suppressed: false as const, created: false as const, leadId: again.rows[0].id };
   });
-  return result.created ? { outcome: "created", leadId: result.leadId } : { outcome: "existing", leadId: result.leadId };
+  if (result.suppressed) {
+    logger.log(`submission ${submissionId}: suppressed (the submitter was erased); nothing stored`);
+    return { outcome: "suppressed" };
+  }
+  if (!result.created) return { outcome: "existing", leadId: result.leadId };
+  // M5-L5: one alert per lead, only when THIS call created the row; never throws (fail-soft).
+  await alertStaffOfWebLead(tenantId, { leadId: result.leadId, contactName: mapped.contactName, originForm: formKey }, deps.alertSender);
+  return { outcome: "created", leadId: result.leadId };
+}
+
+// ───────────────────────────────────────────────────────────────────────── M5-L6: the Website → Leads read
+const CLICK_ID_KEYS = ["gclid", "gbraid", "wbraid", "fbclid", "msclkid", "li_fat_id"] as const;
+const SUMMARY_TEXT_CAP = 512;
+export const WEB_LEADS_LIST_LIMIT = 200;
+
+/** What staff see of a web lead's attribution. An ALLOW-LIST projection of the stored jsonb: the landing and form
+ *  page paths, the referrer host, the three UTM columns the screen shows, and click-id PRESENCE (the names of the
+ *  click ids that are set, never their values). fbp/fbc, utm_term/content, the ids and everything unknown stay in
+ *  the table and never reach the browser or an agent. Wrong-typed values read as absent. */
+export interface WebLeadAttributionSummary {
+  landing: string | null;
+  formPage: string | null;
+  referrer: string | null;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  clickIds: string[];
+}
+
+export interface WebLeadRow {
+  id: string;
+  orgName: string;
+  contactName: string | null;
+  originForm: string | null;
+  createdAt: string;
+  status: string;
+  stage: string;
+  attribution: WebLeadAttributionSummary;
+  /** The banner choice for marketing at submit time: `true` / `false`, or `null` = unknown (no record = no consent). */
+  marketingConsent: boolean | null;
+}
+
+export interface WebLeadsList {
+  /** `AGENCY_WEB_LEADS_ENABLED === "1"` — the flag's state only, never its raw value. */
+  leadIntakeEnabled: boolean;
+  /** More than WEB_LEADS_LIST_LIMIT leads exist for this site; the newest are shown. */
+  truncated: boolean;
+  leads: WebLeadRow[];
+}
+
+function summaryText(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim().slice(0, SUMMARY_TEXT_CAP) : null;
+}
+
+export function summarizeAttribution(raw: unknown): WebLeadAttributionSummary {
+  const a = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return {
+    landing: summaryText(a.landing),
+    formPage: summaryText(a.form_page),
+    referrer: summaryText(a.referrer),
+    utmSource: summaryText(a.utm_source),
+    utmMedium: summaryText(a.utm_medium),
+    utmCampaign: summaryText(a.utm_campaign),
+    clickIds: CLICK_ID_KEYS.filter((k) => typeof a[k] === "string" && (a[k] as string).trim() !== ""),
+  };
+}
+
+export function marketingConsentOf(raw: unknown): boolean | null {
+  const c = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return typeof c.marketing === "boolean" ? c.marketing : null;
+}
+
+/** The web leads for one WebDesk site (tenant) slug, newest first. The CALLER authorizes `read` on `agency_lead`
+ *  first; the tenant wall (`tenant_id = $1` under `withTenants`, no `{ modules }` option) is what keeps another
+ *  company's leads out, even for an identical slug. */
+export async function listWebLeads(tenantId: string, siteSlug: string): Promise<WebLeadsList> {
+  const { rows } = await withTenants([tenantId], (c) =>
+    c.query<{
+      id: string; org_name: string; contact_name: string | null; origin_form: string | null; created_at: Date | string;
+      status: string; stage: string; attribution: unknown; visitor_consent: unknown;
+    }>(
+      `SELECT id, org_name, contact_name, origin_form, created_at, status, stage, attribution, visitor_consent
+         FROM agency_leads
+        WHERE tenant_id = $1 AND deleted_at IS NULL AND source = 'web' AND web_site_slug = $2
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${WEB_LEADS_LIST_LIMIT + 1}`,
+      [tenantId, siteSlug],
+    ),
+  );
+  return {
+    leadIntakeEnabled: webLeadsEnabled(),
+    truncated: rows.length > WEB_LEADS_LIST_LIMIT,
+    leads: rows.slice(0, WEB_LEADS_LIST_LIMIT).map((r) => ({
+      id: r.id,
+      orgName: r.org_name,
+      contactName: r.contact_name,
+      originForm: r.origin_form,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      status: r.status,
+      stage: r.stage,
+      attribution: summarizeAttribution(r.attribution),
+      marketingConsent: marketingConsentOf(r.visitor_consent),
+    })),
+  };
 }

@@ -814,6 +814,78 @@ export const webdevModule: ModuleContract = {
         required: ["tenantId", "tenantSlug", "siteId", "assetId"],
       },
     },
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // M5-W1b — the writers' room grant path (docs/plans/2026-10-11-m5-writers-room-design.md §2.6). Same BFF routes as
+    // the UI (`webdesk-editorial-grants.controller.ts`), authorised as Cerbos `webdesk_collection:manage_editorial`.
+    //
+    // IMPACT CLASSES (design §2.6). `grantRole` is HIGH, like `iam.grantRole`: it WIDENS somebody's authority. `revokeRole`
+    // is MEDIUM: a de-escalation cannot escalate anyone, but it can break somebody's day. Both are `write:true`, so an
+    // unattended caller (an agent or n8n) SUSPENDS for a human decision; an attended human is not suspended. Both are D14
+    // executables (`core/approval-executables.ts` registerWebdeskEditorialExecutableApprovals AND `resource_mcp_tool.yaml`'s
+    // executable list, in this same change), so an approved suspension re-drives as the ORIGINAL requester, whose CURRENT
+    // standing Cerbos decides again. `listGrants` is a read.
+    //
+    // ASSURANCE `verified`, like the iam.* grant tools and unlike the content tools: granting authority is not something
+    // an unverified chat identity should even be able to file, and nothing here is meant for an n8n workflow.
+    {
+      name: "webdesk.editorial.listGrants",
+      description:
+        "List who holds a writers' room role (writer, translator, SEO reviewer, editor) on one WebDesk site, with each grant's collections, locales and expiry.",
+      minAssurance: "verified",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" } },
+        required: ["tenantId", "tenantSlug", "siteId"],
+      },
+    },
+    {
+      name: "webdesk.editorial.grantRole",
+      description:
+        "Grant a writers' room role on ONE WebDesk site to an active employee of this company: webdesk_writer, webdesk_translator, "
+        + "webdesk_seo_reviewer or webdesk_editor, scoped to named collections (or allCollections: true) and named locales (or "
+        + "allLocales: true). Granting the same role on the same site again REPLACES that site's scope. HIGH write: an unattended "
+        + "caller is suspended for human approval. No self-grant; expiresAt (ISO-8601, optional) belongs to the person's grant across sites.",
+      minAssurance: "verified",
+      write: true,
+      impact: "high",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" },
+          userId: { type: "string" },
+          role: { type: "string", enum: ["webdesk_writer", "webdesk_translator", "webdesk_seo_reviewer", "webdesk_editor"] },
+          allCollections: { type: "boolean" },
+          collections: { type: "array", items: { type: "string" }, description: "Collection keys; omit when allCollections is true." },
+          allLocales: { type: "boolean" },
+          locales: { type: "array", items: { type: "string" }, description: "Locales; omit when allLocales is true." },
+          expiresAt: { type: "string", description: "ISO-8601 instant in the future; omit for a permanent grant." },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "userId", "role"],
+      },
+    },
+    {
+      name: "webdesk.editorial.revokeRole",
+      description:
+        "Revoke a writers' room role from a person on ONE WebDesk site (the grant itself goes when it covered no other site). "
+        + "MEDIUM write: an unattended caller is suspended for human approval. Revoking what is not held is a no-op (changed: false).",
+      minAssurance: "verified",
+      write: true,
+      impact: "medium",
+      method: "DELETE",
+      pathTemplate: "/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants/:userId/:role",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, tenantSlug: { type: "string" }, siteId: { type: "string" }, userId: { type: "string" },
+          role: { type: "string", enum: ["webdesk_writer", "webdesk_translator", "webdesk_seo_reviewer", "webdesk_editor"] },
+        },
+        required: ["tenantId", "tenantSlug", "siteId", "userId", "role"],
+      },
+    },
   ],
   rollupProviders: [],
   uiManifest: [

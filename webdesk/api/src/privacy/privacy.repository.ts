@@ -27,6 +27,19 @@ export type MatchedSubmissionRow = {
   expires_at: string;
 };
 
+/** M5-G6: one decision in the server-side consent log, as exported to a data subject. No IP and no raw user agent exist to return. */
+export type ConsentRecordRow = {
+  id: string;
+  consent_id: string;
+  site_id: string;
+  analytics: boolean;
+  marketing: boolean;
+  notice_version: string;
+  action: string;
+  recorded_at: string;
+  user_agent_class: string;
+};
+
 export type MediaAssetLookupRow = {
   id: string;
   bucket_key: string;
@@ -73,6 +86,22 @@ export class PrivacyRepository {
       [tenantId, identifierNormalized, phoneRef],
     );
     return rows;
+  }
+
+  /** M5-G6: every consent record of one consent id, oldest first. A consent id identifies a browser, not a person. */
+  async findConsentRecords(client: PoolClient, tenantId: string, consentId: string): Promise<ConsentRecordRow[]> {
+    const { rows } = await client.query<ConsentRecordRow>(
+      `SELECT id, consent_id, site_id, analytics, marketing, notice_version, action, recorded_at, user_agent_class
+         FROM consent_records WHERE tenant_id = $1 AND consent_id = $2::uuid ORDER BY recorded_at, id`,
+      [tenantId, consentId],
+    );
+    return rows;
+  }
+
+  /** M5-G6: the erasure of a consent id's history (a hard DELETE: a consent record carries no evidentiary purpose once its subject asked for erasure, and the DSR ledger keeps only a hash). */
+  async deleteConsentRecords(client: PoolClient, tenantId: string, consentId: string): Promise<number> {
+    const { rowCount } = await client.query(`DELETE FROM consent_records WHERE tenant_id = $1 AND consent_id = $2::uuid`, [tenantId, consentId]);
+    return rowCount ?? 0;
   }
 
   async findMediaAssetsByIds(client: PoolClient, tenantId: string, ids: string[]): Promise<MediaAssetLookupRow[]> {

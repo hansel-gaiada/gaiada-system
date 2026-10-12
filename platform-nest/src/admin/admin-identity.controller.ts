@@ -68,6 +68,13 @@ const ROLE_SCOPE_CONSTRAINTS: Record<string, readonly string[]> = {
   org_unit_lead: ["org_unit"],
   // WSK-49f: derived_roles.yaml's `client_website_editor` can only match a `client` scope (a clients.id).
   client_website_editor: ["client"],
+  // M5-W1b: the writers' room roles' derived roles match a `company` grant only (scope-constrained-roles.json). The
+  // generic surfaces refuse these four by name anyway (`editorial_role_dedicated_path`, grant-write.service.ts); this
+  // entry keeps the map complete for the permission-arm hazard scan and the DB trigger `user_roles_editorial_guard`.
+  webdesk_writer: ["company"],
+  webdesk_translator: ["company"],
+  webdesk_seo_reviewer: ["company"],
+  webdesk_editor: ["company"],
 };
 
 /** THE single scope-guard check — every write path that mints a `user_roles` row from a

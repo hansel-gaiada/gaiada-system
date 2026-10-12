@@ -1537,7 +1537,7 @@ neither, so nothing that works today changes (§11.1's lesson, stated up front).
 
 **Principal contract.** `RoleGrant.editorialScopes` (`[{siteId, allCollections, collections, allLocales, locales}]`) is sent by
 `principalPayload()` field by field on the grants that carry it (a conditional spread, so every other grant keeps its exact shape);
-a non-boolean `all*` flag is sent as `false`. `assemblePrincipal()` does not populate it yet (W1b).
+a non-boolean `all*` flag is sent as `false`. `assemblePrincipal()` populates it from the grant's scope rows since W1b (§27.1).
 
 **What proves it.** Bundles and parity are blind to all of this (they treat conditions as satisfied, and the four roles map to no
 bundle). The proof is the decision matrix: `platform-nest/cerbos/tests/webdesk_writers_room_test.yaml` (17 principals × 24 resources ×
@@ -1545,9 +1545,30 @@ every action, 4 811 decisions, negatives included; `cerbos compile --tests`) and
 `src/rbac/webdesk-writers-room-cerbos.test.ts`. The four roles are exempted in `role-bundle-completeness` with the reason beside them.
 
 **Not decided here.** The grant path, the `user_roles_editorial_guard` trigger, the refusals on the generic grant surfaces
-(`editorial_role_dedicated_path`) and `ROLE_SCOPE_CONSTRAINTS` entries are W1b. The contributor principal and its DENYs on the
+(`editorial_role_dedicated_path`) and `ROLE_SCOPE_CONSTRAINTS` entries are W1b (now §27.1). The contributor principal and its DENYs on the
 assistant and agent-run kinds are W1d (owner question O-4). The `approve` DENY already names `contributor`, so that wall exists before
 the kind does.
+
+### 27.1 M5-W1b — the grant scopes, the guards and the dedicated grant path (2026-10-11, PROTOTYPED)
+
+`202610111816_iam_editorial_grant_scopes.sql`; design [`plans/2026-10-11-m5-writers-room-design.md`](plans/2026-10-11-m5-writers-room-design.md)
+§2.2, §2.5, §2.6. **No new role, permission, kind, bundle row or policy rule.** The catalog and bundles are unchanged from §27.
+
+| Thing | Value |
+|---|---|
+| Scope rows | `user_role_editorial_scopes (user_role_id FK ON DELETE CASCADE, tenant_id, webdesk_tenant_slug, site_id, all_collections, collections text[], all_locales, locales text[], granted_by, …)`, UNIQUE `(user_role_id, site_id)`. "All" is an explicit boolean: CHECK `all_x` ⇔ empty list, else 1..100 distinct, trimmed entries (keys ≤ 100 chars, locales ≤ 35, WebDesk's own bound). One grant row per (user, role, company) carries one scope row per site. |
+| RLS | FORCE. `tenant_isolation` (the 0025-hardened tenant wall; deliberately no module wall, principal assembly sets no module scope) **plus `principal_lookup` (SELECT only): the rows of grants HELD BY `app.principal_user_id`**, never a tenant's. Read outside that GUC (a bare `withGlobal`), the table returns ZERO rows and no error, which is why `assemblePrincipal()` reads it inside its lookup transaction. |
+| Guards (DB, any writer, seeds included) | `user_role_editorial_scopes_guard`: a scope row only hangs off a grant of one of the four roles, at `company` scope, whose company is the row's `tenant_id`. `user_roles_editorial_guard`: the four roles only at `company` scope, never `managed_by` / `managed_by_position` (no service assignment, no position), and an editorial grant's role and scope are never repointed. `position_roles_editorial_guard`: the four never enter a position's role set. |
+| Generic surfaces | `assertGrantAllowed` refuses the four by name on `legacy_admin`, `ui` and `two_person_appointment` with **400 `editorial_role_dedicated_path`**; the positions composer refuses them (and lists them `attachable:false, reason:"editorial_role_dedicated_path"`); `ROLE_SCOPE_CONSTRAINTS` pins them to `company`. A generic REVOKE of an editorial grant still works (a de-escalation; its scope rows cascade). |
+| Principal | `assemblePrincipal()` attaches `editorialScopes` to each writers' room grant at `company` scope from that grant's OWN rows whose tenant is the grant's company (`attachEditorialScopes`, `src/rbac/editorial-roles.ts`). **A grant with no surviving row carries no `editorialScopes` member at all, so the derived roles' `has()` fails: fail closed.** An expired grant is not resolved at all; an editorial grant at another scope gets nothing. |
+| The grant path | `grantEditorialRole` / `revokeEditorialRole` in `admin/grant-write.service.ts` (the `user_roles` choke point). The caller must pass Cerbos `webdesk_collection:manage_editorial` on `{tenantId, module: webdev, siteId}`: that decision IS the ceiling (§2.5 of the design; no bundle-subset ceiling, the four have no bundle). Re-checked inside: the site is this company's and the collections and locales exist (proven from WebDesk by the BFF before the transaction), the target is an active `employee` with an active membership of this company (every other kind is refused until the contributor principal exists, W1d), no self-grant. Role row, scope row and the audit row (`webdesk.editorial.role_granted` / `_revoked`, `target_entity_type user_role`, identifiers only) commit in ONE transaction; the target's `session_version` is bumped on every change. The grant's `expires_at` belongs to the grant: a different expiry for an existing, unexpired grant is 409 `editorial_grant_expiry_mismatch`. Revoke removes the site's scope row, and the grant itself when it covered no other site. |
+| BFF + MCP | `GET/POST …/sites/:tenantSlug/:siteId/editorial/grants`, `DELETE …/editorial/grants/:userId/:role` (FRONTEND-BFF-CONTRACT §27 "Writers' room grants"). Tools `webdesk.editorial.listGrants` (read), `webdesk.editorial.grantRole` (**high**), `webdesk.editorial.revokeRole` (**medium**), assurance `verified`; both writes are D14 executables (`approval-executables.ts` + `resource_mcp_tool.yaml`). |
+
+**What proves it.** `src/rbac/editorial-roles.test.ts` and `src/modules/webdev/webdesk-editorial-grants.unit.test.ts` (service-free: the
+name lists agree across the TS, the migration and `derived_roles.yaml`; scope attachment fails closed; every pre-database refusal);
+`src/admin/editorial-grant.db.test.ts` (the triggers and CHECKs, principal_lookup across users and tenants, the zero-row trap, a
+scope-less grant probing DENY through the real `check()`, atomicity, revoke); `src/modules/webdev/webdesk-editorial-grants.test.ts`
+(the routes over `app.inject` with real Cerbos: denials with valid bodies and no egress, the wall, the generic refusals with positive controls).
 
 ## 28. WSK-D60 follow-up — `owner` may grant a client's website access and the client `admin` capability (2026-10-12)
 

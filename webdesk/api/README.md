@@ -312,7 +312,8 @@ specs and migration 0015 await the Linux gate).
   "fbp": "...", "fbc": "...",                                    // <= 200; send only with marketing consent
   "sections_seen": ["home.hero"]                                 // <= 50 items, each <= 64, [A-Za-z0-9_.:-]
 },
-"visitor_consent": { "analytics": true, "marketing": false, "version": "3", "decided_at": "2026-10-11T09:00:00Z" }
+"visitor_consent": { "analytics": true, "marketing": false, "version": "3", "decided_at": "2026-10-11T09:00:00Z",
+                     "consentId": "3f2b8c1e-5a4d-4e6f-9a0b-1c2d3e4f5a6b" }   // consentId optional (M5-G6): the id from POST .../consent
 ```
 
 Drop rules (`src/forms/attribution.ts`; the submission always succeeds):
@@ -322,7 +323,32 @@ Drop rules (`src/forms/attribution.ts`; the submission always succeeds):
 - `sections_seen`: more than 50 items drops the key; a bad single item is filtered out.
 - A serialized `attribution` over 4096 bytes is dropped whole. An object with no surviving key is stored as null.
 - `visitor_consent` needs both flags as booleans, a `version` of 1-32 chars and an ISO-8601 `decided_at` with a zone (stored in UTC); anything else is stored as null. null or absent means unknown, which every reader treats as NO consent.
+- M5-G6: `visitor_consent.consentId` is OPTIONAL and allow-listed: the uuid the browser got from `POST /v1/t/:tenantSlug/consent` (below). A missing or non-uuid value drops that one key only (the snapshot stays valid); it is stored lower-cased inside `submissions.visitor_consent`, so a submission can be tied to the server-side proof of the banner decision. It is not checked against `consent_records` (a browser may submit before its consent post lands, and the log is evidence, not a gate).
 - Drops are counted in one log line per submission, never with values.
+
+### Consent log API (M5-G6) — a server-side record of the visitor's banner decision
+
+Status: PROTOTYPED (unit-tested; the DB and HTTP specs and migration 0017 await the Linux gate). Context: `legal/website-visitor-addendum.md` R-V3 / F17 / section 3.6 (consent snapshot) / section 5 (retention), WSK-D67. The site still keeps the choice in localStorage `gaia-consent`; this is the evidence the site cannot forge afterwards.
+
+`POST /v1/t/:tenantSlug/consent` (public, like the forms route), `OPTIONS` for the preflight. The site posts on EVERY banner decision. `consent` is therefore a **reserved collection key** (`delivery/reserved-collection-keys.ts`), like `forms` and `media`.
+
+```jsonc
+// request (Content-Type: application/json, <= 2 KiB)
+{ "consentId": "3f2b8c1e-...",   // optional uuid the browser generated; absent or not a uuid => the server mints one
+  "analytics": true, "marketing": false,   // required booleans (never coerced)
+  "version": "3",                           // required, 1-32 chars: the banner / notice version shown
+  "action": "grant" }                       // grant | update | withdraw; absent => grant (new id) or update (supplied id)
+// 201 response
+{ "consentId": "3f2b8c1e-..." }             // keep it, send it with the next decision and on form submissions
+```
+
+- **Allow-list:** only those five keys; any other key is dropped (counted in a log line, never stored). A wrong type or a bad `version` / `action` is `400`; a body over 2 KiB is `413`. A `withdraw` is stored with both categories false whatever the body said.
+- **Origin / CORS:** like forms. The `Origin` must be a domain of one of the tenant's environments (`environments.domain`, either scheme); that environment's site is recorded as the record's site. A missing or unlisted origin is `403`, an unknown or inactive tenant `404`. `Access-Control-Allow-Origin` echoes the allowed origin; methods `POST, OPTIONS`; header `Content-Type`.
+- **Rate limit:** Redis fixed window, per client IP (default 60 per 10 min) and per tenant (default 3000 per 10 min), `429` when exceeded, `503` when Redis is unreachable (fail closed). Env: `WEBDESK_CONSENT_RATE_LIMIT_IP_PER_WINDOW`, `_IP_WINDOW_MS`, `_TENANT_PER_WINDOW`, `_TENANT_WINDOW_MS` (empty = default).
+- **No cookies** are set. **Stored** in `consent_records` (migration 0017): consent id, tenant, site, the two categories, notice version, action, a server-clock `recorded_at`, and `user_agent_class` (desktop / mobile / tablet / bot / unknown, derived from the User-Agent which is itself never stored). **No IP, no raw User-Agent, no other identifier.**
+- **Append-only:** the app role has SELECT, INSERT and DELETE on the table, no UPDATE; a decision changes by appending a row. DELETE is used by exactly two paths, both in the application: the retention purge and `privacy.erase`.
+- **Retention:** the hourly maintenance job (the `forms-retention-purge` scheduler job, WSK-61) also deletes consent histories whose LATEST record is older than `WEBDESK_CONSENT_RETENTION_MONTHS` (default 26 = data lifetime 14 + 12; an empty value is the default, never 0; a value outside 1-120 fails the job loudly). The unit of purge is the consent id: a browser's history goes whole or not at all.
+- **Data subject:** `privacy.find / export / erase` accept a consent id (a uuid) as the identifier, as well as an email, phone or field value. For a uuid, `find` adds `consentRecordCount`, `export` adds `consentRecords` (`consentId, siteId, action, analytics, marketing, noticeVersion, recordedAt, userAgentClass`, oldest first) and `erase` deletes the records and adds `consentRecordCount`. For every other identifier those keys are absent and the responses are unchanged. A consent id identifies a browser, not a person.
 
 Stored in `submissions.attribution` / `submissions.visitor_consent` (jsonb, migration 0015). The tenant webhook `form.received` payload gains `attribution` and `visitorConsent` (camelCase, like the rest of that payload; always present, null when absent). The Zone B `form.received` envelope is unchanged (`siteSlug, formId, submissionId, hasAttachments`).
 
