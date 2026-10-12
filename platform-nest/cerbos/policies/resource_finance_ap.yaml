@@ -117,3 +117,20 @@ resourcePolicy:
         match:
           expr: >-
             variables.inTenant && request.principal.attr.assurance == "high"
+
+    # PV-D26 (owner ruling, 2026-10-12): supplier bank details need HIGH ASSURANCE from EVERYONE, the
+    # administrator included. The `vendor_master` ALLOW above already requires it, but the
+    # `actions: ["*"]` platform_admin wildcard at the top of this file bypassed that gate. The operator
+    # keeps its reach; this DENY is what makes the second factor apply to it too. Same attribute the
+    # rules above read (`request.principal.attr.assurance`: "low" | "linked" | "high"). `roles: ["user"]`
+    # matches every principal, so under deny-overrides it beats the wildcard. FAIL-CLOSED: a principal
+    # that omits the attribute has no assurance and is denied (principalPayload() always sends it).
+    # Added by PV5-02 alongside `finance_config` `set_bank_details`, the same ruling for our own account.
+    - actions: ["vendor_master"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.principal.attr.assurance) ||
+            request.principal.attr.assurance != "high"

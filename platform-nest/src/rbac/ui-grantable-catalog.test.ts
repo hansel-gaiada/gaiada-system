@@ -97,8 +97,9 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // PV3-01 (2026-10-11): +1 grantable / +1 total on the EXISTING contract kind (`core.contract.countersign`), uiGrantable:FALSE.
     // PV4-02 (2026-10-12): +5 grantable / +5 total: core.conversation.{read,post,draft,manage} (NEW kind,
     // uiGrantable:true) and portal.converse (EXISTING portal kind, uiGrantable:FALSE like every portal.*). 434 -> 439 / 419 -> 424.
-    expect(permissions.length).toBe(439);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(424);
+    // PV5-02 (2026-10-12): +4 grantable / +4 total on 3 EXISTING kinds (invoice: issue, void_issued; contract: mark_certified; finance_config: set_bank_details). On top of PV4-02: 439 -> 443 / 424 -> 428. uiGrantable true for the first three, FALSE for set_bank_details.
+    expect(permissions.length).toBe(443);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(428);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

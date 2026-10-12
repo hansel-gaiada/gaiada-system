@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.98.0` - M5-P2: Google Ads conversion uploads on a lead stage change (simulate only; consent- and WS4-gated) (2026-10-12) - DEV-VERIFIED
+
+The lead-pipeline design's §8 interface (built by the M5 session).
+
+- **Migrations:**
+  - `202610131200_search_conversion_uploads`: the targets config and the uploads ledger, whose insert IS the claim, unique per (tenant, platform, submission, conversion key). It never stores hashes, a gclid or contact data.
+  - `202610131210_automation_approvals_origin_search`: widens the approvals origin CHECK, built from the LIVE definition so no earlier origin is lost. A test asserts every earlier origin and `search` pass and NULL is refused.
+  - This also fixes search's probe-consent filings, which use origin `search` and would have failed the old CHECK.
+- **Wiring:** `agency_lead` joins the consumer loop. A test reads `main.ts` and fails without it.
+- **The gate**, at plan time and again under the lock at execute: marketing consent exactly `true`, not on G5's suppression list, a usable identifier (gclid/gbraid/wbraid, or an email or phone for enhanced conversions).
+- **One WS4 approval per upload:** impact high, content-bound, origin `search`, executed in-band at `decide()` as the decider, never auto-retried.
+- **Mode:** simulate only. `SEARCH_CONVERSIONS_LIVE_PLATFORMS` is empty, and boot refuses unknown tokens. Live needs the Ads developer token and linked account, counsel (G2) and the access audit (O-8).
+- Targets routes and 4 MCP tools on `resource_search_property`. PERMISSION-CONTRACT §31.
+- **Verified** on GitHub Actions 38267194098:
+  - DB 23/23 (consent, suppression, de-dup, the in-band execution, no email/phone/gclid in approvals/outbox/logs/activities/notifications, the origin CHECK);
+  - unit 33/33, consumer wiring 3/3.
+
+### platform-ui `0.103.0` - M5-P2: the approvals inbox labels origin `search` "Consent & ad uploads" (2026-10-12) - DEV-VERIFIED
+
+- One label in `approvalsShared.ts`. GitHub Actions 38267194098 green.
+
 ### platform-nest `0.97.0` - M5-P5b: the AI-crawler log (counts only, no IP or user agent kept) (2026-10-12) - DEV-VERIFIED
 
 - **Ingest:** `POST …/search/properties/:propertyId/ai-crawlers/ingest` and MCP `search.aiCrawlers.ingest` (medium).

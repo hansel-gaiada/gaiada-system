@@ -124,7 +124,8 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // PV4-02 (2026-10-12): +5 grantable (core.conversation.{read,post,draft,manage} on the NEW conversation kind;
     // portal.converse on the EXISTING portal kind); +2 authoring groups (`client_conversation`, `portal_conversation`),
     // none advancedOnly. 419 -> 424.
-    expect(grantable.length).toBe(424);
+    // PV5-02 (2026-10-12): +4 grantable on 3 EXISTING kinds, 424 -> 428 (invoice.issue, invoice.void_issued, core.contract.mark_certified in 3 NEW authoring groups [invoices_issue, invoices_void_issued, client_contracts_certify]; finance.config.set_bank_details advancedOnly).
+    expect(grantable.length).toBe(428);
     expect(relationshipKeys.size).toBe(15);
   });
 
