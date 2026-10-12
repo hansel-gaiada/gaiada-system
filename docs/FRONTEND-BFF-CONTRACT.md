@@ -4806,6 +4806,43 @@ ends: `status` (the intake lifecycle above) and `stage` (the sales position, fro
   and `agency_pipeline.setDealValue` (impact `low`). `agency_intake.convert` gains the optional `deal`.
   `agency_intake.decline` now works from every open status.
 
+### Data-subject requests and lead retention (M5-G5) — **STATUS: BUILT (PROTOTYPED; the DB suites need the Linux gate)**
+
+Addendum: `legal/website-visitor-addendum.md` §5 and §9.3 items 3, 7, 8, 9. Code: `core/agency-privacy.*`,
+`core/agency-lead-retention.ts`, migration `202610121835_agency_lead_privacy_retention.sql`. No UI consumes these yet;
+they are an operator/agent surface (WebDesk's WSK-38 privacy commands, mirrored for the ERP's lead data).
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| POST | `/api/:tenantId/agency/privacy/find` | Body `{ email?, phone?, approvalId? }`. Executed: `{ outcome:"executed", requestId, counts, outOfScope, leads:[{ leadId, status, stage, source, createdAt, statusChangedAt, erasedAt, deleted, directMatch, submissionCount, tokenCount, convertedClientId }] }`, no contact data | `agency_lead:convert` |
+| POST | `/api/:tenantId/agency/privacy/export` | Same body. Executed: the `find` fields plus `orgName`, `contactName`, `contactEmail`, `contactPhone`, `originForm`, `submissionRef`, `webSiteSlug`, `attribution`, `visitorConsent`, `declinedReason`, `submissions:[{ submissionId, schemaVersion, createdAt, erasedAt, answers }]`, `intakeTokens:[{ tokenId, kind, createdAt, expiresAt, usedAt, revokedAt }]` | `agency_lead:convert` |
+| POST | `/api/:tenantId/agency/privacy/erase` | Same body. Executed: `{ outcome:"executed", replayed, requestId, erasedAt, counts:{ leadCount, submissionCount, tokenCount, outOfScopeCount, suppressionCount }, outOfScope:[{ leadId, convertedClientId, reason:"client_record_retention" }] }` | `agency_lead:convert` |
+
+- **WS4 per call, for every principal (the SM-21 shape).** Without `approvalId` the route files a HIGH approval and
+  returns `202 { outcome:"suspended", requestId, approvalId }`, reading nothing. A DIFFERENT company admin decides it
+  in the approvals inbox. The requester then repeats the call with the SAME identifiers and the `approvalId`: it runs
+  exactly once. Typed refusals: `202 awaiting_approval`, `400 subject_invalid | approval_id_invalid |
+  privacy_request_mismatch` (other identifiers or another command than were approved), `403 privacy_request_not_requester
+  | self_approved | user_required`, `404 privacy_request_not_found`, `409 approval_rejected | approval_already_used`.
+  An erase called again with its used approval returns the stored counts with `replayed:true`; a find/export re-use is
+  409 (its response is personal data and is never stored).
+- **Identifiers.** Email is trimmed and lower-cased; phone keeps 7-15 digits with a leading `+`/`00` dropped and a
+  national leading 0 NOT rewritten (WebDesk's normalisation, byte for byte). Never put them in a URL: POST only.
+- **Erase scrubs, never deletes.** Lead: `orgName` `(erased)`, contact fields and attribution null, a decline reason
+  `(erased)`; status, stage, client link, value and the consent snapshot are kept. AD-1: the person answers become
+  `"[erased]"`, business answers stay. Unused intake tokens are revoked. A converted lead's CLIENT record is out of
+  scope and is listed under `outOfScope`. The contact is added, hashed, to the suppression list: the web intake then
+  answers `422 { reason:"subject_suppressed" }` and stores nothing.
+- **Ledger.** `agency_dsr_requests` is append-only and holds SHA-256 hashes only (the same hash WebDesk's
+  `dsr_requests` computes, so one person's two ledgers correlate). The approval row holds the command and which keys
+  were given, never the values.
+- **Retention.** A scheduled purge (dark until `AGENCY_LEAD_RETENTION_PURGE_ENABLED=1`) hard-deletes an UNCONVERTED lead
+  with its AD-1 submissions, tokens and stage history `AGENCY_LEAD_RETENTION_MONTHS` (default 24) after its last status
+  or stage change (`status_changed_at`, kept by a DB trigger), unless a token or submission arrived after the cutoff.
+- **MCP.** `agency_privacy.find`, `agency_privacy.export`, `agency_privacy.erase`: impact `high`, barred from D14
+  auto-execution (the route is its own WS4 gate). Use them from an attended session: an unattended agent is suspended
+  by the hub first, and that hub approval would carry the identifier in its `tool_args`.
+
 ### Convert — what it spawns, and the one thing it must never do
 
 One transaction: `clients` → `client_contacts` (`capability='signer'`, because a viewer-only contact

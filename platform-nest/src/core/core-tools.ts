@@ -455,7 +455,8 @@ const AGENCY_INTAKE_CORE_TOOLS: McpToolDef[] = [
       "platform FETCHES the submission from WebDesk itself (forms.submission.get) — pass only the " +
       "submission's id and the WebDesk tenant slug, never field values. Idempotent per (tenant, submission): " +
       "a repeat returns the existing lead (200, created:false). 410 `submission-gone` = purged or erased, " +
-      "nothing created; 422 `unmapped_form` = the form has no lead mapping; 409 `web_leads_disabled` = " +
+      "nothing created; 422 `unmapped_form` = the form has no lead mapping; 422 `subject_suppressed` = the " +
+      "submitter was erased on request (M5-G5), nothing stored; 409 `web_leads_disabled` = " +
       "AGENCY_WEB_LEADS_ENABLED is off. Authorized as the existing agency-lead create. impact:'medium' — it " +
       "files a prospect's personal data into the CRM, so an unattended caller SUSPENDS for human approval.",
     minAssurance: "verified",
@@ -673,6 +674,91 @@ export function registerAllCoreTools(): void {
   registerIamCoreTools();
   registerAgencyIntakeCoreTools();
   registerAgencyPipelineCoreTools();
+  registerAgencyPrivacyCoreTools();
+}
+
+// =================================================================================================
+// M5-G5 - `agency_privacy.*`, data-subject requests over the agency intake data (addendum section 9.3 item 3).
+// =================================================================================================
+//
+// Route: core/agency-privacy.controller.ts; flow: core/agency-privacy.service.ts. HIGH for all three, the
+// WSK-38 classification (finding or exporting one person's whole footprint concentrates personal data the way
+// no ordinary read does; erase is irreversible). The ROUTE is the WS4 gate for every principal, humans
+// included (the SM-21 shape): the first call files an approval and returns 202, and the same call repeated with
+// the approved `approvalId` runs exactly once. The hub's own gate still suspends an UNATTENDED caller on top,
+// and the three names are BARRED from D14 auto-execution (approval-executables.ts): a hub re-drive would only
+// file a second route-level approval, so an approved hub row must never pretend to have run the command.
+//
+// WARNING: an unattended agent's call is suspended BY THE HUB before it reaches the route, and the runner's
+// approval row then carries the call's args, i.e. the email/phone, in `automation_approvals.tool_args`. Use these
+// tools from an ATTENDED session (a person in chat) until the hub minimises args for them (M5-G5 follow-up).
+const PRIVACY_IDENTIFIER_PROPS = {
+  tenantId: { type: "string" },
+  email: { type: "string", description: "The person's email. Give email, phone, or both; matched after trim + lower-case." },
+  phone: {
+    type: "string",
+    description:
+      "The person's phone: 7-15 digits, an optional leading + or 00, spaces/dashes/dots/brackets allowed. A national " +
+      "leading 0 is NOT rewritten to a country code, so try the number both ways if unsure.",
+  },
+  approvalId: {
+    type: "string",
+    description:
+      "Omit on the first call (it files a WS4 approval and returns 202 with the approvalId). After a DIFFERENT " +
+      "company admin approves it, call again with the SAME identifiers and this approvalId to run it exactly once.",
+  },
+} as const;
+
+const AGENCY_PRIVACY_CORE_TOOLS: McpToolDef[] = [
+  {
+    name: "agency_privacy.find",
+    description:
+      "Find every agency lead (and its AD-1 submissions and intake tokens) belonging to a person, by email and/or " +
+      "phone. Returns ids, statuses and counts, no contact data. impact:'high', WS4-gated per call: the first call " +
+      "files an approval (202 suspended); the approved re-call returns the matches once (a re-use is 409 " +
+      "`approval_already_used`). Converted leads are listed under `outOfScope`: their client record follows " +
+      "client-record retention.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/privacy/find",
+    write: true,
+    impact: "high",
+    inputSchema: { type: "object", properties: { ...PRIVACY_IDENTIFIER_PROPS }, required: ["tenantId"] },
+  },
+  {
+    name: "agency_privacy.export",
+    description:
+      "Export a person's agency-intake data (lead contact fields, attribution, consent snapshot, AD-1 answers, " +
+      "intake-token history) by email and/or phone. impact:'high', WS4-gated per call like agency_privacy.find; the " +
+      "response IS personal data and is never stored, so a re-use of the approval is refused.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/privacy/export",
+    write: true,
+    impact: "high",
+    inputSchema: { type: "object", properties: { ...PRIVACY_IDENTIFIER_PROPS }, required: ["tenantId"] },
+  },
+  {
+    name: "agency_privacy.erase",
+    description:
+      "ERASE a person's agency-intake data by email and/or phone: scrubs the lead's contact fields, attribution and " +
+      "decline reason and the AD-1 person answers, revokes unused intake tokens, and adds the contact (hashed) to the " +
+      "suppression list so the web intake never re-creates the lead and nothing is uploaded to an ad platform. Rows " +
+      "are kept (status, stage, client link). A converted lead's client record is NOT touched (`outOfScope`). " +
+      "impact:'high', irreversible, WS4-gated per call; the requester cannot approve their own request. Calling again " +
+      "with a used approval returns the stored counts (`replayed: true`).",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/privacy/erase",
+    write: true,
+    impact: "high",
+    inputSchema: { type: "object", properties: { ...PRIVACY_IDENTIFIER_PROPS }, required: ["tenantId"] },
+  },
+];
+
+/** M5-G5: the three `agency_privacy.*` tools; exported so a suite can restore exactly this area. */
+export function registerAgencyPrivacyCoreTools(): void {
+  registerCoreTools(AGENCY_PRIVACY_CORE_TOOLS);
 }
 
 /** M5-P1-c: the four `agency_pipeline.*` tools; exported so a suite can restore exactly this area. */

@@ -18,8 +18,8 @@ the estate-wide spine, not a replacement.
 ## Totals
 
 - **172** capabilities across **16** owners
-- **89** writes · 83 reads
-- Writes by impact: **high 19** · medium 29 · low 41
+- **90** writes · 82 reads
+- Writes by impact: **high 21** · medium 28 · low 41
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -39,7 +39,7 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 11 |
+| agency | `agency` | 12 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 3 |
 | clients | `clients` | 12 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 18 |
 | social | `social` | 13 |
-| webdev | `webdev` | 18 |
+| webdev | `webdev` | 17 |
 
 ## Capabilities
 
@@ -78,6 +78,9 @@ unfalsifiable after.
 | core | `agency_pipeline.reference` | `GET` | `/api/:tenantId/agency/pipeline/reference` | read | — |
 | core | `agency_pipeline.setDealValue` | `POST` | `/api/:tenantId/agency/leads/:leadId/deal` | write | `low` |
 | core | `agency_pipeline.stageHistory` | `GET` | `/api/:tenantId/agency/leads/:leadId/stage-history` | read | — |
+| core | `agency_privacy.erase` | `POST` | `/api/:tenantId/agency/privacy/erase` | write | `high` |
+| core | `agency_privacy.export` | `POST` | `/api/:tenantId/agency/privacy/export` | write | `high` |
+| core | `agency_privacy.find` | `POST` | `/api/:tenantId/agency/privacy/find` | write | `high` |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
 | core | `iam.listAttachableRoles` | `GET` | `/api/:tenantId/positions/attachable-roles` | read | — |
@@ -208,9 +211,6 @@ unfalsifiable after.
 | webdev | `webdesk.content.unpublish` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId/unpublish` | write | `medium` |
 | webdev | `webdesk.content.update` | `PATCH` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/items/:itemId` | write | `low` |
 | webdev | `webdesk.deploy.staging` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/deploy/staging` | write | `medium` |
-| webdev | `webdesk.editorial.grantRole` | `POST` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | write | `high` |
-| webdev | `webdesk.editorial.listGrants` | `GET` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants` | read | — |
-| webdev | `webdesk.editorial.revokeRole` | `DELETE` | `/api/:tenantId/modules/webdev/content/sites/:tenantSlug/:siteId/editorial/grants/:userId/:role` | write | `medium` |
 | webdev | `webdesk.key.mint` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/keys` | write | `high` |
 | webdev | `webdesk.key.revoke` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/revoke` | write | `high` |
 | webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |

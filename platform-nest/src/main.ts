@@ -123,6 +123,8 @@ import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
 import { startStaleReaperLoop } from "./modules/it/discovery.service";
 import { startInboxRetentionPurgeLoop } from "./modules/social/inbox-retention-job";
+// M5-G5: the agency-lead retention purge (addendum section 5). See the call site.
+import { leadRetentionConfig, startLeadRetentionPurgeLoop } from "./core/agency-lead-retention";
 // SMM-21 — the nightly metrics sweep. Registered here rather than by the authoring seat because
 // three tickets were in flight over this file at once; the seat handed up the line instead of
 // editing it, which is what kept the collision from happening.
@@ -705,6 +707,19 @@ async function bootstrap(): Promise<void> {
   // impose (addendum §A4e), which is checked at their Standard Tier review. Off by default because
   // no LinkedIn client is connected yet (OQ-1/OQ-3 still gate that) — turning this on is a
   // deploy-time decision paired with turning LinkedIn on for real.
+  // M5-G5: the agency-lead retention purge. A plain Postgres sweep (no Redis), dark by default like the
+  // sweeps above (AGENCY_LEAD_RETENTION_PURGE_ENABLED=1). It HARD-DELETES unconverted leads, their AD-1
+  // submissions, intake tokens and stage history N months (default 24) after the lead's last status change,
+  // so turning it on goes with the addendum's sign-off (G2). Its env is read through its own parser, where
+  // an empty value can never become a zero retention.
+  {
+    const leadRetention = leadRetentionConfig();
+    if (leadRetention.enabled) {
+      startLeadRetentionPurgeLoop(leadRetention);
+      // eslint-disable-next-line no-console
+      console.log(`agency lead retention purge on: ${leadRetention.months} months, every ${leadRetention.intervalMs}ms`);
+    }
+  }
   if (config.social.inboxRetention.purgeEnabled) {
     startInboxRetentionPurgeLoop(config.social.inboxRetention.purgeIntervalMs);
     // eslint-disable-next-line no-console

@@ -48,6 +48,11 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "agency_pipeline.stageHistory",
       "agency_pipeline.moveStage",
       "agency_pipeline.setDealValue",
+      // M5-G5: data-subject requests over the agency intake data. All three HIGH and route-WS4-gated; barred
+      // from D14 auto-execution (approval-executables.ts registerAgencyPrivacyBars).
+      "agency_privacy.find",
+      "agency_privacy.export",
+      "agency_privacy.erase",
     ]);
   });
 
