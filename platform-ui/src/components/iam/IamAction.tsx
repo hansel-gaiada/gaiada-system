@@ -2,6 +2,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
+import { useOutcomePost } from "@/components/OutcomeScope";
 
 // P2-10 / P2-11 / P2-12-FE — one control for every IAM write, because they all share the same three
 // outcomes: it worked, it was refused, or it was refused WITH A NEXT STEP.
@@ -56,6 +57,10 @@ export function IamAction({
   label, title, fields, hidden, action, variant = "ghost", onNextStep, immediate, confirm,
 }: Props) {
   const router = useRouter();
+  // Inside an OutcomeScope a success is posted to the scope: the write revalidates, and the refresh
+  // can remove the row/card holding this control (terminate, removing a seat's last holder, retiring a
+  // position), which would take a locally held message with it. Refusals stay local, next to the control.
+  const post = useOutcomePost();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -64,8 +69,9 @@ export function IamAction({
     for (const [k, v] of Object.entries(hidden ?? {})) formData.set(k, v);
     startTransition(async () => {
       const res = await action(formData);
-      setResult(res);
+      setResult(res.ok && post ? null : res);
       if (res.ok) {
+        post?.(res.message);
         setOpen(false);
         // Refresh AFTER recording the result, so the success message survives the re-render. The
         // message often carries the only copy of a detail the operator needs (how many grants moved).

@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { IamAction } from "@/components/iam/IamAction";
 import { PositionRow } from "@/components/iam/PositionRow";
+import { OutcomeScope } from "@/components/OutcomeScope";
 import "@/components/iam/iam.css";
 
 // P2-12-FE — the positions admin. Design §2.2/§2.3 (the seat + its role-set template), §3.3 (orphans),
@@ -126,6 +127,7 @@ export default async function PositionsPage() {
         </div>
       ) : null}
 
+      <OutcomeScope>
       <Card
         title="Seats"
         headerRight={
@@ -219,6 +221,7 @@ export default async function PositionsPage() {
           />
         )}
       </Card>
+      </OutcomeScope>
 
       <p style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)", marginTop: 14 }}>
         Who holds what, and the grants behind it, is on the{" "}

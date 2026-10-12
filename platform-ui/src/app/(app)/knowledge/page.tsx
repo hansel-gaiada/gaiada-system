@@ -9,6 +9,7 @@ import { Field } from "@/components/forms/Field";
 import { StatusCard } from "@/components/systems/StatusCard";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReviewButtons } from "@/components/systems/ReviewButtons";
+import { OutcomeScope } from "@/components/OutcomeScope";
 import { reviewSource } from "./actions";
 
 // Knowledge is tenant-scoped — the knowledge/memory platform (D9) keeps
@@ -55,6 +56,8 @@ export default async function KnowledgePage() {
         </Card>
       </div>
 
+      {/* The scope sits ABOVE the conditional: approving the last quarantined source removes the card. */}
+      <OutcomeScope>
       {quarantined.length > 0 && (
         <div style={{ marginTop: 20 }}>
           <Card title="Quarantine">
@@ -73,6 +76,7 @@ export default async function KnowledgePage() {
           </Card>
         </div>
       )}
+      </OutcomeScope>
 
       <div style={{ marginTop: 20 }}>
         <Card title="Search test console">

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { SiteRepoCard } from "./SiteRepoCard";
 import type { ProvisionedSite } from "@/lib/webdevProvisionedSites";
@@ -42,5 +42,19 @@ describe("SiteRepoCard", () => {
   it("a failed row shows its reason as text", () => {
     renderCard([site({ status: "failed", failureReason: "no template configured for kind wp <b>x</b>" })]);
     expect(screen.getByText(/no template configured for kind wp <b>x<\/b>/)).toBeInTheDocument();
+  });
+
+  // Provisioning revalidates the page; the refreshed read has an active site, so the form (and any
+  // message it held) unmounts. The rerender stands in for that refresh.
+  it("still says 'Started' after the refresh replaces the provision form with the new site", async () => {
+    const created = site({ status: "pending" });
+    const provision = vi.fn(async () => ({ ok: true as const, site: created }));
+    const props = { runId: "run-1", mayProvision: true, actions: { ...actions, provision } };
+    const { rerender } = render(<SiteRepoCard {...props} list={{ kind: "ok", sites: [] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Provision" }));
+    await screen.findByText(/^Started/);
+    rerender(<SiteRepoCard {...props} list={{ kind: "ok", sites: [created] }} />);
+    expect(screen.queryByRole("button", { name: "Provision" })).toBeNull();
+    expect(screen.getByText(/^Started — /)).toHaveAttribute("role", "status");
   });
 });

@@ -557,12 +557,16 @@ export function WriteOffBillForm({ openBills }: { openBills: ApOpenBill[] }) {
   const [writeOffDate, setWriteOffDate] = useState(today());
   const [reasonCode, setReasonCode] = useState("vendor_dissolved");
   const [reasonText, setReasonText] = useState("");
+  // Kept here because a full write-off drops the bill from `openBills` once the refresh lands
+  // (Next 16.3 applies it right after the action), unmounting ConfirmAction and its own "done" line.
+  const [writtenOff, setWrittenOff] = useState<string | null>(null);
 
   const bill = openBills.find((b) => b.id === billId);
 
   if (openBills.length === 0) {
     return (
       <Card title="Write off a bill">
+        {writtenOff ? <p role="status" className="fin-muted">{writtenOff} written off.</p> : null}
         <p className="fin-muted">No open bill to write off.</p>
       </Card>
     );
@@ -632,16 +636,20 @@ export function WriteOffBillForm({ openBills }: { openBills: ApOpenBill[] }) {
             + "bill number is the cheapest guard against writing off the wrong one."
           }
           actionLabel="Write off this bill"
-          run={({ confirm }) =>
-            writeOffApBill(bill.id, {
+          run={async ({ confirm }) => {
+            const r = await writeOffApBill(bill.id, {
               amount: Number(amount || bill.outstanding),
               writeOffDate,
               reasonCode,
               reason: reasonText.trim(),
               confirm,
-            })
-          }
+            });
+            if (r.ok) setWrittenOff(bill.billNo);
+            return r;
+          }}
         />
+      ) : writtenOff ? (
+        <p role="status" className="fin-muted">{writtenOff} written off.</p>
       ) : null}
     </Card>
   );

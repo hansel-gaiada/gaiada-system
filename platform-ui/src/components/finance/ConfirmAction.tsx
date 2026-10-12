@@ -48,8 +48,18 @@ export function ConfirmAction({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
+  // `done` first: the action revalidates, and since Next 16.3 the refreshed page (already signed off /
+  // closed, so `disabledNote` is now set) arrives with the result — the note must not replace the
+  // confirmation the reader just earned.
+  if (done) {
+    return (
+      <>
+        <p role="status" className="fin-muted">{done}</p>
+        {disabledNote ? <p className="fin-muted">{disabledNote}</p> : null}
+      </>
+    );
+  }
   if (disabledNote) return <p className="fin-muted">{disabledNote}</p>;
-  if (done) return <p className="fin-muted">{done}</p>;
 
   // Armed only on an EXACT match, matching the server's own comparison. A looser check here would
   // let the button enable and then be refused by the API, which reads as a broken button.

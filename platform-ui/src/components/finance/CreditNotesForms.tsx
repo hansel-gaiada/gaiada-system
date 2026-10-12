@@ -324,12 +324,16 @@ export function WriteOffInvoiceForm({ openInvoices }: { openInvoices: ArOpenInvo
   const [writeOffDate, setWriteOffDate] = useState(today());
   const [reasonCode, setReasonCode] = useState("uncollectible");
   const [reasonText, setReasonText] = useState("");
+  // Kept here because a full write-off drops the invoice from `openInvoices` once the refresh lands
+  // (Next 16.3 applies it right after the action), unmounting ConfirmAction and its own "done" line.
+  const [writtenOff, setWrittenOff] = useState<string | null>(null);
 
   const invoice = openInvoices.find((i) => i.id === invoiceId);
 
   if (openInvoices.length === 0) {
     return (
       <Card title="Write off an invoice">
+        {writtenOff ? <p role="status" className="fin-muted">{writtenOff} written off.</p> : null}
         <p className="fin-muted">No open invoice to write off.</p>
       </Card>
     );
@@ -399,16 +403,20 @@ export function WriteOffInvoiceForm({ openInvoices }: { openInvoices: ArOpenInvo
             + "guard against writing off the wrong one."
           }
           actionLabel="Write off this invoice"
-          run={({ confirm }) =>
-            writeOffArInvoice(invoice.id, {
+          run={async ({ confirm }) => {
+            const r = await writeOffArInvoice(invoice.id, {
               amount: Number(amount || invoice.outstanding),
               writeOffDate,
               reasonCode,
               reason: reasonText.trim(),
               confirm,
-            })
-          }
+            });
+            if (r.ok) setWrittenOff(invoice.invoiceNo);
+            return r;
+          }}
         />
+      ) : writtenOff ? (
+        <p role="status" className="fin-muted">{writtenOff} written off.</p>
       ) : null}
     </Card>
   );
