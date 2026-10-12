@@ -62,7 +62,7 @@ describe("buildSchemaDraftPrompt — vocabulary 1.1.0", () => {
 // WSK-49a (vocabulary 1.2.0): `ui.clientEditable` is taught, with one line on what it means.
 describe("buildSchemaDraftPrompt — vocabulary 1.2.0 (ui.clientEditable)", () => {
   it("states the vendored vocabulary version it teaches", () => {
-    expect(VOCABULARY_VERSION).toBe("1.3.0"); // M5-W3c (the ui.clientEditable teaching below is from 1.2.0)
+    expect(VOCABULARY_VERSION).toBe("1.4.0"); // M5-W8b (the ui.clientEditable teaching below is from 1.2.0)
     expect(prompt).toContain(`v${VOCABULARY_VERSION}`);
   });
 

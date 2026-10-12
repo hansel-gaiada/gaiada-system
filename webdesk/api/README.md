@@ -2586,3 +2586,19 @@ Not settings, on purpose: a "minimum sources" count and an "AEO warn level" do n
 paragraph quotes a percentage and the body cites nothing; the AEO score is shown, never thresholded), so there is no constant to expose.
 Tests: `test/content-lint-site-settings.spec.ts` (no database), `webdesk/delivery/test/w3c-lint-content.test.mjs` (vocabulary suite), and
 the DB-backed extension in `test/content-reads.spec.ts` ("per-site lint.content settings", needs the Linux gate).
+
+## Public page path per collection (M5-W8b, PROTOTYPED) — composition `ui.routePattern`, vocabulary 1.4.0
+
+A collection's composition may declare where its items are served on the public site: `ui.routePattern`, for example
+`/blog/{slug}/` or `/{locale}/insights/{slug}/`. The writers dashboard (M5-W8) maps an item to its page with it to look up analytics and
+Search Console figures. **Vocabulary 1.4.0 is a MINOR** (an optional key in the closed `ui` key set; the classifier computes it from
+`webdesk/delivery/test/fixtures/vocabulary-1.3.0.snapshot.json`; a value edit inside a tenant contract is PATCH). No migration, no stored value changes.
+
+- **Grammar** (refused at `schema.apply`, never ignored): starts with `/`; at most 200 characters; every segment is a literal of
+  `[a-z0-9-]`, or exactly `{slug}` (required, once) or `{locale}` (optional, once); a trailing slash is allowed; no query, fragment, `..`,
+  empty segment, uppercase, dot or in-segment token.
+- **`pagePathFor(routePattern, { slug, locale, defaultLocale })`** (exported from the vocabulary, and from the copy vendored into
+  platform-nest) fills it in and returns the path, or `null` for an invalid pattern or a slug/locale that cannot be a URL segment. For the
+  tenant's DEFAULT language the `/{locale}` segment is left out (the site serves its default language at the root); a pattern without
+  `{locale}` gives every language the same address.
+- Tests: `webdesk/delivery/test/w8b-route-pattern.test.mjs` (`cd webdesk/api && node --import tsx ../delivery/test/w8b-route-pattern.test.mjs`).

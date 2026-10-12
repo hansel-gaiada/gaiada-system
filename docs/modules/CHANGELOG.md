@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.22.0` - M5-W8b: a collection may declare its public route pattern (vocabulary 1.4.0) (2026-10-12) - DEV-VERIFIED
+
+- **The key:** an optional composition `ui.routePattern`, for example `/blog/{slug}/` or `/{locale}/insights/{slug}/`.
+- **The grammar:**
+  - a leading `/`, at most 200 characters, and a trailing slash allowed;
+  - each segment is a literal `[a-z0-9-]+`, exactly `{slug}` (required, once) or exactly `{locale}` (optional, at most once);
+  - no query, fragment, `..`, empty segment, uppercase or embedded token.
+- Anything else is refused at `schema.apply`.
+- `pagePathFor(pattern, {slug, locale, defaultLocale})` is exported from the vocabulary and its platform-nest copy. The default locale drops its `/{locale}` segment.
+- **Vocabulary 1.4.0 (MINOR):** the classifier rates 1.3.0 → 1.4.0 as MINOR with exactly that reason, and removing the key is MAJOR. Re-vendored into the api, blocks and platform-nest. The schema-draft prompt now mentions the key.
+- **Why:** the M5-W8 writer dashboard maps an item to its page path through this key. Until gaiada.com's collections set it (a schema apply), each article says "no route pattern" instead of showing numbers.
+- **Verified** on GitHub Actions 38250218990: the new `w8b-route-pattern` suite 48/48 plus every vocabulary suite.
+
 ### platform-nest `0.92.0` - M5-W5: the writers' room calendar read (2026-10-12) - DEV-VERIFIED
 
 - **The read:** `GET …/content/sites/:tenantSlug/:siteId/editorial/calendar?from&to&collection&locale&authorSub`. It joins four sources:
