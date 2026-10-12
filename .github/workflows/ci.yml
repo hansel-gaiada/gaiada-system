@@ -921,6 +921,25 @@ jobs:
           # src/lib/session.ts throws when this is unset, so the Playwright webServer never
           # booted and every test failed as a waitForURL timeout. CI-only dummy value.
           SESSION_SECRET: ci-smoke-secret-not-a-real-key
+      # WebDesk Playwright suite (webdesk-content, webdesk-editorial, portal-website) on Linux, against the
+      # SAME build as the smoke step (`next start` on `.next`, WD_E2E_BUILT=1) and the in-repo stub BFF
+      # (e2e/webdesk-stub, no real services). DEMO_MODE is set by the config itself (0): this run uses the real
+      # platformFetch, session cookie and server components. Before this step the suite only ever ran on
+      # Windows `next dev`. Reuses the Chromium installed above.
+      - name: WebDesk e2e (stub BFF) against the built app
+        if: ${{ !cancelled() }}
+        run: npx playwright test -c playwright.webdesk.config.ts
+        env:
+          WD_E2E_BUILT: "1"
+      - name: Upload WebDesk e2e report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-ui-webdesk-e2e-report
+          path: |
+            platform-ui/playwright-report
+            platform-ui/test-results
+          retention-days: 7
 
   # docs/MAP.md is GENERATED from the filesystem (scripts/gen-map.mjs) — the structural index:
   # components, compose services, module registry, migration head, the @Controller surface, UI

@@ -6,6 +6,9 @@ import { defineConfig, devices } from "@playwright/test";
 // `E2E_PORT` lets a session avoid clashing with a sibling agent's own dev server on the default
 // port — the shared-checkout discipline several concurrent-session tickets in this program require.
 const PORT = Number(process.env.E2E_PORT) || 3005;
+// The WebDesk specs only pass against the stubbed BFF (playwright.webdesk.config.ts); this config has no
+// stub, so no project here may ever pick them up.
+const WEBDESK_STUB_SPECS = /(webdesk-content|webdesk-editorial|portal-website)\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -26,7 +29,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/, /company-context\.spec\.ts/, WEBDESK_STUB_SPECS],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as

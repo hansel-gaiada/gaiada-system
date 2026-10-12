@@ -16,7 +16,11 @@ import { defineConfig, devices } from "@playwright/test";
 // a client component passes tsc and vitest and 500s the page at runtime.
 const APP_PORT = Number(process.env.WD_E2E_APP_PORT) || 3006;
 const STUB_PORT = Number(process.env.WD_STUB_PORT) || 3991;
-const DIST = process.env.NEXT_DIST_DIR || ".next-e2e-wd";
+// `WD_E2E_BUILT=1` (CI): serve the BUILT app with `next start` from the build the platform-ui job already
+// produced (default `.next`; an explicit NEXT_DIST_DIR still wins). Unset = `next dev` on its own
+// `.next-e2e-wd`, the local default, so a developer's running server is never shared.
+const BUILT = process.env.WD_E2E_BUILT === "1";
+const DIST = process.env.NEXT_DIST_DIR || (BUILT ? ".next" : ".next-e2e-wd");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -27,8 +31,11 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: 0,
-  reporter: process.env.CI ? [["line"]] : [["list"]],
+  // One retry in CI only (as the main config): the built-app run showed one order-dependent test (the loading
+  // skeleton) and one load-sensitive one (key.mint) that pass on a clean rerun. Local stays 0 so a flake is seen.
+  retries: process.env.CI ? 1 : 0,
+  // CI also writes the HTML report (uploaded on failure by the platform-ui job) next to the line output.
+  reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : [["list"]],
   expect: { timeout: 15_000 },
   timeout: 150_000,
   use: {
@@ -46,7 +53,7 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: process.env.WD_E2E_START || `npx next dev -p ${APP_PORT}`,
+      command: process.env.WD_E2E_START || (BUILT ? `npx next start -p ${APP_PORT}` : `npx next dev -p ${APP_PORT}`),
       url: `http://localhost:${APP_PORT}/login`,
       env: {
         // NOT demo mode — see the header. The stub answers the shell's reads from the app's own fixtures.
