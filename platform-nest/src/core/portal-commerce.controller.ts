@@ -42,6 +42,7 @@ import {
   invoiceInPortalScope, invoicePaymentClientVisible, projectInPortalScope,
 } from "./portal-visibility";
 import type { PoolClient } from "pg";
+import { claimHeadroom, hasCurrencyPrecision } from "../modules/invoice/issue";
 
 const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
 /** Proof receipts are photos of a transfer slip or a small PDF. 10 MB is generous for both and well
@@ -50,9 +51,8 @@ const PAYMENT_METHODS = new Set(["bank_transfer", "card", "cash", "other"]);
  *  The ONE definition: `core/upload-body-limits.ts` derives this route's Fastify `bodyLimit` from it
  *  (PV4-03b) — change it here and the request-body limit follows. */
 export const MAX_PROOF_BYTES = 10 * 1024 * 1024;
-/** Overpayment tolerance: rounding and bank fees legitimately push a transfer a hair over. Anything
- *  beyond this is a typo, not a payment. */
-const OVERPAY_TOLERANCE = 1.01;
+// (PV5-04 removed the 1% overpayment tolerance: a claim is bounded by the LEDGER's outstanding amount, because an AR
+// allocation can never exceed what is owed. See recordPayment.)
 
 type DownloadableKind = "deliverable" | "contract" | "invoice_payment" | "project" | "conversation";
 
@@ -68,6 +68,32 @@ const DOWNLOADABLE: Record<string, DownloadableKind> = {
   // message -> thread -> conversationThreadInPortalScope in ownsEntity below.
   conversation: "conversation",
 };
+
+/**
+ * PV5-04 — the invoice OF RECORD as the client sees it (portal list and detail). Needs `i` (invoices) and `ar` (the
+ * LEFT-joined finance_ar_invoices on i.ar_invoice_id, read under the finance module scope).
+ *  - `invoiceNo`, `issueDate`, `dueDate`, `subtotal`, `taxTotal`, `taxCode`: NULL on a legacy (pre-issue) invoice.
+ *  - `issuer`: the snapshot frozen at issue (legal name, address, NPWP, the bank block clients pay into).
+ *  - `outstanding`: the ledger's (AR total - paid - credited - written off) for an issued invoice; total - confirmed
+ *    claims for a legacy one. Never negative.
+ *  - `payable`: the invoice accepts a payment claim now (issued, `sent`, something still outstanding after the claims
+ *    already being verified). The portal hides the "Tell us you've paid" form when false.
+ *  - `overdue` (decision 10): past its DUE date and not fully paid; a legacy invoice has no due date, so its period end
+ *    stands in.
+ */
+const PORTAL_INVOICE_RECORD_COLUMNS = `
+  i.invoice_no AS "invoiceNo", to_char(i.issue_date, 'YYYY-MM-DD') AS "issueDate",
+  to_char(i.due_date, 'YYYY-MM-DD') AS "dueDate", i.subtotal::float8 AS subtotal, i.tax_total::float8 AS "taxTotal",
+  i.tax_code AS "taxCode", i.issuer,
+  GREATEST(CASE WHEN ar.id IS NOT NULL THEN ar.total - ar.amount_paid - ar.amount_credited - ar.amount_written_off
+                ELSE i.total - COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
+                                          WHERE pp.invoice_id = i.id AND pp.status = 'confirmed' AND pp.deleted_at IS NULL), 0)
+           END, 0)::float8 AS outstanding,
+  (ar.id IS NOT NULL AND i.status = 'sent'
+     AND ar.total - ar.amount_paid - ar.amount_credited - ar.amount_written_off
+         - COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
+                      WHERE pp.invoice_id = i.id AND pp.status = 'pending' AND pp.deleted_at IS NULL), 0) > 0) AS payable,
+  (i.status = 'sent' AND COALESCE(i.due_date, i.period_end) < current_date) AS overdue`;
 
 function dispositionHeader(filename: string): string {
   const ascii = filename.replace(/[\r\n"\\]/g, "_").replace(/[^\x20-\x7e]/g, "_");
@@ -91,18 +117,21 @@ export class PortalCommerceController {
   @Get(":tenantId/portal/invoices")
   async listInvoices(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
+    // PV5-04: the finance scope is declared because an issued invoice's `outstanding` is the LEDGER's (the AR invoice,
+    // module walled). Without it the join reads zero AR rows and every issued invoice would show nothing outstanding.
     return withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       const rows = await c.query(
         `SELECT i.id, i.status, i.currency, i.total::float8 AS total,
                 to_char(i.period_start, 'YYYY-MM-DD') AS "periodStart",
                 to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
-                i.created_at AS "issuedAt", cl.name AS "clientName",
+                COALESCE(i.issued_at, i.created_at) AS "issuedAt", cl.name AS "clientName",
                 COALESCE(pay.confirmed, 0)::float8 AS paid,
                 COALESCE(pay.pending, 0)::float8 AS "pendingConfirmation",
-                (i.status = 'sent' AND i.period_end < current_date) AS overdue
+                ${PORTAL_INVOICE_RECORD_COLUMNS}
            FROM invoices i
            LEFT JOIN clients cl ON cl.id = i.client_id
+           LEFT JOIN finance_ar_invoices ar ON ar.id = i.ar_invoice_id
            LEFT JOIN LATERAL (
              SELECT COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'confirmed'), 0) AS confirmed,
                     COALESCE(sum(pp.amount) FILTER (WHERE pp.status = 'pending'), 0) AS pending
@@ -116,7 +145,7 @@ export class PortalCommerceController {
         ...r,
         balance: Math.round(((r.total as number) - (r.paid as number)) * 100) / 100,
       }));
-    });
+    }, { modules: ["finance"] });
   }
 
   /** One invoice with its frozen line items and its payment history. */
@@ -142,13 +171,29 @@ export class PortalCommerceController {
       const paid = payments.rows
         .filter((p: Record<string, unknown>) => p.status === "confirmed")
         .reduce((s: number, p: Record<string, unknown>) => s + (p.amount as number), 0);
+      // PV5-04: the tax lines of an issued invoice, from the ledger lines it was posted with (code, statutory rate,
+      // base, amount). Empty for an untaxed or a legacy invoice.
+      const taxLines = inv.arInvoiceId
+        ? (await c.query(
+            `SELECT l.tax_code AS code, l.tax_rate::float8 AS rate, sum(l.line_subtotal)::float8 AS base,
+                    sum(l.tax_amount)::float8 AS amount
+               FROM finance_ar_invoice_lines l
+              WHERE l.invoice_id = $1 AND l.tax_code IS NOT NULL
+              GROUP BY l.tax_code, l.tax_rate ORDER BY l.tax_code`,
+            [inv.arInvoiceId],
+          )).rows
+        : [];
+      // The ledger link is internal: the client gets the invoice of record, not our AR row id.
+      const visible: Record<string, unknown> = { ...inv };
+      delete visible.arInvoiceId;
       return {
-        ...inv,
+        ...visible,
+        taxLines,
         payments: payments.rows,
         paid: Math.round(paid * 100) / 100,
         balance: Math.round((inv.total - paid) * 100) / 100,
       };
-    });
+    }, { modules: ["finance"] });
   }
 
   /** Record a payment against one of the caller's invoices.
@@ -169,34 +214,48 @@ export class PortalCommerceController {
       proof?: { filename?: string; contentType?: string; content?: string };
     },
   ) {
+    // Authorization before validation (PV5 rule): a caller who may not pay gets 403 whatever they sent.
+    await authorize(req.principal, { kind: "portal", tenantId }, "pay");
     const b = body ?? {};
     const amount = Number(b.amount);
     if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be a positive number");
+    // The decimal text of the JSON number travels to Postgres as numeric; no float arithmetic on it below.
+    const amountText = String(b.amount).trim();
+    if (!/^\d+(\.\d+)?$/.test(amountText)) throw new BadRequestException("amount must be a plain decimal number");
     if (!b.paidOn || !/^\d{4}-\d{2}-\d{2}$/.test(b.paidOn)) throw new BadRequestException("paidOn must be YYYY-MM-DD");
     // A transfer dated in the future has not happened. Compared in UTC against the DB's own clock
     // below rather than here, where the server's local date could differ from the client's by a day.
     const method = b.method ?? "bank_transfer";
     if (!PAYMENT_METHODS.has(method)) throw new BadRequestException("method must be bank_transfer|card|cash|other");
-    await authorize(req.principal, { kind: "portal", tenantId }, "pay");
 
     const id = newId();
     const result = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       const inv = await this.ownedInvoice(c, scope, invoiceId);
       if (inv.status === "void") throw new BadRequestException("this invoice has been cancelled");
+      // PV5-04: only an ISSUED invoice accepts a claim. A legacy invoice (sent before invoices were issued through the
+      // ledger) has no ledger record to settle, so a claim on it could never be confirmed (409, nothing written).
+      if (!inv.arInvoiceId) {
+        throw new ConflictException({
+          message: "this invoice cannot take a payment here; please contact us about it",
+          reason: "not_issued",
+        });
+      }
       const future = await c.query<{ future: boolean }>(`SELECT $1::date > current_date AS future`, [b.paidOn]);
       if (future.rows[0]?.future) throw new BadRequestException("paidOn cannot be in the future");
 
-      // Rule 4: bound the claim by what is actually outstanding on the invoice.
-      const prior = await c.query<{ sum: string }>(
-        `SELECT COALESCE(sum(amount), 0) AS sum FROM invoice_payments
-          WHERE invoice_id = $1 AND status <> 'rejected' AND deleted_at IS NULL`,
-        [invoiceId],
-      );
-      const already = Number(prior.rows[0]?.sum ?? 0);
-      if (already + amount > inv.total * OVERPAY_TOLERANCE) {
+      // Rule 4: bound the claim by what is actually outstanding — the LEDGER's outstanding on the AR invoice (PV5-04),
+      // less the claims still pending, compared in numeric. No tolerance: an allocation can never exceed what is owed,
+      // so a claim beyond it could never be confirmed.
+      const room = await claimHeadroom(c, invoiceId);
+      if (!room) throw new ConflictException({ message: "this invoice cannot take a payment here; please contact us about it", reason: "not_issued" });
+      if (!(await hasCurrencyPrecision(c, amountText, room.minorUnit))) {
+        throw new BadRequestException(`amount has more decimals than ${inv.currency} allows`);
+      }
+      const fits = await c.query<{ fits: boolean }>(`SELECT $1::numeric <= $2::numeric AS fits`, [amountText, room.headroom]);
+      if (!fits.rows[0]?.fits) {
         throw new BadRequestException(
-          `amount exceeds the outstanding balance (${Math.max(0, Math.round((inv.total - already) * 100) / 100)} ${inv.currency})`,
+          `amount exceeds the outstanding balance (${room.headroom} ${inv.currency}, after claims still being verified)`,
         );
       }
 
@@ -212,7 +271,7 @@ export class PortalCommerceController {
         [
           id, tenantId, invoiceId,
           // Rule 1: from the invoice row, not the body.
-          inv.clientId, amount, inv.currency, b.paidOn, method,
+          inv.clientId, amountText, inv.currency, b.paidOn, method,
           b.reference ? scrubText(b.reference).text.slice(0, 200) : null,
           proofFileId,
           b.note ? scrubText(b.note).text.slice(0, 1000) : null,
@@ -223,7 +282,7 @@ export class PortalCommerceController {
         invoiceId, clientId: inv.clientId, amount, currency: inv.currency, via: "portal",
       });
       return { inv, proofFileId };
-    });
+    }, { modules: ["finance"] });
 
     await writeActivity(tenantId, req.principal.userId, "recorded", "invoice_payment", id, {
       invoiceId, amount, via: "portal",
@@ -501,13 +560,21 @@ export class PortalCommerceController {
   // Ownership helpers — every one of them applies the scope predicate; none takes an id on trust
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
+  /** `c` must declare the finance module scope (the AR join; see listInvoices). */
   private async ownedInvoice(c: PoolClient, scope: PortalScope, invoiceId: string) {
-    const r = await c.query<{ id: string; clientId: string; status: string; currency: string; total: number; lines: unknown; periodStart: string | null; periodEnd: string | null; issuedAt: string; clientName: string | null }>(
+    const r = await c.query<{
+      id: string; clientId: string; status: string; currency: string; total: number; lines: unknown;
+      periodStart: string | null; periodEnd: string | null; issuedAt: string; clientName: string | null;
+      payable: boolean; arInvoiceId: string | null;
+    }>(
       `SELECT i.id, i.client_id AS "clientId", i.status, i.currency, i.total::float8 AS total, i.lines,
               to_char(i.period_start, 'YYYY-MM-DD') AS "periodStart",
               to_char(i.period_end, 'YYYY-MM-DD') AS "periodEnd",
-              i.created_at AS "issuedAt", cl.name AS "clientName"
+              COALESCE(i.issued_at, i.created_at) AS "issuedAt", cl.name AS "clientName",
+              i.ar_invoice_id AS "arInvoiceId",
+              ${PORTAL_INVOICE_RECORD_COLUMNS}
          FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
+         LEFT JOIN finance_ar_invoices ar ON ar.id = i.ar_invoice_id
         WHERE i.id = $1 AND ${invoiceInPortalScope("i", { clients: 2 })}`,
       [invoiceId, scope.clientIds],
     );

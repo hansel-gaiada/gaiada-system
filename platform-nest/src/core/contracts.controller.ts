@@ -35,6 +35,7 @@ import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
 import { recordInvoiceRevision, snapshotInvoice } from "../modules/invoice/invoice-revisions";
+import { mapLedgerErrors, postConfirmedPayment } from "../modules/invoice/issue";
 import { check, type Resource } from "../rbac/cerbos";
 import { assemblePrincipal, type Principal } from "../rbac/principal";
 import { contractContentSha256 } from "./content-hash";
@@ -596,7 +597,14 @@ export class ContractsController {
    *  (see the portal's finance query). So this is also the ONLY place `invoices.status` moves to `paid`,
    *  and it does so by comparing the CONFIRMED total against the invoice — never by trusting the
    *  incoming request. A client cannot reach this route at all: `invoice`/`update` is not granted to the
-   *  `client` derived role. */
+   *  `client` derived role.
+   *
+   *  PV5-04 (PV-D7): on an ISSUED invoice, confirming POSTS the money in the same transaction — an AR receipt into the
+   *  billing profile's bank ledger account, allocated to the AR invoice (issue.ts postConfirmedPayment) — and the
+   *  invoice becomes `paid` exactly when the AR invoice does. A refusal from the ledger (closed period, overpayment, no
+   *  receipt account) rolls the confirmation back with it: a payment is confirmed AND booked, or neither. A rejected
+   *  claim posts nothing. A LEGACY invoice (sent/paid before PV-5, `pre_pv5_legacy`) keeps the old derivation, in SQL
+   *  numeric; any other unissued invoice cannot have a payment confirmed (409). */
   @Post(":tenantId/invoice-payments/:paymentId/decide")
   @HttpCode(200)
   async decidePayment(
@@ -616,10 +624,15 @@ export class ContractsController {
       throw new BadRequestException("a reason is required when rejecting a payment");
     }
 
-    const out = await withTenants([tenantId], async (c) => {
-      const cur = await c.query<{ status: string; invoice_id: string; client_id: string | null; amount: string; currency: string; recorded_by: string | null }>(
-        `SELECT status, invoice_id, client_id, amount, currency, recorded_by FROM invoice_payments
-          WHERE id = $1 AND deleted_at IS NULL`,
+    // PV5-04: the finance module scope is declared because an issued invoice's confirmation posts to finance_* tables
+    // (module walled: without it they read and write zero rows and raise nothing).
+    const out = await mapLedgerErrors(withTenants([tenantId], async (c) => {
+      const cur = await c.query<{ status: string; invoice_id: string; client_id: string | null; amount: string; currency: string; recorded_by: string | null; paid_on: string; reference: string | null }>(
+        `SELECT status, invoice_id, client_id, amount::text AS amount, currency, recorded_by,
+                to_char(paid_on, 'YYYY-MM-DD') AS paid_on, reference
+           FROM invoice_payments
+          WHERE id = $1 AND deleted_at IS NULL
+          FOR UPDATE`,
         [paymentId],
       );
       const pay = cur.rows[0];
@@ -644,24 +657,53 @@ export class ContractsController {
         return { decision, invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), currency: pay.currency, invoicePaid: false };
       }
 
+      // PV5-04: which kind of invoice is this? Locked, so a concurrent void or issue cannot interleave.
+      const invRow = await c.query<{ issued: boolean; legacy: boolean; status: string }>(
+        `SELECT (issued_at IS NOT NULL) AS issued, pre_pv5_legacy AS legacy, status
+           FROM invoices WHERE id = $1 FOR UPDATE`,
+        [pay.invoice_id],
+      );
+      const inv = invRow.rows[0];
+      if (!inv) throw new NotFoundException("invoice not found");
+      if (inv.status === "void") {
+        // Money cannot be confirmed against a cancelled invoice: there is nothing left to settle. Reject the claim.
+        throw new ConflictException({ message: "this invoice was voided; reject the payment claim instead", reason: "invoice_void" });
+      }
+      if (!inv.issued && !inv.legacy) {
+        throw new ConflictException({
+          message: "this invoice was never issued, so a payment against it cannot be confirmed; reject the claim, or issue the invoice first",
+          reason: "not_issued",
+        });
+      }
+
       await c.query(
         `UPDATE invoice_payments SET status = 'confirmed', confirmed_by = $2, confirmed_at = now(), updated_at = now()
           WHERE id = $1`,
         [paymentId, req.principal.userId],
       );
-      // Derive the invoice's status from the confirmed ledger. Compared with a small tolerance because
-      // `numeric` sums of client-entered amounts land a rupiah short of the total often enough that
-      // requiring exact equality would leave settled invoices showing as unpaid forever.
-      const totals = await c.query<{ total: string; confirmed: string }>(
-        `SELECT i.total::text AS total,
-                COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
-                           WHERE pp.invoice_id = i.id AND pp.status = 'confirmed' AND pp.deleted_at IS NULL), 0)::text AS confirmed
+
+      if (inv.issued) {
+        if (!req.principal.userId) throw new ForbiddenException("confirming a payment needs a known user");
+        const posted = await postConfirmedPayment(c, tenantId, {
+          paymentId, invoiceId: pay.invoice_id, amount: pay.amount, currency: pay.currency, paidOn: pay.paid_on,
+          reference: pay.reference, actorId: req.principal.userId,
+        });
+        await emitEvent(c, tenantId, "invoice_payment", paymentId, "invoice.payment.confirmed", {
+          invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), arReceiptId: posted.receiptId,
+        });
+        return { decision, invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), currency: pay.currency, invoicePaid: posted.invoicePaid };
+      }
+
+      // LEGACY invoice (pre-PV-5, never issued): the old derivation, kept for these rows only and compared in SQL
+      // numeric. The 1-unit tolerance is the old rule (client-entered amounts landing a rupiah short).
+      const totals = await c.query<{ fully_paid: boolean }>(
+        `SELECT COALESCE((SELECT sum(pp.amount) FROM invoice_payments pp
+                           WHERE pp.invoice_id = i.id AND pp.status = 'confirmed' AND pp.deleted_at IS NULL), 0)
+                  >= i.total - 1 AS fully_paid
            FROM invoices i WHERE i.id = $1`,
         [pay.invoice_id],
       );
-      const total = Number(totals.rows[0]?.total ?? 0);
-      const confirmed = Number(totals.rows[0]?.confirmed ?? 0);
-      const fullyPaid = confirmed >= total - 1;
+      const fullyPaid = totals.rows[0]?.fully_paid === true;
       if (fullyPaid) {
         // IAM-GAP-02: this is the THIRD (and last) place invoices.status ever moves — outside the
         // invoice module entirely. Snapshot before the conditional UPDATE; only record a revision
@@ -682,7 +724,7 @@ export class ContractsController {
         invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount),
       });
       return { decision, invoiceId: pay.invoice_id, clientId: pay.client_id, amount: Number(pay.amount), currency: pay.currency, invoicePaid: fullyPaid };
-    });
+    }, { modules: ["finance"] }));
 
     await writeActivity(tenantId, req.principal.userId, out.decision === "confirm" ? "confirmed" : "rejected",
       "invoice_payment", paymentId, { invoiceId: out.invoiceId });

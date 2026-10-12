@@ -26,12 +26,13 @@ export class HttpErrorFilter implements ExceptionFilter {
     let existing: Record<string, unknown> | undefined;
     let site: Record<string, unknown> | undefined;
     let reason: string | undefined;
+    let blockers: unknown[] | undefined;
     if (typeof res === "string") {
       error = res;
     } else {
       const r = res as {
         message?: string | string[]; field?: string; existing?: unknown; site?: unknown;
-        reason?: string;
+        reason?: string; blockers?: unknown;
       };
       const m = r.message;
       error = Array.isArray(m) ? m.join(", ") : m ?? exception.message;
@@ -44,6 +45,9 @@ export class HttpErrorFilter implements ExceptionFilter {
       // that; forwarding it is the honest fix, and it is what agentic-native criterion 2 (typed
       // refusals, not prose) actually requires.
       if (typeof r.reason === "string") reason = r.reason;
+      // PV5-04: `blockers`, same additive rule. Issuing an invoice refuses with EVERY missing prerequisite at once
+      // (`[{ code, message }]`), so the UI can list them instead of showing the first one and failing again.
+      if (Array.isArray(r.blockers)) blockers = r.blockers;
       if (r.existing && typeof r.existing === "object" && !Array.isArray(r.existing)) {
         existing = r.existing as Record<string, unknown>;
       }
@@ -67,6 +71,7 @@ export class HttpErrorFilter implements ExceptionFilter {
       ...(reason ? { reason } : {}),
       ...(existing ? { existing } : {}),
       ...(site ? { site } : {}),
+      ...(blockers ? { blockers } : {}),
     });
   }
 }

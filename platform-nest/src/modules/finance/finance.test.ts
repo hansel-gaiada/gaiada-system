@@ -59,6 +59,13 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
         [fy, tenant],
       );
       await c.query("SELECT finance_generate_periods($1,'monthly')", [fy]);
+      // PV5-04: tax comes from an effective-dated tax code (finance_tax_compute), never from a typed rate. The
+      // 2025 regime: a statutory 12% on 11/12 of the base. Per company, so it is configuration, not code.
+      await c.query(
+        `INSERT INTO finance_tax_codes (tenant_id, code, name, kind, rate, base_multiplier, effective_from)
+         VALUES ($1,'PPN','PPN 12% on 11/12 base','ppn_output',12,0.9166666667,'2025-01-01')`,
+        [tenant],
+      );
       await c.query(
         `SELECT finance_post_journal($1,'2026-03-05','seed-1','Opening capital',
            '[{"account_code":"1120","side":"debit","amount":250000000},
@@ -348,6 +355,43 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
       // accident — the 11/12 base is the whole point of the Indonesian rule.
       expect(body.taxTotal).toBe(6_600_000);
       expect(body.total).toBe(66_600_000);
+    });
+
+    // PV5-04 (finding 4): the rate alone is not a tax rule. A taxed line names its code; the code's effective-dated
+    // rate decides, and a code with nothing in force on the document date is a named 400, not a silent 0.
+    it("PV5-04: a taxed line with a rate but no tax code is refused (400)", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId, invoiceNo: "INV-NOCODE", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{ description: "x", unitPrice: 1000, revenueAccountCode: "4100", taxRate: 12 }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+      expect((r.json() as { error: string }).error).toMatch(/taxCode/);
+    });
+
+    it("PV5-04: a tax code with no rate in force on the invoice date is refused, naming the date", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId, invoiceNo: "INV-OLDCODE", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{ description: "x", unitPrice: 1000, revenueAccountCode: "4100", taxCode: "PPN-NONE" }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+      expect((r.json() as { error: string }).error).toMatch(/PPN-NONE.*2026-03-05/);
+    });
+
+    it("PV5-04: a taxRate that disagrees with the code's rate is refused", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId, invoiceNo: "INV-WRONGRATE", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{ description: "x", unitPrice: 1000, revenueAccountCode: "4100", taxCode: "PPN", taxRate: 11 }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
     });
 
     it("an unknown revenue account is refused by CODE, not swallowed", async () => {
@@ -901,7 +945,7 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
         method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
         payload: {
           customerId: cust, invoiceNo: "INV-950", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
-          lines: [{ description: "Services", quantity: 1, unitPrice: 1000000, revenueAccountCode: "4100", taxRate: 12 }],
+          lines: [{ description: "Services", quantity: 1, unitPrice: 1000000, revenueAccountCode: "4100", taxCode: "PPN", taxRate: 12 }],
         },
       });
       expect(inv.statusCode).toBe(201);
@@ -949,7 +993,7 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
           customerId: cust, creditNoteNo: "CN-950", creditNoteDate: "2026-03-10",
           reasonCode: "return", reason: "Client returned part of the engagement",
           originalInvoiceId: invoiceId,
-          lines: [{ description: "Returned services", amount: 200000, creditAccountCode: "4300", taxRate: 12 }],
+          lines: [{ description: "Returned services", amount: 200000, creditAccountCode: "4300", taxCode: "PPN", taxRate: 12 }],
         },
       });
       expect(r.statusCode).toBe(201);
@@ -1053,7 +1097,7 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
         payload: {
           vendorId: vend, billNo: "BILL-950", billDate: "2026-03-05", dueDate: "2026-04-04",
           withholdingCode: "PPH23", withholdingRate: 0.02, withholdingAccountCode: "2151",
-          lines: [{ description: "Consulting", quantity: 1, unitPrice: 10000000, expenseAccountCode: "6600", taxRate: 12 }],
+          lines: [{ description: "Consulting", quantity: 1, unitPrice: 10000000, expenseAccountCode: "6600", taxCode: "PPN", taxRate: 12 }],
         },
       });
       expect(bill.statusCode).toBe(201);
@@ -1094,7 +1138,7 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
           reasonCode: "return", reason: "Returned part of the engagement",
           originalBillId: billId, notaReturNo: "NR-950",
           withholdingCode: "PPH23", withholdingRate: 0.02, withholdingAmount: 40000,
-          lines: [{ description: "Returned consulting", amount: 2000000, creditAccountCode: "6600", taxRate: 12 }],
+          lines: [{ description: "Returned consulting", amount: 2000000, creditAccountCode: "6600", taxCode: "PPN", taxRate: 12 }],
         },
       });
       expect(r.statusCode).toBe(201);
@@ -1319,7 +1363,7 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
         method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
         payload: {
           customerId: cust2, invoiceNo: "INV-LATE-950", invoiceDate: "2026-03-28", dueDate: "2026-04-27",
-          lines: [{ description: "Late billing", quantity: 1, unitPrice: 5000000, revenueAccountCode: "4100", taxRate: 12 }],
+          lines: [{ description: "Late billing", quantity: 1, unitPrice: 5000000, revenueAccountCode: "4100", taxCode: "PPN", taxRate: 12 }],
         },
       });
       expect(late.statusCode).toBe(201);

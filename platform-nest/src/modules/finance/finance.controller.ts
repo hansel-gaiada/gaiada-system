@@ -55,6 +55,64 @@ function requireConfirmation(supplied: string | undefined, expected: string, wha
   }
 }
 
+/**
+ * PV5-04 (finding 4, design decision 8): the tax on each line, from the line's TAX CODE through `finance_tax_compute()`
+ * (202608241025: tax = base x base_multiplier x rate, effective-dated), rounded to the document currency's minor unit.
+ * It replaces the `subtotal * (11/12) * rate` arithmetic that sat in four handlers here: that line taxed a 2024 supply
+ * at the 2025 regime, and would tax every invoice wrongly the day the rate changes.
+ *
+ * Rules: a line with no `taxCode` and no positive `taxRate` is untaxed. A positive `taxRate` with no `taxCode` is a
+ * 400 (a typed rate is not a tax rule). A `taxCode` with no rate in force on the document date is a 400 naming the
+ * date. A `taxRate` sent alongside a code must equal the code's statutory rate (it is then informational). The
+ * stored line rate becomes the code's rate.
+ *
+ * A short read-only transaction of its own, through withFinance (finance_tax_codes is module walled).
+ */
+async function applyLineTaxes(
+  tenantId: string,
+  onDate: string,
+  currency: string,
+  items: Array<{ line: { tax: number; taxRate: number | null; taxCode: string | null }; base: number; label: string }>,
+): Promise<void> {
+  for (const x of items) {
+    if (!x.line.taxCode) {
+      if (x.line.taxRate !== null && x.line.taxRate > 0) {
+        throw new BadRequestException(
+          `${x.label}: a taxed line needs a taxCode — tax is computed from the code's effective-dated rate, not from a rate typed here`,
+        );
+      }
+      x.line.tax = 0;
+    }
+  }
+  const taxed = items.filter((x) => x.line.taxCode);
+  if (taxed.length === 0) return;
+  await withFinance(tenantId, async (c) => {
+    for (const x of taxed) {
+      const r = await c.query<{ rate: string; tax: string }>(
+        `SELECT t.rate::text AS rate,
+                round(finance_tax_compute($1, $2, $3::numeric, $4::date),
+                      COALESCE((SELECT minor_unit FROM finance_currencies WHERE code = $5), 2)::int)::text AS tax
+           FROM (SELECT rate FROM finance_tax_codes
+                  WHERE tenant_id = $1 AND code = $2 AND $4::date >= effective_from
+                    AND (effective_to IS NULL OR $4::date <= effective_to)
+                  ORDER BY effective_from DESC LIMIT 1) t`,
+        [tenantId, x.line.taxCode, String(x.base), onDate, currency],
+      );
+      if (!r.rows[0]) {
+        throw new BadRequestException(`${x.label}: tax code ${x.line.taxCode} has no rate in force on ${onDate}`);
+      }
+      const rate = Number(r.rows[0].rate);
+      if (x.line.taxRate !== null && x.line.taxRate !== rate) {
+        throw new BadRequestException(
+          `${x.label}: taxRate ${x.line.taxRate} does not match tax code ${x.line.taxCode} (${rate}% on ${onDate}); omit taxRate or send the code's rate`,
+        );
+      }
+      x.line.taxRate = rate;
+      x.line.tax = Number(r.rows[0].tax);
+    }
+  });
+}
+
 function requiredIsoDate(value: string | undefined, field: string): string {
   const d = isoDate(value, field);
   if (d == null) throw new BadRequestException(`${field} is required`);
@@ -107,6 +165,8 @@ interface ArCreditNoteBody {
     /** Contra-revenue (4300 Retur Penjualan / 4200 Potongan Penjualan), not the original revenue
      *  account — netting them hides a deteriorating return rate entirely. */
     creditAccountCode?: string; taxRate?: number | string;
+    /** PV5-04: the tax code whose effective-dated rate applies (finance_tax_codes). Required on a taxed line. */
+    taxCode?: string;
   }>;
 }
 
@@ -146,6 +206,8 @@ interface ApVendorCreditBody {
     description?: string; amount?: number | string;
     /** The expense being reversed. */
     creditAccountCode?: string; taxRate?: number | string;
+    /** PV5-04: the tax code whose effective-dated rate applies (finance_tax_codes). Required on a taxed line. */
+    taxCode?: string;
   }>;
 }
 
@@ -1102,16 +1164,16 @@ export class FinanceController {
         throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
       }
       const subtotal = qty * unit;
-      // Indonesian PPN is 12% applied to 11/12 of the base, not a flat 11%. Computed HERE rather
-      // than accepted from the caller so every invoice this API issues agrees with the ledger's own
-      // convention — a caller passing a pre-computed tax would be free to disagree with it.
-      const tax = rate === null ? 0 : Math.round(subtotal * (11 / 12) * (rate / 100));
+      // Tax is never accepted from the caller and never computed by arithmetic here: applyLineTaxes() takes it from the
+      // line's effective-dated tax code (finance_tax_compute), so a 2024 supply keeps 2024's rule (PV5-04, finding 4).
+      const tax: number = 0; // PV5-04: set by applyLineTaxes() below, from the tax code (finding 4)
       return {
         description: l.description.trim(), quantity: qty, unitPrice: unit, subtotal,
         revenueAccountCode: l.revenueAccountCode, taxCode: l?.taxCode ?? null, taxRate: rate, tax,
       };
     });
 
+    await applyLineTaxes(tenantId, invoiceDate, body?.currencyCode ?? "IDR", lines.map((l, i) => ({ line: l, base: l.subtotal, label: `line ${i + 1}` })));
     const subtotal = lines.reduce((t, l) => t + l.subtotal, 0);
     const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
     if (subtotal + taxTotal <= 0) throw new BadRequestException("invoice total must be greater than zero");
@@ -2023,15 +2085,14 @@ export class FinanceController {
         throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
       }
       const subtotal = qty * unit;
-      // Indonesian PPN: 12% of 11/12 of the base. Same convention as the AR side, computed in one
-      // place per side rather than trusted from the caller.
-      const tax = rate === null ? 0 : Math.round(subtotal * (11 / 12) * (rate / 100));
+      const tax: number = 0; // PV5-04: set by applyLineTaxes() below, from the tax code (finding 4)
       return {
         description: l.description.trim(), quantity: qty, unitPrice: unit, subtotal,
         expenseAccountCode: l.expenseAccountCode, taxCode: l?.taxCode ?? null, taxRate: rate, tax,
       };
     });
 
+    await applyLineTaxes(tenantId, billDate, body?.currencyCode ?? "IDR", lines.map((l, i) => ({ line: l, base: l.subtotal, label: `line ${i + 1}` })));
     const subtotal = lines.reduce((t, l) => t + l.subtotal, 0);
     const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
     const total = subtotal + taxTotal;
@@ -2325,10 +2386,11 @@ export class FinanceController {
       if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
         throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
       }
-      const tax = rate === null ? 0 : Math.round(amount * (11 / 12) * (rate / 100));
-      return { description: l.description.trim(), amount, creditAccountCode: l.creditAccountCode, tax };
+      const tax: number = 0; // PV5-04: set by applyLineTaxes() below, from the tax code (finding 4)
+      return { description: l.description.trim(), amount, creditAccountCode: l.creditAccountCode, taxCode: l?.taxCode ?? null, taxRate: rate, tax };
     });
 
+    await applyLineTaxes(tenantId, noteDate, body?.currencyCode ?? "IDR", lines.map((l, i) => ({ line: l, base: l.amount, label: `line ${i + 1}` })));
     const subtotal = lines.reduce((t, l) => t + l.amount, 0);
     const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
     if (subtotal + taxTotal <= 0) throw new BadRequestException("credit note total must be greater than zero");
@@ -2564,12 +2626,13 @@ export class FinanceController {
       if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
         throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
       }
-      // Same 12%-of-11/12 convention the bill used. A credit whose VAT disagrees with the bill it
-      // reverses is the difference a Coretax reconciliation surfaces months later.
-      const tax = rate === null ? 0 : Math.round(amount * (11 / 12) * (rate / 100));
-      return { description: l.description.trim(), amount, creditAccountCode: l.creditAccountCode, tax };
+      // The tax comes from the same effective-dated code the bill used (applyLineTaxes). A credit whose VAT disagrees
+      // with the bill it reverses is the difference a Coretax reconciliation surfaces months later.
+      const tax: number = 0; // PV5-04: set by applyLineTaxes() below, from the tax code (finding 4)
+      return { description: l.description.trim(), amount, creditAccountCode: l.creditAccountCode, taxCode: l?.taxCode ?? null, taxRate: rate, tax };
     });
 
+    await applyLineTaxes(tenantId, creditDate, body?.currencyCode ?? "IDR", lines.map((l, i) => ({ line: l, base: l.amount, label: `line ${i + 1}` })));
     const subtotal = lines.reduce((t, l) => t + l.amount, 0);
     const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
     const total = subtotal + taxTotal;

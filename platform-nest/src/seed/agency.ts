@@ -14,6 +14,7 @@ import { AGENCY_DEPTS, STAFF } from "./roster";
 import { seedPositions } from "./positions";
 import { resolveSeedActor, assertNotRetired } from "./seed-actor";
 import { emptyProfileState, loadProfileRow, saveProfileRow } from "../modules/clients/centre/store";
+import { createIssuedInvoice, ensureBillingSetup } from "./billing-setup";
 
 // ── THE REAL ESTATE (corrected 2026-08-22, owner-supplied + verified against public sources) ─────
 // `Sanur Resort` was a placeholder and wrong on two counts: the resort is VICEROY BALI and it is in
@@ -298,7 +299,7 @@ export async function seedAgency(): Promise<SeededAgency> {
   await seedPositions(tenantId, rosterIds, users.admin);
   await seedPm(tenantId, projects[0], users);
   await seedIt(tenantId, resortId);
-  await seedInvoices(tenantId, clients[0]);
+  await seedInvoices(tenantId, clients[0], users.admin);
   await seedFiles(tenantId, projects[0]);
   await seedIdentityAndNotifications(tenantId, users);
   await seedComplianceAndFields(tenantId);
@@ -426,13 +427,21 @@ async function seedIt(tenantId: string, resortId: string) {
 }
 
 // ---- Invoices ----
-async function seedInvoices(tenantId: string, clientId: string) {
+// PV5-04: a SENT invoice now means an ISSUED one (PV5-01b's CHECK), so the demo invoice is issued through the real path:
+// the company gets its finance setup and a billing profile with fake issuer/bank data first (billing-setup.ts), and the
+// invoice is numbered and posted to the ledger like any other. IDR, because the books are kept in IDR and the issue
+// path refuses a foreign-currency invoice it would book at face value. The draft stays a plain row.
+async function seedInvoices(tenantId: string, clientId: string, actorId: string) {
   if (await count(tenantId, "invoices") > 0) return;
+  await ensureBillingSetup(tenantId);
+  await createIssuedInvoice(tenantId, {
+    clientId, actorId,
+    lines: [{ description: "Billable time (last 30d)", hours: 42, rate: 1_500_000, amount: 63_000_000 }],
+  });
   await withTenants([tenantId], (c) => c.query(
     `INSERT INTO invoices (id,tenant_id,client_id,period_start,period_end,status,currency,lines,total,origin_site)
-     VALUES ($1,$2,$3,current_date-30,current_date,'sent','USD',$4,6300,$5),
-            ($6,$2,$3,current_date,current_date+30,'draft','USD',$7,0,$5)`,
-    [newId(), tenantId, clientId, JSON.stringify([{ description: "Billable time (last 30d)", hours: 42, rate: 150, amount: 6300 }]), site(), newId(), JSON.stringify([])]));
+     VALUES ($1,$2,$3,current_date,current_date+30,'draft','IDR',$4,0,$5)`,
+    [newId(), tenantId, clientId, JSON.stringify([]), site()]));
 }
 
 // ---- Files (references) ----
@@ -469,7 +478,7 @@ async function seedIdentityAndNotifications(tenantId: string, u: Record<string, 
     [u.superadmin, "approval.requested", { title: "Approval requested", message: "Review: Hero banner v2 awaits a decision.", href: "/approvals" }],
     [u.superadmin, "pm.tracker.update", { title: "AI Tracker — Design hero banner", message: "2/3 subtasks complete → 67%.", href: "/tasks" }],
     [u.admin, "approval.requested", { title: "Approval requested", message: "Review: Hero banner v2 awaits a decision.", href: "/approvals" }],
-    [u.admin, "invoice.sent", { title: "Invoice sent", message: "Bali Beach Resort — $6,300.", href: "/invoices" }],
+    [u.admin, "invoice.sent", { title: "Invoice issued", message: "Bali Beach Resort — IDR 63,000,000.", href: "/invoices" }],
     [u.exec, "rollup.ready", { title: "Rollups recomputed", message: "Group metrics refreshed.", href: "/rollups" }],
     [u.pm, "task.assigned", { title: "Task assigned", message: "QA microsite needs a plan.", href: "/tasks" }],
     [u.approver, "approval.requested", { title: "Approval requested", message: "Review: Hero banner v2 awaits your decision.", href: "/approvals" }],

@@ -22,6 +22,7 @@ import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setu
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
 import { newId, withTenants } from "../db";
 import { setStorageForTest, localStorage as localStorageBackend, type StorageBackend } from "./storage";
+import { createIssuedInvoice, ensureBillingSetup } from "../seed/billing-setup";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -58,7 +59,16 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
     return id;
   }
 
+  // PV5-04: a `sent` invoice is an ISSUED one (PV5-01b), so it is issued for real; an issued invoice cannot be
+  // deleted (202610130400's freeze), so the "deleted invoice" cases use an unissued status the portal still shows.
   async function addInvoice(opts: { status: string; deleted?: boolean; dayOffset: number }): Promise<string> {
+    if (opts.status === "sent") {
+      if (opts.deleted) throw new Error("an issued invoice cannot be soft-deleted");
+      return (await createIssuedInvoice(co, {
+        clientId: clientA, actorId: admin, lines: [{ description: "Fixture work", amount: 1000 }],
+        periodStart: null, periodEnd: null,
+      })).id;
+    }
     const id = newId();
     await withTenants([co], (c) =>
       c.query(
@@ -127,6 +137,7 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
     await grantRole(signerA, await createRole("client"), "company", co);
 
     clientA = await createClient(co, "Iso Client");
+    await ensureBillingSetup(co);
     projectLive = await createProject(co, "Live project", admin);
     projectGone = await createProject(co, "Soon deleted project", admin);
     await withTenants([co], async (c) => {
@@ -242,7 +253,8 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
   describe("timeline payments and receipts follow the invoice", () => {
     it("a confirmed payment on a deleted invoice is absent from the timeline and its receipt is 404", async () => {
       const liveInv = await addInvoice({ status: "sent", dayOffset: 0 });
-      const goneInv = await addInvoice({ status: "sent", dayOffset: 40 });
+      // `void` (never issued): visible to the client and still deletable, so it carries the deleted-invoice case.
+      const goneInv = await addInvoice({ status: "void", dayOffset: 40 });
       const draftInv = await addInvoice({ status: "draft", dayOffset: 80 });
       const livePay = await addPayment(liveInv);
       const gonePay = await addPayment(goneInv);

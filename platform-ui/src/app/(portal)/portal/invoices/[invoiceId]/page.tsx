@@ -28,7 +28,10 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
   if (!invoice) notFound();
 
   const lines = Array.isArray(invoice.lines) ? invoice.lines : [];
-  const canPay = invoice.balance > 0 && invoice.status !== "void";
+  // PV5-04: the API says whether this invoice accepts a claim (`payable`: issued, unpaid, and not already fully being
+  // verified). An older server without the field keeps the old rule.
+  const canPay = invoice.payable ?? (invoice.balance > 0 && invoice.status !== "void");
+  const bank = invoice.issuer?.bank ?? null;
   const pendingPayments = invoice.payments.filter((p) => p.status === "pending");
 
   return (
@@ -76,6 +79,9 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
                     ),
                   }]
                 : []),
+              ...(invoice.invoiceNo ? [{ k: "Invoice no.", v: invoice.invoiceNo }] : []),
+              ...(invoice.dueDate ? [{ k: "Due", v: portalDate(invoice.dueDate) }] : []),
+              ...(invoice.taxTotal ? [{ k: "Tax", v: money(invoice.taxTotal, invoice.currency) }] : []),
               ...(invoice.periodStart && invoice.periodEnd
                 ? [{ k: "Period", v: `${portalDate(invoice.periodStart)} — ${portalDate(invoice.periodEnd)}` }]
                 : []),
@@ -151,6 +157,21 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
           </Card>
         )}
 
+        {/* PV5-04: where to pay, from the issuer block frozen on the invoice when it was issued. The full "How to pay"
+            screen is PV5-09. */}
+        {canPay && bank?.accountNo && (
+          <Card title="How to pay">
+            <PortalFacts
+              rows={[
+                { k: "Bank", v: bank.name ?? "—" },
+                { k: "Account name", v: bank.accountName ?? "—" },
+                { k: "Account no.", v: bank.accountNo },
+                ...(invoice.invoiceNo ? [{ k: "Reference", v: invoice.invoiceNo }] : []),
+              ]}
+            />
+          </Card>
+        )}
+
         {canPay ? (
           <Card title="Tell us you've paid" hint="Recording a transfer here puts it in our finance team's queue to verify against the bank statement.">
             <PortalPaymentForm invoiceId={invoice.id} balance={invoice.balance} currency={invoice.currency} />
@@ -160,7 +181,9 @@ export default async function PortalInvoicePage({ params }: { params: Promise<{ 
             <EmptyNote>
               {invoice.status === "void"
                 ? "This invoice was cancelled — there's nothing to pay."
-                : `This invoice is settled (${clientStatus(invoice.status)}). Thank you.`}
+                : invoice.status === "paid" || invoice.balance <= 0
+                  ? `This invoice is settled (${clientStatus(invoice.status)}). Thank you.`
+                  : "We're verifying the payment you told us about, or this invoice can't be paid here. Questions? Contact us."}
             </EmptyNote>
           </Card>
         )}
