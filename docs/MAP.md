@@ -521,9 +521,12 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/portal/company/[[...section]]`
 - `/portal/contracts`
 - `/portal/contracts/[contractId]`
+- `/portal/conversation`
+- `/portal/conversation/[threadId]`
 - `/portal/deliverables`
 - `/portal/invoices`
 - `/portal/invoices/[invoiceId]`
+- `/portal/meetings/[minutesId]`
 - `/portal/profile`
 - `/portal/projects`
 - `/portal/projects/[projectId]`
