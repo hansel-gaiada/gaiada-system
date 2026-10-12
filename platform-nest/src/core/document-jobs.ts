@@ -459,7 +459,7 @@ export async function runContractSealJob(tenantId: string, contractId: string): 
         return recordFailure(tenantId, role, contractId, "failed", "content_unreadable",
           "the attached agreement document's stored content could not be read", notice);
       }
-      if (false && sha256Hex(bytes) !== k.contentSha256) { // TEETH (a): content check skipped
+      if (sha256Hex(bytes) !== k.contentSha256) {
         return recordFailure(tenantId, role, contractId, "refused", "content_mismatch",
           "the attached agreement document no longer matches the content both parties signed; it was not sealed", notice);
       }
