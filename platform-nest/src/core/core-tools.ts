@@ -899,9 +899,106 @@ const CONTRACT_BILLING_CORE_TOOLS: McpToolDef[] = [
   },
 ];
 
-/** PV3-06: the eight billing tools; exported so a suite can restore exactly this area. */
+// ── PV5-12: issuing and voiding an invoice, and the billing profile (agentic-native bar) ─────────────────────
+//
+// Routes: modules/invoice/invoice.controller.ts (issue-readiness, issue, void) and
+// modules/invoice/billing-profile-agent.controller.ts (the MASKED profile). Logic: modules/invoice/issue.ts.
+//
+// ── WHO THE CALL RUNS AS ────────────────────────────────────────────────────────────────────────
+// `invoices.issue` and `invoices.voidIssued` are HIGH, so an unattended agent's call is SUSPENDED into an approval
+// (D14) and never reaches the route. Once a human approves, the executor re-runs the call as the human the agent
+// acted for (approval-execute.ts, invariant 1), and THAT human must hold Cerbos `invoice` `issue` / `void_issued`
+// themselves: the approver's authority never replaces the filer's. A direct call as a `bot` or `automation`
+// principal is refused (403) by Cerbos (PV5-02), whatever role the bot holds.
+//
+// ── WHAT IS DELIBERATELY NOT A TOOL ─────────────────────────────────────────────────────────────
+// Setting bank details (a payee redirect), marking a contract certified, and creating a checkout. The suite pins
+// that no tool name or path matches those capabilities (contracts-billing-tools / invoice-issue-tools tests).
+//
+// ── MASKED READ ─────────────────────────────────────────────────────────────────────────────────
+// `billingProfile.read` calls `/billing-profile/masked`, a route that cannot return the full account number (last 4
+// only), even for an owner. The plain `/billing-profile` route is not wired to any tool.
+//
+// ── OBSERVABILITY ───────────────────────────────────────────────────────────────────────────────
+// The routes write the `issued` / `voided` activity row (actor + `via` agent + approval) only on a state change; a
+// repeat (`alreadyIssued`, `alreadyVoid`) writes none.
+const INVOICE_ISSUE_CORE_TOOLS: McpToolDef[] = [
+  {
+    name: "invoices.issueReadiness",
+    description:
+      "Everything that stops one invoice being issued right now, all at once: `ready`, `blockers` (each a stable `code` " +
+      "and a message staff can act on: no billing profile, no bank account, no open period, not approved ...), and, " +
+      "for an invoice already issued, `issued:true` with its `invoiceNo`. Read this before asking to issue. 404 if the " +
+      "invoice does not exist; a 403 is a refusal.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/invoices/:invoiceId/issue-readiness",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, invoiceId: { type: "string" } },
+      required: ["tenantId", "invoiceId"],
+    },
+  },
+  {
+    name: "invoices.issue",
+    description:
+      "Issue an APPROVED invoice through the ledger: number it, post it, freeze it. 409 `issue_blocked` with every " +
+      "blocker (nothing written) when it is not ready. IDEMPOTENT: issuing twice answers the issued invoice with " +
+      "`alreadyIssued:true`. impact:'high': an unattended caller SUSPENDS for human approval, and approving it runs " +
+      "the issue as the human the agent acted for, who must themselves be allowed to issue invoices. A bot or " +
+      "automation principal calling this directly is refused (403).",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/invoices/:invoiceId/issue",
+    write: true,
+    impact: "high",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, invoiceId: { type: "string" } },
+      required: ["tenantId", "invoiceId"],
+    },
+  },
+  {
+    name: "invoices.voidIssued",
+    description:
+      "Void an ISSUED, unpaid invoice: a full credit note in the ledger, both rows `void`. Needs a `reason` (at least 4 " +
+      "characters). Refused (409) when the invoice was never issued, is part-paid or has a pending payment claim. " +
+      "IDEMPOTENT: a repeat answers `alreadyVoid:true`. impact:'high': an unattended caller SUSPENDS for human " +
+      "approval, and approving it runs the void as the human the agent acted for, who must themselves be allowed " +
+      "to void issued invoices. A bot or automation principal calling this directly is refused (403).",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/invoices/:invoiceId/void",
+    write: true,
+    impact: "high",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        invoiceId: { type: "string" },
+        reason: { type: "string", description: "why it is voided, at least 4 characters (kept on the credit note)" },
+      },
+      required: ["tenantId", "invoiceId", "reason"],
+    },
+  },
+  {
+    name: "billingProfile.read",
+    description:
+      "The company's billing profile: legal name, address, invoice number prefix, payment terms, currency, the two " +
+      "ledger account codes and the bank block with the account number MASKED to its last 4 digits " +
+      "(`accountNoMasked`). The full number is never returned, to anyone. 404 if the company has no profile yet. " +
+      "Changing the profile or its bank details is a human action in Settings, not a tool.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/billing-profile/masked",
+    inputSchema: { type: "object", properties: { tenantId: { type: "string" } }, required: ["tenantId"] },
+  },
+];
+
+/** PV3-06: the eight billing tools, and PV5-12's four invoice-issue tools; exported so a suite can restore exactly this area. */
 export function registerContractBillingCoreTools(): void {
   registerCoreTools(CONTRACT_BILLING_CORE_TOOLS);
+  registerCoreTools(INVOICE_ISSUE_CORE_TOOLS);
 }
 
 /**
