@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.96.0` - PV-3 follow-ups: a payment's recorder cannot approve an agent's decision on it; client visibility on detail reads (2026-10-12) - PROTOTYPED
+
+- **D14 maker-checker for `invoicePayments.decide`** (found by PV3-06). An agent's request to confirm or reject a client payment executes as the filer, so the route's "the recorder may not decide" rule never saw the approver; the payment's recorder could approve the request and decide their own payment one step removed. Now:
+  - **Wall 1, at approval:** `automation-approvals` decide refuses an approver who recorded the payment, with 403 `approver_recorded_this_payment`; the row stays pending and nothing runs. The recorder can still reject the request.
+  - **Wall 2, at execution:** the executor re-checks the stored `decided_by` in its claim transaction, and refuses with `approver_refused` without calling the hub. This also covers retries.
+  - The check is a general, optional `approverCheck` hook on executable approvals. It fails closed: missing args or an unreadable payment refuse.
+  - A legitimate approver's approval still executes once, as the filer.
+- **`clientVisible` on detail reads:** project, deliverable (through its project), change request, and meeting and task (always false), computed from `core/portal-visibility.ts`. The parity test now proves each detail agrees with its list row and with the portal.
+- Verified: targeted Linux runs with teeth (the approval walls each proven independently; a hand-written detail predicate fails parity), the merged-tree Linux gate, and main's CI.
+
+### platform-ui `0.101.0` - PV-3 follow-ups: staff can download a contract PDF and a payment proof; the internal client is marked, not reviewed (2026-10-12) - PROTOTYPED
+
+- `GET /api/files/:fileId` streams a platform file to staff with their session and active company. The platform authorizes on the file's target entity.
+  - It always sends `content-disposition: attachment` (even if the platform says inline), `nosniff`, a sandbox CSP and `no-store`.
+  - Refusals come back as sentences, never a 500.
+  - The Contracts & billing page links "PDF attached" and "Proof of payment attached" to it.
+- The internal sentinel client (WSK-D36) is badged "Internal (our own sites)" on the Clients list and excluded from the "Business type: Other or not set" review filter.
+- Verified: targeted Linux runs with teeth, the merged-tree gate with `next build`, and the hub, billing and portal e2e.
+
 ### platform-nest `0.95.0` - M5-W8: the writer dashboard read (2026-10-12) - DEV-VERIFIED
 
 - **The read:** `GET …/content/sites/:tenantSlug/:siteId/writers/dashboard?period&collection&locale&mine&cursor&limit`. For each live item the caller may read, it returns:
