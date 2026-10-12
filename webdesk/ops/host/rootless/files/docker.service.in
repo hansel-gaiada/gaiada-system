@@ -28,7 +28,9 @@ Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_DISABLE_HOST_LOOPBACK=true
 Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_SLIRP4NETNS_SANDBOX=true
 Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_SLIRP4NETNS_SECCOMP=true
 Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_DETACH_NETNS=false
-# Fail closed: without the egress guard's marker (root-owned, on /run) the daemon does not start at all.
+# Fail closed: without the egress guard's marker (root-owned, on /run) the daemon does not start at all. A user
+# manager cannot run a root command, so the full `webdesk-rootless-guard.sh check` runs one level up, as
+# ExecStartPre of user@<uid>.service (files/user-at.conf.in): a flushed table keeps the user manager down.
 ExecStartPre=/usr/bin/test -e /run/webdesk-rootless-guard/@USER@.active
 ExecStart=/usr/bin/dockerd-rootless.sh
 # The deploy user reaches this daemon as itself, as it reached the rootful one through the docker group.

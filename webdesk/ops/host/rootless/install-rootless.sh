@@ -528,10 +528,15 @@ envelope_ok() { # the slice's own cgroup files carry the envelope
   [ "$(cat "$d/cpu.max")" = "$want_cpu" ] && [ "$(cat "$d/memory.max")" = "$want_mem" ] && [ "$(cat "$d/pids.max")" = "$TASKS_MAX" ]
 }
 # A missing cgroup controller shows as a `docker info` WARNING naming it; other warnings are not this check's.
+# cpu is matched as a WORD: io and cpuset are deliberately not delegated (WSK-D72 needs cpu, memory, pids).
+warns_missing_controller() { grep -Eiq 'WARNING:.*(cgroup|\bcpu\b|memory|pids|swap)' <<<"$1"; }
+# A daemon that does not answer is not "no warnings": require a successful `docker info` first.
 no_warnings() {
-  local w
+  local w rc
   w="$(rl_docker info 2>&1 >/dev/null)"
-  ! grep -Eiq 'WARNING:.*(cgroup|cpu|memory|pids|io\.|cpuset|swap)' <<<"$w"
+  rc=$?
+  [ "$rc" = 0 ] || return 1
+  ! warns_missing_controller "$w"
 }
 only_operator() { # nobody but the owner and the operator can reach the socket
   [ $((8#$(stat -c %a "$SOCK") & 7)) = 0 ] && [ $((8#$(stat -c %a "$RUNTIME") & 7)) = 0 ] &&
@@ -544,8 +549,17 @@ bridge_not_docker0() { # the rootless default bridge must not shadow the host's 
 }
 etc_access_ok() {
   local f
+  # Positive controls first: a failing runuser (no such user, no PAM, no shell) would make every negative below
+  # pass for the wrong reason.
+  as_user true || return 1
+  as_user test -r /etc/os-release || return 1
   for f in $ETC_READ_OK; do as_user test -r "$f" || return 1; done
-  for f in $ETC_READ_NO; do ! as_user test -r "$f" || return 1; done
+  # The negatives mean something only for a file that is really there (root sees it) and still unreadable to the user.
+  for f in $ETC_READ_NO; do
+    [ -e "$f" ] || return 1
+    ! as_user test -r "$f" || return 1
+  done
+  [ -d /etc/webdesk ] || return 1
   ! as_user ls /etc/webdesk
 }
 tree_ok() {

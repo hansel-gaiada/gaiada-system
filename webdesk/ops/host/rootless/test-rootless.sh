@@ -234,7 +234,9 @@ section_install() {
   R="$(render_template "$F/user-at.conf.in" USER=webdesk-rootless UID=940)"
   assert "user@940 drop-in: wants the guard instance" grep -qx 'Wants=webdesk-rootless-guard@webdesk-rootless.service' <<<"$R"
   assert "user@940 drop-in: ordered after it" grep -qx 'After=webdesk-rootless-guard@webdesk-rootless.service' <<<"$R"
-  assert "user@940 drop-in: delegates cpu cpuset io memory pids" grep -qx 'Delegate=cpu cpuset io memory pids' <<<"$R"
+  assert "user@940 drop-in: delegates exactly cpu memory pids (WSK-D72), not io or cpuset" grep -qx 'Delegate=cpu memory pids' <<<"$R"
+  refute "user@940 drop-in: no io / cpuset delegation anywhere" grep -Eq '^Delegate=.*(io|cpuset)' <<<"$R"
+  assert "user@940 drop-in: ExecStartPre runs the guard's check for this user (m5)"     grep -qx 'ExecStartPre=/usr/local/sbin/webdesk-rootless-guard.sh check webdesk-rootless' <<<"$R"
   R="$(render_template "$F/slice.conf.in" USER=webdesk-rootless UID=940 CPU_QUOTA=100% MEMORY_MAX=5G TASKS_MAX=4096)"
   assert "slice envelope: CPUQuota=100% MemoryMax=5G TasksMax=4096 (WSK-D72: 1.0 vCPU)" \
     test "$(grep -E '^(CPUQuota|MemoryMax|TasksMax)=' <<<"$R" | tr '\n' ' ')" = "CPUQuota=100% MemoryMax=5G TasksMax=4096 "
@@ -404,6 +406,38 @@ section_install() {
   assert "do_remove deletes the switch with rm -f on OTLP_REMOVE only" bash -c "sed -n '/^do_remove() {/,/^}/p' '$HERE/install-rootless.sh' | grep -q 'rm -f \"\$OTLP_REMOVE\"'"
   refute "do_remove never names the command-line OTLP_ENV" bash -c "sed -n '/^do_remove() {/,/^}/p' '$HERE/install-rootless.sh' | grep -q 'OTLP_ENV'"
   unset -f getent
+  echo "== install: tests that must be able to fail (docker info, runuser)"
+  rl_docker() { return 1; }
+  refute "no_warnings is FALSE when the daemon does not answer (it used to pass)" quiet no_warnings
+  rl_docker() { echo 'WARNING: No cpu cfs quota support' >&2; }
+  refute "no_warnings is false on a missing-cpu warning" quiet no_warnings
+  rl_docker() { echo 'WARNING: Running in rootless-mode without cgroups' >&2; }
+  refute "no_warnings is false on a cgroup warning" quiet no_warnings
+  rl_docker() { echo 'WARNING: No cpuset support' >&2; echo 'WARNING: No io.weight support' >&2; }
+  assert "no_warnings ignores cpuset / io (not delegated by design)" quiet no_warnings
+  rl_docker() { echo 'Server: fine'; }
+  assert "no_warnings is true on a clean answer" quiet no_warnings
+  unset -f rl_docker
+  local EV="$T/etcv"
+  mkdir -p "$EV"
+  : >"$EV/ok" ; : >"$EV/secret"
+  ETC_READ_OK="$EV/ok"
+  ETC_READ_NO="$EV/secret"
+  # an as_user that behaves like the real one: can read ok and /etc/os-release, not secret, cannot list /etc/webdesk
+  as_user() { case "$*" in true | "test -r /etc/os-release" | "test -r $EV/ok") return 0 ;; esac; return 1; }
+  if [ -d /etc/webdesk ]; then assert "etc_access_ok passes with a correct as_user (needs /etc/webdesk)" quiet etc_access_ok
+  else echo "  note  no /etc/webdesk here: the final ls check of etc_access_ok is skipped on this host"; fi
+  as_user() { return 1; }
+  refute "etc_access_ok is FALSE when runuser itself fails (every negative would otherwise pass)" quiet etc_access_ok
+  as_user() { case "$*" in true | "test -r /etc/os-release") return 0 ;; esac; return 1; }
+  refute "etc_access_ok is false when the user cannot read a file it must read" quiet etc_access_ok
+  as_user() { case "$*" in "test -r /etc/os-release" | "test -r $EV/ok" | "test -r $EV/secret") return 0 ;; esac; return 1; }
+  refute "etc_access_ok is false when positive control 'true' fails" quiet etc_access_ok
+  as_user() { return 0; }
+  refute "etc_access_ok is false when the user can read a secret" quiet etc_access_ok
+  as_user() { case "$*" in true | "test -r /etc/os-release" | "test -r $EV/ok") return 0 ;; esac; return 1; }
+  ETC_READ_NO="$EV/absent"
+  refute "etc_access_ok is false when a file it should find unreadable is simply absent" quiet etc_access_ok
   echo "  END   install"
 }
 
