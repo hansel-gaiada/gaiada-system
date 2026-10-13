@@ -15,6 +15,7 @@ vi.mock("@/lib/tenant", () => ({ getActiveTenant: vi.fn(async () => "co-1") }));
 vi.mock("@/lib/entities", () => ({ getClient: vi.fn(async () => ({ id: "cl-1", isInternal: false })) }));
 vi.mock("@/lib/clientCentre-data", () => ({
   getClientCentre: vi.fn(async () => ({ clientId: "cl-1", clientName: "Demo", businessType: "hotel", profile: {}, connections: {}, areas: {}, customConnections: {}, revision: 1, canEdit: true })),
+  getClientCentreResults: vi.fn(async () => ({ clientId: "cl-1", generatedAt: "2026-10-13T00:00:00Z", visible: true, services: [], unavailable: [] })),
 }));
 vi.mock("@/lib/clientCentreActions", () => ({ patchClientCentreAction: vi.fn() }));
 vi.mock("@/components/client-centre/ClientCentreShell", () => ({
@@ -22,6 +23,7 @@ vi.mock("@/components/client-centre/ClientCentreShell", () => ({
 }));
 
 import ClientProfilePage from "./page";
+import { getClientCentreResults } from "@/lib/clientCentre-data";
 
 const run = (section?: string[]) => ClientProfilePage({ params: Promise.resolve({ clientId: "cl-1", section }) });
 
@@ -43,5 +45,22 @@ describe("Client hub Profile tab · old Business URLs (PV6-01)", () => {
     expect(screen.getByTestId("shell").textContent).toContain("|rs");
     render(await run(undefined));
     expect(screen.getAllByTestId("shell")).toHaveLength(2);
+  });
+});
+
+describe("Client hub Profile tab · results are read only where shown (PV6-03)", () => {
+  it("Home reads results once (the per-area counts)", async () => {
+    render(await run(undefined));
+    expect(getClientCentreResults).toHaveBeenCalledTimes(1);
+  });
+  it("an area's results part reads results once", async () => {
+    render(await run(["se", "results"]));
+    expect(getClientCentreResults).toHaveBeenCalledTimes(1);
+  });
+  it("🔴 an area's Setup and Connections parts and Business details read no results", async () => {
+    render(await run(["se"]));
+    render(await run(["se", "connections"]));
+    render(await run(["company"]));
+    expect(getClientCentreResults).not.toHaveBeenCalled();
   });
 });

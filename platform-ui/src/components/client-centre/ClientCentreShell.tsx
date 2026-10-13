@@ -6,6 +6,7 @@ import {
   findSection,
   parentOf,
   activeAreas,
+  type BusinessResults,
   type CentreProfile,
   type CentrePatch,
   type ConnectionEntry,
@@ -32,6 +33,8 @@ export function ClientCentreShell({
   profile,
   isPortal,
   patchAction,
+  results,
+  websiteHref,
   switcherOptions,
   onSwitchClient,
 }: {
@@ -42,6 +45,11 @@ export function ClientCentreShell({
   profile: CentreProfile;
   isPortal: boolean;
   patchAction: (clientId: string, patch: CentrePatch) => Promise<CentreActionResult>;
+  /** One results read per page render (PV6-03), fetched by the page only for Home and an area's results part.
+   *  `undefined` = not fetched; `null` = the read failed. */
+  results?: BusinessResults | null;
+  /** Portal website editors only (`/portal/website`): where a website card links. */
+  websiteHref?: string | null;
   /** Portal only (staff move between clients from the Clients list, CC-D8). Rendered only when there
    *  is more than one option — one client goes straight in with no switcher at all. The portal writes
    *  the `gaiada_portal_client` cookie (see `lib/portalCentreClient.ts`) and redirects to
@@ -93,7 +101,7 @@ export function ClientCentreShell({
 
   let content: ReactNode;
   if (route.kind === "home") {
-    content = <HomeView basePath={basePath} profile={{ ...profile, ...draft }} />;
+    content = <HomeView basePath={basePath} profile={{ ...profile, ...draft }} results={results} />;
   } else if (route.kind === "company") {
     content = (
       <CompanySettingsView
@@ -109,7 +117,7 @@ export function ClientCentreShell({
   } else {
     const section = findSection(registry, draft.businessType, route.sectionId);
     if (!section) {
-      content = <HomeView basePath={basePath} profile={{ ...profile, ...draft }} />;
+      content = <HomeView basePath={basePath} profile={{ ...profile, ...draft }} results={results} />;
     } else {
       content = (
         <AreaView
@@ -120,6 +128,9 @@ export function ClientCentreShell({
           part={route.part}
           draft={draft}
           canEdit={canEdit}
+          isPortal={isPortal}
+          results={results}
+          websiteHref={websiteHref}
           onFieldChange={setProfileField}
           onConnectionChange={setConnection}
           onAddCustomConnection={(name) => addCustomConnection(section.id, name)}

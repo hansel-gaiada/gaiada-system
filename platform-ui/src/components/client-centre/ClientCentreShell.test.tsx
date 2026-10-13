@@ -150,7 +150,7 @@ describe("Business areas (PV6-01)", () => {
     expect(card.textContent).toMatch(/\d+ of \d+ fields · \d+ of \d+ connected/);
   });
 
-  it("an area page has a header, a stats line, and a Setup / Connections strip with aria-current on the open part", () => {
+  it("an area page has a header, a stats line, and a Setup / Connections / Services & results strip with aria-current on the open part", () => {
     mount(["rs"]);
     expect(screen.getByRole("heading", { level: 2, name: "Reservations" })).toBeInTheDocument();
     expect(screen.getByText(/\d+ of \d+ setup fields completed · \d+ of \d+ connections connected/)).toBeInTheDocument();
@@ -159,6 +159,7 @@ describe("Business areas (PV6-01)", () => {
     expect(links.map((a) => [a.textContent, a.getAttribute("href"), a.getAttribute("aria-current")])).toEqual([
       ["Setup", "/clients/cl-1/profile/rs", "page"],
       ["Connections", "/clients/cl-1/profile/rs/connections", null],
+      ["Services & results", "/clients/cl-1/profile/rs/results", null],
     ]);
     // the tree marks the open area
     expect(screen.getAllByRole("link", { name: "Reservations" }).some((a) => a.getAttribute("aria-current") === "page")).toBe(true);
@@ -191,14 +192,21 @@ describe("Business areas (PV6-01)", () => {
     expect(container.querySelectorAll("details.cc-conn")).toHaveLength(9);
   });
 
-  it("Marketing lists its 19 sub-areas as cards above the strip; a sub-area page has a breadcrumb through Marketing", () => {
+  it("Marketing lists its 19 sub-areas as cards BELOW the strip on Setup (PV6-03: the strip comes first); a sub-area page has a breadcrumb through Marketing", () => {
     const { container, unmount } = mount(["mk"]);
     const cards = container.querySelectorAll(".cc-area-grid--sub a.cc-area-card");
     expect(cards).toHaveLength(19);
     expect(cards[0].getAttribute("href")).toBe("/clients/cl-1/profile/mk_strat");
-    const position = container.querySelector(".cc-area-grid--sub")!.compareDocumentPosition(screen.getByRole("navigation", { name: "Marketing parts" }));
+    const position = screen.getByRole("navigation", { name: "Marketing parts" }).compareDocumentPosition(container.querySelector(".cc-area-grid--sub")!);
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     unmount();
+    // the sub-area cards belong to Setup only: Connections and the results part do not list them
+    const conn = mount(["mk", "connections"]);
+    expect(conn.container.querySelector(".cc-area-grid--sub")).toBeNull();
+    conn.unmount();
+    const res = mount(["mk", "results"]);
+    expect(res.container.querySelector(".cc-area-grid--sub")).toBeNull();
+    res.unmount();
     const sub = mount(["se"]);
     expect(sub.container.querySelector(".cc-crumb")?.textContent).toBe("Demo Harbour HotelMarketingSEO, AEO & GEO");
     expect(sub.container.querySelector(".cc-area-grid--sub")).toBeNull(); // only Marketing itself lists them

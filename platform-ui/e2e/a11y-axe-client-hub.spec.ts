@@ -37,6 +37,9 @@ const PAGES = [
   "/clients/cl-1/work",
   "/clients/cl-1/profile",
   "/clients/cl-1/profile/company",
+  // PV6-03: Services & results, with the "Client sees this" marker on every card.
+  "/clients/cl-1/profile/se/results",
+  "/clients/cl-1/profile/mk/results",
   "/clients/cl-1/billing",
   "/clients/cl-1/contacts",
   "/clients/cl-1/notes",

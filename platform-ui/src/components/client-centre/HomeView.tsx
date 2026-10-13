@@ -5,18 +5,23 @@ import {
   businessTypeLabel,
   sectionHref,
   sectionStats,
+  runningServicesByArea,
+  type BusinessResults,
   type CentreProfile,
 } from "@/lib/clientCentre";
 import { Breadcrumb } from "./Breadcrumb";
 
 // Home: description lede, 4 overview facts, and one card per Business area with how much of it is set up —
 // read-only (the description itself is edited on Business details, not here).
-export function HomeView({ basePath, profile }: { basePath: string; profile: CentreProfile }) {
+// `results` is the page's ONE results read (PV6-03): each card says how many services run in that area. Absent
+// (not fetched, failed, or hidden from this contact) means no count at all, never "0 services".
+export function HomeView({ basePath, profile, results }: { basePath: string; profile: CentreProfile; results?: BusinessResults | null }) {
   const p = profile.profile;
   const areas = activeAreas(registry, profile.businessType, profile.areas);
   const website = p.website?.trim();
   const websiteLabel = website?.replace(/^https?:\/\//, "");
   const location = [p.city, p.country].filter(Boolean).join(", ") || "—";
+  const running = results && results.visible ? runningServicesByArea(registry, profile.businessType, results) : null;
   const contact = p.phone || p.email || "—";
 
   return (
@@ -53,7 +58,7 @@ export function HomeView({ basePath, profile }: { basePath: string; profile: Cen
               )}
               <span>
                 <b>{a.name}</b>
-                <small>{st.fieldsFilled} of {st.fieldsTotal} fields · {st.connectionsConnected} of {st.connectionsTotal} connected</small>
+                <small>{st.fieldsFilled} of {st.fieldsTotal} fields · {st.connectionsConnected} of {st.connectionsTotal} connected{running && ` · ${running[a.id] ?? 0} ${(running[a.id] ?? 0) === 1 ? "service" : "services"} running`}</small>
               </span>
             </Link>
           );

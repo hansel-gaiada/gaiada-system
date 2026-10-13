@@ -364,3 +364,39 @@
 @media (prefers-reduced-motion: reduce) {
   .cc-tree__toggle { transition: none; }
 }
+
+/* ── Services & results (PV6-03) ───────────────────────────────────────────────────────────────────── */
+.cc-results { display: grid; gap: 14px; }
+.cc-results-note {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  font: 400 13.5px/1.5 var(--font-body);
+}
+.cc-results-group { display: grid; gap: 12px; }
+.cc-results-group .cc-sec-h { margin: 6px 0 0; }
+.cc-service {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-card-solid);
+  padding: 14px 16px;
+  display: grid;
+  gap: 10px;
+}
+.cc-service__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.cc-service__title { margin: 0; font: 600 15px/1.3 var(--font-display); color: var(--ink-strong); }
+.cc-service__status, .cc-service__since { font: 500 12px/1.3 var(--font-body); color: var(--ink-muted); }
+.cc-service__status { padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-strong); }
+.cc-service__items { margin: 0; padding-left: 18px; font: 400 13.5px/1.5 var(--font-body); color: var(--ink-strong); }
+.cc-service__items span { color: var(--ink-muted); }
+.cc-service__kpis { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.cc-kpi { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 10px 12px; min-width: 0; }
+.cc-kpi__label { font: 500 11.5px/1.3 var(--font-body); color: var(--ink-muted); }
+.cc-kpi__body { margin: 4px 0 0; display: grid; gap: 2px; }
+.cc-kpi__value { font: 600 20px/1.3 var(--font-display); color: var(--ink-strong); }
+.cc-kpi__value--unknown { font: 500 13.5px/1.4 var(--font-body); color: var(--ink-muted); }
+.cc-kpi__meta { font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); }
+.cc-service__link { margin: 0; font: 500 13.5px/1.4 var(--font-body); }
+.cc-service__link a { color: var(--erp-accent); }

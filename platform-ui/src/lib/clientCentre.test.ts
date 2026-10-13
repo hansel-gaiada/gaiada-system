@@ -19,6 +19,12 @@ import {
   parseSectionRoute,
   sectionHref,
   legacySectionRedirect,
+  kpiChange,
+  targetMet,
+  cardsForSection,
+  runningServicesByArea,
+  type BusinessResults,
+  type ResultsServiceCard,
   centreChangeLabel,
   isAreaTogglePath,
   buildProfilePatch,
@@ -209,15 +215,16 @@ describe("route model", () => {
     expect(parseSectionRoute(["mk"])).toEqual({ kind: "section", sectionId: "mk", part: "setup" });
     expect(parseSectionRoute(["rs", "connections"])).toEqual({ kind: "section", sectionId: "rs", part: "connections" });
     expect(parseSectionRoute(["se", "connections"])).toEqual({ kind: "section", sectionId: "se", part: "connections" });
+    expect(parseSectionRoute(["mk", "results"])).toEqual({ kind: "section", sectionId: "mk", part: "results" });
   });
   it("falls back to home on a malformed or not-yet-built route rather than throwing", () => {
     expect(parseSectionRoute(["mk", "not-a-part"])).toEqual({ kind: "home" });
     expect(parseSectionRoute(["mk", "connections", "extra"])).toEqual({ kind: "home" });
-    expect(parseSectionRoute(["mk", "results"])).toEqual({ kind: "home" }); // PV6-03 adds this part
+    expect(parseSectionRoute(["mk", "results", "extra"])).toEqual({ kind: "home" });
   });
   it("round-trips through sectionHref", () => {
     const base = "/clients/cl-1/profile";
-    for (const segs of [undefined, ["company"], ["mk"], ["rs", "connections"], ["se", "connections"]]) {
+    for (const segs of [undefined, ["company"], ["mk"], ["rs", "connections"], ["se", "connections"], ["mk_social", "results"]]) {
       const route = parseSectionRoute(segs as string[] | undefined);
       expect(parseSectionRoute(sectionHref(base, route).slice(base.length + 1).split("/").filter(Boolean))).toEqual(route);
     }
@@ -226,6 +233,7 @@ describe("route model", () => {
     const base = "/portal/company";
     expect(sectionHref(base, { kind: "section", sectionId: "rs", part: "setup" })).toBe("/portal/company/rs");
     expect(sectionHref(base, { kind: "section", sectionId: "rs", part: "connections" })).toBe("/portal/company/rs/connections");
+    expect(sectionHref(base, { kind: "section", sectionId: "rs", part: "results" })).toBe("/portal/company/rs/results");
   });
   it("an old `<area>/settings` and an old leaf `<area>/<n>` redirect to the area's Setup, on both bases", () => {
     expect(legacySectionRedirect("/portal/company", ["rs", "settings"])).toBe("/portal/company/rs");
@@ -345,3 +353,43 @@ describe("businessTypeLabel", () => {
 // Type-only smoke check that the imported registry satisfies its declared shape.
 const _typeCheck: ClientCentreRegistry = registry;
 void _typeCheck;
+
+describe("Services & results helpers (PV6-03)", () => {
+  const card = (service: ResultsServiceCard["service"], areaId: string, status: ResultsServiceCard["status"] = "active"): ResultsServiceCard => ({
+    service, areaId, title: service, status, since: null, items: [], kpis: [], clientVisible: true,
+  });
+  const results = (services: ResultsServiceCard[], over: Partial<BusinessResults> = {}): BusinessResults => ({
+    clientId: "cl-1", generatedAt: "2026-10-13T00:00:00Z", visible: true, services, unavailable: [], ...over,
+  });
+
+  it("kpiChange: up, down, flat; a missing previous or value is `none`, never a change against 0", () => {
+    expect(kpiChange({ value: 12, previous: 10 })).toEqual({ direction: "up", delta: 2 });
+    expect(kpiChange({ value: 8, previous: 10 })).toEqual({ direction: "down", delta: -2 });
+    expect(kpiChange({ value: 10, previous: 10 })).toEqual({ direction: "flat", delta: 0 });
+    expect(kpiChange({ value: 10, previous: null })).toEqual({ direction: "none" });
+    expect(kpiChange({ value: null, previous: 10 })).toEqual({ direction: "none" });
+    expect(kpiChange({ value: 0, previous: 5 })).toEqual({ direction: "down", delta: -5 }); // a real zero is a figure
+  });
+  it("targetMet: null without a target or a figure; a lower position is better", () => {
+    expect(targetMet({ value: 10, target: 8, unit: "count" })).toBe(true);
+    expect(targetMet({ value: 7, target: 8, unit: "count" })).toBe(false);
+    expect(targetMet({ value: 3, target: 5, unit: "position" })).toBe(true);
+    expect(targetMet({ value: 9, target: 5, unit: "position" })).toBe(false);
+    expect(targetMet({ value: null, target: 5, unit: "count" })).toBeNull();
+    expect(targetMet({ value: 5, target: null, unit: "count" })).toBeNull();
+  });
+  it("cardsForSection: Marketing rolls up its sub-areas; a sub-area shows only its own", () => {
+    const r = results([card("social", "mk_social"), card("search", "se"), card("website", "mk_web")]);
+    const mk = findArea(registry, "hotel", "mk")!;
+    expect(cardsForSection(r, mk).map((c) => c.areaId)).toEqual(["mk_social", "se", "mk_web"]);
+    expect(cardsForSection(r, findSection(registry, "hotel", "se")!).map((c) => c.areaId)).toEqual(["se"]);
+    expect(cardsForSection(r, findArea(registry, "hotel", "rs")!)).toEqual([]);
+  });
+  it("runningServicesByArea counts only active services, per owning area, from one read; hidden or absent reads count nothing", () => {
+    const r = results([card("social", "mk_social"), card("search", "se"), card("search_ads", "mk_paid", "paused")]);
+    expect(runningServicesByArea(registry, "hotel", r)).toEqual({ mk: 2 });
+    expect(runningServicesByArea(registry, "hotel", results(r.services, { visible: false }))).toEqual({});
+    expect(runningServicesByArea(registry, "hotel", null)).toEqual({});
+    expect(runningServicesByArea(registry, "hotel", undefined)).toEqual({});
+  });
+});

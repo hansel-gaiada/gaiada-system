@@ -37,6 +37,9 @@ const PAGES = [
   "/portal/social-reviews",
   "/portal/timeline",
   "/portal/company",
+  // PV6-03: Services & results (every state is a demo fixture for cl-1).
+  "/portal/company/mk_social/results",
+  "/portal/company/mk/results",
   "/portal/contracts",
   "/portal/invoices",
   "/portal/invoices/inv-2026-014",

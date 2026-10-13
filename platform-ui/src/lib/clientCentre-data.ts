@@ -16,7 +16,7 @@ import "server-only";
 // plain 404 there — mirrors `entities.ts`'s own `listClients`/`skipUnavailable` precedent (404/403
 // degrades to an empty list, never a crash for an ordinary module-off tenant).
 import { platformFetch, PlatformError } from "./platform";
-import type { CentreListItem, CentreProfile, PortalCentreListItem } from "./clientCentre";
+import type { BusinessResults, CentreListItem, CentreProfile, PortalCentreListItem } from "./clientCentre";
 
 export async function listClientCentres(userId: string, tenant: string): Promise<CentreListItem[]> {
   try {
@@ -46,5 +46,25 @@ export async function getPortalCentre(userId: string, tenant: string, clientId: 
   } catch (e) {
     if (e instanceof PlatformError && e.status === 404) return null;
     throw e;
+  }
+}
+
+// PV6-03 — Services & results. DEGRADE RULE (the opposite of the profile readers): a failed read returns `null`,
+// and the view says "Some results could not be loaded", because a results part that throws would take the whole
+// Business workspace down with it, while one that rendered empty would claim "we run no service here". `null`
+// is never an empty list.
+export async function getClientCentreResults(userId: string, tenant: string, clientId: string): Promise<BusinessResults | null> {
+  try {
+    return await platformFetch<BusinessResults>(`/api/${tenant}/clients/${clientId}/centre/results`, userId);
+  } catch {
+    return null;
+  }
+}
+
+export async function getPortalCentreResults(userId: string, tenant: string, clientId: string): Promise<BusinessResults | null> {
+  try {
+    return await platformFetch<BusinessResults>(`/api/${tenant}/portal/centre/${clientId}/results`, userId);
+  } catch {
+    return null;
   }
 }

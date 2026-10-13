@@ -2,10 +2,10 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getClientCentre } from "@/lib/clientCentre-data";
+import { getClientCentre, getClientCentreResults } from "@/lib/clientCentre-data";
 import { getClient } from "@/lib/entities";
 import { patchClientCentreAction } from "@/lib/clientCentreActions";
-import { legacySectionRedirect } from "@/lib/clientCentre";
+import { legacySectionRedirect, parseSectionRoute } from "@/lib/clientCentre";
 import { ClientCentreShell } from "@/components/client-centre/ClientCentreShell";
 
 // CC-D8 — the client hub's Profile tab: the Business workspace (business type, Business areas tree, each area's
@@ -48,6 +48,11 @@ export default async function ClientProfilePage({
   ]);
   if (!profile) notFound();
 
+  // PV6-03: ONE results read per render, only on Home (the per-area counts) and an area's results part.
+  const route = parseSectionRoute(section);
+  const wantsResults = route.kind === "home" || (route.kind === "section" && route.part === "results");
+  const results = wantsResults ? await getClientCentreResults(userId, tenant, clientId) : undefined;
+
   return (
     <>
       {client?.isInternal === false && (
@@ -59,6 +64,7 @@ export default async function ClientProfilePage({
         segments={section ?? []}
         profile={profile}
         isPortal={false}
+        results={results}
         patchAction={patchClientCentreAction}
       />
     </>
