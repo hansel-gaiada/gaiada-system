@@ -61,7 +61,8 @@ copy_tree() { # copy_tree <from> <to>: no node_modules/.next/dist/.git
 STUB_PORT=18443
 with_stub() { env WEBDESK_HOST="localhost:$STUB_PORT" WEBDESK_API_KEY=gate-fixture-key NODE_EXTRA_CA_CERTS="$WORK/stub.crt" "$@"; }
 start_stub() {
-  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost" \n    -keyout "$WORK/stub.key" -out "$WORK/stub.crt" >"$WORK/openssl.log" 2>&1 || { cat "$WORK/openssl.log"; return 1; }
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost" \
+    -keyout "$WORK/stub.key" -out "$WORK/stub.crt" >"$WORK/openssl.log" 2>&1 || { cat "$WORK/openssl.log"; return 1; }
   : > "$WORK/stub-requests.log"
   node "$SRC/webdesk/templates/qa/content-stub.mjs" "$STUB_PORT" "$WORK/stub.crt" "$WORK/stub.key" "$WORK/stub-requests.log" >"$WORK/stub.out" 2>&1 &
   STUB_PID=$!
