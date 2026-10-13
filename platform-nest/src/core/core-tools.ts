@@ -927,7 +927,8 @@ const INVOICE_ISSUE_CORE_TOOLS: McpToolDef[] = [
     name: "invoices.issueReadiness",
     description:
       "Everything that stops one invoice being issued right now, all at once: `ready`, `blockers` (each a stable `code` " +
-      "and a message staff can act on: no billing profile, no bank account, no open period, not approved ...), and, " +
+      "and a message staff can act on: no billing profile, no bank account, no open period, not approved, no service " +
+      "line (`NO_SERVICE_LINE`: staff pick one, and it sets the code in the invoice number) ...), and, " +
       "for an invoice already issued, `issued:true` with its `invoiceNo`. Read this before asking to issue. 404 if the " +
       "invoice does not exist; a 403 is a refusal.",
     minAssurance: "verified",
@@ -1123,7 +1124,7 @@ const CONVERSATION_CORE_TOOLS: McpToolDef[] = [
     name: "conversation.getThread",
     description:
       "One thread with its messages, oldest first, and its PENDING drafts. Each message has `authorSide` (client|staff), " +
-      "`authorName`, `body` (null once retracted) and `draftedBy` (the agent that drafted a staff message a person later " +
+      "`authorName`, `body` and `draftedBy` (the agent that drafted a staff message a person later " +
       "sent). `drafts` are staff-only and never reach the client until a person sends one. Reading marks the thread read for " +
       "the caller. 404 if it does not exist.",
     minAssurance: "verified",

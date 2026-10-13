@@ -504,9 +504,8 @@ export function handlePortalConversation(S, { method, pathname, body, userId }) 
       json: {
         thread: threadView(S, thread, false),
         messages: conv.messages.filter((m) => m.threadId === thread.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((m) => ({
-          id: m.id, threadId: m.threadId, authorId: m.authorId, authorName: m.authorName, authorSide: m.authorSide, body: m.body, retracted: false,
-          edited: false, editedAt: null, createdAt: m.createdAt, mine: m.authorId === userId,
-          editableUntil: m.authorId === userId && Date.now() - Date.parse(m.createdAt) < 15 * 60_000 ? new Date(Date.parse(m.createdAt) + 15 * 60_000).toISOString() : null,
+          id: m.id, threadId: m.threadId, authorId: m.authorId, authorName: m.authorName, authorSide: m.authorSide, body: m.body,
+          createdAt: m.createdAt, mine: m.authorId === userId,
           attachments: [],
         })),
       },

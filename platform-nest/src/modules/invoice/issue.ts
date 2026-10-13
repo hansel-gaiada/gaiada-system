@@ -5,8 +5,10 @@
 // of record, and it happens in ONE transaction, under both RLS walls (`withBilling`, below):
 //   1. re-check readiness (the same function the readiness GET answers from) and refuse with EVERY blocker at once;
 //   2. find or create the client's AR customer (a group client's customer carries counterparty_company_id, decision 20);
-//   3. take the next number of the company's gapless per-year series (`next_document_no`, row-locked: a rollback
-//      returns the number, concurrent issues serialise);
+//   3. take the number `{company}/{yyyy}/{mm}/{code}/{nnnn}` (PV-D35): `{code}` is the (service line, client business type)
+//      code, generated on first use inside this transaction (`billing_number_code`, advisory-locked per company);
+//      `{nnnn}` is the company's gapless per-MONTH counter (`next_document_no`, row-locked: a rollback returns the
+//      number, concurrent issues serialise), never per code;
 //   4. compute tax with `finance_tax_compute()` from the effective-dated tax code, rounded to the currency's minor unit
 //      (never arithmetic in a handler, decision 8);
 //   5. write the AR invoice and its lines and post it with `finance_ar_issue_invoice()` (balanced journal);
@@ -29,6 +31,7 @@ import { DatabaseError, type PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { emitEvent } from "../../events/outbox.service";
 import { recordInvoiceRevision, snapshotInvoice } from "./invoice-revisions";
+import { readServiceLineFacts } from "./billing-numbering";
 
 /** The only DB path for anything that touches finance_* tables from the invoice side. See the header. */
 export function withBilling<T>(tenantId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
@@ -95,6 +98,12 @@ interface IssueFacts {
   periodOpen: boolean;
   today: string;
   taxInForce: boolean | null;
+  // PV5-04b: the number code's inputs. `serviceLineKey` is the EFFECTIVE line: the one staff chose, else the one every
+  // project behind the lines maps to (null when neither); `serviceLineActive` says whether that line is switched on.
+  serviceLineKey: string | null;
+  serviceLineName: string | null;
+  serviceLineActive: boolean;
+  businessType: string;
   // lines
   lineCount: number;
   badLines: number;
@@ -113,13 +122,15 @@ const LOAD_INVOICE = `
          bp.bank_ledger_account_code AS "bankLedgerCode", bp.default_revenue_account_code AS "revenueCode",
          (fs.tenant_id IS NOT NULL) AS "hasSettings", fs.functional_currency AS "functionalCurrency",
          fs.is_pkp AS "isPkp", fs.npwp,
-         (cur.code IS NOT NULL) AS "currencyKnown", COALESCE(cur.minor_unit, 2)::int AS "minorUnit"
+         (cur.code IS NOT NULL) AS "currencyKnown", COALESCE(cur.minor_unit, 2)::int AS "minorUnit",
+         COALESCE(ccp.business_type, 'other') AS "businessType"
     FROM invoices i
     JOIN companies co ON co.id = i.tenant_id
     LEFT JOIN clients cl ON cl.id = i.client_id AND cl.deleted_at IS NULL
     LEFT JOIN company_billing_profiles bp ON bp.tenant_id = i.tenant_id
     LEFT JOIN finance_company_settings fs ON fs.tenant_id = i.tenant_id
     LEFT JOIN finance_currencies cur ON cur.code = i.currency
+    LEFT JOIN client_centre_profiles ccp ON ccp.tenant_id = i.tenant_id AND ccp.client_id = i.client_id
    WHERE i.id = $1 AND i.deleted_at IS NULL`;
 
 /** A live, active, postable, non-control account by code (the shape a receipt or revenue line can post to). */
@@ -171,6 +182,8 @@ async function loadFacts(
     [invoiceId, h.minorUnit],
   );
 
+  const sl = await readServiceLineFacts(c, invoiceId);
+
   const L = ledger.rows[0];
   const ln = lines.rows[0];
   return {
@@ -184,6 +197,9 @@ async function loadFacts(
     periodOpen: L.periodOpen === true,
     today: L.today,
     taxInForce: L.taxInForce,
+    serviceLineKey: sl.effectiveKey,
+    serviceLineName: sl.effectiveName,
+    serviceLineActive: sl.effectiveActive,
     lineCount: Number(ln.n),
     badLines: Number(ln.bad),
     linesTotalMatches: ln.sumMatches === true,
@@ -208,6 +224,12 @@ function blockersFor(f: IssueFacts): IssueBlocker[] {
     else if (!f.revenueAccountId) add("NO_REVENUE_ACCOUNT", `revenue account ${f.revenueCode} is not a live, postable account in the chart`);
     if (!f.bankLedgerCode) add("NO_RECEIPT_ACCOUNT", "the billing profile names no ledger account for bank receipts");
     else if (!f.bankAccountId) add("NO_RECEIPT_ACCOUNT", `receipt account ${f.bankLedgerCode} is not a live, postable account in the chart`);
+  }
+  // PV5-04b (PV-D35): the number carries a code for the invoice's service line, so an invoice needs one.
+  if (!f.serviceLineKey) {
+    add("NO_SERVICE_LINE", "the invoice has no service line (staff pick one before issuing; it sets the code in the invoice number)");
+  } else if (!f.serviceLineActive) {
+    add("NO_SERVICE_LINE", `service line ${f.serviceLineName ?? f.serviceLineKey} is switched off; pick an active one`);
   }
   if (f.arControls === 0) add("NO_AR_CONTROL_ACCOUNT", "the chart of accounts has no active receivables control account");
   if (!f.periodOpen) add("NO_OPEN_PERIOD", `no open fiscal period contains today (${f.today})`);
@@ -283,9 +305,20 @@ async function nextNumber(c: PoolClient, tenantId: string, series: string, year:
   return Number(r.rows[0].n);
 }
 
-/** `{prefix}/{yyyy}/{nnnn}` (PV5-Q3); other series carry a short infix: `{prefix}/RC/{yyyy}/{nnnn}`. */
+/** The company's gapless per-MONTH counter (PV-D35): month 1..12. The yearly counter (month 0) stays for the other series. */
+async function nextMonthlyNumber(c: PoolClient, tenantId: string, series: string, year: number, month: number): Promise<number> {
+  const r = await c.query<{ n: number }>(`SELECT next_document_no($1, $2, $3, $4::smallint) AS n`, [tenantId, series, year, month]);
+  return Number(r.rows[0].n);
+}
+
+/** `{prefix}/{yyyy}/{nnnn}`; other series carry a short infix: `{prefix}/RC/{yyyy}/{nnnn}`. Invoices use formatInvoiceNo. */
 function formatNo(prefix: string, year: number, n: number, infix?: string): string {
   return [prefix, infix, String(year), String(n).padStart(4, "0")].filter(Boolean).join("/");
+}
+
+/** PV-D35: `{company}/{yyyy}/{mm}/{code}/{nnnn}`, e.g. `GDA/2026/10/7K3/0001`. `mm` is zero-padded, `nnnn` has at least 4 digits. */
+export function formatInvoiceNo(prefix: string, year: number, month: number, code: string, n: number): string {
+  return [prefix, String(year), String(month).padStart(2, "0"), code, String(n).padStart(4, "0")].join("/");
 }
 
 /** Decision 20: one AR customer per client, created on first issue. A group client's customer carries the counterparty. */
@@ -369,9 +402,15 @@ export async function issueInvoice(
       // 2. The client's AR customer.
       const customer = await ensureArCustomer(c, f);
 
-      // 3. The number. The series row stays locked until commit; a rollback returns the number.
+      // 3. The number (PV-D35). The code first: generated on first use for this (service line, business type), under a
+      //    per-company advisory lock, in THIS transaction (a rollback leaves no code behind). Then the company's
+      //    per-MONTH counter, taken from the issue date; its row stays locked until commit and a rollback returns it.
       const year = Number(f.today.slice(0, 4));
-      const invoiceNo = formatNo(f.invoicePrefix as string, year, await nextNumber(c, tenantId, "invoice", year));
+      const month = Number(f.today.slice(5, 7));
+      const code = (await c.query<{ code: string }>(
+        `SELECT billing_number_code($1, $2, $3) AS code`, [tenantId, f.serviceLineKey, f.businessType],
+      )).rows[0].code;
+      const invoiceNo = formatInvoiceNo(f.invoicePrefix as string, year, month, code, await nextMonthlyNumber(c, tenantId, "invoice", year, month));
 
       // 4. Lines and tax, computed in the database as numeric. Tax per line through finance_tax_compute(), rounded to
       //    the currency's minor unit; the statutory rate is recorded on the line (decision 8).
@@ -448,9 +487,11 @@ export async function issueInvoice(
         `UPDATE invoices
             SET status = 'sent', invoice_no = $2, issued_at = now(), issued_by = $3, issue_date = $4::date,
                 due_date = $5::date, subtotal = $6::numeric, tax_total = $7::numeric, total = $6::numeric + $7::numeric,
-                issuer = $8::jsonb, ar_invoice_id = $9, updated_by = $3, updated_at = now()
+                issuer = $8::jsonb, ar_invoice_id = $9, service_line_key = $10, number_code = $11,
+                updated_by = $3, updated_at = now()
           WHERE id = $1 AND issued_at IS NULL AND status = 'approved'`,
-        [invoiceId, invoiceNo, actorId, f.today, ar.rows[0].dueDate, subtotal, taxTotal, JSON.stringify(issuer), arId],
+        [invoiceId, invoiceNo, actorId, f.today, ar.rows[0].dueDate, subtotal, taxTotal, JSON.stringify(issuer), arId,
+         f.serviceLineKey, code],
       );
       if (upd.rowCount !== 1) throw new ConflictException({ message: "the invoice changed while it was being issued; nothing was written", reason: "conflict" });
 

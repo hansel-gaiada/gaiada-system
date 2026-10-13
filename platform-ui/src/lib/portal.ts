@@ -314,7 +314,7 @@ export interface PortalProfile {
 /** Topics the live stream can name. Mirrors platform-nest src/core/portal-live.service.ts's
  *  `PortalTopic` — the two lists must agree, and this one is the browser's copy.
  *  `requests` (MI-02/MI-03) — a webdev change request submitted/triaged/converted.
- *  `conversation` (PV4-03) — a conversation thread opened/updated, a message posted/edited/retracted.
+ *  `conversation` (PV4-03) — a conversation thread opened/updated, a message posted.
  *
  *  ⚠ SMM-32 does NOT add a `"social_reviews"` member here: `portal-live.service.ts`'s own
  *  `PortalTopic` union was not touched by SMM-31's backend work, so no SSE frame is ever emitted
@@ -713,14 +713,9 @@ export interface PortalMessage {
   authorId: string;
   authorName: string | null;
   authorSide: "client" | "staff";
-  /** NULL once retracted: the old text is never returned again. */
-  body: string | null;
-  retracted: boolean;
-  edited: boolean;
-  editedAt: string | null;
+  /** Messages are permanent (PV-D34): the body is always present, and there is no edited/retracted/editableUntil. */
+  body: string;
   createdAt: string;
-  /** The end of the edit/retract window (PV4-Q2: 15 minutes). NULL when the caller can no longer change it. */
-  editableUntil: string | null;
   mine: boolean;
   attachments: PortalMessageAttachment[];
 }
@@ -746,6 +741,8 @@ export const CONVERSATION_MAX_BYTES = 10 * 1024 * 1024;
 export const CONVERSATION_COUNTER_FROM = 9_000;
 /** The sentence under every composer (plan §2.4), verbatim. */
 export const CONVERSATION_PRICE_HINT = "Prices and terms change only through a signed contract or amendment.";
+/** PV-D34: shown beside the price hint on every composer, staff and portal. Messages are permanent. */
+export const CONVERSATION_PERMANENT_HINT = "Messages can't be edited or removed once sent. Post a correction instead.";
 
 /** The client-side attachment check, run BEFORE anything is sent so the client gets a plain sentence rather than a
  *  server refusal. The server enforces the same limits (§29); this is the fast path. Null = fine. */
@@ -766,15 +763,6 @@ export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** Can the caller still edit or retract this message? `editableUntil` is the server's DB-clock answer; the
- *  comparison against `now` only hides the controls once the window has closed on this page (the server is
- *  still the authority and answers 409). */
-export function messageEditable(m: Pick<PortalMessage, "mine" | "retracted" | "editableUntil">, now: Date): boolean {
-  if (!m.mine || m.retracted || !m.editableUntil) return false;
-  const until = new Date(m.editableUntil).getTime();
-  return Number.isFinite(until) && until > now.getTime();
 }
 
 export interface ThreadGroup { key: string; title: string; threads: PortalThread[] }

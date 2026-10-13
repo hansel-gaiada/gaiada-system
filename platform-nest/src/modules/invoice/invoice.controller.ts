@@ -16,6 +16,7 @@ import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
 import { invoiceClientVisible, staffClientVisible } from "../../core/portal-visibility";
 import { issueInvoice, readIssueReadiness, voidIssuedInvoice, withBilling } from "./issue";
 import { INVOICE_PDF_FILE_ID } from "../../core/document-read-fields";
+import { readServiceLineFacts, SERVICE_LINE_KEY } from "./billing-numbering";
 
 // IAM-GAP-01: `approved` is a real status (migration 0107 widened the CHECK) but is DELIBERATELY
 // NOT in this set — the only way INTO 'approved' is the dedicated /approve endpoint below, which
@@ -44,8 +45,12 @@ const INVOICE_SELECT = `
          i.subtotal::float8 AS subtotal, i.tax_total::float8 AS "taxTotal", i.tax_code AS "taxCode",
          i.issuer, i.ar_invoice_id AS "arInvoiceId", i.pre_pv5_legacy AS "legacyUnissued",
          -- PV5-07: the issued invoice's stored PDF. NULL = not issued, or issued and still being prepared.
-         ${INVOICE_PDF_FILE_ID("i")} AS "pdfFileId"
+         ${INVOICE_PDF_FILE_ID("i")} AS "pdfFileId",
+         -- PV5-04b (PV-D35): the line staff chose (NULL until chosen). STAFF-ONLY: this route needs invoice read, and the
+         -- portal has its own routes, which never select either column.
+         i.service_line_key AS "serviceLineKey", sl.name AS "serviceLineName"
   FROM invoices i LEFT JOIN clients cl ON cl.id = i.client_id
+  LEFT JOIN billing_service_lines sl ON sl.tenant_id = i.tenant_id AND sl.key = i.service_line_key
   WHERE i.deleted_at IS NULL`;
 
 @Controller("api")
@@ -70,9 +75,32 @@ export class InvoiceController {
   @Get(":tenantId/invoices/:invoiceId")
   async detail(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("invoiceId") invoiceId: string) {
     await authorize(req.principal, { kind: "invoice", id: invoiceId, tenantId }, "read");
-    const rows = await withTenants([tenantId], (c) => c.query(`${INVOICE_SELECT} AND i.id = $1`, [invoiceId]));
-    if (!rows.rows[0]) throw new NotFoundException("invoice not found");
-    return rows.rows[0];
+    return withTenants([tenantId], async (c) => {
+      const rows = await c.query(`${INVOICE_SELECT} AND i.id = $1`, [invoiceId]);
+      const row = rows.rows[0];
+      if (!row) throw new NotFoundException("invoice not found");
+      // PV5-04b: the line the invoice would default to (every project behind its lines maps to one line through its
+      // department), so the picker can preselect it; and, for an ISSUED invoice, what its number code stands for. The
+      // decode is staff-only by construction: this is the staff route, and the code table has no portal reader.
+      const sl = await readServiceLineFacts(c, invoiceId);
+      let numberCode: string | null = null;
+      let numberDecode: { serviceLineKey: string; serviceLineName: string | null; businessType: string } | null = null;
+      if (row.invoiceNo) {
+        const d = await c.query<{ code: string; serviceLineKey: string; serviceLineName: string | null; businessType: string }>(
+          `SELECT n.code, n.service_line_key AS "serviceLineKey", s.name AS "serviceLineName", n.business_type AS "businessType"
+             FROM invoices i
+             JOIN billing_number_codes n ON n.tenant_id = i.tenant_id AND n.code = i.number_code
+             LEFT JOIN billing_service_lines s ON s.tenant_id = n.tenant_id AND s.key = n.service_line_key
+            WHERE i.id = $1`,
+          [invoiceId],
+        );
+        if (d.rows[0]) {
+          numberCode = d.rows[0].code;
+          numberDecode = { serviceLineKey: d.rows[0].serviceLineKey, serviceLineName: d.rows[0].serviceLineName, businessType: d.rows[0].businessType };
+        }
+      }
+      return { ...row, defaultServiceLineKey: sl.defaultKey, numberCode, numberDecode };
+    });
   }
 
   // Generate an invoice: sum billable time on the client's projects in [periodStart, periodEnd],
@@ -110,18 +138,19 @@ export class InvoiceController {
       const mu = await c.query<{ minorUnit: number }>(`SELECT minor_unit::int AS "minorUnit" FROM finance_currencies WHERE code = $1`, [currency]);
       const scale = 10 ** (mu.rows[0] ? Number(mu.rows[0].minorUnit) : 2);
       // Billable minutes per project for this client's projects within the period.
-      const agg = await c.query<{ project: string; minutes: string }>(
-        `SELECT p.name AS project, SUM(te.minutes) AS minutes
+      const agg = await c.query<{ projectId: string; project: string; minutes: string }>(
+        `SELECT p.id AS "projectId", p.name AS project, SUM(te.minutes) AS minutes
          FROM time_entries te JOIN projects p ON p.id = te.project_id
          WHERE p.client_id = $1 AND te.billable = true AND te.deleted_at IS NULL
            AND te.entry_date >= $2::date AND te.entry_date <= $3::date
-         GROUP BY p.name ORDER BY p.name`,
+         GROUP BY p.id, p.name ORDER BY p.name, p.id`,
         [clientId, periodStart, periodEnd],
       );
       const lines = agg.rows.map((r) => {
         const hours = Math.round((Number(r.minutes) / 60) * 100) / 100;
         const amount = Math.round(hours * rate * scale) / scale;
-        return { description: r.project, hours, rate, amount };
+        // PV5-04b: `projectId` lets issue default the service line from the project's department (billing-numbering.ts).
+        return { description: r.project, projectId: r.projectId, hours, rate, amount };
       });
       const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * scale) / scale;
       // IAM-GAP-02: `updated_by` is set to the creator at INSERT time too — right after creation
@@ -185,6 +214,51 @@ export class InvoiceController {
     });
     await writeActivity(tenantId, req.principal.userId, "updated", "invoice", invoiceId, { status: b.status });
     return { ok: true };
+  }
+
+  // PV5-04b (PV-D35) — choose the invoice's SERVICE LINE, which sets the `{code}` of its number at issue. Staff do this
+  // before Issue; with no choice the invoice defaults to the line its projects' departments map to (when they all agree),
+  // and a missing line is the readiness blocker NO_SERVICE_LINE. `null` clears the choice.
+  // Authorized as `invoice` `issue` (company_admin, manager, perm holders; bots and automation DENIED): picking the line is
+  // part of preparing to issue, and a manager who may issue must be able to pick. Before any validation.
+  // No revision row: invoice_revisions.action is a closed CHECK list (0108) and this is not a status change; the choice is
+  // an `updated` activity, and the line is frozen into the invoice-of-record columns when it is issued.
+  @Patch(":tenantId/invoices/:invoiceId/service-line")
+  @HttpCode(200)
+  async setServiceLine(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("invoiceId") invoiceId: string,
+    @Body() b: { serviceLineKey?: unknown },
+  ) {
+    await authorize(req.principal, { kind: "invoice", id: invoiceId, tenantId }, "issue");
+    const raw = b?.serviceLineKey;
+    if (raw !== null && (typeof raw !== "string" || !SERVICE_LINE_KEY.test(raw))) {
+      throw new BadRequestException("serviceLineKey must be a service line key, or null to clear the choice");
+    }
+    const key = raw as string | null;
+    await withTenants([tenantId], async (c) => {
+      const inv = await c.query<{ status: string; issuedAt: string | null }>(
+        `SELECT status, issued_at AS "issuedAt" FROM invoices WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [invoiceId],
+      );
+      if (!inv.rows[0]) throw new NotFoundException("invoice not found");
+      if (inv.rows[0].issuedAt) {
+        throw new ConflictException({ message: "this invoice is issued; its service line is part of the invoice of record and cannot change", reason: "issued" });
+      }
+      if (inv.rows[0].status !== "draft" && inv.rows[0].status !== "approved") {
+        throw new ConflictException({ message: `a ${inv.rows[0].status} invoice has no service line to choose`, reason: "not_editable" });
+      }
+      if (key) {
+        const line = await c.query(`SELECT 1 FROM billing_service_lines WHERE tenant_id = $1 AND key = $2 AND active`, [tenantId, key]);
+        if (!line.rows[0]) throw new BadRequestException(`service line ${key} does not exist or is switched off`);
+      }
+      await c.query(
+        `UPDATE invoices SET service_line_key = $2, updated_by = $3, updated_at = now() WHERE id = $1 AND issued_at IS NULL`,
+        [invoiceId, key, req.principal.userId],
+      );
+    });
+    await writeActivity(tenantId, req.principal.userId, "updated", "invoice", invoiceId, { serviceLineKey: key });
+    return { ok: true, serviceLineKey: key };
   }
 
   // IAM-GAP-01 — the maker/checker seam's own endpoint. draft -> approved ONLY; the approver must

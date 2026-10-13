@@ -547,7 +547,7 @@ describe.skipIf(!TEST_URL)("PV4-06: conversation notifications (portal + staff +
       expect((await portalOverview(wideK)).conversationUnread).toBe(1);
     });
 
-    it("conversationsAwaitingReply and needsUs: last non-retracted message is the client's, open threads only", async () => {
+    it("conversationsAwaitingReply and needsUs: last message is the client's, open threads only", async () => {
       // tK1 holds a client reply from the previous test (last message = client); tGeneral and tK2 end with staff.
       let o = await staffOverview();
       expect(o.conversationsAwaitingReply).toBe(1);
@@ -570,11 +570,11 @@ describe.skipIf(!TEST_URL)("PV4-06: conversation notifications (portal + staff +
       await staffPostReply(admin, tK1);
       expect((await staffOverview()).conversationsAwaitingReply).toBe(1);
 
-      // a retracted client message does not count: the last LIVE message on tK2 is the staff opener
-      const posted = await app.inject({ method: "POST", url: `${P(co)}/${tK2}/messages`, headers: asUser(wideK), payload: { body: "oops" } });
+      // a client message on tK2 makes it awaiting; a staff reply answers it. (Messages are permanent, PV-D34: the
+      // only way a thread stops waiting is a newer message from our side, never a retraction.)
+      await clientPostReply(wideK, tK2);
       expect((await staffOverview()).conversationsAwaitingReply).toBe(2);
-      const retract = await app.inject({ method: "DELETE", url: `${P(co)}/messages/${(posted.json() as { id: string }).id}`, headers: asUser(wideK) });
-      expect(retract.statusCode).toBe(200);
+      await staffPostReply(admin, tK2);
       expect((await staffOverview()).conversationsAwaitingReply).toBe(1);
 
       // a closed thread is not awaiting; reopening brings it back

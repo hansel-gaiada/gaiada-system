@@ -9,13 +9,14 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ChangeRequestFromMessage, type CreateRequestInput } from "./ChangeRequestFromMessage";
 import { DraftCard, type DraftActions } from "./DraftCard";
 import { MessageComposer, type ComposerHandle } from "./MessageComposer";
-import { MessageRow, type MessageActions } from "./MessageRow";
+import { MessageRow } from "./MessageRow";
 import { useThreadPolling } from "./useThreadPolling";
 import "./conversation.css";
 
 // PV4-09 — one conversation thread, as staff see it.
 //
-//   - messages oldest first, each with its sender, side and the backend's "Client sees this" marker;
+//   - messages oldest first, each with its sender, side and the backend's "Client sees this" marker. Messages are
+//     permanent (PV-D34): no edit, no remove, a correction is a new message;
 //   - a distinct Internal-styled card for every pending agent draft (Send needs a confirm that names the client);
 //   - a composer (plain text, attachments), Close and Reopen, and "Turn into a change request";
 //   - fresh every 20 s while the page is visible and on window focus (`useThreadPolling`): there is no staff live
@@ -28,7 +29,7 @@ import "./conversation.css";
 // focus; after a draft is sent focus moves to the message it became; after a confirm closes, focus returns to the
 // control that opened it (Modal).
 
-export interface ThreadActions extends MessageActions, DraftActions {
+export interface ThreadActions extends DraftActions {
   load: (threadId: string) => Promise<ConvResult<{ snapshot: ThreadSnapshot }>>;
   post: (threadId: string, clientId: string, input: { body: string; attachments?: AttachmentInput[] }) => Promise<ConvResult<{ messageId: string }>>;
   setStatus: (threadId: string, clientId: string, status: "open" | "closed") => Promise<ConvResult>;
@@ -125,8 +126,6 @@ export function ThreadView({
               message={m}
               draftedByName={names.get(m.id) ?? null}
               canWrite={canWrite}
-              actions={actions}
-              onChanged={reload}
               onTurnIntoRequest={canWrite ? setRequestFor : undefined}
             />
           ))}

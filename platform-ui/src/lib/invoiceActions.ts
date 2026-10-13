@@ -5,7 +5,7 @@ import { getSessionUserId } from "./session-server";
 import { getMe, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can, isElevated } from "./rbac";
-import { createInvoice, approveInvoice, issueInvoice, voidInvoice, type IssueBlocker } from "./invoice";
+import { createInvoice, approveInvoice, issueInvoice, voidInvoice, setInvoiceServiceLine, type IssueBlocker } from "./invoice";
 import { voidErrorText, voidReasonOk } from "./billingView";
 
 export interface InvoiceFormState { error?: string }
@@ -74,6 +74,30 @@ export async function issueInvoiceAction(invoiceId: string, _prev: InvoiceAction
   }
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/invoices");
+  return { ok: true };
+}
+
+// PV5-04b (PV-D35): choose the invoice's service line before issuing. The server decides who may (Cerbos `invoice`/`issue`)
+// and refuses an unknown or switched-off line and an issued invoice; each refusal is said in words next to the picker.
+export async function setServiceLineAction(invoiceId: string, _prev: InvoiceActionState | null, formData?: FormData): Promise<InvoiceActionState> {
+  const userId = await getSessionUserId();
+  if (!userId) return { error: "Session expired — sign in again." };
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return { error: "Select a company first." };
+  // An empty choice clears it (the invoice then falls back to its default, or is blocked until a line is chosen).
+  const key = String(formData?.get("serviceLineKey") ?? "").trim();
+  try {
+    await setInvoiceServiceLine(userId, tenant, invoiceId, key || null);
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 403) return { error: "Choosing the service line is limited to company administrators and managers." };
+      if (e.status === 409 && e.reason === "issued") return { error: "This invoice is already issued, so its service line can no longer change." };
+      return { error: e.message };
+    }
+    throw e;
+  }
+  revalidatePath(`/invoices/${invoiceId}`);
   return { ok: true };
 }
 

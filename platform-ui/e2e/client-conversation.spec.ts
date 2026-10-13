@@ -13,8 +13,8 @@ import { tenantCookie } from "./appCookies";
 //
 // WHAT THE STUB CANNOT EXPRESS: it has no second user, so "the client replies while the page is open" (the 20 s
 // poll picking up a new client message) is covered by the unit tests (ThreadView.test.tsx with fake timers), not here.
-// It also does not exercise the real 15-minute edit window or the 409 refusals, which the platform's own HTTP suite
-// covers (conversation.controller.test.ts).
+// It also does not exercise the 409 refusals, which the platform's own HTTP suite covers (conversation.controller.test.ts).
+// Messages are permanent (PV-D34): there is no edit or remove control to drive.
 async function openAsAgency(page: Page, path: string) {
   await page.goto("/");
   await page.context().addCookies([tenantCookie(page.url())]);

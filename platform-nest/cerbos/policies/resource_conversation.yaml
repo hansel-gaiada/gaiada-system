@@ -6,7 +6,8 @@
 #             person is accountable for (§2.4), so this is the action the agent DENY below refuses.
 #   draft   — write a DRAFT reply that only staff ever see (`conversation_drafts`); an agent may hold this
 #             without `post` (PV-D23), and a human then reviews and sends.
-#   manage  — close/reopen a thread, retract a staff message, edit the thread subject.
+#   manage  — close/reopen a thread, edit the thread subject. (Messages are permanent, PV-D34, 2026-10-13: no edit and no
+#             retract exists, so `manage` no longer covers retracting a message. The action itself is unchanged.)
 # Restart `gaiada-test-cerbos` after editing this file; the bind-mount does not hot-reload.
 #
 # ── THE ROLE SHAPE IS resource_client.yaml's, ON PURPOSE (design decision 2) ─────────────────────────────────────

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_BODY_CHARS, THREAD_POLL_MS,
-  attachmentsError, bodyError, canEditNow, conversationErrorText, draftedByNames, newClientMessages, pendingDrafts, sortThreads,
+  attachmentsError, bodyError, conversationErrorText, draftedByNames, newClientMessages, pendingDrafts, sortThreads,
   splitLinks, threadScope, threadTitle, type StaffDraft, type StaffMessage,
 } from "./conversation";
 
@@ -35,22 +35,6 @@ describe("thread labels", () => {
     expect(threadTitle({ subject: null, general: true, projectName: null })).toBe("General conversation");
     expect(threadScope({ general: true, projectName: null })).toBe("General");
     expect(threadScope({ general: false, projectName: "Site" })).toBe("Site");
-  });
-});
-
-describe("canEditNow (the 15 minute window is the server's)", () => {
-  const base = { mine: true, retracted: false };
-  const now = Date.parse("2026-10-13T10:00:00Z");
-  it("offers edit while the server's editableUntil is in the future", () => {
-    expect(canEditNow({ ...base, editableUntil: "2026-10-13T10:05:00Z" }, now)).toBe(true);
-  });
-  it("does not once the window has passed, or when the server gave none", () => {
-    expect(canEditNow({ ...base, editableUntil: "2026-10-13T09:59:59Z" }, now)).toBe(false);
-    expect(canEditNow({ ...base, editableUntil: null }, now)).toBe(false);
-  });
-  it("never for someone else's message or a removed one", () => {
-    expect(canEditNow({ mine: false, retracted: false, editableUntil: "2026-10-13T10:05:00Z" }, now)).toBe(false);
-    expect(canEditNow({ mine: true, retracted: true, editableUntil: "2026-10-13T10:05:00Z" }, now)).toBe(false);
   });
 });
 
@@ -88,14 +72,14 @@ describe("splitLinks: plain text in, data out", () => {
 });
 
 const msg = (over: Partial<StaffMessage>): StaffMessage => ({
-  id: "m", threadId: "t", authorId: "u", authorName: "Dana", authorSide: "client", body: "hi", retracted: false, edited: false,
-  editedAt: null, createdAt: "2026-10-13T10:00:00Z", editableUntil: null, mine: false, attachments: [], draftedBy: null, ...over,
+  id: "m", threadId: "t", authorId: "u", authorName: "Dana", authorSide: "client", body: "hi",
+  createdAt: "2026-10-13T10:00:00Z", mine: false, attachments: [], draftedBy: null, ...over,
 });
 
 describe("newClientMessages", () => {
-  it("returns only new, un-retracted messages from the client", () => {
+  it("returns only new messages from the client", () => {
     const prev = [msg({ id: "1" })];
-    const next = [msg({ id: "1" }), msg({ id: "2" }), msg({ id: "3", authorSide: "staff" }), msg({ id: "4", mine: true }), msg({ id: "5", retracted: true })];
+    const next = [msg({ id: "1" }), msg({ id: "2" }), msg({ id: "3", authorSide: "staff" }), msg({ id: "4", mine: true })];
     expect(newClientMessages(prev, next).map((m) => m.id)).toEqual(["2"]);
   });
 });

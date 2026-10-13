@@ -1,7 +1,8 @@
 // PV4-03 — the parts of client Conversation that the STAFF and the PORTAL controllers share: input
-// validation, the lazy client-wide thread, message insert, inline attachments, read markers, the
-// 15-minute edit/retract window, and the message read shape.
-// Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-03; design decisions 3, 4, 7; PV4-Q1/Q2).
+// validation, the lazy client-wide thread, message insert, inline attachments, read markers and the
+// message read shape. Messages are permanent (PV-D34): there is no edit and no retract, and a
+// database trigger (migration 202610132145_pv4_conversation_messages_permanent.sql) refuses UPDATE and DELETE.
+// Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-03; design decisions 3, 4, 7; PV4-Q1; PV-D34).
 //
 // ── WHAT THIS FILE NEVER DOES ─────────────────────────────────────────────────────────────────────
 //   * It never decides WHO may reach a row. Callers pass rows they already admitted: the portal through
@@ -36,8 +37,6 @@ export const MAX_SUBJECT_CHARS = 200;
  *  pre-empts it; see the BFF §29 note. */
 export const MAX_ATTACHMENTS = 5;
 export const MAX_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024;
-/** PV4-Q2 default: a message may be edited or retracted by its author for 15 minutes, then it is permanent. */
-export const EDIT_WINDOW_MINUTES = 15;
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function isUuid(v: unknown): v is string {
@@ -231,21 +230,16 @@ export function awaitingReplySql(threadAlias: string): string {
              ORDER BY lmm.created_at DESC, lmm.id DESC LIMIT 1), '') = 'client')`;
 }
 
-/** A message row as BOTH sides read it, before per-side decoration. A retracted message NEVER carries
- *  its body or its attachments, to either side (lead deviation 4). */
+/** A message row as BOTH sides read it, before per-side decoration. Messages are permanent (PV-D34), so
+ *  there is no `edited`, `editedAt`, `retracted` or `editableUntil`: a correction is a new message. */
 export interface MessageOut {
   id: string;
   threadId: string;
   authorId: string;
   authorName: string | null;
   authorSide: ConversationSide;
-  body: string | null;
-  retracted: boolean;
-  edited: boolean;
-  editedAt: string | null;
+  body: string;
   createdAt: string;
-  /** When the author's 15-minute edit/retract window closes (null once retracted). */
-  editableUntil: string | null;
   mine: boolean;
   attachments: Array<{ id: string; filename: string; contentType: string; byteSize: number }>;
   draftedBy?: string | null;
@@ -253,8 +247,7 @@ export interface MessageOut {
 
 interface RawMessage {
   id: string; thread_id: string; author_id: string; author_name: string | null; author_side: ConversationSide;
-  body: string; drafted_by: string | null; edited_at: string | null; retracted_at: string | null;
-  created_at: string; editable_until: string;
+  body: string; drafted_by: string | null; created_at: string;
 }
 
 /** Read the messages of ONE already-admitted thread, oldest first (the newest `limit`). The caller has
@@ -268,17 +261,17 @@ export async function readMessages(
   const r = await c.query<RawMessage>(
     `SELECT * FROM (
        SELECT m.id, m.thread_id, m.author_id, u.name AS author_name, m.author_side, m.body, m.drafted_by,
-              m.edited_at, m.retracted_at, m.created_at,
-              m.created_at + make_interval(mins => ${EDIT_WINDOW_MINUTES}) AS editable_until
+              m.created_at
          FROM conversation_messages m
          LEFT JOIN users u ON u.id = m.author_id
         WHERE m.thread_id = $1
+          AND m.retracted_at IS NULL -- legacy rows only: PV-D34 retired retraction, nothing sets this column any more
         ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2
      ) x ORDER BY x.created_at ASC, x.id ASC`,
     [threadId, limit],
   );
-  const live = r.rows.filter((m) => !m.retracted_at).map((m) => m.id);
+  const live = r.rows.map((m) => m.id);
   const files = live.length
     ? await c.query<{ id: string; target_entity_id: string; filename: string; content_type: string; byte_size: number }>(
         `SELECT id, target_entity_id, filename, content_type, byte_size::int AS byte_size
@@ -294,57 +287,19 @@ export async function readMessages(
     list.push({ id: f.id, filename: f.filename, contentType: f.content_type, byteSize: f.byte_size });
     byMsg.set(f.target_entity_id, list);
   }
-  const now = Date.now();
   return r.rows.map((m) => {
-    const retracted = m.retracted_at !== null;
-    const mine = m.author_id === viewerId && m.author_side === viewerSide;
-    const until = new Date(m.editable_until);
     const out: MessageOut = {
       id: m.id,
       threadId: m.thread_id,
       authorId: m.author_id,
       authorName: m.author_name,
       authorSide: m.author_side,
-      body: retracted ? null : m.body,
-      retracted,
-      edited: m.edited_at !== null,
-      editedAt: m.edited_at,
+      body: m.body,
       createdAt: m.created_at,
-      editableUntil: retracted || !mine || until.getTime() <= now ? null : until.toISOString(),
-      mine,
-      attachments: retracted ? [] : (byMsg.get(m.id) ?? []),
+      mine: m.author_id === viewerId && m.author_side === viewerSide,
+      attachments: byMsg.get(m.id) ?? [],
     };
     if (opts.includeDraftedBy) out.draftedBy = m.drafted_by;
     return out;
   });
-}
-
-/** The edit/retract decision on a message row the caller has already admitted AND proven to be their
- *  own (each side answers "not yours" differently: 403 for staff, 404 for the portal). Refuses a
- *  retracted message and a message past its 15-minute window with 409. The row was read FOR UPDATE, so
- *  `within_window` is evaluated against the DB clock under the lock. */
-export function assertEditable(row: { retracted_at: string | null; within_window: boolean }): void {
-  if (row.retracted_at) throw new ConflictException("this message was removed");
-  if (!row.within_window) {
-    throw new ConflictException(`a message can only be changed within ${EDIT_WINDOW_MINUTES} minutes of sending`);
-  }
-}
-
-/** SQL fragment: is message `m` still inside its edit window, by the DB clock. */
-export const WITHIN_EDIT_WINDOW_SQL = `(now() < m.created_at + make_interval(mins => ${EDIT_WINDOW_MINUTES}))`;
-
-export async function applyEdit(c: PoolClient, messageId: string, body: string): Promise<{ editedAt: string }> {
-  const r = await c.query<{ edited_at: string }>(
-    `UPDATE conversation_messages SET body = $2, edited_at = now() WHERE id = $1 RETURNING edited_at`,
-    [messageId, body],
-  );
-  return { editedAt: r.rows[0].edited_at };
-}
-
-export async function applyRetract(c: PoolClient, messageId: string): Promise<{ retractedAt: string }> {
-  const r = await c.query<{ retracted_at: string }>(
-    `UPDATE conversation_messages SET retracted_at = now() WHERE id = $1 RETURNING retracted_at`,
-    [messageId],
-  );
-  return { retractedAt: r.rows[0].retracted_at };
 }

@@ -57,7 +57,7 @@ export interface ClientOverview {
   needsUs: ClientBallItem[];
   /** Outstanding items only the CLIENT can clear — the staff view of what the portal is asking them. */
   needsClient: ClientBallItem[];
-  /** PV4-09 (BFF §29d): open threads whose last non-retracted message is the client's. Optional: an older server
+  /** PV4-09 (BFF §29d): open threads whose last message is the client's. Optional: an older server
    *  omits it, and then the tile is not shown (a missing count is not a zero). */
   conversationsAwaitingReply?: number;
 }

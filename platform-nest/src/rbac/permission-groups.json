@@ -1872,7 +1872,7 @@
       "key": "client_conversation",
       "name": "Client Conversations",
       "domain": "core",
-      "description": "Read a client's conversation, write draft replies for a person to send, post messages to the client under your own name, and close or retract. PV4-02: the staff side of the client conversation; post and manage are refused to agents and automation by Cerbos.",
+      "description": "Read a client's conversation, write draft replies for a person to send, post messages to the client under your own name, and close or reopen threads (messages are permanent, PV-D34). PV4-02: the staff side of the client conversation; post and manage are refused to agents and automation by Cerbos.",
       "permissions": [
         "core.conversation.read",
         "core.conversation.draft",
@@ -1885,7 +1885,7 @@
       "key": "portal_conversation",
       "name": "Client Portal — Conversation",
       "domain": "portal",
-      "description": "Open a thread and post, edit or retract your own messages to our team from the client portal. Open to every active contact, viewers included (PV-D24: posting is not signing).",
+      "description": "Open a thread and post messages to our team from the client portal; messages are permanent once sent (PV-D34). Open to every active contact, viewers included (PV-D24: posting is not signing).",
       "permissions": [
         "portal.converse"
       ],

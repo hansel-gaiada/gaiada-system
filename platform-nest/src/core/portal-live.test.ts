@@ -115,19 +115,22 @@ describe("portal live bus (CP-5)", () => {
     a.off();
   });
 
-  // PV4-03 (client Conversation): the four conversation events map to the `conversation` topic, and a
+  // PV4-03 (client Conversation): the three conversation events map to the `conversation` topic, and a
   // frame carrying `clientId` reaches ONLY that client's subscribers. Draft events are never mapped.
   it("PV4-03: conversation events reach only the named client's subscribers, on the 'conversation' topic", () => {
     const a = collector("t1", ["c1"]);
     const b = collector("t1", ["c2"]);
     const both = collector("t1", ["c1", "c2"]);
     const otherTenant = collector("t2", ["c1"]);
-    for (const t of ["conversation.thread.opened", "conversation.thread.updated", "conversation.message.posted", "conversation.message.edited"]) {
+    for (const t of ["conversation.thread.opened", "conversation.thread.updated", "conversation.message.posted"]) {
       dispatchPortalFrame("t1", t, { clientId: "c1", threadId: "th", messageId: "m", body: "SECRET" }, AT);
     }
-    expect(a.frames).toEqual(Array.from({ length: 4 }, () => ({ topic: "conversation", at: AT })));
+    expect(a.frames).toEqual(Array.from({ length: 3 }, () => ({ topic: "conversation", at: AT })));
     expect(b.frames).toEqual([]);
-    expect(both.frames).toHaveLength(4);
+    expect(both.frames).toHaveLength(3);
+    // PV-D34: messages are permanent, so the retired edit/retract event wakes nobody.
+    dispatchPortalFrame("t1", "conversation.message.edited", { clientId: "c1", threadId: "th", messageId: "m" }, AT);
+    expect(a.frames).toHaveLength(3);
     expect(otherTenant.frames).toEqual([]);
     expect(JSON.stringify(a.frames)).not.toContain("SECRET");
     a.off(); b.off(); both.off(); otherTenant.off();

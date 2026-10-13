@@ -57,12 +57,16 @@ export interface InvoiceSnapshot {
   taxCode: string | null;
   issuer: unknown;
   arInvoiceId: string | null;
+  // PV5-04b (PV-D35): the service line staff chose, and the number code written at issue (frozen with the rest).
+  serviceLineKey: string | null;
+  numberCode: string | null;
 }
 
 const SNAPSHOT_KEYS: Array<keyof InvoiceSnapshot> = [
   "id", "tenantId", "clientId", "periodStart", "periodEnd", "status", "currency", "lines", "total",
   "originSite", "createdBy", "approvedBy", "approvedAt", "updatedBy", "createdAt", "updatedAt", "deletedAt",
   "invoiceNo", "issuedAt", "issuedBy", "issueDate", "dueDate", "subtotal", "taxTotal", "taxCode", "issuer", "arInvoiceId",
+  "serviceLineKey", "numberCode",
 ];
 
 /** Reads the invoice's CURRENT full row state. Returns null if the row doesn't exist (the caller
@@ -77,13 +81,13 @@ export async function snapshotInvoice(c: PoolClient, invoiceId: string): Promise
     created_at: string; updated_at: string; deleted_at: string | null;
     invoice_no: string | null; issued_at: string | null; issued_by: string | null; issue_date: string | null;
     due_date: string | null; subtotal: string | null; tax_total: string | null; tax_code: string | null;
-    issuer: unknown; ar_invoice_id: string | null;
+    issuer: unknown; ar_invoice_id: string | null; service_line_key: string | null; number_code: string | null;
   }>(
     `SELECT id, tenant_id, client_id, period_start, period_end, status, currency, lines, total::text AS total,
             origin_site, created_by, approved_by, approved_at, updated_by, created_at, updated_at, deleted_at,
             invoice_no, issued_at, issued_by, to_char(issue_date, 'YYYY-MM-DD') AS issue_date,
             to_char(due_date, 'YYYY-MM-DD') AS due_date, subtotal::text AS subtotal, tax_total::text AS tax_total,
-            tax_code, issuer, ar_invoice_id
+            tax_code, issuer, ar_invoice_id, service_line_key, number_code
        FROM invoices WHERE id = $1`,
     [invoiceId],
   );
@@ -97,6 +101,7 @@ export async function snapshotInvoice(c: PoolClient, invoiceId: string): Promise
     invoiceNo: row.invoice_no, issuedAt: row.issued_at, issuedBy: row.issued_by, issueDate: row.issue_date,
     dueDate: row.due_date, subtotal: row.subtotal, taxTotal: row.tax_total, taxCode: row.tax_code,
     issuer: row.issuer, arInvoiceId: row.ar_invoice_id,
+    serviceLineKey: row.service_line_key, numberCode: row.number_code,
   };
 }
 

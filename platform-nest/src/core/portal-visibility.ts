@@ -321,7 +321,7 @@ export function staffInvoicePaymentClientVisible(paymentAlias: string, invoiceAl
 //
 // Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-03; design decisions 3 and 4; PV4-Q1).
 // Every `conversation_messages` row is client-visible by definition (§2.4: the table has no visibility
-// column). What a client may REACH is decided by the THREAD, so a message, its edit/retract and its
+// column). What a client may REACH is decided by the THREAD, so a message and its
 // attachments are all admitted through `conversationThreadInPortalScope` on the parent thread.
 
 /** A thread is visible unless soft-deleted. Open and closed threads both show (a closed thread is
@@ -344,16 +344,16 @@ export function conversationThreadInPortalScope(alias: string, params: PortalSco
   return `${inCallerClients(alias, params.clients)} AND ${conversationThreadClientVisible(alias)} AND ${inCallerProjects(col(alias, "project_id"), params.projects, false)}`;
 }
 
-/** A message is always visible once its thread is: the table has no visibility state (a retracted
- *  message still shows, as "Message removed", with no body). Returned as `TRUE` after validating the
+/** A message is always visible once its thread is: the table has no visibility state. Returned as `TRUE` after validating the
  *  alias so the staff side composes it like any other row-state predicate. */
 export function conversationMessageClientVisible(alias: string): string {
   col(alias, "id");
   return `TRUE`;
 }
 
-/** A message's ATTACHMENTS are reachable only while the message is not retracted: retracting a
- *  message withdraws what it carried, on the portal download route as well as in the listing. */
+/** A message's ATTACHMENTS are reachable only while the message is not retracted. Retraction was retired
+ *  by PV-D34 (nothing sets `retracted_at` any more), so for every message posted since this is always true;
+ *  the guard stays so a row retracted under the old 15-minute window keeps its files withdrawn. */
 export function conversationAttachmentClientVisible(messageAlias: string): string {
   return `${col(messageAlias, "retracted_at")} IS NULL`;
 }

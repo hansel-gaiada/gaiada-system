@@ -39,7 +39,7 @@ export function BillingProfileForm({ profile }: { profile: BillingProfile | null
         <Field id="bp-legal" label="Legal name" hint="Printed on every invoice as the issuer.">
           <input id="bp-legal" name="legalName" required defaultValue={profile?.legalName ?? ""} disabled={pending} autoComplete="organization" aria-describedby="bp-legal-hint" />
         </Field>
-        <Field id="bp-prefix" label="Invoice number prefix" hint="Starts every invoice number, for example PREFIX/2026/0001. Capital letters, digits or a dash.">
+        <Field id="bp-prefix" label="Invoice number prefix" hint="Starts every invoice number, for example PREFIX/2026/10/CODE/0001. Capital letters, digits or a dash.">
           <input
             id="bp-prefix" name="invoicePrefix" required maxLength={16}
             defaultValue={profile?.invoicePrefix ?? ""} disabled={pending} aria-describedby="bp-prefix-hint"

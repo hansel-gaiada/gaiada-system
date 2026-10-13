@@ -33,7 +33,7 @@ export default async function PortalThreadPage({ params }: { params: Promise<{ t
         actions={<PortalLive topics={["conversation"]} />}
       />
       <div className="cp-stack">
-        <PortalThreadView thread={thread} messages={messages} tenant={tenant} serverNow={new Date().toISOString()} />
+        <PortalThreadView thread={thread} messages={messages} tenant={tenant} />
         <div><PortalLink href="/portal/conversation">All conversations</PortalLink></div>
       </div>
     </>

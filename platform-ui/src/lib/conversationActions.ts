@@ -2,7 +2,7 @@
 // PV4-09 — server actions behind the staff conversation screens (BFF §29b) and the meeting minutes (§29c).
 //
 // The platform is the authority on every one of these: Cerbos `conversation` read/post/draft/manage and
-// `meeting_recording` update/share_minutes, then the controllers' own rules (15-minute edit window, closed
+// `meeting_recording` update/share_minutes, then the controllers' own rules (closed
 // threads, frozen minutes). Nothing here widens or pre-empts that. The only checks on this side are shape
 // checks that save a round trip (empty body, too many files), and the platform repeats them.
 //
@@ -102,30 +102,6 @@ export async function startConversationAction(input: {
     });
     revalidatePath(hubPath(input.clientId));
     return { ok: true, threadId: r.threadId };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function editMessageAction(messageId: string, body: string): Promise<ConvResult> {
-  const c = await ctx();
-  if ("error" in c) return { ok: false, error: c.error };
-  const bad = bodyError(body);
-  if (bad) return { ok: false, error: bad };
-  try {
-    await platformFetch(`/api/${c.tenant}/conversation/messages/${encodeURIComponent(messageId)}`, c.userId, { method: "PATCH", body: JSON.stringify({ body }) });
-    return { ok: true };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function retractMessageAction(messageId: string): Promise<ConvResult> {
-  const c = await ctx();
-  if ("error" in c) return { ok: false, error: c.error };
-  try {
-    await platformFetch(`/api/${c.tenant}/conversation/messages/${encodeURIComponent(messageId)}`, c.userId, { method: "DELETE" });
-    return { ok: true };
   } catch (e) {
     return fail(e);
   }

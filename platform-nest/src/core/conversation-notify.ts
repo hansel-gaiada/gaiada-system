@@ -6,7 +6,7 @@
 //   a CLIENT posts (new thread or reply)      -> staff recipients,  `conversation.message.client`
 //   STAFF post, or a draft is SENT            -> in-scope contacts, `conversation.message.staff`
 //   an AGENT creates a draft                  -> staff recipients,  `conversation.draft.created`
-// Editing or retracting a message, and closing a thread, notify nobody.
+// Closing a thread notifies nobody. (Messages are permanent, PV-D34: there is no edit or retract to notify.)
 //
 // ── BEST-EFFORT, AFTER THE WRITE COMMITS ──────────────────────────────────────────────────────────
 // The controllers call these AFTER `withTenants` has returned (the message is committed). Everything in here, the thread

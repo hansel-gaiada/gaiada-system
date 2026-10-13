@@ -1,29 +1,25 @@
 import { render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { PortalThreadView } from "./PortalThreadView";
 import type { PortalMessage, PortalThread } from "@/lib/portal";
 
 // The server actions import next/headers + the session; none of that exists in jsdom and none of it is under test here.
 vi.mock("@/lib/portalActions", () => ({
-  portalPostMessage: vi.fn(), portalEditMessage: vi.fn(), portalRetractMessage: vi.fn(),
+  portalPostMessage: vi.fn(),
   portalStartConversation: vi.fn(),
 }));
 
 const NOW = "2026-10-13T12:00:00.000Z";
-// The component re-reads the clock after mount (to close the edit window while the page is open), so pin Date
-// to the same instant as `serverNow`; timers stay real so React's effects still run.
-beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(NOW)); });
-afterEach(() => { vi.useRealTimers(); });
 const thread = (over: Partial<PortalThread> = {}): PortalThread => ({
   id: "th1", clientId: "c1", clientName: "Northwind", projectId: "p1", projectName: "Website relaunch", general: false,
   subject: "Homepage copy", status: "open", createdSide: "client", lastMessageAt: NOW, createdAt: NOW, ...over,
 });
 const msg = (over: Partial<PortalMessage>): PortalMessage => ({
-  id: "m", threadId: "th1", authorId: "u", authorName: "Dana Whitfield", authorSide: "client", body: "Hello", retracted: false,
-  edited: false, editedAt: null, createdAt: "2026-10-13T11:55:00.000Z", editableUntil: null, mine: false, attachments: [], ...over,
+  id: "m", threadId: "th1", authorId: "u", authorName: "Dana Whitfield", authorSide: "client", body: "Hello",
+  createdAt: "2026-10-13T11:55:00.000Z", mine: false, attachments: [], ...over,
 });
 const view = (messages: PortalMessage[], t = thread()) =>
-  <PortalThreadView thread={t} messages={messages} tenant="co-1" serverNow={NOW} />;
+  <PortalThreadView thread={t} messages={messages} tenant="co-1" />;
 
 describe("PortalThreadView: messages", () => {
   it("lists messages in the order given (the server sends oldest first), with sender and side", () => {
@@ -41,17 +37,6 @@ describe("PortalThreadView: messages", () => {
     expect(items[1]).toHaveTextContent("Our team");
     expect(items[2]).toHaveTextContent("Wayan Colleague");
     expect(items[2]).toHaveTextContent("Your organisation");
-  });
-
-  it("marks an edited message", () => {
-    render(view([msg({ id: "1", body: "fixed", edited: true, editedAt: NOW })]));
-    expect(screen.getByText("edited")).toBeInTheDocument();
-  });
-
-  it("shows 'Message removed' for a retracted message and never its text", () => {
-    render(view([msg({ id: "1", body: null, retracted: true, mine: true, editableUntil: "2026-10-13T12:10:00.000Z" })]));
-    expect(screen.getByText("Message removed")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /edit|remove your message/i })).not.toBeInTheDocument();
   });
 
   it("lists attachments as downloads through the PORTAL's own file route", () => {
@@ -78,22 +63,16 @@ describe("PortalThreadView: messages", () => {
   });
 });
 
-describe("PortalThreadView: edit and remove window", () => {
-  it("offers Edit and Remove on my own message while editableUntil is in the future", () => {
-    render(view([msg({ id: "1", mine: true, authorName: "Dana", editableUntil: "2026-10-13T12:10:00.000Z" })]));
-    expect(screen.getByRole("button", { name: /edit your message/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /remove your message/i })).toBeInTheDocument();
-  });
-
-  it("offers neither once the window has passed", () => {
-    render(view([msg({ id: "1", mine: true, editableUntil: "2026-10-13T11:59:00.000Z" })]));
-    expect(screen.queryByRole("button", { name: /edit your message/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /remove your message/i })).not.toBeInTheDocument();
-  });
-
-  it("never offers them on someone else's message, whatever editableUntil says", () => {
-    render(view([msg({ id: "1", mine: false, authorSide: "staff", editableUntil: "2026-10-13T12:10:00.000Z" })]));
-    expect(screen.queryByRole("button", { name: /edit your message|remove your message/i })).not.toBeInTheDocument();
+describe("PortalThreadView: messages are permanent (PV-D34)", () => {
+  it("renders no Edit or Remove control on any message, mine or not, and no 'edited' or 'Message removed' state", () => {
+    render(view([
+      msg({ id: "1", mine: true, authorName: "Dana" }),
+      msg({ id: "2", mine: false, authorSide: "staff", authorName: "Made Prabowo" }),
+    ]));
+    expect(screen.queryByRole("button", { name: /edit|remove/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("edited")).not.toBeInTheDocument();
+    expect(screen.queryByText("Message removed")).not.toBeInTheDocument();
+    expect(screen.queryByText(/you can change this until/i)).not.toBeInTheDocument();
   });
 });
 
@@ -109,6 +88,11 @@ describe("PortalThreadView: closed thread", () => {
     render(view([msg({ id: "1" })]));
     expect(screen.getByLabelText("Your reply")).toBeInTheDocument();
     expect(screen.getByText("Prices and terms change only through a signed contract or amendment.")).toBeInTheDocument();
+  });
+
+  it("the composer says a sent message cannot be edited or removed (PV-D34), verbatim", () => {
+    render(view([msg({ id: "1" })]));
+    expect(screen.getByText("Messages can't be edited or removed once sent. Post a correction instead.")).toBeInTheDocument();
   });
 });
 

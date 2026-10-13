@@ -298,6 +298,8 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
     }, SOCIAL);
 
     await ensureBillingSetup(co);
+    // PV5-04b: an invoice needs a service line to be numbered (the seeded `services` line).
+    await withTenants([co], (c) => c.query(`UPDATE invoices SET service_line_key = 'services' WHERE id = $1`, [f.iSent]));
     await issueInvoice(co, f.iSent, admin);
     app = await buildApp();
   }, 120_000);

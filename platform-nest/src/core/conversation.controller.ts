@@ -29,7 +29,7 @@
 // `client_id` (the thread row) never come from the body. Opening a thread names a client by `clientId`;
 // that is the subject of the request, checked to exist in the tenant (RLS) and not be the internal client.
 import {
-  BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, HttpCode,
+  BadRequestException, Body, ConflictException, Controller, Get, HttpCode,
   NotFoundException, Param, Patch, Post, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
@@ -43,7 +43,7 @@ import {
   staffConversationDraftClientVisible, staffConversationMessageClientVisible, staffConversationThreadClientVisible,
 } from "./portal-visibility";
 import {
-  WITHIN_EDIT_WINDOW_SQL, applyEdit, applyRetract, assertEditable, createProjectThread, findOrCreateGeneralThread,
+  createProjectThread, findOrCreateGeneralThread,
   insertMessage, isUuid, markRead, prepareAttachments, readMessages, unreadCountSql, validateBody, validateSubject,
 } from "./conversation-core";
 import { notifyDraftCreated, notifyStaffPosted } from "./conversation-notify";
@@ -331,44 +331,6 @@ export class ConversationController {
     return { id: out.id, status: out.status, subject: out.subject, updatedAt: out.updatedAt };
   }
 
-  /** Edit one's own message within 15 minutes (`post`: editing one's words is posting them). Someone
-   *  else's message: 403 (staff may know it exists). Past the window or retracted: 409. */
-  @Patch(":tenantId/conversation/messages/:messageId")
-  async editMessage(
-    @Req() req: FastifyRequest,
-    @Param("tenantId") tenantId: string,
-    @Param("messageId") messageId: string,
-    @Body() body: { body?: unknown },
-  ) {
-    const b = body ?? {};
-    await authorize(req.principal, { kind: "conversation", tenantId }, "post");
-    const text = validateBody(b.body);
-    return withTenants([tenantId], async (c) => {
-      const m = await this.ownMessageForUpdate(c, messageId, req.principal.userId as string);
-      assertEditable(m);
-      const r = await applyEdit(c, messageId, text);
-      await emitEvent(c, tenantId, "conversation", messageId, "conversation.message.edited", {
-        clientId: m.client_id, projectId: m.project_id, threadId: m.thread_id, messageId, change: "edited", via: "staff",
-      });
-      return { id: messageId, edited: true, editedAt: r.editedAt };
-    });
-  }
-
-  /** Retract one's own message within 15 minutes (`manage`, per the policy header). */
-  @Delete(":tenantId/conversation/messages/:messageId")
-  async retractMessage(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("messageId") messageId: string) {
-    await authorize(req.principal, { kind: "conversation", tenantId }, "manage");
-    return withTenants([tenantId], async (c) => {
-      const m = await this.ownMessageForUpdate(c, messageId, req.principal.userId as string);
-      assertEditable(m);
-      const r = await applyRetract(c, messageId);
-      await emitEvent(c, tenantId, "conversation", messageId, "conversation.message.edited", {
-        clientId: m.client_id, projectId: m.project_id, threadId: m.thread_id, messageId, change: "retracted", via: "staff",
-      });
-      return { id: messageId, retracted: true, retractedAt: r.retractedAt };
-    });
-  }
-
   // ── Drafts (staff-only table; PV-D23) ────────────────────────────────────────────────────────────
 
   /** Create a draft reply (`draft`; allowed to agents). Idempotent on `idempotencyKey` within the tenant:
@@ -519,26 +481,6 @@ export class ConversationController {
     );
     if (!r.rows[0]) throw new NotFoundException("conversation not found");
     return r.rows[0];
-  }
-
-  private async ownMessageForUpdate(c: PoolClient, messageId: string, userId: string) {
-    if (!isUuid(messageId)) throw new NotFoundException("message not found");
-    const r = await c.query<{
-      id: string; thread_id: string; client_id: string; project_id: string | null; author_id: string;
-      author_side: string; retracted_at: string | null; within_window: boolean;
-    }>(
-      `SELECT m.id, m.thread_id, t.client_id, t.project_id, m.author_id, m.author_side, m.retracted_at,
-              ${WITHIN_EDIT_WINDOW_SQL} AS within_window
-         FROM conversation_messages m
-         JOIN conversation_threads t ON t.id = m.thread_id
-        WHERE m.id = $1 AND t.deleted_at IS NULL
-        FOR UPDATE OF m`,
-      [messageId],
-    );
-    const m = r.rows[0];
-    if (!m) throw new NotFoundException("message not found");
-    if (m.author_id !== userId || m.author_side !== "staff") throw new ForbiddenException("you can only change your own messages");
-    return m;
   }
 
   private async draftForUpdate(c: PoolClient, draftId: string) {

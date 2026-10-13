@@ -6,8 +6,8 @@
 //   - bodies are PLAIN TEXT, 1..10,000 characters (design decision 7). `splitLinks` is the only "rich" step and it
 //     returns data, never markup: the renderer turns each part into a React text node or an <a>.
 //   - at most 5 attachments and 10 MB in total per message (§29, lead decision).
-//   - own messages can be edited or retracted for 15 minutes; the server owns the clock and answers 409 past it,
-//     the UI only hides the controls early (`editableUntil` comes from the server, never computed here).
+//   - messages are PERMANENT (PV-D34): no edit, no retract, and so no `edited`, `retracted` or `editableUntil` field.
+//     A correction is a new message.
 
 export const MAX_BODY_CHARS = 10_000;
 export const MAX_ATTACHMENTS = 5;
@@ -17,6 +17,8 @@ export const THREAD_POLL_MS = 20_000;
 
 /** Plan §2.4 — said where staff write, because this is the sentence people get wrong in a reply. */
 export const COMPOSER_HINT = "Prices and terms change only through a signed contract or amendment.";
+/** PV-D34 — said beside the hint above, on every composer: a sent message cannot be changed. */
+export const COMPOSER_PERMANENT_HINT = "Messages can't be edited or removed once sent. Post a correction instead.";
 
 export type ThreadStatus = "open" | "closed";
 export type MessageSide = "client" | "staff";
@@ -36,7 +38,7 @@ export interface StaffThread {
   updatedAt?: string;
   createdBy?: string | null;
   unreadCount: number;
-  /** The last non-retracted message is the client's and the thread is open (§29b). */
+  /** The last message is the client's and the thread is open (§29b). */
   awaitingReply: boolean;
   pendingDrafts: number;
   /** From the backend (computed in SQL), never derived here. Optional: an older server omits it. */
@@ -56,14 +58,9 @@ export interface StaffMessage {
   authorId: string;
   authorName: string;
   authorSide: MessageSide;
-  /** `null` once retracted: the old body is never returned again. */
-  body: string | null;
-  retracted: boolean;
-  edited: boolean;
-  editedAt: string | null;
+  /** Always present: messages are permanent (PV-D34). */
+  body: string;
   createdAt: string;
-  /** Server clock + 15 minutes for an own, live message; `null` otherwise. */
-  editableUntil: string | null;
   mine: boolean;
   attachments: MessageAttachment[];
   /** The agent user whose draft this message was sent from (provenance, staff-only). */
@@ -130,15 +127,6 @@ export function threadTitle(t: Pick<StaffThread, "subject" | "general" | "projec
 /** What the thread is attached to, as a short label: the project's name, or "General". */
 export function threadScope(t: Pick<StaffThread, "general" | "projectName">): string {
   return t.general || !t.projectName ? "General" : t.projectName;
-}
-
-// ── edit window ──────────────────────────────────────────────────────────────────────────────────
-
-/** Whether to OFFER edit/retract. The server decides (409 past 15 minutes); this only avoids offering a
- *  control that is certain to be refused. */
-export function canEditNow(m: Pick<StaffMessage, "mine" | "retracted" | "editableUntil">, now: number = Date.now()): boolean {
-  if (!m.mine || m.retracted || !m.editableUntil) return false;
-  return ts(m.editableUntil) > now;
 }
 
 // ── composer limits ──────────────────────────────────────────────────────────────────────────────
@@ -209,7 +197,7 @@ export function draftedByNames(drafts: StaffDraft[]): Map<string, string> {
 /** Ids of messages in `next` that are not in `prev`, written by the other side. For the polite announcement. */
 export function newClientMessages(prev: StaffMessage[], next: StaffMessage[]): StaffMessage[] {
   const known = new Set(prev.map((m) => m.id));
-  return next.filter((m) => !known.has(m.id) && !m.mine && m.authorSide === "client" && !m.retracted);
+  return next.filter((m) => !known.has(m.id) && !m.mine && m.authorSide === "client");
 }
 
 // ── error wording ────────────────────────────────────────────────────────────────────────────────

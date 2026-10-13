@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  attachmentProblem, CONVERSATION_MAX_BYTES, groupThreads, linkifyText, messageEditable, threadTitle,
+  attachmentProblem, CONVERSATION_MAX_BYTES, groupThreads, linkifyText, threadTitle,
   type PortalThread,
 } from "./portal";
 
@@ -71,23 +71,6 @@ describe("attachmentProblem (client-side, before sending)", () => {
   });
   it("refuses an empty file by name", () => {
     expect(attachmentProblem([f("notes.txt", 0)])).toMatch(/notes\.txt is empty/);
-  });
-});
-
-describe("messageEditable (the 15-minute window)", () => {
-  const now = new Date("2026-10-13T12:00:00Z");
-  const base = { mine: true, retracted: false, editableUntil: "2026-10-13T12:10:00Z" };
-  it("is true for my own live message before editableUntil", () => {
-    expect(messageEditable(base, now)).toBe(true);
-  });
-  it("is false once the window has closed", () => {
-    expect(messageEditable({ ...base, editableUntil: "2026-10-13T11:59:59Z" }, now)).toBe(false);
-    expect(messageEditable({ ...base, editableUntil: "2026-10-13T12:00:00Z" }, now)).toBe(false);
-  });
-  it("is false for someone else's message, a retracted one, or when the server sent no window", () => {
-    expect(messageEditable({ ...base, mine: false }, now)).toBe(false);
-    expect(messageEditable({ ...base, retracted: true }, now)).toBe(false);
-    expect(messageEditable({ ...base, editableUntil: null }, now)).toBe(false);
   });
 });
 

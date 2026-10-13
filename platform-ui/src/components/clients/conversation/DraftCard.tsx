@@ -131,7 +131,7 @@ export function DraftCard({
         error={error}
       >
         <p style={{ margin: 0 }}>
-          {clientName} will see this now, as a message from you. You can edit or remove it for 15 minutes; after that it stays.
+          {clientName} will see this now, as a message from you. Messages can't be edited or removed once sent.
         </p>
         <blockquote style={{ margin: 0, padding: "8px 12px", borderLeft: "3px solid var(--status-warning)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
           {draft.body}

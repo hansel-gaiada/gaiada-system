@@ -5,10 +5,12 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { readResult } from "@/lib/readResult";
 import { getBillingProfile } from "@/lib/billingProfile-data";
+import { getNumberCodes, getServiceLines } from "@/lib/billingNumbering-data";
 import { Card, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { BankDetailsForm, BillingProfileForm } from "@/components/finance/BillingProfileForms";
+import { NumberCodesPanel, ServiceLinesPanel } from "@/components/finance/NumberingForms";
 import "@/components/billing/billing-screens.css";
 
 // PV5-09 — the company's BILLING PROFILE (`/finance/settings/billing-profile`; BFF §30).
@@ -26,6 +28,11 @@ import "@/components/billing/billing-screens.css";
 // "Clients pay into this account", saved by its own button in its own request, masked by default, and gated by a fresh
 // second factor (PV-D26): see `BillingProfileForms.tsx` and `lib/billingProfileActions.ts`.
 //
+// ── NUMBERING (PV-D35) ────────────────────────────────────────────────────────────────────────────
+// Two more sections: "Service lines" (the kinds of work the company invoices; staff pick one per invoice) and "Number codes"
+// (the staff-only decode table for the `{code}` in an invoice number: {company}/{yyyy}/{mm}/{code}/{nnnn}). Each is read on its
+// own and refuses explicitly: a failed read of the lines is never shown as "no lines yet". Nothing here reaches the portal.
+//
 // NPWP and PKP are not here. They live in Accounting settings (one source each), and Issue refuses a taxed invoice until
 // Finance has recorded the PKP status.
 export default async function BillingProfilePage() {
@@ -36,6 +43,10 @@ export default async function BillingProfilePage() {
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
 
   const res = await readResult(getBillingProfile(userId, tenant));
+  const [lines, codes] = await Promise.all([
+    readResult(getServiceLines(userId, tenant)),
+    readResult(getNumberCodes(userId, tenant)),
+  ]);
 
   return (
     <div className="fin-page">
@@ -68,6 +79,25 @@ export default async function BillingProfilePage() {
           </Card>
           <Card>
             <BankDetailsForm bank={res.data?.bank ?? null} hasProfile={res.data !== null} assuranceHigh={me.assurance === "high"} />
+          </Card>
+          <Card>
+            {lines.kind === "ok" ? (
+              <ServiceLinesPanel lines={lines.data} />
+            ) : (
+              <ReadRefusal subject="this company's service lines" inline kind={lines.kind} reason={lines.kind === "unavailable" ? lines.reason : undefined} />
+            )}
+          </Card>
+          <Card>
+            {codes.kind === "ok" && lines.kind === "ok" ? (
+              <NumberCodesPanel data={codes.data} lines={lines.data} />
+            ) : (
+              <ReadRefusal
+                subject="this company's number codes"
+                inline
+                kind={codes.kind !== "ok" ? codes.kind : lines.kind !== "ok" ? lines.kind : "unavailable"}
+                reason={codes.kind === "unavailable" ? codes.reason : lines.kind === "unavailable" ? lines.reason : undefined}
+              />
+            )}
           </Card>
         </>
       )}
