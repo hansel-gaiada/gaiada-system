@@ -1,0 +1,140 @@
+# DW-6h (docs/FRONTEND-BFF-CONTRACT.md §35.4; plan docs/plans/2026-10-13-department-workspaces.md §4.2 and §14.3) —
+# authz for the NEW `creative_asset` resource kind (core, no module): the REVIEW ROUNDS of an Asset Library asset
+# (`creative_assets`, its version group). Four actions:
+#   read             — see an asset's review rounds (company_admin, manager, member, viewer).
+#   request_review   — open a round on the latest version (company_admin, manager, member). Viewers cannot.
+#   decide_review    — approve or request changes. company_admin and manager; an `org_unit_lead` over the asset's
+#                      department (its own rule); and a REQUESTER of a work request the asset was delivered against (its
+#                      own rule). NOBODY decides a round they opened (an EFFECT_DENY, below).
+#   withdraw_review  — close an open round without a decision. company_admin and manager; and the person who OPENED it
+#                      (its own rule).
+#
+# ── THE EXISTING ASSET ROUTES ARE NOT GATED HERE ─────────────────────────────────────────────────
+# Listing, saving (including a new version), reading, streaming and deleting assets keep authorising as the generic
+# `file` kind, exactly as before (§35.4: moving them would be an access change). This kind gates the review actions only.
+# Restart `gaiada-test-cerbos` (and the live sidecar) after editing this file; the bind-mount does not hot-reload.
+#
+# ── EVERY ATTRIBUTE-DEPENDENT RULE STANDS ALONE (the HIER-2 authoring rule) ──────────────────────
+#   1. company_admin / manager      — scope-only roles, unconditional beyond `inTenant && notLow`.
+#   2. org_unit_lead (decide_review) — `resource.attr.unitAncestors` (the asset's `department_id` expanded through
+#                                      `org_unit_closure`) contains the grant's unit. Its own rule, NEVER mixed with a
+#                                      scope role.
+#   3. the REQUESTER (decide_review) — `principal.id in resource.attr.requesterIds`, on `member`. Self-scoped: the
+#                                      bundle marks member·decide_review `selfScoped`.
+#   4. the OPENER (withdraw_review)  — `resource.attr.reviewRequestedBy == principal.id`, on `member`. Self-scoped too.
+# The relationship conditions are written INLINE in each rule, never behind a policy variable: the role-bundle generator
+# and the permission-arm hazard scan classify a rule by its text, and a variable would hide the self-scope.
+# All three attributes are fed by the HANDLER (creative-reviews.ts) from the database, never from a request body:
+# `unitAncestors` from the version's `department_id`, `requesterIds` from `work_request_assets` -> `work_requests.
+# requested_by` over every version of the group, `reviewRequestedBy` from the round's `requested_by`. An unfed resource
+# fails closed: [] contains nobody and "" equals no principal id.
+#
+# ── NOBODY APPROVES A REVIEW THEY OPENED (maker/checker) ─────────────────────────────────────────
+# An EFFECT_DENY on `decide_review` when the round's opener is the caller, on `roles: ["user"]` (every principal carries
+# it), so under deny-overrides it beats every ALLOW below: company_admin, manager, the lead and requester rules, the
+# platform_admin wildcard. Its guard is shaped exactly like resource_invoice.yaml's `approve` DENY (`has() && != ""`
+# before the equality): it fires only when the opener is KNOWN and is the caller. It does not fail closed on an unfed
+# attribute on purpose: the handler ALWAYS feeds it from the round row (`requested_by` is NOT NULL), and a fail-closed
+# form would make every scope-level probe that sends no round (authz-permissions' platform_admin sweep, `can()`) report
+# platform_admin as unable to decide anything. A refusal that only a missing attribute can trigger is not a control.
+#
+# ── NO AUTOMATION OR BOT PRINCIPAL DECIDES (after the PV-4 and DW-5c precedent) ──────────────────
+# Shaped exactly like resource_work_request.yaml's: `roles: ["user"]`, `has()`-guarded. Only `decide_review` is denied:
+# an agent may read rounds, and the plan leaves asking for a review to the separate AI plan's tools.
+#
+# ── THE PERMISSION ARM COVERS `read` AND `request_review` ONLY ───────────────────────────────────
+# `decide_review` (lead rule: attribute-dependent, fails iam-04-reg1-mirror-reach-invariant; requester rule: self-scoped,
+# permission-arm-hazard-scan Pattern B) and `withdraw_review` (opener rule: self-scoped) are the shapes a flat `perms`
+# mirror cannot express: a mirror would let any holder of the key decide or withdraw EVERY round. Same call as
+# resource_work_request.yaml for cancel/deliver/decline. Consequence: the permission-native `owner` role (zero role-arm
+# rules) holds all four keys in its bundle but reaches only `read` and `request_review` through Cerbos, unless it also
+# holds company_admin or manager.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: creative_asset
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["request_review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["decide_review", "withdraw_review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Department head over the ASSET'S department — its own rule, never mixed (HIER-2 §1.4). Containment is the derived
+    # role's: the grant's scopeId must be in resource.attr.unitAncestors (the version's `department_id` and every
+    # ancestor of it). An asset with no department feeds [] and no lead matches.
+    - actions: ["decide_review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # A REQUESTER of a work request the asset was delivered against (DW-5c, `work_request_assets`) decides its rounds.
+    # Its own rule, on `member`, self-scoped. An unfed list is empty and contains nobody.
+    - actions: ["decide_review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.requesterIds) &&
+            request.principal.id in request.resource.attr.requesterIds
+
+    # The person who OPENED the round withdraws it. Its own rule, on `member`, self-scoped. The `has()` guard and the
+    # `!= ""` test make a call that never fed `reviewRequestedBy` deny.
+    - actions: ["withdraw_review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.reviewRequestedBy) && request.resource.attr.reviewRequestedBy != "" &&
+            request.resource.attr.reviewRequestedBy == request.principal.id
+
+    # ══════════ nobody decides a round they opened, whatever their role ═══════════════════════════
+    # Fires when the opener is known and is the caller (see the header). Beats the platform_admin wildcard and every ALLOW.
+    - actions: ["decide_review"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.resource.attr.reviewRequestedBy) && request.resource.attr.reviewRequestedBy != "" &&
+            request.resource.attr.reviewRequestedBy == request.principal.id
+
+    # ══════════ automation and bot principals never decide ══════════════════════════════════════
+    # Same `roles: ["user"]` DENY shape as resource_work_request.yaml.
+    - actions: ["decide_review"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            has(request.principal.attr.kind) &&
+            request.principal.attr.kind in ["automation", "bot"]
+
+    # =========== permission-matching arm: read / request_review ONLY (see the header) ===================
+    # Generic global-or-company mirror per action. The platform_admin wildcard is deliberately NOT mirrored
+    # (IAM-04c: the tier bypass never enters the permission catalog).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_creative_asset_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["request_review"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_creative_asset_request_review"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
