@@ -11,12 +11,16 @@ import type { ReactNode } from "react";
 import type { Me } from "@/lib/platform";
 import type { OverviewWidget, PulseTile } from "@/lib/workspaces";
 import type { DeptLauncher } from "@/lib/deptToolkits";
+import type { WorkLinks } from "@/lib/overviewWork";
 import type { OverviewPeriod } from "@/lib/overview";
 import { NeedsYou } from "./NeedsYou";
 import { Today } from "./Today";
 import { YourNumbers } from "./YourNumbers";
 import { MyActivity } from "./MyActivity";
 import { Pulse } from "./Pulse";
+import { Projects } from "./Projects";
+import { Campaigns } from "./Campaigns";
+import { Requests } from "./Requests";
 
 export interface OverviewWidgetProps {
   me: Me;
@@ -30,6 +34,8 @@ export interface OverviewWidgetProps {
   widget: OverviewWidget;
   /** The workspace's built Pulse tiles (DW-3e); empty for Company and for a workspace with none built. */
   pulse?: readonly PulseTile[];
+  /** The pages the Work blocks link to, from the workspace tabs in the registry (DW-3f). */
+  workLinks?: WorkLinks;
 }
 
 export type OverviewWidgetComponent = (props: OverviewWidgetProps) => ReactNode | Promise<ReactNode>;
@@ -41,6 +47,9 @@ export const OVERVIEW_WIDGETS: Readonly<Record<string, OverviewWidgetComponent>>
   "your-numbers": YourNumbers,
   "my-activity": MyActivity,
   pulse: Pulse,
+  projects: Projects,
+  campaigns: Campaigns,
+  requests: Requests,
 };
 
 export function hasOverviewWidget(key: string, widgets: Readonly<Record<string, OverviewWidgetComponent>> = OVERVIEW_WIDGETS): boolean {

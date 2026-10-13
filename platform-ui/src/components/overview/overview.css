@@ -88,3 +88,13 @@
 .ov-pulse__tile { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-4); min-width: 0; color: inherit; text-decoration: none; }
 a.ov-pulse__tile:hover .ov-nums__value { text-decoration: underline; text-underline-offset: 3px; }
 a.ov-pulse__tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- Work band (DW-3f): Projects, Campaigns and Requests ---- */
+.ov-work__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-12); }
+.ov-work__item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ov-work__name { font: 600 14px/1.3 var(--font-body); color: var(--text-primary); text-decoration: none; overflow-wrap: anywhere; }
+.ov-work__name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ov-work__name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov-work__health { font: 400 13px var(--font-body); color: var(--text-primary); }
+.ov-work__health--risk { font-weight: 600; }
+.ov-work__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); }

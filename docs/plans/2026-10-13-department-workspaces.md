@@ -391,7 +391,7 @@ All of this is for people on the pilot switch (DW-D7). Everyone else keeps today
 | My activity (3j) | `getProductivity` (16 weeks plus today; PM work only until DW-4h) | — |
 | Pulse (3e) | Web Dev: change requests (new), pipeline gates waiting, monitoring summary. Social: scheduled and failed posts. IT: account requests | SEO, Creatives and the deliverables tile have no honest reader yet. HR and Finance tiles are DW-7e |
 | Projects (3f) | owned projects with `computeProjectHealth`, top 4 by risk | `listProjects` must be read through `ReadResult`, not `.catch(() => [])` |
-| Campaigns, Requests (3f) | Social campaigns (`Guarded`); Web Dev change requests | Shared campaign parts are DW-5a and requests between departments DW-5c. Until then these blocks show only these two and stay hidden elsewhere |
+| Campaigns, Requests (3f) | Built after DW-5: `readSharedCampaigns` (`GET campaigns?unitId=`) and `readRequestSummary` (`GET requests/summary`), both `ReadResult` readers, for the department's unit | Agency pack only. Hidden where the workspace has no org node (HR, Finance, IT). Requests links to Incoming only where the workspace has that tab |
 | Learning (3g) | `getMyLearning`: assigned, due, overdue | No per-course progress, so "next course" becomes "next due" |
 | Appraisal (3g) | `getMyAppraisals`: the last finalized result and the current pack's status | Staff cannot read the cycle's stage (HR-only endpoint), so it is not shown |
 | Me \| Team (3h) | department `getReportDocument` (narrowed to the led unit by the server), `getCheckinCompliance` with `rollUpCompliance` | Team learning is tenant-wide only (`getCompliance`), so it is shown only where the reader is not narrowed wrongly |

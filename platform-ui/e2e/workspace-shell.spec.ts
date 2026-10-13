@@ -402,7 +402,7 @@ test.describe("search_staff (seo-staff@gaiada.com)", () => {
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 // DW-3a/3b/3c: the Overview's frame and its Now band. A placed employee (webdev@gaiada.com = u-dev, Web Dev >
-// Frontend) lands on their department's Overview from `/`. Needs you, Today, Your numbers, My activity and Pulse are built; every other
+// Frontend) lands on their department's Overview from `/`. Needs you, Today, Your numbers, My activity, Pulse and the Work band (Projects, Campaigns, Requests) are built; every other
 // block is still planned, so under them is today's page body (nothing is removed, plan §2.6 rule 1); never an invented
 // number.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -436,7 +436,7 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     const actions = page.getByRole("navigation", { name: "Quick actions" });
     await expect(actions.getByRole("link", { name: "New briefing" })).toHaveAttribute("href", "/departments/dept-1/prd");
 
-    // Only the Now, You and Department (Pulse) bands are built, so today's department Home stays below them, under
+    // Only the Now, You, Department (Pulse) and Work bands are built, so today's department Home stays below them, under
     // its own label, and the "being built" line is not needed.
     await expect(page.getByRole("heading", { level: 2, name: "Now", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2, name: "You", exact: true })).toBeVisible();
@@ -444,7 +444,8 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(page.getByRole("heading", { name: "More from Web Dev" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
     await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
-    for (const band of ["Work", "Growth"]) await expect(page.getByRole("heading", { level: 2, name: band, exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Growth", exact: true })).toHaveCount(0);
   });
 
   // DW-3c: what `/` showed before it redirected (the queue, the check-in) is on the Overview, so a pilot user
@@ -587,6 +588,55 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(pulse.getByText("Deliverables due")).toHaveCount(0);
   });
 
+  // DW-3f: the Work band. With the DEMO_MODE backend the three blocks are in these honest states, each asserted exactly:
+  //  - Projects: Web Dev's open projects (the demo serves `GET projects?departmentId=`), "Client site redesign" first
+  //    because it has a blocked task (at risk), each with its health and next due date (all the demo dates are past, so
+  //    "No upcoming due date" is as honest as a date);
+  //  - Campaigns: the demo's two campaigns, which carry no part for the department ("Our part: No part");
+  //  - Requests: the demo has no `requests/summary`, so the read fails and the block says Unavailable, never 0.
+  // Looked up inside the page (`#main-content`), because React's streaming leaves a hidden copy of it outside.
+  test("the Work band has Projects, Campaigns and Requests, each in its honest demo state", async ({ page, context }) => {
+    await signInWebDev(page, context);
+    await page.goto("/departments/dept-1");
+    await expect(page).toHaveURL(/\/departments\/dept-1$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
+
+    const main = page.locator("#main-content");
+    await expect(main.getByRole("heading", { level: 2, name: "Work", exact: true })).toBeVisible();
+
+    const projects = main.getByRole("region", { name: "Projects", exact: true });
+    await expect(projects).toBeVisible();
+    await expect(projects.getByText("Unavailable")).toHaveCount(0);
+    const items = projects.getByRole("listitem");
+    // The demo store is shared by every test in a run, so a project another test created in Web Dev may sit beside
+    // the two seeded ones; the block shows at most four, with the blocked one first.
+    await expect.poll(async () => await items.count()).toBeGreaterThanOrEqual(2);
+    expect(await items.count()).toBeLessThanOrEqual(4);
+    await expect(items.nth(0)).toContainText("Client site redesign");
+    await expect(items.nth(0)).toContainText(/At risk · .*blocked/);
+    for (const item of await items.all()) {
+      await expect(item).toContainText(/(At risk · .+|On track|No tasks yet)/);
+      await expect(item).toContainText(/(Next due \d{2} [A-Z][a-z]{2} \d{4}|No upcoming due date)/);
+    }
+    await expect(items.nth(0).getByRole("link", { name: "Client site redesign" })).toHaveAttribute("href", "/projects/p-web-1");
+    await expect(projects.getByRole("link", { name: "All projects" })).toHaveAttribute("href", "/departments/dept-1/projects");
+
+    const campaigns = main.getByRole("region", { name: "Campaigns", exact: true });
+    await expect(campaigns).toBeVisible();
+    await expect(campaigns.getByRole("listitem")).toHaveCount(2);
+    await expect(campaigns.getByRole("link", { name: "Q3 lead-gen push" })).toBeVisible();
+    await expect(campaigns.getByRole("link", { name: "Brand awareness — social" })).toBeVisible();
+    await expect(campaigns.getByText("Our part: No part")).toHaveCount(2);
+    await expect(campaigns.getByText("Unavailable")).toHaveCount(0);
+    await expect(campaigns.getByRole("link", { name: "Shared campaigns" })).toHaveAttribute("href", "/departments/dept-1/campaigns");
+
+    const requests = main.getByRole("region", { name: "Requests", exact: true });
+    await expect(requests).toBeVisible();
+    await expect(requests.getByText("Unavailable")).toBeVisible();
+    await expect(requests.getByRole("listitem")).toHaveCount(0);
+    await expect(requests.getByText(/^\d+$/)).toHaveCount(0);
+  });
+
   test("the department's own header is not doubled on the Overview, and stays on its other pages", async ({ page, context }) => {
     await signInWebDev(page, context);
     await page.goto("/departments/dept-1");
@@ -645,6 +695,9 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await expect(page.getByRole("heading", { name: "Project health" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
     await expect(page.getByText(/Overview is being built/)).toHaveCount(0);
+    // None of the Overview's Work band (DW-3f) reaches a classic user.
+    await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true })).toHaveCount(0);
+    for (const name of ["Projects", "Campaigns", "Requests"]) await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
   });
 });
 
@@ -655,6 +708,8 @@ test.describe("the Overview's frame: the functional workspaces keep their page b
       await page.goto(path);
       await expect(page.getByRole("heading", { level: 1 }), path).toHaveText(/^Good (morning|afternoon|evening), Clement$/);
       await expect(page.getByRole("heading", { name: `More from ${label}` }), path).toBeVisible();
+      // No org node to scope to (DW-3f): no Work band.
+      await expect(page.getByRole("heading", { level: 2, name: "Work", exact: true }), path).toHaveCount(0);
       await expect(page.getByRole("group", { name: "Period" }), path).toBeVisible();
       await expect(page.getByText(/Overview is being built/), path).toHaveCount(0);
     }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/overview";
 import { Skeleton } from "@/components/Feedback";
 import { builtPulseTiles } from "@/lib/overviewPulse";
+import { workLinks, workWidgetPlaced } from "@/lib/overviewWork";
 import { PeriodSelector } from "./PeriodSelector";
 import { WidgetBoundary } from "./WidgetBoundary";
 import { OVERVIEW_WIDGETS, hasOverviewWidget, type OverviewWidgetComponent } from "./widgets";
@@ -60,7 +61,9 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
   // The Pulse is the one block whose content depends on the workspace: with no built tile it is not placed at
   // all, so the Department band does not draw a label over nothing.
   const pulse = builtPulseTiles(subject);
-  const bands = selectBands(subject.widgets, ctx, (key) => hasOverviewWidget(key, widgets) && (key !== "pulse" || pulse.length > 0));
+  // The Work blocks (DW-3f) read for the department unit: without one they are not placed, so the Work band is dropped.
+  const links = workLinks(subject);
+  const bands = selectBands(subject.widgets, ctx, (key) => hasOverviewWidget(key, widgets) && (key !== "pulse" || pulse.length > 0) && workWidgetPlaced(key, subject));
   const actions = selectQuickActions(subject.quickActions, { ...ctx, deptId: subject.deptId });
   const company = activeCompany(me, tenantId)?.name;
   const firstName = me.name.trim().split(/\s+/)[0];
@@ -108,6 +111,7 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
                         tools={subject.tools}
                         widget={w}
                         pulse={pulse}
+                        workLinks={links}
                       />
                     </Suspense>
                   </WidgetBoundary>

@@ -59,6 +59,7 @@ import "server-only";
 //     `reactions: [{emoji,count,mine}]` aggregated over a CLOSED 8-emoji set
 //     (👍 ❤️ 🎉 👀 ✅ 💡 🙏 🔥).
 import { platformFetch, PlatformError } from "./platform";
+import { readResult, type ReadResult } from "./readResult";
 import { getOrgStructure, type OrgNode } from "./org";
 import { listMembers } from "./entities";
 import type { TagColor } from "./tagColors";
@@ -607,6 +608,22 @@ export const getPmTask = async (u: string, t: string, id: string): Promise<PmTas
   const task = await skipUnavailable(platformFetch<PmTask | null>(`/api/${t}/pm/tasks/${id}`, u), null);
   return task ? normalizePmTask(task) : null;
 };
+// DW-3f: the Overview's Projects block needs a project's tasks and milestones WITHOUT the degrade above: a refused or
+// missing read must not turn a project into "no tasks, on track". A refusal is `forbidden`, any other failure (a
+// module that is off, a 5xx) is `unavailable`, and only an `ok` answer may be read as "this is the project's state".
+export interface ProjectPmInputs { tasks: PmTask[]; milestones: Milestone[]; statuses: ProjectStatus[] }
+export const readProjectPmInputs = (u: string, t: string, projectId: string): Promise<ReadResult<ProjectPmInputs>> =>
+  readResult(
+    Promise.all([
+      platformFetch<unknown>(`/api/${t}/pm/projects/${projectId}/tasks`, u),
+      platformFetch<unknown>(`/api/${t}/pm/projects/${projectId}/milestones`, u),
+      listProjectStatuses(u, t, projectId),
+    ]).then(([tasks, milestones, statuses]) => {
+      // A 200 that is not two lists is a broken read, not "no tasks".
+      if (!Array.isArray(tasks) || !Array.isArray(milestones)) throw new Error("The project's work read returned an unexpected answer.");
+      return { tasks: normalizePmTasks(tasks as PmTask[]), milestones: milestones as Milestone[], statuses };
+    }),
+  );
 export const listMilestones = (u: string, t: string, projectId: string) =>
   skipUnavailable(platformFetch<Milestone[]>(`/api/${t}/pm/projects/${projectId}/milestones`, u), [] as Milestone[]);
 export const listDocs = (u: string, t: string, projectId: string) =>

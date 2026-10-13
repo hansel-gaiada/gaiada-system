@@ -217,9 +217,12 @@ const DEPARTMENT_OVERVIEW: readonly OverviewWidget[] = [
   { key: "my-activity", band: "you", label: "My activity" },
   { key: "condition", band: "department", label: "Department condition", ticket: "DW-3k" },
   { key: "pulse", band: "department", label: "Pulse" },
-  { key: "projects", band: "work", label: "Projects", ticket: "DW-3f" },
-  { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY, ticket: "DW-3f" },
-  { key: "requests", band: "work", label: "Requests", gate: AGENCY_ONLY, ticket: "DW-3f" },
+  // The Work blocks (DW-3f) each read for the department's org node (`departmentId` / `unitId`). HR, Finance and IT are
+  // functional workspaces with no node, so they have nothing to scope to and the frame does not place these blocks
+  // there (`workWidgetPlaced`); the Work band then has nothing and is dropped.
+  { key: "projects", band: "work", label: "Projects" },
+  { key: "campaigns", band: "work", label: "Campaigns", gate: AGENCY_ONLY },
+  { key: "requests", band: "work", label: "Requests", gate: AGENCY_ONLY },
   { key: "learning", band: "growth", label: "Learning", ticket: "DW-3g" },
   { key: "appraisal", band: "growth", label: "Appraisal", ticket: "DW-3g" },
 ];

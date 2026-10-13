@@ -11,6 +11,18 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.135.0` - DW-3f: the Overview's Projects, Campaigns and Requests (2026-10-13) - PROTOTYPED
+
+- **What.** The Overview's Work band (pilot only): Projects, Campaigns and Requests, each its own block behind its own Suspense and WidgetBoundary. Pure rules in `lib/overviewWork.ts`; widgets in `components/overview/widgets/{Projects,Campaigns,Requests,WorkBlocks}.tsx`.
+  - Projects: the department's open projects (`GET projects?departmentId=`, read through `readResult`), the top 4 by risk (at risk first, then health unreadable, then on track), each with `computeProjectHealth` health and its next due date, linking to the project, and a link to the projects list.
+  - Campaigns: `readSharedCampaigns` for the unit; the shared campaigns the department has a part in, with OUR part's status and the dates, linking to Campaigns > Shared. Agency pack only (the registry gate).
+  - Requests: `readRequestSummary` for the unit; counts waiting on us and sent, the oldest waiting with its age, each count linking to its tab where the workspace has it.
+  - Honest: a failed read says "Unavailable" and a refused one "No access" in the block alone; never an empty "no projects" and never 0. A project whose own work could not be read keeps its row, says Unavailable, and ranks above "on track".
+  - A workspace with no org node (HR, Finance, IT) has nothing to scope to: the three blocks are not placed (`workWidgetPlaced`) and the Work band is dropped with them.
+- **Added a reader.** `readProjectPmInputs` in `lib/pm.ts`: a project's tasks, milestones and status registry as a `ReadResult`. The existing PM readers turn a 403 or 404 into `[]`, which would have read as "no tasks, on track".
+- **Demo.** `GET projects` in the demo fixtures now honours `departmentId` (the BFF facet, §33), as `clientId` already was.
+- **Not changed.** The GM's company-level Campaigns block stays DW-3i.
+
 ### platform-nest `0.126.0` - DW-4d: a department head's Team appraisals (2026-10-13) - PROTOTYPED
 
 Contract: `docs/FRONTEND-BFF-CONTRACT.md` §39. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.3 and §5.6.

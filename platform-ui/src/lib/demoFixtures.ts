@@ -2577,11 +2577,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     // parameter would make the client hub's Work tab show EVERY project in demo mode — which is
     // exactly the "demo fixtures hide frontend-first drift" trap this file's own header warns about.
     // PV3-09: `clientVisible` (BFF §22d) is "the project has a client"; a project with none is internal work.
+    // DW-3f: mirror the `departmentId` facet too (BFF §33, the projects the node owns). The demo tree is flat, so
+    // equality is the whole rule; omitted is unchanged.
+    const deptFacet = url.searchParams.get("departmentId");
     return ok(applyDemoClientFilter(
       (PROJECTS[projMatch[1]] ?? []) as Record<string, unknown>[],
       url.searchParams.get("clientId"),
       "client_id",
-    ).map((pr) => ({ ...pr, clientVisible: pr.client_id != null })));
+    ).filter((pr) => !deptFacet || pr.department_id === deptFacet).map((pr) => ({ ...pr, clientVisible: pr.client_id != null })));
   }
   const projDetailMatch = p.match(/^\/api\/[^/]+\/projects\/([^/]+)$/);
   if (projDetailMatch) {
