@@ -321,6 +321,13 @@
 is allowed. Teeth: remove the bot `EFFECT_DENY` and its test fails. After deploy, Cerbos is restarted
 and probed (PV5-13).
 
+### PV5-02b: interim bank-details rule (PV-D29)
+
+**As built (2026-10-13, `bca2af0d`, live in 370):** live Keycloak emits no `amr` claim, so no web session reaches high
+assurance. Until `infra/runbooks/enable-mfa.md` is applied, the `set_bank_details` high-assurance DENY fires only for a
+principal holding no `owner`/`finance_manager` grant on the company. The administrator still needs high assurance;
+bots are refused; `vendor_master` is unchanged. Restore PV-D26 in full once MFA is live.
+
 ### PV5-03: provider comparisons (docs only)
 
 **Owner:** senior-integrator. **Wave 1.** Model: Sonnet·high.
@@ -409,6 +416,18 @@ billing-profile controller, and their tests.
 - `PATCH status=paid` answers 400.
 - A bot calling issue gets 403 before any validation.
 - Teeth: remove the readiness re-check inside the transaction and the "no profile" test fails.
+
+### PV5-04b: invoice numbers per PV-D35
+
+**As built (2026-10-13, `0e313487`, migration `202610132115`):** numbers read `{company}/{yyyy}/{mm}/{code}/{nnnn}`.
+- `{company}` is the billing profile's `invoice_prefix`; `{nnnn}` runs per company per month (`document_series.month`,
+  the 4-argument `next_document_no`; the 3-argument one delegates with month 0).
+- `{code}` is an opaque 3-character code per (service line, client business type) from `billing_number_codes`, generated
+  inside the issue transaction under a per-company advisory lock, pre-assignable by finance, never changed or deleted.
+  Staff decode it; the portal never reads the table.
+- Each company keeps its own `billing_service_lines` (optionally linked to a department). An invoice's service line
+  defaults only when every line's project maps to one active line; otherwise staff choose. No service line is the
+  readiness blocker `NO_SERVICE_LINE`.
 
 ### PV5-05: intercompany posting for group clients
 
@@ -714,7 +733,7 @@ the MCP hub registration, golden cases and the capability inventory.
 |---|---|---|
 | PV5-Q1 | **Counsel:** the contract value at or above which a certified signature is required. Is an amendment measured by its own value, or together with its agreement? | **No threshold.** Under PV-D25 nothing is certified until PV5-11 unparks, which this answer can trigger. When it does, an amendment to a certified agreement is certified |
 | PV5-Q2 | **Counsel:** does stamp duty (bea meterai, UU 10/2020) apply to our agreements, and to invoices or receipts above Rp5,000,000, and should the ERP add an e-Meterai? | **Not applied by the system.** Staff handle it outside the ERP until counsel answers; PV5-03 records which providers can add one |
-| PV5-Q3 | The invoice number format | `{prefix}/{yyyy}/{nnnn}`, restarting each calendar year, with the prefix set in the billing profile |
+| PV5-Q3 | The invoice number format | **RULED PV-D35 (2026-10-13):** `{company}/{yyyy}/{mm}/{code}/{nnnn}`, an opaque service-line and business-type code, the series per company per month. Built as PV5-04b |
 
 ## Not in PV-5 (and where each goes)
 
