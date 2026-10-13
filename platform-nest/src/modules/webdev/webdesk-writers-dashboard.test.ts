@@ -308,5 +308,7 @@ describe.skipIf(!live)("M5-W8 · the writer dashboard over HTTP, real Cerbos and
     } finally {
       for (let i = 0; i < 26; i++) zb.compositions.delete(`bulk${String(i).padStart(2, "0")}`);
     }
-  });
+    // 29+ HTTP pages, each through real Cerbos and Postgres: 20 s (the default) is too tight on a loaded gate (two gates at
+    // once on sumopod timed it out, the run before passed on the same base).
+  }, 60_000);
 });
