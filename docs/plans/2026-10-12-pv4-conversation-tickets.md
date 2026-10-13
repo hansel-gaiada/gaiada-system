@@ -550,6 +550,46 @@ gate: send a draft, see it as a message with the sender's name.
   portal as that client's test contact. The owner authorised that test client on live on
   2026-10-11. The owner says when it is done.
 
+### PV4-11: conversation messages are permanent (PV-D34)
+
+**Owner:** senior-be, with the UI changes. **Wave 5, after PV4-10's tree is on main.**
+
+**The ruling (PV-D34, owner, 2026-10-13):** conversation messages can never be edited or retracted. A message
+is permanent from the moment it is posted; a correction is a new message. It replaces the 15-minute window that
+PV4-03, PV4-08 and PV4-09 built (the lead's default for PV4-Q2, now ruled).
+
+**What changed:**
+- **Routes gone.** `PATCH` and `DELETE` on a message are removed on both sides (staff
+  `:t/conversation/messages/:id`, portal `:t/portal/conversation/messages/:id`). They answer **404** (no such
+  route), not 403. `assertEditable`, `applyEdit`, `applyRetract`, the edit window and the
+  `conversation.message.edited` event are removed. The `conversation` topic, `posted` and `opened` stay.
+- **Payload.** `editableUntil`, `edited`, `editedAt` and `retracted` are removed from every message payload;
+  `body` is always a string. Nothing else in the response moved.
+- **Database guard (lead decision).** Migration `202610132100_pv4_conversation_messages_permanent.sql` adds
+  two row triggers on `conversation_messages`: `BEFORE UPDATE` always raises, `BEFORE DELETE` raises unless the
+  transaction ran `SET LOCAL app.conversation_purge = 'on'` (an operator hatch for erasure and test teardown; no
+  application code may set it, and a static test fails the build if one does). SQLSTATE `PD034`, message
+  `conversation messages are permanent (PV-D34)`. A final DO block asserts both triggers exist and are enabled.
+  So "never" holds even if a future route forgets. `edited_at` and `retracted_at` stay as unused columns
+  (commented as such); there is no column drop. Rows retracted under the old window stay hidden.
+- **Policy comments only.** `resource_portal.yaml` (`converse`) and `resource_conversation.yaml` (`manage`) no
+  longer say they cover edit or retract. No rule or action moved, so no catalog or pin moved.
+- **UI, both sides.** No Edit or Remove control, no window logic, no "edited" mark, no "Message removed" row.
+  Both composers add, beside the prices-and-terms hint: "Messages can't be edited or removed once sent. Post a
+  correction instead." The demo fixtures and the Playwright specs that drove edit and remove were rewritten (the
+  portal spec now sends a correction as a new message).
+- **Contract.** `docs/FRONTEND-BFF-CONTRACT.md` §29 rule, §29a, §29b and §29f updated; the four rows are gone.
+
+**Tests:** staff and portal PATCH and DELETE answer 404 and the message is unchanged; the payload has none of
+the four fields; a DB test proves UPDATE raises, DELETE raises, and DELETE under the purge flag succeeds (and that
+the flag is transaction-local, opens DELETE only and needs exactly `on`); component tests prove no edit or remove
+control renders and the hint does. The existing posting, opening, draft and send-draft suites stay green.
+
+**Not changed here (follow-up):** the permission descriptions in `permission-catalog.json` and
+`permission-groups.json` (and the migration `202610130120_iam_conversation_permissions.sql` that seeded them)
+still say "edit or retract". They are text only; changing them moves the catalog pins, so they wait for the next
+change that touches the catalog anyway.
+
 ---
 
 ## Open for the owner (non-blocking)
@@ -557,7 +597,7 @@ gate: send a draft, see it as a message with the sender's name.
 | # | Question | Lead's default, used until ruled |
 |---|---|---|
 | PV4-Q1 | May a contact limited to some projects see the client-wide thread? | **No.** Only client-wide contacts see it, matching least privilege; a project-scoped contact may be someone outside the client's organisation |
-| PV4-Q2 | How long can a message be edited or retracted? | **15 minutes**, and both sides see "edited". After that a message is permanent, so nothing said can quietly change |
+| PV4-Q2 | How long can a message be edited or retracted? | **RULED by PV-D34 (2026-10-13): never.** A message is permanent from the moment it is posted; a correction is a new message. This replaces the lead's default (15 minutes, then permanent), which PV-4 had built. PV4-11 removes it |
 
 ## Not in PV-4 (and where each goes)
 
