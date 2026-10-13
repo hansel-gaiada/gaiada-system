@@ -25,9 +25,9 @@ import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
-import { resolvePortalScope } from "./portal-scope";
+import { resolvePortalScope, scopeValues } from "./portal-scope";
 // PV3-02: the People list's row-visibility predicate comes from portal-visibility.ts.
-import { clientContactInPortalScope } from "./portal-visibility";
+import { clientContactInPortalScope, projectInPortalScope, scopeAt } from "./portal-visibility";
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -54,9 +54,11 @@ export class PortalProfileController {
                   -- Only the owner of a client row already admitted by the WHERE below (cl.id = ANY of the scope) is read.
                   (SELECT jsonb_build_object('name', u.name, 'email', u.email) FROM users u
                     WHERE u.id = cl.owner_user_id AND u.deleted_at IS NULL AND u.status = 'active') AS "accountManager",
-                  (SELECT count(*) FROM projects p WHERE p.client_id = cl.id AND p.deleted_at IS NULL) AS "projectCount"
+                  -- Per client (2026-10-13): the projects the caller can SEE of this client, not all of them. A
+                  -- contact limited to one project must not learn how many other projects the client has.
+                  (SELECT count(*) FROM projects p WHERE p.client_id = cl.id AND ${projectInPortalScope("p", scopeAt(1))}) AS "projectCount"
              FROM clients cl WHERE cl.id = ANY($1::uuid[]) AND cl.deleted_at IS NULL ORDER BY cl.name`,
-          [scope.clientIds],
+          scopeValues(scope),
         ),
         c.query(
           `SELECT DISTINCT u.id, u.name, u.email, cc.capability, cc.status, cc.client_id AS "clientId",
@@ -84,7 +86,16 @@ export class PortalProfileController {
         me: me.rows[0] ?? null,
         clients: clients.rows.map((r: Record<string, unknown>) => ({ ...r, projectCount: Number(r.projectCount) })),
         contacts: contacts.rows,
-        access: { canSign: scope.canSign, wholeClient: scope.projectIds === null, grants: access.rows },
+        // Per client (2026-10-13). `canSign` / `wholeClient` are DISPLAY summaries ("on at least one of your
+        // clients") and authorize nothing; `signerClientIds` / `wideClientIds` say which clients, and `grants`
+        // spells out every row. Signing is enforced per target client (`requireSignerFor`).
+        access: {
+          canSign: scope.signerClientIds.length > 0,
+          wholeClient: scope.wideClientIds.length > 0,
+          signerClientIds: scope.signerClientIds,
+          wideClientIds: scope.wideClientIds,
+          grants: access.rows,
+        },
       };
     });
   }

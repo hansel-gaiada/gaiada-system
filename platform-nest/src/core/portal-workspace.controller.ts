@@ -19,7 +19,7 @@
 //
 // Every query is scoped by `resolvePortalScope` (see portal-scope.ts for the four isolation layers).
 // The recurring shape is a join to `projects` with
-//   `p.client_id = ANY($clients) AND ($projects::uuid[] IS NULL OR p.id = ANY($projects))`
+//   `p.client_id = ANY($clients) AND (p.client_id = ANY($wide) OR p.id = ANY($projects))` (per client)
 // which is what makes an entity whose OWN client_id is nullable (deliverables) still correctly scoped:
 // ownership travels through the project, which always has a client.
 import { BadRequestException, Controller, Get, NotFoundException, Param, Query, Req, UseGuards } from "@nestjs/common";
@@ -27,26 +27,27 @@ import type { FastifyRequest } from "fastify";
 import { withTenants } from "../db";
 import { authorize } from "./http";
 import { AuthGuard } from "../auth/guards";
-import { resolvePortalScope, type PortalScope } from "./portal-scope";
+import { resolvePortalScope, scopeValues, type PortalScope } from "./portal-scope";
 import type { PoolClient } from "pg";
 import { DONE_PROJECT_STATUSES, FINISHED_PROJECT_STATUSES } from "./project-status";
 // PV3-02: every row-visibility predicate below comes from portal-visibility.ts. PROJECT_SCOPE (binds
-// $1 = clientIds uuid[], $2 = projectIds uuid[] | null) now lives and is exported there.
+// $1 = clientIds, $2 = wideClientIds, $3 = projectIds, all uuid[]: `scopeAt(1)`) now lives and is exported there.
 import {
   PROJECT_SCOPE, contractInPortalScope, deliverableClientVisible, gateClientVisible, inCallerClients,
   invoiceInPortalScope, invoicePaymentClientVisible, milestoneClientVisible,
-  meetingMinutesInPortalScope, runClientVisible, runInPortalScope, conversationThreadInPortalScope,
+  meetingMinutesInPortalScope, runClientVisible, runInPortalScope, conversationThreadInPortalScope, scopeAt,
 } from "./portal-visibility";
 import { isUuid, unreadCountSql } from "./conversation-core";
 
-/** Scope params for queries that bind the caller's scope as $1 (clients) / $2 (projects). */
-const S12 = { clients: 1, projects: 2 } as const;
+/** Scope params for queries that bind the caller's scope as $1 (clients) / $2 (wide clients) / $3 (projects),
+ *  exactly as PROJECT_SCOPE does. Further params of such a query start at $4. */
+const S1 = scopeAt(1);
 
 /** The ONLY columns a client reads of a meeting (PV4-05): the title, when it happened, the minutes a staff member chose to
  *  share, when, and by whom. Everything else about a meeting stays internal and is deliberately absent from this list, so
  *  adding a column to the table can never widen the payload: `transcript`, `transcript_ref`, `audio_ref`, `local_hint`,
  *  `drive_*`, the participants and the pipeline run. `portal-meeting-minutes.test.ts` pins this exact key set.
- *  `$1`/`$2` are the caller's clients / projects; the sharer is named by `users.name` only (never an email or an id). */
+ *  `$1`/`$2`/`$3` are the caller's clients / wide clients / projects; the sharer is named by `users.name` only (never an email or an id). */
 const MEETING_MINUTES_SELECT = `
   SELECT mm.id,
          COALESCE(m.title, 'Meeting') AS title,
@@ -73,12 +74,12 @@ const PROJECT_PROGRESS_SQL = `
 
 interface ScopedArgs {
   scope: PortalScope;
-  /** Positional args for PROJECT_SCOPE: always passed as $1/$2 of the query. */
-  args: [string[], string[] | null];
+  /** Positional args for PROJECT_SCOPE / S1: always passed as $1/$2/$3 of the query. */
+  args: [string[], string[], string[]];
 }
 
 function scoped(scope: PortalScope): ScopedArgs {
-  return { scope, args: [scope.clientIds, scope.projectIds] };
+  return { scope, args: scopeValues(scope) };
 }
 
 @Controller("api")
@@ -105,8 +106,8 @@ export class PortalWorkspaceController {
         ),
         c.query<{ total: string; active: string; done: string; percent: string | null }>(
           `SELECT count(*) AS total,
-                  count(*) FILTER (WHERE NOT (p.status = ANY($3::text[]))) AS active,
-                  count(*) FILTER (WHERE p.status = ANY($4::text[])) AS done,
+                  count(*) FILTER (WHERE NOT (p.status = ANY($4::text[]))) AS active,
+                  count(*) FILTER (WHERE p.status = ANY($5::text[])) AS done,
                   -- Portfolio progress is the MEAN OF PROJECT progress, not of all tasks pooled: a
                   -- 200-task project would otherwise drown out a 3-task one and the headline number
                   -- would track the biggest project rather than the relationship.
@@ -143,8 +144,8 @@ export class PortalWorkspaceController {
         c.query<{ n: number }>(
           `SELECT count(*)::int AS n
              FROM conversation_threads t
-             LEFT JOIN conversation_reads r ON r.thread_id = t.id AND r.user_id = $3
-            WHERE ${conversationThreadInPortalScope("t", S12)}
+             LEFT JOIN conversation_reads r ON r.thread_id = t.id AND r.user_id = $4
+            WHERE ${conversationThreadInPortalScope("t", S1)}
               AND ${unreadCountSql("t", "r", "staff")} > 0`,
           [...args, req.principal.userId],
         ),
@@ -156,7 +157,10 @@ export class PortalWorkspaceController {
         clients: clients.rows,
         // Convenience for the common single-client contact so the UI need not special-case it.
         client: clients.rows[0] ?? null,
-        viewOnly: !scope.canSign,
+        // Per client (2026-10-13): view-only means the caller can sign for NONE of their clients. A contact who
+        // signs for one client and only views another reads false here; each signing surface (contract
+        // detail's `canSign`, the POST routes) answers for its own object's client.
+        viewOnly: scope.signerClientIds.length === 0,
         progress: {
           projects: Number(p?.total ?? 0),
           activeProjects: Number(p?.active ?? 0),
@@ -183,7 +187,7 @@ export class PortalWorkspaceController {
    *
    *  Reads `capability` into each item: a viewer sees the item (they should know a signature is
    *  outstanding) but the UI renders it as informational rather than actionable, matching what
-   *  `requireSigner` would enforce if they tried. */
+   *  `requireSignerFor` would enforce if they tried. */
   private async needsYou(c: PoolClient, scope: PortalScope) {
     const { args } = scoped(scope);
     const [gates, contracts] = await Promise.all([
@@ -194,9 +198,9 @@ export class PortalWorkspaceController {
            -- LEFT join + the OR below: a run may legitimately have no project (internal/manual runs
            -- predate 0072's project link and manual runs may be created before a project exists), and
            -- an INNER join would silently drop every gate on such a run — the client would simply
-           -- never be asked to sign. Client-wide contacts (projectIds IS NULL) therefore see them.
+           -- never be asked to sign. Contacts client-wide on the run's client therefore see them.
            LEFT JOIN projects p ON p.id = r.project_id
-          WHERE ${runInPortalScope("r", S12)}
+          WHERE ${runInPortalScope("r", S1)}
             AND ${gateClientVisible("g")} AND g.status = 'pending'
           ORDER BY g.created_at ASC`,
         args,
@@ -205,7 +209,7 @@ export class PortalWorkspaceController {
         `SELECT k.id, k.title, k.reference, k.created_at AS "since", k.sent_at AS "sentAt",
                 k.value::float8 AS value, k.currency
            FROM contracts k
-          WHERE ${contractInPortalScope("k", S12)} AND k.status = 'sent'
+          WHERE ${contractInPortalScope("k", S1)} AND k.status = 'sent'
             -- A contract already countersigned by this side is not outstanding even if the row still
             -- says 'sent' (status flips only when BOTH parties are in).
             AND NOT EXISTS (SELECT 1 FROM contract_signatures s WHERE s.contract_id = k.id AND s.party = 'client')
@@ -302,7 +306,7 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const { args } = scoped(scope);
       const rows = await c.query(
-        `SELECT p.id, p.name, p.status, (p.status = ANY($3::text[])) AS "finished",
+        `SELECT p.id, p.name, p.status, (p.status = ANY($4::text[])) AS "finished",
                 to_char(p.start_date, 'YYYY-MM-DD') AS "startDate",
                 to_char(p.due_date, 'YYYY-MM-DD') AS "dueDate",
                 p.client_id AS "clientId", cl.name AS "clientName",
@@ -314,7 +318,7 @@ export class PortalWorkspaceController {
                   WHERE m.project_id = p.id AND ${milestoneClientVisible("m")} AND m.status <> 'done' AND m.due_date IS NOT NULL) AS "nextMilestoneDue"
            FROM projects p LEFT JOIN clients cl ON cl.id = p.client_id
           WHERE ${PROJECT_SCOPE}
-          ORDER BY (p.status = ANY($3::text[])), p.due_date NULLS LAST, p.created_at DESC
+          ORDER BY (p.status = ANY($4::text[])), p.due_date NULLS LAST, p.created_at DESC
           LIMIT 200`,
         [...args, [...FINISHED_PROJECT_STATUSES]],
       );
@@ -338,9 +342,9 @@ export class PortalWorkspaceController {
     await authorize(req.principal, { kind: "portal", tenantId }, "read");
     return withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
-      const args: unknown[] = [scope.clientIds, scope.projectIds, projectId];
+      const args: unknown[] = [...scopeValues(scope), projectId];
       const project = await c.query(
-        `SELECT p.id, p.name, p.status, (p.status = ANY($4::text[])) AS "finished",
+        `SELECT p.id, p.name, p.status, (p.status = ANY($5::text[])) AS "finished",
                 to_char(p.start_date, 'YYYY-MM-DD') AS "startDate",
                 to_char(p.due_date, 'YYYY-MM-DD') AS "dueDate",
                 p.client_id AS "clientId", cl.name AS "clientName",
@@ -350,7 +354,7 @@ export class PortalWorkspaceController {
                   WHERE u.id = p.owner_id AND u.deleted_at IS NULL AND u.status = 'active') AS "lead",
                 ${PROJECT_PROGRESS_SQL}
            FROM projects p LEFT JOIN clients cl ON cl.id = p.client_id
-          WHERE ${PROJECT_SCOPE} AND p.id = $3`,
+          WHERE ${PROJECT_SCOPE} AND p.id = $4`,
         [...args, [...FINISHED_PROJECT_STATUSES]],
       );
       // Same 404 for "does not exist" and "not yours" — the isolation boundary must not distinguish
@@ -478,7 +482,7 @@ export class PortalWorkspaceController {
                 COALESCE(g.decision, 'decided'), g.decided_at, 'happened',
                 COALESCE(r.title, 'Your project'), r.project_id::text
            FROM pipeline_gates g JOIN pipeline_runs r ON r.id = g.run_id
-          WHERE ${runInPortalScope("r", S12)}
+          WHERE ${runInPortalScope("r", S1)}
             AND ${gateClientVisible("g")} AND g.status = 'decided' AND g.decided_at IS NOT NULL
          UNION ALL
          -- Contract lifecycle. A NULL project_id is admitted for a project-scoped contact because a
@@ -487,7 +491,7 @@ export class PortalWorkspaceController {
                 COALESCE(k.signed_at, k.sent_at, k.created_at), 'happened',
                 COALESCE(k.reference, 'Agreement'), k.project_id::text
            FROM contracts k
-          WHERE ${contractInPortalScope("k", S12)}
+          WHERE ${contractInPortalScope("k", S1)}
          UNION ALL
          -- Invoices + confirmed payments. Drafts excluded (see finance()).
          SELECT 'invoice', i.id::text,
@@ -506,7 +510,7 @@ export class PortalWorkspaceController {
             AND ${invoiceInPortalScope("pi", { clients: 1 })}
          ORDER BY at DESC
          LIMIT ${cap}`,
-        [scope.clientIds, scope.projectIds],
+        scopeValues(scope),
       );
       return rows.rows;
     });
@@ -528,9 +532,9 @@ export class PortalWorkspaceController {
                 d.updated_at AS "updatedAt", p.id AS "projectId", p.name AS "projectName"
            FROM deliverables d JOIN projects p ON p.id = d.project_id
           WHERE ${PROJECT_SCOPE} AND ${deliverableClientVisible("d")}
-            AND ($3::uuid IS NULL OR d.project_id = $3)
+            AND ($4::uuid IS NULL OR d.project_id = $4)
           ORDER BY d.due_date NULLS LAST, d.created_at DESC LIMIT 300`,
-        [scope.clientIds, scope.projectIds, projectId ?? null],
+        [...scopeValues(scope), projectId ?? null],
       );
       if (!rows.rows.length) return [];
       // Attachments in one batched query rather than a count subquery per row: the list is the surface
@@ -571,10 +575,10 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const rows = await c.query(
         `${MEETING_MINUTES_SELECT}
-          WHERE ${meetingMinutesInPortalScope("mm", "m", S12)}
-            AND ($3::uuid IS NULL OR m.project_id = $3::uuid)
+          WHERE ${meetingMinutesInPortalScope("mm", "m", S1)}
+            AND ($4::uuid IS NULL OR m.project_id = $4::uuid)
           ORDER BY mm.shared_at DESC, mm.id DESC LIMIT 200`,
-        [scope.clientIds, scope.projectIds, projectId || null],
+        [...scopeValues(scope), projectId || null],
       );
       return rows.rows;
     });
@@ -596,8 +600,8 @@ export class PortalWorkspaceController {
       const scope = await resolvePortalScope(c, req.principal);
       const rows = await c.query(
         `${MEETING_MINUTES_SELECT}
-          WHERE mm.id = $3::uuid AND ${meetingMinutesInPortalScope("mm", "m", S12)}`,
-        [scope.clientIds, scope.projectIds, minutesId],
+          WHERE mm.id = $4::uuid AND ${meetingMinutesInPortalScope("mm", "m", S1)}`,
+        [...scopeValues(scope), minutesId],
       );
       if (!rows.rows[0]) throw new NotFoundException("minutes not found");
       return rows.rows[0];

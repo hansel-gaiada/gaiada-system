@@ -3,17 +3,17 @@
 // §1.2 (schema, migration 0088), §4.1 (Cerbos: rides `portal`, new `request_change` action).
 //
 // ── THE §5.1 RULING, TEST-PINNED HERE, NOT JUST DOCUMENTED ────────────────────────────────────────
-// Submitting a change request is a VIEWER-permitted act. Signature capability (`scope.canSign`) gates
+// Submitting a change request is a VIEWER-permitted act. Signature capability (`requireSignerFor`) gates
 // only the downstream mini-run's own gates (prd_sign/scope_signoff) — it is NEVER checked in this
-// file. Do not add a `requireSigner(scope)` call here: that would silently narrow a ratified decision
+// file. Do not add a `requireSignerFor(scope, …)` call here: that would silently narrow a ratified decision
 // back to signers-only, which is exactly the "tighten it" mistake the design doc calls out by name.
 //
 // ── SERVER-DERIVED, NEVER BODY-TRUSTED (the 0075 "rule 1" discipline) ─────────────────────────────
 // `client_id`, `requested_by`, `source` and `status` never come from the request body. `client_id` is
 // resolved from the caller's own PortalScope (via the project, when a project is named, or from the
-// scope's client set otherwise) — see resolveSubmitTarget(). A project-scoped contact MUST name one of
-// their own projects; only a client-wide contact (`scope.projectIds === null`) may submit a
-// client-wide (`project_id IS NULL`) request.
+// scope's client set otherwise) — see resolveSubmitTarget(). PER CLIENT (2026-10-13): on a client where the
+// contact is project-scoped they MUST name one of their own projects; only a contact who is client-wide ON
+// THAT CLIENT (`scope.wideClientIds`) may submit a client-wide (`project_id IS NULL`) request for it.
 import {
   BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Req, UseGuards,
 } from "@nestjs/common";
@@ -25,12 +25,14 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort } from "./client-notify";
-import { resolvePortalScope, type PortalScope } from "./portal-scope";
+import { resolvePortalScope, scopeValues, type PortalScope } from "./portal-scope";
 // PV3-02: the row-visibility predicate below comes from portal-visibility.ts.
-import { changeRequestInPortalScope, contractInPortalScope } from "./portal-visibility";
+import { changeRequestInPortalScope, contractInPortalScope, projectInPortalScope, scopeAt, type PortalScopeParams } from "./portal-visibility";
 import type { PoolClient } from "pg";
 
 const KINDS = new Set(["content", "design", "feature", "bug"]);
+/** A project id that is not a uuid is not one of the caller's projects (refused like any other, never a cast error). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TITLE = 300;
 const MAX_BODY = 10_000;
 // Bug-detail caps. These four are REPORTER-SUPPLIED — they are the things only the person who hit
@@ -69,7 +71,7 @@ const SELECT_COLUMNS = `
 
 /** The join that SELECT_COLUMNS' ac alias needs. Parameter slots are the caller's, like every portal
  *  predicate: the contract is admitted by the same client/project scope that admits the request. */
-const amendmentJoin = (params: { clients: number; projects: number }) =>
+const amendmentJoin = (params: PortalScopeParams) =>
   `LEFT JOIN contracts ac ON ac.id = wcr.amendment_contract_id AND ${contractInPortalScope("ac", params)}`;
 
 @Controller("api")
@@ -86,10 +88,10 @@ export class WebdevChangeRequestsPortalController {
         `SELECT ${SELECT_COLUMNS}
            FROM webdev_change_requests wcr
            LEFT JOIN projects p ON p.id = wcr.project_id
-           ${amendmentJoin({ clients: 1, projects: 2 })}
-          WHERE ${changeRequestInPortalScope("wcr", { clients: 1, projects: 2 })}
+           ${amendmentJoin(scopeAt(1))}
+          WHERE ${changeRequestInPortalScope("wcr", scopeAt(1))}
           ORDER BY wcr.created_at DESC LIMIT 200`,
-        [scope.clientIds, scope.projectIds],
+        scopeValues(scope),
       );
       return rows.rows;
     });
@@ -181,57 +183,52 @@ export class WebdevChangeRequestsPortalController {
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
   /** Derive {clientId, projectId} for a new submission from the caller's scope — never from an
-   *  unvalidated body field.
+   *  unvalidated body field. PER CLIENT (portal scope kernel, 2026-10-13):
    *
-   *  - A PROJECT-SCOPED contact (`scope.projectIds !== null`) MUST name one of their own projects; the
-   *    client is then derived from THAT PROJECT ROW (not from any body-supplied clientId), so a
-   *    mismatched/foreign `clientId` in the body can never redirect the request at another client.
-   *  - A CLIENT-WIDE contact (`scope.projectIds === null`) may name a project belonging to one of
-   *    their clients (client derived the same way), or omit `projectId` entirely for a client-wide
-   *    request — in which case `clientId` is taken from scope if unambiguous (exactly one client) or,
-   *    for the genuinely multi-client case, validated against `scope.clientIds` (0075 "rule 1": the
-   *    form picks one, the server never trusts it blindly). */
+   *  - A named `projectId` must be IN THE CALLER'S REACH (`projectInPortalScope`: one of their clients,
+   *    and either client-wide on that client or one of their explicit projects). The client is then
+   *    derived from THAT PROJECT ROW (not from any body-supplied clientId), so a mismatched/foreign
+   *    `clientId` in the body can never redirect the request at another client.
+   *  - No `projectId` is a client-wide request, allowed only for a client the caller reaches
+   *    CLIENT-WIDE (`scope.wideClientIds`). `clientId` is taken from scope if unambiguous (exactly one
+   *    client) or, for the genuinely multi-client case, validated against the caller's clients (0075
+   *    "rule 1": the form picks one, the server never trusts it blindly). Naming a client where they
+   *    are only project-scoped is the same refusal a project-scoped contact always got. */
   private async resolveSubmitTarget(
     c: PoolClient, scope: PortalScope, bodyProjectId: string | undefined, bodyClientId: string | undefined,
   ): Promise<{ clientId: string; projectId: string | null }> {
     const projectId = typeof bodyProjectId === "string" && bodyProjectId ? bodyProjectId : null;
+    const projectRefusal = scope.wideClientIds.length === 0 ? "select one of your projects" : "project not found";
 
-    if (scope.projectIds !== null) {
-      // Project-scoped contact: NULL project is refused, and so is a project outside their set.
-      if (!projectId || !scope.projectIds.includes(projectId)) {
-        throw new BadRequestException("select one of your projects");
-      }
-      const clientId = await this.clientOfProject(c, projectId, scope.clientIds);
-      if (!clientId) throw new BadRequestException("select one of your projects");
-      return { clientId, projectId };
-    }
-
-    // Client-wide contact.
     if (projectId) {
-      const clientId = await this.clientOfProject(c, projectId, scope.clientIds);
-      if (!clientId) throw new BadRequestException("project not found");
+      const clientId = await this.clientOfProjectInReach(c, projectId, scope);
+      if (!clientId) throw new BadRequestException(projectRefusal);
       return { clientId, projectId };
     }
+
+    // A client-wide request: only on a client the caller reaches client-wide.
+    if (scope.wideClientIds.length === 0) throw new BadRequestException("select one of your projects");
     if (scope.clientIds.length === 1) return { clientId: scope.clientIds[0], projectId: null };
     const clientId = typeof bodyClientId === "string" ? bodyClientId : null;
     if (!clientId || !scope.clientIds.includes(clientId)) {
       throw new BadRequestException("select which of your accounts this request is for");
     }
+    if (!scope.wideClientIds.includes(clientId)) throw new BadRequestException("select one of your projects");
     return { clientId, projectId: null };
   }
 
-  /** The project's own client_id, but ONLY if that client is one the caller is actually scoped to —
-   *  this is what makes deriving `clientId` FROM a body-supplied `projectId` safe: a project belonging
-   *  to a client outside the caller's set is treated as not found, never as "belongs to someone else,
-   *  use their id". */
-  private async clientOfProject(c: PoolClient, projectId: string, callerClientIds: string[]): Promise<string | null> {
-    const r = await c.query<{ client_id: string | null }>(
-      `SELECT client_id FROM projects WHERE id = $1 AND deleted_at IS NULL`,
-      [projectId],
+  /** The project's own client_id, but ONLY if the project is in the caller's reach (the same predicate
+   *  every portal project read uses) — this is what makes deriving `clientId` FROM a body-supplied
+   *  `projectId` safe: a project of a client outside the caller's set, or a project of one of their
+   *  clients that they are not scoped to, is treated as not found, never as "use its client". The uuid
+   *  check keeps a malformed id a 400, not a cast error. */
+  private async clientOfProjectInReach(c: PoolClient, projectId: string, scope: PortalScope): Promise<string | null> {
+    if (!UUID_RE.test(projectId)) return null;
+    const r = await c.query<{ client_id: string }>(
+      `SELECT p.client_id FROM projects p WHERE p.id = $1 AND ${projectInPortalScope("p", scopeAt(2))}`,
+      [projectId, ...scopeValues(scope)],
     );
-    const clientId = r.rows[0]?.client_id ?? null;
-    if (!clientId || !callerClientIds.includes(clientId)) return null;
-    return clientId;
+    return r.rows[0]?.client_id ?? null;
   }
 
   private async owned(c: PoolClient, scope: PortalScope, id: string): Promise<Record<string, unknown>> {
@@ -239,9 +236,9 @@ export class WebdevChangeRequestsPortalController {
       `SELECT ${SELECT_COLUMNS}
          FROM webdev_change_requests wcr
          LEFT JOIN projects p ON p.id = wcr.project_id
-         ${amendmentJoin({ clients: 2, projects: 3 })}
-        WHERE wcr.id = $1 AND ${changeRequestInPortalScope("wcr", { clients: 2, projects: 3 })}`,
-      [id, scope.clientIds, scope.projectIds],
+         ${amendmentJoin(scopeAt(2))}
+        WHERE wcr.id = $1 AND ${changeRequestInPortalScope("wcr", scopeAt(2))}`,
+      [id, ...scopeValues(scope)],
     );
     if (!r.rows[0]) throw new NotFoundException("request not found");
     return r.rows[0];
