@@ -643,3 +643,30 @@ describe("search.visitors.read / search.replay.view", () => {
     expect(CAPABILITY_MAP["search.replay.view"].permissions).toEqual(["search.property.view_replay"]);
   });
 });
+
+// DW-5b — `agency.campaign.manage` mirrors resource_agency_campaign (update) + resource_agency_campaign_part
+// (create, delete, allocate). Its biconditional against the bundles is rbac-capability-parity.test.ts; these pin the
+// role set in words, and that the part's owner / unit-lead rules are NOT folded in (the page decides those).
+describe("agency.campaign.manage (DW-5b)", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  it("is held by company_admin, manager, owner and platform_admin", () => {
+    expect(can(as("company_admin"), "agency.campaign.manage", "co-a")).toBe(true);
+    expect(can(as("manager"), "agency.campaign.manage", "co-a")).toBe(true);
+    expect(can(as("owner"), "agency.campaign.manage", "co-a")).toBe(true);
+    expect(can(as("platform_admin", "global", null), "agency.campaign.manage", "co-a")).toBe(true);
+  });
+  it("is not held by a member, a viewer, a unit lead or a client, whatever they own or lead", () => {
+    for (const role of ["member", "viewer", "client", "org_unit_lead", "hr_manager"]) {
+      expect(can(as(role), "agency.campaign.manage", "co-a"), role).toBe(false);
+    }
+  });
+  it("does not cross companies", () => {
+    expect(can(as("manager"), "agency.campaign.manage", "co-b")).toBe(false);
+  });
+  it("is declared in the capability map with the four permissions it mirrors", () => {
+    expect(CAPABILITY_MAP["agency.campaign.manage"]).toEqual({
+      permissions: ["agency.campaign.update", "agency.campaign_part.create", "agency.campaign_part.delete", "agency.campaign_part.allocate"],
+      semantics: "all",
+    });
+  });
+});

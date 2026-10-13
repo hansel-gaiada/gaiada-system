@@ -882,4 +882,20 @@ export const CAPABILITY_MAP = {
     permissions: ["agency.lead.convert"],
     semantics: "all",
   },
+
+  // ── DW-5b · shared campaigns and their parts (contract §31.2) ────────────────────────────────
+  "agency.campaign.manage": {
+    // The page's manager controls are ONE set (add/remove a department, set an allocation, edit the
+    // campaign's budget, currency, lead and dates), so `all`: a principal holding only some of the keys
+    // (a direct single-key grant) must not be shown a control that 403s. Every role that holds any of the
+    // four (platform_admin, company_admin, manager, owner) holds all four in the bundles; `member` holds
+    // only `agency.campaign_part.update`, which is the part-edit rule this capability deliberately omits.
+    permissions: [
+      "agency.campaign.update",
+      "agency.campaign_part.create",
+      "agency.campaign_part.delete",
+      "agency.campaign_part.allocate",
+    ],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

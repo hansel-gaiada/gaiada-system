@@ -233,9 +233,9 @@ const PM_ROW: WorkspaceRow = {
   tabs: ["projects", "board", "ball", "timeline", "activity"].map((k) => fromToolkit("web-dev", k)),
 };
 
-/** Shared campaigns the department has a part in (§7.1). Needs campaign parts first (DW-5a). */
+/** Shared campaigns the department has a part in (§7.1): campaign parts are built (DW-5a, DW-5b). */
 const SHARED_CAMPAIGNS: WorkspaceTab = {
-  key: "shared", label: "Shared", href: deptPath("campaigns"), icon: "sales", ticket: "DW-5b",
+  key: "shared", label: "Shared", href: deptPath("campaigns"), icon: "sales",
   blurb: "Shared campaigns this department has a part in, with our part's status.",
 };
 
@@ -296,7 +296,7 @@ const WEB_DEV: Workspace = {
         { key: "sent", label: "Sent", href: deptPath("requests/sent"), icon: "bell", ticket: "DW-5c" },
       ],
     },
-    { key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY, ticket: "DW-5b", tabs: [SHARED_CAMPAIGNS] },
+    { key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY, tabs: [SHARED_CAMPAIGNS] },
     CLIENTS_ROW,
   ],
   reports: [],
@@ -404,11 +404,10 @@ const SOCIAL_MEDIA: Workspace = {
     // Publish › Analytics moves to the Analytics row (§4).
     { key: "publish", label: "Publish", icon: "gateway", tabs: ["calendar", "composer", "inbox"].map((k) => fromToolkit("social-media", k)) },
     {
-      key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY, ticket: "DW-5b",
+      key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY,
       tabs: [
         SHARED_CAMPAIGNS,
-        // The social campaigns API exists (`lib/social.ts`); its screen does not.
-        { key: "social", label: "Social campaigns", href: deptPath("campaigns/social"), icon: "sales", ticket: "DW-5b" },
+        { key: "social", label: "Social campaigns", href: deptPath("campaigns/social"), icon: "sales" },
       ],
     },
     CLIENTS_ROW,
@@ -460,7 +459,7 @@ const CREATIVES: Workspace = {
       ],
     },
     { key: "studio", label: "Studio", icon: "box", tabs: [fromToolkit("creatives", "studio"), fromToolkit("creatives", "assets")] },
-    { key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY, ticket: "DW-5b", tabs: [SHARED_CAMPAIGNS] },
+    { key: "campaigns", label: "Campaigns", icon: "sales", gate: AGENCY_ONLY, tabs: [SHARED_CAMPAIGNS] },
     CLIENTS_ROW,
   ],
   reports: [],

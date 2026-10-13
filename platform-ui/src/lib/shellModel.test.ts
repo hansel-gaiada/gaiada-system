@@ -47,7 +47,7 @@ describe("buildShellModel: a placed Web Dev employee in an agency company", () =
 
   it("draws the four blocks of the Web Dev sidebar (plan §2.2)", () => {
     expect(keys(web.rows.top)).toEqual(["overview", "assistant"]);
-    expect(keys(web.rows.work)).toEqual(["pm", "build", "run", "website", "requests", "tools"]);
+    expect(keys(web.rows.work)).toEqual(["pm", "build", "run", "website", "requests", "campaigns", "tools"]);
     expect(keys(web.rows.performance)).toEqual(["reports", "analytics", "appraisals", "learning"]);
     expect(keys(web.rows.you)).toEqual(["inbox", "calendar", "approvals", "me"]);
     expect(overviewHref(web)).toBe("/departments/d-web");

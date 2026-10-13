@@ -409,6 +409,16 @@ export const CAPABILITIES = [
                           // `resource_agency_lead.yaml`'s own header flags as a judgment call ("not a
                           // design-doc-specified tier") rather than a Cerbos-side certainty, but it is
                           // what the enforcing policy says today, so it is what this file mirrors.
+
+  // ── DW-5b (2026-10-14, shared campaigns and their parts, docs/FRONTEND-BFF-CONTRACT.md §31.2) — mirrors
+  // `resource_agency_campaign.yaml` (`update`) and `resource_agency_campaign_part.yaml` (`create`, `delete`,
+  // `allocate`): company_admin and manager by role, owner by the `perm_*` arm, platform_admin by wildcard.
+  // ONE capability, because the page offers them as one set of controls (add or remove a department, set an
+  // allocation, edit the budget, currency, lead and dates). It deliberately does NOT cover a part's own
+  // `update` (status, owner, brief, due date): that is also open to the part's owner and the department head,
+  // which a role list cannot express (the owner rule is attribute-dependent, the head rule is unit-scoped), so
+  // the page decides it from `part.ownerId === me.id` and `isLeadOf(me, unitPath)`. The server stays the authority.
+  "agency.campaign.manage",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -490,6 +500,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // AD-11 — company_admin is named on every one of `resource_agency_lead.yaml`'s five rules
     // (read/create/update/delete/triage/convert), the only role that is.
     "agency.lead.read", "agency.lead.write", "agency.lead.triage", "agency.lead.convert",
+    // DW-5b: company_admin is on every rule the capability mirrors (agency_campaign update; part create/delete/allocate).
+    "agency.campaign.manage",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -566,6 +578,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // AD-11 — manager sits on `resource_agency_lead.yaml`'s read/create/update/delete/triage rules
     // (every one but `convert`, which names `company_admin` alone).
     "agency.lead.read", "agency.lead.write", "agency.lead.triage",
+    // DW-5b: manager sits on the same four rules as company_admin (`derivedRoles: ["company_admin", "manager"]`).
+    "agency.campaign.manage",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
@@ -823,6 +837,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // which is why the parity test calls it dangerous rather than merely stale. The MON-20 comment
     // above is NOT the same case: no `perm_monitor_*` arm exists, so owner really is shut out there.
     "agency.lead.read", "agency.lead.write", "agency.lead.triage", "agency.lead.convert",
+    // DW-5b: owner holds all four keys in the bundle AND the policies' permission arm
+    // (`perm_agency_campaign_update`, `perm_agency_campaign_part_create|delete|allocate`) honours them.
+    "agency.campaign.manage",
   ],
 };
 

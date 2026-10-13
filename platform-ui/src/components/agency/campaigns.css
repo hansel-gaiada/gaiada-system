@@ -1,0 +1,87 @@
+/* DW-5b — shared campaigns: the campaign page's money block and parts, and the Social campaigns screen.
+   Prefix `cmp-` (a new surface within /agency and the department pages). Tokens only, so light and dark both work. */
+
+.cmp-stack { display: grid; gap: 14px; }
+
+.cmp-money {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px 28px;
+  margin: 0;
+}
+.cmp-money__item { display: grid; gap: 4px; min-width: 0; }
+.cmp-money__label { font: 600 11px var(--font-body); letter-spacing: 0.02em; color: var(--ink-subtle); }
+.cmp-money__value { font: 600 18px var(--font-display); color: var(--text-primary); word-break: break-word; }
+.cmp-money__value--quiet { font: 400 14px var(--font-body); color: var(--ink-muted); }
+
+.cmp-note { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--ink-muted); }
+.cmp-empty { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-muted); }
+.cmp-error { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--status-critical-fg); }
+
+.cmp-parts { display: grid; gap: 12px; }
+
+.cmp-part {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.cmp-part--cancelled { opacity: 0.75; }
+.cmp-part__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.cmp-part__unit { margin: 0; font: 600 15px var(--font-display); color: var(--text-primary); }
+.cmp-part__unit--missing { font-style: italic; color: var(--ink-muted); }
+
+.cmp-part__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 20px;
+  margin: 0;
+}
+.cmp-fact { display: grid; gap: 2px; min-width: 0; }
+.cmp-fact dt { font: 600 11px var(--font-body); letter-spacing: 0.02em; color: var(--ink-subtle); }
+.cmp-fact dd { margin: 0; font: 400 13px/1.45 var(--font-body); color: var(--text-primary); word-break: break-word; }
+
+.cmp-part__brief {
+  margin: 0;
+  font: 400 13px/1.55 var(--font-body);
+  color: var(--ink-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cmp-links { display: grid; gap: 8px; }
+.cmp-links__group { display: grid; gap: 4px; }
+.cmp-links__title { font: 600 11px var(--font-body); color: var(--ink-subtle); }
+.cmp-links__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.cmp-links__item { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font: 400 13px var(--font-body); color: var(--text-primary); }
+.cmp-links__own { font: 400 12px var(--font-body); color: var(--ink-muted); }
+
+.cmp-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.cmp-form { display: grid; gap: 14px; }
+.cmp-form__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+
+.cmp-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+.cmp-lead-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  font: 600 11px var(--font-body);
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+  vertical-align: middle;
+}
+
+.cmp-select {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
+  padding: 6px 10px;
+  font: 400 13px var(--font-body);
+  color: var(--text-primary);
+}
+.cmp-select:disabled { color: var(--ink-faint); cursor: not-allowed; }
