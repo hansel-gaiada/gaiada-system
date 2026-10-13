@@ -4,7 +4,7 @@
 // decisions the in-app half rests on — tier resolution and the unit-subtree walk — because those are
 // where §15 finding ① said the boundary had been getting silently wrong.
 import { describe, it, expect } from "vitest";
-import { collectUnitSubtree, personAxisTier, requiresUnitNarrowing, isSelfOnlyTier, sliceRowsToUnitScope, unwrapOrgRoot, todayIsoInTz } from "./person-scope";
+import { collectUnitSubtree, personAxisTier, requiresUnitNarrowing, isSelfOnlyTier, sliceRowsToUnitScope, unwrapOrgRoot, todayIsoInTz, unitExistsInStructure } from "./person-scope";
 import type { Principal, RoleGrant } from "../../rbac/principal";
 
 const T1 = "dddddddd-3333-0000-0000-000000000001";
@@ -168,5 +168,23 @@ describe("TR-25 todayIsoInTz — the as-of anchor", () => {
     expect(todayIsoInTz("UTC", instant)).toBe("2026-07-31");
     expect(todayIsoInTz("Asia/Jakarta", instant)).toBe("2026-08-01"); // UTC+7 has rolled over
     expect(todayIsoInTz("America/Los_Angeles", instant)).toBe("2026-07-31");
+  });
+});
+
+describe("DW-4b unitExistsInStructure — tells an unknown unit from a known one (collectUnitSubtree cannot)", () => {
+  it("finds a department, a division and a deep node of the wrapped org shape", () => {
+    expect(unitExistsInStructure(ORG, "d-web")).toBe(true);
+    expect(unitExistsInStructure(ORG, "dv-frontend")).toBe(true);
+    expect(unitExistsInStructure(ORG, "r-dev")).toBe(true);
+  });
+
+  it("is false for an unknown id, where collectUnitSubtree degrades to [id]", () => {
+    expect(unitExistsInStructure(ORG, "d-nope")).toBe(false);
+    expect(collectUnitSubtree(ORG, "d-nope")).toEqual(["d-nope"]);
+  });
+
+  it("is false for an absent or unreadable tree (fail-closed)", () => {
+    expect(unitExistsInStructure(null, "d-web")).toBe(false);
+    expect(unitExistsInStructure({}, "d-web")).toBe(false);
   });
 });
