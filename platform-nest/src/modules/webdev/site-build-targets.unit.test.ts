@@ -132,6 +132,13 @@ describe("deriveRegistryTarget — production (a promote's target): the promote 
     // ✅ control: the same facts with the production name granted resolve.
     expect(deriveRegistryTarget([facts({ production: prod })], "production")).toMatchObject({ ok: true });
   });
+  it("M6-P6h2: a site granted at staging whose production secret is still being created (state granted, the production name not recorded) rebuilds staging and refuses the promote", () => {
+    const waiting = facts({ production: prod, grantSecretNames: ["WEBDESK_DEPLOY_GRANT", secret("staging")] });
+    expect(deriveRegistryTarget([waiting], "staging")).toMatchObject({ ok: true, target: { environment: "staging" } });
+    expect(deriveRegistryTarget([waiting], "production")).toMatchObject({ ok: false, reason: "production_secret_not_granted" });
+    // once the grant records the production name, the same site promotes
+    expect(deriveRegistryTarget([facts({ production: prod })], "production")).toMatchObject({ ok: true, target: { environment: "production" } });
+  });
   it("the staging secret does not stand in for the production one, nor the reverse", () => {
     expect(perSiteSecretGranted(facts({ grantSecretNames: [secret("staging")] }), "production", REPO)).toBe(false);
     expect(perSiteSecretGranted(facts({ grantSecretNames: [secret("production")] }), "staging", REPO)).toBe(false);

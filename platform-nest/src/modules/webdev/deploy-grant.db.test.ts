@@ -12,7 +12,11 @@
 //   3. a partial grant is recorded and resumed; a secret not created yet is pending (not an error) and completes later;
 //      a revoke is recorded with its reason and actor; the per-site secret is granted to this site's repo only;
 //   4. without `organization_secrets` the row says so, specifically;
-//   5. the schema refuses a grant state without its links, on an uncommitted scaffold, or a revoke without a reason.
+//   5. the schema refuses a grant state without its links, on an uncommitted scaffold, or a revoke without a reason;
+//   6. (M6-P6h2) the grant covers the production per-site secret once the site has a live production row (the row
+//      `promoted_from_site_id` names), a `granted` site may list that name as pending (migration 202610132340 lifted the old
+//      "granted holds no pending name" rule), the console read lists each environment's secret, a revoke removes both, and the
+//      trigger after `POST sites/:id/production` extends the grant but never re-grants a revoked site.
 import { createHash } from "node:crypto";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
@@ -26,7 +30,7 @@ import { GITHUB_CREATE_REPO_WORKFLOW } from "../../core/github/repo-creation";
 import { fileAutomationApproval } from "../../core/approval-filing";
 import type { Principal } from "../../rbac/principal";
 import { DeployGrantRefusal, grantDeploySecrets, revokeDeploySecrets, siteDeploySecretName } from "./deploy-grant";
-import { deployGrantPorts, readDeployGrant } from "./deploy-grant.service";
+import { deployGrantPorts, followProductionRow, readDeployGrant } from "./deploy-grant.service";
 import { commitScaffoldForSite } from "./scaffold-commit.service";
 
 vi.mock("../../core/github/github-app.service", async (importOriginal) => {
@@ -94,6 +98,20 @@ describe.skipIf(!live)("M6-P4g — deploy grant (real Postgres, faked GitHub)", 
   /** The site's own per-site deploy secret (provisioned registry rows are `staging`). */
   // M6-P6f: named from the repo's name and GitHub id; `gh` (the fake repo) is made by fakeRepoFor before any caller asks.
   const siteSecret = (s: Site) => siteDeploySecretName({ slug: s.slug, environment: "staging", repositoryId: gh.repoId });
+
+  /** M6-P6h2: the same site's PRODUCTION per-site secret. */
+  const prodSecret = (s: Site) => siteDeploySecretName({ slug: s.slug, environment: "production", repositoryId: gh.repoId });
+
+  /** The production row `POST sites/:id/production` makes from the staging row (M6-P6g): environment production, `promoted_from_site_id`. */
+  async function addProductionRow(s: Site): Promise<string> {
+    const id = newId();
+    await adminPool().query(
+      `INSERT INTO webdev_sites (id, tenant_id, domain, environment, kind, repo_url, adoption, origin, promoted_from_site_id, origin_site)
+       VALUES ($1, $2, $3, 'production', 'static', $4, 'mandated', 'provisioned', $5, 'main')`,
+      [id, T, `www.${s.slug}.example`, `https://github.com/${ORG}/${s.slug}`, s.webdevSiteId],
+    );
+    return id;
+  }
 
   const lockFor = (s: Site) =>
     JSON.stringify({ blockLibraryVersion: "0.1.0", contentHash: s.snapshot.contentHash, contractVersion: "1.0.0", snapshotId: s.snapshot.id, vocabularyVersion: "1.1.0" }, null, 2) + "\n";
@@ -285,13 +303,14 @@ describe.skipIf(!live)("M6-P4g — deploy grant (real Postgres, faked GitHub)", 
     });
     expect(row.deploy_grant_revoked_at).toBeTruthy();
     const ev = await adminPool().query(`SELECT payload FROM outbox_events WHERE entity_id = $1 AND event_type = 'webdev.site.deploy_revoked'`, [s.id]);
-    expect(ev.rows[0].payload).toMatchObject({ reason: "the client's contract ended", secretNames: [GRANT, siteSecret(s)] });
+    // M6-P6h2: a revoke covers every derivable per-site name, the production one too (this site has no production row).
+    expect(ev.rows[0].payload).toMatchObject({ reason: "the client's contract ended", secretNames: [GRANT, siteSecret(s), prodSecret(s)] });
     expect(gh.orgSecrets.get(siteSecret(s))!.repos.size).toBe(0);
     const revokeRows = await adminPool().query(
       `SELECT count(*)::int AS n FROM activities WHERE tenant_id = $1 AND verb = 'github.secret_write' AND metadata->>'basis' = 'deploy-gate-revoke' AND metadata->>'repo' = $2`,
       [T, `${ORG}/${s.slug}`],
     );
-    expect(revokeRows.rows[0].n).toBe(4); // two secrets, attempted + succeeded each
+    expect(revokeRows.rows[0].n).toBe(6); // three names (the marker, staging, production), attempted + succeeded each
     expect(await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "scaffold" })).toMatchObject({ outcome: "skipped_revoked" });
     expect(gh.orgSecrets.get(GRANT)!.repos.size).toBe(0);
   });
@@ -339,13 +358,121 @@ describe.skipIf(!live)("M6-P4g — deploy grant (real Postgres, faked GitHub)", 
     // M6-P6f: the name ends in the repository id, so the old `<H8>` form (8 hex with a letter) is no longer one
     await expect(adminPool().query(`UPDATE webdev_provisioned_sites SET deploy_grant_site_secret_name = 'WEBDESK_DEPLOY_X_STAGING_0A1B2C3D' WHERE id = $1`, [s.id]))
       .rejects.toMatchObject({ code: "23514" });
-    // granted while a name is still pending
+    // granted with no name at all (granted still needs at least one)
     await expect(adminPool().query(
       `UPDATE webdev_provisioned_sites SET deploy_grant_state = 'granted', deploy_grant_granted_at = now(),
-         ${facts.replace("deploy_grant_pending_names = '{}'", "deploy_grant_pending_names = '{WEBDESK_DEPLOY_KEY}'")} WHERE id = $1`,
+         ${facts.replace("deploy_grant_secret_names = '{WEBDESK_DEPLOY_GRANT}'", "deploy_grant_secret_names = '{}'")} WHERE id = $1`,
       [s.id],
     )).rejects.toMatchObject({ code: "23514" });
     // the complete claim is accepted
     await adminPool().query(`UPDATE webdev_provisioned_sites SET deploy_grant_state = 'pending', ${facts} WHERE id = $1`, [s.id]);
+    // M6-P6h2 (migration 202610132340): granted MAY list a pending name (a production secret not created yet); its other rules held
+    await adminPool().query(
+      `UPDATE webdev_provisioned_sites SET deploy_grant_state = 'granted', deploy_grant_granted_at = now(),
+         ${facts.replace("deploy_grant_pending_names = '{}'", "deploy_grant_pending_names = '{WEBDESK_DEPLOY_X_PRODUCTION_424242}'")} WHERE id = $1`,
+      [s.id],
+    );
+    expect(await stored(s.id)).toMatchObject({ deploy_grant_state: "granted", deploy_grant_pending_names: ["WEBDESK_DEPLOY_X_PRODUCTION_424242"] });
+    // a pending name must still be a secret name (the column's own CHECK is a different constraint)
+    await expect(adminPool().query(`UPDATE webdev_provisioned_sites SET deploy_grant_pending_names = '{"bad-name"}' WHERE id = $1`, [s.id]))
+      .rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("PRODUCTION ROW (M6-P6h2): the grant covers both per-site secrets; the row records the staging name and lists both; the read says where each stands", async () => {
+    const s = await committedSite();
+    const prodRowId = await addProductionRow(s);
+    gh.addOrgSecret(prodSecret(s));
+    const r = await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "operator" });
+    expect(r).toMatchObject({
+      outcome: "granted", state: "granted", siteSecretName: siteSecret(s), pending: [],
+      siteSecrets: [{ environment: "staging", name: siteSecret(s), status: "granted" }, { environment: "production", name: prodSecret(s), status: "granted" }],
+    });
+    expect(r.secrets.map((x) => x.name)).toEqual([GRANT, siteSecret(s), prodSecret(s)]);
+    expect([...gh.orgSecrets.get(prodSecret(s))!.repos]).toEqual([gh.repoId]);
+    expect(await stored(s.id)).toMatchObject({
+      deploy_grant_state: "granted", deploy_grant_secret_names: [GRANT, siteSecret(s), prodSecret(s)],
+      deploy_grant_site_secret_name: siteSecret(s), deploy_grant_pending_names: [],
+    });
+    expect(await readDeployGrant(T, s.id)).toMatchObject({
+      state: "granted", siteSecretName: siteSecret(s), pendingNames: [],
+      siteSecrets: [{ environment: "staging", name: siteSecret(s), status: "granted" }, { environment: "production", name: prodSecret(s), status: "granted" }],
+    });
+    // a SOFT-DELETED production row is no live production row: the read and the next grant are staging only again
+    await adminPool().query(`UPDATE webdev_sites SET deleted_at = now() WHERE id = $1`, [prodRowId]);
+    expect((await readDeployGrant(T, s.id))!.siteSecrets.map((x) => x.environment)).toEqual(["staging"]);
+    const staged = await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "operator" });
+    expect(staged.secrets.map((x) => x.name)).toEqual([GRANT, siteSecret(s)]);
+  });
+
+  it("PRODUCTION SECRET NOT CREATED YET on a site already granted at staging: it stays granted, lists the name pending (the CHECK accepts it), then completes", async () => {
+    const s = await committedSite();
+    expect(await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "operator" })).toMatchObject({ outcome: "granted" });
+    await addProductionRow(s);
+    const r = await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "production" });
+    expect(r).toMatchObject({ outcome: "pending", state: "granted", pending: [prodSecret(s)], error: null });
+    expect(await stored(s.id)).toMatchObject({
+      deploy_grant_state: "granted", deploy_grant_secret_names: [GRANT, siteSecret(s)], deploy_grant_pending_names: [prodSecret(s)], deploy_grant_error: null,
+    });
+    expect(await readDeployGrant(T, s.id)).toMatchObject({
+      state: "granted", pendingNames: [prodSecret(s)],
+      siteSecrets: [{ environment: "staging", name: siteSecret(s), status: "granted" }, { environment: "production", name: prodSecret(s), status: "pending" }],
+    });
+    gh.addOrgSecret(prodSecret(s));
+    expect(await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "production" })).toMatchObject({ outcome: "granted", state: "granted", pending: [] });
+    expect(await stored(s.id)).toMatchObject({ deploy_grant_secret_names: [GRANT, siteSecret(s), prodSecret(s)], deploy_grant_pending_names: [] });
+  });
+
+  it("PRODUCTION SECRET visible to all repos: an error recorded, never written through", async () => {
+    const s = await committedSite();
+    await addProductionRow(s);
+    gh.addOrgSecret(prodSecret(s), "all");
+    const r = await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "operator" });
+    expect(r).toMatchObject({ outcome: "partial", error: `deploy_grant_secret_not_selected: ${prodSecret(s)}` });
+    expect(gh.count("PUT", prodSecret(s))).toBe(0);
+    expect(await stored(s.id)).toMatchObject({ deploy_grant_secret_names: [GRANT, siteSecret(s)], deploy_grant_error: `deploy_grant_secret_not_selected: ${prodSecret(s)}` });
+  });
+
+  it("REVOKE with a production row removes BOTH per-site names at GitHub and ledgers each", async () => {
+    const s = await committedSite();
+    await addProductionRow(s);
+    gh.addOrgSecret(prodSecret(s));
+    await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "operator" });
+    const r = await revokeDeploySecrets(ports(s), { siteId: s.id, reason: "the client contract ended" });
+    expect(r).toMatchObject({ outcome: "revoked", state: "revoked" });
+    for (const n of [GRANT, siteSecret(s), prodSecret(s)]) expect(gh.orgSecrets.get(n)!.repos.size).toBe(0);
+    expect(await stored(s.id)).toMatchObject({ deploy_grant_state: "revoked", deploy_grant_secret_names: [], deploy_grant_pending_names: [] });
+    const ev = await adminPool().query(`SELECT payload FROM outbox_events WHERE entity_id = $1 AND event_type = 'webdev.site.deploy_revoked'`, [s.id]);
+    expect(ev.rows[0].payload).toMatchObject({ secretNames: [GRANT, siteSecret(s), prodSecret(s)] });
+    const revokeRows = await adminPool().query(
+      `SELECT count(*)::int AS n FROM activities WHERE tenant_id = $1 AND verb = 'github.secret_write' AND metadata->>'basis' = 'deploy-gate-revoke' AND metadata->>'repo' = $2`,
+      [T, `${ORG}/${s.slug}`],
+    );
+    expect(revokeRows.rows[0].n).toBe(6); // three secrets, attempted + succeeded each
+  });
+
+  it("THE TRIGGER after the production row: extends the grant best-effort; never re-grants a revoked site; null for a site no provisioned row owns", async () => {
+    const principal = { userId, assurance: "high", companies: [T], roles: [], sessionVersion: 1 } as unknown as Principal;
+    const s = await committedSite();
+    expect(await grantDeploySecrets(ports(s), { siteId: s.id, trigger: "operator" })).toMatchObject({ outcome: "granted" });
+    await addProductionRow(s);
+    gh.addOrgSecret(prodSecret(s));
+    const summary = await followProductionRow(principal, T, s.webdevSiteId);
+    expect(summary).toMatchObject({
+      outcome: "granted", state: "granted", error: null,
+      siteSecrets: [{ environment: "staging", name: siteSecret(s), status: "granted" }, { environment: "production", name: prodSecret(s), status: "granted" }],
+    });
+    expect(gh.orgSecrets.get(prodSecret(s))!.repos.has(gh.repoId)).toBe(true);
+
+    // an operator revoke is never undone by it
+    await revokeDeploySecrets(ports(s), { siteId: s.id, reason: "paused by the operator" });
+    const before = gh.calls.length;
+    expect(await followProductionRow(principal, T, s.webdevSiteId)).toMatchObject({ outcome: "skipped_revoked", state: "revoked" });
+    expect(gh.calls.length).toBe(before);
+    expect(gh.orgSecrets.get(prodSecret(s))!.repos.size).toBe(0);
+
+    // a staging row that belongs to no provisioned site has no grant to extend; a refusal is data, not an exception
+    expect(await followProductionRow(principal, T, newId())).toBeNull();
+    const noPrincipal = { userId: null, assurance: "high", companies: [T], roles: [], sessionVersion: 1 } as unknown as Principal;
+    expect(await followProductionRow(noPrincipal, T, s.webdevSiteId)).toMatchObject({ outcome: "refused" });
   });
 });

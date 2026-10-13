@@ -195,6 +195,10 @@ describe.skipIf(!TEST_URL)("M6-P6g · delivery binding + production-from-staging
       deliveryState: "awaiting_deploy_credential",
     });
     const prodId = r.json().id as string;
+    // M6-P6h2: the answer carries the deploy grant's best-effort re-run for the new row's production secret. This site was never
+    // granted (no scaffold, no GitHub org here), so the trigger is REFUSED AS DATA: the request still answered 201, nothing granted.
+    expect(r.json().deployGrant).toMatchObject({ outcome: "refused", state: null });
+    expect((await db().query(`SELECT deploy_grant_state FROM webdev_provisioned_sites WHERE id = $1`, [s.id])).rows[0].deploy_grant_state).toBeNull();
     const act = await db().query(`SELECT verb, metadata FROM activities WHERE target_entity_id = $1`, [prodId]);
     expect(act.rows).toHaveLength(1);
     expect(act.rows[0]).toMatchObject({ verb: "created", metadata: { environment: "production", promotedFromSiteId: s.siteId } });
@@ -213,6 +217,18 @@ describe.skipIf(!TEST_URL)("M6-P6g · delivery binding + production-from-staging
     expect((await promote(s2.siteId, manager, {})).statusCode).toBe(400);
     expect((await promote(s2.siteId, manager, { domain: "placeholder.provisioned.invalid" })).json()).toMatchObject({ error: "production_domain_invalid" });
     expect((await promote(prodId, manager, { domain: "from-prod.example.test" })).json()).toMatchObject({ error: "not_a_provisioned_staging_row" });
+  });
+
+  it("production for a staging row that belongs to no provisioned site: 201 with `deployGrant: null` (there is no grant to extend)", async () => {
+    const siteId = newId();
+    await db().query(
+      `INSERT INTO webdev_sites (id, tenant_id, domain, environment, kind, repo_url, adoption, origin, origin_site)
+       VALUES ($1, $2, $3, 'staging', 'static', 'https://github.com/acme-org/y', 'mandated', 'provisioned', 'main')`,
+      [siteId, T, `p6h2-${siteId.slice(-12)}.provisioned.invalid`],
+    );
+    const r = await promote(siteId, manager, { domain: "p6h2-hand-registered.example.test" });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().deployGrant).toBeNull();
   });
 
   it("GET provisioned-sites/:id shows the host side (`delivery`) beside the GitHub side (`deployGrant`) as two separate facts", async () => {

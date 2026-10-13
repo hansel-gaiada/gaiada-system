@@ -27,15 +27,19 @@
 //   grant    a second transaction under the same lock (a grant and a revoke never interleave): one PUT per secret, each
 //            ledgered. The names that landed are recorded even when a later one fails, so a re-run completes a partial
 //            grant (GitHub's PUT is idempotent). `deploy_grant_secret_names` only grows until a revoke.
-//   revoke   under the lock: one DELETE per secret in the fixed list ∪ recorded ∪ the per-site name. A 404 means nothing
-//            to revoke.
+//   revoke   under the lock: one DELETE per secret in the fixed list ∪ recorded ∪ every derivable per-site name (staging AND
+//            production, M6-P6h2). A 404 means nothing to revoke.
 //
 // ═══ TWO KINDS OF SECRET (the M6-P6a amendment) ═════════════════════════════════════════════════════
 //   1. the fixed list, `WEBDESK_DEPLOY_SECRET_NAMES` (default `WEBDESK_DEPLOY_GRANT`, the marker the templates check);
-//   2. ONE per-site secret, `siteDeploySecretName()`: P6's deploy principal for this site and environment, locked to one
-//      document root, whose CI copy an org owner creates BY HAND with visibility limited to this site's repo. Its name
-//      is derived from the repo's name, the environment and the repo's GitHub id (M6-P6f: the repo's own workflow derives
-//      the same name) and recorded on the row, so no other site's grant can ever name it.
+//   2. ONE per-site secret PER ENVIRONMENT the site has in the registry, `siteDeploySecretName()`: P6's deploy principal for
+//      this site and environment, locked to one document root, whose CI copy an org owner creates BY HAND with visibility
+//      limited to this site's repo. The name is derived from the repo's name, the environment and the repo's GitHub id
+//      (M6-P6f: the repo's own workflow derives the same name), so no other site's grant can ever name it. Always the
+//      staging row's name (recorded on the row as `deploy_grant_site_secret_name`); plus the PRODUCTION name when the site
+//      has a live production row (M6-P6h2: the row M6-P6g's `POST sites/:id/production` made, `promoted_from_site_id` = the
+//      staging row). The production name needs no column of its own: it is derived the same way, and once it has landed it
+//      is in `deploy_grant_secret_names` (or in `deploy_grant_pending_names` until the owner creates the secret).
 //
 // A secret that does not exist YET (404) is not an error: the grant stays `pending`, the name is listed as pending on
 // the row and in the answer, and the next grant run (the route, or the next trigger) completes it once the owner has
@@ -43,8 +47,14 @@
 // recorded and never written through. A missing App permission (O-3) stops the whole grant as
 // `github_permission_missing: organization_secrets`.
 //
-// The automatic trigger (after the scaffold commit) never re-grants a `revoked` site: only an operator's POST undoes an
-// operator's revoke.
+// The automatic triggers (after the scaffold commit, and after the production row is created) never re-grant a `revoked`
+// site: only an operator's POST undoes an operator's revoke.
+//
+// A `granted` site that gains a name which is not granted yet (a new production row whose secret the owner has not created,
+// a name added to the configuration) STAYS `granted`: the state only ever moves on a claim, a full grant or a revoke, so the
+// staging deploys the site already has are not stopped by a secret that is still being created. The name is listed in
+// `deploy_grant_pending_names` (migration 202610132340 lifts wps_deploy_grant_links' old rule that `granted` has none), and
+// the recorded names are the precise fact: a build target asks about ONE name (`perSiteSecretGranted`), never the state alone.
 import { getBranchHead, type GitCaller, type RepoRef } from "../../core/github/git-data";
 import {
   addRepoToOrgSecret, getFileAtRef, getOrgSecret, getRepoInfo, isValidSecretName, removeRepoFromOrgSecret,
@@ -164,6 +174,56 @@ export function siteDeploySecretName(site: { slug: string; environment: string; 
 export const SITE_SECRET_NOT_DERIVABLE =
   "not derivable yet: the name ends in the repository's GitHub id, which the ERP records at the first grant (it needs the repo to exist and be readable)";
 
+/** The environments whose per-site secret a grant covers: the staging row's, plus production when it has a live row. */
+export function grantEnvironments(registry: Pick<RegistryFacts, "environment" | "production">): string[] {
+  return [...new Set([registry.environment, ...(registry.production ? [registry.production.environment] : [])])];
+}
+
+/** The per-site names of these environments, in order. Throws like `siteDeploySecretName`. */
+export function perSiteSecretNames(site: { slug: string; repositoryId: number }, environments: readonly string[]): string[] {
+  return [...new Set(environments.map((environment) => siteDeploySecretName({ ...site, environment })))];
+}
+
+/** Every per-site environment a REVOKE sweeps: the registry row's (staging) and `production`, whether or not a production row
+ *  exists now (it may have been removed, or its secret created by hand before the row). A name that was never created answers
+ *  404, which is nothing to revoke. */
+export function revokableEnvironments(registry: Pick<RegistryFacts, "environment"> | null): string[] {
+  return [...new Set([registry?.environment ?? "staging", "production"])];
+}
+
+/**
+ * Where each environment's per-site secret stands, from what the row recorded. `repoName` is the resolved repo's name (the
+ * `<SLUG>`), `repositoryId` the id the name ends in. [] when either is unknown (a name is never invented).
+ */
+export function siteSecretRefs(a: {
+  repoName: string | null;
+  repositoryId: number | null;
+  stagingEnvironment: string | null;
+  hasProduction: boolean;
+  grantedNames: readonly string[];
+  pendingNames: readonly string[];
+}): SiteSecretRef[] {
+  if (!a.repoName || a.repositoryId === null || !a.stagingEnvironment) return [];
+  const environments = grantEnvironments({
+    environment: a.stagingEnvironment,
+    production: a.hasProduction ? { siteId: "", environment: "production" } : null,
+  });
+  const out: SiteSecretRef[] = [];
+  for (const environment of environments) {
+    let name: string;
+    try {
+      name = siteDeploySecretName({ slug: a.repoName, environment, repositoryId: a.repositoryId });
+    } catch {
+      continue;
+    }
+    const status = a.grantedNames.some((n) => n.toUpperCase() === name)
+      ? "granted"
+      : a.pendingNames.some((n) => n.toUpperCase() === name) ? "pending" : "not_granted";
+    out.push({ environment, name, status });
+  }
+  return out;
+}
+
 // ── the row and the ports ───────────────────────────────────────────────────────────────────────────
 
 export type DeployGrantState = "pending" | "granted" | "revoked";
@@ -201,6 +261,9 @@ export interface RegistryFacts {
   repoUrl: string | null;
   /** `webdev_sites.environment`: the `<ENV>` of the per-site secret. */
   environment: string;
+  /** M6-P6h2: the live PRODUCTION row made from this row (`promoted_from_site_id` = this row, `deleted_at IS NULL`), or null.
+   *  Its `environment` is the production secret's `<ENV>`. */
+  production: { siteId: string; environment: string } | null;
 }
 
 export interface GrantClaim {
@@ -244,6 +307,14 @@ export interface DeployGrantDeps {
   classifyError?(err: unknown): DeployGrantRefusal | null;
 }
 
+/** One environment's per-site deploy secret and where it stands: `granted` (the repo may read it), `pending` (the owner has not
+ *  created it yet: the grant completes once they have), `not_granted` (anything else: not claimed yet, not selected, revoked). */
+export interface SiteSecretRef {
+  environment: string;
+  name: string;
+  status: "granted" | "pending" | "not_granted";
+}
+
 export interface SecretOutcome {
   name: string;
   result: SecretAccessResult;
@@ -261,6 +332,9 @@ export interface DeployGrantResult {
   siteSecretName: string | null;
   /** Why `siteSecretName` is null (`SITE_SECRET_NOT_DERIVABLE`), else null. */
   siteSecretNote: string | null;
+  /** M6-P6h2: every environment's per-site secret (staging, then production when the site has a production row), each with
+   *  where it stands. [] until the repo's name and GitHub id are known. */
+  siteSecrets: SiteSecretRef[];
   /** Secret names the owner has not created yet. */
   pending: string[];
   state: DeployGrantState | null;
@@ -358,8 +432,9 @@ export function parseRevokeReason(body: unknown): string {
 
 export interface GrantRequest {
   siteId: string;
-  /** scaffold: the automatic follow-on of the scaffold commit · operator: the explicit POST (re-checks and re-grants). */
-  trigger: "scaffold" | "operator";
+  /** scaffold: the automatic follow-on of the scaffold commit · production: the automatic follow-on of creating a production
+   *  row (M6-P6h2) · operator: the explicit POST (re-checks and re-grants). Both automatic triggers never undo a revoke. */
+  trigger: "scaffold" | "production" | "operator";
 }
 
 /**
@@ -377,11 +452,21 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
   const row0 = first.row;
   if (!row0) return refuse("not_found", "provisioned site not found");
 
-  const result = (row: DeployGrantRow, outcome: DeployGrantResult["outcome"], repo: RepoRef | null, secrets: SecretOutcome[]): DeployGrantResult => ({
+  const result = (
+    row: DeployGrantRow,
+    outcome: DeployGrantResult["outcome"],
+    repo: RepoRef | null,
+    secrets: SecretOutcome[],
+    registry: RegistryFacts | null = null,
+  ): DeployGrantResult => ({
     outcome,
     siteId: row.id,
     siteSecretName: row.grantSiteSecretName,
     siteSecretNote: row.grantSiteSecretName ? null : SITE_SECRET_NOT_DERIVABLE,
+    siteSecrets: siteSecretRefs({
+      repoName: repo?.name ?? null, repositoryId: row.grantRepositoryId, stagingEnvironment: registry?.environment ?? null,
+      hasProduction: registry?.production != null, grantedNames: row.grantSecretNames, pendingNames: row.grantPendingNames,
+    }),
     pending: row.grantPendingNames,
     state: row.grantState,
     repo: repo ? repoName(repo) : null,
@@ -392,8 +477,9 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
     error: row.grantError,
   });
 
-  // An operator's revoke is never undone by the automatic path.
-  if (req.trigger === "scaffold" && row0.grantState === "revoked") return result(row0, "skipped_revoked", null, []);
+  // An operator's revoke is never undone by an automatic path (the scaffold commit's, or a new production row's).
+  const automatic = req.trigger !== "operator";
+  if (automatic && row0.grantState === "revoked") return result(row0, "skipped_revoked", null, []);
 
   const recordAndThrow = async (err: unknown): Promise<never> => {
     const typed = err instanceof DeployGrantRefusal ? err : (deps.classifyError?.(err) ?? null);
@@ -411,22 +497,25 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
     if (!repo) return refuse("deploy_grant_repo_unresolved", "the GH-12 repo for this site could not be proven (approval, org or repo_url disagree)");
     const registry0 = first.registry as RegistryFacts;
     checkRegistryNamesRepo(registry0, repo);
-    // The scaffold job re-submitting the same tree: already granted for these names and this pin, nothing to do. The per-site
-    // name ends in the repository id, so it is derived here from the id the last grant recorded (none: nothing to compare).
-    if (req.trigger === "scaffold" && row0.grantState === "granted" && row0.grantSnapshotId === row0.contractSnapshotId && row0.grantRepositoryId !== null) {
-      const recorded = siteDeploySecretName({ slug: repo.name, environment: registry0.environment, repositoryId: row0.grantRepositoryId });
-      const held = [...new Set([...fixedNames, recorded])];
-      if (row0.grantSiteSecretName === recorded && held.every((n) => row0.grantSecretNames.includes(n))) {
-        return result(row0, "already_granted", repo, held.map((name) => ({ name, result: "granted" as const })));
+    // An automatic trigger on a site already granted for these names and this pin: nothing to do. The per-site names end in the
+    // repository id, so they are derived here from the id the last grant recorded (none: nothing to compare). The names
+    // include the PRODUCTION secret once the site has a production row, so creating that row is never short-circuited.
+    if (automatic && row0.grantState === "granted" && row0.grantSnapshotId === row0.contractSnapshotId && row0.grantRepositoryId !== null) {
+      const perSite = perSiteSecretNames({ slug: repo.name, repositoryId: row0.grantRepositoryId }, grantEnvironments(registry0));
+      const held = [...new Set([...fixedNames, ...perSite])];
+      if (row0.grantSiteSecretName === perSite[0] && held.every((n) => row0.grantSecretNames.includes(n))) {
+        return result(row0, "already_granted", repo, held.map((name) => ({ name, result: "granted" as const })), registry0);
       }
     }
 
     // Fresh reads at GitHub: which repo (its id), its default branch's head, the lock at that head.
     const info = await getRepoInfo(deps.git, repo);
-    // The fixed list, then THIS site's own per-site secret, derived from the resolved repo's name and id (what the site's own
-    // workflow sees as `github.event.repository.name` / `github.repository_id`), never from the caller.
-    const siteSecretName = siteDeploySecretName({ slug: repo.name, environment: registry0.environment, repositoryId: info.id });
-    const names = [...new Set([...fixedNames, siteSecretName])];
+    // The fixed list, then THIS site's own per-site secrets, one per environment the registry holds for it (the staging row's,
+    // and the production row's once it exists), derived from the resolved repo's name and id (what the site's own workflow sees
+    // as `github.event.repository.name` / `github.repository_id`), never from the caller.
+    const perSiteNames = perSiteSecretNames({ slug: repo.name, repositoryId: info.id }, grantEnvironments(registry0));
+    const siteSecretName = perSiteNames[0];
+    const names = [...new Set([...fixedNames, ...perSiteNames])];
     const head = await getBranchHead(deps.git, repo, info.defaultBranch);
     if (!head) return refuse("deploy_grant_no_lock", `the default branch ${info.defaultBranch} does not exist`);
     const where = `${info.defaultBranch}@${head.slice(0, 12)}`;
@@ -442,7 +531,7 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
     const claimed = await deps.withLockedSite(async (tx) => {
       const r = await tx.read();
       if (!r) return refuse("not_found", "provisioned site not found");
-      if (req.trigger === "scaffold" && r.grantState === "revoked") return null;
+      if (automatic && r.grantState === "revoked") return null;
       const reg = r.webdevSiteId ? await tx.readRegistry(r.webdevSiteId) : null;
       checkSiteConditions(r, reg);
       if (r.providerRef !== row0.providerRef || r.repoUrl !== row0.repoUrl || reg?.environment !== registry0.environment) {
@@ -454,7 +543,7 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
       await tx.claim({ snapshotId: lock.snapshotId, repositoryId: info.id, headSha: head, requestedBy: deps.actor.userId, siteSecretName });
       return tx.read();
     });
-    if (claimed === null) return result(row0, "skipped_revoked", repo, []);
+    if (claimed === null) return result(row0, "skipped_revoked", repo, [], registry0);
 
     // GRANT: under the lock, so a revoke cannot interleave. Per-name answers are data; a thrown error stops the loop.
     const done = await deps.withLockedSite(async (tx) => {
@@ -506,7 +595,7 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
     const outcome = done.secrets.every((s) => s.result === "granted")
       ? "granted"
       : done.secrets.some((s) => s.result === "not_selected") ? "partial" : "pending";
-    return result(row, outcome, repo, done.secrets);
+    return result(row, outcome, repo, done.secrets, registry0);
   } catch (err) {
     return recordAndThrow(err);
   }
@@ -520,7 +609,7 @@ export interface RevokeRequest {
 }
 
 /**
- * Remove the site's repo from every deploy secret it may hold (fixed list ∪ recorded ∪ per-site). Idempotent. A site the ERP never
+ * Remove the site's repo from every deploy secret it may hold (fixed list ∪ recorded ∪ every per-site name). Idempotent. A site the ERP never
  * granted is still swept (the DELETEs are harmless) but nothing is recorded. Throws `DeployGrantRefusal`.
  */
 export async function revokeDeploySecrets(deps: DeployGrantDeps, req: RevokeRequest): Promise<DeployRevokeResult> {
@@ -553,10 +642,12 @@ export async function revokeDeploySecrets(deps: DeployGrantDeps, req: RevokeRequ
       const r = await tx.read();
       if (!r) return refuse("not_found", "provisioned site not found");
       const repositoryId = r.grantRepositoryId ?? knownId;
-      // The fixed list, what the row recorded, and this site's own per-site secret (recorded, else derived now).
+      // The fixed list, what the row recorded, the staging per-site secret the claim recorded, and EVERY derivable per-site name
+      // (staging and production, M6-P6h2, whether or not a production row exists now). This is also the archive path's sweep
+      // (`revokeDeployAfterArchive` goes through `revokeDeployForSite`).
       const reg = r.webdevSiteId ? await tx.readRegistry(r.webdevSiteId) : null;
-      const siteSecret = r.grantSiteSecretName ?? (reg ? siteDeploySecretName({ slug: repo.name, environment: reg.environment, repositoryId }) : null);
-      const names = union(union(deps.secretNames, r.grantSecretNames), siteSecret ? [siteSecret] : []);
+      const derivable = perSiteSecretNames({ slug: repo.name, repositoryId }, revokableEnvironments(reg));
+      const names = union(union(deps.secretNames, r.grantSecretNames), union(r.grantSiteSecretName ? [r.grantSiteSecretName] : [], derivable));
       let remaining = [...r.grantSecretNames];
       const secrets: SecretOutcome[] = [];
       let failure: unknown = null;
