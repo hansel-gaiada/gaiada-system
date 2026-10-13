@@ -71,7 +71,7 @@ export class PortalProfileController {
                   cc.project_id AS "projectId",
                   CASE WHEN u.kind = 'client' THEN 'client' ELSE 'provider' END AS "side"
              FROM client_contacts cc JOIN users u ON u.id = cc.user_id
-            WHERE ${clientContactInPortalScope("cc", scopeAt(1))}
+            WHERE ${clientContactInPortalScope("cc", scopeAt(1))} OR cc.client_id = ANY($1::uuid[])
             ORDER BY u.name`,
           scopeValues(scope),
         ),
