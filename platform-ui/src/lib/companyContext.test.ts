@@ -1,10 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { activeCompany, isRootCompany, isRootOwner, isPlatformOperator, moduleOn } from "./companyContext";
+import { activeCompany, isRootCompany, isRootOwner, isOperatorRootOwner, isPlatformOperator, moduleOn } from "./companyContext";
 import type { Me } from "./platform";
 
+// PV-D31: `root` is the OPERATOR root. `cust` is a second root (a future subscriber's organization),
+// unmarked, used by the PV-D31 cases below.
 const companies: Me["companies"] = [
-  { id: "root", name: "Holding", type: "holding", vertical: "holding", enabledModules: ["pm"], rootCompanyId: "root" },
-  { id: "kid", name: "Agency", type: "agency", vertical: "agency", enabledModules: ["pm", "clients"], rootCompanyId: "root" },
+  { id: "root", name: "Holding", type: "holding", vertical: "holding", enabledModules: ["pm"], rootCompanyId: "root", isOperatorRoot: true },
+  { id: "kid", name: "Agency", type: "agency", vertical: "agency", enabledModules: ["pm", "clients"], rootCompanyId: "root", isOperatorRoot: false },
+];
+const withCustomer: Me["companies"] = [
+  ...companies,
+  { id: "cust", name: "Customer", type: "holding", vertical: "holding", rootCompanyId: "cust", isOperatorRoot: false },
 ];
 const me = (roles: Me["roles"], cs = companies): Me => ({
   userId: "u", name: "U", email: "u@x", title: null, assurance: "high", companies: cs, roles,
@@ -49,7 +55,28 @@ describe("isRootOwner (PV-D20)", () => {
   });
 });
 
-describe("isPlatformOperator (PV-D18)", () => {
+describe("isOperatorRootOwner (PV-D31)", () => {
+  it("is true for owner of the operator root only", () => {
+    expect(isOperatorRootOwner(me([owner("root")], withCustomer))).toBe(true);
+    expect(isOperatorRootOwner(me([owner("cust")], withCustomer))).toBe(false);
+    expect(isOperatorRootOwner(me([owner("kid")], withCustomer))).toBe(false);
+  });
+  it("fails closed on an older backend that sends no isOperatorRoot", () => {
+    const old = companies.map((c) => ({ ...c, isOperatorRoot: undefined }));
+    expect(isOperatorRootOwner(me([owner("root")], old))).toBe(false);
+  });
+  it("needs the marked company to also BE a root (a marker on a non-root is ignored)", () => {
+    const odd: Me["companies"] = [{ id: "kid", name: "Agency", type: "agency", rootCompanyId: "root", isOperatorRoot: true }];
+    expect(isOperatorRootOwner(me([owner("kid")], odd))).toBe(false);
+  });
+});
+
+describe("isPlatformOperator (PV-D18, narrowed by PV-D31)", () => {
+  it("is false for the owner of a CUSTOMER root, who is still a root owner for the Group area", () => {
+    const custOwner = me([owner("cust")], withCustomer);
+    expect(isRootOwner(custOwner)).toBe(true);
+    expect(isPlatformOperator(custOwner)).toBe(false);
+  });
   it("is true for platform_admin at global scope", () => {
     expect(isPlatformOperator(me([{ role: "platform_admin", scopeType: "global", scopeId: null }]))).toBe(true);
   });

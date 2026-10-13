@@ -1,0 +1,85 @@
+# M6-P6e harness: a real sshd (SFTP), real vsftpd (explicit FTPS), a plain-FTP vsftpd and a rogue copy of
+# each, an HTTPS static server on the same volume, and a client that runs deploy.sh. ONE private network and
+# NO published ports. Run it with run.sh, ON sumopod only (owner rule: no Docker on the laptop).
+name: p6e-harness
+
+x-img: &img
+  image: p6e-harness-img:local
+  build: .
+  volumes:
+    - ./:/harness:ro
+    - data:/data
+    - pki:/pki
+  init: true
+  mem_limit: 256m
+  pids_limit: 256
+
+services:
+  setup:
+    <<: *img
+    command: ["setup"]
+    restart: "no"
+
+  sshd:
+    <<: *img
+    command: ["sshd"]
+    environment: [PW_A, PW_B]
+    depends_on: { setup: { condition: service_completed_successfully } }
+
+  sshd-rogue:
+    <<: *img
+    command: ["sshd-rogue"]
+    environment: [PW_A, PW_B]
+    depends_on: { setup: { condition: service_completed_successfully } }
+
+  ftps:
+    <<: *img
+    command: ["ftps"]
+    environment: [PW_A, PW_B]
+    depends_on: { setup: { condition: service_completed_successfully } }
+
+  ftps-rogue:
+    <<: *img
+    command: ["ftps-rogue"]
+    environment: [PW_A, PW_B]
+    depends_on: { setup: { condition: service_completed_successfully } }
+
+  ftp-plain:
+    <<: *img
+    command: ["ftp-plain"]
+    environment: [PW_A, PW_B]
+    depends_on: { setup: { condition: service_completed_successfully } }
+
+  https:
+    <<: *img
+    command: ["https"]
+    depends_on: { setup: { condition: service_completed_successfully } }
+    networks:
+      default:
+        aliases: [site-a, site-b]
+
+  # Requests the served site every few ms (while /probe/run exists), so the activation window shows up as 404s.
+  probe:
+    <<: *img
+    command: ["probe"]
+    volumes:
+      - ./:/harness:ro
+      - pki:/pki:ro
+      - probe:/probe
+    depends_on: [https]
+
+  client:
+    <<: *img
+    command: ["client"]
+    cap_add: [NET_ADMIN]          # tc netem: the activation window is also measured at WAN latency
+    volumes:
+      - ./:/harness:ro
+      - ../:/deploy:ro
+      - probe:/probe
+      - pki:/pki:ro
+    depends_on: [sshd, sshd-rogue, ftps, ftps-rogue, ftp-plain, https]
+
+volumes:
+  probe:
+  data:
+  pki:

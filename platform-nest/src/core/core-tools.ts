@@ -996,10 +996,37 @@ const INVOICE_ISSUE_CORE_TOOLS: McpToolDef[] = [
   },
 ];
 
-/** PV3-06: the eight billing tools, and PV5-12's four invoice-issue tools; exported so a suite can restore exactly this area. */
+// ── PV5-08: the client's legal and money documents (agentic-native bar) ──────────────────────────────────────
+//
+// `documents.list` is READ-only and per client: `GET /api/:tenantId/clients/:clientId/documents` (BFF §30b), the staff
+// counterpart of the portal Documents list. Signed agreements (sealed copy when ready), issued-invoice PDFs and payment
+// receipts, newest first, each with `clientVisible` (the backend's marker, from the portal's own predicates). It lists
+// and links; the bytes are fetched by a person through the file route, never by a tool. There is no write counterpart.
+const DOCUMENTS_CORE_TOOLS: McpToolDef[] = [
+  {
+    name: "documents.list",
+    description:
+      "One client's legal and money documents, newest first: signed agreements (`signed_contract`; `ready:false` while " +
+      "the sealed copy is still being prepared), issued-invoice PDFs (`invoice`) and payment receipts (`receipt`). Each " +
+      "item has `id` (the source contract, invoice or payment), `title`, `date`, `fileId` (null until a file exists), " +
+      "`ready` and `clientVisible` (true when the client sees it in their portal). Deliverables are not documents here. " +
+      "Lists only; it never returns file bytes. 404 if the client does not exist; a 403 is a refusal.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/clients/:clientId/documents",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, clientId: { type: "string" } },
+      required: ["tenantId", "clientId"],
+    },
+  },
+];
+
+/** PV3-06: the eight billing tools, PV5-12's four invoice-issue tools and PV5-08's `documents.list`; exported so a suite can restore exactly this area. */
 export function registerContractBillingCoreTools(): void {
   registerCoreTools(CONTRACT_BILLING_CORE_TOOLS);
   registerCoreTools(INVOICE_ISSUE_CORE_TOOLS);
+  registerCoreTools(DOCUMENTS_CORE_TOOLS);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════

@@ -12,9 +12,10 @@ const base: Me = {
   roles: [],
 };
 
-// A group: a holding root with an agency and a hospitality company under it.
+// A group: a holding root with an agency and a hospitality company under it. PV-D31: the holding is
+// the OPERATOR root (`isOperatorRoot`, from /api/me).
 const GROUP: Me["companies"] = [
-  { id: "co-holding", name: "Holding", type: "holding", vertical: "holding", enabledModules: MODULES, rootCompanyId: "co-holding" },
+  { id: "co-holding", name: "Holding", type: "holding", vertical: "holding", enabledModules: MODULES, rootCompanyId: "co-holding", isOperatorRoot: true },
   { id: "co-agency", name: "Agency", type: "agency", vertical: "agency", enabledModules: MODULES, rootCompanyId: "co-holding" },
   { id: "co-resort", name: "Resort", type: "resort", vertical: "hospitality", enabledModules: MODULES, rootCompanyId: "co-holding" },
 ];
@@ -229,7 +230,7 @@ describe("navFor follows the active company's pack (PV-D15, PV-D17)", () => {
   });
 });
 
-describe("navFor Platform and Group areas (PV-D11, PV-D18, PV-D20)", () => {
+describe("navFor Platform and Group areas (PV-D11, PV-D18, PV-D20, PV-D31)", () => {
   const groupNames = (me: Me, tenant: string) => navFor(me, tenant).map((g) => g.label);
   const rootOwner = inGroup([
     { role: "owner", scopeType: "company", scopeId: "co-holding" },
@@ -243,7 +244,7 @@ describe("navFor Platform and Group areas (PV-D11, PV-D18, PV-D20)", () => {
       expect(groupNames(me, t)).not.toContain("Group");
     }
   });
-  it("a root owner sees Platform in every company, and Group only while the root is active", () => {
+  it("the OPERATOR root's owner sees Platform in every company, and Group only while the root is active", () => {
     expect(groupNames(rootOwner, "co-holding")).toContain("Platform");
     expect(groupNames(rootOwner, "co-agency")).toContain("Platform");
     expect(groupNames(rootOwner, "co-resort")).toContain("Platform");
@@ -262,6 +263,25 @@ describe("navFor Platform and Group areas (PV-D11, PV-D18, PV-D20)", () => {
     const childOwner = inGroup([{ role: "owner", scopeType: "company", scopeId: "co-agency" }]);
     expect(groupNames(childOwner, "co-holding")).not.toContain("Platform");
     expect(groupNames(childOwner, "co-holding")).not.toContain("Group");
+  });
+  // PV-D31: a second, UNMARKED root (a customer organization) with a company under it. Its owner is a
+  // root owner, so they keep Group on their own root (PV-D11 unchanged), but never get Platform.
+  const CUSTOMER: Me["companies"] = [
+    { id: "cust-root", name: "Customer", type: "holding", vertical: "holding", enabledModules: MODULES, rootCompanyId: "cust-root", isOperatorRoot: false },
+    { id: "cust-co", name: "Customer Agency", type: "agency", vertical: "agency", enabledModules: MODULES, rootCompanyId: "cust-root", isOperatorRoot: false },
+  ];
+  const customerOwner: Me = { ...base, companies: CUSTOMER, roles: [{ role: "owner", scopeType: "company", scopeId: "cust-root" }] };
+  it("PV-D31: the owner of a CUSTOMER root never sees Platform, but keeps Group on their own root", () => {
+    expect(groupNames(customerOwner, "cust-root")).not.toContain("Platform");
+    expect(groupNames(customerOwner, "cust-co")).not.toContain("Platform");
+    expect(groupNames(customerOwner, "cust-root")).toContain("Group");
+    expect(groupNames(customerOwner, "cust-co")).not.toContain("Group");
+  });
+  it("PV-D31: an older backend that sends no isOperatorRoot hides Platform from a root owner (fails closed)", () => {
+    const old = inGroup(rootOwner.roles);
+    old.companies = GROUP.map((c) => ({ ...c, isOperatorRoot: undefined }));
+    expect(groupNames(old, "co-holding")).not.toContain("Platform");
+    expect(groupNames(old, "co-holding")).toContain("Group");
   });
   it("a platform_admin sees Platform everywhere and Group on the root", () => {
     const admin = inGroup([{ role: "platform_admin", scopeType: "global", scopeId: null }]);

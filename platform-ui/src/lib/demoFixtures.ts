@@ -67,8 +67,10 @@ const DEMO_ENABLED_MODULES = ["agency", "pm", "it", "invoice", "clients", "knowl
 
 // PV1-01: `vertical` and `root_company_id` mirror the companies table after migration
 // 202610110530 (holding → holding, agency → agency, resort → hospitality); `co-holding` is the root.
+// PV-D31: `is_operator_root` mirrors migration 202610132137 — the demo root is the operator root, and
+// a company created in the demo session is not.
 const COMPANIES: Record<string, unknown>[] = [
-  { id: "co-holding", name: "D & A Syrowatka", type: "holding", vertical: "holding", root_company_id: "co-holding", enabled_modules: [], status: "active" },
+  { id: "co-holding", name: "D & A Syrowatka", type: "holding", vertical: "holding", root_company_id: "co-holding", is_operator_root: true, enabled_modules: [], status: "active" },
   {
     id: "co-agency",
     name: "Gaia Digital Agency",
@@ -746,10 +748,11 @@ const CLIENTS: Record<string, unknown>[] = [
 ];
 
 // PV3-04: the demo twins of the backend's platform-operator gate (admin/elevated.ts `isPlatformOperator`:
-// platform_admin at global scope, or the owner of a ROOT company) and of `checkGroupCompany`
+// platform_admin at global scope, or the owner of the OPERATOR root, PV-D31) and of `checkGroupCompany`
 // (modules/clients/group-company.ts: not the client's own company, exists, same root). Same typed codes.
 function demoIsPlatformOperator(identity: { roles: { role: string; scopeType: string; scopeId: string | null }[] }): boolean {
-  const isRoot = (id: string | null) => COMPANIES.some((c) => c.id === id && c.root_company_id === c.id);
+  const isRoot = (id: string | null) =>
+    COMPANIES.some((c) => c.id === id && c.root_company_id === c.id && c.is_operator_root === true);
   return identity.roles.some((r) =>
     (r.role === "platform_admin" && r.scopeType === "global") || (r.role === "owner" && r.scopeType === "company" && isRoot(r.scopeId)));
 }
@@ -2474,6 +2477,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       companies: COMPANIES.map((c) => ({
         id: c.id, name: c.name, type: c.type,
         vertical: c.vertical, enabledModules: DEMO_ENABLED_MODULES, rootCompanyId: c.root_company_id,
+        isOperatorRoot: c.is_operator_root === true,
       })),
       clientOf: DEMO_CLIENT_OF[currentIdentity.userId] ?? [],
     });

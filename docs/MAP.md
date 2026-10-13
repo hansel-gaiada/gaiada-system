@@ -169,11 +169,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202610132100_pv5_invoice_numbering.sql`
+- Head: `202610132137_pv_d31_operator_root.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 278 (121 legacy `NNNN_`, 157 timestamped)
+- Applied files on disk: 281 (121 legacy `NNNN_`, 160 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -208,6 +208,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/automation-approvals.controller.ts` |
 | `/api` | `platform-nest/src/core/claude-seats.controller.ts` |
 | `/api` | `platform-nest/src/core/client-contacts.controller.ts` |
+| `/api` | `platform-nest/src/core/client-documents.controller.ts` |
 | `/api` | `platform-nest/src/core/client-website-access.controller.ts` |
 | `/api` | `platform-nest/src/core/client-work.controller.ts` |
 | `/api` | `platform-nest/src/core/collab.controller.ts` |
@@ -224,6 +225,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/portal-centre.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-commerce.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-conversation.controller.ts` |
+| `/api` | `platform-nest/src/core/portal-documents.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-profile.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-workspace.controller.ts` |
@@ -528,6 +530,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/portal/conversation`
 - `/portal/conversation/[threadId]`
 - `/portal/deliverables`
+- `/portal/documents`
 - `/portal/invoices`
 - `/portal/invoices/[invoiceId]`
 - `/portal/meetings/[minutesId]`

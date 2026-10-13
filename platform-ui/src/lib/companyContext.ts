@@ -26,10 +26,20 @@ export function isRootOwner(me: Me): boolean {
   return me.roles.some((r) => r.role === "owner" && r.scopeType === "company" && r.scopeId != null && roots.has(r.scopeId));
 }
 
-/** PV-D18: the Platform surfaces (bot, gateway, hub, automation, observability) are for
- *  `platform_admin` at global scope and for the owner of the root. */
+/** PV-D31: holds the `owner` role, company-scoped, on the OPERATOR root (the root `/api/me` marks
+ *  `isOperatorRoot`). An owner of any other root (a customer root) is not. A missing marker (older
+ *  backend) reads as "not the operator root", so the menu fails closed; the server is the authority. */
+export function isOperatorRootOwner(me: Me): boolean {
+  const roots = new Set(me.companies.filter((c) => isRootCompany(c) && c.isOperatorRoot === true).map((c) => c.id));
+  return me.roles.some((r) => r.role === "owner" && r.scopeType === "company" && r.scopeId != null && roots.has(r.scopeId));
+}
+
+/** PV-D18 narrowed by PV-D31: the Platform surfaces (bot, gateway, hub, automation, observability)
+ *  are for `platform_admin` at global scope and for the owner of the OPERATOR root. The Group area
+ *  (PV-D11) keeps using `isRootOwner`: every root's owner sees their own Group. Mirrors
+ *  `isPlatformOperator` in platform-nest's admin/elevated.ts. */
 export function isPlatformOperator(me: Me): boolean {
-  return isElevated(me) || isRootOwner(me);
+  return isElevated(me) || isOperatorRootOwner(me);
 }
 
 /** A module is on unless the company says otherwise. A missing `enabledModules` means "unknown", and

@@ -69,6 +69,7 @@ server {
   # location = /lib/kestrel/r {          # V6-a replay chunks (design 6.2: 320 KB cap on this location only)
   #   limit_except POST OPTIONS { deny all; }
   #   client_max_body_size 320k;
+  #   client_body_buffer_size 320k;     # keep the chunk in memory: a spilled body logs the visitor's address
   #   set $collect_upstream "collector:8080";
   #   proxy_pass http://$collect_upstream;
   #   include /etc/nginx/proxy-common.inc;

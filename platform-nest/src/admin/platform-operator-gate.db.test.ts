@@ -1,13 +1,19 @@
-// PV1-05 — the Platform server gate (PV-D18 + PV-D20). `isPlatformOperator` (./elevated.ts) admits
-// `platform_admin` at global scope OR the owner of a ROOT company, and it guards the SYSTEM surfaces
-// only: admin-systems.controller.ts, bot-admin.controller.ts, observability.controller.ts.
+// PV1-05 — the Platform server gate (PV-D18 + PV-D20), narrowed by PV-D31 (D21, 2026-10-13).
+// `isPlatformOperator` (./elevated.ts) admits `platform_admin` at global scope OR the owner of the
+// OPERATOR ROOT (the root company with `companies.is_operator_root`, migration 202610132137), and it
+// guards the SYSTEM surfaces only: admin-systems.controller.ts, bot-admin.controller.ts,
+// observability.controller.ts.
 //
 // HOW THIS FILE BITES:
-//   * drop the owner arm (back to isElevated)      -> every "root owner gets 2xx" case fails;
+//   * drop the owner arm (back to isElevated)      -> every "operator root owner gets 2xx" case fails;
 //   * widen it to any owner, or to "owner grant whose scopeId is in rootCompanies"
 //                                                   -> every "child-company owner is 403" case fails.
 //     The second widening is the tempting one, and the first `it` below pins WHY it is wrong:
 //     `rootCompanies` holds the whole root TREE, so the child owner's own company is in it.
+//   * drop the PV-D31 marker condition (`AND is_operator_root`, i.e. back to "owner of ANY root")
+//                                                   -> every "CUSTOMER root owner is 403" case fails.
+//     The customer root is a real root with a real, anchored owner; only the marker tells them apart,
+//     which the second `it` pins.
 //
 // One read and one write route per surface family where a write exists (observability has only
 // its one GET). Downstream services are a local stub, as in admin-systems.test.ts / bot-admin.test.ts;
@@ -83,12 +89,14 @@ const ROUTES: Array<{ family: string; kind: "read" | "write"; req: Req; ok: numb
   { family: "automation", kind: "read", req: { method: "GET", url: "/api/admin/automation/workflows" }, ok: 200 },
 ];
 
-describe.skipIf(!TEST_URL)("PV1-05 · platform-operator gate on the system surfaces (PV-D18/PV-D20)", () => {
+describe.skipIf(!TEST_URL)("PV1-05 · platform-operator gate on the system surfaces (PV-D18/PV-D20/PV-D31)", () => {
   let app: NestFastifyApplication;
   let stub: Server;
   let root: string;
   let child: string;
+  let customerRoot: string;
   let rootOwner: string;
+  let customerOwner: string;
   let childOwner: string;
   let member: string;
   let admin: string;
@@ -121,6 +129,11 @@ describe.skipIf(!TEST_URL)("PV1-05 · platform-operator gate on the system surfa
     // child.root_company_id = root.id.
     root = await createCompany("PV105 Root Holding");
     child = await createCompany("PV105 Child Co", [], root);
+    // PV-D31: the test database migrated an EMPTY schema, so the migration marked nothing. Mark the
+    // operator root exactly as an operator would on an estate (data, never an id in code).
+    await withGlobal((c) => c.query(`UPDATE companies SET is_operator_root = true WHERE id = $1`, [root]));
+    // A second, UNMARKED root: a future subscriber's organization (PV-D13). Its own root, its own owner.
+    customerRoot = await createCompany("PV105 Customer Root");
 
     const ownerRole = await createRole("owner");
     const memberRole = await createRole("member");
@@ -128,6 +141,7 @@ describe.skipIf(!TEST_URL)("PV1-05 · platform-operator gate on the system surfa
     const itRole = await createRole("it");
 
     rootOwner = await createUser("root-owner@pv105.test");
+    customerOwner = await createUser("customer-owner@pv105.test");
     childOwner = await createUser("child-owner@pv105.test");
     member = await createUser("member@pv105.test");
     admin = await createUser("admin@pv105.test");
@@ -142,6 +156,10 @@ describe.skipIf(!TEST_URL)("PV1-05 · platform-operator gate on the system surfa
     // rootCompanies contains both companies — see the first test.
     await addMembership(child, childOwner);
     await grantRole(childOwner, ownerRole, "company", child);
+
+    // Customer-root owner: the same shape as the operator root's owner, on the OTHER root.
+    await addMembership(customerRoot, customerOwner);
+    await grantRole(customerOwner, ownerRole, "company", customerRoot);
 
     await addMembership(root, member);
     await grantRole(member, memberRole, "company", root);
@@ -158,6 +176,7 @@ describe.skipIf(!TEST_URL)("PV1-05 · platform-operator gate on the system surfa
         [rootOwner, member, admin, itUser],
       ]);
       await c.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [child, childOwner]);
+      await c.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [customerRoot, customerOwner]);
     });
 
     app = await buildApp();
@@ -190,12 +209,48 @@ describe.skipIf(!TEST_URL)("PV1-05 · platform-operator gate on the system surfa
     expect(p?.roles).toContainEqual({ role: "owner", scopeType: "company", scopeId: child });
   });
 
+  it("fixture premise (PV-D31): the customer root is a real root with an anchored owner; only the marker differs", async () => {
+    const rows = await withGlobal((c) =>
+      c.query<{ id: string; root_company_id: string; is_operator_root: boolean }>(
+        `SELECT id, root_company_id, is_operator_root FROM companies WHERE id = ANY($1::uuid[])`,
+        [[root, customerRoot]],
+      ),
+    );
+    const byId = new Map(rows.rows.map((r) => [r.id, r]));
+    expect(byId.get(customerRoot)).toMatchObject({ root_company_id: customerRoot, is_operator_root: false });
+    expect(byId.get(root)).toMatchObject({ root_company_id: root, is_operator_root: true });
+
+    const p = await assemblePrincipal(customerOwner, "high");
+    expect(p?.rootCompanies).toContain(customerRoot);
+    expect(p?.roles).toContainEqual({ role: "owner", scopeType: "company", scopeId: customerRoot });
+  });
+
+  it("GET /api/me carries isOperatorRoot: true on the operator root only (PV-D31, additive)", async () => {
+    const mine = (await app.inject({ method: "GET", url: "/api/me", headers: asUser(rootOwner) })).json() as {
+      companies: { id: string; isOperatorRoot: boolean }[];
+    };
+    expect(mine.companies.find((c) => c.id === root)?.isOperatorRoot).toBe(true);
+    const cust = (await app.inject({ method: "GET", url: "/api/me", headers: asUser(customerOwner) })).json() as {
+      companies: { id: string; isOperatorRoot: boolean }[];
+    };
+    expect(cust.companies.find((c) => c.id === customerRoot)?.isOperatorRoot).toBe(false);
+    const kid = (await app.inject({ method: "GET", url: "/api/me", headers: asUser(childOwner) })).json() as {
+      companies: { id: string; isOperatorRoot: boolean }[];
+    };
+    expect(kid.companies.find((c) => c.id === child)?.isOperatorRoot).toBe(false);
+  });
+
   for (const r of ROUTES) {
     const label = `${r.family} ${r.kind}: ${r.req.method} ${r.req.url}`;
 
-    it(`${label} — the owner of the ROOT gets ${r.ok}`, async () => {
+    it(`${label} — the owner of the OPERATOR ROOT gets ${r.ok}`, async () => {
       const res = await call(rootOwner, r.req);
       expect(res.statusCode, res.body).toBe(r.ok);
+    });
+
+    it(`${label} — the owner of a CUSTOMER root (unmarked) gets 403 (PV-D31)`, async () => {
+      const res = await call(customerOwner, r.req);
+      expect(res.statusCode, res.body).toBe(403);
     });
 
     it(`${label} — an owner of only the CHILD company gets 403`, async () => {

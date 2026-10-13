@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **265** capabilities across **16** owners
-- **142** writes · 123 reads
+- **266** capabilities across **16** owners
+- **142** writes · 124 reads
 - Writes by impact: **high 26** · medium 41 · low 75
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -42,8 +42,8 @@ unfalsifiable after.
 | agency | `agency` | 17 |
 | assistant | `assistant` | 15 |
 | automation-console | `admin/automation` | 3 |
-| clients | `clients` | 15 |
-| core | `agency` · `billing-profile` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 48 |
+| clients | `clients` | 16 |
+| core | `agency` · `billing-profile` · `clients` · `contracts` · `contracts?clientId=:clientId` · `conversation` · `conversation?clientId=:clientId&projectId=:projectId&status=:status&awaitingReply=:awaitingReply` · `invoice-payments` · `invoice-payments?clientId=:clientId` · `invoices` · `meetings` · `positions` · `role-grants` | 58 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 10 |
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 17 |
 | search | `search` | 28 |
 | social | `social` | 13 |
-| webdev | `webdev` | 31 |
+| webdev | `webdev` | 32 |
 
 ## Capabilities
 
@@ -97,6 +97,7 @@ unfalsifiable after.
 | core | `conversation.post` | `POST` | `/api/:tenantId/conversation/:threadId/messages` | write | `medium` |
 | core | `conversation.reopenThread` | `PATCH` | `/api/:tenantId/conversation/:threadId` | write | `low` |
 | core | `conversation.sendDraft` | `POST` | `/api/:tenantId/conversation/drafts/:draftId/send` | write | `medium` |
+| core | `documents.list` | `GET` | `/api/:tenantId/clients/:clientId/documents` | read | — |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
 | core | `iam.listAttachableRoles` | `GET` | `/api/:tenantId/positions/attachable-roles` | read | — |

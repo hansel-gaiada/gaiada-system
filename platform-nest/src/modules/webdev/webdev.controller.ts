@@ -10,6 +10,8 @@
 //   DELETE /api/:tenantId/modules/webdev/provisioned-sites/:id/deploy-grant -> 200 revoke | 404 | 409 | 422 | 429 | 502 | 503
 //        (M6-P4g: the deploy gate is the org secret grant; deploy-grant.ts)
 //   POST /api/:tenantId/modules/webdev/sites/:id/domain                 -> 200 registry site | 400 | 404 | 409 (M6-P4c2)
+//   POST /api/:tenantId/modules/webdev/sites/:id/delivery-binding       -> 200 registry site + deliveryState | 400 | 404 | 409 | 422 (M6-P6g)
+//   POST /api/:tenantId/modules/webdev/sites/:id/production             -> 201 registry site + deliveryState | 400 | 404 | 409 (M6-P6g)
 //
 // This controller is DELIBERATELY THIN. It validates route/body input, resolves the principal,
 // authorizes, builds the driver, and maps a typed outcome onto a status code. Every decision that
@@ -63,8 +65,11 @@ import {
   completeAfterPoll, readProvisionCompletion, reconcileAndComplete, type ProvisionCompletionDto,
 } from "./provision-completion.service";
 import {
-  claimProvisionedSiteDomain, createWebdevSite, getWebdevSite, patchWebdevSiteVaultRef, type WebdevSiteDto,
+  bindSiteDelivery, claimProvisionedSiteDomain, createProductionFromStaging, createWebdevSite, getWebdevSite,
+  patchWebdevSiteVaultRef, type DeliverySiteDto, type WebdevSiteDto,
 } from "./site-registry.service";
+import { DeliveryRefusal, parseBindingBody } from "./delivery-binding";
+import { readDeliveryForProvisioned, type SiteDeliveryDto } from "./delivery-binding.service";
 import { ScaffoldRefusal } from "./scaffold-commit";
 import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto, type ScaffoldCommitResponse } from "./scaffold-commit.service";
 import { DeployGrantRefusal, type DeployGrantResult, type DeployRevokeResult } from "./deploy-grant";
@@ -114,6 +119,15 @@ function deployGrantHttpError(err: unknown): unknown {
   return err;
 }
 
+/** A delivery refusal (M6-P6g) as its HTTP answer, `{error: <token>, reason}` (the P4b2/P4g shape); anything else unchanged. */
+function deliveryHttpError(err: unknown): unknown {
+  if (err instanceof DeliveryRefusal) {
+    if (err.code === "not_found") return new NotFoundException("webdev site not found");
+    return new HttpException({ message: err.code, reason: err.detail }, err.status);
+  }
+  return err;
+}
+
 @Controller("api/:tenantId/modules/webdev")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
 export class WebdevController {
@@ -132,18 +146,24 @@ export class WebdevController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-  ): Promise<SiteDto & { completion: ProvisionCompletionDto | null; scaffold: ScaffoldCommitDto | null; deployGrant: DeployGrantDto | null }> {
+  ): Promise<SiteDto & {
+    completion: ProvisionCompletionDto | null; scaffold: ScaffoldCommitDto | null; deployGrant: DeployGrantDto | null;
+    delivery: SiteDeliveryDto;
+  }> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "read");
     const site = await getProvisionedSite(tenantId, id);
     if (!site) throw new NotFoundException("provisioned site not found");
     // M6-P4c: where §08's completion stands (registry row, WebDesk tenant, pinned contract). Additive.
     // M6-P4b2: where the scaffold's first fill stands (state, commit, last error). Additive.
     // M6-P4g: where the deploy grant stands (state, the secret NAMES, last error). Additive.
+    // M6-P6g: where the HOST side stands per registry row (awaiting_deploy_credential | ready). Additive, and a different
+    // fact from `deployGrant` (GitHub-side): the two are read separately and never merged.
     return {
       ...site,
       completion: await readProvisionCompletion(tenantId, id),
       scaffold: await readScaffoldCommit(tenantId, id),
       deployGrant: await readDeployGrant(tenantId, id),
+      delivery: (await readDeliveryForProvisioned(tenantId, [id])).get(id) ?? { environments: [] },
     };
   }
 
@@ -459,5 +479,61 @@ export class WebdevController {
       domainClaimed: true, domain: site.domain,
     });
     return site;
+  }
+
+  /** M6-P6g — bind a registry row to its delivery target. Body EXACTLY `{hostKind, hostRef, access, vaultRef}` (any other key
+   *  is a 400: a host, user, path or secret has no column and is refused, not ignored). `hostKind` is `shared-hosting` or
+   *  `our-box`; `hostRef` an opaque label; `access` `ssh` (SFTP) or `ftp` (FTPS); `vaultRef` a VLT-1 record of THIS tenant,
+   *  linked, of the provider that access needs, owned by the company or this site's own client. Another tenant's record and
+   *  an id that does not exist are both `422 vault_ref_unknown`. Authorization comes first and is independent of the body
+   *  (`webdev_site · update`, no new action). Refusals are `{error: <token>, reason}` with the token's status. */
+  @Post("sites/:id/delivery-binding")
+  @HttpCode(200)
+  async bindDelivery(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<DeliverySiteDto> {
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "update");
+    try {
+      const input = parseBindingBody(body);
+      const site = await bindSiteDelivery(tenantId, id, input, req.principal.userId);
+      await writeActivity(tenantId, req.principal.userId, "updated", "webdev_site", site.id, {
+        deliveryBound: true, hostKind: site.hostKind, hostRef: site.hostRef, access: site.access, deliveryState: site.deliveryState,
+      });
+      return site;
+    } catch (err) {
+      throw deliveryHttpError(err);
+    }
+  }
+
+  /** M6-P6g — create a provisioned site's PRODUCTION row from its STAGING row (`:id` is the staging row). Body EXACTLY
+   *  `{domain}`. Once only: a second call, or a project that already has a production row, is `409 production_row_exists`;
+   *  a domain another live row holds is `409 domain_taken`. The new row copies project, client, kind, repo and adoption and
+   *  starts unbound (`awaiting_deploy_credential`). Authorization is the registry's `webdev_site · create` (a new row). */
+  @Post("sites/:id/production")
+  @HttpCode(201)
+  async createProduction(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<DeliverySiteDto> {
+    await authorize(req.principal, { kind: "webdev_site", tenantId, id, module: "webdev" }, "create");
+    try {
+      const rec = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+      const keys = rec ? Object.keys(rec) : [];
+      if (!rec || keys.length !== 1 || keys[0] !== "domain" || typeof rec.domain !== "string") {
+        throw new DeliveryRefusal("production_body_invalid", `this command accepts exactly {"domain": string} — got field(s): ${keys.join(",") || "(none)"}`);
+      }
+      const site = await createProductionFromStaging(tenantId, id, rec.domain, req.principal.userId);
+      await writeActivity(tenantId, req.principal.userId, "created", "webdev_site", site.id, {
+        domain: site.domain, environment: site.environment, promotedFromSiteId: id,
+      });
+      return site;
+    } catch (err) {
+      throw deliveryHttpError(err);
+    }
   }
 }

@@ -15,6 +15,7 @@
 //
 // `mark_certified` has NO bot DENY by design (PV5-02 spec); it is therefore not asserted either way here.
 //
+// PV-D29 (2026-10-13) relaxes the `set_bank_details` DENY, TEMPORARILY, for an owner or finance_manager of the tenant.
 // PV-D26 (owner ruling, 2026-10-12): the PV-D26 describe pins the high-assurance DENY on `set_bank_details` and on
 // `vendor_master` (finance_ap), which applies to platform_admin too. Every other test here runs at high assurance
 // (the `principal()` default), so none of them is affected by it.
@@ -271,31 +272,46 @@ describe.skipIf(!live)("PV5-02 · finance_config `set_bank_details` (live Cerbos
   });
 });
 
-describe.skipIf(!live)("PV-D26 · bank details need high assurance from EVERYONE, platform_admin included (live Cerbos)", () => {
+describe.skipIf(!live)("PV-D26 / PV-D29 · bank details: high assurance for the operator; an owner / finance_manager of the company is relaxed to linked until MFA is live (live Cerbos)", () => {
   // Assurance is "low" | "linked" | "high"; the ruling's "medium" is "linked" (a plain SSO login, no fresh second factor).
   const SET = "set_bank_details";
   const ap = (tenantId: string = T1): Resource => ({ kind: "finance_ap", tenantId, module: "finance" });
   const admin = (assurance: Principal["assurance"]) => principal([glob("platform_admin")], { companies: [], assurance });
 
-  it("set_bank_details: an owner at linked assurance is DENIED, at high is ALLOWED", async () => {
-    expect(await allow(principal([co("owner")], { assurance: "linked" }), financeConfig(), SET)).toBe(false);
+  // PV-D29 (2026-10-13): INTERIM until MFA is enabled (infra/runbooks/enable-mfa.md). Live Keycloak emits no `amr`
+  // claim, so no web session reaches "high"; the assurance DENY on set_bank_details therefore does not fire for an
+  // owner or finance_manager grant on the tenant. When MFA is live, restore PV-D26's unconditional DENY and flip
+  // the two "linked" owner / finance_manager expectations below back to false.
+  it("set_bank_details (PV-D29 interim): an owner at linked assurance is ALLOWED, at high is ALLOWED, at low is DENIED", async () => {
+    expect(await allow(principal([co("owner")], { assurance: "linked" }), financeConfig(), SET)).toBe(true);
     expect(await allow(principal([co("owner")], { assurance: "high" }), financeConfig(), SET)).toBe(true);
+    expect(await allow(principal([co("owner")], { assurance: "low" }), financeConfig(), SET)).toBe(false);
   });
 
-  it("set_bank_details: a finance_manager at high is ALLOWED, at linked is DENIED", async () => {
+  it("set_bank_details (PV-D29 interim): a finance_manager at linked or high is ALLOWED, at low is DENIED", async () => {
+    expect(await allow(principal([co("finance_manager")], { assurance: "linked" }), financeConfig(), SET)).toBe(true);
     expect(await allow(principal([co("finance_manager")], { assurance: "high" }), financeConfig(), SET)).toBe(true);
-    expect(await allow(principal([co("finance_manager")], { assurance: "linked" }), financeConfig(), SET)).toBe(false);
+    expect(await allow(principal([co("finance_manager")], { assurance: "low" }), financeConfig(), SET)).toBe(false);
   });
 
-  it("set_bank_details: platform_admin at linked (and low) is DENIED, at high is ALLOWED: the wildcard keeps its reach but not a way round the step-up", async () => {
+  it("🔴 PV-D29: the relaxation is for the company's own owner / finance_manager only: another company's, or a global, grant at linked is still DENIED", async () => {
+    expect(await allow(principal([co("owner", T2)], { assurance: "linked" }), financeConfig(), SET)).toBe(false);
+    expect(await allow(principal([co("finance_manager", T2)], { assurance: "linked" }), financeConfig(), SET)).toBe(false);
+    expect(await allow(principal([glob("owner")], { assurance: "linked" }), financeConfig(), SET)).toBe(false);
+  });
+
+  it("set_bank_details: platform_admin at linked (and low) is still DENIED, at high is ALLOWED: the wildcard keeps its reach but not a way round the step-up (PV-D29 does not relax it)", async () => {
     expect(await allow(admin("linked"), financeConfig(), SET)).toBe(false);
     expect(await allow(admin("low"), financeConfig(), SET)).toBe(false);
     expect(await allow(admin("high"), financeConfig(), SET)).toBe(true);
   });
 
-  it("set_bank_details: a bot is still DENIED at high assurance; company_admin at high is still DENIED", async () => {
-    expect(await allow(principal([co("owner")], { kind: "bot", assurance: "high" }), financeConfig(), SET)).toBe(false);
-    expect(await allow(principal([co("company_admin")], { assurance: "high" }), financeConfig(), SET)).toBe(false);
+  it("set_bank_details: a bot is still DENIED at high and at linked assurance; company_admin is DENIED at linked and at high (no ALLOW for it at all)", async () => {
+    for (const assurance of ["high", "linked"] as const) {
+      expect(await allow(principal([co("owner")], { kind: "bot", assurance }), financeConfig(), SET), `bot owner ${assurance}`).toBe(false);
+      expect(await allow(principal([co("finance_manager")], { kind: "automation", assurance }), financeConfig(), SET), `automation fm ${assurance}`).toBe(false);
+      expect(await allow(principal([co("company_admin")], { assurance }), financeConfig(), SET), `company_admin ${assurance}`).toBe(false);
+    }
   });
 
   it("the assurance DENY names set_bank_details only: platform_admin keeps the rest of finance_config at linked assurance", async () => {

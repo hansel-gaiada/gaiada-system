@@ -116,6 +116,18 @@ describe.skipIf(!TEST_URL)("the D & A Syrowatka holding backbone", () => {
     expect(rows[0].home_company_id).toBe(holding.id);
   });
 
+  it("the holding is the one OPERATOR ROOT (PV-D31), and a re-seed keeps it that way", async () => {
+    const marked = async () =>
+      (await adminPool().query<{ name: string }>(
+        `SELECT name FROM companies WHERE is_operator_root AND deleted_at IS NULL`,
+      )).rows.map((r) => r.name);
+    // A fresh database migrates before it seeds, so without the seed's mark no root owner would get
+    // the Platform area on a seeded estate.
+    expect(await marked()).toEqual([HOLDING]);
+    await seedAgency();
+    expect(await marked()).toEqual([HOLDING]);
+  }, 300_000);
+
   it("platform_admin is still held by the superadmin, and Anthony does NOT hold it", async () => {
     const { rows } = await adminPool().query<{ email: string }>(
       `SELECT u.email

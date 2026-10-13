@@ -2,12 +2,14 @@ import { describe, it, expect } from "vitest";
 import type { Me } from "./platform";
 import { groupCompanyOptions } from "./clientGroupCompany";
 
-const company = (id: string, name: string, rootCompanyId: string | null) => ({ id, name, type: null, rootCompanyId });
+const company = (id: string, name: string, rootCompanyId: string | null, isOperatorRoot = false) =>
+  ({ id, name, type: null, rootCompanyId, isOperatorRoot });
 const me = (roles: Me["roles"]): Me => ({
   userId: "u", name: "U", email: "u@x.test", title: null, assurance: "high",
+  // PV-D31: `root` is the OPERATOR root; `root-2` is another (customer) root.
   companies: [
-    company("root", "Root", "root"), company("agency", "Agency", "root"), company("sib", "Sibling", "root"),
-    company("other", "Elsewhere", "root-2"), company("loose", "No root", null),
+    company("root", "Root", "root", true), company("agency", "Agency", "root"), company("sib", "Sibling", "root"),
+    company("root-2", "Customer Root", "root-2"), company("other", "Elsewhere", "root-2"), company("loose", "No root", null),
   ],
   roles,
 });
@@ -21,6 +23,10 @@ describe("PV3-04 · group-company picker options", () => {
   it("the owner of the ROOT gets it; the owner of a child does not (null = no picker at all)", () => {
     expect(groupCompanyOptions(me([{ role: "owner", scopeType: "company", scopeId: "root" }]), "agency")).not.toBeNull();
     expect(groupCompanyOptions(me([{ role: "owner", scopeType: "company", scopeId: "agency" }]), "agency")).toBeNull();
+  });
+
+  it("PV-D31: the owner of a CUSTOMER root gets no picker, even on their own root's company", () => {
+    expect(groupCompanyOptions(me([{ role: "owner", scopeType: "company", scopeId: "root-2" }]), "other")).toBeNull();
   });
 
   it("a member or company_admin gets no picker", () => {

@@ -126,6 +126,14 @@ const unit = (kind: string, refId: string, refName: string, respId: string, resp
 export async function seedAgency(): Promise<SeededAgency> {
   // ---- Holding + member companies ----
   const holdingId = await ensureCompany(HOLDING_NAME, [], "holding", null);
+  // PV-D31: the seeded holding is the OPERATOR ROOT. Migration 202610132137 marks the one root that
+  // exists when it runs, but a fresh database migrates BEFORE it seeds, so the seed marks its own
+  // root. Only when no operator root is marked yet: a human's choice is never overwritten.
+  await withGlobal((c) => c.query(
+    `UPDATE companies SET is_operator_root = true
+      WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM companies WHERE is_operator_root AND deleted_at IS NULL)`,
+    [holdingId],
+  ));
   const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr", "reports", "assistant"], "agency", holdingId);
   const resortId = await ensureCompany(RESORT_NAME, [], "resort", holdingId);
   // Viceroy's own venues hang off the RESORT, not the holding — the tree mirrors the business, and

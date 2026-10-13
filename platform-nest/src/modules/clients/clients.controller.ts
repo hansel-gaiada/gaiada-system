@@ -41,7 +41,8 @@ const CLIENT_FROM = `FROM clients cl LEFT JOIN users ou ON ou.id = cl.owner_user
 
 // PV3-04 (PV3-Q1, lead's default until the owner rules): linking a client to one of OUR companies later
 // drives intercompany tagging of that client's invoices, so a wrong link misstates group money. Only a
-// platform operator (platform_admin, or the owner of the root: PV-D18/PV-D20) may set or change it.
+// platform operator (platform_admin, or the owner of the OPERATOR root: PV-D18/PV-D20, narrowed by
+// PV-D31 so a customer root's owner is refused) may set or change it.
 // Checked right after the Cerbos decision and BEFORE any validation of the target, so a refusal never
 // reveals whether a company exists. "Touching" = the key is present in the body, whatever its value.
 async function assertMayTouchGroupCompany(req: FastifyRequest, raw: unknown): Promise<void> {

@@ -161,10 +161,11 @@ export interface Me {
   /** PV1-01 added `vertical` (the company's business line, which selects its pack), `enabledModules`
    *  (the effective set the module gate uses) and `rootCompanyId`. Optional for an older backend:
    *  treat a missing vertical as "general", missing modules as unknown (hide nothing), and a missing
-   *  root as "not a root". */
+   *  root as "not a root". PV-D31 added `isOperatorRoot`: true only on the one root whose owners
+   *  get the Platform area; a missing value (older backend) is "not the operator root". */
   companies: {
     id: string; name: string; type: string | null;
-    vertical?: string; enabledModules?: string[]; rootCompanyId?: string | null;
+    vertical?: string; enabledModules?: string[]; rootCompanyId?: string | null; isOperatorRoot?: boolean;
   }[];
   roles: { role: string; scopeType: string; scopeId: string | null }[];
   serviceScopes?: ServiceScope[];
