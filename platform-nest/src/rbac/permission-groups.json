@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 165,
-      "grantablePermissionsInCatalog": 436,
-      "permissionsCoveredByGroups": 397,
+      "groups": 166,
+      "grantablePermissionsInCatalog": 441,
+      "permissionsCoveredByGroups": 402,
       "permissionsAdvancedOnly": 39,
       "permissionsAppearingInMultipleGroups": 4,
       "sensitiveGroups": 114
@@ -1902,6 +1902,20 @@
         "agency.campaign_part.update",
         "agency.campaign_part.delete",
         "agency.campaign_part.allocate"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "work_requests",
+      "name": "Requests between departments",
+      "domain": "core",
+      "description": "Asking another department for assets or engineering work, and answering such requests. DW-5c: any member can ask (create); the requester can withdraw their own request (cancel); the receiving department's head and the people doing the work deliver, and the head declines. Agents and automation can read requests but never ask, cancel, deliver or decline.",
+      "permissions": [
+        "core.work_request.read",
+        "core.work_request.create",
+        "core.work_request.cancel",
+        "core.work_request.deliver",
+        "core.work_request.decline"
       ],
       "sensitive": false
     }

@@ -654,6 +654,27 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "agency.campaign_part.allocate" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_work_request_* — DW-5c (2026-10-13, docs/FRONTEND-BFF-CONTRACT.md §32.2). One generic global-or-company
+    # mirror for read and create. NO cancel/deliver/decline mirror, on purpose: each is reachable by a requester
+    # rule or an assignee rule (self-scoped) and an org_unit_lead rule (attribute-dependent) as well as by
+    # company_admin/manager, and a flat `perms` mirror cannot tell those apart (permission-arm-hazard-scan Pattern B,
+    # iam-04-reg1-mirror-reach-invariant). Same call as agency_campaign_part's update and time_entry's own actions.
+    - name: perm_work_request_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.work_request.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_work_request_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.work_request.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_agency_creative_asset_* — IAM-04-ROLLOUT-B12
     - name: perm_agency_creative_asset_read
       parentRoles: ["user"]
