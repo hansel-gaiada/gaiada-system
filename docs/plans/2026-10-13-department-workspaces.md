@@ -424,6 +424,144 @@ Each department has its own set. The row opens one page with two sections:
 - **The exit.** Every delivered design exists as an exported file in the Asset Library, so nothing is
   lost if Figma goes. That keeps the vendor doctrine's point (§2.6, amended for this ruling).
 
+### 4.2 Build notes (DW-6, 2026-10-13)
+
+Written when DW-6 started, from a survey of main (`2e222711`). Pilot users only, like DW-2.
+
+**Most of the regrouping is already built.**
+- The registry (DW-1a) holds every row of §4 for Web Dev, SEO, Social Media, Creatives and the
+  Office of the GM. The pilot shell (DW-2) draws them. That includes Pipeline and Monitoring in Web
+  Dev (its owned routes) and SEO's "Client reports" label.
+- The generic workspace already draws the full skeleton: Overview, AI Assistant, Project
+  Management, Tools & connections, the Performance block and You.
+- So 6a, 6b and 6e are proofs, not builds. What is left:
+  - SEO's client-reports page and the classic toolkit still say "Reports". They follow the
+    registry.
+  - A browser test walks each agency workspace and a generic department, and checks the rows and
+    tabs against §4.
+- Tabs that carry another phase's ticket stay hidden until it lands: Campaigns (DW-5b), Requests
+  (DW-5c, DW-5d) and the new analytics tabs (DW-4c). The Clients row is counted under 6d. 6a and 6b
+  tick when everything else in their rows renders and is proven.
+
+**What each ticket builds on, and what it adds:**
+
+- **6c · Tools & connections.**
+  - *Builds on:* the Connections page `/departments/[deptId]/connections`. It already shows your
+    own GitHub, Drive and Claude seat, the organisation's GitHub App, the team grid (for
+    `company.manage`) and SEO's Google accounts. It also builds on the department Home's launcher
+    row, which already shows your seat on the Claude tools.
+  - *Adds:* one page with two sections drawn from the registry:
+    - **Tools:** the workspace's `tools`, each with your seat where it has one.
+    - **Connections:** the workspace's `connections` kinds. A kind with a ticket is hidden
+      (Figma until 6k; bank feeds and the IT consoles until DW-7e).
+  - *Adds:* pins. You pin up to 6 tools per workspace. The Overview's Today block (DW-3c) shows
+    the pinned tools, or the first six when none are pinned. The classic Home keeps its launcher
+    row.
+  - *Gap:* pins live in the `gaiada_prefs` cookie, so they belong to the browser, not the account.
+    No server-side preference store exists.
+- **6c2 · Launch with context.**
+  - *Adds:* an "Open in" menu on the task, project and client pages. It lists the workspace's
+    tools, each with a context link where one exists: the project's linked GitHub repository, the
+    client's Search Console property and GA4, Figma after 6k and Drive after 6i.
+  - *Return paths:* pull requests on the task (6f), the Asset Library upload (exists), and Figma
+    exports (6k).
+  - *Gap:* a tool with no context link opens its home page.
+- **6d · Clients row.**
+  - *Builds on:* `projects.department_id`, an org-node id with no FK, is the only department link a
+    client has. The `clients` table has no department column, and `GET /clients` takes no filter.
+  - *Adds:* contract §33, then `GET /clients?departmentId=`. It returns the clients that have a live
+    project owned by that department or any unit under it (`org_unit_closure`, which includes the
+    node itself and is keyed by tenant). The filter narrows the list for display; it is not a
+    boundary, and authorisation stays `client read`. The row's page is
+    `/departments/[deptId]/clients`.
+  - *Gap:* a client served only through an engagement or a site, with no project, is not listed,
+    and the page says so.
+- **6g · Web Dev Deliverables.**
+  - *Builds on:* `deliverables`: `project_id` is not null, with status and due date, and files
+    attach to it. It also builds on `GET /deliverables?projectId=&clientId=`. Today's tab is a
+    placeholder that reads nothing.
+  - *Adds:* `?departmentId=` on the same join (contract §33), and a tab that lists the department's
+    deliverables with status, due date, client and file count.
+  - *Gap:* produced artefacts that are not deliverable rows, such as PRDs and site builds, stay on
+    their own tabs.
+- **6f · Pull requests and CI on tasks.**
+  - *Builds on:* the GitHub App webhooks already receive `pull_request` and `workflow_run` and
+    write `work_activity`. Tasks have `seq` and projects have `short_code`, so a task key like
+    `ABC-12` already exists. Nothing parses it, and no PR is stored.
+  - *Adds:* contract §34, then:
+    - a `github_pull_requests` table, filled by the existing handlers;
+    - the task key in the branch name or the PR title, which links a PR to its task;
+    - a read on the task, and the task page's Pull requests panel with CI status.
+  - *Trap:* GitHub data lives under the organisation's tenant, which may not be the task's. Reads go
+    through the organisation-tenant resolver (`github-tenant-scope-ruling.md`), and the link checks
+    the task's tenant.
+  - *Gap:* a PR with no task key in its branch or title is on no task. It stays visible on the
+    repository.
+- **6h · Asset versions and review rounds.**
+  - *Builds on:* `creative_assets` has `department_id`, but no versions and no review. It
+    authorises as the generic `file` kind, and its list ignores the department.
+  - *Adds:* contract §35, then:
+    - version groups and review rounds on assets;
+    - a Cerbos kind of its own, so review can be granted separately;
+    - the department filter on the list.
+  - *Reuses:* the generic comments for threads, and the social review's content hash, which proves
+    which version a reviewer saw.
+  - *Gap:* not to be confused with `agency_creative_assets`, which is campaign-bound and has its
+    own review. 6h targets the Asset Library's `creative_assets`.
+- **6k · Figma.**
+  - *Builds on:* the credential vault (`integration_connections`) and reference attachments
+    (`files.url`). No Figma code exists.
+  - *Adds:* contract §36, then:
+    - a `figma` provider;
+    - `figma_links` on tasks, requests and campaign parts;
+    - a server-side read for the thumbnail, last change and open comments. Thumbnails are signed
+      and short-lived, so they are proxied, never stored.
+    - exports into the Asset Library as versions, which needs 6h.
+  - *Gap:* the live proof waits for Figma API access (DW-11).
+- **6i · Google Drive.**
+  - *Builds on:* `google_drive` is a provider in the vault and in the Google OAuth registry. No
+    Drive surface is registered, and no Drive client exists.
+  - *Adds:* a Drive surface with the `drive.file` scope and the Google Picker. You pick a file, and
+    it attaches as a reference.
+  - *Note:* `drive.file` reaches only the files a person picks, which keeps clear of the restricted
+    Drive scopes and their verification. Check this against Google's current scope list when the
+    ticket starts.
+  - *Waits for:* the Drive OAuth client (DW-11).
+- **6j:** owned by the SEO and SMM trackers, and ticked here when they land.
+
+**Order, one agent at a time:**
+1. 6a + 6b + 6e: the label and the browser test (Sonnet).
+2. 6c (Sonnet).
+3. Contract §33 (orchestrator), then the 6d + 6g backend (Sonnet), then their screens (Sonnet).
+4. Contract §34, then the 6f backend (Opus: the link crosses tenants), then the panel (Sonnet).
+5. Contract §35, then the 6h backend (Sonnet: a migration and a Cerbos kind), then the screens.
+6. 6c2 (Sonnet).
+7. Contract §36, then 6k after 6h. It goes live after DW-11.
+8. 6i, after DW-11.
+
+**Defaults taken, which the owner may overrule:**
+- A department's clients come from its projects, in the same company only. Clients it serves for
+  another group company through a service assignment are not shown, as in DW-5's v1 (§32.8).
+- The Deliverables tab lists the `deliverables` rows of the department's projects.
+- Pins belong to the browser.
+- Asset review is internal in v1. Clients review posts through the social flow.
+
+**Shared files.**
+- `lib/workspaces.ts` is edited by DW-3, DW-4 and DW-5 as well. DW-6 edits only these parts:
+  - `CONN`, `CLIENTS_ROW` and `TOOLS_ROW`;
+  - the `tools` and `connections` arrays;
+  - the generic workspace;
+  - Web Dev's Build row.
+- DW-3c's Today block reads the tools. 6c changes only which tools reach it.
+- DW-6's browser test is its own file, `e2e/workspace-departments.spec.ts`. That keeps it out of
+  the shell spec, which DW-3 is growing.
+- In the BFF contract, DW-6 takes §33 to §36. DW-5 holds §31 and §32.
+
+**Testing.**
+- UI and backend suites run on GitHub Actions CI. Backend HTTP and DB suites run with Postgres and
+  Cerbos.
+- The browser test runs on sumopod with `platform-ui/qa/e2e-gate.sh`, one gate at a time.
+
 ---
 
 ## 5. Performance, inside every department
@@ -893,6 +1031,7 @@ Each row keeps its gate. A generic-pack company has no Clients or Campaigns row.
 - **5f** (Haiku) "Ask Creatives for assets" and "Ask Web Dev" quick actions.
 
 **DW-6 · Department workspaces regrouped, with their tools**
+- Build notes, the order and what DW-1 and DW-2 already built: §4.2.
 - **6a** (Haiku) Web Dev, as in §4.
 - **6b** (Haiku) SEO, Social Media, Creatives and the Office of the GM, as in §4. SEO's tab becomes
   "Client reports".
