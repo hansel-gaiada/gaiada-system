@@ -249,7 +249,7 @@ function blockersFor(f: IssueFacts): IssueBlocker[] {
   if (f.taxCode) {
     // PV-D7 (owner, 2026-10-12): until Finance records the company as PKP, an invoice that carries tax cannot be issued.
     if (f.isPkp !== true) add("PKP_NOT_CONFIRMED", "the invoice carries tax but the company is not recorded as PKP");
-    if (f.taxInForce !== true) add("TAX_CODE_NOT_IN_FORCE", `tax code ${f.taxCode} has no rate in force today`);
+    if (f.taxInForce !== true) add("TAX_CODE_NOT_IN_FORCE", `tax code ${f.taxCode} has no rate in force today; Finance sets tax codes up under Finance > Tax (/finance/tax), where the standard PPN codes can be added in one step`);
     if (!f.vatAccountId) add("NO_VAT_ACCOUNT", "the invoice carries tax but the chart has no output VAT account (2140)");
   }
   return out;
@@ -640,6 +640,35 @@ export async function hasCurrencyPrecision(c: PoolClient, amount: string, minorU
 }
 
 /**
+ * PV5-F2: the date a client payment is RECEIPTED in the ledger (standard late recognition). ONE rule, shared by the
+ * staff confirmation (postConfirmedPayment) and the gateway path (PV5-10), so a closed period never strands a payment.
+ *   - the claim's `paid_on` when its fiscal period is OPEN;
+ *   - otherwise the FIRST DAY of the earliest OPEN period after `paid_on` (`late: true`; the caller records the
+ *     original date on the receipt);
+ *   - with no open period after it, a 409 `no_open_period` naming the problem, not a raw ledger error.
+ * `invoice_payments.paid_on` (the evidence) is never touched. `c` must be withBilling: finance_fiscal_periods is module
+ * walled and reads ZERO rows without it, which would make every payment look like it has no open period.
+ */
+export async function resolveReceiptDate(
+  c: PoolClient, tenantId: string, paidOn: string,
+): Promise<{ receiptDate: string; late: boolean }> {
+  const r = await c.query<{ open: boolean; nextOpen: string | null }>(
+    `SELECT finance_period_accepts_posting($1, $2::date) AS open,
+            (SELECT to_char(p.start_date, 'YYYY-MM-DD') FROM finance_fiscal_periods p
+              WHERE p.tenant_id = $1 AND p.state = 'OPEN' AND p.start_date > $2::date
+              ORDER BY p.start_date LIMIT 1) AS "nextOpen"`,
+    [tenantId, paidOn],
+  );
+  const x = r.rows[0];
+  if (x?.open === true) return { receiptDate: paidOn, late: false };
+  if (x?.nextOpen) return { receiptDate: x.nextOpen, late: true };
+  throw new ConflictException({
+    message: `the payment is dated ${paidOn}, which is not in an open fiscal period, and no later fiscal period is open to receive it; open the next period in Finance, then confirm again`,
+    reason: "no_open_period",
+  });
+}
+
+/**
  * Confirming a payment on an ISSUED invoice posts it: an AR receipt into the billing profile's bank ledger account
  * (`finance_ar_record_receipt`: DR bank, CR AR), then its allocation to the AR invoice (`finance_ar_allocate`). The
  * invoice becomes `paid` exactly when the AR invoice does, in the same transaction. `c` must be withBilling, and the
@@ -688,15 +717,19 @@ export async function postConfirmedPayment(
     });
   }
 
-  const year = Number(p.paidOn.slice(0, 4));
+  // PV5-F2: a payment dated in a closed period is receipted in the next open one; the receipt records the real date.
+  const dating = await resolveReceiptDate(c, tenantId, p.paidOn);
+  const year = Number(dating.receiptDate.slice(0, 4));
   const receiptNo = formatNo(row.prefix ?? "INV", year, await nextNumber(c, tenantId, "receipt", year), "RC");
   const receiptId = newId();
+  // finance_ar_receipts has no notes column; `reference` is its free-text field, so the late-recognition note rides there.
+  const lateNote = dating.late ? ` | paid ${p.paidOn}, booked ${dating.receiptDate} (period closed)` : "";
   await c.query(
     `INSERT INTO finance_ar_receipts
        (id, tenant_id, customer_id, receipt_no, receipt_date, currency_code, amount, bank_account_id, reference)
      VALUES ($1, $2, $3, $4, $5::date, $6, $7::numeric, $8, $9)`,
-    [receiptId, tenantId, a.customerId, receiptNo, p.paidOn, p.currency, p.amount, row.bankAccountId,
-     (p.reference ?? `invoice payment ${p.paymentId}`).slice(0, 200)],
+    [receiptId, tenantId, a.customerId, receiptNo, dating.receiptDate, p.currency, p.amount, row.bankAccountId,
+     (p.reference ?? `invoice payment ${p.paymentId}`).slice(0, 200 - lateNote.length) + lateNote],
   );
   await c.query(`SELECT finance_ar_record_receipt($1, $2)`, [receiptId, p.actorId]);
   await c.query(`SELECT finance_ar_allocate($1, $2, $3::numeric, $4)`, [receiptId, row.arInvoiceId, p.amount, p.actorId]);

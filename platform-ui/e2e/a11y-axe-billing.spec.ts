@@ -7,6 +7,7 @@ import { tenantCookie } from "./appCookies";
 //   - a legacy invoice (`inv-1`: sent before invoices were issued through the ledger),
 //   - the billing profile (the bank block is its own section, masked by default),
 //   - accounting settings (which now links to the billing profile),
+//   - tax (PV5-F2: tax codes, the standard PPN action and the add form, beside the PPN position),
 //   - the client's Contracts & billing page (tier, content fingerprint, Mark certified disabled with its reason).
 //
 // Modelled on `a11y-axe-client-hub.spec.ts`. Runs in the default `chromium` project on the shared staff session and, like
@@ -23,6 +24,7 @@ const PAGES = [
   "/invoices/inv-1",
   "/finance/settings/billing-profile",
   "/finance/settings",
+  "/finance/tax", // PV5-F2: the tax-code setup card (the standard PPN codes, add, end-date)
   "/clients/cl-1/billing",
 ];
 

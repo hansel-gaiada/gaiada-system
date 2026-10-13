@@ -50,7 +50,7 @@ import "server-only";
 import type {
   Account, FiscalPeriod, TrialBalance, BalanceSheet, ArAgingRow, ApAgingRow,
   LedgerVerdict, ReconcileVerdict, ArPosition, ApPosition, CloseReadiness,
-  JournalSummary, PpnSummary, EfakturException,
+  JournalSummary, PpnSummary, EfakturException, TaxCode,
 } from "./finance";
 
 interface DemoResult { status: number; json: unknown }
@@ -250,6 +250,14 @@ const PPN: PpnSummary = {
 
 const EFAKTUR_EXCEPTIONS: EfakturException[] = [
   { kind: "AP_INPUT_VAT_LOST", documentNo: "VINV-0042", counterparty: "PT Sewa Kantor", docDate: `${YEAR}-03-18`, taxAmount: "2200000.0000", detail: "input VAT NOT creditable without a vendor e-Faktur — this amount is a real cost" },
+];
+
+// PV5-F2 — the standard PPN rows, as `GET /finance/tax/codes` returns them (an `inUse` row cannot be removed, only end-dated).
+const TAX_CODES: TaxCode[] = [
+  { id: "tc-ppn-2025", code: "PPN", name: "PPN 12% on 11/12 of the base (from 2025-01-01)", kind: "ppn_output", rate: 12,
+    baseMultiplier: 0.9166666667, effectiveFrom: "2025-01-01", effectiveTo: null, notes: null, accountCode: "2140", inUse: true },
+  { id: "tc-ppn-2022", code: "PPN", name: "PPN 11% on the full base (to 2024-12-31)", kind: "ppn_output", rate: 11,
+    baseMultiplier: 1, effectiveFrom: "2022-04-01", effectiveTo: "2024-12-31", notes: null, accountCode: "2140", inUse: true },
 ];
 
 // ── UI-01c / UI-02b — the cap table and settings ────────────────────────────────────────────────
@@ -710,6 +718,7 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   if (tail === "ap/reconcile") return ok(AP_RECONCILE);
   if (tail === "tax/ppn") return ok(PPN);
   if (tail === "tax/efaktur-exceptions") return ok(EFAKTUR_EXCEPTIONS);
+  if (tail === "tax/codes") return ok(TAX_CODES);
   if (/^periods\/[^/]+\/close-readiness$/.test(tail)) return ok(CLOSE_READINESS);
   if (tail.startsWith("profit-and-loss")) {
     return ok([
@@ -1240,6 +1249,26 @@ function financeWrite(tail: string, body: string | undefined): DemoResult | null
   if (tail === "instruments") return createInstrumentDemo(b);
   const accrual = /^instruments\/([^/]+)\/accrual$/.exec(tail);
   if (accrual) return postInstrumentAccrualDemo(accrual[1], b);
+
+  // PV5-F2 — tax codes. Stateless, like the rest of this store: the fixture already holds the standard PPN rows, so the
+  // standard action reports them as present, and an add/end validates its shape and answers as the live handler does.
+  if (tail === "tax/codes/standard-ppn") return ok({ created: [], skipped: ["PPN from 2022-04-01", "PPN from 2025-01-01"] });
+  if (tail === "tax/codes") {
+    if (!b.code || !b.name || b.rate === undefined || b.rate === "" || !b.effectiveFrom) {
+      return badRequest("code, name, rate and effectiveFrom are required");
+    }
+    return { status: 201, json: { id: `demo-tc-${Date.now()}` } };
+  }
+  const endCode = /^tax\/codes\/([^/]+)\/end$/.exec(tail);
+  if (endCode) {
+    const row = TAX_CODES.find((c) => c.id === endCode[1]);
+    if (!row) return notFound("no such tax code in this company");
+    if (!b.effectiveTo) return badRequest("effectiveTo is required");
+    if (row.effectiveTo) {
+      return { status: 409, json: { error: `this row already ends on ${row.effectiveTo}; an end date can only be brought forward, never pushed back`, reason: "tax_code_cannot_extend" } };
+    }
+    return ok({ id: row.id, code: row.code, effectiveTo: b.effectiveTo });
+  }
 
   if (tail === "ar/customers") return createArCustomerDemo(b);
   if (tail === "ap/vendors") return createApVendorDemo(b);
