@@ -130,3 +130,17 @@ describe("demo billing · the hub Overview agrees with the store", () => {
     expect(o.needsClient.filter((i) => i.kind === "contract").every((i) => i.href === "/clients/cl-1/billing")).toBe(true);
   });
 });
+
+describe("demo billing · documents (PV5-08)", () => {
+  it("serves the client's documents as {items} with clientVisible, newest first, and refuses a plain member", () => {
+    const r = call("GET", `/api/${T}/clients/cl-1/documents`, HANSEL);
+    expect(r.status).toBe(200);
+    const items = (r.json as { items: Array<{ kind: string; date: string; clientVisible: boolean }> }).items;
+    expect(items.length).toBeGreaterThan(0);
+    for (const i of items) expect(typeof i.clientVisible).toBe("boolean");
+    const t = items.map((i) => Date.parse(i.date));
+    expect(t).toEqual([...t].sort((a, b) => b - a));
+    expect(call("GET", `/api/${T}/clients/cl-2/documents`, HANSEL).json).toEqual({ items: [] });
+    expect(call("GET", `/api/${T}/clients/cl-1/documents`, IC).status).toBe(403);
+  });
+});

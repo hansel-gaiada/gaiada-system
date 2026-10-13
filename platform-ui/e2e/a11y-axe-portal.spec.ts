@@ -44,6 +44,8 @@ const PAGES = [
   "/portal/invoices/inv-2026-021",
   "/portal/contracts/ctr-msa-2026",
   "/portal/contracts/ctr-sow-brand",
+  // PV5-08: legal and money documents.
+  "/portal/documents",
   "/portal/profile",
 ];
 
