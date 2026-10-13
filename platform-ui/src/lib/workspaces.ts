@@ -921,8 +921,11 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
     tabs: [
       // Ungated: mandatory training is owed by everyone, so the page that says what you owe never is.
       { key: "mine", label: "My learning", href: "/me/learning", icon: "learning" },
-      // The catalogue is ungated (`member` holds `lms.catalogue.view`); its department filter is DW-4f.
-      { key: "courses", label: "Department courses", href: "/learning/catalogue", icon: "box" },
+      // Opens the catalogue on this department's subtree (DW-4f). The catalogue is ungated (`member` holds
+      // `lms.catalogue.view`). A workspace with no department node (HR, Finance, IT until DW-7d; Company)
+      // is not offered the tab (the `{dept}` rule, `hrefFor`); the whole catalogue stays in the Company
+      // area's "Learning catalogue" row.
+      { key: "courses", label: "Department courses", href: "/learning/catalogue?unit={dept}", icon: "box" },
       { key: "add", label: "Add material", href: "/learning/authoring", icon: "projects", gate: { kind: "unitCap", cap: "lms.authoring" } },
       { key: "team", label: "Team progress", href: "/learning/compliance", icon: "check", gate: { kind: "unitCap", cap: "lms.progress.view" } },
     ],

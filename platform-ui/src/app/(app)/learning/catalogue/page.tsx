@@ -8,6 +8,8 @@ import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ModuleDisabled } from "@/components/ModuleDisabled";
 import { isModuleOnForActiveCompany } from "@/lib/modules";
+import { getOrgStructure } from "@/lib/org";
+import { unitSubtree, inUnit } from "@/lib/learningScope";
 
 // Learning › Catalogue — everything on offer, for everyone.
 //
@@ -15,10 +17,15 @@ import { isModuleOnForActiveCompany } from "@/lib/modules";
 // cannot see is a support ticket rather than a security posture (resource_lms_course.yaml's read
 // rule names `member` for exactly this reason). What is NOT open is anyone's progress or scores —
 // those live on /learning/compliance behind `lms.progress.view`.
+//
+// `?unit=<org node id>` (DW-4f, the Learning row's "Department courses" tab) narrows the page to that
+// department's SUBTREE: a department's courses may sit on its divisions, and the backend's
+// `unitNodeId=` filter matches one exact node, so the page filters instead. Nothing new is revealed —
+// the unfiltered catalogue is open to every member.
 export default async function LearningCataloguePage({
   searchParams,
 }: {
-  searchParams: Promise<{ level?: string; discipline?: string; track?: string }>;
+  searchParams: Promise<{ level?: string; discipline?: string; track?: string; unit?: string }>;
 }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -35,10 +42,33 @@ export default async function LearningCataloguePage({
   const level = LEVELS.includes(sp.level as Level) ? (sp.level as Level) : undefined;
   const track = sp.track === "general" || sp.track === "department" ? sp.track : undefined;
 
-  const [courses, paths] = await Promise.all([
-    listCourses(userId, tenant, { level, discipline: sp.discipline, track }),
+  // The department view: resolve the subtree first, so an unknown id never renders a list.
+  let scope: { name: string; ids: Set<string> } | null = null;
+  if (sp.unit) {
+    const company = me.companies.find((c) => c.id === tenant) ?? { id: tenant, name: tenant, type: null };
+    const { structure } = await getOrgStructure(userId, tenant, company);
+    scope = unitSubtree(structure, sp.unit);
+    if (!scope) {
+      return (
+        <EmptyNote>
+          This department does not exist.{" "}
+          <Link href="/learning/catalogue" style={{ color: "var(--erp-accent)" }}>Whole catalogue</Link>
+        </EmptyNote>
+      );
+    }
+  }
+  const unitQs = sp.unit ? `unit=${encodeURIComponent(sp.unit)}` : "";
+  const catalogueHref = (extra = "") => {
+    const qs = [unitQs, extra].filter(Boolean).join("&");
+    return qs ? `/learning/catalogue?${qs}` : "/learning/catalogue";
+  };
+
+  const [allCourses, allPaths] = await Promise.all([
+    listCourses(userId, tenant, { level, discipline: sp.discipline, track: scope ? "department" : track }),
     listPaths(userId, tenant),
   ]);
+  const courses = scope ? inUnit(allCourses, scope.ids) : allCourses;
+  const paths = scope ? inUnit(allPaths.filter((p) => p.track === "department"), scope.ids) : allPaths;
 
   const mandatory = paths.filter((p) => p.isMandatory);
   const disciplines = [...new Set(courses.map((c) => c.discipline).filter((d): d is string => !!d))].sort();
@@ -46,10 +76,20 @@ export default async function LearningCataloguePage({
 
   return (
     <>
+      {scope && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+          <span className="type-eyebrow">Department courses · {scope.name}</span>
+          <Link href="/learning/catalogue" className="lux-btn lux-btn--sm lux-btn--ghost">Whole catalogue</Link>
+        </div>
+      )}
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 22 }}>
-        <KpiTile label="Courses" value={String(courses.length)} foot="published" />
-        <KpiTile label="Paths" value={String(paths.length)} />
-        <KpiTile label="Required of everyone" value={String(mandatory.length)} foot="the general track" />
+        <KpiTile label="Courses" value={String(courses.length)} foot={scope ? `for ${scope.name}` : "published"} />
+        <KpiTile label="Paths" value={String(paths.length)} foot={scope ? `for ${scope.name}` : undefined} />
+        {scope ? (
+          <KpiTile label="Required of everyone" value="—" foot="company-wide courses: whole catalogue" />
+        ) : (
+          <KpiTile label="Required of everyone" value={String(mandatory.length)} foot="the general track" />
+        )}
         <KpiTile label="Disciplines" value={String(disciplines.length)} foot={disciplines.slice(0, 3).join(", ") || undefined} />
       </div>
 
@@ -58,7 +98,7 @@ export default async function LearningCataloguePage({
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18, alignItems: "center" }}>
         <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-60)" }}>Level:</span>
         <Link
-          href="/learning/catalogue"
+          href={catalogueHref()}
           className={`lux-btn lux-btn--sm ${!level ? "lux-btn--solid" : "lux-btn--ghost"}`}
         >
           All
@@ -66,7 +106,7 @@ export default async function LearningCataloguePage({
         {byLevel.map((b) => (
           <Link
             key={b.level}
-            href={`/learning/catalogue?level=${b.level}`}
+            href={catalogueHref(`level=${b.level}`)}
             className={`lux-btn lux-btn--sm ${level === b.level ? "lux-btn--solid" : "lux-btn--ghost"}`}
           >
             {LEVEL_LABEL[b.level]} ({b.n})
@@ -79,7 +119,9 @@ export default async function LearningCataloguePage({
         hint="A path is an ORDERED sequence — the steps are meant to be taken in order, and completing one earns a certificate."
         style={{ marginBottom: 22 }}
       >
-        {paths.length === 0 ? (
+        {paths.length === 0 && scope ? (
+          <EmptyNote>No path for {scope.name} yet.</EmptyNote>
+        ) : paths.length === 0 ? (
           <EmptyNote>
             No paths published yet. A path is what gets assigned and what certifies — individual
             courses are its building blocks.
@@ -112,10 +154,12 @@ export default async function LearningCataloguePage({
         )}
       </Card>
 
-      <Card title={level ? `Courses — ${LEVEL_LABEL[level]}` : "All courses"}>
+      <Card title={level ? `Courses — ${LEVEL_LABEL[level]}` : scope ? `Courses — ${scope.name}` : "All courses"}>
         {courses.length === 0 ? (
           <EmptyNote>
-            {level
+            {scope
+              ? <>No course for {scope.name} yet.{" "}<Link href="/learning/catalogue" style={{ color: "var(--erp-accent)" }}>Whole catalogue</Link></>
+              : level
               ? `Nothing published at ${LEVEL_LABEL[level]} level yet.`
               : "No published courses. A course must be published before it can be added to a path or assigned — a draft is invisible here by design."}
           </EmptyNote>

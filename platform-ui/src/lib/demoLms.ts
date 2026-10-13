@@ -50,25 +50,25 @@ const COURSES: Course[] = [
   {
     id: "demo-lms-c3", courseKey: "webdev-fe-foundations", version: 1, title: "Frontend foundations",
     summary: "Components, state and the render boundary — with a build you actually run.",
-    track: "department", unitNodeId: "dept-webdev", discipline: "FE", level: "practitioner",
+    track: "department", unitNodeId: "dept-1", discipline: "FE", level: "practitioner",
     status: "published", estimatedMinutes: 320, publishedAt: "2026-08-10", createdAt: "2026-08-02",
   },
   {
     id: "demo-lms-c4", courseKey: "webdev-devops-pipelines", version: 1, title: "Pipelines and rollout",
     summary: "Build, sign, ship and roll back — graded on the artefacts your pipeline produces.",
-    track: "department", unitNodeId: "dept-webdev", discipline: "DevOps", level: "advanced",
+    track: "department", unitNodeId: "dept-1-div-2", discipline: "DevOps", level: "advanced",
     status: "published", estimatedMinutes: 480, publishedAt: "2026-08-12", createdAt: "2026-08-05",
   },
   {
     id: "demo-lms-c5", courseKey: "webdev-security-basics", version: 1, title: "Web security fundamentals",
     summary: "The vulnerability classes that reach production, against a target you are allowed to break.",
-    track: "department", unitNodeId: "dept-webdev", discipline: "Cyber Security", level: "practitioner",
+    track: "department", unitNodeId: "dept-1", discipline: "Cyber Security", level: "practitioner",
     status: "published", estimatedMinutes: 400, publishedAt: "2026-08-14", createdAt: "2026-08-06",
   },
   {
     id: "demo-lms-c6", courseKey: "mgmt-running-a-department", version: 1, title: "Running a department",
     summary: "Capacity, the ball, appraisals and the numbers a head is answerable for.",
-    track: "department", unitNodeId: "dept-gm", discipline: "Management", level: "lead",
+    track: "department", unitNodeId: "dept-5", discipline: "Management", level: "lead",
     status: "published", estimatedMinutes: 240, publishedAt: "2026-08-15", createdAt: "2026-08-08",
   },
 ];
@@ -233,7 +233,7 @@ const PATHS: LearningPath[] = [
   {
     id: "demo-lms-p2", pathKey: "webdev-fe-track", title: "Web Dev — Frontend",
     summary: "Foundations through production work, in order.",
-    track: "department", unitNodeId: "dept-webdev", discipline: "FE", level: "practitioner",
+    track: "department", unitNodeId: "dept-1", discipline: "FE", level: "practitioner",
     status: "published", isMandatory: false, appliesTo: "unit", dueDays: null,
     certificationValidMonths: null, certificationLabel: "FE Practitioner", courseCount: 1,
   },
@@ -247,7 +247,7 @@ const PATHS: LearningPath[] = [
   {
     id: "demo-lms-p4", pathKey: "dept-head-track", title: "Department heads",
     summary: "For anyone holding a lead position.",
-    track: "department", unitNodeId: "dept-gm", discipline: "Management", level: "lead",
+    track: "department", unitNodeId: "dept-5", discipline: "Management", level: "lead",
     status: "published", isMandatory: false, appliesTo: "unit", dueDays: null,
     certificationValidMonths: null, certificationLabel: null, courseCount: 1,
   },
