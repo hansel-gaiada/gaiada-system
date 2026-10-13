@@ -11,6 +11,15 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.129.0` - DW-4f: "Department courses" shows the department's own courses (2026-10-13) - PROTOTYPED
+
+Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.4 and §5.6.
+- **The tab.** The Learning row's "Department courses" opened the whole catalogue under the department's name. It now opens `/learning/catalogue?unit={dept}`. A workspace with no department node (HR, Finance and IT until DW-7d; Company) is not offered the tab, the rule every `{dept}` tab follows; the whole catalogue stays in the Company area's "Learning catalogue" row.
+- **The page.** With `?unit=`, the catalogue shows the department-track courses and paths placed anywhere in that department's subtree, so a division's courses count. The backend's `unitNodeId=` filter matches one exact node, so the page filters (courses are open to every member, so nothing new is revealed). An unknown unit says "This department does not exist."; an empty department says "No course for <name> yet." with a link to the whole catalogue; company-wide required courses are pointed to, not counted. Without `?unit=`, the page is unchanged.
+- **New pure `lib/learningScope.ts`** (`unitSubtree`, `inUnit`), tested.
+- **Demo.** The demo courses carried unit ids that match no org node (`dept-webdev`, `dept-gm`); they are re-keyed to real demo nodes (`dept-1`, a `dept-1` division, `dept-5`), so Web Dev shows three courses, one of them through its Backend division.
+- Not changed: "Add material" and "Team progress" still need DW-4g (heads hold no `lms.*` right today). The course reader still turns a failed read into an empty list (existing behaviour; the module gate runs first).
+
 ### platform-ui `0.128.0` - DW-3e: the Overview's Pulse (2026-10-13) - PROTOTYPED
 
 - **What.** The Department band's Pulse (plan §3.3, §4): the workspace's own tiles, only where an honest reader exists (plan §3.7). Each tile reads its own source, all at once, and shows a count, its label and a link to the page that lists the items.
