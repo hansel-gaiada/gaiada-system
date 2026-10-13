@@ -35,6 +35,14 @@ local stack). None of these mean "production-done".
   - Unit: `indexnow-webdesk.test.ts` (`liveVersionNow`, `pageForItem` in both modes, `notifyWebdeskTransition` refusals) and `scheduled-rebuilds.unit.test.ts` (an 18-row parity table).
   - DB, run in GitHub Actions: `scheduled-rebuilds.test.ts` +5 and `webdesk-content.test.ts` +3. They cover who is pinged, who never is, and that a broken notifier changes nothing.
 
+### platform-ui `0.112.0` - DW-2e: ⌘K built from the workspace registry (2026-10-13) - PROTOTYPED
+
+- **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.6 rule 3:
+  - `buildWorkspaceEntries(model)` (`lib/palette.ts`, pure): one entry per concrete tab of every workspace in the shell model (the person's own first), then the Company and Admin rows. Department tabs read `Web Dev · Board`; a row whose only tab has the row's label shows it once; Overview, AI Assistant, Performance and You are listed once from the home workspace (the first when home is Company), labelled plainly. A department-specific tab of those blocks (another href) is kept under its workspace's name.
+  - `Shell` passes `workspacePaletteEntries(model, today)`: the registry's entries, then today's nav and department entries, de-duplicated by href with the registry winning. Nothing findable today stops being findable until the classic nav retires (DW-9d).
+- **Not changed:** the classic shell's entries, the palette's look, live-record search and keyboard handling, `lib/workspaces.ts`, `nav.ts`, every gate, server read and URL.
+- **Tests:** `paletteFindability.test.ts` (new): six personas (placed Web Dev employee, operator-root owner, customer-root owner, HR staff without an HR node, generic-pack member, platform_admin) each find every `navFor` href and every model tab, with no placeholder, unique ids and no duplicate href; plus label and section unit tests. CI run: 38350097661 (green; an earlier run 38349388091 failed only on the Shell test's palette mock, fixed).
+
 ### platform-ui `0.111.0` - DW-2c and DW-2d: the workspace top bar, and the AI Assistant row opens the drawer (2026-10-13) - PROTOTYPED
 
 - **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.5 and DW-D9:

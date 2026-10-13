@@ -14,7 +14,7 @@ import { SpecialAccessBanner } from "./SpecialAccessBanner";
 import { AssistantFab } from "./AssistantFab";
 import { CommandPalette } from "./CommandPalette";
 import { activeCompany } from "@/lib/companyContext";
-import { buildNavEntries, buildDeptEntries } from "@/lib/palette";
+import { buildNavEntries, buildDeptEntries, workspacePaletteEntries } from "@/lib/palette";
 import type { ShellModel } from "@/lib/shellModel";
 import "./shell.css";
 
@@ -29,13 +29,14 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   // Command palette tiers 1+2 (§4.1/§4.2) — computed here, in the same request that renders the
   // sidebar, so typing in the palette costs zero network round-trips for anything but tier 3 (live
   // records, fetched client-side from CommandPalette itself). Both builders are pure/client-safe.
-  const paletteEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments, activeCompany(me, tenantId)?.vertical, (t) => !t.requires || can(me, t.requires, tenantId))];
+  const todayEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments, activeCompany(me, tenantId)?.vertical, (t) => !t.requires || can(me, t.requires, tenantId))];
+  // DW-2e: the workspace shell builds them from the registry too (rule 3), with today's entries kept in the union.
+  const paletteEntries = workspaceModel ? workspacePaletteEntries(workspaceModel, todayEntries) : todayEntries;
 
   // Everything below the skip link. In the workspace shell it sits inside the provider, which renders no
   // DOM, so `.erp-app`'s grid still sees these as its direct children.
   const frame = (
     <>
-      {/* The palette's entries change in a later DW-2 ticket. */}
       {workspaceModel ? (
         <WorkspaceShellSidebar me={me} tenantId={tenantId} />
       ) : (
