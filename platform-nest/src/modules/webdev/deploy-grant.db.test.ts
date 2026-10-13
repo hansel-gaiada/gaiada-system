@@ -92,7 +92,8 @@ describe.skipIf(!live)("M6-P4g — deploy grant (real Postgres, faked GitHub)", 
   }
 
   /** The site's own per-site deploy secret (provisioned registry rows are `staging`). */
-  const siteSecret = (s: Site) => siteDeploySecretName({ id: s.id, slug: s.slug, environment: "staging" });
+  // M6-P6f: named from the repo's name and GitHub id; `gh` (the fake repo) is made by fakeRepoFor before any caller asks.
+  const siteSecret = (s: Site) => siteDeploySecretName({ slug: s.slug, environment: "staging", repositoryId: gh.repoId });
 
   const lockFor = (s: Site) =>
     JSON.stringify({ blockLibraryVersion: "0.1.0", contentHash: s.snapshot.contentHash, contractVersion: "1.0.0", snapshotId: s.snapshot.id, vocabularyVersion: "1.1.0" }, null, 2) + "\n";
@@ -311,7 +312,7 @@ describe.skipIf(!live)("M6-P4g — deploy grant (real Postgres, faked GitHub)", 
     const plain = await completeSite();
     const facts = `deploy_grant_secret_names = '{WEBDESK_DEPLOY_GRANT}', deploy_grant_snapshot_id = '${plain.snapshot.id}',
                    deploy_grant_repository_id = 7, deploy_grant_head_sha = '${"a".repeat(40)}', deploy_grant_requested_by = '${userId}',
-                   deploy_grant_site_secret_name = 'WEBDESK_DEPLOY_X_STAGING_0A1B2C3D', deploy_grant_pending_names = '{}'`;
+                   deploy_grant_site_secret_name = 'WEBDESK_DEPLOY_X_STAGING_424242', deploy_grant_pending_names = '{}'`;
     // not committed
     await expect(adminPool().query(`UPDATE webdev_provisioned_sites SET deploy_grant_state = 'pending', ${facts} WHERE id = $1`, [plain.id]))
       .rejects.toMatchObject({ code: "23514" });
@@ -334,6 +335,9 @@ describe.skipIf(!live)("M6-P4g — deploy grant (real Postgres, faked GitHub)", 
       .rejects.toMatchObject({ code: "23514" });
     // a per-site name that is not one derived by siteDeploySecretName
     await expect(adminPool().query(`UPDATE webdev_provisioned_sites SET deploy_grant_site_secret_name = 'OTHER_SECRET' WHERE id = $1`, [s.id]))
+      .rejects.toMatchObject({ code: "23514" });
+    // M6-P6f: the name ends in the repository id, so the old `<H8>` form (8 hex with a letter) is no longer one
+    await expect(adminPool().query(`UPDATE webdev_provisioned_sites SET deploy_grant_site_secret_name = 'WEBDESK_DEPLOY_X_STAGING_0A1B2C3D' WHERE id = $1`, [s.id]))
       .rejects.toMatchObject({ code: "23514" });
     // granted while a name is still pending
     await expect(adminPool().query(
