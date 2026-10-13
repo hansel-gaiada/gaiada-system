@@ -20,6 +20,8 @@ import {
   addContributor, removeContributor, reassignResponsible, setBallToMe, rescheduleTask,
 } from "@/lib/pmActions";
 import { PM_TERMS } from "@/lib/pmVocabulary";
+import { getTaskPullRequests } from "@/lib/pmPullRequests-data";
+import { PullRequestsSection } from "@/components/pm/PullRequests";
 import { StatusSelect } from "@/components/pm/StatusSelect";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -86,7 +88,7 @@ export async function TaskDetailView({
     );
   }
 
-  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers, assignmentHistory] = await Promise.all([
+  const [comments, suggestions, assignable, projectTasks, timeLogs, files, tagRegistry, customFieldDefs, projectStatuses, followers, assignmentHistory, pullRequests] = await Promise.all([
     listTaskComments(userId, tenant, taskId),
     listSuggestions(userId, tenant, taskId),
     assignableUnits(userId, tenant),
@@ -98,6 +100,7 @@ export async function TaskDetailView({
     listProjectStatuses(userId, tenant, task.projectId),
     listFollowers(userId, tenant, taskId),
     listAssignmentHistory(userId, tenant, taskId), // P4-B7
+    getTaskPullRequests(userId, tenant, taskId), // DW-6f — a ReadResult; never throws
   ]);
   const canEdit = true; // signed-in members; backend RLS is the real boundary
   const statusLabel = (id: string) => projectStatuses.find((s) => s.id === id)?.label ?? id;
@@ -237,6 +240,10 @@ export async function TaskDetailView({
           >
             <Subtasks subtasks={task.subtasks} canEdit={canEdit} toggle={toggleSubtask.bind(null, task.id)} add={addSubtask.bind(null, task.id)} />
           </Section>
+
+          {/* DW-6f (§34.7) — pull requests + CI linked through the task's key. Renders nothing when there is nothing to
+              say; "Pull requests unavailable" when the read failed. Not pilot-gated: this page is shared by both layouts. */}
+          <PullRequestsSection result={pullRequests} />
 
           {customFieldDefs.length > 0 && (
             <Section label="Custom fields">
