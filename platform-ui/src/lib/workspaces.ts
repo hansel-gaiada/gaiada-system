@@ -839,16 +839,16 @@ export const TOOLS_ROW: WorkspaceRow = {
   tabs: [{ key: "tools", label: "Tools & connections", href: deptPath("connections"), icon: "hub" }],
 };
 
-/** Report periods (§5.1). Only day, week and month exist in the backend (`ReportPeriodKind`); the other
- *  three are DW-4a, and until then they are shown disabled, never faked (§13 trap 4). Calendar quarters
- *  and semesters (DW-Q3). */
+/** Report periods (§5.1). All six exist in the backend since DW-4a (`ReportPeriodKind`): calendar
+ *  quarters and semesters (DW-Q3), and the year. `ticket` stays on the type for a future period that
+ *  is not built yet, which is shown disabled, never faked (§13 trap 4). */
 export const REPORT_PERIODS: readonly { key: string; label: string; ticket?: string }[] = [
   { key: "day", label: "Daily" },
   { key: "week", label: "Weekly" },
   { key: "month", label: "Monthly" },
-  { key: "quarter", label: "Quarterly", ticket: "DW-4a" },
-  { key: "semester", label: "Semester", ticket: "DW-4a" },
-  { key: "year", label: "Yearly", ticket: "DW-4a" },
+  { key: "quarter", label: "Quarterly" },
+  { key: "semester", label: "Semester" },
+  { key: "year", label: "Yearly" },
 ];
 
 // Learning and the team views use `unitCap`: today a head holds `manager`, which has no `lms.*` right,

@@ -20,6 +20,7 @@ import type {
   ReportDocument, ReportGrain, ReportPeriodKind, ReportKpi, ReportSeries, ReportSeriesPoint,
 } from "./reports";
 import { dayCountOf, formatDateRange } from "./reports";
+import { formatPeriodLabel, isCalendarKind, previousPeriodRange, resolveCalendarRange } from "./reportCalendar";
 import type { GroupCompanyCard, GroupFigure, GroupReport } from "./groupReport";
 
 interface DemoResult { status: number; json: unknown }
@@ -79,15 +80,29 @@ function additiveSeries(key: string, label: string, unit: ReportSeries["unit"], 
   return { key, label, unit, kind, points };
 }
 
-/** Calendar-kind label ("16 Jul 2026" / "Week 29 2026" / "July 2026") vs a custom range's
- *  "16 Jul – 3 Aug 2026" — mirrors `report-document.ts`'s own `periodLabel` doc comment closely
- *  enough for a demo fixture (exact week/month-number formatting isn't the point here). */
+/** The header's `periodLabel`: the same strings as the backend's `formatPeriodLabel`
+ *  (report-calendar.ts) — "14 Oct 2026" | "Week 42 2026" | "February 2026" | "Q3 2026" |
+ *  "Semester 2 2026" | "Year 2026" — except a custom range, which keeps this demo's own en-dash
+ *  `formatDateRange` ("16 Jul – 3 Aug 2026"). */
 function periodLabel(periodKind: ReportPeriodKind, start: string, end: string): string {
   if (periodKind === "custom") return formatDateRange(start, end);
-  const d = new Date(`${start}T00:00:00Z`);
-  if (periodKind === "day") return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-  if (periodKind === "month") return d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
-  return `Week of ${formatDateRange(start, end)}`;
+  return formatPeriodLabel(periodKind, start, end);
+}
+
+/** A resolved report period as the demo backend serves it: the snapped range (`end` derived from
+ *  `start` for every calendar kind), its day count, label and comparison baseline. Exported so the
+ *  golden-table test can pin it against platform-nest's report-calendar.test.ts. */
+export function resolveDemoPeriod(periodKind: ReportPeriodKind, start: string, end?: string): {
+  start: string; end: string; dayCount: number; label: string;
+  comparison: { periodStart: string; periodEnd: string; dayCount: number };
+} {
+  const range = isCalendarKind(periodKind) ? resolveCalendarRange(periodKind, start) : { start, end: end ?? start };
+  const dayCount = dayCountOf(range.start, range.end);
+  const prev = previousPeriodRange(periodKind, range.start, range.end, dayCount);
+  return {
+    ...range, dayCount, label: periodLabel(periodKind, range.start, range.end),
+    comparison: { periodStart: prev.start, periodEnd: prev.end, dayCount: prev.dayCount },
+  };
 }
 
 function buildKpis(grain: ReportGrain, days: string[]): ReportKpi[] {
@@ -223,8 +238,9 @@ function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, p
   const currentMonthStart = `${today.slice(0, 7)}-01`;
   const sealed = periodKind === "month" && end < currentMonthStart;
 
-  const comparisonStart = addDaysIso(start, -dayCount);
-  const comparisonEnd = addDaysIso(start, -1);
+  // DW-4a: a calendar kind compares to the preceding period of the same kind over its own day
+  // count (as the backend does); a custom range to the equal-length window right before it.
+  const prev = previousPeriodRange(periodKind, start, end, dayCount);
 
   const header: ReportDocument["header"] = {
     tenantId, grain, scopeRef, scopeName: scopeName(grain, scopeRef, tenantId),
@@ -233,7 +249,7 @@ function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, p
     generatedAt: new Date().toISOString(),
     sealed,
     ...(sealed ? { periodId: `demo-period-${grain}-${scopeRef}`, revision: 2 } : {}),
-    comparison: { periodStart: comparisonStart, periodEnd: comparisonEnd, dayCount },
+    comparison: { periodStart: prev.start, periodEnd: prev.end, dayCount: prev.dayCount },
     ...(servedTenantId ? { providerView: { servedTenantId, servedTenantName: COMPANY_NAMES[servedTenantId] ?? servedTenantId } } : {}),
     ...(Object.keys(warnings).length > 0 ? { warnings } : {}),
   };
@@ -292,37 +308,18 @@ function isAuthorized(userId: string, grain: ReportGrain, scopeRef: string): boo
   return elevated || userId === GROUP_OWNER_ID;
 }
 
-// Mirrors `document-builder.ts`'s `resolveCalendarRange` exactly (§6.2: "for non-custom kinds,
-// `end` is ignored and derived from `start`"). Getting this wrong is not cosmetic: the FIRST bug
-// this file shipped with returned a ONE-DAY range for `periodKind=month` (just `start`, unexpanded)
-// — every series had a single point, so `TrendLine` correctly refused to draw a line ("not enough
-// history yet") and the whole demo looked broken. Caught by actually screenshotting the page
-// (ruling 1), not by the unit tests, which never asserted `header.dayCount` against a real month.
-function mondayOnOrBefore(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
-  d.setUTCDate(d.getUTCDate() - dow);
-  return d.toISOString().slice(0, 10);
-}
-function resolveCalendarRange(periodKind: "day" | "week" | "month", start: string): { start: string; end: string } {
-  if (periodKind === "day") return { start, end: start };
-  if (periodKind === "week") {
-    const s = mondayOnOrBefore(start);
-    return { start: s, end: addDaysIso(s, 6) };
-  }
-  const monthStart = `${start.slice(0, 7)}-01`;
-  const d = new Date(`${monthStart}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  d.setUTCDate(0); // last day of the ORIGINAL month
-  return { start: monthStart, end: d.toISOString().slice(0, 10) };
-}
-
+// §6.2: "for non-custom kinds, `end` is ignored and derived from `start`" — `resolveCalendarRange`
+// (./reportCalendar, a mirror of platform-nest's report-calendar.ts) does the snapping. Getting this
+// wrong is not cosmetic: the FIRST bug this file shipped with returned a ONE-DAY range for
+// `periodKind=month` (just `start`, unexpanded) — every series had a single point, so `TrendLine`
+// correctly refused to draw a line ("not enough history yet") and the whole demo looked broken.
+// Caught by actually screenshotting the page (ruling 1), not by the unit tests, which never
+// asserted `header.dayCount` against a real month.
 function validateRange(periodKind: string, start: string | null, end: string | null): { periodKind: ReportPeriodKind; start: string; end: string } | DemoResult {
-  if (!["day", "week", "month", "custom"].includes(periodKind)) return err(400, "periodKind must be one of day, week, month, custom", "periodKind");
+  if (!isCalendarKind(periodKind) && periodKind !== "custom") return err(400, "periodKind must be one of day, week, month, quarter, semester, year, custom", "periodKind");
   if (!start) return err(400, "start must be a YYYY-MM-DD date", "start");
-  if (periodKind !== "custom") {
-    const resolved = resolveCalendarRange(periodKind as "day" | "week" | "month", start);
-    return { periodKind: periodKind as ReportPeriodKind, ...resolved };
+  if (isCalendarKind(periodKind)) {
+    return { periodKind, ...resolveCalendarRange(periodKind, start) };
   }
   if (!end) return err(400, "end is required when periodKind=custom", "end");
   if (end < start) return err(400, "end must be on or after start", "end");

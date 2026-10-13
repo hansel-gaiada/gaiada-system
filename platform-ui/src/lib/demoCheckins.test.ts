@@ -29,6 +29,18 @@ describe("demoCheckins — checkinsDemo (DEMO_MODE fixtures, TR-10/TR-38)", () =
       expect(call("GET", "/api/co-agency/checkins/compliance", { periodKind: "custom", start: todayIso() })?.status).toBe(400);
     });
 
+    it("resolves quarter, semester and year to their calendar range, and 400s an unknown kind (DW-4a)", () => {
+      const range = (periodKind: string, start: string) => {
+        const res = call("GET", "/api/co-agency/checkins/compliance", { periodKind, start });
+        const grid = res!.json as { from: string; to: string };
+        return [res?.status, grid.from, grid.to];
+      };
+      expect(range("quarter", "2026-08-17")).toEqual([200, "2026-07-01", "2026-09-30"]);
+      expect(range("semester", "2026-03-03")).toEqual([200, "2026-01-01", "2026-06-30"]);
+      expect(range("year", "2028-07-01")).toEqual([200, "2028-01-01", "2028-12-31"]);
+      expect(call("GET", "/api/co-agency/checkins/compliance", { periodKind: "decade", start: "2026-08-17" })?.status).toBe(400);
+    });
+
     it("derives the grid from the SAME store the history endpoint reads", () => {
       const to = addDaysIso(todayIso(), -1);
       const from = addDaysIso(todayIso(), -7);
