@@ -69,6 +69,8 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "invoices.issue",
       "invoices.voidIssued",
       "billingProfile.read",
+      // PV5-08: the client's legal and money documents (read, per client). Pinned in client-documents.db.test.ts.
+      "documents.list",
       // PV4-07: client Conversation and meeting minutes for agents (PV-D23: agents draft, staff send). Two reads, the
       // agent's drafting writes (`draftReply`, `saveMinutes`) and the thread-state pair are LOW; the four writes that
       // reach a client (`post`, `open`, `sendDraft`, `shareMinutes`) are MEDIUM and BARRED from D14 auto-execution.

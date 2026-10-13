@@ -519,7 +519,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   // Route table FIRST, identity check second — but only for routes this module owns, so unmatched
   // portal routes still fall through to `portalDemo` (runs/gates) rather than being 403'd here.
   const seg = p.replace(/^\/api\/[^/]+\/portal\//, "");
-  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|profile|stream|files|change-requests|conversation|meetings)(\/|\?|$)/;
+  const OWNED = /^(overview|projects|milestones|timeline|deliverables|invoices|contracts|documents|profile|stream|files|change-requests|conversation|meetings)(\/|\?|$)/;
   if (!OWNED.test(seg)) return null;
   if (!isDemoPortalClient(userId)) return { status: 403, json: { error: "not a portal client" } };
 
@@ -585,6 +585,22 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
   if (seg.startsWith("deliverables") && m === "GET") {
     const q = new URL(p, "http://demo").searchParams.get("projectId");
     return ok(q ? DELIVERABLES.filter((d) => d.projectId === q) : DELIVERABLES);
+  }
+
+  // ── documents (PV5-08): signed agreements, issued-invoice PDFs, payment receipts; newest first ──
+  if (seg === "documents" && m === "GET") {
+    const items = [
+      ...CONTRACTS.filter((k) => k.status === "signed" && k.signedAt).map((k) => ({
+        id: k.id, kind: "signed_contract", title: k.title, date: k.signedAt as string, fileId: `file-sealed-${k.id}`, ready: true,
+      })),
+      ...INVOICES.map((inv) => ({
+        id: inv.id, kind: "invoice", title: `Invoice ${inv.id.replace(/^inv-/, "").toUpperCase()}`, date: inv.issuedAt, fileId: `file-pdf-${inv.id}`, ready: true,
+      })),
+      ...Object.values(PAYMENTS).flat().filter((x) => x.proofFileId).map((x) => ({
+        id: x.id, kind: "receipt", title: "Payment proof", date: x.paidOn, fileId: x.proofFileId, ready: true,
+      })),
+    ];
+    return ok({ items: items.sort((x, y) => Date.parse(y.date) - Date.parse(x.date)) });
   }
 
   // ── invoices + payments ──

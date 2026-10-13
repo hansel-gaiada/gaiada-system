@@ -18,6 +18,7 @@ import "server-only";
 // boundary. A backend outage rendering as an empty dashboard is the worst outcome available here: the
 // client concludes their project has no milestones, no invoices and no contract.
 import { platformFetch, PlatformError } from "./platform";
+import type { DocumentItem } from "./documents";
 import type {
   PortalConversationDetail, PortalConversationList, PortalMeetingMinutes,
   PortalChangeRequest, PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice,
@@ -97,6 +98,13 @@ export async function listPortalContracts(userId: string, tenant: string): Promi
 
 export async function getPortalContract(userId: string, tenant: string, contractId: string): Promise<PortalContractDetail | null> {
   return safe(platformFetch<PortalContractDetail>(`/api/${tenant}/portal/contracts/${contractId}`, userId), null);
+}
+
+/** PV5-08: the client's legal and money documents, newest first (BFF §30b). `null` = the list could not be read
+ *  (an older server, or a refusal): the page says so in words, it never shows "no documents" for a failed read. */
+export async function listPortalDocuments(userId: string, tenant: string): Promise<DocumentItem[] | null> {
+  const r = await safe(platformFetch<{ items: DocumentItem[] }>(`/api/${tenant}/portal/documents`, userId), null);
+  return r ? r.items : null;
 }
 
 export async function getPortalProfile(userId: string, tenant: string): Promise<PortalProfile | null> {

@@ -249,3 +249,19 @@ describe("demoPortal fixture fidelity", () => {
     });
   });
 });
+
+describe("PV5-08 documents route", () => {
+  it("serves signed agreements and invoices newest first, in the real list's shape", () => {
+    const r = portalDashboardDemo("GET", T("documents"), CLIENT);
+    expect(r?.status).toBe(200);
+    const items = (r?.json as { items: Array<{ kind: string; date: string }> }).items;
+    expect(items.length).toBeGreaterThan(0);
+    expect(new Set(items.map((i) => i.kind))).toEqual(new Set(["signed_contract", "invoice"]));
+    const times = items.map((i) => Date.parse(i.date));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+    for (const i of items) expect(Object.keys(i).sort()).toEqual(["date", "fileId", "id", "kind", "ready", "title"]);
+  });
+  it("refuses a staff caller like every other portal route", () => {
+    expect(portalDashboardDemo("GET", T("documents"), "demo-hansel")?.status).toBe(403);
+  });
+});

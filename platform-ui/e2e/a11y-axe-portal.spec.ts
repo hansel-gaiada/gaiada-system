@@ -40,6 +40,8 @@ const PAGES = [
   "/portal/contracts",
   "/portal/invoices",
   "/portal/invoices/inv-2026-014",
+  // PV5-08: legal and money documents.
+  "/portal/documents",
   "/portal/profile",
 ];
 

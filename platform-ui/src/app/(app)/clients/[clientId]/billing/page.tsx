@@ -6,7 +6,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listProjects } from "@/lib/entities";
 import { readResult, type ReadResult } from "@/lib/readResult";
-import { getContract, listClientInvoices, listClientPayments, listContracts } from "@/lib/contracts-data";
+import { getContract, listClientDocuments, listClientInvoices, listClientPayments, listContracts } from "@/lib/contracts-data";
 import { groupContracts, type ContractDetail } from "@/lib/contracts";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -15,6 +15,7 @@ import { ClientVisibilityMarker } from "@/components/clients/ClientVisibilityMar
 import { ContractForm } from "@/components/clients/billing/ContractForm";
 import { ContractRow } from "@/components/clients/billing/ContractRow";
 import { PaymentRow } from "@/components/clients/billing/PaymentRow";
+import { ClientDocuments } from "@/components/clients/billing/ClientDocuments";
 import { formatDate, money } from "@/lib/format";
 import "@/components/clients/billing/billing.css";
 
@@ -48,12 +49,14 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
   const { clientId } = await params;
   if (!tenant) notFound();
 
-  const [contractsRes, paymentsRes, invoicesRes, projectsRes] = await Promise.all([
+  const [contractsRes, paymentsRes, invoicesRes, projectsRes, documentsRes] = await Promise.all([
     readResult(listContracts(userId, tenant, clientId)),
     readResult(listClientPayments(userId, tenant, clientId, "pending")),
     readResult(listClientInvoices(userId, tenant, clientId)),
     // Only to offer "tie this to a project" on the draft form. Its refusal is said on the form itself.
     readResult(listProjects(userId, tenant, clientId)),
+    // PV5-08: legal and money documents (BFF §30b). Its refusal is said in its own section.
+    readResult(listClientDocuments(userId, tenant, clientId)),
   ]);
   const projects = projectsRes.kind === "ok" ? projectsRes.data.map((p) => ({ id: p.id, name: p.name })) : null;
 
@@ -155,6 +158,13 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
     );
   }
 
+  function renderDocuments(): ReactNode {
+    if (documentsRes.kind !== "ok") {
+      return <ReadRefusal subject="this client's documents" kind={documentsRes.kind} reason={reasonOf(documentsRes)} />;
+    }
+    return <ClientDocuments items={documentsRes.data} />;
+  }
+
   return (
     <div className="bl-sections">
       <section aria-labelledby="bl-contracts">
@@ -179,6 +189,15 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
         <h2 id="bl-invoices" className="bl-section__title">Invoices</h2>
         <p className="bl-section__lede">The list only. Open an invoice to work on it.</p>
         {renderInvoices()}
+      </section>
+
+      <section aria-labelledby="bl-documents">
+        <h2 id="bl-documents" className="bl-section__title">Documents</h2>
+        <p className="bl-section__lede">
+          Signed agreements, issued invoices and payment receipts: the legal and money documents only, as the client
+          sees them in their portal.
+        </p>
+        {renderDocuments()}
       </section>
     </div>
   );
