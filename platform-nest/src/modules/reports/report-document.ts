@@ -36,7 +36,14 @@ export interface ReportHeader {
   // ([start - dayCount, start - 1]); for a calendar kind it is the immediately preceding period OF
   // THE SAME KIND (previous day/ISO-week/calendar-month), which is what makes month-boundary
   // deltas correct without assuming every month is 30 days.
-  comparison?: { periodStart: string; periodEnd: string; dayCount: number };
+  comparison?: {
+    periodStart: string;
+    periodEnd: string;
+    dayCount: number;
+    // DW-4m: the comparison window's own honesty flags, computed exactly as `warnings.precedesFactHistory` is.
+    precedesFactHistory?: { firstFactDate: string; affectedDays: number }; // window starts before the first fact date
+    noFacts?: true; // the whole comparison window precedes fact history: no KPI carries a delta
+  };
   providerView?: { servedTenantId: string; servedTenantName: string }; // shared-service slice
   // Honesty flags — set at build time. A user-chosen range will straddle these constantly;
   // silence here would be a lie of omission.
@@ -60,7 +67,10 @@ export interface ReportKpi {
   value: number; // for ratios: numerator/denominator, computed at build
   numerator?: number; // ALWAYS present for ratio metrics (invariant 2)
   denominator?: number;
-  delta?: number; // vs comparison period, same unit (percent-point for ratios)
+  // vs comparison period, same unit (percent-point for ratios). ABSENT (never 0) when the baseline is
+  // not real (DW-4m): comparison.noFacts, or a ratio with a 0 denominator on either side.
+  delta?: number;
+  previous?: { value: number; numerator?: number; denominator?: number }; // DW-4m: the comparison window's parts
   direction?: "up_good" | "down_good" | "neutral";
   appraisalSafe: boolean;
   // §5.4 class markers for the two non-additive metrics (never omitted when applicable — a

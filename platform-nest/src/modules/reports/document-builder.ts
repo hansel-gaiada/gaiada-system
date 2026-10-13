@@ -156,21 +156,25 @@ export function buildKpis(
   previousRows: RollupRow[],
   servedTenantId: string | undefined,
   sourceDiversity: { current: number; previous: number },
+  comparisonNoFacts: boolean,
 ): ReportKpi[] {
   const kpis: ReportKpi[] = [];
   for (const m of REPORT_METRICS) {
     if (!m.grains.includes(grain)) continue;
     if (m.metricKey === "evidence.source_diversity") {
-      kpis.push({
+      const diversity: ReportKpi = {
         metricKey: m.metricKey,
         label: humanizeMetricKey(m.metricKey),
         unit: toReportUnit(m.displayUnit),
         value: sourceDiversity.current,
-        delta: sourceDiversity.current - sourceDiversity.previous,
         direction: METRIC_DIRECTION[m.metricKey] ?? "neutral",
         appraisalSafe: m.appraisalSafe,
         distinctOver: true,
-      });
+        previous: { value: sourceDiversity.previous },
+      };
+      // DW-4m: no delta against a baseline that has no records (§15). The key is left unset, never 0.
+      if (!comparisonNoFacts) diversity.delta = sourceDiversity.current - sourceDiversity.previous;
+      kpis.push(diversity);
       continue;
     }
     const row = findRow(currentRows, m.metricKey, grain, scopeRef, servedTenantId);
@@ -182,12 +186,18 @@ export function buildKpis(
       label: humanizeMetricKey(m.metricKey),
       unit: toReportUnit(m.displayUnit), // never "text" (ruling: TR-13 must not emit a text-unit KPI)
       value: current.value,
-      delta: current.value - previous.value,
       direction: METRIC_DIRECTION[m.metricKey] ?? "neutral",
       appraisalSafe: m.appraisalSafe,
+      previous: { ...previous },
     };
     if (current.numerator !== undefined) kpi.numerator = current.numerator;
     if (current.denominator !== undefined) kpi.denominator = current.denominator;
+    // DW-4m: `delta` is ABSENT (never 0) when the baseline is not real (§15): the comparison window
+    // has no records, or a ratio had nothing to measure (denominator 0) on either side. `value`
+    // for a 0-denominator ratio is an honest 0, but a difference against it is not a change.
+    const ratioUnmeasured =
+      current.denominator !== undefined && previous.denominator !== undefined && (current.denominator === 0 || previous.denominator === 0);
+    if (!comparisonNoFacts && !ratioUnmeasured) kpi.delta = current.value - previous.value;
     if (m.metricKey === "discipline.overdue_open") kpi.pointInTime = true;
     kpis.push(kpi);
   }
@@ -353,6 +363,32 @@ async function personSpansMembershipChange(tenantId: string, userId: string, sta
   return rows.some((r) => r.valid_from > start && r.valid_from <= end);
 }
 
+/** The days of [start, end] that lie before the tenant's first fact date, or undefined when none
+ *  do. The ONE arithmetic behind both the current window's `warnings.precedesFactHistory` and the
+ *  comparison window's `comparison.precedesFactHistory` (DW-4m), so the two can never disagree. */
+export function factHistoryGap(
+  start: string,
+  end: string,
+  firstFactDate: string | null,
+): { firstFactDate: string; affectedDays: number } | undefined {
+  if (!firstFactDate || start >= firstFactDate) return undefined;
+  const cappedEnd = end < firstFactDate ? end : addDaysIso(firstFactDate, -1);
+  if (cappedEnd < start) return undefined;
+  return { firstFactDate, affectedDays: inclusiveDayCount(start, cappedEnd) };
+}
+
+/** DW-4m: the comparison window's own honesty flags. `precedesFactHistory` when the window starts
+ *  before the first fact date; `noFacts` only when the WHOLE window does (affectedDays ===
+ *  dayCount), because then no KPI has a real baseline. Pure. */
+export function computeComparisonFlags(
+  window: { start: string; end: string; dayCount: number },
+  firstFactDate: string | null,
+): { precedesFactHistory?: { firstFactDate: string; affectedDays: number }; noFacts?: true } {
+  const history = factHistoryGap(window.start, window.end, firstFactDate);
+  if (!history) return {};
+  return history.affectedDays === window.dayCount ? { precedesFactHistory: history, noFacts: true } : { precedesFactHistory: history };
+}
+
 export interface HeaderWarningInputs {
   periodKind: ReportPeriodKind;
   start: string;
@@ -382,15 +418,8 @@ export function computeHeaderWarnings(input: HeaderWarningInputs): ReportHeader[
     if (input.end >= input.today) warnings.partialPeriod = true;
   }
 
-  if (input.firstFactDate && input.start < input.firstFactDate) {
-    const cappedEnd = input.end < input.firstFactDate ? input.end : addDaysIso(input.firstFactDate, -1);
-    if (cappedEnd >= input.start) {
-      warnings.precedesFactHistory = {
-        firstFactDate: input.firstFactDate,
-        affectedDays: inclusiveDayCount(input.start, cappedEnd),
-      };
-    }
-  }
+  const history = factHistoryGap(input.start, input.end, input.firstFactDate);
+  if (history) warnings.precedesFactHistory = history;
 
   if (input.spansMembershipChange) warnings.spansMembershipChange = true;
 
@@ -917,7 +946,16 @@ export async function buildReportDocument(params: BuildDocumentParams): Promise<
 
   const spansMembershipChange = grain === "person" ? await personSpansMembershipChange(tenantId, scopeRef, start, end) : undefined;
 
-  const kpis = buildKpis(grain, scopeRef, currentRows, previousRows, servedTenantId, { current: currentDiversity, previous: previousDiversity });
+  const comparisonFlags = computeComparisonFlags(comparison, firstFact);
+  const kpis = buildKpis(
+    grain,
+    scopeRef,
+    currentRows,
+    previousRows,
+    servedTenantId,
+    { current: currentDiversity, previous: previousDiversity },
+    comparisonFlags.noFacts === true,
+  );
   const { series, distributions } = await buildSeriesAndDistributions(tenantId, grain, scopeRef, servedTenantId, start, end, today, currentRows);
   const tables = await buildTables(tenantId, grain, scopeRef, servedTenantId, start, end, currentRows);
   const highlights = buildHighlights(kpis, end, today);
@@ -935,7 +973,7 @@ export async function buildReportDocument(params: BuildDocumentParams): Promise<
     periodLabel: formatPeriodLabel(periodKind, start, end),
     generatedAt: new Date().toISOString(),
     sealed: false, // always false — the live path only; TR-15 layers sealed reads on top
-    comparison: { periodStart: comparison.start, periodEnd: comparison.end, dayCount: comparison.dayCount },
+    comparison: { periodStart: comparison.start, periodEnd: comparison.end, dayCount: comparison.dayCount, ...comparisonFlags },
     warnings: computeHeaderWarnings({ periodKind, start, end, today, firstFactDate: firstFact, spansMembershipChange }),
   };
   if (servedTenantId) {
