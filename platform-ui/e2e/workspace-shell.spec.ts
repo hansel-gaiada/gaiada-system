@@ -18,6 +18,7 @@ import { tenantCookie } from "./appCookies";
 //       member     (gede@gaiada.com, member)            -> none                     -> no workspace of their own: Company
 //       search_staff (seo-staff@gaiada.com)             -> none                     -> no workspace of their own: Company
 //   - Admin needs `admin.access`: platform_admin only. The Company area (first row "Departments") is open to all.
+//     An Admin page is a 404 for anyone not allowed to use it (DW-D20, lib/adminAccess.ts).
 //   - The tree has no HR, IT or Finance node, so the registry appends those three workspaces after the
 //     departments in the switcher.
 //   - client_contact (dana@northwind.example) is client-only and belongs in /portal, never the staff shell.
@@ -177,6 +178,12 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await sidebar(page).getByRole("link", { name: "Admin", exact: true }).click();
     await expect(page).toHaveURL(/\/admin$/);
     await expect(menu(page, "Admin").getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+
+    // DW-D20: allowed, so no 404 for Settings or for Platform.
+    await page.goto("/admin/users");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/users & roles/i);
+    await page.goto("/systems/hub");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/mcp hub/i);
   });
 
   test("the top bar: search opens the command palette and finds a page; the bell has its pop-over", async ({ page, context }) => {
@@ -338,12 +345,12 @@ test.describe("member (gede@gaiada.com)", () => {
 
     await expect(sidebar(page).getByRole("link", { name: "Company", exact: true })).toBeVisible();
     await expect(sidebar(page).getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
-    // Typing the URL still lands on an Admin page (it redirects to /admin/users in DEMO_MODE), but the shell
-    // offers a member no Admin row: the menu holds only the way back, no row of the area.
-    await page.goto("/admin");
-    await expect(menu(page, "Admin")).toBeVisible();
-    await expect(menu(page, "Admin").getByRole("link", { name: /^(?!Back to)/ })).toHaveCount(0);
-    await expect(menu(page, "Admin").getByRole("link", { name: "Back to Company" })).toBeVisible();
+    // DW-D20: an Admin-area page is reachable only by those allowed to use it. A member who types the URL gets
+    // the 404 page, for Settings and for a Platform page alike.
+    for (const url of ["/admin", "/systems/hub"]) {
+      await page.goto(url);
+      await expect(page.getByRole("heading", { level: 1 })).toContainText(/page not found/i);
+    }
   });
 
   test("visiting a department says so and Back returns to Company; its own create action leads + New", async ({ page, context }) => {
