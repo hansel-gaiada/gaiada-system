@@ -7,7 +7,8 @@
 //   - a CLIENT site's claim creates the property UNVERIFIED, under the client, and MON-01's SQL does not list it; once the
 //     probe-consent approval's effect lands (verified_at set), it is listed;
 //   - an INTERNAL site (no client, or the sentinel as its client) is verified, under the sentinel, ONLY once the D36 sentinel
-//     exists: with none, nothing is created and the claim stands; with two, nothing is created;
+//     exists: with none, nothing is created and the claim stands (a second sentinel cannot exist:
+//     ux_clients_one_internal_per_tenant refuses it, which the code's "ambiguous" guard relies on);
 //   - an existing property for the domain (any case) is LINKED and left exactly as it was; one owned by another client refuses the
 //     claim (409 property_domain_conflict) and the claim rolls back with it (the row is still on its placeholder);
 //   - the production row from a staging row gets the same treatment, with its own refusal;
@@ -23,7 +24,6 @@ import { claimProvisionedSiteDomain, createProductionFromStaging, createWebdevSi
 describe.skipIf(!TEST_URL)("claim -> search_properties link and the consent gate (M6-P6i)", () => {
   let none: string; // a company with NO internal sentinel
   let sen: string; // a company with exactly one
-  let two: string; // a company with two (ambiguous)
   let noneClient: string;
   let senClient: string;
   let senSentinel: string;
@@ -32,15 +32,10 @@ describe.skipIf(!TEST_URL)("claim -> search_properties link and the consent gate
     await initTestDb();
     none = await createCompany("Link Co No Sentinel", ["webdev", "search"]);
     sen = await createCompany("Link Co Sentinel", ["webdev", "search"]);
-    two = await createCompany("Link Co Two Sentinels", ["webdev", "search"]);
     noneClient = await createClient(none, "Real Client N");
     senClient = await createClient(sen, "Real Client S");
     senSentinel = await createClient(sen, "Internal S");
     await adminPool().query(`UPDATE clients SET is_internal = true WHERE id = $1`, [senSentinel]);
-    for (const n of ["Internal T1", "Internal T2"]) {
-      const id = await createClient(two, n);
-      await adminPool().query(`UPDATE clients SET is_internal = true WHERE id = $1`, [id]);
-    }
   }, 120_000);
 
   afterAll(async () => {
@@ -140,11 +135,11 @@ describe.skipIf(!TEST_URL)("claim -> search_properties link and the consent gate
     expect((await propertiesOf(sen, "client-is-sentinel.example.com"))[0]).toMatchObject({ client_id: senSentinel });
   });
 
-  it("with MORE THAN ONE sentinel: nothing is created (the M5-G0 script's own refusal), the claim stands", async () => {
-    const site = await provisioned(two, "internal-ambiguous");
-    const claimed = await claimProvisionedSiteDomain(two, site.id, "internal-ambiguous.example.com", null);
-    expect(claimed.property).toMatchObject({ state: "skipped", propertyId: null, reason: "ambiguous_internal_sentinel" });
-    expect(await propertiesOf(two, "internal-ambiguous.example.com")).toHaveLength(0);
+  it("a SECOND sentinel cannot exist: the database refuses it (ux_clients_one_internal_per_tenant), so 'ambiguous' is unreachable", async () => {
+    // The code still refuses an ambiguous sentinel (defence in depth); this pins the schema guarantee it leans on. The CI run
+    // that first exercised this suite (38350186279) showed the old two-sentinel fixture could not even be created.
+    const second = await createClient(sen, "Internal S2");
+    await expect(adminPool().query(`UPDATE clients SET is_internal = true WHERE id = $1`, [second])).rejects.toMatchObject({ code: "23505" });
   });
 
   // ── an existing property ──────────────────────────────────────────────────────────────────────────────────────
