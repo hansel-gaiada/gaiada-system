@@ -77,6 +77,7 @@ const SHARED: AreaRule[] = [
   rule("/clients", "shared", true, "Linked from Company and the GM's Clients & sales"),
   rule("/client-centre", "shared", true),
   rule("/agency", "shared", true, "Campaigns and leads: Company and the GM both link them"),
+  rule("/requests", "shared", true, "My requests, the new-request form and a request record: every workspace links them, and a record keeps the area you came from (DW-5c)"),
   rule("/learning/catalogue", "shared", false, "Company's catalogue and Performance > Learning both link it"),
   rule("/learning/courses", "shared", true),
   rule("/learning/paths", "shared", true),

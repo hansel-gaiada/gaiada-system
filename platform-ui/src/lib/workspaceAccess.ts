@@ -41,6 +41,10 @@ export interface GateContext {
   tenantId: string | null;
   /** The workspace's unit and its ancestors, nearest first; [] when it has no org node. */
   unitPath: readonly string[];
+  /** The registry keys of the workspaces the active company has a DEPARTMENT for (`workspaceKeysOf`). Read only by the
+   *  `hasWorkspace` gate. Absent means "not known", and that gate then hides: it never offers a link to a department the
+   *  caller cannot show exists. */
+  workspaces?: readonly string[];
 }
 
 /** Evaluate a registry gate. Mirrors the surface each gate was copied from; see `Gate`'s doc. */
@@ -62,6 +66,8 @@ export function gateAllows(gate: Gate | undefined, ctx: GateContext): boolean {
       return packFor(company?.vertical).key === gate.pack;
     case "module":
       return moduleOn(company, gate.module);
+    case "hasWorkspace":
+      return ctx.workspaces?.includes(gate.workspace) ?? false;
     case "elevated":
       return isElevated(ctx.me);
     case "platformOperator":
@@ -161,6 +167,25 @@ export function resolveMyWorkspaces(input: { me: Me; tenantId: string | null; ro
   for (const r of own) if (!mine.some((m) => m.workspace.key === r.workspace.key && m.deptId === r.deptId)) mine.push(r);
   const home: HomeArea = mine.length > 0 ? { kind: "workspace", ref: mine[0] } : { kind: "company" };
   return { home, mine, all };
+}
+
+/** The registry keys of the workspaces the active company has a department for, for the `hasWorkspace` gate: every
+ *  department in the org tree (`all` lists the functional ones the tree lacks too, with no `deptId`, and those do not
+ *  count: there is no department to send a request to). */
+export function workspaceKeysOf(ws: MyWorkspaces): string[] {
+  return [...new Set(ws.all.filter((r) => r.deptId !== null).map((r) => r.workspace.key))];
+}
+
+/** The active company's department whose workspace is `workspaceKey` (`workspaceFor`, the one name match: the agency
+ *  pack's bespoke workspaces only, by the same rule as `toolkitFor`). The first in tree order; null when there is none.
+ *  `root` is the org tree, which the caller must have READ: a tree that could not be read is not "no department". */
+export function departmentForWorkspace(
+  root: OrgTreeNode | null,
+  vertical: string | null | undefined,
+  workspaceKey: string,
+): { id: string; name: string } | null {
+  const d = departmentsOf(root).find((n) => workspaceFor(vertical, n.name).key === workspaceKey);
+  return d ? { id: d.id, name: d.name } : null;
 }
 
 /** The area `resolveArea` (`lib/areas.ts`) falls back to: the home workspace by its department id, or

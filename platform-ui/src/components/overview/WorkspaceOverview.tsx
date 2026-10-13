@@ -55,7 +55,7 @@ export function WorkspaceOverview({ me, tenantId, subject, period, legacy, now =
   /** The widget host. The default is the real one; a test passes its own. */
   widgets?: Readonly<Record<string, OverviewWidgetComponent>>;
 }) {
-  const ctx = { me, tenantId, unitPath: subject.unitPath };
+  const ctx = { me, tenantId, unitPath: subject.unitPath, workspaces: subject.workspaces };
   const bands = selectBands(subject.widgets, ctx, (key) => hasOverviewWidget(key, widgets));
   const actions = selectQuickActions(subject.quickActions, { ...ctx, deptId: subject.deptId });
   const company = activeCompany(me, tenantId)?.name;

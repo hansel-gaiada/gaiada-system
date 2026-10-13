@@ -21,10 +21,11 @@ export async function pilotFrame(
 ): Promise<((legacy: ReactNode) => ReactNode) | null> {
   const prefs = await getPrefs();
   if (prefs.shell !== "workspaces") return null;
-  const ref = workspaceRefForPage(await myWorkspaces(me, tenantId), target);
+  const all = await myWorkspaces(me, tenantId);
+  const ref = workspaceRefForPage(all, target);
   if (!ref) return null;
   const { period } = await searchParams;
-  const subject = subjectOfRef(ref);
+  const subject = subjectOfRef(ref, all);
   const parsed = parseOverviewPeriod(period);
   return (legacy) => <WorkspaceOverview me={me} tenantId={tenantId} subject={subject} period={parsed} legacy={legacy} />;
 }

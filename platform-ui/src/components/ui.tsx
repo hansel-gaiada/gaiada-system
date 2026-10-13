@@ -67,6 +67,8 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   // sage — done/positive states
   approved: "ok", "on track": "ok", paid: "ok", active: "ok", shipped: "ok",
   done: "ok", completed: "ok", "closed won": "ok", configured: "ok",
+  // DW-5c: a request's own lifecycle. "open" is in flight (below); "cancelled" is idle (below).
+  delivered: "ok",
   // bronze — in-flight/neutral states
   open: "progress", pending: "progress", review: "progress", todo: "progress", "in progress": "progress",
   proposal: "progress", negotiation: "progress", discovery: "progress",
@@ -76,7 +78,7 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   planned: "idle", cancelled: "idle",
   // rust — attention/negative states
   "at risk": "critical", overdue: "critical", low: "critical", critical: "critical", blocked: "critical",
-  "on hold": "critical", rejected: "critical", error: "critical",
+  "on hold": "critical", rejected: "critical", error: "critical", declined: "critical",
   // D14-08 — automation_approvals.execution_status (0078), the decision-vs-execution second axis.
   // "pending"/"executing" fall through to the default "progress" family already; "executed" is
   // its own positive terminal state (distinct from the decision "approved") and "failed" its own

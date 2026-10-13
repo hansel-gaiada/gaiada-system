@@ -419,6 +419,15 @@ export const CAPABILITIES = [
   // which a role list cannot express (the owner rule is attribute-dependent, the head rule is unit-scoped), so
   // the page decides it from `part.ownerId === me.id` and `isLeadOf(me, unitPath)`. The server stays the authority.
   "agency.campaign.manage",
+
+  // ── DW-5c UI (2026-10-14, requests between departments, docs/FRONTEND-BFF-CONTRACT.md §32.2) — mirrors
+  // `resource_work_request.yaml` `deliver` + `decline`: company_admin and manager by role, org_unit_lead on the receiving
+  // unit (`canInUnit`), platform_admin by wildcard. ONE capability because the request page offers them to the same people
+  // (a manager or the receiving department's head). It deliberately does NOT cover the assignee rule of `deliver` (the work's
+  // responsible person: attribute-dependent, so the page decides it from the PM task) nor the requester's `cancel`.
+  // `owner` holds both keys in the bundle but the policy's permission arm covers `read` and `create` only (§32.10 deviation 3),
+  // so a pure owner is refused by Cerbos: the mirror leaves `owner` out and the parity register says why.
+  "work_request.decide",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -502,6 +511,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "agency.lead.read", "agency.lead.write", "agency.lead.triage", "agency.lead.convert",
     // DW-5b: company_admin is on every rule the capability mirrors (agency_campaign update; part create/delete/allocate).
     "agency.campaign.manage",
+    // DW-5c UI: company_admin is on work_request `deliver` and `decline`.
+    "work_request.decide",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -580,6 +591,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "agency.lead.read", "agency.lead.write", "agency.lead.triage",
     // DW-5b: manager sits on the same four rules as company_admin (`derivedRoles: ["company_admin", "manager"]`).
     "agency.campaign.manage",
+    // DW-5c UI: manager is on work_request `deliver` and `decline`.
+    "work_request.decide",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
@@ -734,7 +747,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // — a lead browses the catalogue through their MEMBER grant at COMPANY scope, not through
   // org_unit_lead at unit scope (see principal-scope-constrained-perms.db.test.ts).
   org_unit_lead: ["reports.department.view", "appraisal.read",
-                  "lms.authoring", "lms.publish", "lms.progress.view", "lms.assign", "lms.grade"],
+                  "lms.authoring", "lms.publish", "lms.progress.view", "lms.assign", "lms.grade",
+                  // DW-5c UI: work_request `deliver` and `decline` each have an `org_unit_lead` rule over the receiving unit.
+                  // As with every unit-lead capability, only `canInUnit(..., unitPath)` honours it, never a company-wide `can()`.
+                  "work_request.decide"],
   // IAM-02a-FIX / DR-2b — see the `Role` union's `agency_approver` comment for the full trail. Its
   // ENTIRE verified Cerbos reach is `agency_approval:approve` (via `module_approver`, module always
   // `"agency"`) — nothing else, not even `agency_approval:read` (that baseline rule names

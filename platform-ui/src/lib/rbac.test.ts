@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { can, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier, isClient, isStaff, isClientOnly, CAPABILITIES } from "./rbac";
+import { can, canInUnit, isElevated, canManageIT, accessibleCompanies, canSwitchCompany, isManagerTier, isClient, isStaff, isClientOnly, CAPABILITIES } from "./rbac";
 import { CAPABILITY_MAP } from "./rbac-capability-map";
 import type { Me } from "./platform";
 
@@ -666,6 +666,44 @@ describe("agency.campaign.manage (DW-5b)", () => {
   it("is declared in the capability map with the four permissions it mirrors", () => {
     expect(CAPABILITY_MAP["agency.campaign.manage"]).toEqual({
       permissions: ["agency.campaign.update", "agency.campaign_part.create", "agency.campaign_part.delete", "agency.campaign_part.allocate"],
+      semantics: "all",
+    });
+  });
+});
+
+// DW-5c UI: `work_request.decide` mirrors resource_work_request (deliver + decline): company_admin and manager by role,
+// org_unit_lead on the receiving unit, platform_admin by wildcard. Its biconditional against the bundles is
+// rbac-capability-parity.test.ts (which also registers why `owner` is left out); these pin the role set in words, and that
+// the requester's `cancel` and the assignee's `deliver` are NOT folded in (the page decides those).
+describe("work_request.decide (DW-5c)", () => {
+  const as = (role: string, scopeType = "company", scopeId: string | null = "co-a") => me([{ role, scopeType, scopeId }]);
+  it("is held by company_admin, manager and platform_admin", () => {
+    expect(can(as("company_admin"), "work_request.decide", "co-a")).toBe(true);
+    expect(can(as("manager"), "work_request.decide", "co-a")).toBe(true);
+    expect(can(as("platform_admin", "global", null), "work_request.decide", "co-a")).toBe(true);
+  });
+  it("is not held by a member (who may deliver only as an assignee), a viewer, an owner or a client", () => {
+    for (const role of ["member", "viewer", "client", "owner", "hr_manager"]) {
+      expect(can(as(role), "work_request.decide", "co-a"), role).toBe(false);
+    }
+  });
+  it("does not cross companies", () => {
+    expect(can(as("manager"), "work_request.decide", "co-b")).toBe(false);
+  });
+  it("reaches a unit lead only through canInUnit over the receiving unit, never a company-wide can()", () => {
+    const head = me([
+      { role: "member", scopeType: "company", scopeId: "co-a" },
+      { role: "org_unit_lead", scopeType: "org_unit", scopeId: "d-cre" },
+    ]);
+    expect(can(head, "work_request.decide", "co-a")).toBe(false);
+    expect(canInUnit(head, "work_request.decide", "co-a", ["d-cre", "root"])).toBe(true);
+    // Leading a unit cascades down, but another department's request is not theirs to decide.
+    expect(canInUnit(head, "work_request.decide", "co-a", ["d-web", "root"])).toBe(false);
+    expect(canInUnit(head, "work_request.decide", "co-a", [])).toBe(false);
+  });
+  it("is declared in the capability map with the two permissions it mirrors", () => {
+    expect(CAPABILITY_MAP["work_request.decide"]).toEqual({
+      permissions: ["core.work_request.deliver", "core.work_request.decline"],
       semantics: "all",
     });
   });
