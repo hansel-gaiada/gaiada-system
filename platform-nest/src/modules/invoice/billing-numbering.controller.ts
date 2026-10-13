@@ -1,5 +1,5 @@
 // PV5-04b — the company's INVOICE NUMBERING settings (ruling PV-D35): its service lines and the number-code decode table.
-// Tables: billing_service_lines, billing_number_codes (202610132100). Logic: ./billing-numbering.ts, ./issue.ts.
+// Tables: billing_service_lines, billing_number_codes (202610132115). Logic: ./billing-numbering.ts, ./issue.ts.
 //
 // An invoice number reads `{company}/{yyyy}/{mm}/{code}/{nnnn}`. The `{code}` stands for (service line, the client's
 // business type) and is deliberately NOT mnemonic: a client cannot easily read it, staff decode it HERE. So everything in

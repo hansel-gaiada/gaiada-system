@@ -1,6 +1,6 @@
 // PV5-04b — the pieces of invoice numbering (ruling PV-D35) that more than one file needs: the service-line facts an invoice
 // is judged on, and the constants shared with the controller. Tables: billing_service_lines, billing_number_codes
-// (202610132100). The number is `{company}/{yyyy}/{mm}/{code}/{nnnn}`; see issue.ts for where it is made.
+// (202610132115). The number is `{company}/{yyyy}/{mm}/{code}/{nnnn}`; see issue.ts for where it is made.
 import type { PoolClient } from "pg";
 
 /** The key of a service line: lower-case, starts with a letter, 2-32 characters (mirrors the table's CHECK). */

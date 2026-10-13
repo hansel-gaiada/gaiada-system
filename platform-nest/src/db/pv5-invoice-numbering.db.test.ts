@@ -1,4 +1,4 @@
-// PV5-04b — migration 202610132100_pv5_invoice_numbering.sql, proven against a REAL Postgres (ruling PV-D35).
+// PV5-04b — migration 202610132115_pv5_invoice_numbering.sql, proven against a REAL Postgres (ruling PV-D35).
 //
 // The monthly counter, the code lookup and its generation, and the immutability of both a code and an issued invoice's
 // service line. The HTTP behaviour (readiness, the issued number, the portal and the staff decode) is in

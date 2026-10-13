@@ -1,4 +1,4 @@
--- 202610132100_pv5_invoice_numbering.sql — PV-5 / PV5-04b: invoice numbers per ruling PV-D35.
+-- 202610132115_pv5_invoice_numbering.sql — PV-5 / PV5-04b: invoice numbers per ruling PV-D35.
 -- Plan: docs/plans/2026-10-12-pv5-contracts-billing-tickets.md (design decision 3, PV5-Q3);
 -- ruling: docs/plans/2026-10-10-three-perspectives.md, row PV-D35. PV-D13: no company names or ids anywhere in this file.
 --

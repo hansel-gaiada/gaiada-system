@@ -6153,7 +6153,7 @@ There is no `DELETE`, `PATCH` or `unshare` route on minutes.
 
 `share_minutes` reaches exactly the roles that hold `update` on `meeting_recording` (`company_admin`, `manager`, `member`; perm mirror `perm_meeting_recording_share_minutes`), and is **denied to `kind` `bot`/`automation`** (PV-D23). See `PERMISSION-CONTRACT.md` §34.
 
-## 30. Billing profiles, issue readiness, issue and void (PV5-04, 2026-10-13) — `platform-nest/src/modules/invoice/{issue.ts,billing-profile.controller.ts,invoice.controller.ts}`, migrations `202610130400` (data model), `202610131850` (the invoice CHECK; its guard trigger reuses 1820's `pv5_legacy_flag_guard()`) and `202610132100` (invoice numbers, PV5-04b, §30b) — **STATUS: PROTOTYPED (HTTP suite `src/modules/invoice/issue.test.ts` and DB suite `src/db/pv5-invoice-enforcement.db.test.ts` on the Linux CI gate; not driven live — PV5-13)**
+## 30. Billing profiles, issue readiness, issue and void (PV5-04, 2026-10-13) — `platform-nest/src/modules/invoice/{issue.ts,billing-profile.controller.ts,invoice.controller.ts}`, migrations `202610130400` (data model), `202610131850` (the invoice CHECK; its guard trigger reuses 1820's `pv5_legacy_flag_guard()`) and `202610132115` (invoice numbers, PV5-04b, §30b) — **STATUS: PROTOTYPED (HTTP suite `src/modules/invoice/issue.test.ts` and DB suite `src/db/pv5-invoice-enforcement.db.test.ts` on the Linux CI gate; not driven live — PV5-13)**
 
 Ruling PV-D7: the finance ledger is the invoice of record. `invoices` stays the drafting stage (lines from logged hours,
 maker/checker approve); **issuing** numbers it and posts the matching ledger AR invoice in one transaction, after which
@@ -6198,7 +6198,7 @@ series: receipts `{prefix}/RC/{yyyy}/{nnnn}`, credit notes `{prefix}/CN/{yyyy}/{
 - **Read fields PV5-07 added (now real), still treated as optional:** `pdfFileId` (invoice list and detail, staff and portal) and `signedCopyFileId` (contract list and detail, staff and portal). Absent and `null` read alike: an issued invoice or a signed contract says "being prepared", anything else says nothing (`lib/billingView.ts`). Every screen works whether or not PV5-07 has merged.
 
 
-### 30b. Invoice numbers: service lines, number codes and the monthly counter (PV5-04b, 2026-10-13) — `platform-nest/src/modules/invoice/{billing-numbering.ts,billing-numbering.controller.ts,issue.ts,invoice.controller.ts}`, migration `202610132100_pv5_invoice_numbering.sql` — **STATUS: PROTOTYPED (HTTP suite `src/modules/invoice/invoice-numbering.test.ts` and DB suite `src/db/pv5-invoice-numbering.db.test.ts` on the Linux CI gate; not driven live)**
+### 30b. Invoice numbers: service lines, number codes and the monthly counter (PV5-04b, 2026-10-13) — `platform-nest/src/modules/invoice/{billing-numbering.ts,billing-numbering.controller.ts,issue.ts,invoice.controller.ts}`, migration `202610132115_pv5_invoice_numbering.sql` — **STATUS: PROTOTYPED (HTTP suite `src/modules/invoice/invoice-numbering.test.ts` and DB suite `src/db/pv5-invoice-numbering.db.test.ts` on the Linux CI gate; not driven live)**
 
 Ruling PV-D35 (owner, 2026-10-13): an invoice number reads **`{company}/{yyyy}/{mm}/{code}/{nnnn}`**, e.g. `GDA/2026/10/7K3/0001`.
 `{company}` is the billing profile's `invoicePrefix`; `{mm}` is zero-padded and, with `{yyyy}`, comes from the **issue date**;
