@@ -1,64 +1,51 @@
-// WSK-29 — a THIN, read-only diagnostic wrapper over webdesk/deploy's own HTTP service (see that
-// package's server.ts header). Registered as an ordinary hub tool so an operator or an automation
-// flow can ask "is delphi/helios reachable right now" through the same MCP surface as everything
-// else, without SSH access of their own.
+// RETIRED (M6-P6j, WSK-D29 / WSK-D79). This tool used to be a thin wrapper over webdesk/deploy's
+// HTTP service, which SSHed to delphi/helios to see whether they answered. The control plane no
+// longer reaches delivery hosts: delivery is per site, run by the site's own CI (SFTP, the scripts
+// in webdesk/templates/_deploy/), with the per-site binding set by `POST sites/:id/delivery-binding`.
 //
-// DELIBERATELY NOT A WRITE TOOL, and there is no `webdesk.deploy.driver.deploy` here or anywhere in
-// this file. The mutating call (webdesk/deploy's `deploy()`) is reachable ONLY as a library call —
-// its own HTTP service does not even expose it (see that file's header for why: no Cerbos, no WS4,
-// no principal model on that side, so it must never be the thing a network caller can invoke to
-// change a live host). The AUTHORIZED path for an actual WebDesk deploy is the aggregated
-// `webdesk.deploy.staging` / `webdesk.site.promote` tools (WSK-31, platform-nest's webdev module),
-// which run the real Cerbos + ALWAYS_WS4 gate before ever reaching Zone B. Do not "complete" this
-// file by adding a deploy tool that bypasses that — see this ticket's report for the full reasoning.
-import { config } from "./config";
+// The tool stays registered, and honest, because automation flows and agent personas may still
+// call it by name; a missing tool would read as an outage, a "retired" answer reads as what it is.
+// The handler makes NO network call of any kind (the test stubs fetch and asserts it is never
+// touched). There is no deploy tool here either: the authorised write path is the aggregated
+// `webdesk.deploy.staging` / `webdesk.site.promote` tools (Cerbos + ALWAYS_WS4), which dispatch the
+// SITE'S workflow, not a control-plane executor.
 import { registerTool } from "./registry";
 
-export interface WebdeskProbeResult {
-  target: "staging" | "production";
-  host: string;
-  reachable: boolean;
-  checkedAt: string;
+export interface WebdeskProbeRetired {
+  retired: true;
+  reachable: null;
   detail: string;
-  latencyMs?: number;
+  replacement: string;
 }
+
+export const WEBDESK_PROBE_RETIRED_DETAIL =
+  "retired: the control plane no longer reaches delivery hosts; delivery is per site via the site's CI (WSK-D79)";
 
 export function registerWebdeskDeployTools(): void {
   registerTool({
     name: "webdesk.deploy.probeReachability",
     description:
-      "Read-only: check whether the WebDesk (Zone A) frontend-deploy service can currently reach " +
-      "delphi (staging) or helios (production) over SSH. Never deploys anything. Returns a " +
-      "ReachabilityResult { target, host, reachable, checkedAt, detail }.",
+      "RETIRED. Does not probe anything. The control plane no longer reaches delivery hosts " +
+      "(WSK-D29); delivery is per site, run by the site's own CI over SFTP (WSK-D79). Always answers " +
+      "{ retired: true, reachable: null, detail, replacement }. To see whether a site's delivery " +
+      "works, read its delivery binding and its last deploy run, or rebuild it through the " +
+      "webdesk.deploy.staging tool.",
     minAssurance: "low",
     inputSchema: {
       type: "object",
       properties: {
-        target: { type: "string", enum: ["staging", "production"], description: "which host to probe" },
+        target: { type: "string", enum: ["staging", "production"], description: "ignored; kept so existing callers still validate" },
       },
-      required: ["target"],
     },
-    handler: async (args) => {
-      if (!config.webdeskDeployUrl) {
-        throw new Error("webdesk.deploy.probeReachability not enabled: set WEBDESK_DEPLOY_URL (the webdesk/deploy service's base URL)");
-      }
-      const target = String(args.target ?? "");
-      if (target !== "staging" && target !== "production") {
-        throw new Error('target must be "staging" or "production"');
-      }
-      const res = await fetch(`${config.webdeskDeployUrl}/probe`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(config.webdeskDeployToken ? { Authorization: `Bearer ${config.webdeskDeployToken}` } : {}),
-        },
-        body: JSON.stringify({ target }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `webdesk-deploy /probe ${res.status}`);
-      }
-      const result = (await res.json()) as WebdeskProbeResult;
+    handler: async () => {
+      const result: WebdeskProbeRetired = {
+        retired: true,
+        reachable: null,
+        detail: WEBDESK_PROBE_RETIRED_DETAIL,
+        replacement:
+          "the site's own CI deploys over SFTP (webdesk/templates/_deploy/deploy.sh); bind it with " +
+          "POST sites/:id/delivery-binding; runbook infra/runbooks/webdesk-staging-rebuild.md",
+      };
       return JSON.stringify(result);
     },
   });

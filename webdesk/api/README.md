@@ -702,11 +702,12 @@ refuses the duplicate.
 `src/control/jobs/jobs.service.ts` is an **in-memory, single-process** job store (same flagged
 limitation as the idempotency store) that a caller polls via `GET .../jobs/:jobId` or
 `GET .../jobs`. The actual box-side work is defined only behind an interface
-(`src/control/release/release-transport.ts`'s `ReleaseTransportAdapter`) — under WSK-D26 the real
-targets are `delphi`/`helios`/Hostinger, and those adapters are WSK-25/26'/29's build. The shipped
-default binding (`NotYetAvailableReleaseTransport`) always fails a job with a documented
-`TRANSPORT_NOT_AVAILABLE` error — the command's own machinery (idempotency, audit, job creation)
-still completes correctly; only the transport itself has nothing to talk to yet.
+(`src/control/release/release-transport.ts`'s `ReleaseTransportAdapter`). No control-plane adapter will be
+built (M6-P6j, WSK-D29/D79): delivery is per site, run by the site's own CI, and `delphi`/`helios`/Hostinger
+are per-site targets reached that way. The shipped default binding (`NotYetAvailableReleaseTransport`)
+always fails a job with a documented `TRANSPORT_NOT_AVAILABLE` error that points at the per-site delivery
+binding (`POST sites/:id/delivery-binding`) and the runbook — the command's own machinery (idempotency,
+audit, job creation) still completes correctly; only the transport itself is absent, by design.
 `deploy`/`promote`/`rollback` additionally write a `releases` row on transport success (the table
 already has `kind IN ('deploy','promote','rollback')` — `triggerRebuild` has no matching kind and
 intentionally writes no row).

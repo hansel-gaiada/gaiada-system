@@ -59,14 +59,18 @@ describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools (+ WSK-59 cont
   });
 
   // WSK-59 re-pointed the first two routes at the real channel; the key route files a key.mint approval since 2026-10-11;
-  // the archive route files a site.archive approval since 2026-10-12; the domain route files a site.setDomain approval (M6-P6i).
-  const NOW_REAL = ["webdesk.schema.apply", "webdesk.site.provision", "webdesk.key.mint", "webdesk.site.archive", "webdesk.site.setDomain"];
+  // the archive route files a site.archive approval since 2026-10-12; the domain route files a site.setDomain approval (M6-P6i);
+  // the promote route files a site.promote approval (M6-P6h).
+  const NOW_REAL = [
+    "webdesk.schema.apply", "webdesk.site.provision", "webdesk.key.mint", "webdesk.site.archive", "webdesk.site.setDomain", "webdesk.site.promote",
+  ];
   const STILL_NOT_WIRED = WEBDESK_REGISTRY_TOOLS.filter((n) => !NOW_REAL.includes(n));
 
-  it("🔴 the five tools whose routes are STILL 501 ALWAYS refuse with webdesk_control_plane_not_wired — the honest answer", async () => {
-    expect(STILL_NOT_WIRED).toHaveLength(5);
+  it("🔴 the four tools whose routes are STILL 501 ALWAYS refuse with webdesk_control_plane_not_wired — the honest answer", async () => {
+    expect(STILL_NOT_WIRED).toHaveLength(4);
     expect(STILL_NOT_WIRED).not.toContain("webdesk.site.archive");
     expect(STILL_NOT_WIRED).not.toContain("webdesk.site.setDomain");
+    expect(STILL_NOT_WIRED).not.toContain("webdesk.site.promote");
     for (const name of STILL_NOT_WIRED) {
       const verdict = await getExecutable(name)!.precondition({} as never, {});
       expect(verdict, name).toEqual({ ok: false, reason: "webdesk_control_plane_not_wired" });
@@ -82,6 +86,18 @@ describe("WSK-31 registry: the ten §07 medium/HIGH webdesk tools (+ WSK-59 cont
     const prov = getExecutable("webdesk.site.provision")!;
     expect(await prov.precondition({} as never, { tenantSlug: "gaiada", kind: "astro", name: "Main" })).toEqual({ ok: true });
     expect(await prov.precondition({} as never, { tenantSlug: "gaiada", kind: "static", name: "Main" })).toEqual({ ok: false, reason: "kind_invalid" });
+  });
+
+  it("M6-P6h: webdesk.site.promote carries a REAL structural precondition (its route files a site.promote approval now); it stays registered", async () => {
+    const promote = getExecutable("webdesk.site.promote")!;
+    const site = "0b6f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+    expect(promote).toBeDefined();
+    expect(WEBDESK_REGISTRY_TOOLS).toContain("webdesk.site.promote");
+    expect(await promote.precondition({} as never, { tenantSlug: "gaiada", siteId: site })).toEqual({ ok: true });
+    expect(await promote.precondition({} as never, { tenantSlug: "", siteId: site })).toEqual({ ok: false, reason: "tenant_slug_invalid" });
+    expect(await promote.precondition({} as never, { tenantSlug: "gaiada", siteId: "nope" })).toEqual({ ok: false, reason: "site_id_invalid" });
+    expect(await promote.precondition({} as never, {})).toEqual({ ok: false, reason: "tenant_slug_invalid" });
+    expect(promote.lockKey({ tenantSlug: "gaiada", siteId: site })).toBe(`webdesk:${site}`);
   });
 
   it("2026-10-11: webdesk.key.mint carries a REAL structural precondition (its route files a key.mint approval now)", async () => {

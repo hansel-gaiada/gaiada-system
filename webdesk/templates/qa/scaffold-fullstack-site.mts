@@ -31,6 +31,8 @@ const PROTOTYPE = JSON.stringify({
     { slug: "case-studies", title: "Case Studies", collection: "caseStudy", isListing: true },
     { slug: "case-studies", title: "Case Study", collection: "caseStudy" },
     { slug: "articles", title: "Articles", collection: "article", isListing: true },
+    // an item page on a collection the gate's content stub holds NO items for (the empty-collection case, M6-P6m)
+    { slug: "articles", title: "Article", collection: "article" },
   ],
 });
 

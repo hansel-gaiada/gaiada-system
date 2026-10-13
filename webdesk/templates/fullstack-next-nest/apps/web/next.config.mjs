@@ -3,6 +3,7 @@
 // the API half runs on a Node host, M6-P6l). Without it the app builds for `next start` as before, so local dev is unchanged.
 // A page that renders per request (`export const dynamic = "force-dynamic"`, or reading cookies/headers) cannot be exported:
 // next build says so and the workflow's build job fails; such a page needs generateStaticParams / static data instead.
+// The pages code.scaffold generates already do (M6-P6m): they read content through the SDK at build time.
 const staticExport = process.env.WEBDESK_STATIC_EXPORT === "1";
 
 /** @type {import('next').NextConfig} */

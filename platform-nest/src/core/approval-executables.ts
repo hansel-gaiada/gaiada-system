@@ -875,8 +875,8 @@ export function registerWebdeskExecutableApprovals(): void {
       toolName,
       lockKey: (args) => webdeskLockKey(args, toolName),
       // WSK-59: the commands whose routes are now REAL carry a real (structural) precondition (schema.apply,
-      // site.provision; key.mint since 2026-10-11; site.archive since 2026-10-12; site.setDomain since M6-P6i); the other
-      // five (deploy.staging, site.promote, site.rollback, key.rotate, key.revoke) stay honestly not-wired.
+      // site.provision; key.mint since 2026-10-11; site.archive since 2026-10-12; site.setDomain since M6-P6i; site.promote
+      // since M6-P6h); the other four (deploy.staging, site.rollback, key.rotate, key.revoke) stay honestly not-wired.
       precondition: WEBDESK_STRUCTURAL_PRECONDITIONS[toolName] ?? webdeskNotWiredPrecondition,
     });
   }
@@ -995,12 +995,23 @@ async function webdeskSetDomainPrecondition(_client: PoolClient, a: Record<strin
   return { ok: true };
 }
 
+/** M6-P6h: `POST control/sites/:siteId/promote` stopped being a 501 stub. What it does on a re-drive is FILE a site.promote
+ *  approval as the original requester (it never deploys; WSK-66 sends the production dispatch at decide(), as a DIFFERENT user
+ *  who also holds `github_repo · deploy`), exactly like key.mint, site.archive and site.setDomain above. Structural only: the
+ *  wall, the registry target, the production grant, the in-flight check and the de-dup run in the route. */
+async function webdeskSitePromotePrecondition(_client: PoolClient, a: Record<string, unknown>): Promise<PreconditionVerdict> {
+  if (!nonEmptyString(a.tenantSlug)) return { ok: false, reason: "tenant_slug_invalid" };
+  if (typeof a.siteId !== "string" || !UUID_RE_EXEC.test(a.siteId)) return { ok: false, reason: "site_id_invalid" };
+  return { ok: true };
+}
+
 const WEBDESK_STRUCTURAL_PRECONDITIONS: Record<string, (client: PoolClient, a: Record<string, unknown>) => Promise<PreconditionVerdict>> = {
   "webdesk.schema.apply": webdeskSchemaApplyPrecondition,
   "webdesk.site.provision": webdeskSiteProvisionPrecondition,
   "webdesk.key.mint": webdeskKeyMintPrecondition,
   "webdesk.site.archive": webdeskSiteArchivePrecondition,
   "webdesk.site.setDomain": webdeskSetDomainPrecondition,
+  "webdesk.site.promote": webdeskSitePromotePrecondition,
 };
 
 /** The two MEDIUM content tools that can suspend. Mirrored in `resource_mcp_tool.yaml`'s executable list. */

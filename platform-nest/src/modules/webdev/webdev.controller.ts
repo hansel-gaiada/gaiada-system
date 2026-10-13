@@ -2,7 +2,7 @@
 //
 //   POST /api/:tenantId/modules/webdev/provision                        -> 201 | 200 | 409 | 422 | 502 | 503
 //   GET  /api/:tenantId/modules/webdev/provisioned-sites[?runId=]       -> 200 [site]
-//   GET  /api/:tenantId/modules/webdev/provisioned-sites/:id            -> 200 site (+ `completion`, M6-P4c)
+//   GET  /api/:tenantId/modules/webdev/provisioned-sites/:id            -> 200 site (+ `completion`, M6-P4c; + `builds`, M6-P6h)
 //   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/reconcile  -> 200 site (+ `completion`, M6-P4c)
 //   POST /api/:tenantId/modules/webdev/provisioned-sites/:id/scaffold-commit -> 200 commit | 404 | 409 | 422 | 429 | 502 | 503
 //        (M6-P4b2: the first fill of the provisioned repo with the scaffolded tree; scaffold-commit.ts)
@@ -77,6 +77,7 @@ import { ScaffoldRefusal } from "./scaffold-commit";
 import { commitScaffoldForSite, readScaffoldCommit, type ScaffoldCommitDto, type ScaffoldCommitResponse } from "./scaffold-commit.service";
 import { DeployGrantRefusal, type DeployGrantResult, type DeployRevokeResult } from "./deploy-grant";
 import { grantDeployForSite, readDeployGrant, revokeDeployForSite, type DeployGrantDto } from "./deploy-grant.service";
+import { readSiteBuildsForProvisioned, type SiteBuildsDto } from "./site-builds.service";
 
 const SITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -151,7 +152,7 @@ export class WebdevController {
     @Param("id") id: string,
   ): Promise<SiteDto & {
     completion: ProvisionCompletionDto | null; scaffold: ScaffoldCommitDto | null; deployGrant: DeployGrantDto | null;
-    delivery: SiteDeliveryDto;
+    delivery: SiteDeliveryDto; builds: SiteBuildsDto;
   }> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "read");
     const site = await getProvisionedSite(tenantId, id);
@@ -167,6 +168,9 @@ export class WebdevController {
       scaffold: await readScaffoldCommit(tenantId, id),
       deployGrant: await readDeployGrant(tenantId, id),
       delivery: (await readDeliveryForProvisioned(tenantId, [id])).get(id) ?? { environments: [] },
+      // M6-P6h: per environment, whether a build could start now (and the typed reason if not) and the newest build: staging
+      // (publish | rebuild) and production (promote). Additive; read from the registry and the WSK-60 ledger.
+      builds: (await readSiteBuildsForProvisioned(tenantId, id)) ?? { environments: [] },
     };
   }
 

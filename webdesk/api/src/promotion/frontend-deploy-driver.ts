@@ -7,12 +7,10 @@
 // second, sibling seam scoped to promotion's own needs is more honest than overloading the
 // existing one's args bag to smuggle a finer-grained op through it.
 //
-// Under WSK-D26 the real targets are `delphi` (staging), `helios` (production), Hostinger (WP) —
-// building real adapters for any of them is explicitly OUT of this ticket's scope: both hosts are
-// OBSERVE-ONLY by owner ruling AND unreachable (SSH/HTTP both time out) from this dev machine. The
-// default binding below (NotYetAvailableFrontendDeployDriver) is what ships; a real adapter is
-// WSK-26'/29's build, bound to this SAME token, with no change needed to
-// promotion-command.service.ts.
+// RETIRED AS A DEPLOY PATH (M6-P6j, WSK-D29/D79): no control-plane adapter will be built. Delivery is
+// per site, run by the site's own CI over SFTP (webdesk/templates/_deploy/); `delphi`, `helios` and
+// Hostinger are per-site targets reached that way. The default binding below
+// (NotYetAvailableFrontendDeployDriver) is what ships.
 
 export const FRONTEND_DEPLOY_DRIVER = Symbol("FRONTEND_DEPLOY_DRIVER");
 

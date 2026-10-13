@@ -15,6 +15,9 @@
 // and the rest) is NOT on this wire: it is on the ledger row and in the approval's execution result.
 //
 // ── AUTHZ ────────────────────────────────────────────────────────────────────────────────────────
+// M6-P6h: the staging target is resolved by `resolveSiteBuildTarget` (the WEBDESK_REBUILD_TARGETS override, else the
+// registry); the 503 below names the typed reason when there is none.
+//
 // Both routes reuse `webdesk_content_item` (no new Cerbos kind): reading the state of a site's rebuild is
 // `read`, and asking for a rebuild is `request_publish`, the same editor-tier action that files a publish
 // (the approver, not the requester, holds the dispatch authority: `github_repo · deploy`, checked at
@@ -27,7 +30,7 @@ import { AuthGuard } from "../../auth/guards";
 import { withTenants } from "../../db";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { fileWebdeskCommandApproval } from "./webdesk-approved-command";
-import { getBuildStatus, rebuildTargetFor, type BuildStatusBody } from "./site-builds.service";
+import { getBuildStatus, resolveSiteBuildTarget, type BuildStatusBody } from "./site-builds.service";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,198}[a-z0-9])?$/;
@@ -62,10 +65,12 @@ export class SiteBuildsController {
   ): Promise<{ approvalId: string }> {
     await authorize(req.principal, { kind: "webdesk_content_item", tenantId, module: "webdev" }, "request_publish");
     site(tenantSlug, siteId);
-    // Fail early and visibly: an approval for a site with no staging target could only ever fail.
-    if (!rebuildTargetFor(tenantSlug, siteId)) {
+    // Fail early and visibly: an approval for a site with no staging target could only ever fail. M6-P6h: the target is the
+    // env override, else the registry (site-build-targets.ts); a wp site has nothing to rebuild (its theme reads /v1 live).
+    const target = await resolveSiteBuildTarget(tenantId, tenantSlug, siteId.toLowerCase(), "staging");
+    if (!target.ok) {
       throw new ServiceUnavailableException({
-        message: "webdesk_not_configured: no staging rebuild target is configured for this site",
+        message: `webdesk_not_configured: no staging rebuild target for this site (${target.reason})`,
         reason: "webdesk_not_configured",
       });
     }

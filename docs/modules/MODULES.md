@@ -34,21 +34,21 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.114.1` | IN PROGRESS | WS1 | 2026-10-13 |
-| platform-ui | `0.114.0` | IN PROGRESS | WS5 | 2026-10-13 |
+| platform-nest | `0.115.0` | IN PROGRESS | WS1 | 2026-10-13 |
+| platform-ui | `0.114.1` | IN PROGRESS | WS5 | 2026-10-13 |
 | ai-gateway-go | `0.13.3` | PROTOTYPED | WS3 | 2026-10-13 |
-| mcp-hub | `0.15.2` | PROTOTYPED | WS2 | 2026-10-13 |
+| mcp-hub | `0.15.3` | PROTOTYPED | WS2 | 2026-10-13 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | insights-collector | `0.3.2` | PROTOTYPED | SEO | 2026-10-13 |
 | automation (n8n) | `0.6.3` | PROTOTYPED | WS4 | 2026-10-13 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.13.16` | PROTOTYPED | WS10 | 2026-10-13 |
 | wa-chat-bot | `0.10.0` | PROTOTYPED | WS5 | 2026-10-12 |
-| ai-agents | `0.15.0` | PROTOTYPED | WS8 | 2026-10-12 |
+| ai-agents | `0.16.0` | PROTOTYPED | WS8 | 2026-10-13 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
-| webdesk | `0.29.0` | DEV-VERIFIED | Web Dev | 2026-10-13 |
+| webdesk | `0.29.1` | DEV-VERIFIED | Web Dev | 2026-10-13 |
 | search-marketing | `0.5.2` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
