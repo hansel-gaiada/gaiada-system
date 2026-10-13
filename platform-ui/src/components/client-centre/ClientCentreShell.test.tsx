@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ClientCentreShell } from "./ClientCentreShell";
@@ -243,9 +243,10 @@ describe("Business areas (PV6-01)", () => {
 
 describe("the word 'department' is not on the Business surface (PV6-01 finding 4)", () => {
   it("no component in this folder says it", () => {
-    const dir = fileURLToPath(new URL(".", import.meta.url));
+    // `__dirname`, like the repo's other folder guards: under jsdom `import.meta.url` is not a file: URL.
+    const dir = __dirname;
     const files = readdirSync(dir).filter((f) => !/\.test\.(ts|tsx)$/.test(f));
     expect(files.length).toBeGreaterThan(5);
-    for (const f of files) expect(readFileSync(dir + f, "utf8"), f).not.toMatch(/department/i);
+    for (const f of files) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/department/i);
   });
 });
