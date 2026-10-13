@@ -43,7 +43,7 @@ export interface BillingProfileFormValues {
 export function validateProfileForm(v: BillingProfileFormValues): { field: keyof BillingProfileFormValues; message: string } | null {
   if (!v.legalName.trim()) return { field: "legalName", message: "Enter the legal name invoices are issued in." };
   if (!v.address.trim()) return { field: "address", message: "Enter the address printed on invoices." };
-  // The prefix starts every invoice number (PREFIX/2026/0001): 1 to 16 characters of A-Z, 0-9 and a dash.
+  // The prefix starts every invoice number (PREFIX/2026/10/CODE/0001): 1 to 16 characters of A-Z, 0-9 and a dash.
   if (!/^[A-Z0-9-]{1,16}$/.test(v.invoicePrefix.trim())) {
     return { field: "invoicePrefix", message: "The prefix is 1 to 16 characters: capital letters, digits or a dash. It starts every invoice number." };
   }

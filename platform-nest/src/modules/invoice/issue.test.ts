@@ -44,15 +44,20 @@ describe.skipIf(!TEST_URL)("PV5-04 — issue an invoice through the ledger", () 
     withTenants([t], (c) => c.query(sql, args), { modules: ["finance"] }).then((r) => r.rows as T[]);
 
   /** An APPROVED invoice (the stage issue starts from), lines that add up, inserted directly. */
-  async function approvedInvoice(t: string, client: string | null, amount: number, cols: { taxCode?: string; currency?: string } = {}): Promise<string> {
+  async function approvedInvoice(
+    t: string, client: string | null, amount: number,
+    cols: { taxCode?: string; currency?: string; serviceLineKey?: string | null } = {},
+  ): Promise<string> {
     const id = newId();
     await withTenants([t], (c) =>
       c.query(
         `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site,
-                               created_by, updated_by, approved_by, approved_at, tax_code)
-         VALUES ($1, $2, $3, current_date - 30, current_date, 'approved', $4, $5, $6, 'test', $7, $7, $8, now(), $9)`,
+                               created_by, updated_by, approved_by, approved_at, tax_code, service_line_key)
+         VALUES ($1, $2, $3, current_date - 30, current_date, 'approved', $4, $5, $6, 'test', $7, $7, $8, now(), $9, $10)`,
         [id, t, client, cols.currency ?? "IDR", JSON.stringify([{ description: "Design work", hours: 1, rate: amount, amount }]),
-         amount, recorder, admin, cols.taxCode ?? null],
+         amount, recorder, admin, cols.taxCode ?? null,
+         // PV5-04b: the seeded `services` line, unless the test says otherwise (B has no service lines at all).
+         "serviceLineKey" in cols ? cols.serviceLineKey : "services"],
       ),
     );
     return id;
@@ -148,12 +153,12 @@ describe.skipIf(!TEST_URL)("PV5-04 — issue an invoice through the ledger", () 
   // ── readiness ───────────────────────────────────────────────────────────────────────────────────────
   describe("issue readiness", () => {
     it("a company with no finance setup and no billing profile: every blocker at once, and issuing writes NOTHING (409)", async () => {
-      const id = await approvedInvoice(B, clientB, 1000);
+      const id = await approvedInvoice(B, clientB, 1000, { serviceLineKey: null });
       const r = await readiness(B, id);
       expect(r.statusCode).toBe(200);
       const codes = (r.json() as { ready: boolean; blockers: Array<{ code: string }> }).blockers.map((b) => b.code);
       expect(r.json().ready).toBe(false);
-      expect(codes).toEqual(expect.arrayContaining(["NO_BILLING_PROFILE", "FINANCE_MODULE_OFF", "NO_FINANCE_SETTINGS", "NO_AR_CONTROL_ACCOUNT", "NO_OPEN_PERIOD"]));
+      expect(codes).toEqual(expect.arrayContaining(["NO_BILLING_PROFILE", "FINANCE_MODULE_OFF", "NO_FINANCE_SETTINGS", "NO_AR_CONTROL_ACCOUNT", "NO_OPEN_PERIOD", "NO_SERVICE_LINE"]));
 
       const res = await issue(B, id);
       expect(res.statusCode, res.body).toBe(409);
@@ -194,7 +199,8 @@ describe.skipIf(!TEST_URL)("PV5-04 — issue an invoice through the ledger", () 
       expect(res.statusCode, res.body).toBe(200);
       const out = res.json() as { invoiceNo: string; arInvoiceId: string; total: string; alreadyIssued: boolean; dueDate: string; issueDate: string };
       expect(out.alreadyIssued).toBe(false);
-      expect(out.invoiceNo).toMatch(new RegExp(`^TST/${year}/\\d{4}$`));
+      // PV-D35: {company}/{yyyy}/{mm}/{code}/{nnnn}; the code is 3 characters from the alphabet without O, 0, I, 1, L.
+      expect(out.invoiceNo).toMatch(new RegExp(`^TST/${year}/\\d{2}/[2-9A-HJKMNP-Z]{3}/\\d{4}$`));
 
       const inv = await row(
         `SELECT status, invoice_no, total::text AS total, subtotal::text AS subtotal, tax_total::text AS tax, issuer, ar_invoice_id, issued_by,
@@ -230,14 +236,18 @@ describe.skipIf(!TEST_URL)("PV5-04 — issue an invoice through the ledger", () 
       const [x, y] = [await approvedInvoice(A, clientA, 1000), await approvedInvoice(A, clientA, 2000)];
       const [rx, ry] = await Promise.all([issue(A, x), issue(A, y)]);
       expect([rx.statusCode, ry.statusCode]).toEqual([200, 200]);
-      const nums = [rx.json().invoiceNo, ry.json().invoiceNo].map((n: string) => Number(n.split("/")[2])).sort((a, b) => a - b);
+      const nums = [rx.json().invoiceNo, ry.json().invoiceNo].map((n: string) => Number(n.split("/")[4])).sort((a, b) => a - b);
       expect(nums[1] - nums[0]).toBe(1);
     });
 
     it("a refused issue consumes no number: the series is gapless", async () => {
       // A hand-entered ledger invoice already holds the number the next issue would take, so that issue fails AFTER
       // taking it, and rolls back. Once the collision is gone, the next issue gets the SAME number.
-      const taken = `GAP/${year}/0001`;
+      // The code is generated on first use, so it is PRE-ASSIGNED here to know the exact number the next issue will take.
+      const pre = await app.inject({ method: "POST", url: `/api/${C}/billing/number-codes`, headers: asUser(admin), payload: { serviceLineKey: "services", businessType: "other", code: "GP7" } });
+      expect(pre.statusCode, pre.body).toBe(200);
+      const mm = (await row(`SELECT to_char(current_date, 'MM') AS m`, [])).m as string;
+      const taken = `GAP/${year}/${mm}/GP7/0001`;
       const cust = newId();
       const arId = newId();
       await withTenants([C], async (c) => {

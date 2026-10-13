@@ -202,6 +202,14 @@ export class PortalCommerceController {
       // The ledger link is internal: the client gets the invoice of record, not our AR row id.
       const visible: Record<string, unknown> = { ...inv };
       delete visible.arInvoiceId;
+      // PV5-04b: the tracker's lines carry the internal `projectId` (it defaults the service line at issue). The client
+      // sees what each line says and costs, never our project ids.
+      if (Array.isArray(visible.lines)) {
+        visible.lines = (visible.lines as Array<Record<string, unknown>>).map((l) => {
+          const { projectId: _projectId, ...rest } = l ?? {};
+          return rest;
+        });
+      }
       return {
         ...visible,
         taxLines,

@@ -9,6 +9,8 @@ import "server-only";
 //   GET  /api/:t/invoices/:id/issue-readiness -> { ready, issued, invoiceNo, blockers: [{code,message}] }
 //   POST /api/:t/invoices/:id/issue       -> the issued invoice (number, dates, totals), or 409 { reason:
 //                                            "issue_blocked", blockers } with nothing written (PV5-04, PV-D7)
+//   PATCH /api/:t/invoices/:id/service-line {serviceLineKey|null} -> { ok, serviceLineKey }   PV5-04b (PV-D35): staff pick the
+//                                            service line before issue; it sets the `{code}` in the number
 //   POST /api/:t/invoices/:id/void {reason} -> { creditNoteId, alreadyVoid? } for an ISSUED invoice; 409 { reason:
 //                                            not_issued | not_voidable | pending_payment | ... } (PV5-04, PV5-09)
 // The backend computes line items from billable time in the period (the demo
@@ -64,6 +66,15 @@ export interface Invoice {
   /** PV5-07: the stored PDF of an issued invoice, rendered once after the commit. Absent (an older server) and null (not
    *  rendered yet) read alike: an issued invoice says "being prepared", any other says nothing (lib/billingView.ts). */
   pdfFileId?: string | null;
+  /** PV5-04b (PV-D35): the service line staff chose (null until chosen), its name, and, on an unissued invoice, the line it
+   *  would default to when every project behind its lines maps to one through its department. STAFF-ONLY fields. */
+  serviceLineKey?: string | null;
+  serviceLineName?: string | null;
+  defaultServiceLineKey?: string | null;
+  /** PV5-04b: on an ISSUED invoice, the code its number carries and what it stands for. Staff decode it here; a client sees
+   *  the number only. Absent on an older server. */
+  numberCode?: string | null;
+  numberDecode?: { serviceLineKey: string; serviceLineName: string | null; businessType: string } | null;
 }
 
 /** PV5-04: the issuer block frozen on an invoice at issue (decision 5). The bank block is where the client pays. */
@@ -96,6 +107,11 @@ export const createInvoice = (u: string, t: string, body: { clientId: string; pe
 // PV5-04: `draft` and `void` only. `sent` is reached by issueInvoice(), and `paid` follows from confirmed payments.
 export const setInvoiceStatus = (u: string, t: string, id: string, status: "draft" | "void") =>
   platformFetch<{ ok: true }>(`/api/${t}/invoices/${id}`, u, { method: "PATCH", body: JSON.stringify({ status }) });
+// PV5-04b: pick (or clear, with null) the invoice's service line. Left uncaught so the action can word the refusal.
+export const setInvoiceServiceLine = (u: string, t: string, id: string, serviceLineKey: string | null) =>
+  platformFetch<{ ok: true; serviceLineKey: string | null }>(`/api/${t}/invoices/${id}/service-line`, u, {
+    method: "PATCH", body: JSON.stringify({ serviceLineKey }),
+  });
 export const getIssueReadiness = (u: string, t: string, id: string) =>
   skip(platformFetch<IssueReadiness | null>(`/api/${t}/invoices/${id}/issue-readiness`, u), null);
 // Left uncaught (no `skip`): the 409 carries the blocker list, which issueInvoiceAction turns into the list it shows.

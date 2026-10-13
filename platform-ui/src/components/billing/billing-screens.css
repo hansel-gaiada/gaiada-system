@@ -86,3 +86,12 @@
 .bs-fingerprint__label { font: 600 12px/1.4 var(--font-body); color: var(--ink-subtle); }
 .bs-fingerprint code { font: 500 12px/1.4 var(--font-mono, monospace); color: var(--ink-strong); }
 .bs-fingerprint__status { font: 500 12px/1.4 var(--font-body); color: var(--ink-muted); min-width: 4ch; }
+
+/* ── PV5-04b: the numbering sections (service lines, number codes) and the invoice page's picker ─────── */
+.bs-line { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.bs-line:first-child { border-top: 0; padding-top: 0; }
+.bs-line[data-active="false"] .bs-field input { color: var(--ink-muted); }
+.bs-picker { display: grid; gap: 10px; }
+.bs-picker__row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.bs-picker__row .bs-field { min-width: 220px; }
+.bs-code { font: 600 14px/1.4 var(--font-mono, monospace); letter-spacing: 0.06em; color: var(--ink-strong); }
