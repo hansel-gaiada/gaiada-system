@@ -12,6 +12,7 @@
 // no reason for this endpoint to ever degrade.
 
 import { withTenants } from "../../db";
+import { deliveryStateOf, type DeliveryState } from "./delivery-binding";
 
 export type SiteEnvironment = "production" | "staging" | "preview" | "development";
 
@@ -49,6 +50,10 @@ export interface PortfolioSite {
    *  `integration_connections.id` row, never a credential (WSK-D30). NULL means no hosting
    *  credential has been vaulted for this site yet — an honest "not wired up", not an error. */
   vaultRef: string | null;
+  /** M6-P6g: for a PROVISIONED site, `awaiting_deploy_credential` until its row is bound to a host with a usable vault
+   *  record, then `ready`; null for every other row (a tracked estate site has no delivery to wait for). HOST side only: the
+   *  GitHub-side deploy grant is `GET provisioned-sites/:id` `deployGrant`, and the two are never merged. */
+  deliveryState: DeliveryState | null;
 }
 
 export interface PortfolioProject {
@@ -86,6 +91,7 @@ const PORTFOLIO_SQL = `
   SELECT s.id, s.domain, s.environment, s.host_kind, s.host_ref, s.access, s.kind, s.adoption,
          s.repo_url, s.repo_branch, s.contract_version, s.origin, s.last_seen_at, s.last_http_status, s.notes,
          s.vault_ref,
+         ic.provider AS vault_provider, ic.status AS vault_status,
          s.project_id, s.client_id,
          pr.name  AS project_name,
          cl.name  AS client_name,
@@ -95,6 +101,8 @@ const PORTFOLIO_SQL = `
     FROM webdev_sites s
     LEFT JOIN projects pr ON pr.id = s.project_id AND pr.tenant_id = s.tenant_id
     LEFT JOIN clients  cl ON cl.id = s.client_id
+    LEFT JOIN integration_connections ic
+           ON ic.tenant_id = s.tenant_id AND ic.deleted_at IS NULL AND ic.id::text = lower(s.vault_ref)
     LEFT JOIN search_properties sp
            ON sp.tenant_id = s.tenant_id AND sp.domain = s.domain AND sp.deleted_at IS NULL
    WHERE s.deleted_at IS NULL
@@ -109,6 +117,7 @@ interface Row {
   access: string; kind: string | null; adoption: string; repo_url: string | null; repo_branch: string | null;
   contract_version: string | null; origin: string; last_seen_at: Date | null; last_http_status: number | null;
   notes: string | null; vault_ref: string | null;
+  vault_provider: string | null; vault_status: string | null;
   project_id: string | null; client_id: string | null; project_name: string | null; client_name: string | null;
   property_id: string | null;
   hosting_provider: string | null; control_panel: string | null; stack: string | null;
@@ -139,6 +148,10 @@ function toSite(r: Row): PortfolioSite {
     topologyCheckedAt: r.topology_checked_at ? r.topology_checked_at.toISOString() : null,
     crawlConsent: r.crawl_consent === true,
     vaultRef: r.vault_ref,
+    deliveryState: deliveryStateOf({
+      origin: r.origin, hostKind: r.host_kind, hostRef: r.host_ref, access: r.access, vaultRef: r.vault_ref,
+      vaultRecord: r.vault_provider !== null && r.vault_status !== null ? { provider: r.vault_provider, status: r.vault_status } : null,
+    }),
   };
 }
 
@@ -157,7 +170,8 @@ export async function getPortfolio(tenantId: string): Promise<PortfolioResult> {
   // `search_properties` is a LEFT JOIN — it would silently blank hosting topology on every row and
   // report `crawlConsent: false` everywhere, under-reporting consent while looking authoritative.
   //
-  // `clients` and `projects` are deliberately absent: their policies gate on tenant only, no module.
+  // `clients`, `projects` and `integration_connections` (the delivery state's vault join) are deliberately absent: their
+  // policies gate on tenant only, no module.
   // Add a key here whenever a module-gated table joins into PORTFOLIO_SQL.
   const rows = await withTenants([tenantId], (c) => c.query<Row>(PORTFOLIO_SQL), {
     modules: ["webdev", "search"],

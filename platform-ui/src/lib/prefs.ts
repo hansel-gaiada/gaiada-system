@@ -2,6 +2,7 @@ import "server-only";
 // Per-user display preferences, persisted in a cookie (no backend needed).
 // Applied as data-attributes on the app shell so pure CSS does the rest.
 import { cookies } from "next/headers";
+import { DEFAULT_SHELL_LAYOUT, parseShellLayout, type ShellLayout } from "./shellLayout";
 
 export type Density = "comfortable" | "compact";
 export type Width = "standard" | "wide";
@@ -26,6 +27,8 @@ export interface Prefs {
   /** The Office canvas's camera zoom (2026-08-23) — same cookie, same "don't invent new storage"
    *  instruction as `assistantRailCollapsed` above. */
   officeZoom: OfficeZoom;
+  /** DW-1d: today's shell or the department workspace shell (`lib/shellLayout.ts`). Classic by default. */
+  shell: ShellLayout;
 }
 
 // Width defaults to "wide" (no max-width): the suite is dominated by tables, boards and console
@@ -39,7 +42,7 @@ export interface Prefs {
 // 1.0.0-alpha.301 were INERT for every user on the default. The design draws a
 // centred column; "standard" is that. "wide" survives untouched as the opt-in
 // full-bleed mode for anyone who wants it.
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit" };
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit", shell: DEFAULT_SHELL_LAYOUT };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];
@@ -61,6 +64,7 @@ export async function getPrefs(): Promise<Prefs> {
         ? parsed.assistantRailCollapsed
         : DEFAULT_PREFS.assistantRailCollapsed,
       officeZoom: OFFICE_ZOOMS.includes(parsed.officeZoom as OfficeZoom) ? (parsed.officeZoom as OfficeZoom) : DEFAULT_PREFS.officeZoom,
+      shell: parseShellLayout(parsed.shell),
     };
   } catch {
     return DEFAULT_PREFS;

@@ -114,6 +114,8 @@ import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-as
 import { WorkflowDispatchError, authorizeDeploy } from "../../core/github/workflow-dispatch";
 import { rebuildTargetFor, startSiteRebuild } from "./site-builds.service";
 import { ClientPublishAuthority } from "../../core/github/workflow-dispatch";
+import { revokeDeployForSite } from "./deploy-grant.service";
+import { DeployGrantRefusal } from "./deploy-grant";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // The closed allow-list
@@ -277,6 +279,10 @@ export type WebdeskApprovedCommandResult =
       executionStatus: "executed";
       siteId: string;
       status: "archived";
+      /** M6-P4g2 (WSK-D82): the deploy-grant revoke that follows the archive, one entry per provisioned repo linked to this
+       *  WebDesk tenant (none: the site was never provisioned, so nothing was ever granted). A failed revoke does NOT make
+       *  this result `failed`: the archive stands, and the provisioned site's row records the revoke's own outcome. */
+      deployRevoke?: Array<{ provisionedSiteId: string; outcome: "revoked" | "not_granted" | "partial" | "failed"; error: string | null }>;
     }
   | { command: WebdeskApprovedCommand; executionStatus: "failed"; error: string };
 
@@ -1140,6 +1146,13 @@ export async function executeApprovedWebdeskCommand(
     outcome = { ...outcome, build: await startRebuildAfterPublish(tenantId, approvalId, a, outcome.items, decider, clientDecider) };
   }
 
+  // ── M6-P4g2 (WSK-D82): an archived site keeps no deploy access. deploy-grant.service.ts's header makes any archive path
+  // call `revokeDeployForSite`; `site.archive` is that path. AFTER the archive is recorded `executed`, and never able to
+  // undo it: the archive is irreversible in WebDesk, so a revoke that fails is reported and left for the operator route.
+  if (outcome.executionStatus === "executed" && outcome.command === "site.archive" && a.command === "site.archive") {
+    outcome = { ...outcome, deployRevoke: await revokeDeployAfterArchive(tenantId, approvalId, a, decider) };
+  }
+
   // The requester is the one waiting (design §6: "requester notified").
   // WSK-49c: NOT for a client decision. The notification's href is the staff inbox (`/approvals/<id>`), which a client
   // contact cannot open, and the portal page that would carry it (`/portal/website`) is WSK-49d's: a link to it now would
@@ -1161,6 +1174,44 @@ export async function executeApprovedWebdeskCommand(
     });
   }
   return outcome;
+}
+
+/** The deploy-grant revoke after an archive (M6-P4g2). The provisioned repos linked to the archived site's WebDesk tenant
+ *  (`webdesk_tenant_slug`, set at P4c's tenant step) each lose their deploy secrets, as the DECIDER: the archive's own
+ *  approver, whose `promote` already outranks the revoke's `provision` + `github_repo · push` pair (a decider who lacks
+ *  them is reported `forbidden`, never elevated). Never throws. */
+export async function revokeDeployAfterArchive(
+  tenantId: string,
+  approvalId: string,
+  a: Extract<ParsedArgs, { command: "site.archive" }>,
+  decider: Principal,
+): Promise<NonNullable<Extract<WebdeskApprovedCommandResult, { command: "site.archive"; executionStatus: "executed" }>["deployRevoke"]>> {
+  let ids: string[];
+  try {
+    const r = await withTenants([tenantId], (c) =>
+      c.query<{ id: string }>(
+        `SELECT id FROM webdev_provisioned_sites WHERE tenant_id = $1 AND webdesk_tenant_slug = $2 ORDER BY created_at, id`,
+        [tenantId, a.tenantSlug],
+      ),
+    );
+    ids = r.rows.map((x) => x.id);
+  } catch (err) {
+    logger.error(`archive ${approvalId}: could not look up provisioned sites for ${a.tenantSlug}: ${err instanceof Error ? err.message : String(err)}`);
+    return [{ provisionedSiteId: "(unknown)", outcome: "failed", error: "lookup_failed" }];
+  }
+  const out: NonNullable<Extract<WebdeskApprovedCommandResult, { command: "site.archive"; executionStatus: "executed" }>["deployRevoke"]> = [];
+  for (const id of ids) {
+    try {
+      const res = await revokeDeployForSite(decider, tenantId, id, `WebDesk site ${a.siteId} archived (approval ${approvalId})`);
+      out.push({ provisionedSiteId: id, outcome: res.outcome, error: null });
+    } catch (err) {
+      const error =
+        err instanceof DeployGrantRefusal ? err.rowToken : err instanceof ForbiddenException ? "forbidden" : "deploy_revoke_failed";
+      logger.error(`archive ${approvalId}: deploy revoke of provisioned site ${id} failed (${error}); revoke it with the operator route`);
+      out.push({ provisionedSiteId: id, outcome: "failed", error });
+    }
+  }
+  return out;
 }
 
 type PublishArgs = Extract<ParsedArgs, { command: "content.publish" }>;
