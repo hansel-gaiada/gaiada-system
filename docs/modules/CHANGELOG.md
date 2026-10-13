@@ -11,6 +11,24 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.119.0` - DW-5b: the Campaigns row, the campaign page's parts and the Social campaigns screen (2026-10-13) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §31 (the "UI (DW-5b)" paragraph in §31.7). Plan §7.1 and §7.3.
+- **Campaigns › Shared** (`/departments/[deptId]/campaigns`):
+  - It lists the shared campaigns where the department has a part or leads, with our part's status, owner and due date.
+  - It appears in every agency workspace (Web Dev, SEO, Social Media, Creatives). The registry drops its `DW-5b` tickets.
+- **Social campaigns** (`/departments/[deptId]/campaigns/social`): the existing API finally has a screen, with list, create, and link or unlink to a shared campaign's part.
+- **`/agency/[campaignId]`** reads the new detail route and gains:
+  - the money block as the server returns it (budget, allocated, unallocated);
+  - the lead department and dates;
+  - a Parts section: department, owner, status, due date, allocation, links and request counts.
+  - Controls: manager controls (add or remove a department, allocate, edit budget, currency, lead and dates) behind the new `agency.campaign.manage` capability, which is parity-tested against the role bundles. A part's status, owner, brief and due date are editable by its owner and its department head too. The server stays the authority.
+- **Honest reads.** Every read is a `ReadResult`. A refusal or failure says so in words, and a link list says "you cannot see SEO campaigns" or "the module is off", never an empty list.
+- **Money.** Typed amounts become minor units through an exact string parser; the UI never adds or subtracts money. Typed refusals (`allocation_exceeds_budget` and others) are sentences carrying the server's figures.
+- **New code:** `lib/campaigns.ts`, `campaigns-data.ts`, `campaignActions.ts`, `components/agency/*` and `components/social/{SocialCampaignLink,NewSocialCampaignForm}.tsx`, with 51 + 14 + component tests.
+- **Rows:** the Web Dev sidebar gains its Campaigns row (`workspaceAccess` and `shellModel` tests updated).
+- **Not yet driven in a browser:** the pages pass typecheck, vitest (430 files, 7602 tests on the branch) and `next build`. A Playwright pass comes with the DW-5 requests UI.
+
 ### platform-nest `0.119.0` - DW-5a and DW-5c: campaign parts, and requests between departments (2026-10-13) - PROTOTYPED
 
 Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §31 (campaign parts) and §32 (requests between departments); plan `docs/plans/2026-10-13-department-workspaces.md` §7.3. Backend only; the screens come with DW-5b and the DW-5c UI. Rulings DW-D13 and DW-D14.
