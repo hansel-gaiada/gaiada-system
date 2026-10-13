@@ -6877,6 +6877,136 @@ MCP hub tools are unchanged by this section.
   - A caller refused `read` gets 403 even with a malformed `departmentId`.
 - **The closure is built by the real org save path** (`putOrg`), not inserted by hand, so the suite proves the tree the product writes.
 
+## 34. Pull requests and CI status on tasks (DW-6f, 2026-10-13) — `platform-nest/src/core/github-pull-requests.ts` (new), `core/github-webhook-handlers.ts`, `modules/pm/pm.controller.ts` — **STATUS: CONTRACT (nothing built)**
+
+Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 ("launch and return": a pull request appears on the task). Code is written outside the ERP, in VS Code and Claude Code. Its result comes back as the pull requests and their CI status on the task the work is for.
+
+### 34.1 What exists, and what this adds
+
+- **What exists:**
+  - The GitHub App webhook receiver already handles `pull_request` and `workflow_run` (`github-webhook-handlers.ts`, `handlePullRequest`, `handleWorkflowRun`).
+  - Each delivery is recorded once (`github_webhook_deliveries`) and stamped with the org tenant (`GITHUB_REPO_SYNC_TENANT_ID`, the company that owns the GitHub organisation).
+  - Today these events only bump repo-level counters on `github_repos` and write `work_activity` rows. **No pull request is stored, and nothing links a pull request to a task.**
+- **What links them:** a task already has a key. A project has a `short_code` (unique per company, migration `0050`), and a PM task has a `seq` within its project. So `WEB-12` names one task.
+- **This section adds:**
+  - one table of pull requests, filled by the existing handlers;
+  - a rule that links a pull request to a task through that key;
+  - one read on the task.
+- **No new Cerbos kind.** The read is authorised exactly like the task (`pm_task` · `read`).
+
+### 34.2 v1 is one company: the company that owns the GitHub organisation
+
+- GitHub data stays in the org tenant (the GitHub tenant-scope ruling, `docs/blueprints/github-tenant-scope-ruling.md` §0).
+- A pull request links only to a task **in that same company**. That is where Web Dev's projects live.
+- So the link, the table and the read all sit in one tenant. The read is an ordinary `withTenants([tenantId])` query, and it never crosses a tenant.
+- **Gap that stays visible:** a task in another company is never linked. Its panel says so (§34.6). Linking across group companies needs the tenant-scope ruling's resolver and is later work.
+
+### 34.3 Data model (one migration, timestamp-named after main's newest)
+
+**`github_pull_requests`** (new). RLS is ENABLE plus FORCE, with the standard `tenant_isolation` policy on `app_current_tenants()`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid PK` | |
+| `tenant_id` | `uuid NOT NULL → companies` | Always the org tenant (the receiver's stamp) |
+| `repo_full_name` | `text NOT NULL` | `org/name`, as `github_repos.full_name` |
+| `number` | `int NOT NULL` | |
+| `title` | `text NOT NULL` | |
+| `state` | `text NOT NULL CHECK (state IN ('open','closed'))` | GitHub's own two states |
+| `merged` | `boolean NOT NULL DEFAULT false` | |
+| `draft` | `boolean NOT NULL DEFAULT false` | |
+| `head_ref` | `text NOT NULL` | The branch |
+| `head_sha` | `text NULL` | Updated on `synchronize` |
+| `html_url` | `text NOT NULL` | |
+| `author_login` | `text NULL` | |
+| `gh_updated_at` | `timestamptz NULL` | GitHub's `updated_at`; the ordering guard (§34.4) |
+| `pm_task_id` | `uuid NULL → pm_tasks(id) ON DELETE SET NULL` | The linked task |
+| `task_key` | `text NULL` | The key that linked it, as written, for display and audit |
+| `ci` | `jsonb NOT NULL DEFAULT '{}'` | One entry per workflow name (§34.4) |
+| `created_at`, `updated_at` | `timestamptz` | |
+
+- `UNIQUE (tenant_id, repo_full_name, number)`.
+- Index `(tenant_id, pm_task_id) WHERE pm_task_id IS NOT NULL`.
+- Index `(tenant_id, repo_full_name, head_sha)`.
+- No backfill. Pull requests appear as their events arrive, so one opened before the deploy shows up on its next event (any push to it, an edit, a review request).
+
+### 34.4 How the handlers fill it (in the same delivery, after today's writes)
+
+**`pull_request`.** Any action, including opened, reopened, edited, synchronize, closed, ready_for_review and converted_to_draft:
+- Upsert the row on `(tenant_id, repo_full_name, number)`.
+- Apply it only if the payload's `pull_request.updated_at` is at or after the stored `gh_updated_at`. Out-of-order deliveries never roll a row back.
+- Re-run the link (§34.5) on every applied event, so editing a title to add or remove a key changes the link.
+
+**`workflow_run`.**
+- Find the pull requests it belongs to: the numbers in `workflow_run.pull_requests[]` for this repo, or else the rows whose `head_sha` equals `workflow_run.head_sha`.
+- On each, set `ci[<workflow name>] = { runId, status, conclusion, url, at }`.
+- An entry is replaced only when the new run's `run_started_at` (else `created_at`) is at or after the stored `at`.
+- The update merges into the object. Never `jsonb_set` a missing path; it creates no ancestors.
+
+**The CI summary,** computed on read, never stored:
+- `failing` when any workflow's latest conclusion is `failure`, `timed_out`, `cancelled` or `action_required`;
+- else `running` when any is not `completed`;
+- else `passing` when all are `success`, `skipped` or `neutral`;
+- `none` with no entries.
+
+**Robustness.**
+- A handler failure in this new part must not fail the delivery's existing writes. Each part logs and records its own note.
+- The delivery is idempotent on `delivery_id`, as today.
+
+### 34.5 The link rule (`linkTaskKey`, pure, exported)
+
+- **Candidate keys:** every match of `[A-Za-z][A-Za-z0-9]{1,9}-[0-9]{1,6}` that sits between non-alphanumeric characters (or at either end).
+  - First in the title, then in `head_ref`; in each, left to right.
+  - Case-insensitive, compared upper-cased.
+- **A key resolves** only when `projects.short_code` (case-insensitive, live project) and `pm_tasks.seq` (live task) both exist **in the org tenant**.
+- **The first candidate that resolves wins.** One pull request links to at most one task.
+- **When nothing resolves,** `pm_task_id` and `task_key` are set to `NULL`. The pull request stays in the table and on its repository, never hidden. A word like `FIX-2` that names no project links nothing.
+- **A deleted task** clears the link (FK `SET NULL`).
+- **Ambiguity:** a pull request that names two tasks links only the first. That gap is accepted for v1.
+- **Exports for other tickets:** the resolver is exported so DW-4h can attach the same pull request's `work_activity` rows to the task later. 6f does not change `work_activity`.
+
+### 34.6 The read
+
+`GET /api/:t/pm/tasks/:taskId/pull-requests`
+- **Authorisation:** `pm_task` · `read` on the task, identical to `GET /api/:t/pm/tasks/:taskId`. Then RLS: a task id from another tenant finds nothing and answers 404.
+- **Response:**
+  `{ taskKey: string | null, linkable: boolean, repoLinked: boolean, pullRequests: Array<{ repo, number, title, state: "open" | "closed", merged, draft, headRef, url, authorLogin, updatedAt, ci: { summary: "passing" | "failing" | "running" | "none", runs: Array<{ name, status, conclusion, url, at }> } }> }`
+- **Field meanings:**
+  - `taskKey`: the task's key (`<short_code>-<seq>`), or `null` when its project has no short code.
+  - `linkable`: `t` is the org tenant (§34.2). When it is `false`, the list is always empty.
+  - `repoLinked`: some live `github_repos` row has `project_id` = the task's project. The UI uses it to decide whether to teach the key convention.
+- **Order:** open pull requests first, then by `updatedAt` descending.
+- **Status:** 200 with an empty list is a real "none". A server that cannot read answers 5xx; it never pretends "none".
+
+### 34.7 UI (`platform-ui`)
+
+- The PM task page (`TaskDetailView`) gains a **Pull requests** section, read with a `ReadResult` reader (`lib/pm.ts`).
+- **Each pull request** shows:
+  - a link `repo#number` and the title, opening GitHub in a new tab;
+  - its state: Open, Draft, Merged or Closed;
+  - the branch;
+  - a CI chip (Passing, Failing, Running, or none), whose tooltip lists each workflow and its result.
+- **What shows when, from the response:**
+  - **Pull requests exist:** the list.
+  - **None, and `repoLinked` with a `taskKey`:** one quiet line, "No pull requests yet. Put WEB-12 in a branch name or pull request title to link one."
+  - **None, and not `linkable`:** nothing at all, so the convention is not taught in a company it cannot work in.
+  - **None otherwise:** nothing.
+  - **The read failed:** "Pull requests unavailable".
+- Not pilot-gated: the task page is shared by both layouts, and the section is new information, not a layout change.
+
+### 34.8 Before building, and tests
+
+- **Check first, read-only:** that the App is subscribed to `pull_request` and `workflow_run`. Count recent rows per event in `github_webhook_deliveries` on the live ERP. If either is missing, the App's subscription is an owner step, added to DW-11.
+- **Unit tests:**
+  - `linkTaskKey`: title before branch; branch only; lowercase in a branch (`feature/web-12-nav`); several keys, where the first that resolves wins; no key; a key naming no project; a key naming a deleted task.
+  - The CI summary over every conclusion.
+- **DB/HTTP suite (Linux CI gate: Postgres and Cerbos):**
+  - Upsert from `opened`. Then `edited`, adding and removing a key, re-links. An older `updated_at` delivered after a newer one changes nothing.
+  - `workflow_run` matches by `pull_requests[]` and by `head_sha`, keeps one entry per workflow name, and refuses an older run.
+  - The read: authorised like the task. A caller refused `read` gets 403. A task from another tenant gets 404. `linkable: false` in a non-org tenant. Open pull requests come first.
+  - A replayed delivery (same `delivery_id`) writes nothing twice.
+- **Fixtures** are taken from real GitHub payload shapes (`pull_request` and `workflow_run`), trimmed. No invented field.
+
 ## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
 
 **Why.** A head's Team report must list everyone in their unit. `GET /reports/overview?grain=person` lists only people who have fact rows in the range, so a quiet team member would silently drop off the page. An empty or short list is a claim; this one would be false. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.1 and §5.6.

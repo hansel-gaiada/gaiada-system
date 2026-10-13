@@ -540,9 +540,13 @@ Written when DW-6 started, from a survey of main (`2e222711`). Pilot users only,
     - a `github_pull_requests` table, filled by the existing handlers;
     - the task key in the branch name or the PR title, which links a PR to its task;
     - a read on the task, and the task page's Pull requests panel with CI status.
-  - *Trap:* GitHub data lives under the organisation's tenant, which may not be the task's. Reads go
-    through the organisation-tenant resolver (`github-tenant-scope-ruling.md`), and the link checks
-    the task's tenant.
+  - *Trap, and how §34 avoids it:* GitHub data lives under the organisation's tenant, which may not
+    be the task's.
+    - v1 links a pull request only to a task in that same company, which is where Web Dev's
+      projects live. The table, the link and the read then stay in one tenant, and the read is
+      authorised exactly like the task.
+    - A task in another company is never linked (contract §34.2). Linking across group companies
+      needs the organisation-tenant resolver (`github-tenant-scope-ruling.md`) and is later work.
   - *Gap:* a PR with no task key in its branch or title is on no task. It stays visible on the
     repository.
 - **6h · Asset versions and review rounds.**
@@ -582,7 +586,8 @@ Written when DW-6 started, from a survey of main (`2e222711`). Pilot users only,
 1. 6a + 6b + 6e: the label and the browser test (Sonnet).
 2. 6c (Sonnet).
 3. Contract §33 (orchestrator), then the 6d + 6g backend (Sonnet), then their screens (Sonnet).
-4. Contract §34, then the 6f backend (Opus: the link crosses tenants), then the panel (Sonnet).
+4. Contract §34 (written), then the 6f backend (Sonnet: v1 stays in one tenant, so no read
+   crosses tenants), then the panel (Sonnet).
 5. Contract §35, then the 6h backend (Sonnet: a migration and a Cerbos kind), then the screens.
 6. 6c2 (Sonnet).
 7. Contract §36, then 6k after 6h. It goes live after DW-11.
