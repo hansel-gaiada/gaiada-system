@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.123.0` - DW-4l: ratio KPIs read honestly on the report pages (2026-10-13) - PROTOTYPED
+
+- **Team report.** `/reports/team` printed a ratio's bare value, so an active person with no task due in the period read "0%" on time (seen live on 1.0.0-alpha.377). A ratio whose denominator is 0 now reads "—"; a measured 0% still reads 0%. New pure `lib/teamReport.ts` (`formatTeamKpi`), tested.
+- **`DeltaChip`.** A ratio's delta is the difference of two fractions, and the chip printed it raw with "pp" ("0.04pp" for four points, found by the DW-3 session). It now reads whole points, the Overview's rule (`lib/overviewNumbers.ts`); minutes read whole; counts keep one decimal; a delta that rounds to nothing reads flat. A caller's own `magnitude` (DW-3d's Overview) is shown as given. `DeltaChip.test.tsx` is new.
+- Not in this change: DW-4m (a comparison against a period with no facts, or a previous ratio with a zero denominator, still yields a delta; that needs a backend signal, contract first).
+
 ### platform-ui `0.122.0` - DW-3d: the Overview's Your numbers (2026-10-13) - PROTOTYPED
 
 - **What.** The You band's first block (plan §3.2, §3.3): tasks done, on-time rate, hours logged and check-ins for the Overview's selected period, each against the previous period. One read of the person's own report document, `getReportDocument(tenant, userId, { grain: "person", scopeRef: <self>, periodKind: <period>, start: <today>, end: <today> })`; the six Overview periods are the six report period kinds one to one and the server snaps the bounds.
