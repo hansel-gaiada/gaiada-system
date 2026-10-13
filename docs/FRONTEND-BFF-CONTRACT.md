@@ -6459,7 +6459,7 @@ Every item: `{id, kind, title, date, fileId, ready}`. `id` is the source row (co
 
 **Known limit.** Portal scope comes from `resolvePortalScope`, which flattens a contact's project scope across their clients (on the board under "Before real clients use the portal"). This list is built only from the shared predicates and does not work around it, so the kernel fix covers it too.
 
-## 31. Campaign parts — shared campaigns gain departments (DW-5a, 2026-10-13) — `platform-nest/src/modules/agency/` — **STATUS: CONTRACT (nothing built)**
+## 31. Campaign parts — shared campaigns gain departments (DW-5a, 2026-10-13) — `platform-nest/src/modules/agency/` — **STATUS: BUILT, PROTOTYPED (HTTP suite campaign-parts.test.ts written; needs the Linux CI gate)**
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §7.1 and §7.3, ruling DW-D13 (campaigns are multi-department). One campaign (today's `agency_campaigns`, owned by the Office of the GM or a lead department) gains **parts**: one per taking-part department, each with an owner, a status, an optional budget allocation, and the work linked to it (the department's own SEO or Social campaigns, and the requests of §32). The plan's trap 6 says a part's money is ruled here, never in the UI: see §31.3.
 
@@ -6571,6 +6571,31 @@ A new kind is six artifacts, plus the pinned count literals (policy, `cerbos.ts`
 - **Org:** a division or unknown node id answers 400 `unit_invalid`. A unit removed from the tree reads as `unitMissing`.
 - **Links:** linking another tenant's SEO campaign is 400. Linking a campaign that is already linked is 409. Deleting a part that has links is 409.
 - **IAM:** the new kind's catalog, groups, bundles and the four count literals are green, and the policy is probed after a Cerbos restart.
+
+### 31.7 Built (DW-5a, 2026-10-14)
+
+Files: `migrations/202610140500_agency_campaign_parts.sql` (schema), `migrations/202610140510_iam_agency_campaign_part_permissions.sql` (IAM seed),
+`src/modules/agency/agency-campaign-parts.service.ts` (money rules, parsers, org check, SQL helpers),
+`src/modules/agency/agency.controller.ts` (the routes of §31.4), `src/modules/agency/index.ts` (the five permission keys),
+`cerbos/policies/resource_agency_campaign_part.yaml` and four `perm_agency_campaign_part_*` roles in `derived_roles.yaml`,
+`src/rbac/permission-catalog.json`, `permission-groups.json`, `role-permission-bundles.json` (regenerated), the four pinned count literals
+(105 kinds / 451 pairs / 436 grantable / 101 non-exempt kinds), `src/http-error.filter.ts` (the additive `detail` field), `docs/modules/CAPABILITY-INVENTORY.md`.
+Proof files: `agency-campaign-parts.service.test.ts` (36 pure unit tests, run locally), `cerbos-agency-campaign-part.test.ts` (static pin plus a live matrix),
+`campaign-parts.test.ts` (the HTTP suite for every bullet of §31.6, including the concurrent-allocation race; DB and Cerbos, Linux gate only).
+
+Deviations from §31, each deliberate:
+
+1. **No permission mirror for `update`.** §31.2 says the generic arm "does not mirror the owner or lead rules"; the arm is wired for `read`, `create`, `delete` and `allocate` only. A `perm_*update` rule fails the permission-arm hazard scan (Pattern B: the owner rule is self-scoped) and the mirror-reach invariant (the lead rule is attribute-dependent), the same call `time_entry` makes. Consequence: the permission-native `owner` role holds the `update` key in its bundle but cannot act on it through Cerbos unless it also holds company_admin or manager.
+2. **The owner rule is on `member`.** "Its own rule for the part's owner" is `derivedRoles: ["member"]` with `variables.owns`, so a viewer who owns a part still cannot update it. `member·agency.campaign_part.update` is a `selfScoped` pair in the bundles and the seed.
+3. **The `org_unit_lead` rule carries `update` only** (no `read`), as §31.2 lists. A department head also holds `member` in practice.
+4. **None of the five keys is `sensitive`.** `allocate` moves money but only within the campaign's own budget, and flagging it would route every department-head grant of `manager` through the sensitive-grant override path (PERMISSION-CONTRACT §12.2). Flip it additively if the owner wants it.
+5. **Error carrier.** The contract's codes travel in `reason` (the `{error}` reshape keeps `error` as the prose message). The `{budgetMinor, allocatedMinor, requestedMinor}` figures of `allocation_exceeds_budget` travel in a new additive `detail` object, which `http-error.filter.ts` now forwards; it has the same only-when-set rule as `field`, `reason` and `existing`. `allocatedMinor` is the sum over the campaign's OTHER live, non-cancelled parts and `requestedMinor` is the part's new allocation.
+6. **`GET campaigns/:campaignId` adds `linkAccess`** (`{searchCampaigns, socialCampaigns}`, each `ok | module_off | forbidden`). A link list is empty both when nothing is linked and when the caller may not read that kind of campaign or the module is off; the extra key keeps an empty list from reading as "nothing linked". The detail read needs `agency_campaign` `read` AND `agency_campaign_part` `read`; the list read needs the part `read` only when `?unitId=` is sent.
+7. **`requests` counts and the request half of `part_has_links` are stubs.** `work_requests` does not exist until DW-5c, so `requests` is `{open: 0, delivered: 0, declined: 0}` and no request ever blocks a delete. The seam is two functions in the service (`requestCountsByPart`, `countRequestsOnPart`) that DW-5c replaces.
+8. **Linking a campaign that is already linked answers 409 `already_linked` even when it is linked to the SAME part** (one reading of "already linked"; no idempotent 201).
+9. **`PATCH` part returns `{id}`, `DELETE` part and links return `{id}` / `{id, kind, refId}`** with 200; `PATCH campaigns/:id` returns `{id, money}`. `POST links` answers 201.
+10. **Extra refusals the contract implies but does not name:** 400 `budget_invalid`, `date_invalid`, `dates_invalid`, `currency_invalid`, `brief_too_long`, `status_invalid`, `name_invalid`, `link_kind_invalid`, `nothing_to_update`; 404 `link_not_found` (unlinking something not linked); 409 `part_changed` (the part's owner moved between the authorization read and the locked write).
+11. **Authorization runs before body validation** on every write (a caller who may not write gets 403 whatever they sent), and `unitAncestors` / `ownerId` are read from the part row, never from the body.
 
 ---
 
