@@ -153,15 +153,16 @@ describe("Campaigns", () => {
       camp("soon", { part: part("in_progress"), endsOn: "2026-11-01" }),
       camp("undated", { part: part("planned") }),
     ]), "d-1");
-    expect(view.kind === "ok" && view.rows.map((r) => [r.id, r.ourPart])).toEqual([
-      ["soon", "in_progress"], ["late", "planned"], ["undated", "planned"], ["lead-only", "Lead, no part"],
+    expect(view.kind === "ok" && view.rows.map((r) => [r.id, r.ourPart, r.partStatus])).toEqual([
+      ["soon", "in_progress", "in_progress"], ["late", "planned", "planned"], ["undated", "planned", "planned"],
+      ["lead-only", "Lead, no part", null],
     ]);
     expect(view.kind === "ok" && view.rows[1]).toMatchObject({ name: "late", startsOn: "2026-11-01", endsOn: "2026-12-01" });
   });
 
   it("says plainly a campaign the department neither leads nor has a part in has no part of ours", () => {
     const view = campaignsView(ok([camp("x", { leadUnitId: "d-9" })]), "d-1");
-    expect(view.kind === "ok" && view.rows[0].ourPart).toBe("No part");
+    expect(view.kind === "ok" && view.rows[0]).toMatchObject({ ourPart: "No part", partStatus: null });
   });
 
   it("cuts to the top few and counts them all", () => {

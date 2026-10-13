@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { StatusBadge } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import {
   healthText, refusalText,
@@ -61,7 +62,7 @@ export function CampaignsBlock({ view, href }: { view: CampaignsView; href: stri
             {view.rows.map((r) => (
               <li key={r.id} className="ov-work__item" data-campaign={r.id}>
                 <Link href={`/agency/${r.id}`} className="ov-work__name">{r.name}</Link>
-                <span className="ov-work__health">Our part: {r.ourPart}</span>
+                <span className="ov-work__health">Our part: {r.partStatus ? <StatusBadge label={r.partStatus} /> : r.ourPart}</span>
                 {dateRange(r.startsOn, r.endsOn) && <span className="ov-work__meta">{dateRange(r.startsOn, r.endsOn)}</span>}
               </li>
             ))}

@@ -164,6 +164,9 @@ export interface CampaignRowModel {
   name: string;
   /** OUR part's status, or in words why there is none (the department only leads it, or has no part). */
   ourPart: string;
+  /** OUR part's status as the backend sends it, drawn as a status badge like the Campaigns pages do; null when
+   *  `ourPart` is the sentence saying why there is no part. */
+  partStatus: string | null;
   startsOn: string | null;
   endsOn: string | null;
 }
@@ -188,6 +191,7 @@ export function campaignsView(result: ReadResult<DeptCampaignRow[]>, deptId: str
     rows: rows.slice(0, CAMPAIGNS_SHOWN).map((r) => ({
       id: r.id, name: r.name, startsOn: r.startsOn, endsOn: r.endsOn,
       ourPart: r.part ? r.part.status : r.leadUnitId && r.leadUnitId === deptId ? "Lead, no part" : "No part",
+      partStatus: r.part ? r.part.status : null,
     })),
   };
 }

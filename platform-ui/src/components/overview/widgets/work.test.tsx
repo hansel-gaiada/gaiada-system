@@ -124,7 +124,9 @@ describe("Campaigns (widget)", () => {
     const block = screen.getByRole("region", { name: "Campaigns" });
     expect(shared).toHaveBeenCalledWith("u-1", "co-a", "d-web");
     expect(within(block).getByRole("link", { name: "Campaign c1" })).toHaveAttribute("href", "/agency/c1");
-    expect(block).toHaveTextContent("Our part: in_progress");
+    // The part's status reads like the Campaigns pages' badge, never as the raw enum.
+    expect(block).toHaveTextContent("Our part: In progress");
+    expect(block).not.toHaveTextContent("in_progress");
     expect(block).toHaveTextContent("01 Nov 2026 to 01 Dec 2026");
     expect(within(block).getByRole("link", { name: "Shared campaigns" })).toHaveAttribute("href", "/departments/d-web/campaigns");
   });
