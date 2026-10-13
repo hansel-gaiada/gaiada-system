@@ -7031,3 +7031,32 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 
 **UI consumer.** `lib/reports-data.ts::getReportOverview(…, { unit })` on `/reports/team`. The demo backend (`demoReports.ts`) serves the same shape.
 
 **MCP.** No tool lists the overview today; none is added.
+
+## 38. A department head's Team progress, and their access to Learning (DW-4g, 2026-10-13) — `platform-nest/src/modules/lms/lms-learn.controller.ts` (`compliance`) — **STATUS: PLANNED (contract first)**
+
+**Why.** DW-D15 (owner): a head gets `org_unit_lead` on their own department, derived from their lead position, so they can add learning material and see their team's progress, but never waive mandatory training. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.4 and §5.6.
+
+**What already exists, and stays.**
+- The grant. A lead position's role set carries `org_unit_lead` at `scope_kind = 'own_unit'` (`seed/positions.ts`), and the position reconciler materialises it as an `org_unit`-scoped `user_roles` grant. No new grant path is added. A head without a lead position has no lead power; that is data, fixed in Positions.
+- Authoring. `lms_course` create, update, publish and retire match `org_unit_lead` only when the course's unit is inside the head's unit (`unitAncestors`), and a general-track course stays `company_admin` only. Proven by `lms-l1-acceptance.test.ts` case 1.
+- Waiving. `POST …/enrollments/:id/waive` is allowed only for `hr_people_ops`, `module_manager` and `company_admin` (`resource_lms_enrollment.yaml`). Unchanged.
+
+**The gap.** `GET /api/:t/modules/lms/compliance` authorizes `lms_enrollment` read with no unit attributes, so `org_unit_lead` can never match and a head is refused. Its aggregate is also company-wide. And the Learning pages gate on company-wide `can()`, which by design never counts a unit-scoped grant, so a head who sees the "Add material" and "Team progress" tabs is refused when opening them.
+
+**The unit-scoped read.** `GET /api/:t/modules/lms/compliance?unit=<orgNodeId>`. Without `unit`, the endpoint is unchanged.
+1. Cerbos `lms_enrollment` read, with the resource's `unitAncestors` loaded for `unit` (`loadUnitAncestors`). A head of that unit or an enclosing one passes; anyone else without a company-wide grant gets 403. An id that is not in the org tree has no ancestors, so a head is refused (403) before anything reveals whether it exists.
+2. A caller who passed Cerbos through a company-wide grant, asking for an id that is not in the org tree, gets 404 `{error: "unit_not_found", field: "unit"}` on the wire.
+3. Learners: every user whose primary `org_unit_memberships` row is valid TODAY (`REPORTS_TZ`) on a node of the unit's subtree, the same roster rule as §37.
+4. Response: `{unit, learners, paths: [{pathKey, title, isMandatory, assigned, completed, outstanding, overdue, waived}]}`. Each count covers only those learners' enrolments. `learners` is the roster size, so "0 assigned" can never be read as "nobody here".
+
+**The UI.**
+- Registry Learning row: `add` → `/learning/authoring?unit={dept}`, `team` → `/learning/compliance?unit={dept}`. Their gates stay `unitCap`.
+- `/learning/authoring`: opens for a company-wide `lms.authoring` holder as today, and for a head through `canInUnit` on the unit in `?unit` (or, with no `unit`, on any unit they lead). A head can create only department-track courses, and only for units they lead (the server is the authority). Publishing follows `lms.publish` the same way.
+- `/learning/compliance?unit=`: opens through `canInUnit(lms.progress.view)` for that unit and reads the unit-scoped endpoint through an honest reader. A 403 shows the refusal, a 404 says the department does not exist, and nothing is ever an empty list for a failed read. Without `unit` the page is unchanged.
+
+**Proof (live Postgres + Cerbos on the CI gate, added to `lms-l1-acceptance.test.ts`):**
+- the Web Dev head is refused when waiving (403);
+- `compliance?unit=d-web` as the Web Dev head → 200, counting only Web Dev learners (a learner placed elsewhere is not counted);
+- `compliance?unit=d-seo` as the Web Dev head → 403;
+- an unknown unit → 403 for the head, and 404 for a company-wide caller;
+- without `unit`, the head is still refused (unchanged).
