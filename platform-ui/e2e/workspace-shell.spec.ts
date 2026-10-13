@@ -558,7 +558,8 @@ test.describe("the Overview's frame: a placed Web Dev employee (webdev@gaiada.co
     await signInWebDev(page, context);
     await page.goto("/departments/dept-3");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(greeting);
-    await expect(page.getByText(/^SEO · Gaia Digital Agency · /)).toBeVisible();
+    // Scoped to the page: while the page streams, React briefly holds a hidden copy outside #main-content.
+    await expect(page.locator("#main-content").getByText(/^SEO · Gaia Digital Agency · /)).toBeVisible();
     await expect(sidebar(page).getByText("Visiting SEO")).toBeVisible();
   });
 
@@ -597,7 +598,7 @@ test.describe("the Overview's frame: someone whose home is the Company area", ()
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Gede$/);
-    await expect(page.getByText(/^Company · Gaia Digital Agency · /)).toBeVisible();
+    await expect(page.locator("#main-content").getByText(/^Company · Gaia Digital Agency · /)).toBeVisible();
     await expect(page.getByRole("group", { name: "Period" }).getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
     // Today is built for the company frame; its decisions block (DW-3i) is not, so no Needs you here.
     await expect(page.getByText(/The Company Overview is being built/)).toHaveCount(0);
