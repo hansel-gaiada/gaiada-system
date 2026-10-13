@@ -19,7 +19,7 @@ local stack). None of these mean "production-done".
 - **Not tagged `@smoke`**: the smoke project selects by file (`testMatch: smoke.spec.ts`) as well as by tag, so a tag in this spec would not be picked up.
 - **sumopod (Linux, Playwright 1.62.1 image, `next start` production build, DEMO_MODE)**: sha `54678e77`, `workspace-shell` 16/16 passed on both runs (21.5 s, 22.1 s), smoke project 1/1. Earlier shas of the same branch failed on test-side expectations only (fixed): `dcc6a6cb` 11/16, `a21a27c8` 15/16.
 - **Observation, not changed**: a member who types `/admin` is redirected (DEMO_MODE) to `/admin/users` and the shell draws an "Admin menu" with no rows and only "Back to Company"; the test pins that no Admin row is offered.
-- **CI**: see the run id in the DW-2g report (GitHub Actions on `dw/2g`).
+- **CI**: GitHub Actions `ci.yml` on `dw/2g`, run 38359765436 at sha `045264df` (code identical to the sumopod-run `54678e77`; only docs differ): success, every job green including platform-ui (run 38358147966 at `dcc6a6cb` also success).
 
 ### ai-agents `0.16.0` - M6-P6m: the scaffolded fullstack pages are statically exportable (2026-10-13) - DEV-VERIFIED
 
