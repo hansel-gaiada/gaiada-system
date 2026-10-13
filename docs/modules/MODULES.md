@@ -40,7 +40,7 @@ versions below; the running build reports it at `GET /health`.
 | mcp-hub | `0.15.2` | PROTOTYPED | WS2 | 2026-10-13 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | insights-collector | `0.3.2` | PROTOTYPED | SEO | 2026-10-13 |
-| automation (n8n) | `0.6.2` | PROTOTYPED | WS4 | 2026-10-13 |
+| automation (n8n) | `0.6.3` | PROTOTYPED | WS4 | 2026-10-13 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.13.15` | PROTOTYPED | WS10 | 2026-10-13 |
 | wa-chat-bot | `0.10.0` | PROTOTYPED | WS5 | 2026-10-12 |

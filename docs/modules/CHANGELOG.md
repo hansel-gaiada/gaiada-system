@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### automation `0.6.3` - `wf:billing-chaser` sends each client's unsigned-contract reminders to that client's account owner (2026-10-13) - PROTOTYPED
+
+- Completes PV-D28's routing. A contract the client has not signed for more than 7 days goes to that client's `owner_user_id` (from `clients.list`, which already carries it; no hub or platform change). A client with no owner falls back to the configured recipients, with a "no account owner set" note. Payment claims (more than 2 days) and countersign waits (more than 1 day) stay with the configured recipients (`BILLING_NOTIFY_USER_IDS`, else `NOTIFY_USER_ID`). There is one digest per recipient, each covering only that recipient's clients, and the internal sentinel client is skipped.
+- Live data: 0 of 71 clients have an account owner today, so every reminder still reaches the configured recipients until owners are set (client Edit → Owner).
+- Verified: the workflow test runs its Code nodes on fixtures (23/23 on sumopod). Teeth: routing (c) to the configured recipients only fails 3 tests. Re-imported into the live n8n by CLI (id kept) and re-activated.
+
 ### infra `0.13.15` - M6-P4p: the hub can reach the agent runner (2026-10-13) - PROTOTYPED
 
 - **The bug:** found live by the M6 P4 gate after 369. Six pinned gate sites reached `code.scaffold` and stopped: the hub answered "agent runner not configured (AGENT_RUNNER_URL empty)" (n8n executions 2753-2759).
