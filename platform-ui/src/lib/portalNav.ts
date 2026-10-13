@@ -47,6 +47,8 @@ export const PORTAL_AREAS: PortalArea[] = [
     tabs: [
       { href: "/portal/contracts", label: "Contracts" },
       { href: "/portal/invoices", label: "Invoices" },
+      // PV5-08: signed agreements, issued-invoice PDFs and payment receipts in one list. A new path; every other is kept.
+      { href: "/portal/documents", label: "Documents" },
     ],
   },
   { key: "people", label: "People", tabs: [{ href: "/portal/profile", label: "People" }] },
