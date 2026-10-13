@@ -44,6 +44,18 @@ local stack). None of these mean "production-done".
 - **Tests:** `test/site-set-domain-unit.spec.ts` (no services: the domain rule, the controller, the WS4 hash binding, the real forms guard and the preview origin rule against every lookalike; 85 tests) and `test/site-set-domain.spec.ts` (real Postgres, Redis, the real policy decision point; the gate, the value, single use, replay, CORS on the real consent preflight, the 404 and 409 refusals, and the rollback). `test/control-command-registry.spec.ts` updated.
 - **Docs:** `webdesk/api/README.md` command table and a "site.setDomain" section.
 
+### platform-ui `0.110.0` - DW-2b: one tab strip drawn by the workspace shell (2026-10-13) - PROTOTYPED
+
+- **What:** inside the workspace shell only (the pilot switch, `prefs.shell` = `workspaces`), plan §2.4 and §2.6 rule 1:
+  - One tab strip at the top of the main column, drawn from the active sidebar row's tabs when the row has more than one (`.sec-tabs`/`.sec-tab`, `aria-current="page"` on the page's tab, `nav` named "<row> sections"). It scrolls inside itself at phone width.
+  - A console strip hides itself only when every one of its tab hrefs is a tab of the current view's rows, so no page loses its way in: HR, Finance, IT, IT > Network, Me and the department console (both levels) hide; Admin's strip stays (its seven pages are not registry tabs, Settings is the one `/admin` tab).
+  - No breadcrumb on a tool page (the pathname is a tab href of the view); a record below a tool keeps it.
+  - No My-work rail in the department console: the frame is one column (the full-bleed tabs still widen the page).
+  - One source of truth for the area: `WorkspaceShellProvider` / `useWorkspaceShell()` (null in the classic shell) holds the area, the view, the rows and the active row and tab. The sidebar now reads it; the `gaiada.shell.lastArea` logic moved with it unchanged.
+- **Where:** `components/shell/WorkspaceShellContext.tsx`, `WorkspaceTabStrip.tsx`; `Shell.tsx` (provider around the frame, strip in `.erp-main__inner`); `SectionTabs.tsx`, `components/finance/FinanceTabs.tsx`, `DeptTabs.tsx`, `components/Breadcrumbs.tsx` (now a client component, same markup), `components/departments/DeptShellFrame.tsx`; `shell.css` and `departments.css` (existing tokens only).
+- **Not changed:** the classic shell (every page renders as before), `lib/workspaces.ts`, `nav.ts`, every gate, every URL, every server read. The department layout still reads the My-work rail's data on the server even though the workspace shell does not draw it; a later ticket can skip those reads.
+- **Tests:** `WorkspaceShellContext.test.tsx`, `WorkspaceTabStrip.test.tsx`, `consoleStrips.test.tsx` (covering rule from the real registry, HR hidden and Admin kept), `Breadcrumbs.test.tsx`; `WorkspaceSidebar.test.tsx` keeps every assertion (wrapped in the provider). CI run 38345297693 green (platform-ui: typecheck, 406 test files / 7218 tests, `next build`, smoke; every other job green).
+
 ### platform-ui `0.109.0` - DW-2a: the new workspace sidebar, behind the per-person pilot switch (2026-10-13) - PROTOTYPED
 
 - **What:** the department workspace sidebar of `docs/plans/2026-10-13-department-workspaces.md` §2.2–2.3, drawn only when the person's pilot switch (`prefs.shell`, DW-1d) is `workspaces`.

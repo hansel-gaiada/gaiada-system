@@ -8,95 +8,30 @@ import { SidebarToggle } from "./SidebarToggle";
 import { NewMenu } from "./NewMenu";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { Eyebrow } from "@/components/ui";
-import { areaFor, resolveArea, sameArea, type Area } from "@/lib/areas";
-import { activeLocation, allRows, overviewHref, workspaceForArea, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
+import { overviewHref, type ShellModel, type ShellWorkspace } from "@/lib/shellModel";
 import type { ConcreteRow } from "@/lib/workspaceAccess";
+import { useWorkspaceShell } from "./WorkspaceShellContext";
 import "./workspace-sidebar.css";
 
 // DW-2a: the department workspace sidebar (plan §2.2), drawn only for people on the pilot switch.
 //
-// The area comes from the URL on the CLIENT (plan §13 trap 2): `areaFor(pathname)`, and for personal,
-// performance and shared pages the last workspace, Company or Admin area the person was in
-// (`resolveArea`). That "last" lives in sessionStorage, so it is per tab and read only after mount; the
-// first render uses none, which is what the server rendered too (no hydration mismatch).
-//
-// Rows arrive already gated and concrete (`lib/shellModel.ts`). This only chooses which set to draw and
-// which row holds the current page. No badges yet: a count arrives with its own ticket, never made up.
-
-const LAST_AREA_KEY = "gaiada.shell.lastArea";
-
-function readLastArea(): Area | null {
-  try {
-    const raw = window.sessionStorage.getItem(LAST_AREA_KEY);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as { kind?: unknown; deptId?: unknown; slug?: unknown } | null;
-    if (v?.kind === "company") return { kind: "company" };
-    if (v?.kind === "admin") return { kind: "admin" };
-    if (v?.kind === "workspace") {
-      return {
-        kind: "workspace",
-        ...(typeof v.deptId === "string" ? { deptId: v.deptId } : {}),
-        ...(typeof v.slug === "string" ? { slug: v.slug } : {}),
-      };
-    }
-  } catch {
-    // Storage blocked, or a hand-edited value: start from home.
-  }
-  return null;
-}
-
-function writeLastArea(area: Area): void {
-  try {
-    window.sessionStorage.setItem(LAST_AREA_KEY, JSON.stringify(area));
-  } catch {
-    // Private mode or blocked storage: the sidebar still works, it just forgets on reload.
-  }
-}
+// Where the person is (area, view, active row) comes from `WorkspaceShellContext` (DW-2b), so the sidebar,
+// the tab strip and the breadcrumbs share one answer. Rows arrive already gated and concrete
+// (`lib/shellModel.ts`). This only draws them. No badges yet: a count arrives with its own ticket, never
+// made up.
 
 export interface SidebarCompany { id: string; name: string; badge?: string | null }
 
-type View =
-  | { kind: "workspace"; ws: ShellWorkspace }
-  | { kind: "company" }
-  | { kind: "admin" };
-
-/** What to draw for an area. A department the model does not list (another company's id kept from
- *  a previous visit, a unit below a department) falls back to home, never to an empty sidebar. */
-function viewFor(model: ShellModel, area: Area): View {
-  if (area.kind === "company") return { kind: "company" };
-  if (area.kind === "admin") return { kind: "admin" };
-  const ws = workspaceForArea(model, area) ?? model.workspaces.find((w) => w.home) ?? null;
-  return ws ? { kind: "workspace", ws } : { kind: "company" };
-}
-
-export function WorkspaceSidebar({ model, company, companies, newItems }: {
-  model: ShellModel;
+export function WorkspaceSidebar({ company, companies, newItems }: {
   company: SidebarCompany | null;
   /** Every company the person may switch to; empty when there is only one. */
   companies: SidebarCompany[];
   newItems: { label: string; href: string }[];
 }) {
-  const pathname = usePathname() ?? "/";
-  const [last, setLast] = useState<Area | null>(null);
-
-  useEffect(() => {
-    setLast(readLastArea());
-  }, []);
-
-  // A workspace, Company or Admin page becomes the new "last" area. Runs after the read above on mount,
-  // so the page's own area wins over the stored one.
-  useEffect(() => {
-    const m = areaFor(pathname);
-    if (m.kind !== "workspace" && m.kind !== "company" && m.kind !== "admin") return;
-    const a = resolveArea(m, null, model.home);
-    writeLastArea(a);
-    setLast((prev) => (prev && sameArea(prev, a) ? prev : a));
-  }, [pathname, model.home]);
-
-  const area = resolveArea(areaFor(pathname), last, model.home);
-  const view = viewFor(model, area);
-  const rows = view.kind === "workspace" ? allRows(view.ws) : view.kind === "company" ? model.company : model.admin;
-  const active = activeLocation(rows, pathname);
+  const shell = useWorkspaceShell();
+  // Only the workspace shell draws this, inside its provider. Outside it there is nothing to draw.
+  if (!shell) return null;
+  const { model, view, rows, active } = shell;
 
   const visiting = view.kind === "workspace" && !view.ws.mine;
   const atHome = view.kind === "workspace" ? view.ws.home : view.kind === "company" && model.home.kind === "company";
@@ -163,7 +98,7 @@ function RowGroup({ label, rows, active }: { label?: string; rows: ConcreteRow[]
   );
 }
 
-/** A row links to its first tab. The tab strip inside a row is DW-2b. */
+/** A row links to its first tab; the shell's tab strip (WorkspaceTabStrip) shows the rest. */
 function RowLink({ row, active }: { row: ConcreteRow; active: boolean }) {
   const { tip, triggerProps } = useRailTooltip(row.label);
   return (

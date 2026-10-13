@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WorkspaceSidebar, type SidebarCompany } from "./WorkspaceSidebar";
+import { WorkspaceShellProvider } from "./WorkspaceShellContext";
 import { buildShellModel } from "@/lib/shellModel";
 import { resolveMyWorkspaces } from "@/lib/workspaceAccess";
 import { agencyTree, me, member } from "@/lib/workspaceFixtures";
@@ -22,7 +23,11 @@ function renderAt(pathname: string, companies: SidebarCompany[] = []) {
   nav.pathname = pathname;
   // A fresh element each time: React skips re-rendering an identical one, and the mocked pathname is
   // read only when the sidebar renders.
-  const ui = () => <WorkspaceSidebar model={model} company={COMPANY} companies={companies} newItems={[{ label: "Task", href: "/tasks/new" }]} />;
+  const ui = () => (
+    <WorkspaceShellProvider model={model}>
+      <WorkspaceSidebar company={COMPANY} companies={companies} newItems={[{ label: "Task", href: "/tasks/new" }]} />
+    </WorkspaceShellProvider>
+  );
   const out = render(ui());
   return { ...out, goTo: (next: string) => { nav.pathname = next; out.rerender(ui()); } };
 }
