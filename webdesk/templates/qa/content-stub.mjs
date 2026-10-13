@@ -7,7 +7,7 @@
 //
 //   node content-stub.mjs <port> <cert.pem> <key.pem> <request-log>
 //
-// Fixture: caseStudy has two items (alpha, beta); article is EMPTY (the empty-collection case); any other collection or slug is a 404.
+// Fixture: caseStudy has three items (alpha, beta, and release.v2: WebDesk's slug grammar admits dots); article is EMPTY (the empty-collection case); any other collection or slug is a 404.
 import { createServer } from "node:https";
 import { readFileSync, appendFileSync } from "node:fs";
 
@@ -16,6 +16,7 @@ const COLLECTIONS = {
   caseStudy: [
     { slug: "alpha", title: "Alpha case study" },
     { slug: "beta", title: "Beta case study" },
+    { slug: "release.v2", title: "Dotted slug case study" },
   ],
   article: [],
 };
@@ -27,7 +28,7 @@ const server = createServer({ cert: readFileSync(certPath), key: readFileSync(ke
   const url = new URL(req.url, "https://localhost");
   appendFileSync(logPath, `${req.method} ${url.pathname}${url.search} auth=${req.headers.authorization ? "yes" : "no"}\n`);
   const send = (status, body) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
-  const m = /^\/v1\/t\/[^/]+\/([A-Za-z0-9_-]+)(?:\/([A-Za-z0-9_-]+))?$/.exec(url.pathname);
+  const m = /^\/v1\/t\/[^/]+\/([A-Za-z0-9_-]+)(?:\/([A-Za-z0-9._-]+))?$/.exec(url.pathname);
   if (req.method !== "GET" || !m || !(m[1] in COLLECTIONS)) return send(404, { error: "not found" });
   const [, collection, slug] = m;
   const items = COLLECTIONS[collection];

@@ -93,7 +93,9 @@ export const dynamicParams = false;
 
 const COLLECTION = ${JSON.stringify(collection)};
 const FALLBACK_TITLE = ${JSON.stringify(page.title)};
-const SAFE_SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+// WebDesk's item slug grammar (webdesk/api content-projection.ts SLUG_PATTERN, which admits dots), widened to case and "_".
+// It cannot spell ".." or "/", so a slug read from the server is always one safe path segment.
+const SAFE_SLUG = /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/;
 
 // Next 15 refuses an EMPTY generateStaticParams() under output: "export" ("is missing generateStaticParams()"), so an empty
 // collection yields this one placeholder param instead. It is not a valid slug, so it is never fetched: it renders the 404.
@@ -165,6 +167,8 @@ export const dynamic = "force-static";
 
 const COLLECTION = ${JSON.stringify(collection)};
 const TITLE = ${JSON.stringify(page.title)};
+// The same slug rule as the item page's generateStaticParams(): only a slug that has a page is linked.
+const SAFE_SLUG = /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/;
 const BASE = ${JSON.stringify(base)};
 
 export const metadata = { title: TITLE };
@@ -179,7 +183,7 @@ export default async function Page() {
   let cursor: string | undefined;
   for (let i = 0; i < 1000; i++) {
     const list = await listItems<ListEnvelope>(COLLECTION, { cursor, limit: 100 });
-    items.push(...list.items);
+    items.push(...list.items.filter((item) => SAFE_SLUG.test(item.slug)));
     if (!list.page?.hasMore || !list.page.cursor) break;
     cursor = list.page.cursor;
   }

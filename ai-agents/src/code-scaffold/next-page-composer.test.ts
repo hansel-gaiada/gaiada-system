@@ -50,6 +50,9 @@ describe("composeNextPages", () => {
       expect(f).not.toContain("Rendered per request");
     }
     expect(files.get("apps/web/src/app/blog/page.tsx")).toContain('export const dynamic = "force-static"');
+    // the listing links only slugs the item page generates (the same rule, which admits WebDesk's dotted slugs)
+    expect(files.get("apps/web/src/app/blog/page.tsx")).toContain("list.items.filter((item) => SAFE_SLUG.test(item.slug))");
+    expect(files.get("apps/web/src/app/blog/page.tsx")).toContain("const SAFE_SLUG = /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/;");
     expect(files.get("apps/web/src/app/blog/[slug]/page.tsx")).toContain("notFound()");
   });
 

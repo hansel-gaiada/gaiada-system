@@ -71,7 +71,7 @@ start_stub() {
 }
 check_export() { # check_export <apps/web dir>: the static export holds the fixture content
   local out="$1/out" f
-  for f in index.html case-studies/index.html case-studies/alpha/index.html case-studies/beta/index.html articles/index.html; do
+  for f in index.html case-studies/index.html case-studies/alpha/index.html case-studies/beta/index.html case-studies/release.v2/index.html articles/index.html; do
     [ -f "$out/$f" ] || { echo "missing out/$f"; return 1; }
   done
   grep -q "Alpha case study" "$out/case-studies/alpha/index.html" || { echo "out/case-studies/alpha/index.html lacks the fixture title"; return 1; }
