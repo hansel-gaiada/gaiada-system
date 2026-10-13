@@ -81,3 +81,19 @@ describe("rankByUrgency", () => {
     expect(ranked.map((r) => r.id)).toEqual(["a-item", "b-item"]);
   });
 });
+
+describe("DW-5g: a client conversation waiting for my reply", () => {
+  it("ranks below approvals/gates and overdue tasks, above due-today tasks and the rest, oldest first", () => {
+    const approval = item({ id: "a", type: "approval", createdAt: iso(1) });
+    const overdue = item({ id: "t1", type: "task", dueDate: due(-1), createdAt: iso(1) });
+    const convOld = item({ id: "c-old", type: "conversation", createdAt: iso(3) });
+    const convNew = item({ id: "c-new", type: "conversation", createdAt: iso(0.5) });
+    const today = item({ id: "t2", type: "task", dueDate: due(0), createdAt: iso(1) });
+    const mention = item({ id: "m", type: "mention", createdAt: iso(40) });
+    const ranked = rankByUrgency([mention, today, convNew, convOld, overdue, approval], NOW);
+    expect(ranked.map((r) => r.id)).toEqual(["a", "t1", "c-old", "c-new", "t2", "m"]);
+  });
+  it("never reads as a due-today or now item (the Today block stays tasks only)", () => {
+    expect(urgencyBand(item({ id: "c", type: "conversation" }), NOW)).toBe("soon");
+  });
+});

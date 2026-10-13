@@ -370,3 +370,46 @@ describe("humanizeToolName", () => {
     expect(humanizeToolName("...")).toBe("...");
   });
 });
+
+describe("getMyWorkQueue: client conversations waiting for my reply (DW-5g)", () => {
+  const companies = [{ id: "co-a", name: "Agency" }];
+  const m = me(companies, [{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
+  const thread = {
+    id: "th-1", clientId: "cl-1", clientName: "Acme", projectId: null, projectName: null, general: true, subject: null,
+    status: "open", createdSide: "client", lastMessageAt: "2026-07-05T10:00:00Z", createdAt: "2026-07-05T09:00:00Z",
+    unreadCount: 1, awaitingReply: true, pendingDrafts: 0,
+  };
+
+  it("asks for open, awaiting, mine threads and maps each to a conversation item that links to the thread", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/co-a/conversation")) { seen.push(u); return new Response(JSON.stringify({ threads: [thread] }), { status: 200 }); }
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(seen).toHaveLength(1);
+    const qs = new URL(seen[0]).searchParams;
+    expect(qs.get("awaitingReply")).toBe("true");
+    expect(qs.get("mine")).toBe("true");
+    expect(qs.get("status")).toBe("open");
+    const item = queue.items.find((i) => i.id === "conversation:co-a:th-1")!;
+    expect(item).toMatchObject({
+      type: "conversation", title: "A client is waiting for your reply", meta: "Acme · General conversation",
+      href: "/clients/cl-1/work/conversation/th-1", createdAt: "2026-07-05T10:00:00Z", companyId: "co-a",
+    });
+    expect(queue.companies[0].partialSources).toBeUndefined();
+  });
+
+  it("a failed conversation read is named in partialSources, never a silent empty", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/co-a/conversation")) return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const queue = await getMyWorkQueue(m, "u1", companies);
+    expect(queue.items.some((i) => i.type === "conversation")).toBe(false);
+    const leg = queue.companies[0];
+    expect(leg.included).toBe(true);
+    expect(leg.partialSources).toContain("conversations");
+  });
+});

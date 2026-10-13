@@ -22,6 +22,9 @@ import {
 import { listWorkActivity, type WorkActivityRow } from "./activity";
 import { listAutomationApprovals, type AutomationApproval } from "./automationApprovals";
 import { listInternalPendingGates, GATE_LABEL, type PipelineGate } from "./pipeline";
+import { listThreads } from "./conversation-data";
+import { threadTitle } from "./conversation";
+import type { StaffThread } from "./conversation";
 import { listNotifications, type NotificationItem } from "./entities";
 import { mergeLegs, type Envelope } from "./envelope";
 import { rankByUrgency, type QueueItem, type QueueItemType } from "./queueUrgency";
@@ -220,6 +223,25 @@ function fromMention(n: NotificationItem, company: { id: string; name: string })
   };
 }
 
+// DW-5g: a client conversation waiting for MY reply (BFF §29b `mine` + `awaitingReply`: I am a staff recipient by
+// the notice rule and the client spoke last). `lastMessageAt` is that client message, since the thread is
+// awaiting precisely because the client's message is the last live one. The context is the hub's own
+// (subject, else the project, else "General conversation").
+function fromConversation(t: StaffThread, company: { id: string; name: string }): QueueItem {
+  return {
+    id: `conversation:${company.id}:${t.id}`,
+    type: "conversation",
+    title: "A client is waiting for your reply",
+    meta: `${t.clientName} · ${threadTitle(t)}`,
+    companyId: company.id,
+    company: company.name,
+    href: `/clients/${t.clientId}/work/conversation/${t.id}`,
+    createdAt: t.lastMessageAt ?? t.createdAt,
+    decidable: true,
+    urgencyScore: 0,
+  };
+}
+
 export interface MyWorkQueueOptions {
   /** Cap on automation-approval + pipeline-gate reads (both tenant-wide
    *  lists); default matches the rail's own convention of pending-only. */
@@ -244,7 +266,7 @@ export async function getMyWorkQueue(
         // AGN-3: every source names itself, so a leg that survives a dead source reports WHICH one it
         // lost instead of quietly returning a shorter queue.
         const lost: string[] = [];
-        const [approvals, automation, gates, tasks, pmTasks, notifications] = await Promise.all([
+        const [approvals, automation, gates, tasks, pmTasks, notifications, conversations] = await Promise.all([
           settle("approvals", getPendingApprovals(userId, [c]), lost),
           settle("automation approvals", listAutomationApprovals(userId, c.id, { status: "pending" }), lost),
           // A refused gate read is a REFUSAL, not an empty gate list, so it is reported as a lost
@@ -260,6 +282,7 @@ export async function getMyWorkQueue(
           settle("my tasks", getMyTasks(userId, c.id), lost),
           settle("PM tasks", listAllPmTasks(userId, c.id, { assignee: "me" }), lost),
           settle("mentions", listNotifications(userId, c.id, true), lost),
+          settle("conversations", listThreads(userId, c.id, { awaitingReply: true, mine: true, status: "open" }), lost),
         ]);
         const rows: QueueItem[] = [
           ...approvals.map((a) => fromApproval(a, decidable)),
@@ -268,6 +291,7 @@ export async function getMyWorkQueue(
           ...tasks.filter((t) => t.status !== "done").map((t) => fromTask(t, c)),
           ...pmTasks.filter((t) => t.status !== "done").map((t) => fromPmTask(t, c)),
           ...notifications.filter(isMentionEligible).map((n) => fromMention(n, c)),
+          ...conversations.map((t) => fromConversation(t, c)),
         ];
         return { company: c, ok: true, rows, partialSources: lost };
       } catch {

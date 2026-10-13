@@ -14,6 +14,7 @@ const TYPE_LABEL: Record<QueueItem["type"], string> = {
   gate: "Gate",
   task: "Task",
   mention: "Mention",
+  conversation: "Conversation",
 };
 
 function when(iso: string): string {

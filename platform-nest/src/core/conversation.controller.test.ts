@@ -524,4 +524,67 @@ describe.skipIf(!TEST_URL)("PV4-03: client Conversation API (portal + staff)", (
     expect(ev.rows.length).toBe(2);
     for (const e of ev.rows) expect(e.payload.clientId).toBe(clientA);
   });
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════════
+  // DW-5g: `mine` = the caller is a staff recipient (the notice rule: staff author, project owner, account manager)
+  // ════════════════════════════════════════════════════════════════════════════════════════════════
+
+  it("DW-5g: mine=true keeps only threads where the caller is a staff recipient; awaitingReply narrows it to 'waiting for MY reply'", async () => {
+    const memberRole = await createRole("member");
+    const staffUser = async (email: string) => {
+      const u = await createUser(email);
+      await addMembership(co, u);
+      await grantRole(u, memberRole, "company", co);
+      return u;
+    };
+    const author = await staffUser("mine-author@agency.test");
+    const owner = await staffUser("mine-owner@agency.test");
+    const manager = await staffUser("mine-manager@agency.test");
+    const stranger = await staffUser("mine-stranger@agency.test");
+
+    const clientM = await createClient(co, "DW5g Client");
+    await adminPool().query(`UPDATE clients SET owner_user_id = $1 WHERE id = $2`, [manager, clientM]);
+    const projectM = await createProject(co, "DW5g Project", owner, clientM);
+    const contactUser = await createUser("mine-contact@client.test");
+    await addContact(co, clientM, contactUser, { capability: "signer" });
+    await grantRole(contactUser, await createRole("client"), "company", co);
+
+    // General thread: opened by the client, answered once by `author`, then the client speaks last.
+    const g = await app.inject({ method: "POST", url: portal(co), headers: asUser(contactUser), payload: { body: "general question" } });
+    expect(g.statusCode).toBe(201);
+    const general = (g.json() as { threadId: string }).threadId;
+    expect((await app.inject({ method: "POST", url: `${staff(co)}/${general}/messages`, headers: asUser(author), payload: { body: "on it" } })).statusCode).toBe(201);
+    expect((await app.inject({ method: "POST", url: `${portal(co)}/${general}/messages`, headers: asUser(contactUser), payload: { body: "thanks, one more thing" } })).statusCode).toBe(201);
+    // Project thread: opened by the client, no staff author at all (only the project owner and the account manager hear it).
+    const pr = await app.inject({ method: "POST", url: portal(co), headers: asUser(contactUser), payload: { projectId: projectM, body: "project question" } });
+    expect(pr.statusCode).toBe(201);
+    const proj = (pr.json() as { threadId: string }).threadId;
+
+    const ids = async (who: string, qs: string) => {
+      const r = await app.inject({ method: "GET", url: `${staff(co)}?clientId=${clientM}${qs}`, headers: asUser(who) });
+      expect(r.statusCode).toBe(200);
+      return (r.json() as { threads: ThreadListRow[] }).threads.map((t) => t.id).sort();
+    };
+    const both = [general, proj].sort();
+
+    expect(await ids(author, "&mine=true")).toEqual([general]);
+    expect(await ids(owner, "&mine=true")).toEqual([proj]);
+    expect(await ids(manager, "&mine=true")).toEqual(both);
+    expect(await ids(stranger, "&mine=true")).toEqual([]);
+    // Not-mine is the complement; `all` and absent are no filter.
+    expect(await ids(stranger, "&mine=false")).toEqual(both);
+    expect(await ids(author, "&mine=false")).toEqual([proj]);
+    expect(await ids(stranger, "&mine=all")).toEqual(both);
+    expect(await ids(stranger, "")).toEqual(both);
+    // Combined with awaitingReply (the client spoke last on both): "client threads waiting for MY reply".
+    expect(await ids(author, "&mine=true&awaitingReply=true")).toEqual([general]);
+    expect(await ids(owner, "&mine=true&awaitingReply=true&status=open")).toEqual([proj]);
+    // Once `author` replies, the general thread is no longer waiting for a reply from them.
+    await app.inject({ method: "POST", url: `${staff(co)}/${general}/messages`, headers: asUser(author), payload: { body: "done" } });
+    expect(await ids(author, "&mine=true&awaitingReply=true")).toEqual([]);
+    expect(await ids(author, "&mine=true")).toEqual([general]);
+    // A bad value is a 400, and a client principal still reaches no staff route (the filter is no authorization).
+    expect((await app.inject({ method: "GET", url: `${staff(co)}?mine=maybe`, headers: asUser(author) })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: `${staff(co)}?mine=true`, headers: asUser(contactUser) })).statusCode).toBe(403);
+  });
 });

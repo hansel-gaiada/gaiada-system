@@ -6,7 +6,7 @@
 // approvals/gates first, then overdue tasks, then due-today items by due
 // time, then everything else by age descending. Tuning the weights below is a
 // one-file change.
-export type QueueItemType = "approval" | "gate" | "task" | "mention";
+export type QueueItemType = "approval" | "gate" | "task" | "mention" | "conversation";
 
 export interface QueueItem {
   id: string;
@@ -41,6 +41,10 @@ export interface QueueItem {
 export const TIER_WEIGHT = {
   approvalOrGate: 30_000,
   overdueTask: 20_000,
+  // DW-5g: a client conversation waiting for MY reply. Below approvals/gates and overdue tasks, above
+  // due-today tasks and the untiered rest. It has no due date, so it is ranked by how long the client has
+  // waited (hours, capped), oldest first; the cap keeps it far inside the gap to the tiers around it.
+  conversationAwaitingReply: 15_000,
   dueToday: 10_000,
   rest: 0,
 } as const;
@@ -51,7 +55,9 @@ const AGE_CAP_DAYS = 60; // in-tier age tie-break cap (tiers 1/3)
 const AGE_WEIGHT_REST = 100; // primary sort key within tier 4 ("age descending")
 const PROXIMITY_CAP_DAYS = 30; // small same-age tie-break nudge within tier 4
 
-const DAY_MS = 24 * 3600 * 1000;
+const HOUR_MS = 3600 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const CONVERSATION_WAIT_CAP_HOURS = 24 * AGE_CAP_DAYS;
 
 function daysUntil(dueDate: string, now: Date): number {
   const due = new Date(dueDate);
@@ -72,6 +78,11 @@ export function computeUrgency(
 ): number {
   if (item.type === "approval" || item.type === "gate") {
     return TIER_WEIGHT.approvalOrGate + Math.min(ageDays(item.createdAt, now), AGE_CAP_DAYS);
+  }
+  if (item.type === "conversation") {
+    const created = new Date(item.createdAt).getTime();
+    const hours = Number.isNaN(created) ? 0 : Math.max(0, Math.floor((now.getTime() - created) / HOUR_MS));
+    return TIER_WEIGHT.conversationAwaitingReply + Math.min(hours, CONVERSATION_WAIT_CAP_HOURS);
   }
   if (item.dueDate) {
     const days = daysUntil(item.dueDate, now);
