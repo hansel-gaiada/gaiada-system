@@ -18,6 +18,7 @@ import "server-only";
 import { platformFetch, PlatformError } from "./platform";
 import type { Invoice } from "./invoice";
 import type { Contract, ContractDetail, InvoicePayment } from "./contracts";
+import type { StaffDocumentItem } from "./documents";
 
 const q = (clientId: string) => `clientId=${encodeURIComponent(clientId)}`;
 
@@ -61,4 +62,11 @@ export async function countContractsToCountersign(userId: string, tenant: string
   } catch {
     return null;
   }
+}
+
+/** PV5-08: this client's legal and money documents, each with the backend's `clientVisible` (BFF §30b). Throws like the
+ *  readers above: a refusal is rendered as a refusal, never as an empty list. */
+export async function listClientDocuments(userId: string, tenant: string, clientId: string): Promise<StaffDocumentItem[]> {
+  const r = await platformFetch<{ items: StaffDocumentItem[] }>(`/api/${tenant}/clients/${encodeURIComponent(clientId)}/documents`, userId);
+  return r.items;
 }

@@ -66,6 +66,8 @@ describe("activePortalNav", () => {
     ["/portal/contracts/k1", "billing", "/portal/contracts"],
     ["/portal/invoices", "billing", "/portal/invoices"],
     ["/portal/invoices/i1", "billing", "/portal/invoices"],
+    // PV5-08: Documents is a Contracts & billing sub-tab.
+    ["/portal/documents", "billing", "/portal/documents"],
     ["/portal/profile", "people", "/portal/profile"],
   ])("%s lights %s / %s", (path, areaKey, tabHref) => {
     expect(activePortalNav(path)).toEqual({ areaKey, tabHref });
@@ -92,12 +94,16 @@ describe("activePortalNav", () => {
   it("keeps the existing client-facing paths and the area layout", () => {
     expect(PORTAL_AREAS.map((a) => a.key)).toEqual(["overview", "projects", "business", "billing", "people"]);
     const all = PORTAL_AREAS.flatMap((a) => a.tabs.map((t) => t.href));
-    expect(all).toHaveLength(13);
-    expect(new Set(all).size).toBe(13);
+    expect(all).toHaveLength(14);
+    expect(new Set(all).size).toBe(14);
     // PV4-08 added exactly one: Conversation, in Projects, after Requests.
     expect(PORTAL_AREAS.find((a) => a.key === "projects")!.tabs.map((t) => t.href)).toEqual([
       "/portal/projects", "/portal/approvals", "/portal/deliverables", "/portal/requests",
       "/portal/conversation", "/portal/social-reviews", "/portal/timeline",
+    ]);
+    // PV5-08 added exactly one: Documents, last tab of Contracts & billing.
+    expect(PORTAL_AREAS.find((a) => a.key === "billing")!.tabs.map((t) => t.href)).toEqual([
+      "/portal/contracts", "/portal/invoices", "/portal/documents",
     ]);
     // WSK-49d added exactly one: Website, second tab of Business (offered only to a website editor, see PortalTabs).
     expect(PORTAL_AREAS.find((a) => a.key === "business")!.tabs.map((t) => t.href)).toEqual(["/portal/company", "/portal/website"]);
