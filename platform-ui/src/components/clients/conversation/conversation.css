@@ -52,7 +52,6 @@
 .cv-msg__who { color: var(--ink-strong); font-weight: 600; font-size: 13px; }
 .cv-msg__body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 14px/1.6 var(--font-body); color: var(--ink-strong); }
 .cv-msg__body a { color: var(--erp-accent); text-decoration: underline; text-underline-offset: 3px; }
-.cv-msg--removed .cv-msg__body { color: var(--ink-muted); font-style: italic; }
 .cv-msg__tools { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
 .cv-msg__prov { color: var(--ink-muted); font: 500 12px var(--font-body); }
 .cv-files { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0; list-style: none; font: 400 12px var(--font-body); }

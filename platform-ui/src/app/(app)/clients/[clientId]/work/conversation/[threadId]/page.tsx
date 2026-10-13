@@ -7,8 +7,8 @@ import { can } from "@/lib/rbac";
 import { readResult } from "@/lib/readResult";
 import { getThreadSnapshot } from "@/lib/conversation-data";
 import {
-  createChangeRequestFromMessageAction, discardDraftAction, editDraftAction, editMessageAction, loadThreadAction,
-  postMessageAction, retractMessageAction, sendDraftAction, setThreadStatusAction,
+  createChangeRequestFromMessageAction, discardDraftAction, editDraftAction, loadThreadAction,
+  postMessageAction, sendDraftAction, setThreadStatusAction,
 } from "@/lib/conversationActions";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ThreadView, type ThreadActions } from "@/components/clients/conversation/ThreadView";
@@ -42,8 +42,6 @@ export default async function ConversationThreadPage({ params }: { params: Promi
     post: postMessageAction,
     setStatus: setThreadStatusAction,
     createChangeRequest: createChangeRequestFromMessageAction,
-    edit: editMessageAction,
-    retract: retractMessageAction,
     send: sendDraftAction.bind(null, clientId),
     discard: discardDraftAction.bind(null, clientId),
     editDraft: editDraftAction,

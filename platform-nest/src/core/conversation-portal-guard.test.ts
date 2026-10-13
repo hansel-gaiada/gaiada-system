@@ -79,17 +79,18 @@ describe("PV4-03 guard — the conversation portal controller (PV-D24, authz sha
 
   it("authorizes only the `portal` kind, `read` for GETs and `converse` for every write", () => {
     const kinds = [...src.matchAll(/authorize\(req\.principal,\s*\{\s*kind:\s*"([a-z_]+)"/g)].map((m) => m[1]);
-    expect(kinds.length).toBeGreaterThanOrEqual(6);
+    // list, start, detail, reply (PV-D34 removed the edit and retract routes)
+    expect(kinds.length).toBeGreaterThanOrEqual(4);
     expect(new Set(kinds)).toEqual(new Set(["portal"]));
     const actions = [...src.matchAll(/kind:\s*"portal",\s*tenantId\s*\},\s*"([a-z_]+)"\)/g)].map((m) => m[1]);
     expect(new Set(actions)).toEqual(new Set(["read", "converse"]));
-    expect(actions.filter((a) => a === "converse").length).toBe(4);
+    expect(actions.filter((a) => a === "converse").length).toBe(2);
   });
 
   it("every thread / message admission goes through conversationThreadInPortalScope", () => {
     const fromConversationTables = (src.match(/FROM conversation_(threads|messages)/g) ?? []).length;
     const predicateUses = (src.match(/conversationThreadInPortalScope\(/g) ?? []).length;
-    // One predicate use per query over the conversation tables (list, detail, owned, message-for-update).
+    // One predicate use per query over the conversation tables (list, detail, owned thread).
     expect(fromConversationTables).toBeGreaterThan(0);
     expect(predicateUses).toBeGreaterThanOrEqual(fromConversationTables);
   });

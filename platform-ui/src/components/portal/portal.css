@@ -568,7 +568,6 @@
 .cp-msg__who { font: 600 13px/1.3 var(--font-body); color: var(--ink-strong); }
 .cp-msg__side { font: 500 11px/1.3 var(--font-body); color: var(--ink-subtle); }
 .cp-msg__time { font: 400 12px/1.3 var(--font-body); color: var(--ink-subtle); }
-.cp-msg__edited { font: 400 12px/1.3 var(--font-body); color: var(--ink-subtle); font-style: italic; }
 .cp-msg__body {
   margin: 0; font: 400 14px/1.55 var(--font-body); color: var(--ink-body);
   white-space: pre-wrap; overflow-wrap: anywhere;
@@ -576,7 +575,6 @@
 /* Links sit on a tinted surface (your own messages are on an accent wash), where the accent colour fails 4.5:1 in the
    light theme (axe, 2026-10-13). Strong ink + underline keeps them recognisable without colour alone. */
 .cp-msg__body a { color: var(--ink-strong); text-decoration: underline; }
-.cp-msg--removed .cp-msg__body { color: var(--ink-subtle); font-style: italic; }
 .cp-msg__files { display: flex; gap: 8px; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; }
 .cp-msg__file {
   font: 500 12px/1.3 var(--font-body); color: var(--erp-accent); text-decoration: none;
@@ -584,8 +582,6 @@
 }
 .cp-msg__file:hover { border-color: var(--line-strong); }
 .cp-msg__file:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
-.cp-msg__actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.cp-msg__hint { font: 400 11px/1.4 var(--font-body); color: var(--ink-subtle); }
 .cp-linkbtn {
   font: 500 12px/1.3 var(--font-body); color: var(--ink-strong); background: none; border: 0;
   padding: 2px 0; cursor: pointer; text-decoration: underline;

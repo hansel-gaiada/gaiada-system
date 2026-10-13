@@ -16,7 +16,7 @@ const err = (status: number, error: string): DemoResult => ({ status, json: { er
 
 interface Msg {
   id: string; threadId: string; authorId: string; authorName: string; authorSide: "client" | "staff";
-  body: string | null; retracted: boolean; edited: boolean; editedAt: string | null; createdAt: string;
+  body: string; createdAt: string;
   draftedBy: string | null; attachments: { id: string; filename: string; contentType: string; byteSize: number }[];
 }
 interface Thread {
@@ -33,7 +33,6 @@ const G = globalThis as unknown as { __demoConv?: { threads: Thread[]; messages:
 
 const minsAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
 const STAFF = { id: "demo-hansel", name: "Clement Hansel" };
-const WINDOW_MS = 15 * 60_000;
 
 function store() {
   if (G.__demoConv) return G.__demoConv;
@@ -42,10 +41,10 @@ function store() {
     { id: "cv-thread-2", clientId: "cl-1", clientName: "Northwind Traders", projectId: null, projectName: null, subject: null, status: "open", createdSide: "staff", createdAt: minsAgo(60 * 24 * 6) },
   ];
   const messages: Msg[] = [
-    { id: "cv-msg-1", threadId: "cv-thread-1", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Hi, can we swap the hero image for the one from last week's shoot? The new one is at https://example.com/hero-v2 and we would also like the headline shortened.", retracted: false, edited: false, editedAt: null, createdAt: minsAgo(60 * 30), draftedBy: null, attachments: [] },
-    { id: "cv-msg-2", threadId: "cv-thread-1", authorId: STAFF.id, authorName: STAFF.name, authorSide: "staff", body: "Thanks Dana. We will take a look and come back to you.", retracted: false, edited: false, editedAt: null, createdAt: minsAgo(60 * 29), draftedBy: null, attachments: [] },
-    { id: "cv-msg-3", threadId: "cv-thread-1", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Any update on the hero image? We would like to publish on Friday.", retracted: false, edited: false, editedAt: null, createdAt: minsAgo(90), draftedBy: null, attachments: [{ id: "cv-file-1", filename: "hero-v2-brief.pdf", contentType: "application/pdf", byteSize: 48_213 }] },
-    { id: "cv-msg-4", threadId: "cv-thread-2", authorId: STAFF.id, authorName: STAFF.name, authorSide: "staff", body: "Welcome to the portal. Use this thread for anything that is not tied to one project.", retracted: false, edited: false, editedAt: null, createdAt: minsAgo(60 * 24 * 6), draftedBy: null, attachments: [] },
+    { id: "cv-msg-1", threadId: "cv-thread-1", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Hi, can we swap the hero image for the one from last week's shoot? The new one is at https://example.com/hero-v2 and we would also like the headline shortened.", createdAt: minsAgo(60 * 30), draftedBy: null, attachments: [] },
+    { id: "cv-msg-2", threadId: "cv-thread-1", authorId: STAFF.id, authorName: STAFF.name, authorSide: "staff", body: "Thanks Dana. We will take a look and come back to you.", createdAt: minsAgo(60 * 29), draftedBy: null, attachments: [] },
+    { id: "cv-msg-3", threadId: "cv-thread-1", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Any update on the hero image? We would like to publish on Friday.", createdAt: minsAgo(90), draftedBy: null, attachments: [{ id: "cv-file-1", filename: "hero-v2-brief.pdf", contentType: "application/pdf", byteSize: 48_213 }] },
+    { id: "cv-msg-4", threadId: "cv-thread-2", authorId: STAFF.id, authorName: STAFF.name, authorSide: "staff", body: "Welcome to the portal. Use this thread for anything that is not tied to one project.", createdAt: minsAgo(60 * 24 * 6), draftedBy: null, attachments: [] },
   ];
   const drafts: Draft[] = [
     { id: "cv-draft-1", threadId: "cv-thread-1", body: "Hi Dana, the new hero image is in and the headline is shortened. A preview is ready for your review, and we can publish on Friday as planned.", draftedBy: "agent-atlas", draftedByName: "Atlas", status: "pending", decidedBy: null, decidedAt: null, sentMessageId: null, createdAt: minsAgo(20) },
@@ -61,26 +60,21 @@ function lastAt(t: Thread): string {
 }
 function awaiting(t: Thread): boolean {
   if (t.status !== "open") return false;
-  const live = store().messages.filter((m) => m.threadId === t.id && !m.retracted);
+  const live = store().messages.filter((m) => m.threadId === t.id);
   return live.length > 0 && live[live.length - 1].authorSide === "client";
 }
 function threadRow(t: Thread) {
   const s = store();
   return {
     ...t, general: t.projectId === null, lastMessageAt: lastAt(t), updatedAt: lastAt(t), createdBy: STAFF.id,
-    unreadCount: awaiting(t) ? s.messages.filter((m) => m.threadId === t.id && m.authorSide === "client" && !m.retracted).length : 0,
+    unreadCount: awaiting(t) ? s.messages.filter((m) => m.threadId === t.id && m.authorSide === "client").length : 0,
     awaitingReply: awaiting(t), pendingDrafts: s.drafts.filter((d) => d.threadId === t.id && d.status === "pending").length,
     clientVisible: true,
   };
 }
 function msgRow(m: Msg, userId: string) {
-  const mine = m.authorSide === "staff" && m.authorId === userId;
-  const age = Date.now() - Date.parse(m.createdAt);
-  return {
-    ...m, mine, clientVisible: true,
-    editableUntil: mine && !m.retracted && age < WINDOW_MS ? new Date(Date.parse(m.createdAt) + WINDOW_MS).toISOString() : null,
-    body: m.retracted ? null : m.body, attachments: m.retracted ? [] : m.attachments,
-  };
+  // Messages are permanent (PV-D34): no edited / retracted / editableUntil on the wire.
+  return { ...m, mine: m.authorSide === "staff" && m.authorId === userId, clientVisible: true };
 }
 const draftRow = (d: Draft) => ({ ...d, clientVisible: false });
 
@@ -88,7 +82,7 @@ const draftRow = (d: Draft) => ({ ...d, clientVisible: false });
 export function demoConversationNeedsUs(clientId: string): { count: number; items: { kind: "conversation"; id: string; label: string; context: string; href: string; since: string | null; clientVisible: boolean }[] } {
   const s = store();
   const items = s.threads.filter((t) => t.clientId === clientId && awaiting(t)).map((t) => {
-    const lastClient = [...s.messages].reverse().find((m) => m.threadId === t.id && m.authorSide === "client" && !m.retracted);
+    const lastClient = [...s.messages].reverse().find((m) => m.threadId === t.id && m.authorSide === "client");
     return {
       kind: "conversation" as const, id: t.id, label: "A client message is waiting for our reply",
       context: t.subject ?? t.projectName ?? "General conversation",
@@ -169,20 +163,14 @@ export function conversationDemo(method: string, p: string, params: URLSearchPar
         t = { id: nid("cv-thread"), clientId, clientName: "Northwind Traders", projectId, projectName: projectId ? "Client site redesign" : null, subject: b.subject ? String(b.subject) : null, status: "open", createdSide: "staff", createdAt: new Date().toISOString() };
         s.threads.push(t);
       }
-      const msg: Msg = { id: nid("cv-msg"), threadId: t.id, authorId: userId, authorName: STAFF.name, authorSide: "staff", body: text, retracted: false, edited: false, editedAt: null, createdAt: new Date().toISOString(), draftedBy: null, attachments: [] };
+      const msg: Msg = { id: nid("cv-msg"), threadId: t.id, authorId: userId, authorName: STAFF.name, authorSide: "staff", body: text, createdAt: new Date().toISOString(), draftedBy: null, attachments: [] };
       s.messages.push(msg);
       return ok({ threadId: t.id, messageId: msg.id, created, attachmentIds: [] }, 201);
     }
   }
 
-  if ((hit = p.match(/^\/api\/[^/]+\/conversation\/messages\/([^/]+)$/))) {
-    const msg = s.messages.find((x) => x.id === hit![1]);
-    if (!msg) return err(404, "message not found");
-    if (msg.authorSide !== "staff" || msg.authorId !== userId) return err(403, "you can only change your own messages");
-    if (msg.retracted || Date.now() - Date.parse(msg.createdAt) >= WINDOW_MS) return err(409, "the 15 minute edit window has passed");
-    if (m === "PATCH") { msg.body = String(json().body ?? ""); msg.edited = true; msg.editedAt = new Date().toISOString(); return ok({ id: msg.id, edited: true, editedAt: msg.editedAt }); }
-    if (m === "DELETE") { msg.retracted = true; return ok({ id: msg.id, retracted: true, retractedAt: new Date().toISOString() }); }
-  }
+  // PV-D34: no edit and no retract route; the BFF answers 404 (no such route), so the demo does too.
+  if (/^\/api\/[^/]+\/conversation\/messages\/[^/]+$/.test(p) && (m === "PATCH" || m === "DELETE")) return err(404, "no such route");
 
   if ((hit = p.match(/^\/api\/[^/]+\/conversation\/drafts\/([^/]+)(?:\/(send|discard))?$/))) {
     const d = s.drafts.find((x) => x.id === hit![1]);
@@ -199,7 +187,7 @@ export function conversationDemo(method: string, p: string, params: URLSearchPar
       if (d.status !== "pending") return err(409, "this draft was already decided");
       const t = s.threads.find((x) => x.id === d.threadId)!;
       if (t.status === "closed") return err(409, "this conversation is closed");
-      const msg: Msg = { id: nid("cv-msg"), threadId: t.id, authorId: userId, authorName: STAFF.name, authorSide: "staff", body: d.body, retracted: false, edited: false, editedAt: null, createdAt: new Date().toISOString(), draftedBy: d.draftedBy, attachments: [] };
+      const msg: Msg = { id: nid("cv-msg"), threadId: t.id, authorId: userId, authorName: STAFF.name, authorSide: "staff", body: d.body, createdAt: new Date().toISOString(), draftedBy: d.draftedBy, attachments: [] };
       s.messages.push(msg);
       d.status = "sent"; d.sentMessageId = msg.id; d.decidedBy = userId; d.decidedAt = msg.createdAt;
       return ok({ id: msg.id, threadId: t.id, draftId: d.id, draftedBy: d.draftedBy, createdAt: msg.createdAt, clientVisible: true }, 201);
@@ -217,7 +205,7 @@ export function conversationDemo(method: string, p: string, params: URLSearchPar
     if (t.status === "closed") return err(409, "this conversation is closed");
     const text = String(json().body ?? "");
     if (!text.trim() || text.length > 10_000) return err(400, "body must be 1..10000 characters");
-    const msg: Msg = { id: nid("cv-msg"), threadId: t.id, authorId: userId, authorName: STAFF.name, authorSide: "staff", body: text, retracted: false, edited: false, editedAt: null, createdAt: new Date().toISOString(), draftedBy: null, attachments: [] };
+    const msg: Msg = { id: nid("cv-msg"), threadId: t.id, authorId: userId, authorName: STAFF.name, authorSide: "staff", body: text, createdAt: new Date().toISOString(), draftedBy: null, attachments: [] };
     s.messages.push(msg);
     return ok({ id: msg.id, threadId: t.id, createdAt: msg.createdAt, attachmentIds: [], clientVisible: true }, 201);
   }

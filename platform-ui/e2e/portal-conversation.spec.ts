@@ -10,8 +10,8 @@ import { test, expect, type Page } from "@playwright/test";
 // stub. Identity: viewer@northwind.example (Vera Viewer: a client contact WITHOUT a signing or editor grant). A viewer opens
 // threads and replies (PV-D24), so everything below is done as one.
 //
-// What the stub can and cannot express (see its header): a staff reply is injected with `/__stub/staff-reply`; edit and retract
-// are not stubbed (the demo-mode spec e2e/portal.spec.ts covers them). The refresh after the staff reply is nudged with the
+// What the stub can and cannot express (see its header): a staff reply is injected with `/__stub/staff-reply`. Messages are permanent
+// (PV-D34), so there is no edit or retract to stub. The refresh after the staff reply is nudged with the
 // `visibilitychange` event PortalLive already listens for (a tab coming back to the foreground): the live stream and the 30 s
 // poll are PortalLive's own, and waiting 30 s in a spec would only test the clock.
 

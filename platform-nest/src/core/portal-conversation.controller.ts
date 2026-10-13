@@ -1,5 +1,5 @@
 // PV4-03 — the client portal's Conversation surface: threads per project plus one client-wide thread
-// per client (PV-D22), replies with inline attachments, and a 15-minute edit/retract of one's own words.
+// per client (PV-D22), replies with inline attachments. Messages are permanent (PV-D34): there is no edit and no retract.
 // Plan: docs/plans/2026-10-12-pv4-conversation-tickets.md (PV4-03; findings 6, 9, 10; decisions 3, 4, 7).
 // BFF contract: docs/FRONTEND-BFF-CONTRACT.md §29.
 //
@@ -26,8 +26,8 @@
 // carrying `authorId`, `authorSide`, `clientId` (beyond choosing among the caller's OWN clients), `status`
 // or `tenantId` is simply never read for those columns.
 import {
-  BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param,
-  Patch, Post, Query, Req, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param,
+  Post, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -38,7 +38,7 @@ import { AuthGuard } from "../auth/guards";
 import { resolvePortalScope, type PortalScope } from "./portal-scope";
 import { conversationThreadInPortalScope, projectInPortalScope } from "./portal-visibility";
 import {
-  WITHIN_EDIT_WINDOW_SQL, applyEdit, applyRetract, assertEditable, createProjectThread, findOrCreateGeneralThread,
+  createProjectThread, findOrCreateGeneralThread,
   insertMessage, isUuid, markRead, prepareAttachments, readMessages, unreadCountSql, validateBody, validateSubject,
 } from "./conversation-core";
 import { notifyClientPosted } from "./conversation-notify";
@@ -201,48 +201,6 @@ export class PortalConversationController {
     return out;
   }
 
-  /** Edit one's own message within 15 minutes (PV4-Q2). Not one's own, or out of scope: 404 (no
-   *  existence oracle on the portal). Past the window or retracted: 409. */
-  @Patch(":tenantId/portal/conversation/messages/:messageId")
-  async edit(
-    @Req() req: FastifyRequest,
-    @Param("tenantId") tenantId: string,
-    @Param("messageId") messageId: string,
-    @Body() body: { body?: unknown },
-  ) {
-    const b = body ?? {};
-    await authorize(req.principal, { kind: "portal", tenantId }, "converse");
-    const text = validateBody(b.body);
-    return withTenants([tenantId], async (c) => {
-      const scope = await resolvePortalScope(c, req.principal);
-      const m = await this.ownMessageForUpdate(c, scope, messageId, req.principal.userId as string);
-      assertEditable(m);
-      const r = await applyEdit(c, messageId, text);
-      await emitEvent(c, tenantId, "conversation", messageId, "conversation.message.edited", {
-        clientId: m.client_id, projectId: m.project_id, threadId: m.thread_id, messageId, change: "edited", via: "portal",
-      });
-      return { id: messageId, edited: true, editedAt: r.editedAt };
-    });
-  }
-
-  /** Retract one's own message within 15 minutes. Both sides then see "Message removed": the read
-   *  endpoints return `body: null, retracted: true` and no attachments, and the portal download route
-   *  refuses the message's files. */
-  @Delete(":tenantId/portal/conversation/messages/:messageId")
-  async retract(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("messageId") messageId: string) {
-    await authorize(req.principal, { kind: "portal", tenantId }, "converse");
-    return withTenants([tenantId], async (c) => {
-      const scope = await resolvePortalScope(c, req.principal);
-      const m = await this.ownMessageForUpdate(c, scope, messageId, req.principal.userId as string);
-      assertEditable(m);
-      const r = await applyRetract(c, messageId);
-      await emitEvent(c, tenantId, "conversation", messageId, "conversation.message.edited", {
-        clientId: m.client_id, projectId: m.project_id, threadId: m.thread_id, messageId, change: "retracted", via: "portal",
-      });
-      return { id: messageId, retracted: true, retractedAt: r.retractedAt };
-    });
-  }
-
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
   // Ownership — every helper applies the thread predicate; none takes an id on trust
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -280,27 +238,6 @@ export class PortalConversationController {
       [threadId, scope.clientIds, scope.projectIds],
     );
     if (!r.rows[0]) throw new NotFoundException("conversation not found");
-    return r.rows[0];
-  }
-
-  /** The caller's OWN client-side message, on a thread in their scope, locked for the edit/retract.
-   *  Someone else's message (a colleague's or staff's) answers 404 exactly like a message in another
-   *  client's thread: the portal never confirms that a message id exists. */
-  private async ownMessageForUpdate(c: PoolClient, scope: PortalScope, messageId: string, userId: string) {
-    if (!isUuid(messageId)) throw new NotFoundException("message not found");
-    const r = await c.query<{
-      id: string; thread_id: string; client_id: string; project_id: string | null;
-      retracted_at: string | null; within_window: boolean;
-    }>(
-      `SELECT m.id, m.thread_id, t.client_id, t.project_id, m.retracted_at, ${WITHIN_EDIT_WINDOW_SQL} AS within_window
-         FROM conversation_messages m
-         JOIN conversation_threads t ON t.id = m.thread_id
-        WHERE m.id = $1 AND ${conversationThreadInPortalScope("t", { clients: 2, projects: 3 })}
-          AND m.author_id = $4 AND m.author_side = 'client'
-        FOR UPDATE OF m`,
-      [messageId, scope.clientIds, scope.projectIds, userId],
-    );
-    if (!r.rows[0]) throw new NotFoundException("message not found");
     return r.rows[0];
   }
 }

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   attachmentProblem, CONVERSATION_BODY_MAX, CONVERSATION_COUNTER_FROM, CONVERSATION_MAX_BYTES,
-  CONVERSATION_MAX_FILES, CONVERSATION_PRICE_HINT, formatBytes,
+  CONVERSATION_MAX_FILES, CONVERSATION_PERMANENT_HINT, CONVERSATION_PRICE_HINT, formatBytes,
 } from "@/lib/portal";
 
 // PV4-08 — the message box shared by "Start a conversation" and the thread's reply form. It renders INSIDE a
@@ -78,9 +78,10 @@ export function PortalComposerFields({
           id={`${idPrefix}-body`} ref={area} className="cp-textarea" name="body" rows={4}
           value={body} onChange={(e) => setBody(e.target.value)} disabled={pending}
           aria-invalid={over > 0 || errorField === "body" ? true : undefined}
-          aria-describedby={`${idPrefix}-hint${showCount ? ` ${idPrefix}-count` : ""}`}
+          aria-describedby={`${idPrefix}-hint ${idPrefix}-permanent${showCount ? ` ${idPrefix}-count` : ""}`}
         />
         <span className="cp-field__hint" id={`${idPrefix}-hint`}>{CONVERSATION_PRICE_HINT}</span>
+        <span className="cp-field__hint" id={`${idPrefix}-permanent`}>{CONVERSATION_PERMANENT_HINT}</span>
         {showCount && (
           <span
             id={`${idPrefix}-count`} role="status"

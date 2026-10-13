@@ -65,16 +65,17 @@ resourcePolicy:
     #                    cannot express (it sees no rows, and this is a per-CLIENT capability check,
     #                    not a per-CALLER one). Every other active contact gets `read` only — the
     #                    profile renders read-only for them, never a 403 surprise.
-    #   converse       — PV4-02 (PV-4 conversation, owner ruling PV-D24, 2026-10-12): open a thread, post, edit or
-    #                    retract ONE'S OWN message in the client/staff conversation (the portal side of the
-    #                    `conversation` kind, resource_conversation.yaml, which the `client` derived role is
-    #                    deliberately absent from). Narrow-named for the same reason as `request_change`.
+    #   converse       — PV4-02 (PV-4 conversation, owner ruling PV-D24, 2026-10-12): open a thread and post in
+    #                    the client/staff conversation (the portal side of the `conversation` kind,
+    #                    resource_conversation.yaml, which the `client` derived role is deliberately absent from).
+    #                    PV-D34 (2026-10-13): messages are permanent, so the edit/retract of one's own message that
+    #                    this action once covered no longer exist; the action itself is unchanged. Narrow-named for the same reason as `request_change`.
     #                    Deliberately available to EVERY active contact regardless of `capability`, on the
     #                    ratified reasoning of `request_change`/`approve_post`: viewers post, because posting is
     #                    not signing ("paying is not signing", and asking a question is weaker than recording a
     #                    payment). Do NOT condition this action on a signer-only derived role or attribute — that
     #                    would silently re-tighten the owner's ruling. Row-level reach (which client, which
-    #                    project, whose message may be edited) is portal-scope.ts + portal-visibility.ts, never
+    #                    project) is portal-scope.ts + portal-visibility.ts, never
     #                    this policy; the capability is not a Cerbos attribute and no rule here reads it.
     - actions: ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile", "converse"]
       effect: EFFECT_ALLOW

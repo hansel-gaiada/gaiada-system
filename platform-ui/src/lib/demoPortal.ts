@@ -353,12 +353,12 @@ const WEBDEV_CRS: DemoChangeRequest[] = ((globalThis as Record<symbol, unknown>)
 // ── PV4-08: conversation + shared meeting notes (BFF contract §29a, §29c) ──────────────────────────
 //
 // Same globalThis pinning as the change-request store above (the server-action graph and the page graph are bundled
-// separately). The demo client identities are client-wide, so `canUseGeneral` is true. The 15-minute edit window
-// is computed from `createdAt` as the BFF does (`editableUntil` only for the caller's OWN live message).
+// separately). The demo client identities are client-wide, so `canUseGeneral` is true. Messages are permanent (PV-D34):
+// there is no edit and no retract, so the demo store has no `PATCH`/`DELETE` on a message (they answer 404, as the BFF does).
 // Nothing here reproduces the staff side: a staff reply is not drivable in demo mode (the stub BFF's spec injects one).
 interface DemoMessage {
   id: string; threadId: string; authorId: string; authorName: string; authorSide: "client" | "staff";
-  body: string | null; retracted: boolean; edited: boolean; editedAt: string | null; createdAt: string;
+  body: string; createdAt: string;
   attachments: Array<{ id: string; filename: string; contentType: string; byteSize: number }>;
 }
 interface DemoThread {
@@ -376,12 +376,12 @@ const CONV = ((globalThis as Record<symbol, unknown>)[CONV_STORE_KEY] ??= {
     { id: "th-brand", projectId: "proj-nw-brand", subject: "Logo options", status: "closed", createdSide: "staff", createdAt: stamp(-9), unread: 0 },
   ] as DemoThread[],
   messages: [
-    { id: "msg-g1", threadId: "th-general", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Welcome to your portal. Ask us anything here; we reply within a working day.", retracted: false, edited: false, editedAt: null, createdAt: stamp(-12), attachments: [] },
-    { id: "msg-g2", threadId: "th-general", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Thanks Made. Where do I find the invoices? See https://example.com/help.", retracted: false, edited: true, editedAt: stamp(-11), createdAt: stamp(-11.5), attachments: [] },
-    { id: "msg-s1", threadId: "th-site", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Can we change the homepage headline before Friday?", retracted: false, edited: false, editedAt: null, createdAt: stamp(-5), attachments: [{ id: "file-msg-s1", filename: "headline-options.pdf", contentType: "application/pdf", byteSize: 48_213 }] },
-    { id: "msg-s2", threadId: "th-site", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Yes. Send us the wording and we will have it live by Thursday.", retracted: false, edited: false, editedAt: null, createdAt: stamp(-4), attachments: [] },
-    { id: "msg-b1", threadId: "th-brand", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Three logo directions attached for review.", retracted: false, edited: false, editedAt: null, createdAt: stamp(-9), attachments: [] },
-    { id: "msg-b2", threadId: "th-brand", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: null, retracted: true, edited: false, editedAt: null, createdAt: stamp(-8), attachments: [] },
+    { id: "msg-g1", threadId: "th-general", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Welcome to your portal. Ask us anything here; we reply within a working day.", createdAt: stamp(-12), attachments: [] },
+    { id: "msg-g2", threadId: "th-general", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Thanks Made. Where do I find the invoices? See https://example.com/help.", createdAt: stamp(-11.5), attachments: [] },
+    { id: "msg-s1", threadId: "th-site", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Can we change the homepage headline before Friday?", createdAt: stamp(-5), attachments: [{ id: "file-msg-s1", filename: "headline-options.pdf", contentType: "application/pdf", byteSize: 48_213 }] },
+    { id: "msg-s2", threadId: "th-site", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Yes. Send us the wording and we will have it live by Thursday.", createdAt: stamp(-4), attachments: [] },
+    { id: "msg-b1", threadId: "th-brand", authorId: "demo-staff-made", authorName: "Made Prabowo", authorSide: "staff", body: "Three logo directions attached for review.", createdAt: stamp(-9), attachments: [] },
+    { id: "msg-b2", threadId: "th-brand", authorId: "demo-client", authorName: "Dana Whitfield", authorSide: "client", body: "Option two, please. Thank you.", createdAt: stamp(-8), attachments: [] },
   ] as DemoMessage[],
   minutes: [
     { id: "min-kickoff", projectId: "proj-nw-site", title: "Website relaunch kickoff", meetingDate: stamp(-30), sharedAt: stamp(-29), sharedBy: "Made Prabowo",
@@ -391,15 +391,11 @@ const CONV = ((globalThis as Record<symbol, unknown>)[CONV_STORE_KEY] ??= {
   ] as DemoMinutes[],
 }) as { threads: DemoThread[]; messages: DemoMessage[]; minutes: DemoMinutes[] };
 
-const EDIT_WINDOW_MS = 15 * 60 * 1000;
 function convMessageView(m: DemoMessage, userId: string) {
-  const mine = m.authorId === userId && m.authorSide === "client";
-  const until = new Date(m.createdAt).getTime() + EDIT_WINDOW_MS;
   return {
     id: m.id, threadId: m.threadId, authorId: m.authorId, authorName: m.authorName, authorSide: m.authorSide,
-    body: m.retracted ? null : m.body, retracted: m.retracted, edited: m.edited, editedAt: m.editedAt, createdAt: m.createdAt,
-    editableUntil: mine && !m.retracted && until > Date.now() ? new Date(until).toISOString() : null,
-    mine, attachments: m.retracted ? [] : m.attachments,
+    body: m.body, createdAt: m.createdAt,
+    mine: m.authorId === userId && m.authorSide === "client", attachments: m.attachments,
   };
 }
 function convThreadView(t: DemoThread, withUnread: boolean) {
@@ -863,27 +859,12 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       }
       if (thread.status === "closed") return { status: 409, json: { error: "thread is closed" } };
       const id = nextId("msg");
-      CONV.messages.push({ id, threadId: thread.id, authorId: userId, authorName: profileName, authorSide: "client", body: checked.body, retracted: false, edited: false, editedAt: null, createdAt: new Date().toISOString(), attachments: checked.files });
+      CONV.messages.push({ id, threadId: thread.id, authorId: userId, authorName: profileName, authorSide: "client", body: checked.body, createdAt: new Date().toISOString(), attachments: checked.files });
       return created({ threadId: thread.id, messageId: id, created: createdNew, attachmentIds: checked.files.map((f) => f.id) });
     }
   }
-  const msgM = seg.match(/^conversation\/messages\/([^/]+)$/);
-  if (msgM && (m === "PATCH" || m === "DELETE")) {
-    const msg = CONV.messages.find((x) => x.id === msgM[1]);
-    // Someone else's message, or one that is not a client message: 404 on the portal, never 403.
-    if (!msg || msg.authorSide !== "client" || msg.authorId !== userId) return notFound("message not found");
-    if (msg.retracted || new Date(msg.createdAt).getTime() + EDIT_WINDOW_MS <= Date.now()) {
-      return { status: 409, json: { error: "this message can no longer be changed (15 minutes)" } };
-    }
-    if (m === "DELETE") {
-      msg.retracted = true; msg.body = null; msg.attachments = [];
-      return ok({ id: msg.id, retracted: true, retractedAt: new Date().toISOString() });
-    }
-    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
-    if (!body || body.length > 10_000) return bad("body must be 1 to 10,000 characters", "body");
-    msg.body = body; msg.edited = true; msg.editedAt = new Date().toISOString();
-    return ok({ id: msg.id, edited: true, editedAt: msg.editedAt });
-  }
+  // PV-D34: there is no edit and no retract route; the BFF answers 404 (no such route), so the demo does too.
+  if (/^conversation\/messages\//.test(seg) && (m === "PATCH" || m === "DELETE")) return notFound("no such route");
   const thrM = seg.match(/^conversation\/([^/?]+)(\/messages)?$/);
   if (thrM) {
     const thread = CONV.threads.find((t) => t.id === thrM[1]);
@@ -901,7 +882,7 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       if ("error" in checked) return bad(checked.error, checked.field);
       const id = nextId("msg");
       const at = new Date().toISOString();
-      CONV.messages.push({ id, threadId: thread.id, authorId: userId, authorName: profileName, authorSide: "client", body: checked.body, retracted: false, edited: false, editedAt: null, createdAt: at, attachments: checked.files });
+      CONV.messages.push({ id, threadId: thread.id, authorId: userId, authorName: profileName, authorSide: "client", body: checked.body, createdAt: at, attachments: checked.files });
       return created({ id, threadId: thread.id, createdAt: at, attachmentIds: checked.files.map((f) => f.id) });
     }
   }

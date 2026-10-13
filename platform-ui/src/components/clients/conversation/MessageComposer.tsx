@@ -1,7 +1,7 @@
 "use client";
 import { forwardRef, useId, useImperativeHandle, useRef, useState } from "react";
 import {
-  COMPOSER_HINT, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_BODY_CHARS,
+  COMPOSER_HINT, COMPOSER_PERMANENT_HINT, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_BODY_CHARS,
   attachmentsError, bodyError, formatBytes, type AttachmentInput,
 } from "@/lib/conversation";
 import "./conversation.css";
@@ -95,7 +95,7 @@ export const MessageComposer = forwardRef<ComposerHandle, {
       </div>
       <div className="cv-row">
         <p id={`${id}-hint`} className="cv-help">
-          Plain text. {showHint ? COMPOSER_HINT : null}
+          Plain text. {showHint ? COMPOSER_HINT : null}{showHint ? <>{" "}<span>{COMPOSER_PERMANENT_HINT}</span></> : null}
         </p>
         <span className={`cv-count${over ? " cv-count--over" : ""}`} aria-live="off">
           {body.length.toLocaleString("en-GB")} / {MAX_BODY_CHARS.toLocaleString("en-GB")}

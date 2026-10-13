@@ -653,7 +653,7 @@ export class PortalCommerceController {
                            AND ${invoiceInPortalScope("i", { clients: 2 })}`,
       // PV4-03: a message attachment, reached THROUGH its thread. The thread predicate carries both
       // halves of layer 3 (the caller's clients AND, for a project-scoped contact, their projects with NO
-      // client-wide-thread admission, PV4-Q1). A retracted message's files are withdrawn with it.
+      // client-wide-thread admission, PV4-Q1). A message retracted under the retired 15-minute window (PV-D34) keeps its files withdrawn.
       conversation: `SELECT 1 FROM conversation_messages m JOIN conversation_threads t ON t.id = m.thread_id
                       WHERE m.id = $1 AND ${conversationAttachmentClientVisible("m")}
                         AND ${conversationThreadInPortalScope("t", { clients: 2, projects: 3 })}`,

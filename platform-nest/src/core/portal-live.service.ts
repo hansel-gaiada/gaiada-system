@@ -41,7 +41,7 @@ export type PortalTopic =
   | "contracts"
   | "profile"      // contact added/revoked, capability changed
   | "requests"     // MI-02/MI-03: a webdev change request submitted/triaged/converted
-  | "conversation"; // PV4-03: a conversation thread opened/updated, a message posted/edited/retracted
+  | "conversation"; // PV4-03: a conversation thread opened/updated, a message posted
 
 /** event_type -> topic. An event type absent from this map produces NO frame: the portal's realtime
  *  surface is an allowlist, same principle as the timeline query (see portal-workspace.controller.ts).
@@ -79,7 +79,6 @@ const TOPIC_BY_EVENT: Record<string, PortalTopic> = {
   "conversation.thread.opened": "conversation",
   "conversation.thread.updated": "conversation",
   "conversation.message.posted": "conversation",
-  "conversation.message.edited": "conversation",
   // PV4-05: a staff member shared a meeting's minutes. Entity type `meeting_minutes`; the producer puts the MEETING's
   // `clientId` in the payload so the frame is narrowed to that client's connections. Rides the existing `projects` topic
   // (the portal's meetings list refetches with it), so no new topic and no change to the UI's hand-copied union.

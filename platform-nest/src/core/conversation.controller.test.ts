@@ -51,7 +51,7 @@ const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
 
 interface ThreadListRow { id: string; unreadCount: number; awaitingReply?: boolean; general: boolean; clientVisible?: boolean }
 interface MessageRow {
-  id: string; body: string | null; retracted: boolean; edited: boolean; authorId: string; authorSide: string;
+  id: string; body: string; authorId: string; authorSide: string;
   attachments: Array<{ id: string }>; clientVisible?: boolean; draftedBy?: string | null; mine: boolean;
 }
 
@@ -267,6 +267,7 @@ describe.skipIf(!TEST_URL)("PV4-03: client Conversation API (portal + staff)", (
     }
     const aMsg = await adminPool().query(`SELECT id FROM conversation_messages WHERE thread_id = $1 AND author_id = $2 LIMIT 1`, [generalA, wideA]);
     const msgId = aMsg.rows[0].id as string;
+    // PV-D34: there is no edit/retract route at all, so another client's contact gets the same 404 as anyone.
     expect((await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${msgId}`, headers: asUser(wideB), payload: { body: "hijack" } })).statusCode).toBe(404);
     expect((await app.inject({ method: "DELETE", url: `${portal(co)}/messages/${msgId}`, headers: asUser(wideB) })).statusCode).toBe(404);
     // Nothing changed.
@@ -335,53 +336,67 @@ describe.skipIf(!TEST_URL)("PV4-03: client Conversation API (portal + staff)", (
   });
 
   // ════════════════════════════════════════════════════════════════════════════════════════════════
-  // Edit / retract (15-minute window, own messages only)
+  // PV-D34: messages are permanent. The edit/retract routes are GONE (404, not 403), on both surfaces.
   // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-  it("the author edits within the window; a colleague's or a staff message is 404 on the portal", async () => {
+  const unchanged = async (id: string, body: string) => {
+    const row = await adminPool().query(`SELECT body, edited_at, retracted_at FROM conversation_messages WHERE id = $1`, [id]);
+    expect(row.rows).toHaveLength(1);
+    expect(row.rows[0]).toMatchObject({ body, edited_at: null, retracted_at: null });
+  };
+
+  it("PORTAL: PATCH and DELETE on a message answer 404 for its author, a colleague and for staff's message, and nothing changes", async () => {
     const mine = await adminPool().query(`SELECT id FROM conversation_messages WHERE thread_id = $1 AND author_id = $2 AND body = 'Colleague here'`, [generalA, wideA2]);
     const id = mine.rows[0].id as string;
-    const ok = await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${id}`, headers: asUser(wideA2), payload: { body: "Colleague here (edited)" } });
-    expect(ok.statusCode).toBe(200);
-    const row = await adminPool().query(`SELECT body, edited_at FROM conversation_messages WHERE id = $1`, [id]);
-    expect(row.rows[0].body).toBe("Colleague here (edited)");
-    expect(row.rows[0].edited_at).not.toBeNull();
-
-    // wideA (same client, same thread) editing a COLLEAGUE's message: 404, not 403.
-    expect((await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${id}`, headers: asUser(wideA), payload: { body: "nope" } })).statusCode).toBe(404);
-    const staffMsg = await adminPool().query(`SELECT id FROM conversation_messages WHERE thread_id = $1 AND author_side = 'staff' LIMIT 1`, [threadP2]);
-    expect((await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${staffMsg.rows[0].id}`, headers: asUser(wideA), payload: { body: "nope" } })).statusCode).toBe(404);
+    for (const who of [wideA2, wideA]) {
+      expect((await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${id}`, headers: asUser(who), payload: { body: "edited" } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "DELETE", url: `${portal(co)}/messages/${id}`, headers: asUser(who) })).statusCode).toBe(404);
+    }
+    await unchanged(id, "Colleague here");
+    const staffMsg = await adminPool().query(`SELECT id, body FROM conversation_messages WHERE thread_id = $1 AND author_side = 'staff' LIMIT 1`, [threadP2]);
+    const sid = staffMsg.rows[0].id as string;
+    expect((await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${sid}`, headers: asUser(wideA), payload: { body: "nope" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: `${portal(co)}/messages/${sid}`, headers: asUser(wideA) })).statusCode).toBe(404);
+    await unchanged(sid, staffMsg.rows[0].body as string);
   });
 
-  it("an edit after 15 minutes is a 409", async () => {
-    const r = await app.inject({ method: "POST", url: `${portal(co)}/${generalA}/messages`, headers: asUser(wideA), payload: { body: "old words" } });
-    const id = (r.json() as { id: string }).id;
-    await adminPool().query(`UPDATE conversation_messages SET created_at = now() - interval '16 minutes' WHERE id = $1`, [id]);
-    const late = await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${id}`, headers: asUser(wideA), payload: { body: "new words" } });
-    expect(late.statusCode).toBe(409);
-    const lateRetract = await app.inject({ method: "DELETE", url: `${portal(co)}/messages/${id}`, headers: asUser(wideA) });
-    expect(lateRetract.statusCode).toBe(409);
-    const row = await adminPool().query(`SELECT body, retracted_at FROM conversation_messages WHERE id = $1`, [id]);
-    expect(row.rows[0]).toMatchObject({ body: "old words", retracted_at: null });
-  });
-
-  it("a retracted message never returns its body or attachments, to either side, and its file is withdrawn", async () => {
-    const del = await app.inject({ method: "DELETE", url: `${portal(co)}/messages/${attMsg}`, headers: asUser(wideA) });
-    expect(del.statusCode).toBe(200);
-
+  it("PORTAL: an attachment-bearing message stays whole: body, attachment and download survive a DELETE attempt", async () => {
+    expect((await app.inject({ method: "DELETE", url: `${portal(co)}/messages/${attMsg}`, headers: asUser(wideA) })).statusCode).toBe(404);
     const pd = await app.inject({ method: "GET", url: `${portal(co)}/${generalA}`, headers: asUser(wideA) });
     const pm = (pd.json() as { messages: MessageRow[] }).messages.find((m) => m.id === attMsg) as MessageRow;
-    expect(pm).toMatchObject({ body: null, retracted: true, attachments: [] });
-    expect(pd.body).not.toContain("See attached");
+    expect(pm).toMatchObject({ body: "See attached" });
+    expect(pm.attachments).toHaveLength(1);
+    expect((await app.inject({ method: "GET", url: `/api/${co}/portal/files/${attGeneral}`, headers: asUser(wideA) })).statusCode).toBe(200);
+  });
 
+  it("STAFF: PATCH and DELETE on a message answer 404 for the author, a colleague and for a client's message, and nothing changes", async () => {
+    const r = await app.inject({ method: "POST", url: `${staff(co)}/${generalA}/messages`, headers: asUser(admin), payload: { body: "admin words" } });
+    expect(r.statusCode).toBe(201);
+    const id = (r.json() as { id: string }).id;
+    for (const who of [admin, member]) {
+      expect((await app.inject({ method: "PATCH", url: `${staff(co)}/messages/${id}`, headers: asUser(who), payload: { body: "admin words, fixed" } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "DELETE", url: `${staff(co)}/messages/${id}`, headers: asUser(who) })).statusCode).toBe(404);
+    }
+    await unchanged(id, "admin words");
+    const clientMsg = await adminPool().query(`SELECT id, body FROM conversation_messages WHERE author_side = 'client' LIMIT 1`);
+    const cid = clientMsg.rows[0].id as string;
+    expect((await app.inject({ method: "PATCH", url: `${staff(co)}/messages/${cid}`, headers: asUser(admin), payload: { body: "x" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: `${staff(co)}/messages/${cid}`, headers: asUser(admin) })).statusCode).toBe(404);
+    await unchanged(cid, clientMsg.rows[0].body as string);
+  });
+
+  it("the message payload on BOTH surfaces carries no edit/retract fields (PV-D34)", async () => {
+    const pd = await app.inject({ method: "GET", url: `${portal(co)}/${generalA}`, headers: asUser(wideA) });
     const sd = await app.inject({ method: "GET", url: `${staff(co)}/${generalA}`, headers: asUser(member) });
-    const sm = (sd.json() as { messages: MessageRow[] }).messages.find((m) => m.id === attMsg) as MessageRow;
-    expect(sm).toMatchObject({ body: null, retracted: true, attachments: [] });
-    expect(sd.body).not.toContain("See attached");
-
-    expect((await app.inject({ method: "GET", url: `/api/${co}/portal/files/${attGeneral}`, headers: asUser(wideA) })).statusCode).toBe(404);
-    // A retracted message cannot be edited back.
-    expect((await app.inject({ method: "PATCH", url: `${portal(co)}/messages/${attMsg}`, headers: asUser(wideA), payload: { body: "back" } })).statusCode).toBe(409);
+    for (const res of [pd, sd]) {
+      expect(res.statusCode).toBe(200);
+      const messages = (res.json() as { messages: Array<Record<string, unknown>> }).messages;
+      expect(messages.length).toBeGreaterThan(0);
+      for (const m of messages) {
+        for (const k of ["edited", "editedAt", "retracted", "editableUntil"]) expect(m).not.toHaveProperty(k);
+        expect(typeof m.body).toBe("string");
+      }
+    }
   });
 
   // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -492,18 +507,6 @@ describe.skipIf(!TEST_URL)("PV4-03: client Conversation API (portal + staff)", (
     const id = (draft.json() as { id: string }).id;
     expect((await app.inject({ method: "POST", url: `${staff(co)}/drafts/${id}/discard`, headers: asUser(member) })).statusCode).toBe(200);
     expect((await app.inject({ method: "POST", url: `${staff(co)}/drafts/${id}/send`, headers: asUser(member) })).statusCode).toBe(409);
-  });
-
-  it("staff edit: someone else's message is 403; their own past the window is 409", async () => {
-    const r = await app.inject({ method: "POST", url: `${staff(co)}/${generalA}/messages`, headers: asUser(admin), payload: { body: "admin words" } });
-    const id = (r.json() as { id: string }).id;
-    expect((await app.inject({ method: "PATCH", url: `${staff(co)}/messages/${id}`, headers: asUser(member), payload: { body: "x" } })).statusCode).toBe(403);
-    expect((await app.inject({ method: "PATCH", url: `${staff(co)}/messages/${id}`, headers: asUser(admin), payload: { body: "admin words, fixed" } })).statusCode).toBe(200);
-    await adminPool().query(`UPDATE conversation_messages SET created_at = now() - interval '16 minutes' WHERE id = $1`, [id]);
-    expect((await app.inject({ method: "PATCH", url: `${staff(co)}/messages/${id}`, headers: asUser(admin), payload: { body: "too late" } })).statusCode).toBe(409);
-    // A client's message is never a staff member's own.
-    const clientMsg = await adminPool().query(`SELECT id FROM conversation_messages WHERE author_side = 'client' LIMIT 1`);
-    expect((await app.inject({ method: "DELETE", url: `${staff(co)}/messages/${clientMsg.rows[0].id}`, headers: asUser(admin) })).statusCode).toBe(403);
   });
 
   it("close (manage) stops replies on both sides; reopen restores them; a bot cannot manage", async () => {

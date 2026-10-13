@@ -12,8 +12,10 @@ vi.mock("./platform", async () => {
 });
 
 import { platformFetch, PlatformError } from "./platform";
-import { portalEditMessage, portalPostMessage, portalRetractMessage, portalStartConversation } from "./portalActions";
+import * as portalActions from "./portalActions";
 import { CONVERSATION_BODY_MAX, CONVERSATION_MAX_BYTES } from "./portal";
+
+const { portalPostMessage, portalStartConversation } = portalActions;
 
 const fetchMock = vi.mocked(platformFetch);
 const sent = () => JSON.parse(String(fetchMock.mock.calls[0][2]?.body));
@@ -83,23 +85,8 @@ describe("portalStartConversation", () => {
   });
 });
 
-describe("portalEditMessage / portalRetractMessage", () => {
-  it("edit PATCHes the message; a 409 says the 15 minutes have passed", async () => {
-    fetchMock.mockResolvedValue({ id: "m1", edited: true });
-    expect(await portalEditMessage(null, form({ messageId: "m1", threadId: "th1", body: "fixed" }))).toEqual({ ok: true, id: "m1" });
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/co-1/portal/conversation/messages/m1");
-    expect(fetchMock.mock.calls[0][2]?.method).toBe("PATCH");
-    fetchMock.mockRejectedValue(new PlatformError(409, "edit window closed"));
-    const late = await portalEditMessage(null, form({ messageId: "m1", threadId: "th1", body: "fixed" }));
-    expect(late.ok).toBe(false);
-    expect(late.error).toMatch(/15 minutes/);
-  });
-
-  it("retract DELETEs the message; a 409 says the 15 minutes have passed", async () => {
-    fetchMock.mockResolvedValue({ id: "m1", retracted: true });
-    expect((await portalRetractMessage(null, form({ messageId: "m1", threadId: "th1" }))).ok).toBe(true);
-    expect(fetchMock.mock.calls[0][2]?.method).toBe("DELETE");
-    fetchMock.mockRejectedValue(new PlatformError(409, "window closed"));
-    expect((await portalRetractMessage(null, form({ messageId: "m1", threadId: "th1" }))).error).toMatch(/15 minutes/);
+describe("messages are permanent (PV-D34)", () => {
+  it("the portal actions expose no edit and no retract: a correction is a new message", () => {
+    expect(Object.keys(portalActions).filter((k) => /edit|retract|remove/i.test(k))).toEqual([]);
   });
 });

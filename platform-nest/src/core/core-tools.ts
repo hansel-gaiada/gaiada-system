@@ -1123,7 +1123,7 @@ const CONVERSATION_CORE_TOOLS: McpToolDef[] = [
     name: "conversation.getThread",
     description:
       "One thread with its messages, oldest first, and its PENDING drafts. Each message has `authorSide` (client|staff), " +
-      "`authorName`, `body` (null once retracted) and `draftedBy` (the agent that drafted a staff message a person later " +
+      "`authorName`, `body` and `draftedBy` (the agent that drafted a staff message a person later " +
       "sent). `drafts` are staff-only and never reach the client until a person sends one. Reading marks the thread read for " +
       "the caller. 404 if it does not exist.",
     minAssurance: "verified",

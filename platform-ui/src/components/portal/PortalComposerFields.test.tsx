@@ -88,4 +88,10 @@ describe("PortalComposerFields: attachments", () => {
     const hint = screen.getByText("Prices and terms change only through a signed contract or amendment.");
     expect(screen.getByLabelText("Your reply").getAttribute("aria-describedby")).toContain(hint.id);
   });
+
+  it("states that a sent message cannot be edited or removed (PV-D34), verbatim, and ties it to the box", () => {
+    renderBox();
+    const hint = screen.getByText("Messages can't be edited or removed once sent. Post a correction instead.");
+    expect(screen.getByLabelText("Your reply").getAttribute("aria-describedby")).toContain(hint.id);
+  });
 });

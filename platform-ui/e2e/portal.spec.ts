@@ -225,9 +225,9 @@ test.describe("client portal", () => {
     await expect(page.getByText("The pricing page 404s on mobile Safari")).toBeVisible();
   });
 
-  // PV4-08 — Conversation, in DEMO_MODE (the demo store enforces the BFF's limits and the 15-minute window).
+  // PV4-08 — Conversation, in DEMO_MODE (the demo store enforces the BFF's limits; messages are permanent, PV-D34).
   // The staff-reply-arrives flow needs a second party and runs against the stub BFF: e2e/portal-conversation.spec.ts.
-  test("conversation: threads by project, General pinned, a reply, an edit and a removal @portal", async ({ page }) => {
+  test("conversation: threads by project, General pinned, a reply that is permanent: no edit, no remove @portal", async ({ page }) => {
     test.setTimeout(120_000);
     await signInAsClient(page);
     await page.goto("/portal/conversation");
@@ -256,16 +256,19 @@ test.describe("client portal", () => {
     // Focus returned to the box so the client can keep typing.
     await expect(page.getByLabel("Your reply")).toBeFocused();
 
-    // Own, new message: editable inside the window.
-    await page.getByRole("button", { name: /edit your message/i }).click();
-    await page.getByLabel("Edit your message").fill("Updated wording");
-    await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(messages.getByText("Updated wording")).toBeVisible();
-    await expect(messages.getByText("edited")).toBeVisible();
+    // PV-D34: the message just sent is permanent. The composer says so, and no message carries an edit or remove control.
+    await expect(page.getByText("Messages can't be edited or removed once sent. Post a correction instead.")).toBeVisible();
+    await expect(page.getByRole("button", { name: /edit|remove/i })).toHaveCount(0);
+    await expect(messages.getByText("edited")).toHaveCount(0);
+    await expect(messages.getByText("Message removed")).toHaveCount(0);
 
-    await page.getByRole("button", { name: /remove your message/i }).click();
-    await page.getByRole("button", { name: "Yes, remove it" }).click();
-    await expect(messages.getByText("Message removed")).toBeVisible();
+    // A correction is a new message.
+    await page.getByLabel("Your reply").fill("Correction: the headline is Updated wording");
+    await page.getByRole("button", { name: "Send reply" }).click();
+    await expect(messages.getByRole("listitem")).toHaveCount(before + 2);
+    await expect(messages.getByText("Correction: the headline is Updated wording")).toBeVisible();
+    // The original is still there, word for word.
+    await expect(messages.getByText("<b>not bold</b>", { exact: false })).toBeVisible();
   });
 
   test("conversation: a closed thread has no composer, and the project page lists threads and meeting notes @portal", async ({ page }) => {
@@ -273,7 +276,8 @@ test.describe("client portal", () => {
     await page.goto("/portal/conversation/th-brand");
     await expect(page.getByText("This conversation is closed")).toBeVisible();
     await expect(page.getByRole("textbox")).toHaveCount(0);
-    await expect(page.getByText("Message removed")).toBeVisible();
+    await expect(page.getByText("Option two, please. Thank you.")).toBeVisible();
+    await expect(page.getByText("Message removed")).toHaveCount(0);
 
     await page.goto("/portal/projects/proj-nw-site");
     await expect(page.getByRole("heading", { name: "Conversation" })).toBeVisible();
