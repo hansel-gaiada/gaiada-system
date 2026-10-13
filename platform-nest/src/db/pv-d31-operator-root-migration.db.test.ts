@@ -1,4 +1,4 @@
-// PV-D31 (D21) — migration 202610132030_pv_d31_operator_root.sql: the operator-root marker.
+// PV-D31 (D21) — migration 202610132130_pv_d31_operator_root.sql: the operator-root marker.
 //
 // `initTestDb()` already applied the file once, against an EMPTY schema (zero roots, so it marked
 // nothing — that is the "fresh database" path). Each case below manufactures an estate shape and
@@ -20,7 +20,7 @@ import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setu
 import { createCompany } from "../testing/fixtures";
 
 const MIGRATION_SQL = readFileSync(
-  join(__dirname, "..", "..", "migrations", "202610132030_pv_d31_operator_root.sql"),
+  join(__dirname, "..", "..", "migrations", "202610132130_pv_d31_operator_root.sql"),
   "utf8",
 );
 // The final assertion DO block on its own, so it can be shown to bite independently of the marking
@@ -71,7 +71,7 @@ describe.skipIf(!TEST_URL)("PV-D31 · operator-root marker migration", () => {
   it("the first application (empty schema at initTestDb) marked nothing, and the column defaults false", async () => {
     const { rows } = await adminPool().query<{ n: string }>(`SELECT count(*)::text n FROM companies WHERE is_operator_root`);
     expect(Number(rows[0].n)).toBe(0);
-    const ledger = await adminPool().query(`SELECT 1 FROM schema_migrations WHERE name = '202610132030_pv_d31_operator_root.sql'`);
+    const ledger = await adminPool().query(`SELECT 1 FROM schema_migrations WHERE name = '202610132130_pv_d31_operator_root.sql'`);
     expect(ledger.rowCount).toBe(1);
   });
 

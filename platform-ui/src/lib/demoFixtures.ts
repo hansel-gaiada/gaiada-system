@@ -67,7 +67,7 @@ const DEMO_ENABLED_MODULES = ["agency", "pm", "it", "invoice", "clients", "knowl
 
 // PV1-01: `vertical` and `root_company_id` mirror the companies table after migration
 // 202610110530 (holding → holding, agency → agency, resort → hospitality); `co-holding` is the root.
-// PV-D31: `is_operator_root` mirrors migration 202610132030 — the demo root is the operator root, and
+// PV-D31: `is_operator_root` mirrors migration 202610132130 — the demo root is the operator root, and
 // a company created in the demo session is not.
 const COMPANIES: Record<string, unknown>[] = [
   { id: "co-holding", name: "D & A Syrowatka", type: "holding", vertical: "holding", root_company_id: "co-holding", is_operator_root: true, enabled_modules: [], status: "active" },
