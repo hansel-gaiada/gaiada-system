@@ -71,7 +71,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await expect(page.getByRole("button", { name: "Office of the GM, Gaia Digital Agency. Switch workspace" })).toBeVisible();
 
     const { mine, others } = await openSwitcher(page);
-    await expect(mine.getByRole("link")).toHaveText(["Office of the GM Home"]);
+    await expect(mine.getByRole("link")).toHaveText([/^Office of the GM\s*Home$/]);
     // Departments in the org tree's order. The GM is already above, so it is not listed twice.
     const names = (await others.getByRole("link").allTextContents()).map((t) => t.replace(/\s*Home$/, ""));
     expect(names.slice(0, DEPARTMENTS.length)).toEqual(DEPARTMENTS);
@@ -232,16 +232,20 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     await expect(switcher(page)).toHaveCount(0);
   });
 
-  test("the AI Assistant row opens the drawer over the page; Escape closes it and focus returns to the row", async ({ page, context }) => {
+  test("the AI Assistant row opens the drawer over the page with the page's context; Escape closes it and focus returns to the row", async ({ page, context }) => {
     await signIn(page, context, "superadmin");
-    await page.goto("/departments/dept-5");
+    // A page with a resolvable entity, so the context the row carries is visible in the drawer.
+    await page.goto("/projects/p-web-1");
 
     const row = menu(page, "Office of the GM").getByRole("link", { name: "AI Assistant" });
+    // The page context rides in the link (`ctx=`), the same href the classic floating button builds.
+    await expect(row).toHaveAttribute("href", /^\/assistant\?ctx=/);
     await hydrated(row);
     await row.click();
     const dialog = page.getByRole("dialog", { name: "Assistant" });
     await expect(dialog).toBeVisible();
-    await expect(page).toHaveURL(/\/assistant\?.*from=/);
+    await expect(page).toHaveURL(/\/assistant/);
+    await expect(dialog.getByRole("button", { name: /Pinned: Client site redesign/ })).toBeVisible();
     // The workspace shell has no floating button; the row is the trigger.
     await expect(page.getByRole("link", { name: "Open assistant" })).toHaveCount(0);
 
@@ -284,7 +288,7 @@ test.describe("superadmin (hansel@gaiada.com)", () => {
     const fab = page.getByRole("link", { name: "Open assistant" });
     await expect(fab).toBeVisible();
     await expect(switcher(page)).toHaveCount(0);
-    await expect(page.getByRole("searchbox", { name: "Search" })).toBeVisible(); // classic top bar's own form
+    await expect(page.getByRole("textbox", { name: "Search" })).toBeVisible(); // the classic top bar's own form (a text input, not the new bar's searchbox)
 
     // The switch is reachable from the classic avatar menu and lands in the new shell.
     await press(page.getByRole("button", { name: "Clement Hansel" }));
@@ -304,7 +308,7 @@ test.describe("manager (manager@gaiada.com)", () => {
 
     await expect(menu(page, "Office of the GM")).toBeVisible();
     const { mine } = await openSwitcher(page);
-    await expect(mine.getByRole("link")).toHaveText(["Office of the GM Home"]);
+    await expect(mine.getByRole("link")).toHaveText([/^Office of the GM\s*Home$/]);
     await page.keyboard.press("Escape");
 
     await expect(sidebar(page).getByRole("link", { name: "Company", exact: true })).toBeVisible();
@@ -334,8 +338,11 @@ test.describe("member (gede@gaiada.com)", () => {
 
     await expect(sidebar(page).getByRole("link", { name: "Company", exact: true })).toBeVisible();
     await expect(sidebar(page).getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
+    // Typing the URL still lands on an Admin page (it redirects to /admin/users in DEMO_MODE), but the shell
+    // offers a member no Admin row: the menu has nothing to link to.
     await page.goto("/admin");
-    await expect(menu(page, "Admin")).toHaveCount(0); // the page is refused; the shell offers no Admin area
+    await expect(menu(page, "Admin")).toBeVisible();
+    await expect(menu(page, "Admin").getByRole("link")).toHaveCount(0);
   });
 
   test("visiting a department says so and Back returns to Company; its own create action leads + New", async ({ page, context }) => {
