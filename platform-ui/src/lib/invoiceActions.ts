@@ -5,7 +5,8 @@ import { getSessionUserId } from "./session-server";
 import { getMe, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can, isElevated } from "./rbac";
-import { createInvoice, approveInvoice, issueInvoice, type IssueBlocker } from "./invoice";
+import { createInvoice, approveInvoice, issueInvoice, voidInvoice, type IssueBlocker } from "./invoice";
+import { voidErrorText, voidReasonOk } from "./billingView";
 
 export interface InvoiceFormState { error?: string }
 // Shared shape for the status-transition actions below (approve/mark-sent/mark-paid), driven by
@@ -74,6 +75,33 @@ export async function issueInvoiceAction(invoiceId: string, _prev: InvoiceAction
   revalidatePath(`/invoices/${invoiceId}`);
   revalidatePath("/invoices");
   return { ok: true };
+}
+
+// PV5-09: void an ISSUED invoice. It posts a full credit note in the ledger, so it is the one action here that
+// asks for a reason (kept on the record) and is refused in words for every reason the API names: never issued, money
+// already applied, a payment claim still pending. Cerbos `invoice`/`void_issued` is the authority; a 403 is shown as a
+// sentence, never as a bare "Forbidden". The confirm step is the component's.
+export async function voidInvoiceAction(invoiceId: string, _prev: InvoiceActionState | null, formData?: FormData): Promise<InvoiceActionState> {
+  const userId = await getSessionUserId();
+  if (!userId) return { error: "Session expired — sign in again." };
+  const me = await getMe(userId);
+  const tenant = await getActiveTenant(me);
+  if (!tenant) return { error: "Select a company first." };
+  const reason = String(formData?.get("reason") ?? "").trim();
+  if (!voidReasonOk(reason)) return voidFailure(400, undefined, "");
+  try {
+    await voidInvoice(userId, tenant, invoiceId, reason);
+  } catch (e) {
+    if (e instanceof PlatformError) return voidFailure(e.status, e.reason, e.message);
+    throw e;
+  }
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/invoices");
+  return { ok: true };
+}
+
+function voidFailure(status: number | null, reason: string | undefined, message: string): InvoiceActionState {
+  return { error: voidErrorText(status, reason, message) };
 }
 
 // IAM-GAP-01 — separate gate from `ctx()` above: approving is `invoice.approve` (company_admin/

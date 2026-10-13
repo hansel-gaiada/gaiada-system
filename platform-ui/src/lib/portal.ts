@@ -191,6 +191,10 @@ export interface PortalInvoice {
   outstanding?: number;
   /** The invoice accepts a payment claim now. When false, the "Tell us you've paid" form is not offered. */
   payable?: boolean;
+  /** PV5-07: the stored PDF of an issued invoice. Absent (an older server) and null (not rendered yet) read alike: an
+   *  issued invoice says "being prepared", any other says nothing (lib/billingView.ts). Downloaded through the portal's
+   *  own file route, never the staff one. */
+  pdfFileId?: string | null;
 }
 
 /** PV5-04: the issuer as frozen on the invoice when it was issued (the bank block is where to pay). */
@@ -243,6 +247,8 @@ export interface PortalInvoiceDetail {
   outstanding?: number;
   payable?: boolean;
   overdue?: boolean;
+  /** PV5-07: see `PortalInvoice.pdfFileId`. */
+  pdfFileId?: string | null;
 }
 
 export interface PortalContract {
@@ -263,6 +269,9 @@ export interface PortalContract {
   clientSigned: boolean;
   providerSigned: boolean;
   termEnded: boolean;
+  /** PV5-07: the sealed signed copy (the contract, its evidence page and the company seal), once rendered. Absent and null
+   *  read alike: a SIGNED contract says "being prepared", any other says nothing (lib/billingView.ts). */
+  signedCopyFileId?: string | null;
   /** PV4-04 (§16b): `amendment` changes the terms of an earlier signed contract; it never voids or replaces it.
    *  Optional for an older server (read as an ordinary agreement). `amendsReference` and `changeRequestId` are
    *  already filtered through the caller's own scope, so out of reach reads `null`. */

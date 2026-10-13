@@ -114,6 +114,15 @@ for V in $(sed 's/\$\$//g' docker-compose.yml | grep -o '\${[A-Z_][A-Z0-9_]*' | 
 done
 [ -z "$MISSING_DOC" ] && pass "every \${VAR} in docker-compose.yml is documented in .env.example" || fail ".env.example does not mention:$MISSING_DOC"
 
+# 6b. no visitor address in the gates' logs (M5 QA 2026-10-13) ------------------------------------------------
+if grep -qE '^error_log /dev/stderr crit;' nginx/nginx.conf; then pass "nginx.conf: error_log at crit (request-level lines name the client address)"
+else fail "nginx.conf: error_log must be 'crit' -- warn/error lines carry 'client: <visitor address>'"; fi
+if grep -qE '^\s*client_body_buffer_size 32k;' nginx/nginx.conf; then pass "nginx.conf: request bodies stay in memory up to the 32k cap"
+else fail "nginx.conf: client_body_buffer_size 32k missing (a spilled body logs the visitor address)"; fi
+if grep -qE 'location = /lib/kestrel/r' nginx/edge.conf.template && ! grep -qE '^\s*#?\s*client_body_buffer_size 320k;' nginx/edge.conf.template; then
+  fail "edge /lib/kestrel/r: client_body_buffer_size 320k missing"
+else pass "edge /lib/kestrel/r: its body buffer matches its 320k cap"; fi
+
 # 7. nginx templates in the pinned image ----------------------------------------------------------------------
 NGINX_IMG="$(grep -m1 -oE 'nginxinc/nginx-unprivileged:[^ ]+@sha256:[0-9a-f]{64}' docker-compose.yml)"
 if [ -z "$NGINX_IMG" ]; then

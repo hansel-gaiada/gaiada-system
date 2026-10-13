@@ -6,7 +6,7 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listProjects } from "@/lib/entities";
 import { readResult, type ReadResult } from "@/lib/readResult";
-import { getContract, listClientInvoices, listClientPayments, listContracts } from "@/lib/contracts-data";
+import { getContract, listClientDocuments, listClientInvoices, listClientPayments, listContracts } from "@/lib/contracts-data";
 import { groupContracts, type ContractDetail } from "@/lib/contracts";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -15,7 +15,10 @@ import { ClientVisibilityMarker } from "@/components/clients/ClientVisibilityMar
 import { ContractForm } from "@/components/clients/billing/ContractForm";
 import { ContractRow } from "@/components/clients/billing/ContractRow";
 import { PaymentRow } from "@/components/clients/billing/PaymentRow";
+import { ClientDocuments } from "@/components/clients/billing/ClientDocuments";
 import { formatDate, money } from "@/lib/format";
+import { DOCUMENT_PREPARING_TEXT, invoiceDocumentState } from "@/lib/billingView";
+import { FileLink } from "@/components/clients/billing/FileLink";
 import "@/components/clients/billing/billing.css";
 
 // PV3-08 — the hub's CONTRACTS & BILLING area (`/clients/[id]/billing`; BFF §16e).
@@ -48,12 +51,14 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
   const { clientId } = await params;
   if (!tenant) notFound();
 
-  const [contractsRes, paymentsRes, invoicesRes, projectsRes] = await Promise.all([
+  const [contractsRes, paymentsRes, invoicesRes, projectsRes, documentsRes] = await Promise.all([
     readResult(listContracts(userId, tenant, clientId)),
     readResult(listClientPayments(userId, tenant, clientId, "pending")),
     readResult(listClientInvoices(userId, tenant, clientId)),
     // Only to offer "tie this to a project" on the draft form. Its refusal is said on the form itself.
     readResult(listProjects(userId, tenant, clientId)),
+    // PV5-08: legal and money documents (BFF §30b). Its refusal is said in its own section.
+    readResult(listClientDocuments(userId, tenant, clientId)),
   ]);
   const projects = projectsRes.kind === "ok" ? projectsRes.data.map((p) => ({ id: p.id, name: p.name })) : null;
 
@@ -139,20 +144,38 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
     return (
       <Card>
         <HairlineTable
-          columns={[{ label: "Period" }, { label: "Status" }, { label: "Total", align: "right" }]}
-          rows={invoices.map((i) => [
-            <span key="p">
-              <Link href={`/invoices/${i.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
-                {i.periodStart && i.periodEnd ? `${formatDate(i.periodStart)} to ${formatDate(i.periodEnd)}` : `Invoice ${i.id}`}
-              </Link>
-              <ClientVisibilityMarker clientVisible={i.clientVisible} />
-            </span>,
-            <StatusBadge key="s" label={i.status} />,
-            money(i.total, i.currency),
-          ])}
+          columns={[{ label: "Period" }, { label: "Status" }, { label: "PDF" }, { label: "Total", align: "right" }]}
+          rows={invoices.map((i) => {
+            // PV5-07 renders the PDF after the commit, and an older server omits the field: an ISSUED invoice with no file
+            // yet says "being prepared"; a draft or legacy invoice has none to promise and shows a dash.
+            const pdf = invoiceDocumentState(i);
+            return [
+              <span key="p">
+                <Link href={`/invoices/${i.id}`} style={{ color: "var(--ink-strong)", textDecoration: "none" }}>
+                  {i.periodStart && i.periodEnd ? `${formatDate(i.periodStart)} to ${formatDate(i.periodEnd)}` : `Invoice ${i.id}`}
+                </Link>
+                {i.invoiceNo ? <span className="bl-contract__meta"> · {i.invoiceNo}</span> : null}
+                <ClientVisibilityMarker clientVisible={i.clientVisible} />
+              </span>,
+              <StatusBadge key="s" label={i.status === "sent" && i.invoiceNo ? "Issued" : i.status} />,
+              pdf.kind === "link"
+                ? <FileLink key="f" fileId={pdf.fileId} label="Invoice PDF" />
+                : pdf.kind === "preparing"
+                  ? <span key="f" className="bl-contract__meta">{DOCUMENT_PREPARING_TEXT}</span>
+                  : <span key="f" aria-label="No PDF">—</span>,
+              money(i.total, i.currency),
+            ];
+          })}
         />
       </Card>
     );
+  }
+
+  function renderDocuments(): ReactNode {
+    if (documentsRes.kind !== "ok") {
+      return <ReadRefusal subject="this client's documents" kind={documentsRes.kind} reason={reasonOf(documentsRes)} />;
+    }
+    return <ClientDocuments items={documentsRes.data} />;
   }
 
   return (
@@ -177,8 +200,17 @@ export default async function ClientBillingPage({ params }: { params: Promise<{ 
 
       <section aria-labelledby="bl-invoices">
         <h2 id="bl-invoices" className="bl-section__title">Invoices</h2>
-        <p className="bl-section__lede">The list only. Open an invoice to work on it.</p>
+        <p className="bl-section__lede">Open an invoice to issue it, see what it says, or void it.</p>
         {renderInvoices()}
+      </section>
+
+      <section aria-labelledby="bl-documents">
+        <h2 id="bl-documents" className="bl-section__title">Documents</h2>
+        <p className="bl-section__lede">
+          Signed agreements, issued invoices and payment receipts: the legal and money documents only, as the client
+          sees them in their portal.
+        </p>
+        {renderDocuments()}
       </section>
     </div>
   );

@@ -435,6 +435,12 @@ export function toolkitFor(vertical: string | null | undefined, deptName: string
   return bespokeFor(vertical, deptName) ?? genericToolkit(deptName);
 }
 
+/** The bespoke toolkit with this slug, regardless of vertical. For the workspace registry
+ *  (`lib/workspaces.ts`), which applies the pack rule itself and reuses the tabs and launchers. */
+export function bespokeToolkit(slug: string): DeptToolkit | undefined {
+  return TOOLKITS.find((t) => t.slug === slug);
+}
+
 /** True when a department has a bespoke toolkit (vs. the generic Home-only shell). */
 export function hasBespokeToolkit(vertical: string | null | undefined, deptName: string): boolean {
   return bespokeFor(vertical, deptName) !== undefined;

@@ -6,7 +6,10 @@
 //
 // PV5-04 (PV-D7): "Mark sent" became ISSUE (numbered, posted to the ledger, frozen in one step on the server), and
 // "Mark paid" is gone: paid follows from confirmed payments. When issuing is refused, the server's whole blocker list
-// is shown, so staff see everything that is missing at once. The full issued view is PV5-09.
+// is shown, so staff see everything that is missing at once.
+// PV5-09: the blockers are also known BEFORE the click (`readiness`, read by the page from `GET …/issue-readiness`): the
+// Issue button is then disabled with the reason, and the list sits on the page (IssueBlockers). The click's own 409 list
+// stays, for the case the page was stale.
 import { useActionState } from "react";
 import {
   approveInvoiceAction,
@@ -14,25 +17,30 @@ import {
   type InvoiceActionState,
 } from "@/lib/invoiceActions";
 import type { InvoiceStatus } from "@/lib/invoice";
-import { Button, Toast } from "@/components/ui";
+import { Toast } from "@/components/ui";
+import { IssueBlockers } from "@/components/billing/IssueBlockers";
+import "@/components/billing/billing-screens.css";
 
 type BoundAction = (invoiceId: string, prev: InvoiceActionState | null, formData?: FormData) => Promise<InvoiceActionState>;
 
 function StatusButton({
-  invoiceId, action, label, pendingLabel,
-}: { invoiceId: string; action: BoundAction; label: string; pendingLabel: string }) {
+  invoiceId, action, label, pendingLabel, blockedReasonId,
+}: { invoiceId: string; action: BoundAction; label: string; pendingLabel: string; blockedReasonId?: string }) {
   const bound = action.bind(null, invoiceId);
   const [state, formAction, pending] = useActionState<InvoiceActionState | null, FormData>(bound, null);
   return (
     <form action={formAction}>
-      <Button type="submit" size="sm" disabled={pending}>{pending ? pendingLabel : label}</Button>
+      {/* A disabled control says why, next to it: a greyed button with no explanation reads as broken. */}
+      <button
+        type="submit" className="lux-btn lux-btn--solid lux-btn--sm"
+        disabled={pending || Boolean(blockedReasonId)} aria-describedby={blockedReasonId}
+      >
+        {pending ? pendingLabel : label}
+      </button>
       {state?.error && !state.blockers && <Toast message={state.error} />}
       {state?.blockers && state.blockers.length > 0 && (
-        <div role="alert" className="sys-empty-note" style={{ margin: "6px 0 0", maxWidth: 360, textAlign: "left" }}>
-          <p style={{ margin: "0 0 4px" }}>{state.error}</p>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {state.blockers.map((b) => <li key={b.code + b.message}>{b.message}</li>)}
-          </ul>
+        <div style={{ margin: "6px 0 0", maxWidth: 420, textAlign: "left" }}>
+          <IssueBlockers blockers={state.blockers} lead={state.error ?? "This invoice can't be issued yet:"} role="alert" />
         </div>
       )}
     </form>
@@ -47,6 +55,7 @@ export function InvoiceActions({
   isCreator,
   legacyUnknownCreator,
   invoiceNo,
+  blockerCount = null,
 }: {
   invoiceId: string;
   status: InvoiceStatus;
@@ -60,6 +69,9 @@ export function InvoiceActions({
   legacyUnknownCreator: boolean;
   /** PV5-04: set once issued. */
   invoiceNo?: string | null;
+  /** PV5-09: how many reasons the readiness read found before any click. `null` = the read gave no answer (an older
+   *  server, or a refusal): Issue stays enabled and the server's own check is the gate. */
+  blockerCount?: number | null;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
@@ -68,7 +80,10 @@ export function InvoiceActions({
           <StatusButton invoiceId={invoiceId} action={approveInvoiceAction} label="Approve" pendingLabel="Approving…" />
         )}
         {status === "approved" && canBill && (
-          <StatusButton invoiceId={invoiceId} action={issueInvoiceAction} label="Issue" pendingLabel="Issuing…" />
+          <StatusButton
+            invoiceId={invoiceId} action={issueInvoiceAction} label="Issue" pendingLabel="Issuing…"
+            blockedReasonId={blockerCount && blockerCount > 0 ? "issue-blocked-reason" : undefined}
+          />
         )}
       </div>
       {/* State-machine legibility (IAM-GAP-01): explain why draft has no send/pay control, and — the
@@ -94,9 +109,14 @@ export function InvoiceActions({
           Draft invoices must be approved before they can be issued.
         </p>
       )}
-      {status === "approved" && (
-        <p className="sys-empty-note" style={{ margin: 0, maxWidth: 320, textAlign: "right" }}>
-          Approved — ready to issue. Issuing gives it its number and records it in the books.
+      {status === "approved" && blockerCount != null && blockerCount > 0 && (
+        <p className="bs-note bs-note--right" id="issue-blocked-reason">
+          Not ready to issue yet. What is missing is listed below.
+        </p>
+      )}
+      {status === "approved" && !(blockerCount != null && blockerCount > 0) && (
+        <p className="bs-note bs-note--right">
+          Approved{blockerCount === 0 ? ", and nothing is missing" : ""}. Issuing gives it its number and records it in the books.
         </p>
       )}
       {status === "sent" && (

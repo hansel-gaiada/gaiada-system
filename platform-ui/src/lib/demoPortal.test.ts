@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { portalDashboardDemo } from "./demoPortal";
 
 // CP-16 — the demo store's BEHAVIOURAL fidelity, not its data.
@@ -247,5 +247,72 @@ describe("demoPortal fixture fidelity", () => {
       }));
       expect(r?.status).toBe(400);
     });
+  });
+});
+
+// PV5-09 — the demo's fidelity to the invoice-of-record and content-hash fields, because the browser specs (axe, the stale-hash
+// reload) run against it and would pass against a backend that does not exist if it were more permissive than the real one.
+describe("demoPortal PV5 fields", () => {
+  it("an issued invoice carries its number, dates, the frozen issuer and a payable flag; the taxed one has a tax line", () => {
+    const d = portalDashboardDemo("GET", T("invoices/inv-2026-021"), CLIENT)?.json as {
+      invoiceNo: string; dueDate: string; subtotal: number; taxTotal: number; total: number; pdfFileId: string | null; payable: boolean;
+      issuer: { legalName: string; bank: { accountNo: string } };
+      taxLines: Array<{ code: string; rate: number; base: number; amount: number }>;
+    };
+    expect(d.invoiceNo).toBe("DEMO/2026/0021");
+    expect(d.issuer.bank.accountNo).toBeTruthy();
+    expect(d.payable).toBe(true);
+    expect(d.taxLines).toEqual([{ code: "PPN", rate: 11, base: d.subtotal, amount: d.taxTotal }]);
+    // The money agrees with itself: nothing in the page has to add it up.
+    expect(d.subtotal + d.taxTotal).toBe(d.total);
+    // Not rendered yet: the page must say "being prepared" for this one.
+    expect(d.pdfFileId).toBeNull();
+  });
+
+  it("a settled invoice is not payable, and one with a rendered PDF carries its file id", () => {
+    const paid = portalDashboardDemo("GET", T("invoices/inv-2025-088"), CLIENT)?.json as { payable: boolean; pdfFileId: string | null };
+    expect(paid.payable).toBe(false);
+    expect(paid.pdfFileId).toBeTruthy();
+  });
+
+  it("🔴 a sign with a STALE content hash is refused with a 409 content_changed and writes nothing", async () => {
+    // A fresh copy of the store: the tests above spend the unsigned contracts (a re-sign is the idempotent 200, checked first).
+    vi.resetModules();
+    const { portalDashboardDemo: fresh } = await import("./demoPortal");
+    const detail = fresh("GET", T("contracts/ctr-sow-brand"), CLIENT)?.json as { contentSha256: string };
+    expect(detail.contentSha256).toMatch(/^[0-9a-f]{64}$/);
+    const stale = fresh("POST", T("contracts/ctr-sow-brand/sign"), CLIENT,
+      JSON.stringify({ signerName: "Dana Whitfield", agree: true, contentSha256: "0".repeat(64) }));
+    expect(stale?.status).toBe(409);
+    expect((stale?.json as { reason: string }).reason).toBe("content_changed");
+    const after = fresh("GET", T("contracts/ctr-sow-brand"), CLIENT)?.json as { signatures: unknown[] };
+    expect(after.signatures).toEqual([]);
+    // The hash the page showed is accepted (the signature lands).
+    const good = fresh("POST", T("contracts/ctr-sow-brand/sign"), CLIENT,
+      JSON.stringify({ signerName: "Dana Whitfield", agree: true, contentSha256: detail.contentSha256.toUpperCase() }));
+    expect(good?.status).toBe(200);
+  });
+
+  it("a signed contract carries a sealed-copy file id on the detail and the list", () => {
+    const d = portalDashboardDemo("GET", T("contracts/ctr-msa-2026"), CLIENT)?.json as { signedCopyFileId: string | null };
+    expect(d.signedCopyFileId).toBeTruthy();
+    const list = portalDashboardDemo("GET", T("contracts"), CLIENT)?.json as Array<{ id: string; signedCopyFileId: string | null }>;
+    expect(list.find((k) => k.id === "ctr-msa-2026")?.signedCopyFileId).toBeTruthy();
+  });
+});
+
+describe("PV5-08 documents route", () => {
+  it("serves signed agreements and invoices newest first, in the real list's shape", () => {
+    const r = portalDashboardDemo("GET", T("documents"), CLIENT);
+    expect(r?.status).toBe(200);
+    const items = (r?.json as { items: Array<{ kind: string; date: string }> }).items;
+    expect(items.length).toBeGreaterThan(0);
+    expect(new Set(items.map((i) => i.kind))).toEqual(new Set(["signed_contract", "invoice"]));
+    const times = items.map((i) => Date.parse(i.date));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+    for (const i of items) expect(Object.keys(i).sort()).toEqual(["date", "fileId", "id", "kind", "ready", "title"]);
+  });
+  it("refuses a staff caller like every other portal route", () => {
+    expect(portalDashboardDemo("GET", T("documents"), "demo-hansel")?.status).toBe(403);
   });
 });

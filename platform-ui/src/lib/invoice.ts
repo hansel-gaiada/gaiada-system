@@ -9,6 +9,8 @@ import "server-only";
 //   GET  /api/:t/invoices/:id/issue-readiness -> { ready, issued, invoiceNo, blockers: [{code,message}] }
 //   POST /api/:t/invoices/:id/issue       -> the issued invoice (number, dates, totals), or 409 { reason:
 //                                            "issue_blocked", blockers } with nothing written (PV5-04, PV-D7)
+//   POST /api/:t/invoices/:id/void {reason} -> { creditNoteId, alreadyVoid? } for an ISSUED invoice; 409 { reason:
+//                                            not_issued | not_voidable | pending_payment | ... } (PV5-04, PV5-09)
 // The backend computes line items from billable time in the period (the demo
 // store approximates this). Finance capability (company.manage) only.
 //
@@ -53,6 +55,24 @@ export interface Invoice {
   subtotal?: number | null;
   taxTotal?: number | null;
   taxCode?: string | null;
+  /** PV5-04: who issued it, the issuer as FROZEN when it was issued (never today's profile), and the ledger invoice behind
+   *  it. `legacyUnissued` marks a sent/paid row from before PV-5: it has no number and no snapshot. */
+  issuedBy?: string | null;
+  issuer?: InvoiceIssuer | null;
+  arInvoiceId?: string | null;
+  legacyUnissued?: boolean;
+  /** PV5-07: the stored PDF of an issued invoice, rendered once after the commit. Absent (an older server) and null (not
+   *  rendered yet) read alike: an issued invoice says "being prepared", any other says nothing (lib/billingView.ts). */
+  pdfFileId?: string | null;
+}
+
+/** PV5-04: the issuer block frozen on an invoice at issue (decision 5). The bank block is where the client pays. */
+export interface InvoiceIssuer {
+  legalName: string | null;
+  address: string | null;
+  npwp: string | null;
+  isPkp: boolean | null;
+  bank: { name: string | null; accountName: string | null; accountNo: string | null } | null;
 }
 
 /** PV5-04: one reason an invoice cannot be issued yet (stable `code`, human `message`). */
@@ -89,3 +109,9 @@ export const issueInvoice = (u: string, t: string, id: string) =>
 // action in invoiceActions.ts is what turns those into an honest, specific message.
 export const approveInvoice = (u: string, t: string, id: string) =>
   platformFetch<{ ok: true; status: "approved" }>(`/api/${t}/invoices/${id}/approve`, u, { method: "POST" });
+// PV5-04/PV5-09: void an ISSUED invoice (a full credit note is posted and both rows read `void`). Left uncaught (no
+// `skip`): the 409's `reason` (not_issued, not_voidable, pending_payment, ...) is what voidInvoiceAction puts in words.
+export const voidInvoice = (u: string, t: string, id: string, reason: string) =>
+  platformFetch<{ creditNoteId?: string; alreadyVoid?: boolean }>(`/api/${t}/invoices/${id}/void`, u, {
+    method: "POST", body: JSON.stringify({ reason }),
+  });

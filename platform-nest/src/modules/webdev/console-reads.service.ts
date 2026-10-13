@@ -49,6 +49,7 @@
 import type { PoolClient } from "pg";
 import { withTenants } from "../../db";
 import { listProvisionedSites, type SiteDto } from "./provisioning.service";
+import { readDeliveryForProvisioned, type SiteDeliveryDto } from "./delivery-binding.service";
 import {
   listContractSnapshots,
   type SnapshotDto,
@@ -125,6 +126,10 @@ export interface SiteConsoleRow extends SiteDto {
   lastKnownDeployment: SiteFactSummary | null;
   lastKnownPromotion: SiteFactSummary | null;
   lastKnownRollback: SiteFactSummary | null;
+  /** M6-P6g: the HOST side of delivery, per registry row (staging, then production once it exists): `awaiting_deploy_credential`
+   *  until the row is bound to a host with a usable vault record, then `ready`. NOT the GitHub-side deploy grant (that is
+   *  `GET provisioned-sites/:id` `deployGrant`); the two are never merged. */
+  delivery: SiteDeliveryDto;
 }
 
 export interface SiteRegistryResult {
@@ -142,6 +147,7 @@ export async function getSiteRegistry(tenantId: string): Promise<SiteRegistryRes
     listProvisionedSites(tenantId),
     recentFacts(tenantId, RELEASE_KINDS, 500),
   ]);
+  const delivery = await readDeliveryForProvisioned(tenantId, sites.map((s) => s.id));
 
   const bySlug = new Map<string, FactRow[]>();
   for (const f of facts) {
@@ -165,6 +171,7 @@ export async function getSiteRegistry(tenantId: string): Promise<SiteRegistryRes
       lastKnownDeployment: latestOfKind(list, "deploy.done"),
       lastKnownPromotion: latestOfKind(list, "promote.done"),
       lastKnownRollback: latestOfKind(list, "rollback.done"),
+      delivery: delivery.get(s.id) ?? { environments: [] },
     };
   });
 

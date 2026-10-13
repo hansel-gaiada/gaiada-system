@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -6,6 +7,7 @@ import { getFinanceSettings, formatNpwp } from "@/lib/finance";
 import { Card, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { SettingsEditor } from "@/components/finance/SettingsEditor";
+import "@/components/billing/billing-screens.css";
 
 // UI-02b — accounting settings.
 //
@@ -19,6 +21,19 @@ import { SettingsEditor } from "@/components/finance/SettingsEditor";
 // permission, and the refusal arrives after the user has decided what they want. So they are
 // rendered read-only WITH the reason, rather than omitted (which reads as "we forgot") or offered
 // (which reads as "go ahead").
+// PV5-09: the billing profile (issuer details and the bank account clients pay into) lives one level down. It is linked
+// from BOTH branches below, because a company whose accounting settings are missing may still need its billing profile.
+function BillingProfileLink() {
+  return (
+    <Card title="Billing profile">
+      <p className="fin-muted">
+        How this company appears on the invoices it issues, and the bank account clients pay into.{" "}
+        <Link className="bs-link" href="/finance/settings/billing-profile">Open the billing profile</Link>
+      </p>
+    </Card>
+  );
+}
+
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -38,10 +53,13 @@ export default async function FinanceSettingsPage() {
     // whose settings could not be loaded would invite someone to save those invented values over
     // whatever is actually there.
     return (
-      <EmptyNote>
-        This company has no accounting settings yet, or they could not be loaded. Seed the department
-        with <code>npm run seed:finance-config</code> in platform-nest first.
-      </EmptyNote>
+      <div className="fin-page">
+        <EmptyNote>
+          This company has no accounting settings yet, or they could not be loaded. Seed the department
+          with <code>npm run seed:finance-config</code> in platform-nest first.
+        </EmptyNote>
+        <BillingProfileLink />
+      </div>
     );
   }
 
@@ -73,6 +91,8 @@ export default async function FinanceSettingsPage() {
       </Card>
 
       <SettingsEditor isPkp={s.isPkp} npwp={s.npwp ?? ""} />
+
+      <BillingProfileLink />
 
       <Card
         title="Fixed for this company"

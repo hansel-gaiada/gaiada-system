@@ -69,11 +69,33 @@ Never write "built", "done", "complete", or "production-ready". The vocabulary i
 - **Managed-first for v1**; all-local is target-state and hiring-gated.
 - **Agency is a first-deploy child company** — the digital-agency vertical must be genuinely
   operable, not a demo.
+- **Internal now, SaaS/PaaS later (PV-D13).** Never hard-wire our own group: no company names or
+  ids in code ("Gaiada", "Viceroy", "Syrowatka" are data), a root company is a customer
+  organization (never assume a single root), packs are keyed by **vertical**, and a client sees
+  their provider's brand, never our holding's. Product-only work (self-signup, subscription billing,
+  customer SSO, SOC 2, marketplace) stays out until the owner opens it.
 - **Agentic-native bar** (`docs/superpowers/plans/2026-08-03-agentic-native-erp-plan.md`, OPEN,
   must close before staging): every department capability must work identically under a human,
   under n8n, and under an agent. Read it *before* adding a capability — retrofitting costs more.
 - **Legal Gate 1 + the day-one technical gate** must both be green before ingesting real
   employee data (`legal/`).
+
+## Reserved words (binding for UI copy, route names and docs)
+
+From `docs/plans/2026-10-10-three-perspectives.md` §2.2. "Company" was already reserved by CC-D9.
+
+| Word | Means | Never means |
+|---|---|---|
+| **Group** | D & A Syrowatka and everything under it (in code: a root and its tree) | a client's group of companies |
+| **Company** | one of *our* group companies | a client's business |
+| **Vertical** | *our* company's line of business, selecting its pack (`holding`, `agency`, `hospitality`, `catering`, `general`) | a client's industry |
+| **Business type** | a *client's* industry (`client_centre_profiles.business_type`) | our company's vertical |
+| **Department** | an org unit of one of our companies | a section of a client's business |
+| **Client** | an external organisation buying services from one of our companies | a hotel guest |
+| **Business** / **Business area** | the client's own organisation / a section of its profile (not CMC's "department") | our company / our department |
+| **Guest** | a hospitality customer of one of our hospitality companies | a client |
+| **Contracts & billing** | formal instruments between our legal entity and the client (contracts, invoices, payments, legal documents) | chat or status updates |
+| **Conversation** | the working channel between a client and the staff serving them | formal correspondence |
 
 ## Traps that have burned real tickets, program-wide
 

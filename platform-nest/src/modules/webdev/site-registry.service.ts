@@ -31,6 +31,7 @@ import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { emitEvent } from "../../events/outbox.service";
 import { PROVISIONED_PLACEHOLDER_DOMAIN_SUFFIX } from "./provision-completion";
+import { DeliveryRefusal, deliveryStateOf, vaultRecordRefusal, type BindingInput, type DeliveryState } from "./delivery-binding";
 
 export const SITE_ENVIRONMENTS = new Set(["production", "staging", "preview", "development"]);
 export const SITE_HOST_KINDS = new Set(["our-box", "client-cpanel", "shared-hosting", "external", "unknown"]);
@@ -315,6 +316,185 @@ export async function claimProvisionedSiteDomain(
   } catch (err) {
     // ux_webdev_sites_tenant_domain: another live row in this tenant already holds this domain.
     if (pgCode(err) === "23505") throw new ConflictException("a site with this domain already exists");
+    if (pgCode(err) === "23514" || pgCode(err) === "23502") throw new BadRequestException("site payload failed a database constraint");
+    throw err;
+  }
+}
+
+// ═══ M6-P6g — the delivery binding, and a production row made from its staging row ═══════════════════════════════
+// Both are narrow writes on the registry, in the same closed-body spirit as the vaultRef PATCH and the domain claim above:
+// the binding sets exactly host_kind, host_ref, access and vault_ref; the production command inserts exactly one row.
+// Rules, refusals and the console word live in `delivery-binding.ts` (pure); this is their Postgres half.
+
+/** A registry row plus its delivery state (null for a row that is not a provisioned site). */
+export type DeliverySiteDto = WebdevSiteDto & { deliveryState: DeliveryState | null };
+
+function pgConstraint(err: unknown): string | undefined {
+  return typeof err === "object" && err !== null && "constraint" in err
+    ? (err as { constraint?: string }).constraint
+    : undefined;
+}
+
+/** Bind a site row to a delivery target: `host_kind`, an opaque `host_ref`, an `access` and a `vault_ref`.
+ *
+ *  One transaction, row locked `FOR UPDATE` (a re-bind and a clear never interleave). The vault record is read INSIDE the
+ *  transaction under the request tenant's RLS and with an explicit `tenant_id = $tenant`, so another tenant's record is
+ *  invisible: it is refused as `vault_ref_unknown`, the same answer as an id that does not exist (no existence oracle).
+ *  Nothing host-like, user-like or path-like has a column here; `parseBindingBody` already refused any such key. Both RLS
+ *  walls are set (`modules`). Re-binding an already bound row replaces the four facts. */
+export async function bindSiteDelivery(
+  tenantId: string,
+  siteId: string,
+  input: BindingInput,
+  actorId: string | null,
+): Promise<DeliverySiteDto> {
+  if (!looksLikeUuid(siteId)) throw new DeliveryRefusal("not_found", "webdev site not found");
+  return withTenants(
+    [tenantId],
+    async (c) => {
+      const cur = await c.query<SiteRow>(
+        `SELECT ${SELECT_COLS} FROM webdev_sites WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [siteId],
+      );
+      const site = cur.rows[0];
+      if (!site) throw new DeliveryRefusal("not_found", "webdev site not found");
+      // A preview or development row is never delivered to a host by the site CI.
+      if (site.environment !== "staging" && site.environment !== "production") {
+        throw new DeliveryRefusal("site_environment_not_deliverable", `only a staging or production row has a delivery target (this is ${site.environment})`);
+      }
+      const rec = await c.query<{ provider: string; status: string; owner_kind: string; owner_id: string }>(
+        `SELECT provider, status, owner_kind, owner_id FROM integration_connections
+          WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+        [input.vaultRef, tenantId],
+      );
+      const found = rec.rows[0];
+      if (!found) {
+        throw new DeliveryRefusal("vault_ref_unknown", "vaultRef must name an existing vault record of this tenant");
+      }
+      const refusal = vaultRecordRefusal(
+        { provider: found.provider, status: found.status, ownerKind: found.owner_kind, ownerId: found.owner_id },
+        input.access,
+        site.client_id,
+      );
+      if (refusal) throw new DeliveryRefusal(refusal.code, refusal.detail);
+
+      const upd = await c.query<SiteRow>(
+        `UPDATE webdev_sites SET host_kind = $2, host_ref = $3, access = $4, vault_ref = $5, updated_at = now()
+          WHERE id = $1 AND deleted_at IS NULL
+        RETURNING ${SELECT_COLS}`,
+        [siteId, input.hostKind, input.hostRef, input.access, input.vaultRef],
+      );
+      const row = upd.rows[0];
+      await emitEvent(c, tenantId, "webdev_site", row.id, "webdev.site.delivery_bound", {
+        // The label and the transport, never the credential: vaultRef is an opaque pointer already resolved above.
+        hostKind: row.host_kind, hostRef: row.host_ref, access: row.access, actorId,
+      });
+      return {
+        ...toDto(row),
+        deliveryState: deliveryStateOf({
+          origin: row.origin, hostKind: row.host_kind, hostRef: row.host_ref, access: row.access, vaultRef: row.vault_ref,
+          vaultRecord: { provider: found.provider, status: found.status },
+        }),
+      };
+    },
+    { modules: ["webdev"] },
+  );
+}
+
+/** Create a provisioned site's PRODUCTION row from its STAGING row.
+ *
+ *  M6-P4c registers a provisioned site as one `staging` row (origin `provisioned`). This adds its `production` sibling under
+ *  a real domain the caller supplies. The sibling copies what the two environments share (project, client, kind, repo, branch,
+ *  adoption, contract version) and nothing host-side: its binding starts empty (`host_kind unknown`, `access none`), because
+ *  production is usually a different host than staging and is bound on its own (`bindSiteDelivery`).
+ *
+ *  Refusals, each with a named reason: the row is not a live provisioned staging row (409); a live production row already
+ *  exists for this staging row or for this project (409 `production_row_exists`); the domain is already held by another live
+ *  row of the tenant, the staging row's own domain included (409 `domain_taken`). The staging row is locked `FOR UPDATE`, so
+ *  two concurrent calls cannot both win; the unique indexes (`ux_webdev_sites_one_production_per_staging`,
+ *  `ux_webdev_sites_one_production_per_project`, `ux_webdev_sites_tenant_domain`) are the backstop and map to the same reasons. */
+export async function createProductionFromStaging(
+  tenantId: string,
+  stagingId: string,
+  rawDomain: string,
+  actorId: string | null,
+): Promise<DeliverySiteDto> {
+  let domain: string;
+  try {
+    domain = normalizeSiteDomain(rawDomain);
+  } catch {
+    throw new DeliveryRefusal("production_domain_invalid", "domain is required, lowercase, no whitespace, 3-253 chars");
+  }
+  if (domain === "invalid" || domain.endsWith(".invalid")) {
+    throw new DeliveryRefusal("production_domain_invalid", "domain must be a real domain, not a .invalid placeholder");
+  }
+  if (!looksLikeUuid(stagingId)) throw new DeliveryRefusal("not_found", "webdev site not found");
+  try {
+    return await withTenants(
+      [tenantId],
+      async (c) => {
+        const cur = await c.query<SiteRow>(
+          `SELECT ${SELECT_COLS} FROM webdev_sites WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [stagingId],
+        );
+        const staging = cur.rows[0];
+        if (!staging) throw new DeliveryRefusal("not_found", "webdev site not found");
+        if (staging.environment !== "staging" || staging.origin !== "provisioned") {
+          throw new DeliveryRefusal("not_a_provisioned_staging_row", "only a provisioned site's staging row can be promoted to a production row");
+        }
+        const existing = await c.query<{ id: string }>(
+          `SELECT id FROM webdev_sites
+            WHERE tenant_id = $1 AND deleted_at IS NULL AND environment = 'production'
+              AND (promoted_from_site_id = $2 OR ($3::uuid IS NOT NULL AND project_id = $3::uuid))
+            LIMIT 1`,
+          [tenantId, stagingId, staging.project_id],
+        );
+        if (existing.rows[0]) {
+          throw new DeliveryRefusal("production_row_exists", "this site already has a production row");
+        }
+        const held = await c.query<{ id: string }>(
+          `SELECT id FROM webdev_sites WHERE tenant_id = $1 AND domain = $2 AND deleted_at IS NULL LIMIT 1`,
+          [tenantId, domain],
+        );
+        if (held.rows[0]) {
+          throw new DeliveryRefusal("domain_taken", `the domain ${domain} is already held by another live registry row of this tenant`);
+        }
+        const id = newId();
+        const ins = await c.query<SiteRow>(
+          `INSERT INTO webdev_sites
+             (id, tenant_id, domain, environment, project_id, client_id, kind, repo_url, repo_branch, adoption,
+              contract_version, origin, notes, promoted_from_site_id, origin_site)
+           VALUES ($1, $2, $3, 'production', $4, $5, $6, $7, $8, $9, $10, 'provisioned', $11, $12, $13)
+           RETURNING ${SELECT_COLS}`,
+          [
+            id, tenantId, domain, staging.project_id, staging.client_id, staging.kind, staging.repo_url, staging.repo_branch,
+            staging.adoption, staging.contract_version,
+            `Production row created from the staging row ${staging.id}. Not yet bound to a host.`,
+            staging.id, config.originSite,
+          ],
+        );
+        const row = ins.rows[0];
+        await emitEvent(c, tenantId, "webdev_site", row.id, "webdev.site.created", {
+          domain: row.domain, environment: "production", origin: "provisioned", promotedFromSiteId: staging.id, actorId,
+        });
+        return {
+          ...toDto(row),
+          deliveryState: deliveryStateOf({
+            origin: row.origin, hostKind: row.host_kind, hostRef: row.host_ref, access: row.access, vaultRef: row.vault_ref,
+            vaultRecord: null,
+          }),
+        };
+      },
+      { modules: ["webdev"] },
+    );
+  } catch (err) {
+    if (pgCode(err) === "23505") {
+      // The indexes are the backstop for a race the FOR UPDATE could not see (a different staging row, a concurrent domain claim).
+      if (pgConstraint(err) === "ux_webdev_sites_tenant_domain") {
+        throw new DeliveryRefusal("domain_taken", `the domain ${domain} is already held by another live registry row of this tenant`);
+      }
+      throw new DeliveryRefusal("production_row_exists", "this site already has a production row");
+    }
     if (pgCode(err) === "23514" || pgCode(err) === "23502") throw new BadRequestException("site payload failed a database constraint");
     throw err;
   }

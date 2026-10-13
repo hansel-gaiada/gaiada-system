@@ -5,7 +5,9 @@
 //      (the allow-list is read from the hub's source, so a drift in either direction fails here).
 //   2. NEVER DECIDES: no send / countersign / decide / draft tool appears anywhere in the file.
 //   3. LOGIC: the three reminders and their day thresholds, silence when nothing qualifies, one digest per
-//      recipient, and a refusal from the hub THROWS instead of reading as "nothing to chase".
+//      distinct recipient, the per-client account-owner routing of (c) (owner-less clients fall back to the
+//      configured recipients), the internal sentinel client being skipped, and a refusal from the hub THROWS
+//      instead of reading as "nothing to chase".
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -164,13 +166,13 @@ describe("billing-chaser.json logic", () => {
     expect(p.counts).toEqual({ paymentsAwaitingConfirmation: 1, contractsAwaitingCountersignature: 1, contractsUnsignedByClient: 1 });
     expect(p.clients).toEqual([
       { id: "c-a", name: "Acme", payments: 1, countersign: 1, unsigned: 0 },
-      { id: "c-b", name: "Beta", payments: 0, countersign: 0, unsigned: 1 },
+      { id: "c-b", name: "Beta", payments: 0, countersign: 0, unsigned: 1, noAccountOwner: true }, // no owner on the fixture
     ]);
     expect(p.body).toContain("1 payment claim waiting over 2 days");
     expect(p.body).toContain("1 contract signed by the client and waiting over 1 day for our countersignature");
     expect(p.body).toContain("1 contract sent over 7 days ago and still unsigned by the client");
     expect(p.body).toContain("Acme (2)");
-    expect(p.body).toContain("Beta (1)");
+    expect(p.body).toContain("Beta (1, no account owner set)");
     expect(p.body).not.toContain("Quiet Co");
     expect(p.href).toBe("/clients/c-a/billing");
     expect(p.links).toEqual([{ label: "Acme", href: "/clients/c-a/billing" }, { label: "Beta", href: "/clients/c-b/billing" }]);
@@ -210,6 +212,121 @@ describe("billing-chaser.json logic", () => {
     at();
     expect(() => drive({ env: { AGENCY_TENANT_ID: "T1" } })).toThrow(/no recipient/);
     expect(drive({ env: { AGENCY_TENANT_ID: "T1" }, contracts: { "c-a": [], "c-b": [], "c-c": [] }, payments: { "c-a": [], "c-b": [], "c-c": [] } }).notify).toEqual([]);
+  });
+
+  describe("per-client account-owner routing (PV-D28)", () => {
+    // Two clients with different owners plus an owner-less one, and the internal sentinel (which must be ignored).
+    const OC = [
+      { id: "c-a", name: "Acme", owner_user_id: "u-alice", owner_name: "Alice" },
+      { id: "c-b", name: "Beta", owner_user_id: "u-bob", owner_name: "Bob" },
+      { id: "c-n", name: "Nobody Co", owner_user_id: null, owner_name: null },
+      { id: "c-i", name: "Gaiada Internal", isInternal: true, owner_user_id: "u-alice", owner_name: "Alice" },
+    ];
+    const unsignedC = (days: number) => ({ status: "sent", clientSigned: false, providerSigned: false, sentAt: ago(days) });
+    const OCONTRACTS: Record<string, unknown[]> = {
+      "c-a": [unsignedC(9), { status: "sent", clientSigned: true, providerSigned: false, sentAt: ago(2) }], // (c) + (b)
+      "c-b": [unsignedC(10), unsignedC(11)], // (c) x2
+      "c-n": [unsignedC(8)], // (c), no owner
+      "c-i": [unsignedC(30), { status: "sent", clientSigned: true, providerSigned: false, sentAt: ago(5) }], // would qualify, but internal
+    };
+    const OPAYMENTS: Record<string, unknown[]> = {
+      "c-a": [{ status: "pending", recordedAt: ago(4) }], // (a)
+      "c-b": [],
+      "c-n": [],
+      "c-i": [{ status: "pending", recordedAt: ago(9) }],
+    };
+    type Digest = { counts: Record<string, number>; clients: Array<Record<string, unknown>>; body: string; href: string };
+    const byRecipient = (items: Item[]) => Object.fromEntries(items.map((n) => [n.json.recipientId as string, n.json.payload as Digest]));
+
+    it("each owner gets only their own clients' (c) items; the configured recipients get (a), (b) and the owner-less (c), noted", () => {
+      at();
+      const { notify } = drive({ clients: OC, contracts: OCONTRACTS, payments: OPAYMENTS });
+      expect(notify.map((n) => n.json.recipientId)).toEqual(["u-owner-1", "u-owner-2", "u-alice", "u-bob"]); // configured first, one digest each, no duplicates
+      const d = byRecipient(notify);
+
+      expect(d["u-alice"].counts).toEqual({ paymentsAwaitingConfirmation: 0, contractsAwaitingCountersignature: 0, contractsUnsignedByClient: 1 });
+      expect(d["u-alice"].clients).toEqual([{ id: "c-a", name: "Acme", payments: 0, countersign: 0, unsigned: 1 }]);
+      expect(d["u-alice"].href).toBe("/clients/c-a/billing");
+      expect(d["u-alice"].body).not.toContain("Beta");
+      expect(d["u-alice"].body).not.toContain("Nobody");
+      expect(d["u-alice"].body).not.toContain("no account owner set");
+
+      expect(d["u-bob"].counts).toEqual({ paymentsAwaitingConfirmation: 0, contractsAwaitingCountersignature: 0, contractsUnsignedByClient: 2 });
+      expect(d["u-bob"].clients).toEqual([{ id: "c-b", name: "Beta", payments: 0, countersign: 0, unsigned: 2 }]);
+      expect(d["u-bob"].body).not.toContain("Acme");
+
+      for (const r of ["u-owner-1", "u-owner-2"]) {
+        expect(d[r].counts).toEqual({ paymentsAwaitingConfirmation: 1, contractsAwaitingCountersignature: 1, contractsUnsignedByClient: 1 });
+        expect(d[r].clients).toEqual([
+          { id: "c-a", name: "Acme", payments: 1, countersign: 1, unsigned: 0 }, // Acme's (c) went to Alice, not here
+          { id: "c-n", name: "Nobody Co", payments: 0, countersign: 0, unsigned: 1, noAccountOwner: true },
+        ]);
+        expect(d[r].body).toContain("Nobody Co (1, no account owner set)");
+        expect(d[r].body).not.toContain("Beta"); // Bob's (c) is Bob's alone
+      }
+    });
+
+    it("the internal sentinel client is ignored entirely, even with qualifying items", () => {
+      at();
+      const split = runCode("Split clients (skip if none)", [ok(OC)], {}, ENV);
+      expect(split.map((s) => s.json.clientId)).toEqual(["c-a", "c-b", "c-n"]);
+      const { notify } = drive({ clients: OC, contracts: OCONTRACTS, payments: OPAYMENTS });
+      expect(JSON.stringify(notify)).not.toContain("c-i");
+      expect(JSON.stringify(notify)).not.toContain("Gaiada Internal");
+      // and a book that is ONLY the internal client is silent
+      expect(drive({ clients: [OC[3]], contracts: OCONTRACTS, payments: OPAYMENTS }).notify).toEqual([]);
+    });
+
+    it("the owner survives the whole chain: Split -> Parse contracts -> Evaluate", () => {
+      at();
+      const split = runCode("Split clients (skip if none)", [ok(OC)], {}, ENV);
+      expect(split[0].json).toMatchObject({ clientId: "c-a", ownerUserId: "u-alice", ownerName: "Alice" });
+      expect(split[2].json).toMatchObject({ clientId: "c-n", ownerUserId: null, ownerName: null });
+      const parsed = runCode("Parse contracts", split.map((s) => ok(OCONTRACTS[s.json.clientId as string])), { "Split clients (skip if none)": split }, ENV);
+      expect(parsed[1].json).toMatchObject({ clientId: "c-b", ownerUserId: "u-bob", ownerName: "Bob" });
+    });
+
+    it("only owner items and no configured recipients: it does NOT throw, and delivers to the owners alone", () => {
+      at();
+      const none = { AGENCY_TENANT_ID: "T1" };
+      const { notify } = drive({
+        env: none,
+        clients: OC.slice(0, 2),
+        contracts: { "c-a": [unsignedC(9)], "c-b": [unsignedC(10)] },
+        payments: { "c-a": [], "c-b": [] },
+      });
+      expect(notify.map((n) => n.json.recipientId)).toEqual(["u-alice", "u-bob"]);
+      // ... but the moment an item is for the configured recipients (an owner-less (c), or any (a)/(b)) and none is set, it throws again
+      expect(() => drive({ env: none, clients: [OC[2]], contracts: OCONTRACTS, payments: OPAYMENTS })).toThrow(/no recipient/);
+      expect(() => drive({ env: none, clients: OC, contracts: OCONTRACTS, payments: OPAYMENTS })).toThrow(/no recipient/); // Acme's (a)/(b)
+    });
+
+    it("an owner who is also a configured recipient gets ONE merged digest, not two", () => {
+      at();
+      const { notify } = drive({ clients: OC, contracts: OCONTRACTS, payments: OPAYMENTS, env: { AGENCY_TENANT_ID: "T1", BILLING_NOTIFY_USER_IDS: "u-alice" } });
+      expect(notify.map((n) => n.json.recipientId)).toEqual(["u-alice", "u-bob"]);
+      const d = byRecipient(notify);
+      expect(d["u-alice"].counts).toEqual({ paymentsAwaitingConfirmation: 1, contractsAwaitingCountersignature: 1, contractsUnsignedByClient: 2 }); // Acme's (a)(b)(c) + Nobody Co's (c)
+    });
+
+    it("a blank owner id counts as no owner", () => {
+      at();
+      const { notify } = drive({
+        clients: [{ id: "c-n", name: "Nobody Co", owner_user_id: "  ", owner_name: "" }],
+        contracts: { "c-n": [unsignedC(8)] },
+        payments: { "c-n": [] },
+      });
+      expect(notify.map((n) => n.json.recipientId)).toEqual(["u-owner-1", "u-owner-2"]);
+      expect((notify[0].json.payload as Digest).body).toContain("no account owner set");
+    });
+
+    it("the notify node runs once per digest item (an HTTP Request node executes per input item) and Parse notify counts them", () => {
+      const n = node("MCP notify (in-app digest)") as unknown as { parameters: { jsonBody?: string }; executeOnce?: boolean };
+      expect(n.executeOnce).not.toBe(true); // executeOnce would send only the first recipient's digest
+      expect(n.parameters.jsonBody).toContain("recipientId: $json.recipientId"); // per-item expression, not a fixed id
+      expect(n.parameters.jsonBody).toContain("payload: $json.payload");
+      expect(runCode("Parse notify result", [ok({ ok: true }), ok({ ok: true }), ok({ ok: true })], {}, ENV)[0].json).toEqual({ ok: true, delivered: 3 });
+    });
   });
 
   it("a hub refusal on any read THROWS: a 403 is never an empty list", () => {

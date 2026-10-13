@@ -22,6 +22,90 @@ local stack). None of these mean "production-done".
 - **Harness, `webdesk/templates/_deploy/harness/` (run on `sumopod` only):** a real sshd and vsftpd (explicit TLS), a rogue copy of each, a plain-FTP vsftpd, nginx over HTTPS on the same volume, a probe and a client; one private network, no published ports. `run.sh` prints PASS or FAIL per case and removes everything it made.
 - **Docs:** `docs/plans/2026-10-11-webdesk-m6-plan.md` M6-P6e row.
 
+### platform-nest `0.112.1` - M6-P4g2: archiving a WebDesk site revokes its repo's deploy grant (WSK-D82) (2026-10-13) - PROTOTYPED
+
+- **The change:** after an approved `site.archive` executes, the executor (`webdesk-approved-command.ts`) calls the new `revokeDeployAfterArchive()`.
+  - It finds every provisioned site whose `webdesk_tenant_slug` is the archived site's WebDesk tenant.
+  - It runs `revokeDeployForSite` on each, as the decider, with a reason naming the site and the approval.
+- **It never fails or undoes the archive.** The archive is irreversible in WebDesk.
+  - The result's new optional `deployRevoke` lists each repo as `revoked`, `not_granted`, `partial` or `failed`, with a typed error: a refusal's row token, `forbidden`, `deploy_revoke_failed` or `lookup_failed`.
+  - A failure is logged for the operator route.
+  - Before O-3 every revoke is expected to answer `not_granted` or `github_permission_missing`.
+- **Tests:** `webdesk-archive-revoke.unit.test.ts`, 7 tests.
+
+### platform-nest `0.112.0` - M6-P6g: the delivery binding in the registry (2026-10-13) - PROTOTYPED
+
+- **What this adds:** a site row can be bound to WHERE it is delivered and HOW we reach it, and the console can tell "awaiting deploy credential" from "ready". Nothing is deployed; no host, user, path or secret is stored.
+  - **Plan:** `docs/plans/2026-10-11-webdesk-m6-plan.md` §6.0 and the M6-P6g row (WSK-D79: targets are per site; HSR-4 and HSR-8 for new rows).
+- **Migrations (both additive; no DML):**
+  - `202610132100_search_properties_control_panel_hpanel.sql` (HSR-4): adds `hpanel` to `search_properties.control_panel`'s CHECK.
+    - **Not typed from memory.** The new list is read from the LIVE definition (`pg_get_constraintdef`) and `hpanel` is unioned in (the VLT-1 idiom). The only migration that ever touched that constraint is `202608300818` (the five values `cpanel plesk directadmin none other`); the file asserts every earlier value survived and that exactly one such CHECK exists, and a re-run is a no-op.
+    - **NULL stays valid**, explicitly (`control_panel IS NULL OR ...`): NULL means "not surveyed".
+  - `202610132110_webdev_sites_promoted_from.sql`: `webdev_sites.promoted_from_site_id`, a composite same-tenant FK to the staging row, a CHECK (a row that names a staging row is a production row and not its own origin) and a partial unique index.
+    - **Why:** the existing one-production-per-project index is partial on `project_id IS NOT NULL`, so a project-less provisioned site could get two production rows. The new index makes "once only" true for every site.
+- **`POST sites/:id/delivery-binding`** (authz `webdev_site · update`, no new action):
+  - **Body:** EXACTLY `{hostKind, hostRef, access, vaultRef}`. Any other key is a 400 `binding_body_invalid`, so a host, user, path or secret is refused rather than ignored.
+  - **Values:**
+    - `hostKind` is `shared-hosting` or `our-box` (`delphi`/`helios` stay per-site targets).
+    - `hostRef` is an opaque label (`^[a-z0-9][a-z0-9_-]{0,62}$`: no dot, `@`, slash, colon or space).
+    - `access` is `ssh` (SFTP) or `ftp` (FTPS). No new `access` value was needed.
+  - **`vaultRef`:** read inside the same transaction under RLS with `tenant_id = $tenant`, so another tenant's record and an id that does not exist both answer `422 vault_ref_unknown` (no existence oracle). It must also be:
+    - not deleted, and `linked` (`vault_ref_not_linked`);
+    - the provider the access needs: `ssh` for `ssh`, `ftp` for `ftp` (`vault_ref_wrong_provider`);
+    - owned by the company or by this site's own client (`vault_ref_wrong_owner`).
+  - **Row and result:** a staging or production row only (`site_environment_not_deliverable` otherwise); the row is locked `FOR UPDATE`. A re-bind replaces the four facts. Emits `webdev.site.delivery_bound` (no pointer in the payload) and writes an `activities` row.
+- **`POST sites/:id/production`** (authz `webdev_site · create`): creates a provisioned site's production row from its staging row.
+  - **Body:** EXACTLY `{domain}`. The new row copies project, client, kind, repo, branch, adoption and contract version, and starts unbound.
+  - **Refusals (409):** `production_row_exists` (once only, also for a project-less site), `domain_taken` (names the domain; the staging row's own domain included), `not_a_provisioned_staging_row`. A `.invalid` or malformed domain is a 400 `production_domain_invalid`. The registry's unique domain index still holds.
+- **The console's delivery state:** `deliveryState` is `awaiting_deploy_credential` for a provisioned site until the binding is complete, then `ready`; null for a row that is not a provisioned site. `ready` needs a bindable host kind, a `host_ref`, a deploy transport and a vault record that still resolves, is linked and is the right provider, so a revoked record turns a once-ready site back into awaiting.
+  - **Where:** `GET console/portfolio` (each site, additive `deliveryState`), `GET console/sites` (each row, additive `delivery.environments`) and `GET provisioned-sites/:id` (additive `delivery`).
+  - **Not the deploy grant.** `deployGrant` (M6-P4g) is GitHub-side; this is host-side. They are read by different queries and shown side by side, and no combined "ready" exists.
+- **Tests:**
+  - `delivery-binding.unit.test.ts`: 18 cases (body, host label, vault rules, console word).
+  - `delivery-binding.db.test.ts`: the standing every-earlier-value CHECK test, a rebuild from an old-definition database, a later-added value surviving, a re-run no-op; bind, cross-tenant and unknown vault ref, nothing host-like stored, production-from-staging once only and the indexes bypassed, RLS, console states.
+  - `delivery-binding-http.test.ts`: `app.inject`, real Cerbos.
+  - **Not run locally** (no Docker, owner order; the shared checkout's installed dependencies are stale). The unit suite and `tsc` ran; the DB and HTTP suites are the server gate.
+- **Capability inventory:** regenerated (`UPDATE_INVENTORY=1`), the webdev driver count 31 to 32 for the new HTTP suite. `docs/MAP.md` regenerated (migration head).
+
+### platform-ui `0.108.0` - DW-1: the department workspace foundations, no visible change (2026-10-13) - PROTOTYPED
+
+Department workspaces plan (`docs/plans/2026-10-13-department-workspaces.md`), phase DW-1. Nothing renders from these files yet; DW-2 draws the new shell from them.
+- **DW-1a, the registry (`lib/workspaces.ts`).** One pure, client-safe description of every workspace:
+  - Web Dev, SEO, Social Media, Creatives and the Office of the GM (the agency pack, by the `toolkitFor` rule);
+  - HR, Finance and IT (every vertical) and the generic workspace;
+  - the You, Company and Admin areas.
+
+  Each holds its Work rows and tabs with absolute hrefs, the shared Performance block, the Tools & connections set, Overview widgets, pulse tiles, quick actions, KPI starting sets and owned routes. Gates are data copied from nav.ts and the consoles. Anything unbuilt carries its DW ticket and is never rendered. The test pins that every built href lands on an existing page, that every tab of today's toolkits and of the HR, Finance and IT consoles keeps a home, and that no company is named.
+- **DW-1b, the person's workspaces (`lib/workspaceAccess.ts`, `lib/workspaces-data.ts`).** `resolveMyWorkspaces` picks the home: org placement, then a led unit, then an HR, Finance or IT role (or service scope), then the Office of the GM for GM access, else the Company area. The switcher lists every department, the Office of the GM first. `gateAllows` evaluates the registry gates, with tests proving parity with nav.ts. `concreteRows` gives a Web Dev employee 16 rows today and 19 once the planned rows land (plan §0).
+- **DW-1c, areas (`lib/areas.ts`).** `areaFor(path)` puts every page in exactly one area (a workspace, Company, Admin, personal, performance or shared), with Next.js's static-over-dynamic precedence. `resolveArea` is the last-area rule. A test walks all 231 page files and fails on a page with no area or two.
+- **DW-1d, the pilot switch (`lib/shellLayout.ts`).** A `shell` field in `gaiada_prefs` (classic by default) and `setShellLayoutAction`. Nothing calls it yet. `savePrefs` now spreads the current prefs, so saving Account settings no longer resets fields the form does not show.
+- **DW-1e, the unit-aware mirror (`lib/rbac.ts`).** Adds `leadUnits`, `isLeadOf`, `canInUnit` and `unitPathOf`. Only `org_unit_lead` at org_unit scope counts, and only in a company the person belongs to. `can()` is unchanged, so a unit grant still never answers a company-wide question.
+- **Rebased onto main `a12fa545`.** PV5-09 added `/finance/settings/billing-profile`. The test that every console page keeps a home caught it, so it is now a Finance tab beside Settings, like IT's network sub-pages.
+- **Not changed:** no page, route, gate or server call.
+- **Tests:** tsc and the eight touched suites were green locally (203 tests), as a dev loop only. The GitHub Actions run is the gate.
+
+### infra `0.13.16` - the Umami/collector edge never writes a visitor's address to its logs (2026-10-13) - DEV-VERIFIED
+
+- **Found by the M5 end-to-end QA on sumopod.** The edge nginx logged at `warn`. A request body larger than the in-memory buffer (any replay chunk over about 16 KB) was spilled to a temp file, and the warn line named `client: <the visitor's address>`, which Docker's logs kept.
+  - Request-level `error` lines carry the same field, e.g. when the collector is down.
+  - This applied to the live Umami edge since it went live.
+- **The fix, in `infra/sumopod/umami/nginx/nginx.conf`:**
+  - `error_log /dev/stderr crit`;
+  - `client_body_buffer_size 32k`, matching the server cap;
+  - the templated `/lib/kestrel/r` location keeps its 320k body in memory.
+- **New `check-config.sh` checks** keep all three in place.
+- **Verified:**
+  - `check-config.sh` ALL PASS on sumopod;
+  - the end-to-end QA re-run: 5 test IPs, 0 hits in every log and both dumps;
+  - GitHub Actions 38334930360.
+- **The live `umami` edge takes this on its next `docker compose up -d edge`.**
+
+### automation `0.6.3` - `wf:billing-chaser` sends each client's unsigned-contract reminders to that client's account owner (2026-10-13) - PROTOTYPED
+
+- Completes PV-D28's routing. A contract the client has not signed for more than 7 days goes to that client's `owner_user_id` (from `clients.list`, which already carries it; no hub or platform change). A client with no owner falls back to the configured recipients, with a "no account owner set" note. Payment claims (more than 2 days) and countersign waits (more than 1 day) stay with the configured recipients (`BILLING_NOTIFY_USER_IDS`, else `NOTIFY_USER_ID`). There is one digest per recipient, each covering only that recipient's clients, and the internal sentinel client is skipped.
+- Live data: 0 of 71 clients have an account owner today, so every reminder still reaches the configured recipients until owners are set (client Edit → Owner).
+- Verified: the workflow test runs its Code nodes on fixtures (23/23 on sumopod). Teeth: routing (c) to the configured recipients only fails 3 tests. Re-imported into the live n8n by CLI (id kept) and re-activated.
+
 ### infra `0.13.15` - M6-P4p: the hub can reach the agent runner (2026-10-13) - PROTOTYPED
 
 - **The bug:** found live by the M6 P4 gate after 369. Six pinned gate sites reached `code.scaffold` and stopped: the hub answered "agent runner not configured (AGENT_RUNNER_URL empty)" (n8n executions 2753-2759).
