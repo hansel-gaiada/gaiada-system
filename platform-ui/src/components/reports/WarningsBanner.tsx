@@ -1,4 +1,4 @@
-import type { ReportHeader } from "@/lib/reports";
+import { formatDateRange, type ReportHeader } from "@/lib/reports";
 import "./reports.css";
 
 // §7 amendment: "silence here is a lie of omission" — a user-chosen range
@@ -6,9 +6,13 @@ import "./reports.css";
 // future, precedes-fact-history, spans-membership-change), so every set flag
 // on `header.warnings` renders, always, above the charts — never a dismissed
 // toast, never collapsed by default.
+// DW-4m: the comparison window's own flags (`header.comparison.noFacts` /
+// `.precedesFactHistory`) render here too, so a delta against an empty or
+// partly empty baseline is never silent. The banner shows when only one of
+// those is set, with no `warnings` at all.
 export function WarningsBanner({ header }: { header: ReportHeader }) {
-  const w = header.warnings;
-  if (!w) return null;
+  const w = header.warnings ?? {};
+  const cmp = header.comparison;
   const items: { text: string; tone: "info" | "risk" }[] = [];
   if (w.adHoc) {
     items.push({ tone: "info", text: "Ad hoc · unsealed — this custom range is a live computation, not the authoritative sealed record, and can't be used for appraisal." });
@@ -24,6 +28,11 @@ export function WarningsBanner({ header }: { header: ReportHeader }) {
   }
   if (w.spansMembershipChange) {
     items.push({ tone: "risk", text: "Spans a membership change — this subject moved unit partway through the range, so department totals may be split across units." });
+  }
+  if (cmp?.noFacts) {
+    items.push({ tone: "risk", text: `No comparison: the previous period (${formatDateRange(cmp.periodStart, cmp.periodEnd)}) has no records.` });
+  } else if (cmp?.precedesFactHistory) {
+    items.push({ tone: "risk", text: `Compared with a period that starts before records began on ${cmp.precedesFactHistory.firstFactDate}; the change is against a partly empty baseline.` });
   }
   if (items.length === 0) return null;
   return (
