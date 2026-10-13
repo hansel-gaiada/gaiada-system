@@ -7160,6 +7160,121 @@ The deploy restarts Cerbos and then probes it.
 - **Cerbos restart:** the policy count rises by one, and Cerbos is probed after a restart on the gate.
 - **UI vitest:** the chip mapping, the version badge, and actions hidden by capability.
 
+## 36. Figma links on tasks, requests and campaign parts (DW-6k, 2026-10-13) — `platform-nest/src/core/figma/` (new) — **STATUS: CONTRACT (nothing built; live proof waits for Figma API access, DW-11)**
+
+Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.1 (Figma, owner ruling DW-Q6: "use Figma too"), §4.2 (DW-6k) and §14.1 (launch and return). Editing still happens in Figma, because a design tool cannot run inside the ERP. This section adds the connected half:
+- link a file or frame to the work it belongs to;
+- see its thumbnail, when it last changed and its open comments;
+- export it into the Asset Library as a version.
+
+That way delivery and review stay in the ERP, and every delivered design exists as a file the ERP holds (the vendor doctrine's exit, §2.6).
+
+### 36.1 The connection
+
+- **Provider.** The credential vault gains the provider `figma`: the `integration_connections` provider CHECK is widened by migration, and `CONNECTION_PROVIDERS` in `core/integrations.service.ts` is updated.
+- **Scope.** The connection is per company (`owner_kind = 'company'`). Its token is sealed like every other token.
+- **Token types.**
+  - A personal access token is sent as the `X-Figma-Token` header.
+  - An OAuth token is sent as `Authorization: Bearer`. The OAuth app itself is the owner step in DW-11.
+- **Who manages it.** Connecting and disconnecting needs `company.manage`, on the Tools & connections page, where the Figma kind loses its `DW-6k` ticket. Everyone sees whether it is connected.
+- **Who it serves.** Only the company's own Figma team files are reachable: whatever the token can read.
+
+### 36.2 Data model (one migration, timestamp-named after main's newest)
+
+**`figma_links`** (new). RLS is ENABLE plus FORCE, with the standard `tenant_isolation` policy.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid PK` | |
+| `tenant_id` | `uuid NOT NULL → companies` | |
+| `target_kind` | `text NOT NULL CHECK (target_kind IN ('pm_task','work_request','campaign_part'))` | |
+| `target_id` | `uuid NOT NULL` | `pm_tasks.id`, `work_requests.id` (§32) or `agency_campaign_parts.id` (§31). There is no FK across three tables; the route checks that it exists in the tenant |
+| `file_key` | `text NOT NULL` | From the URL |
+| `node_id` | `text NULL` | A frame, in the API form `1:2`. `NULL` means the whole file |
+| `url` | `text NOT NULL` | As pasted, normalised |
+| `title` | `text NULL` | Cached: the file name, and the frame name when there is one |
+| `last_modified` | `timestamptz NULL` | Cached from the file |
+| `open_comments` | `int NULL` | Cached: comments with no `resolved_at` (on the node, when one is set) |
+| `cached_at` | `timestamptz NULL` | |
+| `asset_group_id` | `uuid NULL → creative_assets(id)` | The Asset Library group its exports go into (§35) |
+| `created_by` | `uuid NOT NULL → users` | |
+| `created_at`, `deleted_at` | `timestamptz` | |
+
+- Unique: `(tenant_id, target_kind, target_id, file_key, COALESCE(node_id, '')) WHERE deleted_at IS NULL`.
+- Index: `(tenant_id, target_kind, target_id) WHERE deleted_at IS NULL`.
+
+**Parsing the URL.**
+- Hosts: `www.figma.com` and `figma.com`.
+- Paths: `/design/<key>/…`, `/file/<key>/…` and `/proto/<key>/…`.
+- The optional `node-id` query uses `-` in the URL and `:` in the API (`1-2` becomes `1:2`).
+- Anything else answers 400 `{ field: "url" }`. The parser is a pure function with its own tests.
+
+### 36.3 Reading Figma (server side only)
+
+- **Calls.** Figma's REST API under the company token:
+  - the file (`GET /v1/files/:key`, shallow depth) for the name and `lastModified`;
+  - the nodes (`GET /v1/files/:key/nodes?ids=`) for a frame's name;
+  - comments (`GET /v1/files/:key/comments`);
+  - renders (`GET /v1/images/:key?ids=&format=&scale=`).
+- **Cache.** A link's cached fields refresh when they are older than 10 minutes and someone reads the link. A failed refresh keeps the old values and marks the link `stale`.
+- **Thumbnails** are rendered by Figma and expire, so they are **proxied and never stored**. `GET …/figma-links/:id/thumbnail` streams a small PNG with `Cache-Control: private, max-age=600`.
+- **Failures.** No connection answers `figma_not_connected`. A token Figma refuses answers `figma_refused`. Neither is ever shown as "no comments" or as an empty file.
+- **Rate limits.** Figma rate-limits its API. A 429 sets `stale` and is retried on a later read, never in a loop.
+- **The client.** Everything goes through one thin client module whose responses are typed from Figma's documented shapes. Tests use recorded, trimmed fixtures of those shapes, never invented fields.
+
+### 36.4 Exports into the Asset Library
+
+`POST …/figma-links/:id/export` with `{ format: "png" | "svg" | "pdf", scale?: 1 | 2 | 3 }`:
+- The server renders the frame (or the file's first page when there is no node), downloads the result, and saves it as a `creative_assets` row:
+  - `content_type` is the format's own type;
+  - `grade` is `{ "source": "figma", "fileKey", "nodeId", "lastModified" }`;
+  - `department_id` is the target's department where it has one.
+- The **first** export starts a version group and records it on the link (`asset_group_id`). Every later export is a new version of that group (§35.2), so the Asset Library holds the design's history and a review round can review it (§35.3).
+- **Linking to a request.** When the target is an `assets` work request (§32), the export is not delivered automatically. Delivering stays DW-5's explicit step. The request page offers the exported asset to deliver.
+
+### 36.5 Routes and authorization
+
+There is **no new Cerbos kind**. A link is part of the work it is on, so it is authorised by that work's own kind.
+
+| Method | Path | Authz |
+|---|---|---|
+| GET | `/api/:t/figma-links?targetKind=&targetId=` | `read` on the target (`pm_task`, `work_request` or `agency_campaign_part`) |
+| POST | `/api/:t/figma-links` `{ targetKind, targetId, url }` | Writing to the target: `pm_task` · `update`; `agency_campaign_part` · `update`; `work_request` · `deliver` **or** `cancel` (the receiving side or the asker) |
+| DELETE | `/api/:t/figma-links/:id` | The same write check on the link's target |
+| GET | `/api/:t/figma-links/:id/thumbnail` | `read` on the link's target |
+| POST | `/api/:t/figma-links/:id/export` | The write check on the target **and** `file` · `create`, today's Asset Library save gate |
+
+- Authorise first, then validate.
+- Error tokens go at the start of `message`: `figma_not_connected`, `figma_refused`, `target_not_found`, `bad_figma_url`.
+- A target from another tenant answers 404.
+
+### 36.6 UI
+
+- **Where it shows.** The PM task page, the request page (§32) and the campaign part (§31) each gain a **Designs** section.
+- **Each link shows:**
+  - its thumbnail and title;
+  - "changed <relative time>";
+  - "<n> open comments", which opens Figma at the frame;
+  - "Open in Figma";
+  - Export (PNG, SVG or PDF), which lands in the Asset Library and shows the new version number.
+- **Adding a link.** Paste a Figma URL; it is checked before it is saved.
+- **When Figma is not connected,** the section shows its links with the cached values and one line: "Figma isn't connected for this company". It never shows empty comments. Managers see a link to Tools & connections.
+- **Thumbnails** load lazily, with alt text set to the title.
+
+### 36.7 Tests
+
+- **Unit:**
+  - URL parsing across `design`, `file` and `proto`, with and without `node-id`, and other hosts refused;
+  - the open-comment count (resolved, on-node and off-node comments).
+- **DB/HTTP suite (Linux CI gate: Postgres and Cerbos), with the Figma client stubbed from recorded fixtures:**
+  - create, list and delete per target kind;
+  - the write check per kind, including a `work_request` asker (cancel) and receiver (deliver), and a stranger refused;
+  - another tenant's target answers 404;
+  - the 10-minute refresh, and `stale` on a failed or 429 refresh;
+  - an export creates version 1 and then version 2 in the link's group;
+  - `figma_not_connected` when there is no connection.
+- **Live proof** waits for Figma API access (DW-11 item 7): one file linked, a thumbnail shown, comments counted, one export landing in the Asset Library, observed on the live ERP.
+
 ## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
 
 **Why.** A head's Team report must list everyone in their unit. `GET /reports/overview?grain=person` lists only people who have fact rows in the range, so a quiet team member would silently drop off the page. An empty or short list is a claim; this one would be false. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.1 and §5.6.
