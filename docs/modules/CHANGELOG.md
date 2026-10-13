@@ -11,6 +11,65 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.121.0` - DW-5a, DW-5c and DW-5g: campaign parts, requests between departments, and client replies in Needs you (2026-10-13) - PROTOTYPED
+
+Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §31 (campaign parts) and §32 (requests between departments). Plan: `docs/plans/2026-10-13-department-workspaces.md` §7.3. Rulings: DW-D13 and DW-D14.
+- **DW-5a, campaign parts.**
+  - **The data.** A shared campaign (`agency_campaigns`) gains a lead department and dates. It gets one part per taking-part department (`agency_campaign_parts`): owner, status, brief, due date, and an optional allocation from the campaign budget.
+  - **Links.** A department's own SEO and Social campaigns link to its part through `agency_part_id`.
+  - **The money rule (§31.3).** Allocations never exceed the campaign budget, enforced under a row lock on the campaign. A part has no currency of its own. The server does every sum. Spend is not rolled up.
+  - **Routes.** Eight routes under `modules/agency`.
+  - **Access.** New Cerbos kind `agency_campaign_part`. `allocate` is a separate action from `update`. The part's owner and the department head may update a part. There is no permission arm for `update` (§31.7).
+- **DW-5c, requests between departments.**
+  - **The model.** A request is the ask (`work_requests`); the work stays where the receiver works. An asset request becomes a PM task owned by the receiving department. An engineering request becomes an internal Web Dev change request.
+  - **Intake projects.** Both kinds live in the department's intake project, "<Department> · Requests" (`work_request_intakes`). It is created once, even when two requests race to create it.
+  - **Routes.** Seven routes under `/api/:tenantId/requests`.
+  - **Change-request sync.** Triage decline, verify and unverify move the ask. An internal requester gets one notification, not two.
+  - **Access.** New Cerbos kind `work_request`:
+    - any member may ask, and bots are refused;
+    - the assignee delivers;
+    - the department head or a manager declines;
+    - the requester cancels.
+
+    The new attributes `requestedBy` and `assigneeIds` are added to the allow-list.
+  - **PM.** One new export, `closePmTaskInTx`.
+- **DW-5g, the staff conversation list's `mine` filter.**
+  - **The filter.** `GET /api/:t/conversation` takes `mine=true|false|all`. `mine=true` keeps the threads where the caller is a staff recipient, by the same rule as PV-4's notifications: a staff author with a live message, the project's owner, or the client's account manager.
+  - **One rule, used twice.** `staffRecipientIdsSql` in `conversation-notify.ts` now serves both the notification path and this filter. Who gets notified is unchanged.
+  - **What it is not.** It is a filter inside the already-authorized list, not an authorization rule. The MCP tool is unchanged.
+- **Migrations:** `202610140500_agency_campaign_parts.sql`, `202610140510_iam_agency_campaign_part_permissions.sql`, `202610140600_work_requests.sql`, `202610140610_iam_work_request_permissions.sql`.
+- **Cerbos change:** two new policies, plus derived roles. **Restart Cerbos after the deploy, then probe it.** No compose change.
+  - The department head's reach grows by `agency.campaign_part.update`, `core.work_request.deliver` and `core.work_request.decline`.
+  - All three are unit-bounded and pinned in `principal-scope-constrained-perms.db.test.ts`.
+- **CI:** GitHub Actions `ci.yml` was green on the pre-rebase branches:
+  - run 38391485322, on `deb5f78a`;
+  - run 38394652379, on the combined candidate `d8d29fad` (16 jobs).
+
+  Suites: `work-requests.test.ts` 48, `cerbos-work-request.test.ts` 43 (live), `work-requests.service.test.ts` 39, `campaign-parts.test.ts` 34, `cerbos-agency-campaign-part.test.ts` 34 (live) and `agency-campaign-parts.service.test.ts` 36. The landing sha gets its own run.
+
+### platform-ui `0.124.0` - DW-5b, DW-5c UI, DW-5d, 5e, 5f, 5g and 5h: campaigns and requests between departments (2026-10-13) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §31.7 and §32.10 (the "UI" paragraphs). Plan: §7.1 to §7.3.
+- **Campaigns.**
+  - **Campaigns › Shared** in every agency workspace (`/departments/[deptId]/campaigns`).
+  - **Social campaigns** (`/departments/[deptId]/campaigns/social`): list, create, and link to a shared part.
+  - **The campaign page** (`/agency/[campaignId]`) shows the money block as the server returns it, the lead department and dates, and a Parts section.
+  - **Gating.** New capability `agency.campaign.manage`. A part's owner and its department head may edit that part.
+- **Requests.**
+  - **The form** (`/requests/new?to=creatives|web-dev`): the receiving department is found in the org tree, the fields depend on the kind, and a campaign part is optional.
+  - **The request page** (`/requests/[id]`) shows the live work and offers cancel, decline, deliver and deliver more. Assets are picked from the Asset Library. New capability `work_request.decide`.
+  - **`/requests`** lists my requests.
+  - **Requests › Sent** in every agency workspace (DW-5h).
+  - **Creatives › Requests** gains Incoming and Delivered (DW-5d).
+  - **Web Dev's Incoming** shows where each internal request came from (DW-5e).
+  - **"Ask Creatives for assets" and "Ask Web Dev"** (DW-5f) use a new `hasWorkspace` gate, so they show only where the company has the receiving department.
+- **Needs you (DW-5g).** It gains a `conversation` item, "A client is waiting for your reply", from `GET conversation?awaitingReply=true&mine=true` for each company.
+  - **Rank.** Tier 15,000: below approvals, gates and overdue tasks, and above tasks due today. The longest wait comes first.
+  - **A failed read** adds `conversations` to the company's `partialSources`, so Needs you says it is incomplete and never shows an empty list.
+- **New route** `GET /api/creative-assets/[assetId]`: the staff download of a delivered asset. It forwards the caller's session and active company, and sends the same four download headers as `/api/files/[fileId]`.
+- **Honest reads.** Every read is a `ReadResult`. A refusal or a failure says so in words; nothing is ever shown as 0 or an empty list. Money is converted from a typed amount by an exact string parser, and the UI never adds or subtracts money.
+- **Local runs on the landing branch** (on DW-6 `693f3f4b`, which is on 378): see the landing commit. `next build` passed on each ticket's branch. The pages have not yet been driven in a browser.
+
 ### platform-ui `0.123.0` - DW-6a, 6b, 6c and 6e: department Work menus proved, "Client reports", Tools & connections with pins (2026-10-13) - PROTOTYPED
 
 - **What.** The first DW-6 work (plan §4.2). DW-1a had already put every §4 row in the registry and DW-2 draws them, so 6a, 6b and 6e are proofs plus one label; 6c is the pilot's Tools & connections page.
