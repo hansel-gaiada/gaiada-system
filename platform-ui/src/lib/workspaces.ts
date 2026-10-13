@@ -140,6 +140,8 @@ export interface Workspace {
   overview: readonly OverviewWidget[];
   pulse: readonly PulseTile[];
   quickActions: readonly QuickAction[];
+  /** The keys of this workspace's own create actions, from its quickActions, in order. "+ New" lists them first (DW-2f). */
+  creates: readonly string[];
   kpis: readonly DeptKpi[];
   /** Route prefixes OUTSIDE `/departments/{dept}` that belong to this workspace (`areaFor`, DW-1c). */
   ownedRoutes: readonly string[];
@@ -309,6 +311,7 @@ const WEB_DEV: Workspace = {
     { key: "runs-waiting-approval", label: "Runs waiting approval", ticket: "DW-3e" },
     { key: "deliverables-due", label: "Deliverables due", ticket: "DW-3e" },
   ],
+  creates: ["new-briefing"],
   quickActions: [
     { key: "new-briefing", label: "New briefing", href: deptPath("prd") },
     { key: "triage-requests", label: "Triage requests", href: deptPath("requests") },
@@ -361,6 +364,7 @@ const SEO: Workspace = {
     { key: "client-reports-waiting", label: "Client reports waiting", ticket: "DW-3e" },
     { key: "budgets-off-pace", label: "Budgets off pace", ticket: "DW-3e" },
   ],
+  creates: ["new-content-brief"],
   quickActions: [
     { key: "run-site-audit", label: "Run a site audit", href: deptPath("audit") },
     { key: "new-content-brief", label: "New content brief", href: deptPath("briefs") },
@@ -407,6 +411,7 @@ const SOCIAL_MEDIA: Workspace = {
     // Needs the inbox sync backend first (SMM-15).
     { key: "unanswered-inbox", label: "Unanswered inbox", ticket: "DW-3e after SMM-15" },
   ],
+  creates: ["compose-post"],
   quickActions: [
     { key: "compose-post", label: "Compose a post", href: deptPath("composer") },
     ...ASK_ACTIONS,
@@ -449,6 +454,7 @@ const CREATIVES: Workspace = {
     { key: "due-this-week", label: "Due this week", ticket: "DW-3e" },
     { key: "delivered-this-period", label: "Delivered this period", ticket: "DW-3e" },
   ],
+  creates: ["upload-to-library"],
   quickActions: [
     { key: "open-image-studio", label: "Open Image Studio", href: deptPath("studio") },
     { key: "upload-to-library", label: "Upload to library", href: deptPath("assets") },
@@ -497,6 +503,7 @@ const OFFICE_OF_THE_GM: Workspace = {
     { key: "project-health", label: "Project health", ticket: "DW-3i" },
     { key: "utilization", label: "Utilization", ticket: "DW-3i" },
   ],
+  creates: [],
   quickActions: [
     { key: "business-review", label: "Business review", href: deptPath("review") },
     { key: "decisions", label: "Decisions", href: deptPath("decisions") },
@@ -580,6 +587,7 @@ const HR: Workspace = {
     { key: "open-cases", label: "Open cases", ticket: "DW-7e" },
     { key: "payroll-status", label: "Payroll status", ticket: "DW-7e" },
   ],
+  creates: ["new-hire"],
   quickActions: [
     { key: "approve-leave", label: "Approve leave", href: "/hr/leave", gate: HR_ON },
     { key: "new-hire", label: "New hire", href: "/hr/onboarding", gate: HR_ON },
@@ -658,6 +666,7 @@ const FINANCE: Workspace = {
     { key: "close-progress", label: "Close progress", ticket: "DW-7e" },
     { key: "integrity-findings", label: "Integrity findings", ticket: "DW-7e" },
   ],
+  creates: ["record-journal"],
   quickActions: [
     { key: "confirm-payments", label: "Confirm payments", href: "/finance/receivables" },
     { key: "record-journal", label: "Record a journal", href: "/finance/journals" },
@@ -711,6 +720,7 @@ const IT: Workspace = {
     { key: "account-requests", label: "Account requests", ticket: "DW-7e" },
     { key: "failing-workflows", label: "Failing workflows", ticket: "DW-7e" },
   ],
+  creates: ["register-device"],
   quickActions: [{ key: "register-device", label: "Register a device", href: "/it/devices", gate: IT_ON }, ...ASK_ACTIONS],
   kpis: [
     { key: "uptime", label: "Device and network uptime" },
@@ -739,6 +749,7 @@ const GENERIC: Workspace = {
     { key: "due-soon", label: "Due soon", ticket: "DW-3e" },
     { key: "blocked", label: "Blocked", ticket: "DW-3e" },
   ],
+  creates: ["new-task"],
   quickActions: [{ key: "new-task", label: "New task", href: "/tasks/new" }],
   kpis: [
     { key: "projects-on-time", label: "Projects on time" },
