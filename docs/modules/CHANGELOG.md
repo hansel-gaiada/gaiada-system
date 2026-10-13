@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.123.0` - DW-6a, 6b, 6c and 6e: department Work menus proved, "Client reports", Tools & connections with pins (2026-10-13) - PROTOTYPED
+
+- **What.** The first DW-6 work (plan §4.2). DW-1a had already put every §4 row in the registry and DW-2 draws them, so 6a, 6b and 6e are proofs plus one label; 6c is the pilot's Tools & connections page.
+  - **6b, "Client reports".** SEO's Accounts tab and its page title now say "Client reports" (the route is unchanged), so it is never confused with the department's Reports row. This shows in the classic console too (`lib/deptToolkits.ts`, `departments/[deptId]/reports/page.tsx`).
+  - **6c, Tools & connections (pilot only).** For people on "Try the new layout", `/departments/[deptId]/connections` is drawn from the registry.
+    - **Tools:** the workspace's tool set in registry order, with your Claude seat on the Claude tools. Each tool has a pin toggle: a form button that works without JavaScript, always named "Pin <tool> to the Overview", with `aria-pressed` for the state.
+    - **Connections:** one block per built kind of the workspace's set. Web Dev has GitHub (with the organisation's GitHub App), Google Drive and Claude seats. SEO has Google accounts, Drive and seats. Social Media has its social accounts (a read-only list; a failed read says "unavailable"), Drive and seats. Creatives and the Office of the GM have Drive and seats. A generic department has Drive only. Figma stays hidden until DW-6k.
+    - "Team status" keeps its gate (`company.manage`), and every write keeps its gate.
+    - Classic renders exactly what it did: the pilot is an early return, and `ConnectionsPanel` without the new `only` prop is unchanged.
+  - **Pins.**
+    - `lib/pinnedTools.ts` holds up to 6 tool keys per workspace key in the `gaiada_prefs` cookie (`Prefs.pinnedTools`). Pins belong to the browser, not the account: no server-side preference store exists.
+    - With no entry, the first six tools count as pinned. An explicit `[]` pins nothing.
+    - The parser treats the cookie as untrusted: it dedupes, caps at 6, bounds the lengths, keeps at most 20 workspaces, and drops `__proto__`, `constructor` and `prototype`.
+    - `togglePinnedToolAction` re-resolves the workspace from the registry, refuses a tool that is not one of its own and refuses a seventh pin.
+    - The Overview's Today block (DW-3c) now shows the pinned tools: `subjectOfRef(ref, pins)` in `lib/overview.ts`, fed by `pilotFrame` from the prefs it already reads.
+- **Proof.**
+  - `e2e/workspace-departments.spec.ts` (new, its own Playwright project):
+    - every agency workspace's Work rows and tab strips against the registry, matched as an ordered subsequence so DW-4 and DW-5 rows do not break it;
+    - SEO's "Client reports";
+    - `/pipeline` and `/monitoring` keeping Web Dev's sidebar;
+    - the Tools & connections page;
+    - a pin removed and put back across reloads, with the Overview's Today following it;
+    - classic unchanged.
+  - 6e is proved by `components/shell/WorkspaceSidebar.generic.test.tsx`, because the demo org tree seeds departments for the agency company only.
+  - Unit: `lib/pinnedTools.test.ts`, `lib/prefs.test.ts`, `lib/prefsActions.pins.test.ts`, `ToolsSection.test.tsx`, `ConnectionBlocks.test.tsx`, plus a case in `lib/overview.test.ts`.
+  - Branch gates before the landing rebase:
+    - 6a: CI run 38388093449 green (platform-ui 428 files, 7503 tests, build); sumopod 8/8 twice on `20967e44`.
+    - 6c: CI run 38391768622 green (433 files, 7548 tests); sumopod 11/11 twice on `c6d3587d`.
+  - The landing sha's own CI and sumopod runs are recorded on the board.
+- **Docs.** Plan §4.2 (DW-6 build notes) and BFF contract §33 (department filters for DW-6d and DW-6g; contract only, nothing built).
+- **Not changed.** No backend, API, Cerbos or migration change. Nothing outside the pilot changes except the "Client reports" label.
 ### platform-ui `0.122.0` - DW-3d: the Overview's Your numbers (2026-10-13) - PROTOTYPED
 
 - **What.** The You band's first block (plan §3.2, §3.3): tasks done, on-time rate, hours logged and check-ins for the Overview's selected period, each against the previous period. One read of the person's own report document, `getReportDocument(tenant, userId, { grain: "person", scopeRef: <self>, periodKind: <period>, start: <today>, end: <today> })`; the six Overview periods are the six report period kinds one to one and the server snaps the bounds.
