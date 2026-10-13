@@ -11,6 +11,17 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.27.0` - M6-P6e: the site deploy transport, SFTP or explicit-TLS FTPS, with its container harness (2026-10-13) - DEV-VERIFIED (script and harness, on sumopod; not wired into any template yet)
+
+- **New, in `webdesk/templates/_deploy/`:** `deploy.sh` (modes `deploy` and `rollback`), `make-manifest.sh` (the build job's manifest generator) and a README. M6-P6f wires it into the three templates' deploy jobs; nothing calls it yet, and nothing was run against Hostinger or `delphi`/`helios`.
+- **Tool:** bash + `lftp`: one command language for SFTP and FTPS, one `apt-get install lftp` on a runner, no package manager in the deploy job.
+- **Method:** upload to `<base>/releases/.tmp-<id>`, read every file back and compare sha256 to the manifest (a flipped byte refuses; a size check would not), rename to `releases/<id>`, swap into the docroot with two renames in one session (the second failing undoes the first), read `webdesk-build.json` over HTTPS and require the build id (else swap back), keep the last three, release the `mkdir` lock.
+- **Refuses (exit 2) before touching the host:** SFTP without a pinned `known_hosts` entry (never trust on first use); FTPS without a pinned fingerprint or CA, or whose certificate does not match; `ftp` as a transport; a server with no TLS; an artifact that no longer matches its manifest; too few files or pages.
+- **The activation window is not zero.** The docroot does not exist between the two renames. Measured in the harness: the script's own upper bound is 3 to 8 ms on the LAN, and 162 ms (SFTP) to 404 ms (FTPS) with 80 ms of added latency each way; a probe container requesting the site every 15 to 25 ms saw no failed request on the LAN and 6 (SFTP) to 12 (FTPS) `404`s spread over 66 to 148 ms at that latency, so on a WAN the real gap is about one round trip.
+- **Contract:** the build stamp must carry a build id (`buildId`); the WSK-60 stamp today has none, so M6-P6f's build job must write it.
+- **Harness, `webdesk/templates/_deploy/harness/` (run on `sumopod` only):** a real sshd and vsftpd (explicit TLS), a rogue copy of each, a plain-FTP vsftpd, nginx over HTTPS on the same volume, a probe and a client; one private network, no published ports. `run.sh` prints PASS or FAIL per case and removes everything it made.
+- **Docs:** `docs/plans/2026-10-11-webdesk-m6-plan.md` M6-P6e row.
+
 ### platform-nest `0.112.1` - M6-P4g2: archiving a WebDesk site revokes its repo's deploy grant (WSK-D82) (2026-10-13) - PROTOTYPED
 
 - **The change:** after an approved `site.archive` executes, the executor (`webdesk-approved-command.ts`) calls the new `revokeDeployAfterArchive()`.
