@@ -804,6 +804,28 @@ const DEMO_BILLING_PROFILE: Record<string, unknown> = {
   currencyCode: "USD", bank: { bankName: "Example Bank", accountName: "Example Agency Ltd", accountNo: "0000000000" },
   bankLedgerAccountCode: "1010", defaultRevenueAccountCode: "4000", signatureThreshold: null, updatedBy: DEMO_USER_ID, updatedAt: "2026-07-01T09:00:00Z",
 };
+// PV5-04b (PV-D35): the company's service lines and number-code decode table (BFF §30). Invented, generic placeholders. A code is
+// generated the first time a (line, business type) pair is needed, exactly as the server does, and is never changed.
+const DEMO_SERVICE_LINES: { key: string; name: string; departmentId: string | null; active: boolean; updatedAt: string; invoiceCount: number }[] = [
+  { key: "services", name: "Professional services", departmentId: null, active: true, updatedAt: "2026-07-01T09:00:00Z", invoiceCount: 0 },
+  { key: "support", name: "Support and maintenance", departmentId: null, active: true, updatedAt: "2026-07-01T09:00:00Z", invoiceCount: 0 },
+];
+const DEMO_BUSINESS_TYPES = [
+  { id: "hotel", label: "Hotel / villa / accommodation" }, { id: "restaurant", label: "Restaurant / café / bar" },
+  { id: "services", label: "Professional services" }, { id: "retail", label: "Retail / shop" }, { id: "other", label: "Other" },
+];
+const DEMO_NUMBER_CODES: { serviceLineKey: string; businessType: string; code: string; createdAt: string }[] = [];
+const DEMO_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function demoNumberCode(serviceLineKey: string, businessType: string): string {
+  const have = DEMO_NUMBER_CODES.find((c) => c.serviceLineKey === serviceLineKey && c.businessType === businessType);
+  if (have) return have.code;
+  let code = "";
+  do {
+    code = Array.from({ length: 3 }, () => DEMO_CODE_ALPHABET[Math.floor(Math.random() * DEMO_CODE_ALPHABET.length)]).join("");
+  } while (DEMO_NUMBER_CODES.some((c) => c.code === code));
+  DEMO_NUMBER_CODES.push({ serviceLineKey, businessType, code, createdAt: "2026-07-16T10:00:00Z" });
+  return code;
+}
 const FILES: Record<string, unknown>[] = [
   { id: "f-1", entity_type: "project", entity_id: "p-web-1", filename: "Redesign SOW.pdf", content_type: "application/pdf", byte_size: 184320, scrubbed: true, uploader_id: "u-pm", created_at: "2026-06-20T09:00:00Z", url: null },
   { id: "f-2", entity_type: "task", entity_id: "t-4", filename: "hero-mock.fig", content_type: "application/octet-stream", byte_size: 51200, scrubbed: true, uploader_id: "u-dev", created_at: "2026-07-03T09:00:00Z", url: null },
@@ -2699,7 +2721,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (invIssue) {
     const inv = INVOICES.find((x) => x.id === invIssue[1]) as { status: string; invoiceNo?: string | null; issueDate?: string | null; dueDate?: string | null } | undefined;
     if (!inv) return { status: 404, json: { error: "invoice not found" } };
-    const blockers = inv.status === "approved" ? [] : [{ code: "NOT_APPROVED", message: `only an approved invoice can be issued (this one is ${inv.status})` }];
+    const blockers: { code: string; message: string }[] = inv.status === "approved" ? [] : [{ code: "NOT_APPROVED", message: `only an approved invoice can be issued (this one is ${inv.status})` }];
+    // PV5-04b: the number carries a service-line code, so an invoice needs a (switched-on) line, as on the server.
+    const chosenLine = DEMO_SERVICE_LINES.find((l) => l.key === (inv as { serviceLineKey?: string | null }).serviceLineKey);
+    if (!inv.invoiceNo && (!chosenLine || !chosenLine.active)) {
+      blockers.push({ code: "NO_SERVICE_LINE", message: chosenLine ? `service line ${chosenLine.name} is switched off; pick an active one` : "the invoice has no service line (staff pick one before issuing; it sets the code in the invoice number)" });
+    }
     if (invIssue[2] === "issue-readiness") {
       return ok({ invoiceId: invIssue[1], status: inv.status, issued: !!inv.invoiceNo, invoiceNo: inv.invoiceNo ?? null, ready: !inv.invoiceNo && blockers.length === 0, blockers: inv.invoiceNo ? [] : blockers });
     }
@@ -2708,8 +2735,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       if (blockers.length) return { status: 409, json: { error: `this invoice cannot be issued yet: ${blockers[0].message}`, reason: "issue_blocked", blockers } };
       const n = INVOICES.filter((x) => (x as { invoiceNo?: string | null }).invoiceNo).length + 1;
       const profile = DEMO_BILLING_PROFILE as { legalName: string; address: string; bank: { bankName: string; accountName: string; accountNo: string } | null };
+      // PV5-04b: {company}/{yyyy}/{mm}/{code}/{nnnn}. The demo books are one month, so its counter is the issued count.
+      const line = chosenLine!;
+      const code = demoNumberCode(line.key, "other");
+      line.invoiceCount += 1;
       Object.assign(inv, {
-        status: "sent", invoiceNo: `DEMO/2026/${String(n).padStart(4, "0")}`, issueDate: "2026-07-16", dueDate: "2026-08-15", updatedBy: userId,
+        serviceLineName: line.name, numberCode: code,
+        numberDecode: { serviceLineKey: line.key, serviceLineName: line.name, businessType: "other" },
+        status: "sent", invoiceNo: `DEMO/2026/07/${code}/${String(n).padStart(4, "0")}`, issueDate: "2026-07-16", dueDate: "2026-08-15", updatedBy: userId,
         issuedAt: "2026-07-16T10:00:00Z", issuedBy: userId, subtotal: (inv as { total?: number }).total ?? 0, taxTotal: 0, taxCode: null,
         legacyUnissued: false, pdfFileId: null,
         issuer: {
@@ -2718,6 +2751,67 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
         },
       });
       return ok({ id: invIssue[1], invoiceNo: inv.invoiceNo, alreadyIssued: false });
+    }
+  }
+  // PV5-04b — choose an unissued invoice's service line.
+  const invLine = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)\/service-line$/);
+  if (invLine && m === "PATCH") {
+    const inv = INVOICES.find((x) => x.id === invLine[1]) as { status: string; invoiceNo?: string | null; serviceLineKey?: string | null; serviceLineName?: string | null } | undefined;
+    if (!inv) return { status: 404, json: { error: "invoice not found" } };
+    const key = (JSON.parse(body || "{}") as { serviceLineKey?: string | null }).serviceLineKey;
+    if (key !== null && typeof key !== "string") return { status: 400, json: { error: "serviceLineKey must be a service line key, or null to clear the choice" } };
+    if (inv.invoiceNo) return { status: 409, json: { error: "this invoice is issued; its service line is part of the invoice of record and cannot change", reason: "issued" } };
+    const line = key ? DEMO_SERVICE_LINES.find((l) => l.key === key && l.active) : null;
+    if (key && !line) return { status: 400, json: { error: `service line ${key} does not exist or is switched off` } };
+    Object.assign(inv, { serviceLineKey: line?.key ?? null, serviceLineName: line?.name ?? null });
+    return ok({ ok: true, serviceLineKey: line?.key ?? null });
+  }
+  // PV5-04b — service lines and the number-code decode table (staff only; BFF §30).
+  const slOne = p.match(/^\/api\/[^/]+\/billing\/service-lines\/([^/]+)$/);
+  if (slOne && m === "PUT") {
+    const key = decodeURIComponent(slOne[1]);
+    if (!/^[a-z][a-z0-9_]{1,31}$/.test(key)) return { status: 400, json: { error: "a service line key is 2-32 characters: a lower-case letter, then lower-case letters, digits or '_'" } };
+    const b = JSON.parse(body || "{}") as { name?: string; departmentId?: string | null; active?: boolean };
+    let line = DEMO_SERVICE_LINES.find((l) => l.key === key);
+    if (!line) {
+      if (!String(b.name ?? "").trim()) return { status: 400, json: { error: "a new service line needs a name" } };
+      line = { key, name: "", departmentId: null, active: true, updatedAt: "2026-07-16T10:00:00Z", invoiceCount: 0 };
+      DEMO_SERVICE_LINES.push(line);
+    }
+    if (typeof b.name === "string" && b.name.trim()) line.name = b.name.trim();
+    if (b.departmentId !== undefined) line.departmentId = b.departmentId || null;
+    if (typeof b.active === "boolean") line.active = b.active;
+    return ok(line);
+  }
+  if (/^\/api\/[^/]+\/billing\/service-lines$/.test(p) && m === "GET") return ok(DEMO_SERVICE_LINES);
+  if (/^\/api\/[^/]+\/billing\/number-codes$/.test(p)) {
+    if (m === "GET") {
+      const codes = DEMO_NUMBER_CODES.map((c) => {
+        const invoiceCount = INVOICES.filter((x) => (x as { numberCode?: string }).numberCode === c.code).length;
+        return {
+          serviceLineKey: c.serviceLineKey, serviceLineName: DEMO_SERVICE_LINES.find((l) => l.key === c.serviceLineKey)?.name ?? c.serviceLineKey,
+          businessType: c.businessType, businessTypeLabel: DEMO_BUSINESS_TYPES.find((b) => b.id === c.businessType)?.label ?? c.businessType,
+          code: c.code, createdAt: c.createdAt, invoiceCount, used: invoiceCount > 0,
+        };
+      });
+      return ok({ codes, businessTypes: DEMO_BUSINESS_TYPES });
+    }
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}") as { serviceLineKey?: string; businessType?: string; code?: string };
+      if (!DEMO_SERVICE_LINES.some((l) => l.key === b.serviceLineKey)) return { status: 404, json: { error: `service line ${b.serviceLineKey} not found` } };
+      if (!DEMO_BUSINESS_TYPES.some((t) => t.id === b.businessType)) return { status: 400, json: { error: "businessType must be a client-centre business type" } };
+      const have = DEMO_NUMBER_CODES.find((c) => c.serviceLineKey === b.serviceLineKey && c.businessType === b.businessType);
+      if (have) {
+        if (b.code && b.code !== have.code) return { status: 409, json: { error: `this pair already has the code ${have.code}; a code is never changed`, reason: "code_already_assigned" } };
+        return ok({ serviceLineKey: b.serviceLineKey, businessType: b.businessType, code: have.code, alreadyAssigned: true });
+      }
+      if (b.code) {
+        if (!/^[A-Z0-9]{2,4}$/.test(b.code)) return { status: 400, json: { error: "code must be 2-4 characters of A-Z and 0-9, or omitted to generate one" } };
+        if (DEMO_NUMBER_CODES.some((c) => c.code === b.code)) return { status: 409, json: { error: `the code ${b.code} already stands for another pair in this company`, reason: "code_taken" } };
+        DEMO_NUMBER_CODES.push({ serviceLineKey: b.serviceLineKey!, businessType: b.businessType!, code: b.code, createdAt: "2026-07-16T10:00:00Z" });
+        return ok({ serviceLineKey: b.serviceLineKey, businessType: b.businessType, code: b.code, alreadyAssigned: false });
+      }
+      return ok({ serviceLineKey: b.serviceLineKey, businessType: b.businessType, code: demoNumberCode(b.serviceLineKey!, b.businessType!), alreadyAssigned: false });
     }
   }
   // PV5-09 — void an ISSUED invoice, mirroring the 409 reasons of invoice.controller.ts / issue.ts.

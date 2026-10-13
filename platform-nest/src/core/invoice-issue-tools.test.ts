@@ -154,14 +154,14 @@ describe.skipIf(!TEST_URL)("PV5-12 · invoice-issue tools through the real endpo
     )).rows[0];
 
   /** An APPROVED invoice (the stage issue starts from), lines that add up. */
-  async function approvedInvoice(amount = 500): Promise<string> {
+  async function approvedInvoice(amount = 500, serviceLineKey: string | null = "services"): Promise<string> {
     const id = newId();
     await withTenants([tenant], (c) =>
       c.query(
         `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, origin_site,
-                               created_by, updated_by, approved_by, approved_at)
-         VALUES ($1, $2, $3, current_date - 30, current_date, 'approved', 'IDR', $4, $5, 'test', $6, $6, $6, now())`,
-        [id, tenant, clientA, JSON.stringify([{ description: "Design work", hours: 1, rate: amount, amount }]), amount, member],
+                               created_by, updated_by, approved_by, approved_at, service_line_key)
+         VALUES ($1, $2, $3, current_date - 30, current_date, 'approved', 'IDR', $4, $5, 'test', $6, $6, $6, now(), $7)`,
+        [id, tenant, clientA, JSON.stringify([{ description: "Design work", hours: 1, rate: amount, amount }]), amount, member, serviceLineKey],
       ),
     );
     return id;
@@ -223,6 +223,13 @@ describe.skipIf(!TEST_URL)("PV5-12 · invoice-issue tools through the real endpo
 
       const denied = await callTool("invoices.issueReadiness", { tenantId: tenant, invoiceId: id }, MEMBER);
       expect(denied.statusCode, denied.body).toBe(403);
+
+      // PV5-04b: an invoice with no service line reports the stable blocker through the tool too.
+      const noLine = await approvedInvoice(500, null);
+      const missing = await callTool("invoices.issueReadiness", { tenantId: tenant, invoiceId: noLine }, ADMIN);
+      expect(missing.statusCode, missing.body).toBe(200);
+      expect(missing.json().ready).toBe(false);
+      expect((missing.json().blockers as Array<{ code: string }>).map((b) => b.code)).toEqual(["NO_SERVICE_LINE"]);
     });
 
     it("invoices.issue: issues through the ledger, an `issued` activity names the human AND the agent, a repeat answers the issued invoice", async () => {

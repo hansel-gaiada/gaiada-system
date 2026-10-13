@@ -131,11 +131,18 @@ describe.skipIf(!TEST_URL)("invoices (§4)", () => {
     const patch = await app.inject({ method: "PATCH", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin), payload: { status: "sent" } });
     expect(patch.statusCode).toBe(400);
     expect((patch.json() as { error: string }).error).toMatch(/\/issue/);
+    // PV5-04b (PV-D35): the number carries a service-line code, so an invoice with no line is refused (409, named
+    // blocker) until staff pick one.
+    const noLine = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/issue`, headers: asUser(admin) });
+    expect(noLine.statusCode, noLine.body).toBe(409);
+    expect((noLine.json() as { blockers: Array<{ code: string }> }).blockers.map((b) => b.code)).toEqual(["NO_SERVICE_LINE"]);
+    const pick = await app.inject({ method: "PATCH", url: `/api/${tenant}/invoices/${id}/service-line`, headers: asUser(admin), payload: { serviceLineKey: "services" } });
+    expect(pick.statusCode, pick.body).toBe(200);
     const issue = await app.inject({ method: "POST", url: `/api/${tenant}/invoices/${id}/issue`, headers: asUser(admin) });
     expect(issue.statusCode, issue.body).toBe(200);
     const after = (await app.inject({ method: "GET", url: `/api/${tenant}/invoices/${id}`, headers: asUser(admin) })).json() as { status: string; approvedBy: string; invoiceNo: string | null };
     expect(after.status).toBe("sent");
-    expect(after.invoiceNo).toMatch(/^INV\/\d{4}\/0001$/);
+    expect(after.invoiceNo).toMatch(/^INV\/\d{4}\/\d{2}\/[2-9A-HJKMNP-Z]{3}\/0001$/);
     expect(after.approvedBy).toBe(admin2);
   });
 

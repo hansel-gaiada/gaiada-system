@@ -7,6 +7,8 @@ import { can, isElevated } from "@/lib/rbac";
 import { getInvoice, getIssueReadiness } from "@/lib/invoice";
 import { invoiceDocumentState, DOCUMENT_PREPARING_TEXT } from "@/lib/billingView";
 import { listMembers } from "@/lib/entities";
+import { serviceLinesOrNull } from "@/lib/billingNumbering-data";
+import { decodeText } from "@/lib/billingNumbering";
 import { money, formatDate, formatDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
@@ -16,6 +18,7 @@ import { FileLink } from "@/components/clients/billing/FileLink";
 import { IssueBlockers } from "@/components/billing/IssueBlockers";
 import { MaskedAccount } from "@/components/billing/MaskedAccount";
 import { InvoiceActions } from "./InvoiceActions";
+import { ServiceLinePicker } from "./ServiceLinePicker";
 import { VoidInvoice } from "./VoidInvoice";
 import "@/components/billing/billing-screens.css";
 
@@ -59,6 +62,10 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
     ? await getIssueReadiness(userId, tenant, invoiceId)
     : null;
   const blockers = readiness?.blockers ?? [];
+  // PV5-04b (PV-D35): the service line sets the code in the number. Staff pick it before issue (the picker is also where the
+  // NO_SERVICE_LINE blocker's link lands). `null` lines = the viewer may not read them: no picker, and the server decides.
+  const canChooseLine = (inv.status === "approved" || inv.status === "draft") && (canBill || holdsApproveCapability);
+  const serviceLines = canChooseLine ? await serviceLinesOrNull(userId, tenant) : null;
   // An invoice is ISSUED once it has its number (status `sent` reads "Issued"). A legacy sent/paid row has none.
   const issued = Boolean(inv.invoiceNo);
   const pdf = invoiceDocumentState(inv);
@@ -113,6 +120,8 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
             },
             { label: "Period", value: inv.periodStart ? `${formatDate(inv.periodStart)} – ${formatDate(inv.periodEnd)}` : "—" },
             { label: "Total", value: money(inv.total, inv.currency) },
+            // Staff-only (this is the staff page). A legacy or older-server invoice has none: an em dash, never a guess.
+            { label: "Service line", value: inv.serviceLineName ?? (inv.serviceLineKey ?? "—") },
           ]} />
           {inv.legacyUnissued && (
             <p className="bs-note" style={{ marginTop: 10 }}>
@@ -132,6 +141,17 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
         </Card>
       </div>
 
+      {canChooseLine && serviceLines !== null && (
+        <div id="service-line" style={{ marginBottom: 20 }}>
+          <Card title="Service line" hint="Sets the code in this invoice's number. Only staff can decode it; a client sees the number only.">
+            <ServiceLinePicker
+              invoiceId={inv.id} lines={serviceLines}
+              chosenKey={inv.serviceLineKey ?? null} defaultKey={inv.defaultServiceLineKey ?? null}
+            />
+          </Card>
+        </div>
+      )}
+
       {inv.status === "approved" && blockers.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <IssueBlockers blockers={blockers} lead="This invoice can't be issued yet. Clear these first:" />
@@ -143,6 +163,16 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
           <Card title="Invoice of record" hint="The invoice as it was issued. It cannot change; a mistake is corrected by voiding it.">
             <DescriptionList items={[
               { label: "Invoice no.", value: inv.invoiceNo },
+              // PV5-04b: what the number's code stands for. Staff only; absent on an older server or a legacy number.
+              ...(inv.numberCode ? [{
+                label: "Number code",
+                value: (
+                  <span>
+                    <span className="bs-code">{inv.numberCode}</span>
+                    {decodeText(inv.numberDecode) ? <> · {decodeText(inv.numberDecode)}</> : null}
+                  </span>
+                ),
+              }] : []),
               { label: "Issued", value: formatDate(inv.issueDate ?? null) },
               { label: "Due", value: formatDate(inv.dueDate ?? null) },
               {

@@ -23,16 +23,25 @@ vi.mock("@/lib/platform", async () => {
 vi.mock("@/lib/invoice", () => ({ getInvoice: vi.fn(), getIssueReadiness: vi.fn() }));
 vi.mock("@/lib/entities", () => ({ listMembers: vi.fn(async () => []) }));
 vi.mock("@/lib/invoiceActions", () => ({
-  approveInvoiceAction: vi.fn(), issueInvoiceAction: vi.fn(), voidInvoiceAction: vi.fn(),
+  approveInvoiceAction: vi.fn(), issueInvoiceAction: vi.fn(), voidInvoiceAction: vi.fn(), setServiceLineAction: vi.fn(),
 }));
+// PV5-04b: the company's service lines, for the picker. `null` (the default here) = the viewer cannot read them: no picker.
+vi.mock("@/lib/billingNumbering-data", () => ({ serviceLinesOrNull: vi.fn(async () => null) }));
 
 import { getMe } from "@/lib/platform";
 import { getInvoice, getIssueReadiness } from "@/lib/invoice";
+import { serviceLinesOrNull } from "@/lib/billingNumbering-data";
 import InvoiceDetailPage from "./page";
 
 const meMock = vi.mocked(getMe);
 const invoiceMock = vi.mocked(getInvoice);
 const readinessMock = vi.mocked(getIssueReadiness);
+const linesMock = vi.mocked(serviceLinesOrNull);
+const LINES = [
+  { key: "web", name: "Web development", departmentId: "dept-web", active: true, updatedAt: "2026-10-01T09:00:00Z", invoiceCount: 2 },
+  { key: "seo", name: "Search", departmentId: null, active: true, updatedAt: "2026-10-01T09:00:00Z", invoiceCount: 0 },
+  { key: "old", name: "Retired line", departmentId: null, active: false, updatedAt: "2026-10-01T09:00:00Z", invoiceCount: 1 },
+];
 
 const ADMIN: Me = { userId: "u-fin", name: "Fin", email: "f@example.test", title: null, assurance: "high", companies: [{ id: "co-1", name: "Example", type: null }], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }] };
 const MEMBER: Me = { ...ADMIN, roles: [{ role: "member", scopeType: "company", scopeId: "co-1" }] };
@@ -55,7 +64,7 @@ const mount = async (inv: Invoice, me: Me = ADMIN) => {
 };
 const card = (title: string) => screen.getByRole("heading", { name: new RegExp(`^${title}`) }).closest("section") as HTMLElement;
 
-beforeEach(() => { meMock.mockReset(); invoiceMock.mockReset(); readinessMock.mockReset(); });
+beforeEach(() => { meMock.mockReset(); invoiceMock.mockReset(); readinessMock.mockReset(); linesMock.mockReset(); linesMock.mockResolvedValue(null); });
 
 describe("staff invoice page · the issued view", () => {
   it("🔴 shows the invoice of record: number, issue and due dates, and the PDF through the staff file route", async () => {
@@ -179,5 +188,71 @@ describe("staff invoice page · what is missing before Issue", () => {
   it("only an approved invoice asks the readiness question", async () => {
     await mount({ ...APPROVED, status: "draft" });
     expect(readinessMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("staff invoice page · the service line (PV-D35)", () => {
+  const APPROVED: Invoice = { ...ISSUED, status: "approved", invoiceNo: null, issueDate: null, dueDate: null, subtotal: null, taxTotal: null, issuer: null, pdfFileId: null, issuedAt: null };
+  const NO_LINE = { code: "NO_SERVICE_LINE", message: "the invoice has no service line (staff pick one before issuing)" };
+
+  it("🔴 an approved invoice with no line shows the blocker AND the picker it links to (#service-line), and Issue is disabled", async () => {
+    linesMock.mockResolvedValue(LINES);
+    readinessMock.mockResolvedValue({ invoiceId: "inv-1", status: "approved", issued: false, invoiceNo: null, ready: false, blockers: [NO_LINE] });
+    await mount({ ...APPROVED, serviceLineKey: null, defaultServiceLineKey: null });
+    expect(screen.getByRole("link", { name: "Choose a service line" })).toHaveAttribute("href", "#service-line");
+    const picker = within(card("Service line"));
+    const select = picker.getByRole("combobox", { name: "Service line" });
+    expect(select).toHaveValue("");
+    // Active lines are offered; a switched-off line that is not the chosen one is not.
+    expect(within(select).getByRole("option", { name: "Web development" })).toBeInTheDocument();
+    expect(within(select).queryByRole("option", { name: /Retired line/ })).toBeNull();
+    expect(picker.getByText(/no default applies/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Issue" })).toBeDisabled();
+  });
+
+  it("names the default line when every project maps to one, and shows the chosen line selected", async () => {
+    linesMock.mockResolvedValue(LINES);
+    readinessMock.mockResolvedValue({ invoiceId: "inv-1", status: "approved", issued: false, invoiceNo: null, ready: true, blockers: [] });
+    const first = await mount({ ...APPROVED, serviceLineKey: null, defaultServiceLineKey: "web" });
+    expect(within(card("Service line")).getByRole("option", { name: "Default: Web development" })).toBeInTheDocument();
+    expect(within(card("Service line")).getByText(/issued under Web development/)).toBeInTheDocument();
+    first.unmount();
+    await mount({ ...APPROVED, serviceLineKey: "seo", serviceLineName: "Search", defaultServiceLineKey: "web" });
+    expect(within(card("Service line")).getByRole("combobox", { name: "Service line" })).toHaveValue("seo");
+  });
+
+  it("a company with no lines is told where to add them", async () => {
+    linesMock.mockResolvedValue([]);
+    readinessMock.mockResolvedValue({ invoiceId: "inv-1", status: "approved", issued: false, invoiceNo: null, ready: false, blockers: [NO_LINE] });
+    await mount({ ...APPROVED, serviceLineKey: null });
+    expect(screen.getByRole("link", { name: "Add service lines" })).toHaveAttribute("href", "/finance/settings/billing-profile#service-lines");
+  });
+
+  it("🔴 an ISSUED invoice shows the line and decodes the number's code for staff, and offers no picker", async () => {
+    linesMock.mockResolvedValue(LINES);
+    await mount({
+      ...ISSUED, invoiceNo: "EX/2026/10/7K3/0001", serviceLineKey: "web", serviceLineName: "Web development",
+      numberCode: "7K3", numberDecode: { serviceLineKey: "web", serviceLineName: "Web development", businessType: "hotel" },
+    });
+    const record = within(card("Invoice of record"));
+    expect(record.getByText("EX/2026/10/7K3/0001")).toBeInTheDocument();
+    expect(record.getByText("7K3")).toBeInTheDocument();
+    expect(record.getByText(/Web development · hotel/)).toBeInTheDocument();
+    expect(within(card("Summary")).getByText("Web development")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Service line/ })).toBeNull();
+    expect(linesMock).not.toHaveBeenCalled();
+  });
+
+  it("an older server (no numbering fields) shows no code row and no picker, and claims nothing", async () => {
+    await mount(ISSUED);
+    expect(within(card("Invoice of record")).queryByText("Number code")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /^Service line/ })).toBeNull();
+  });
+
+  it("a viewer who cannot read the lines (null) gets no picker for an approved invoice", async () => {
+    readinessMock.mockResolvedValue({ invoiceId: "inv-1", status: "approved", issued: false, invoiceNo: null, ready: true, blockers: [] });
+    await mount(APPROVED);
+    expect(screen.queryByRole("heading", { name: /^Service line/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Issue" })).toBeEnabled();
   });
 });

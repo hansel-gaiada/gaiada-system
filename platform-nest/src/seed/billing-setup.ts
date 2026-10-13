@@ -10,14 +10,22 @@
 //     year with monthly periods (each only when no fiscal year already covers its 1 January), so a demo invoice
 //     issued "60 days ago" in January still lands in an open period;
 //   * a billing profile with OBVIOUSLY FAKE issuer and bank details (the repo is public; real values are entered on the
-//     server through PUT /billing-profile), prefix `INV` unless told otherwise, revenue 4100 and receipts into 1120.
-// An existing profile is never overwritten.
+//     server through PUT /billing-profile), prefix `INV` unless told otherwise, revenue 4100 and receipts into 1120;
+//   * two GENERIC service lines (`services`, `support`; PV-D35: the number's `{code}` stands for a service line and the
+//     client's business type), so an invoice can be numbered. No company names, no department links.
+// An existing profile or service line is never overwritten.
 //
 // ⚠ The finance tables are module walled: every write here declares { modules: ["finance"] } (a plain withTenants writes
 // nothing and raises nothing).
 import { newId, withGlobal, withTenants } from "../db";
 import { config } from "../config";
 import { issueInvoice, postConfirmedPayment, withBilling, type IssuedView } from "../modules/invoice/issue";
+
+/** The generic service lines every seeded company gets (data, not code that names anyone). The first is the default. */
+export const SEED_SERVICE_LINES: Array<[key: string, name: string]> = [
+  ["services", "Professional services"],
+  ["support", "Support and maintenance"],
+];
 
 export interface BillingSetupOptions {
   /** Invoice number prefix (A-Z, 0-9, '-'). Default `INV`. */
@@ -73,6 +81,13 @@ export async function ensureBillingSetup(tenantId: string, opts: BillingSetupOpt
          ON CONFLICT (tenant_id) DO NOTHING`,
         [tenantId, company.rows[0].name, opts.prefix ?? "INV"],
       );
+      for (const [key, name] of SEED_SERVICE_LINES) {
+        await c.query(
+          `INSERT INTO billing_service_lines (id, tenant_id, key, name) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (tenant_id, key) DO NOTHING`,
+          [newId(), tenantId, key, name],
+        );
+      }
     },
     { modules: ["finance"] },
   );
@@ -92,6 +107,8 @@ export async function createIssuedInvoice(
     periodStart?: string | null; periodEnd?: string | null; taxCode?: string | null;
     /** Seeds only: issue as of this date (YYYY-MM-DD), e.g. to show an overdue invoice. Default today. */
     issueDate?: string;
+    /** The invoice's service line (PV-D35). Default: the first seeded line (`services`). */
+    serviceLineKey?: string;
   },
 ): Promise<IssuedView> {
   const id = newId();
@@ -99,11 +116,11 @@ export async function createIssuedInvoice(
   await withTenants([tenantId], (c) =>
     c.query(
       `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total,
-                             origin_site, created_by, updated_by, approved_by, approved_at, tax_code)
+                             origin_site, created_by, updated_by, approved_by, approved_at, tax_code, service_line_key)
        VALUES ($1, $2, $3, COALESCE($4::date, current_date - 30), COALESCE($5::date, current_date), 'approved', $6, $7, $8,
-               $9, $10, $10, $10, now(), $11)`,
+               $9, $10, $10, $10, now(), $11, $12)`,
       [id, tenantId, p.clientId, p.periodStart ?? null, p.periodEnd ?? null, p.currency ?? "IDR",
-       JSON.stringify(p.lines), total, config.originSite, p.actorId, p.taxCode ?? null],
+       JSON.stringify(p.lines), total, config.originSite, p.actorId, p.taxCode ?? null, p.serviceLineKey ?? SEED_SERVICE_LINES[0][0]],
     ),
   );
   return issueInvoice(tenantId, id, p.actorId, { issueDate: p.issueDate });

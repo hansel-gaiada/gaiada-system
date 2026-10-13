@@ -84,6 +84,10 @@ describe("blockerFix · where a blocker is cleared", () => {
     expect(blockerFix("NO_FINANCE_SETTINGS")?.href).toBe("/finance/settings");
   });
 
+  it("PV5-04b: a missing service line points at the picker on the invoice page itself", () => {
+    expect(blockerFix("NO_SERVICE_LINE")).toEqual({ href: "#service-line", label: "Choose a service line" });
+  });
+
   it("🔴 a code this UI does not know has NO link (never a guessed one)", () => {
     expect(blockerFix("SOMETHING_NEW")).toBeNull();
     expect(blockerFix("NOT_APPROVED")).toBeNull();

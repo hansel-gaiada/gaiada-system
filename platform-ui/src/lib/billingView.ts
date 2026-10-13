@@ -78,6 +78,9 @@ export function blockerFix(code: string): BlockerFix | null {
     case "NO_REVENUE_ACCOUNT":
     case "NO_RECEIPT_ACCOUNT":
       return { href: "/finance/settings/billing-profile", label: "Open the billing profile" };
+    case "NO_SERVICE_LINE":
+      // PV5-04b: the picker is a card on the invoice page itself (anchor `service-line`); the lines are edited on the profile page.
+      return { href: "#service-line", label: "Choose a service line" };
     case "NO_FINANCE_SETTINGS":
     case "PKP_NOT_CONFIRMED":
       return { href: "/finance/settings", label: "Open accounting settings" };

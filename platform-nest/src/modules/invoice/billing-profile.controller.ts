@@ -113,7 +113,7 @@ export class BillingProfileController {
     if (legalName !== undefined && !legalName) throw new BadRequestException("legalName cannot be blank");
     if (address !== undefined && !address) throw new BadRequestException("address cannot be blank");
     if (prefix !== undefined && !/^[A-Z0-9-]{1,16}$/.test(prefix)) {
-      throw new BadRequestException("invoicePrefix must be 1-16 characters of A-Z, 0-9 or '-' (it starts every invoice number: PREFIX/2026/0001)");
+      throw new BadRequestException("invoicePrefix must be 1-16 characters of A-Z, 0-9 or '-' (it starts every invoice number: PREFIX/2026/10/CODE/0001)");
     }
     let terms: number | undefined;
     if (b.defaultPaymentTermsDays !== undefined) {
