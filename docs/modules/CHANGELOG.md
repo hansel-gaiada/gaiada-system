@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.119.0` - DW-5a and DW-5c: campaign parts, and requests between departments (2026-10-13) - PROTOTYPED
+
+Contracts: `docs/FRONTEND-BFF-CONTRACT.md` §31 (campaign parts) and §32 (requests between departments); plan `docs/plans/2026-10-13-department-workspaces.md` §7.3. Backend only; the screens come with DW-5b and the DW-5c UI. Rulings DW-D13 and DW-D14.
+- **DW-5a, campaign parts.**
+  - **The parts.** A shared campaign (`agency_campaigns`, which gains a lead department and dates) gets one part per taking-part department (`agency_campaign_parts`). A part has an owner, a status, a brief, a due date and an optional allocation from the campaign budget.
+  - **Links.** A department's own SEO and Social campaigns link to its part (`agency_part_id` on `search_campaigns` and `social_campaigns`).
+  - **The money rule (§31.3).** Allocations never exceed the campaign budget. The check runs under a row lock on the campaign. A part has no currency of its own, the server does every sum, and spend is not rolled up.
+  - **Routes.** Eight, under `modules/agency`: `GET campaigns` gains `?unitId=` and the part, plus a new detail read, a campaign `PATCH`, part create, edit and delete, and link and unlink.
+  - **Cerbos kind `agency_campaign_part`.** `allocate` is kept apart from `update`, and the part's owner and the department head may update. There is no permission arm for `update` (§31.7).
+- **DW-5c, requests between departments.**
+  - **The ask.** A request is the ask (`work_requests`); the work stays where the receiver works.
+  - **Asset requests** become a PM task owned by the receiving department.
+  - **Engineering requests** become an internal Web Dev change request.
+  - **Intake project.** Both kinds live in the department's intake project, "<Department> · Requests" (`work_request_intakes`), which is created once, safely under a race.
+  - **Routes.** Seven under `/api/:tenantId/requests`: create, deliver, decline, cancel, the inbox and sent lists, a summary for the Overview and a detail read.
+  - **Change-request sync.** Triage decline, verify and unverify move the ask. An internal requester gets one notification, not two.
+  - **Cerbos kind `work_request`.** Any member may ask, the assignee delivers, the head or a manager declines, the requester cancels, and bots are refused. Two new resource attributes are added to the allow-list: `requestedBy` and `assigneeIds`.
+  - **PM** gains one export, `closePmTaskInTx`.
+- **Migrations:**
+  - `202610140500_agency_campaign_parts.sql` and `202610140510_iam_agency_campaign_part_permissions.sql`;
+  - `202610140600_work_requests.sql` and `202610140610_iam_work_request_permissions.sql`.
+- **Cerbos change:** two new policies plus derived roles. **Restart Cerbos after the deploy and probe it.** No compose change. The department head's reach grows by `agency.campaign_part.update`, `core.work_request.deliver` and `core.work_request.decline`, all unit-bounded and pinned in `principal-scope-constrained-perms.db.test.ts`.
+- **CI:** GitHub Actions `ci.yml` run 38391485322 on `deb5f78a` was a success on all 16 jobs.
+  - Suites: `work-requests.test.ts` 48, `cerbos-work-request.test.ts` 43 (live), `work-requests.service.test.ts` 39, `campaign-parts.test.ts` 34, `cerbos-agency-campaign-part.test.ts` 34 (live), `agency-campaign-parts.service.test.ts` 36.
+  - The landing sha gets its own run.
+
 ### platform-ui `0.118.0` - DW-3a, 3b and 3c: the Overview's frame and its Now band (2026-10-13) - PROTOTYPED
 
 - **What.** The frame of the per-workspace Overview (plan §3), into which every later DW-3 ticket plugs its blocks. The frame, not the blocks: every widget in the registry is still planned, so the Overview is the new header, and under it today's page body (below). Nothing is invented.
