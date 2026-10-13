@@ -825,14 +825,18 @@ async function bootstrap(): Promise<void> {
   startProvisionReconcileLoop(config.provision.reconcileIntervalMs);
   // eslint-disable-next-line no-console
   console.log(provisionReconcileStartLine());
-  // WSK-60: the staging-rebuild stamp poller. It reads only rows that exist and GETs only the staging URL
-  // an operator put in WEBDESK_REBUILD_TARGETS, so "a target is configured" is its whole gate: with none,
-  // no build can have been dispatched and there is nothing to poll. WSK-61 rides the same tick: a
-  // scheduled publish that went live is settled into a build first (scheduled-rebuilds.service.ts).
-  if (rebuildTargets().length > 0) {
+  // WSK-60: the build stamp poller. It reads only ledger rows that exist and GETs only the stamp URL each row recorded. M6-P6h:
+  // targets now come from the registry too (and a production promote rides the same ledger), so the env JSON can no longer
+  // be its gate. A build can only be dispatched by an approved WebDesk publish, rebuild or promote, every one of which needs
+  // the WebDesk control channel, so "the env override names a target OR the control channel is configured" is the gate.
+  // WSK-61 rides the same tick: a scheduled publish that went live is settled into a build first (scheduled-rebuilds.service.ts).
+  if (rebuildTargets().length > 0 || config.webdeskControl.baseUrl !== "") {
     startSiteBuildsLoop(config.webdeskRebuild.pollIntervalMs, { beforeSweep: () => sweepScheduledRebuilds() });
     // eslint-disable-next-line no-console
-    console.log(`webdesk staging-rebuild poller on: every ${config.webdeskRebuild.pollIntervalMs}ms, ${rebuildTargets().length} target(s)`);
+    console.log(
+      `webdesk build poller on: every ${config.webdeskRebuild.pollIntervalMs}ms; ${rebuildTargets().length} env override target(s), ` +
+        "registry targets resolved per build",
+    );
   }
   if (config.search.schedulerEnabled) {
     startSearchPullSchedulerLoop(config.search.schedulerIntervalMs);

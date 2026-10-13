@@ -1,5 +1,19 @@
-// WSK-66 — WebDesk HIGH commands (content.publish, content.schedule, key.mint, site.archive, site.setDomain) filed as ONE
-// WS4 approval and executed IN-BAND when a human approves it in the ERP's Approvals inbox.
+// WSK-66 — WebDesk HIGH commands (content.publish, content.schedule, key.mint, site.archive, site.setDomain, site.promote) filed
+// as ONE WS4 approval and executed IN-BAND when a human approves it in the ERP's Approvals inbox.
+//
+// ── site.promote (M6-P6h: a site's PRODUCTION deploy, from its default branch) ──────────────────────
+// The seventh member of the union. Filed from the console by a staff caller holding `promote` on `webdev_provisioned_site`
+// (`POST control/sites/:siteId/promote`, which was the WSK-31 always-501 stub), decided by a DIFFERENT user (maker ≠ checker,
+// in code, like site.archive) who must ALSO hold `github_repo · deploy` with this approval's id (the WSK-60 chokepoint's own
+// D14 rule, on the GitHub org tenant). Like content.rebuild it sends NOTHING to Zone B and carries no editorial assertion:
+// its whole effect is ONE `workflow_dispatch` of the template's `site.yml` with `kind=promote`, `environment=production` and
+// the approval id (site-builds.service.ts#startSitePromote), recorded as ONE `kind = 'promote'` ledger row, and `live` only
+// through a stamp read from the PRODUCTION URL. The target comes from the registry only (repo, branch, the production row's
+// domain, the kind's stamp path), and a promote whose production per-site secret is not granted (M6-P4g) fails with
+// `webdesk_promote_failed: production_secret_not_granted` and dispatches nothing. Re-presenting the decided approval is
+// decide()'s own 404 and runs nothing (the claim below is single-use, and the ledger's UNIQUE (tenant_id, approval_id) is the
+// second lock). No new Cerbos kind or action: filing reuses `webdev_provisioned_site · promote`, deciding reuses it plus
+// `github_repo · deploy`.
 //
 // ── site.setDomain (M6-P6i: setting or clearing ONE WebDesk environment's public domain) ────────────
 // The sixth member of the union, the THIRD site-gated one (key.mint, site.archive): filed by a staff caller holding
@@ -123,7 +137,7 @@ import {
 } from "./webdesk-control-client";
 import { commandArgsAsZoneBSeesThem, computeCommandHash } from "./webdesk-ws4-assertion";
 import { WorkflowDispatchError, authorizeDeploy } from "../../core/github/workflow-dispatch";
-import { rebuildTargetFor, startSiteRebuild } from "./site-builds.service";
+import { resolveSiteBuildTarget, startSitePromote, startSiteRebuild } from "./site-builds.service";
 import { ClientPublishAuthority } from "../../core/github/workflow-dispatch";
 import { revokeDeployForSite } from "./deploy-grant.service";
 import { checkWebdeskEnvironmentDomain } from "./webdesk-domain";
@@ -135,7 +149,8 @@ import { DeployGrantRefusal } from "./deploy-grant";
 
 /** The ONLY commands this executor runs. A closed union: a fourth command cannot ride it silently,
  *  because every table below is a `Record<WebdeskApprovedCommand, …>` and fails to compile without it. */
-export type WebdeskApprovedCommand = "content.publish" | "content.schedule" | "key.mint" | "content.rebuild" | "site.archive" | "site.setDomain";
+export type WebdeskApprovedCommand =
+  | "content.publish" | "content.schedule" | "key.mint" | "content.rebuild" | "site.archive" | "site.setDomain" | "site.promote";
 
 /** WSK-59: the editorial writes the BFF executes immediately (not through an approval). They sign through the
  *  SAME registered signer as the approved commands; only the command name differs (design §3.1).
@@ -173,6 +188,7 @@ const TOOL_NAME: Record<WebdeskApprovedCommand, string> = {
   "content.rebuild": "webdesk.content.rebuild",
   "site.archive": "webdesk.site.archive",
   "site.setDomain": "webdesk.site.setDomain",
+  "site.promote": "webdesk.site.promote",
 };
 
 function isApprovedCommand(value: unknown): value is WebdeskApprovedCommand {
@@ -211,6 +227,9 @@ export const WEBDESK_EXEC_ERROR = {
   /** content.rebuild only: the dispatch did not happen. Format `webdesk_rebuild_failed: <reason>`, where
    *  the reason is one of workflow-dispatch.ts's / site-builds.service.ts's typed tokens. */
   rebuildFailed: "webdesk_rebuild_failed",
+  /** site.promote only (M6-P6h): the production dispatch did not happen. Format `webdesk_promote_failed: <reason>`, the reason
+   *  one of site-build-targets.ts's / site-builds.service.ts's / workflow-dispatch.ts's typed tokens. */
+  promoteFailed: "webdesk_promote_failed",
 } as const;
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -249,7 +268,9 @@ type ParsedArgs =
   | { command: "content.rebuild"; tenantSlug: string; siteId: string }
   | { command: "site.archive"; tenantSlug: string; siteId: string }
   /** M6-P6i. `domain: null` clears the environment's domain (the rollback to "no domain"). */
-  | { command: "site.setDomain"; tenantSlug: string; siteId: string; envId: string; domain: string | null };
+  | { command: "site.setDomain"; tenantSlug: string; siteId: string; envId: string; domain: string | null }
+  /** M6-P6h. A production deploy of the site's default branch; the target is the registry's, never an argument. */
+  | { command: "site.promote"; tenantSlug: string; siteId: string };
 
 interface ZoneBRequest {
   command: WebdeskApprovedCommand;
@@ -298,6 +319,14 @@ export type WebdeskApprovedCommandResult =
        *  WebDesk tenant (none: the site was never provisioned, so nothing was ever granted). A failed revoke does NOT make
        *  this result `failed`: the archive stands, and the provisioned site's row records the revoke's own outcome. */
       deployRevoke?: Array<{ provisionedSiteId: string; outcome: "revoked" | "not_granted" | "partial" | "failed"; error: string | null }>;
+    }
+  | {
+      /** M6-P6h: the production dispatch was accepted; `build` is its ledger row (`rebuilding` until the production stamp
+       *  proves it: `live`, or `unverified` after the poll window). A refused dispatch is the `failed` variant instead. */
+      command: "site.promote";
+      executionStatus: "executed";
+      environment: "production";
+      build: { buildId: string | null; state: "rebuilding" | "live" | "unverified"; failureReason: null };
     }
   | {
       /** M6-P6i: the environment's domain now is `domain` (null = cleared). `previousDomain` is what a rollback sets back. */
@@ -418,6 +447,7 @@ const ARG_KEYS: Record<WebdeskApprovedCommand, ReadonlyArray<string>> = {
   "content.rebuild": [],
   "site.archive": [],
   "site.setDomain": ["envId", "domain"],
+  "site.promote": [],
 };
 
 class ArgsError extends Error {}
@@ -498,6 +528,11 @@ function parseCommandArgs(raw: unknown): ParsedArgs {
       if (extra.length) throw new ArgsError(`site.archive takes no ${extra.join(", ")}`);
       return { command, tenantSlug, siteId };
     }
+    case "site.promote": {
+      const extra = ["items", "note", "publishAt", "unpublishAt", "envId", "scope", "domain"].filter((k) => raw[k] !== undefined);
+      if (extra.length) throw new ArgsError(`site.promote takes no ${extra.join(", ")}`);
+      return { command, tenantSlug, siteId };
+    }
     case "site.setDomain": {
       const extra = ["items", "note", "publishAt", "unpublishAt", "scope"].filter((k) => raw[k] !== undefined);
       if (extra.length) throw new ArgsError(`site.setDomain takes no ${extra.join(", ")}`);
@@ -515,7 +550,7 @@ function parseCommandArgs(raw: unknown): ParsedArgs {
 
 /** The exact Zone B request (design §3.1/§3.2; WebDesk keys.controller.ts for key.mint). Bodies never
  *  carry `tenantSlug`/`siteId`/`itemId` (design §3.2: a colliding key makes the hash ambiguous). */
-function zoneBRequestFor(a: Exclude<ParsedArgs, { command: "content.rebuild" }>): ZoneBRequest {
+function zoneBRequestFor(a: Exclude<ParsedArgs, { command: "content.rebuild" | "site.promote" }>): ZoneBRequest {
   const wireItems = (items: WebdeskPublishItem[]) => items.map(({ itemId, version }) => ({ itemId, version }));
   switch (a.command) {
     case "content.publish":
@@ -566,7 +601,7 @@ export function webdeskCommandHashFor(toolArgs: unknown): string {
 }
 
 function commandHashOf(a: ParsedArgs): string {
-  if (a.command === "content.rebuild") {
+  if (a.command === "content.rebuild" || a.command === "site.promote") {
     return computeCommandHash(a.command, commandArgsAsZoneBSeesThem({ tenantSlug: a.tenantSlug, siteId: a.siteId }, {}));
   }
   const req = zoneBRequestFor(a);
@@ -574,18 +609,20 @@ function commandHashOf(a: ParsedArgs): string {
 }
 
 function itemCountOf(a: ParsedArgs): number {
-  return a.command === "key.mint" || a.command === "content.rebuild" || a.command === "site.archive" || a.command === "site.setDomain" ? 0 : a.items.length;
+  return a.command === "key.mint" || a.command === "content.rebuild" || a.command === "site.archive" || a.command === "site.setDomain" || a.command === "site.promote"
+    ? 0
+    : a.items.length;
 }
 
 /** The commands gated on the SITE kind (`webdev_provisioned_site` · `promote`) and never self-approvable: they carry
  *  no item, no editorial assertion and no staging rebuild. */
 function isSiteGated(command: WebdeskApprovedCommand): boolean {
-  return command === "key.mint" || command === "site.archive" || command === "site.setDomain";
+  return command === "key.mint" || command === "site.archive" || command === "site.setDomain" || command === "site.promote";
 }
 
 /** WSK-D46 R4: only a single-item, NON-scheduled publish may be approved by its own requester. A
  *  rebuild has no maker-checker arm (see the WSK-60 note in the header): its requester may decide it.
- *  A key mint, a site archive and a site setDomain are NEVER self-approvable. */
+ *  A key mint, a site archive, a site setDomain and a production promote are NEVER self-approvable. */
 function isSelfApprovable(a: ParsedArgs): boolean {
   return a.command === "content.rebuild" || (a.command === "content.publish" && a.items.length === 1);
 }
@@ -635,15 +672,20 @@ async function authorizeDecider(
     // The dispatch's own D14 rule (`github_repo · deploy`, approvalId set, resolved against the ORG
     // tenant). Run here so a refusal at preflight leaves the row pending; workflow-dispatch.ts runs it
     // again at the send. A tenant that cannot resolve its org is a deployment fault (503), not a denial.
-    try {
-      await authorizeDeploy(decider, tenantId, approvalId);
-    } catch (err) {
-      if (err instanceof WorkflowDispatchError) {
-        if (err.reason === "deploy_denied") throw new ForbiddenException(`not authorized: ${err.message}`);
-        throw new ServiceUnavailableException({ message: `${WEBDESK_EXEC_ERROR.notConfigured}: ${err.message}`, reason: WEBDESK_EXEC_ERROR.notConfigured });
-      }
-      throw err;
+    await authorizeDeployAsDecider(decider, tenantId, approvalId);
+    return;
+  }
+  if (a.command === "site.promote") {
+    // M6-P6h. Three gates, all before the decide UPDATE so any refusal leaves the row pending and dispatches nothing:
+    //   1. maker ≠ checker, in code (a production deploy is never self-approvable; the `promote` rule has no such arm);
+    //   2. `webdev_provisioned_site · promote` with this approval's id: the same site-level authority the filer needed;
+    //   3. `github_repo · deploy` with this approval's id, on the GitHub org tenant: the WSK-60 chokepoint's own D14 rule,
+    //      which workflow-dispatch.ts runs AGAIN at the send.
+    if (requestedBy && decider.userId === requestedBy) {
+      throw new ForbiddenException("not authorized: a production promote may not be approved by the principal who requested it");
     }
+    await authorize(decider, { kind: "webdev_provisioned_site", tenantId, module: "webdev", approvalId }, "promote");
+    await authorizeDeployAsDecider(decider, tenantId, approvalId);
     return;
   }
   if (a.command === "key.mint" || a.command === "site.archive" || a.command === "site.setDomain") {
@@ -679,16 +721,37 @@ async function authorizeDecider(
   );
 }
 
-function ensureConfigured(a: ParsedArgs): WebdeskControlClient | null {
+/** `github_repo · deploy` for the decider, with the approval's id, as an HTTP refusal: 403 on a denial, 503 when the GitHub
+ *  org tenant cannot be resolved (a deployment fault, not a denial). */
+async function authorizeDeployAsDecider(decider: Principal, tenantId: string, approvalId: string): Promise<void> {
+  try {
+    await authorizeDeploy(decider, tenantId, approvalId);
+  } catch (err) {
+    if (err instanceof WorkflowDispatchError) {
+      if (err.reason === "deploy_denied") throw new ForbiddenException(`not authorized: ${err.message}`);
+      throw new ServiceUnavailableException({ message: `${WEBDESK_EXEC_ERROR.notConfigured}: ${err.message}`, reason: WEBDESK_EXEC_ERROR.notConfigured });
+    }
+    throw err;
+  }
+}
+
+async function ensureConfigured(tenantId: string, a: ParsedArgs): Promise<WebdeskControlClient | null> {
   if (a.command === "content.rebuild") {
-    // No Zone B send, no signer. What it needs is a configured staging target: without one the approval
-    // could only fail, so refuse (503) at preflight and leave the row pending rather than approve a no-op.
-    if (!rebuildTargetFor(a.tenantSlug, a.siteId)) {
+    // No Zone B send, no signer. What it needs is a staging target (M6-P6h: the env override, else the registry): without
+    // one the approval could only fail, so refuse (503) at preflight and leave the row pending rather than approve a no-op.
+    // A wp site has nothing to rebuild (its theme reads /v1 live), so it is refused the same way.
+    const t = await resolveSiteBuildTarget(tenantId, a.tenantSlug, a.siteId, "staging");
+    if (!t.ok) {
       throw new ServiceUnavailableException({
-        message: `${WEBDESK_EXEC_ERROR.notConfigured}: no staging rebuild target is configured for this site (WEBDESK_REBUILD_TARGETS)`,
+        message: `${WEBDESK_EXEC_ERROR.notConfigured}: no staging rebuild target for this site (${t.reason}: ${t.detail})`,
         reason: WEBDESK_EXEC_ERROR.notConfigured,
       });
     }
+    return null;
+  }
+  if (a.command === "site.promote") {
+    // No Zone B send, no signer. The production target and its grant are re-derived at execution, where a refusal is
+    // recorded as a failed promote with its typed reason (the filing route already refused a promote that could not start).
     return null;
   }
   let client: WebdeskControlClient;
@@ -731,7 +794,7 @@ export async function preflightWebdeskApprovedCommand(
     throw err;
   }
   await authorizeDecider(a, tenantId, approvalId, requestedBy, decider, clientDecider);
-  const client = ensureConfigured(a);
+  const client = await ensureConfigured(tenantId, a);
   return { args: a, client };
 }
 
@@ -1064,6 +1127,10 @@ export async function executeApprovedWebdeskCommand(
   if (a.command === "content.rebuild") {
     return executeRebuildApproval({ tenantId, approvalId, a, toolArgs: row.tool_args, filedHash, requestedBy, decider, deciderId });
   }
+  // ── M6-P6h: a production promote sends nothing to Zone B either. Its whole effect is the production dispatch.
+  if (a.command === "site.promote") {
+    return executePromoteApproval({ tenantId, approvalId, a, toolArgs: row.tool_args, filedHash, requestedBy, decider, deciderId });
+  }
   const zoneB = pre.client;
   if (!zoneB) {
     // Unreachable: preflight returns a client for every command that talks to Zone B.
@@ -1140,7 +1207,7 @@ export async function executeApprovedWebdeskCommand(
   }
 
   // ── Phase 4: classify. Never resend.
-  let outcome: Exclude<WebdeskApprovedCommandResult, { command: "content.rebuild" }>;
+  let outcome: Exclude<WebdeskApprovedCommandResult, { command: "content.rebuild" | "site.promote" }>;
   const ambiguous =
     (sendError instanceof WebdeskControlTransportError && sendError.maybeDelivered) || (res !== null && res.status >= 500);
 
@@ -1236,7 +1303,10 @@ export async function executeApprovedWebdeskCommand(
   // throws, and a rebuild that could not start does not touch the publish: the row above is already
   // `executed`. (A schedule publishes nothing yet, so it rebuilds nothing.)
   if (outcome.executionStatus === "executed" && outcome.command === "content.publish" && a.command === "content.publish") {
-    outcome = { ...outcome, build: await startRebuildAfterPublish(tenantId, approvalId, a, outcome.items, decider, clientDecider) };
+    // M6-P6h: a wp site's theme reads /v1 live, so there is nothing to rebuild: no ledger row, and no `build` on the result
+    // (a missing build is "no rebuild needed", never a failed one).
+    const build = await startRebuildAfterPublish(tenantId, approvalId, a, outcome.items, decider, clientDecider);
+    if (build) outcome = { ...outcome, build };
   }
 
   // ── M6-P4g2 (WSK-D82): an archived site keeps no deploy access. deploy-grant.service.ts's header makes any archive path
@@ -1331,7 +1401,7 @@ async function startRebuildAfterPublish(
   items: Array<{ publishedAt?: string | null }>,
   decider: Principal,
   clientDecider?: ClientDecider,
-): Promise<{ buildId: string | null; state: "rebuilding" | "live" | "unverified" | "failed"; failureReason: string | null }> {
+): Promise<{ buildId: string | null; state: "rebuilding" | "live" | "unverified" | "failed"; failureReason: string | null } | null> {
   const r = await startSiteRebuild({
     // WSK-D65: the ONLY place a client-publish authority is issued: this executor, after the publish a CLIENT editor decided has
     // executed. The dispatch re-verifies it against the approval row and the site link before any GitHub call.
@@ -1346,6 +1416,7 @@ async function startRebuildAfterPublish(
     publishedAt: newestPublishedAt(items),
     decider,
   });
+  if (r.notApplicable) return null;
   return { buildId: r.buildId, state: r.state, failureReason: r.failureReason };
 }
 
@@ -1404,13 +1475,66 @@ async function executeRebuildApproval(p: {
   return result;
 }
 
+/** A `site.promote` approval (M6-P6h): tamper check, then ONE production dispatch. Executed = the dispatch was accepted;
+ *  failed = it was not (a refused target, a promote already in flight, or the chokepoint's own refusal), with
+ *  `webdesk_promote_failed: <typed reason>` on the row. Either way the ledger holds this approval's ONE promote row. */
+async function executePromoteApproval(p: {
+  tenantId: string;
+  approvalId: string;
+  a: Extract<ParsedArgs, { command: "site.promote" }>;
+  toolArgs: unknown;
+  filedHash: string;
+  requestedBy: string;
+  decider: Principal;
+  deciderId: string;
+}): Promise<WebdeskApprovedCommandResult> {
+  const { tenantId, approvalId, a, deciderId } = p;
+  const verb = "webdesk.site.promote";
+  const base = { viaApproval: approvalId, tenantSlug: a.tenantSlug, siteId: a.siteId, environment: "production", requestedBy: p.requestedBy || null };
+  const fail = async (error: string): Promise<WebdeskApprovedCommandResult> => {
+    await finish(tenantId, approvalId, deciderId, { ok: false, error });
+    await writeActivity(tenantId, deciderId, verb, "automation_approval", approvalId, { ...base, outcome: "failed", error });
+    return { command: a.command, executionStatus: "failed", error };
+  };
+  let result: WebdeskApprovedCommandResult;
+  if (webdeskCommandHashFor(p.toolArgs) !== p.filedHash) {
+    result = await fail(`${WEBDESK_EXEC_ERROR.argsTampered}: the stored args no longer match the filed command hash`);
+  } else {
+    await writeActivity(tenantId, deciderId, verb, "automation_approval", approvalId, { ...base, outcome: "attempted" });
+    const r = await startSitePromote({ tenantId, tenantSlug: a.tenantSlug, siteId: a.siteId, approvalId, decider: p.decider });
+    if (r.state === "failed") {
+      result = await fail(`${WEBDESK_EXEC_ERROR.promoteFailed}: ${r.failureReason ?? "unknown"}`);
+    } else {
+      const build = { buildId: r.buildId, state: r.state, failureReason: null };
+      await finish(tenantId, approvalId, deciderId, { ok: true, result: { command: a.command, environment: "production", build } });
+      await writeActivity(tenantId, deciderId, verb, "automation_approval", approvalId, { ...base, outcome: "succeeded", buildId: r.buildId });
+      result = { command: a.command, executionStatus: "executed", environment: "production", build };
+    }
+  }
+  logger.log(`approval ${approvalId} site.promote: ${result.executionStatus}${result.executionStatus === "failed" ? ` (${result.error.split(":").slice(0, 2).join(":")})` : ""}`);
+  if (p.requestedBy && p.requestedBy !== deciderId) {
+    const ok = result.executionStatus === "executed";
+    await notifyBestEffort(tenantId, deciderId, [p.requestedBy], ok ? "automation_approval.executed" : "automation_approval.execution_failed", {
+      title: ok ? "Production promote started" : "Production promote FAILED to start",
+      body: ok ? undefined : (result as { error: string }).error,
+      href: `/approvals/${approvalId}`,
+      entityType: "automation_approval",
+      entityId: approvalId,
+      severity: ok ? "info" : "warning",
+      origin: WEBDESK_APPROVAL_ORIGIN,
+      tool: TOOL_NAME[a.command],
+    });
+  }
+  return result;
+}
+
 function successOf(
-  a: Exclude<ParsedArgs, { command: "content.rebuild" }>,
+  a: Exclude<ParsedArgs, { command: "content.rebuild" | "site.promote" }>,
   res: WebdeskControlResponse | null,
   approvalId: string,
   selfPublish: boolean,
   reconciled: boolean,
-): Exclude<WebdeskApprovedCommandResult, { command: "content.rebuild" }> {
+): Exclude<WebdeskApprovedCommandResult, { command: "content.rebuild" | "site.promote" }> {
   const j = res && isPlainObject(res.json) ? res.json : {};
   if (a.command === "site.archive") {
     return { command: a.command, executionStatus: "executed", siteId: a.siteId, status: "archived" };

@@ -939,7 +939,8 @@ describe.skipIf(!live)("WSK-59 · the content BFF", () => {
     });
 
     it("the other control routes are STILL honest 501s", async () => {
-      const r = await call("POST", control("sites/s1/promote"), adminA, {});
+      // M6-P6h: `sites/:siteId/promote` files a site.promote approval now (site-builds-promote.test.ts); rollback is still a stub.
+      const r = await call("POST", control("sites/s1/rollback"), adminA, {});
       expect(r.statusCode).toBe(501);
     });
   });

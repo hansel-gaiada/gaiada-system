@@ -95,7 +95,8 @@ export class WorkflowDispatchError extends Error {
  *      `dispatchApprovedWorkflow` would bypass that dedup, and there is exactly one such caller (`startSiteRebuild`).
  *   3. This class is a LABEL, not a lock: it keeps a request body from ever reaching the dispatcher (a plain JSON object fails
  *      `instanceof`), but in-process code could still construct one (`issue` is public; `Object.create` passes `instanceof`).
- * Nothing here carries a repo, workflow or ref: those come from `rebuildTargetFor`, i.e. config.
+ * Nothing here carries a repo, workflow or ref: those come from `resolveSiteBuildTarget` (the env override, else the site
+ * registry; M6-P6h), never from the authority or a request.
  * A staff decider's dispatch has no authority and runs `authorizeDeploy` exactly as before.
  */
 export class ClientPublishAuthority {
