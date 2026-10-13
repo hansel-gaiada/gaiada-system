@@ -279,7 +279,7 @@
 .pm-pr__link:hover, .pm-pr__link:focus-visible { text-decoration: underline; }
 .pm-pr__ref { font-weight: 700; }
 .pm-pr__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 400 12px var(--font-body); color: var(--pm-text-dim); }
-.pm-pr__state { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim); }
+.pm-pr__state { font: 700 10px var(--font-body); letter-spacing: 0.03em; color: var(--pm-text-dim); }
 .pm-pr__state--open { color: var(--pm-urgency-on-track-fg); }
 .pm-pr__state--merged { color: var(--pm-accent); }
 .pm-pr__branch { font: 400 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--pm-text-dim); overflow-wrap: anywhere; }
