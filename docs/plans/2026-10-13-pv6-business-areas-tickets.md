@@ -209,7 +209,7 @@
 **Owned paths:** new `PN/src/modules/clients/centre/results/` (one builder per service, the area map,
 the composer); new `PN/src/modules/clients/centre/centre-results.controller.ts` (staff) and
 `PN/src/core/portal-centre-results.controller.ts` (portal), each registered in its module;
-`PN/src/core/portal-visibility.ts` (one new predicate) and its guard test; a small export from
+`PN/src/core/portal-visibility.test.ts` (the guard's switched list); a small export from
 monitoring (`UPTIME_RATIO_SQL` or a function) and from search (one top-10 helper); BFF §25.
 
 **Contract:**
@@ -229,8 +229,9 @@ type BusinessResults = { clientId: string; generatedAt: string; visible: boolean
   `ModuleEnabledGuard("clients")`.
 - `GET /api/:t/portal/centre/:clientId/results`: `portal` read; `clientId` outside scope is 404; a
   contact who is in scope but **not client-wide for this client** gets 200 with `visible: false` and no
-  services (PV-D33; PV6-Q1). The client-wide test is a new `portal-visibility.ts` predicate (finding 8),
-  not inline SQL.
+  services (PV-D33; PV6-Q1). The client-wide test is `scope.wideClientIds`, not inline SQL. (Finding 8's
+  flaw was fixed on main by `4ea548d0`, the per-client portal scope, while PV6-02 was being built; the
+  predicate PV6-02 first added duplicated it and was removed at the wave-1 merge.)
 
 **Builders** (one file each; each declares only its own module; a module the company has not enabled
 is skipped, which means "not offered"; a builder that throws is logged and listed in `unavailable`;
@@ -261,7 +262,7 @@ never a silent empty list):
   client are equal (a parity test, like PV3-07).
 - Every builder's SQL runs under its module scope (the test runs with the scope removed and expects
   the guard to catch it).
-- Teeth: drop the `simulated` filter; drop the client-wide predicate; drop the module scope. Each must
+- Teeth: drop the `simulated` filter; drop the client-wide check; drop the module scope. Each must
   turn a test red.
 
 ### PV6-03: Services & results on both sides

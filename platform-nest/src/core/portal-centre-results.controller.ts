@@ -8,9 +8,9 @@
 // THE ORDER (authorization before anything else):
 //   1. Cerbos: portal `read`.
 //   2. portal scope: the URL's clientId must be one of the caller's clients, else 404 (never 403: no existence oracle).
-//   3. client-wide for THIS client (`callerClientWideFor`, portal-visibility.ts): a contact who is in scope but limited to
-//      some projects may be someone outside the client's organisation, so they get 200 `{visible: false, services: []}`
-//      (PV-D33; PV6-Q1), never a partial or project-filtered view. The UI renders that as "ask your account manager".
+//   3. client-wide for THIS client (`scope.wideClientIds`, the per-client portal scope): a contact who is in scope but
+//      limited to some projects may be someone outside the client's organisation, so they get 200
+//      `{visible: false, services: []}` (PV-D33; PV6-Q1), never a partial or project-filtered view.
 //   4. only then the composer, the same function the staff route calls, so the two payloads are equal.
 import { Controller, Get, NotFoundException, Param, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
@@ -18,7 +18,6 @@ import { withTenants } from "../db";
 import { authorize } from "./http";
 import { AuthGuard } from "../auth/guards";
 import { resolvePortalScope } from "./portal-scope";
-import { callerClientWideFor } from "./portal-visibility";
 import { composeBusinessResults, hiddenBusinessResults } from "../modules/clients/centre/results/compose";
 
 @Controller("api")
@@ -30,11 +29,7 @@ export class PortalCentreResultsController {
     const wide = await withTenants([tenantId], async (c) => {
       const scope = await resolvePortalScope(c, req.principal);
       if (!scope.clientIds.includes(clientId)) throw new NotFoundException("client not found");
-      const r = await c.query<{ wide: boolean }>(
-        `SELECT ${callerClientWideFor({ user: 1, client: 2 })} AS wide`,
-        [req.principal.userId, clientId],
-      );
-      return !!r.rows[0]?.wide;
+      return scope.wideClientIds.includes(clientId);
     });
     if (!wide) return hiddenBusinessResults(clientId);
     return composeBusinessResults(tenantId, clientId);

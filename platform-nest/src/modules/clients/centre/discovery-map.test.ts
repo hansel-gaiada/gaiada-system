@@ -7,7 +7,7 @@ import { DISCOVERY_MAP, answerText, planDiscoveryFill, valueFor } from "./discov
 
 const questionIds = new Set(ALL_QUESTIONNAIRE_FIELDS.map((f) => String(f.id)));
 const registryKeys = new Set(Object.keys(registry.fields as Record<string, unknown>));
-const emptyProfileState = (): ProfileState => ({ businessType: "other", profile: {}, connections: {}, departments: {}, customConnections: {} });
+const emptyProfileState = (): ProfileState => ({ businessType: "other", profile: {}, connections: {}, areas: {}, customConnections: {} });
 const entry = (to: string) => {
   const e = DISCOVERY_MAP.find((m) => m.to === to);
   if (!e) throw new Error(`no map row for ${to}`);

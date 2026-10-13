@@ -5249,7 +5249,7 @@ Plan: `docs/plans/2026-10-13-pv6-business-areas-tickets.md` (PV6-02; findings 6 
 | Method + path | Authz | Notes |
 |---|---|---|
 | `GET /api/:t/clients/:clientId/centre/results` | `client` read (the same as the profile) | Staff, under `ModuleEnabledGuard("clients")`. Returns `BusinessResults`. Authorization runs before the id is looked at; an unknown, malformed or other-company `clientId` is 404. |
-| `GET /api/:t/portal/centre/:clientId/results` | `portal` read + `clientId ∈ scope.clientIds` + client-wide for that client | Client. Core controller, no module guard. A `clientId` outside scope is **404**. A contact who is in scope but **not client-wide for this client** (project-limited) gets **200 with `visible: false` and no services** (PV-D33, PV6-Q1); the UI says "ask your account manager". The client-wide test is `callerClientWideFor` in `portal-visibility.ts` (a `client_contacts` row with `project_id IS NULL`, active, any capability, or the legacy `clients.portal_user_id`), not inline SQL. |
+| `GET /api/:t/portal/centre/:clientId/results` | `portal` read + `clientId ∈ scope.clientIds` + client-wide for that client | Client. Core controller, no module guard. A `clientId` outside scope is **404**. A contact who is in scope but **not client-wide for this client** (project-limited) gets **200 with `visible: false` and no services** (PV-D33, PV6-Q1); the UI says "ask your account manager". The client-wide test is the per-client portal scope's `wideClientIds` (`portal-scope.ts`: an active `client_contacts` row with `project_id IS NULL`, any capability, or the legacy `clients.portal_user_id`), not inline SQL. |
 
 ```ts
 type Kpi = { key: string; label: string; value: number | null; unit: "count" | "percent" | "position" | "ratio";

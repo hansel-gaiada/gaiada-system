@@ -232,10 +232,10 @@ describe("guards", () => {
     expect(norm(UPTIME_RATIO_SQL)).toBe(norm(pinned));
   });
 
-  it("the portal route takes its client-wide test from portal-visibility.ts, never inline SQL", () => {
+  it("the portal route takes its client-wide test from the per-client portal scope, never inline SQL", () => {
     const src = readFileSync(join(DIR, "..", "..", "..", "..", "core", "portal-centre-results.controller.ts"), "utf8");
     const c = code(src);
-    expect(c).toMatch(/callerClientWideFor\(/);
+    expect(c).toMatch(/scope\.wideClientIds\.includes\(clientId\)/);
     expect(c).not.toMatch(/project_id\s+IS\s+NULL/);
     expect(c).not.toMatch(/client_contacts/);
   });
@@ -245,7 +245,7 @@ describe("guards", () => {
     const at = (needle: string) => c.indexOf(needle);
     expect(at("authorize(")).toBeGreaterThan(-1);
     expect(at("authorize(")).toBeLessThan(at("resolvePortalScope("));
-    expect(at("resolvePortalScope(")).toBeLessThan(at("callerClientWideFor("));
-    expect(at("callerClientWideFor(")).toBeLessThan(at("composeBusinessResults("));
+    expect(at("resolvePortalScope(")).toBeLessThan(at("wideClientIds.includes("));
+    expect(at("wideClientIds.includes(")).toBeLessThan(at("composeBusinessResults("));
   });
 });

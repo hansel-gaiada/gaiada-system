@@ -222,6 +222,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/integrations.controller.ts` |
 | `/api` | `platform-nest/src/core/meetings.controller.ts` |
 | `/api` | `platform-nest/src/core/pipeline.controller.ts` |
+| `/api` | `platform-nest/src/core/portal-centre-results.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-centre.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-commerce.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-conversation.controller.ts` |
@@ -237,6 +238,8 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/work-activity.controller.ts` |
 | `/api` | `platform-nest/src/mail/thread.controller.ts` |
 | `/api` | `platform-nest/src/modules/assistant/assistant.controller.ts` |
+| `/api` | `platform-nest/src/modules/clients/centre/centre-discovery.controller.ts` |
+| `/api` | `platform-nest/src/modules/clients/centre/centre-results.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
