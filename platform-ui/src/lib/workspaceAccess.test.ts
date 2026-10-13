@@ -33,6 +33,8 @@ describe("gateAllows mirrors nav.ts (gates unchanged, plan §2.6 rule 4)", () =>
   it.each([
     ["the root owner in the root", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [ROOT, AGENCY]), "co-root"],
     ["the root owner in a child", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [ROOT, AGENCY]), "co-a"],
+    // PV-D31: only the owner of the OPERATOR root gets Platform.
+    ["the operator root's owner", me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [{ ...ROOT, isOperatorRoot: true }, AGENCY]), "co-root"],
     ["platform_admin in the root", me([{ role: "platform_admin", scopeType: "global", scopeId: null }], [ROOT, AGENCY]), "co-root"],
     ["a member", me([member()]), "co-a"],
   ] as [string, Me, string][])("shows Group, Platform and Settings exactly where nav.ts does: %s", (_name, m, tenant) => {

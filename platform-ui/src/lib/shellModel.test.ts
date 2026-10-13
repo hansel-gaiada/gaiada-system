@@ -86,8 +86,10 @@ describe("buildShellModel: an unplaced root owner", () => {
     expect(keys(mod.workspaces[0].rows.work)).toEqual(expect.arrayContaining(["command", "oversight"]));
   });
 
-  it("offers Settings, Group and Platform, each by its own gate", () => {
-    expect(keys(mod.admin)).toEqual(["settings", "group", "platform"]);
+  it("offers Settings and Group by their own gates, and Platform only to the operator root's owner (PV-D31)", () => {
+    expect(keys(mod.admin)).toEqual(["settings", "group"]);
+    const operatorOwner = me([{ role: "owner", scopeType: "company", scopeId: "co-root" }], [{ ...AGENCY_ROOT, isOperatorRoot: true }]);
+    expect(keys(model(operatorOwner, "co-root", agencyTree()).admin)).toEqual(["settings", "group", "platform"]);
   });
 
   it("lists the GM once, as theirs", () => {
