@@ -564,6 +564,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/reports/department`
 - `/reports/person`
 - `/reports/project`
+- `/reports/team`
 - `/rollups`
 - `/search`
 - `/step-up`

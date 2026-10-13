@@ -11,6 +11,24 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.120.0` - DW-4b: a unit's whole roster on the person-grain report overview (2026-10-13) - PROTOTYPED
+
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §37. Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.1 and §5.6.
+- **Why.** `GET /reports/overview?grain=person` lists only people with rows in the range, so a quiet team member would silently drop off a head's Team report.
+- **`unit` (grain=person only).** Returns every user whose primary membership is valid TODAY (`REPORTS_TZ`) on a node of the unit's subtree, ordered by name, each with `activity`. `activity` means fact rows in the range (a person-grain `delivery.tasks_completed` row, which `computeOwnFactRollups` emits exactly for users with `report_work_facts` rows; the calendar metrics emit rows for every expected person and so cannot decide it). Without activity, `kpis` is `[]`, never zero-filled; with it, the KPIs are byte-identical to the no-`unit` listing.
+- **Order of refusals.** `unit` with another grain → 400; range; Cerbos `read_person` (a plain member → 403); a narrowed caller must lead the unit → 403, before the existence check, so nothing leaks about units outside their line; an unknown unit → 404 `unit_not_found`. The TR-25 narrowing still filters the roster as a second guard. Without `unit`, the endpoint is unchanged.
+- **`person-scope.ts`.** `loadUnitRoster` (the same validity predicate as `loadUnitByUser`), `unitExistsInStructure` (pure; `collectUnitSubtree` returns `[id]` for an unknown id by design) and `loadOrgStructure` exported.
+- **Tests.** `tr25-person-axis.db.test.ts` gains a DW-4b block on live Postgres (the whole roster with a quiet member, a division's roster, 403 outside the line including an unknown id, 404 for a company-wide caller, 400 for another grain, no `activity` without `unit`, a member refused); `person-scope.test.ts` 3 pure tests. No new HTTP test file, so the capability inventory is unchanged.
+- No migration, no Cerbos change, no compose change, no new route.
+
+### platform-ui `0.121.0` - DW-4b: the Reports row, Team reports and six report periods (2026-10-13) - PROTOTYPED
+
+- **New `/reports/team`.** With `?unit=` it lists everyone in the department: the headline numbers per person, "No activity in this period" (never numbers) for a quiet member, and "Open report" to their person report. Without `unit` it is the department picker; its empty state says no department you may read has activity, never "no team". 403, 404 and a range that is too long each have their own state. `lib/areas.ts` homes it in Performance.
+- **The Team tab** in every department workspace opens `/reports/team?unit={dept}` and is no longer planned. HR, Finance and IT have no org node until DW-7d, so they are not offered it, the rule every `{dept}` tab follows.
+- **`components/reports/PeriodSelector.tsx`** offers Daily, Weekly, Monthly, Quarterly, Semester, Yearly (from `REPORT_PERIODS`) and Custom range on every report page. New `ReportPeriodBar` puts the selection in the URL and keeps `unit`.
+- **Demo.** `demoReports.ts` serves the roster with the server's order of refusals (Web Dev and SEO each have an active and a quiet member).
+- `docs/MAP.md` regenerated (the new route).
+
 ### platform-nest `0.119.0` - PV5-14: a simulated second factor for the dev stage (PV-D40) (2026-10-13) - PROTOTYPED
 
 - **Why:** live Keycloak emits no `amr` (live tokens checked 2026-10-13: `sid` present, no `amr`), so no one ever reached high assurance and every high-assurance finance action was refused. The owner ruled (PV-D40) to keep the rules and simulate the factor while live holds mock data.
