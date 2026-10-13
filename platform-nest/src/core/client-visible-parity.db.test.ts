@@ -64,7 +64,7 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
   const f = {
     d1: newId(), d3: newId(), dInternal: newId(),
     kDraft: newId(), kSent: newId(), kSentP2: newId(),
-    iDraft: newId(), iSent: newId(), iNoClient: newId(),
+    iDraft: newId(), iSent: newId(), iNoClient: newId(), iVoidUnissued: newId(),
     payPendingSent: newId(), payConfirmedSent: newId(), payPendingDraft: newId(),
     r1: newId(), r0: newId(), rInternal: newId(),
     g1: newId(), g2: newId(), g3: newId(), g4: newId(),
@@ -165,6 +165,8 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
       await invoice(f.iDraft, client, "draft");
       await invoice(f.iSent, client, "approved");
       await invoice(f.iNoClient, null, "void");
+      // PV5-F1: a draft voided before it was issued: the client never got it, so the portal hides it and staff say "Internal".
+      await invoice(f.iVoidUnissued, client, "void");
 
       // Payments: pending + confirmed on the issued invoice; a pending claim on the draft (hidden through
       // its invoice, even though the payment row itself names the client).
@@ -365,6 +367,8 @@ describe.skipIf(!TEST_URL)("PV3-07 · clientVisible parity with the portal", () 
     const portal = (await get(signer, "/portal/invoices")) as Row[];
     expectParity("invoice", staff, portal.map((r) => r.id));
     expect(staff.find((r) => r.id === f.iNoClient)?.clientVisible).toBe(false);
+    expect(staff.find((r) => r.id === f.iVoidUnissued)?.clientVisible).toBe(false);
+    expect(portal.map((r) => r.id)).not.toContain(f.iVoidUnissued);
   });
 
   it("invoice payments (through the invoice, the portal's detail context)", async () => {

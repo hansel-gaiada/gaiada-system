@@ -80,6 +80,35 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
     return id;
   }
 
+  // PV5-F1: a `void` invoice in each of its three histories. A flagged-legacy row can only exist if the guard
+  // trigger is stepped over (as the migration does), so it is inserted on a connection with triggers off
+  // (`session_replication_role = replica`, superuser, one transaction: no other test sees it).
+  async function addVoid(kind: "unissued" | "issued" | "legacy", dayOffset: number): Promise<string> {
+    if (kind === "issued") {
+      const inv = await addInvoice({ status: "sent", dayOffset });
+      await withTenants([co], (c) => c.query(`UPDATE invoices SET status = 'void' WHERE id = $1`, [inv]));
+      return inv;
+    }
+    const id = newId();
+    const k = await adminPool().connect();
+    try {
+      await k.query("BEGIN");
+      await k.query("SET LOCAL session_replication_role = replica");
+      await k.query(
+        `INSERT INTO invoices (id, tenant_id, client_id, period_start, period_end, status, currency, lines, total, pre_pv5_legacy, origin_site)
+         VALUES ($1, $2, $3, current_date - $4::int - 30, current_date - $4::int - 1, 'void', 'IDR', '[]', 1000, $5, $6)`,
+        [id, co, clientA, dayOffset, kind === "legacy", site()],
+      );
+      await k.query("COMMIT");
+    } catch (e) {
+      await k.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      k.release();
+    }
+    return id;
+  }
+
   async function addPayment(invoiceId: string, status = "confirmed"): Promise<string> {
     const id = newId();
     await withTenants([co], (c) =>
@@ -249,12 +278,35 @@ describe.skipIf(!TEST_URL)("PV3-02c — portal isolation fixes", () => {
     });
   });
 
+  // ── 4b. a void invoice is shown only if it was ever issued (PV5-F1) ──────────────────────────────────
+  // Teeth: drop the `(status <> 'void' OR issued_at IS NOT NULL OR pre_pv5_legacy)` arm from `invoiceClientVisible`
+  // (portal-visibility.ts) and the unissued void appears in the list and its detail answers 200.
+  describe("a void invoice that was never issued is hidden from the client", () => {
+    it("an unissued void is absent and 404; an issued-then-voided and a pre-PV-5 void still show", async () => {
+      const unissued = await addVoid("unissued", 200);
+      const issued = await addVoid("issued", 210);
+      const legacy = await addVoid("legacy", 220);
+
+      const list = await app.inject({ method: "GET", url: `/api/${co}/portal/invoices`, headers: asUser(signerA) });
+      expect(list.statusCode).toBe(200);
+      const ids = (list.json() as Array<{ id: string }>).map((r) => r.id);
+      expect(ids).not.toContain(unissued);
+      expect(ids).toContain(issued);
+      expect(ids).toContain(legacy);
+
+      const detail = (id: string) => app.inject({ method: "GET", url: `/api/${co}/portal/invoices/${id}`, headers: asUser(signerA) });
+      expect((await detail(unissued)).statusCode).toBe(404);
+      expect((await detail(issued)).statusCode).toBe(200);
+      expect((await detail(legacy)).statusCode).toBe(200);
+    });
+  });
+
   // ── 3. a payment is reached through a visible invoice ─────────────────────────────────────────────
   describe("timeline payments and receipts follow the invoice", () => {
     it("a confirmed payment on a deleted invoice is absent from the timeline and its receipt is 404", async () => {
       const liveInv = await addInvoice({ status: "sent", dayOffset: 0 });
-      // `void` (never issued): visible to the client and still deletable, so it carries the deleted-invoice case.
-      const goneInv = await addInvoice({ status: "void", dayOffset: 40 });
+      // A pre-PV-5 `void` (flagged legacy): visible to the client and still deletable, so it carries the deleted-invoice case.
+      const goneInv = await addVoid("legacy", 40);
       const draftInv = await addInvoice({ status: "draft", dayOffset: 80 });
       const livePay = await addPayment(liveInv);
       const gonePay = await addPayment(goneInv);

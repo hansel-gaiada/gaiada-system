@@ -8,7 +8,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { PdfRenderFailedError, PdfRendererNotConfiguredError, generateJobToken, renderPdfViaSidecar } from "./report-pdf-export";
+import { PdfRenderFailedError, PdfRendererNotConfiguredError, generateJobToken, renderPdfViaSidecar, renderPrintPathViaSidecar } from "./report-pdf-export";
 
 describe("generateJobToken — requirement 4: unguessable, encodes nothing about the document", () => {
   it("is base64url (no characters a raw path segment would need escaping) and long enough for real entropy", () => {
@@ -98,6 +98,24 @@ describe("renderPdfViaSidecar — real HTTP round trip against a genuine node:ht
     await renderPdfViaSidecar("tok", { rendererUrl: `${url}/`, rendererToken: "t", platformUiInternalUrl: "http://ui.test/" });
     expect(capturedUrl).toBe("/render");
     expect(capturedTarget).toBe("http://ui.test/print/reports/tok");
+  });
+
+  it("PV5-F1: footerText is sent in the body only when given (reports send none)", async () => {
+    const bodies: string[] = [];
+    const url = await listen((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        bodies.push(raw);
+        res.writeHead(200, { "content-type": "application/pdf" });
+        res.end(Buffer.from("%PDF"));
+      });
+    });
+    const base = { rendererUrl: url, rendererToken: "t", platformUiInternalUrl: "http://ui.test" };
+    await renderPdfViaSidecar("tok", base);
+    await renderPrintPathViaSidecar("/print/invoices/tok", { ...base, footerText: "Issuer Ltd - INV-1" });
+    expect(JSON.parse(bodies[0]!)).toEqual({ url: "http://ui.test/print/reports/tok" });
+    expect(JSON.parse(bodies[1]!)).toEqual({ url: "http://ui.test/print/invoices/tok", footerText: "Issuer Ltd - INV-1" });
   });
 
   it("a non-2xx sidecar response -> PdfRenderFailedError, never a silently-empty buffer", async () => {
