@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { can, canInUnit, isLeadOf, leadUnits, unitPathOf } from "./rbac";
+import { can, canInUnit, isLeadOf, leadUnits, leadsAnyUnitWith, unitPathOf } from "./rbac";
 import type { Me } from "./platform";
 
 const companies = [
@@ -89,5 +89,21 @@ describe("unitPathOf", () => {
   });
   it("returns [] for an unknown id", () => {
     expect(unitPathOf(tree, "nope")).toEqual([]);
+  });
+});
+
+describe("leadsAnyUnitWith (DW-4g)", () => {
+  it("offers a lead the authoring and publishing rights org_unit_lead carries, in their own company", () => {
+    const l = me([lead("d-web")]);
+    expect(leadsAnyUnitWith(l, "lms.authoring", "co-a")).toBe(true);
+    expect(leadsAnyUnitWith(l, "lms.publish", "co-a")).toBe(true);
+  });
+  it("never offers what org_unit_lead lacks: waiving", () => {
+    expect(leadsAnyUnitWith(me([lead("d-web")]), "lms.waive", "co-a")).toBe(false);
+  });
+  it("is false with no led unit, for a company they do not belong to, or with no company", () => {
+    expect(leadsAnyUnitWith(me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]), "lms.authoring", "co-a")).toBe(false);
+    expect(leadsAnyUnitWith(me([lead("d-web")]), "lms.authoring", "co-z")).toBe(false);
+    expect(leadsAnyUnitWith(me([lead("d-web")]), "lms.authoring", null)).toBe(false);
   });
 });

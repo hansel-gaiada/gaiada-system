@@ -288,9 +288,44 @@ const COMPLIANCE: ComplianceRow[] = [
   { pathKey: "dept-head-track", title: "Department heads", isMandatory: false, assigned: 8, completed: 3, outstanding: 4, overdue: 0, waived: 1 },
 ];
 
+// DW-4g (BFF §38) — `GET compliance?unit=`. The demo org is the flat `dept-N` ids the other demo
+// fixtures use (demoReports' DEPARTMENT_NAMES), and the SAME order of refusals as the server: a caller
+// who is neither company-wide (`demo-hansel`) nor the head of that unit is 403 BEFORE anything says
+// whether the unit exists (so an unknown id is 403 for a head and 404 only for a company-wide caller).
+// `dept-manager` is the SEO Manager and leads `dept-3` (the same wiring as demoReports' LED_UNITS).
+const DEMO_UNITS = new Set(["dept-1", "dept-2", "dept-3", "dept-4", "dept-5"]);
+const DEMO_COMPANY_WIDE = new Set(["demo-hansel"]);
+const DEMO_LED: Record<string, string[]> = { "dept-manager": ["dept-3"] };
+// [assigned, completed, outstanding, overdue, waived] per path key, over THAT roster only. A unit with
+// nobody placed has learners 0 and every count 0 — the page says "0 people", never a table of zeros.
+const DEMO_UNIT_PROGRESS: Record<string, { learners: number; counts: Record<string, [number, number, number, number, number]> }> = {
+  "dept-1": { learners: 2, counts: {
+    "general-induction": [2, 2, 0, 0, 0], "security-awareness": [2, 1, 1, 1, 0], "webdev-fe-track": [2, 1, 1, 0, 0],
+  } },
+  "dept-3": { learners: 2, counts: {
+    "general-induction": [2, 1, 1, 0, 0], "security-awareness": [2, 0, 2, 1, 0],
+  } },
+};
+
+function unitCompliance(userId: string, unit: string | null): DemoResult {
+  const wide = DEMO_COMPANY_WIDE.has(userId);
+  if (!wide && !(unit !== null && unit !== "" && (DEMO_LED[userId] ?? []).includes(unit))) {
+    return { status: 403, json: { error: "not authorized" } };
+  }
+  if (!unit || !DEMO_UNITS.has(unit)) {
+    return { status: 404, json: { error: "unit_not_found", field: "unit" } };
+  }
+  const progress = DEMO_UNIT_PROGRESS[unit] ?? { learners: 0, counts: {} };
+  const paths: ComplianceRow[] = COMPLIANCE.map((r) => {
+    const [assigned, completed, outstanding, overdue, waived] = progress.counts[r.pathKey] ?? [0, 0, 0, 0, 0];
+    return { pathKey: r.pathKey, title: r.title, isMandatory: r.isMandatory, assigned, completed, outstanding, overdue, waived };
+  });
+  return ok({ unit, learners: progress.learners, paths });
+}
+
 /** Returns null when the path is not an LMS route, so the caller falls through. */
 export function lmsDemo(
-  method: string, p: string, qs: URLSearchParams, body?: string,
+  method: string, p: string, qs: URLSearchParams, body?: string, userId = "demo-hansel",
 ): DemoResult | null {
   const base = p.match(/^\/api\/[^/]+\/modules\/lms\/(.*)$/);
   if (!base) return null;
@@ -353,7 +388,8 @@ export function lmsDemo(
   }
 
   if (m === "GET" && rest === "me") return ok(MINE);
-  if (m === "GET" && rest === "compliance") return ok(COMPLIANCE);
+  // Without `unit` the company-wide array, exactly as before; with it (even empty) the unit-scoped read.
+  if (m === "GET" && rest === "compliance") return qs.has("unit") ? unitCompliance(userId, qs.get("unit")) : ok(COMPLIANCE);
   if (m === "GET" && rest === "enrollments") return ok([]);
 
   // ─────────────────────────────────────────────────────────── learner attempts (L1) ────────────

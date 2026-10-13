@@ -29,6 +29,7 @@ import "server-only";
 //   POST       /activities/:id/attempts                             -> AttemptResult
 //   POST       /attempts/:id/grade                                  -> {ok}
 //   GET        /compliance                                          -> ComplianceRow[]
+//   GET        /compliance?unit=<orgNodeId>                         -> UnitCompliance   (DW-4g, BFF §38)
 import { platformFetch, PlatformError } from "./platform";
 
 const base = (t: string) => `/api/${t}/modules/lms`;
@@ -117,6 +118,15 @@ export interface ComplianceRow {
   pathKey: string; title: string; isMandatory: boolean;
   assigned: number; completed: number; outstanding: number; overdue: number; waived: number;
 }
+/** DW-4g (BFF §38): one department's roster and the same per-path counts over ONLY that roster. */
+export interface UnitCompliance { unit: string; learners: number; paths: ComplianceRow[] }
+/** The honest answer to a unit-scoped read. `ok` with `learners: 0` is evidence of an empty roster;
+ *  the other three are never an empty table. */
+export type UnitComplianceResult =
+  | { kind: "ok"; data: UnitCompliance }
+  | { kind: "forbidden" }
+  | { kind: "not_found" }
+  | { kind: "error"; reason: string };
 
 // ───────────────────────────────────────────────────────────────────── readers ────────────────
 export const listCourses = (
@@ -169,6 +179,36 @@ export const listEnrollments = (u: string, t: string, q: { subjectUserId?: strin
 
 export const getCompliance = (u: string, t: string) =>
   soft(() => platformFetch<ComplianceRow[]>(`${base(t)}/compliance`, u), []);
+
+/**
+ * DW-4g — a department head's Team progress (BFF §38). NOT `soft()`: a refusal read as an empty list
+ * would say "nobody here has any training", the wrong answer this surface must never give.
+ *
+ * 403 -> forbidden. 404 is ambiguous on this route family: `unit_not_found` (the unit id is not in
+ * the org tree, `field: "unit"`) is a real answer, but a bare 404 means the `lms` module is dark, which
+ * is NOT "this department does not exist" — so only the typed 404 maps to `not_found`; anything else
+ * (a bare 404, a 5xx, a timeout) is `error` and carries the backend's words.
+ */
+export async function getUnitCompliance(u: string, t: string, unit: string): Promise<UnitComplianceResult> {
+  try {
+    const data = await platformFetch<UnitCompliance>(
+      `${base(t)}/compliance?unit=${encodeURIComponent(unit)}`, u,
+    );
+    // A backend that predates §38 ignores `unit` and answers the company-wide ARRAY. That is not this
+    // department's numbers, and must never be rendered as if it were.
+    if (!data || Array.isArray(data) || !Array.isArray(data.paths) || typeof data.learners !== "number") {
+      return { kind: "error", reason: "unexpected answer from the compliance endpoint" };
+    }
+    return { kind: "ok", data };
+  } catch (e) {
+    if (e instanceof PlatformError) {
+      if (e.status === 403) return { kind: "forbidden" };
+      if (e.status === 404 && (e.field === "unit" || e.message === "unit_not_found")) return { kind: "not_found" };
+      return { kind: "error", reason: e.message };
+    }
+    return { kind: "error", reason: (e as Error)?.message ?? "unknown error" };
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────── formatting ───────────────
 /** Minutes to a human duration. Kept here so the same number never renders two ways. */

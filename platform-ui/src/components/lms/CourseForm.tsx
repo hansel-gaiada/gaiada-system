@@ -16,15 +16,21 @@ const LEVELS = ["foundation", "practitioner", "advanced", "lead"];
  * caller does not lead, whatever this select offered. Rendering a unit here that the server would
  * reject produces an honest 403 rather than a silent write to somebody else's department.
  */
-export function CourseForm({ create, unitOptions }: {
+export function CourseForm({ create, unitOptions, departmentOnly = false, defaultUnit }: {
   create: (formData: FormData) => Promise<LmsResult>;
   unitOptions: { value: string; label: string }[];
+  /** DW-4g: a department head, not a company-wide author. The track is fixed to `department` and the
+   *  general track is not offered (it is the company administrator's; the server refuses it anyway). */
+  departmentOnly?: boolean;
+  /** Prefill for the Department select (`?unit=` from the head's Add material tab). */
+  defaultUnit?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [field, setField] = useState<string | undefined>();
-  const [track, setTrack] = useState("department");
+  const [trackChoice, setTrack] = useState("department");
+  const track = departmentOnly ? "department" : trackChoice;
   const [pending, startTransition] = useTransition();
 
   const onSubmit = (formData: FormData) => {
@@ -63,21 +69,26 @@ export function CourseForm({ create, unitOptions }: {
         />
         <Field name="title" label="Title" required error={field === "title" ? msg ?? undefined : undefined} />
         <Field name="summary" label="Summary" type="textarea" hint="One or two sentences: what somebody will be able to do afterwards." />
-        <label className="lux-field">
-          <span className="lux-field__label">Track</span>
-          <span className="lux-field__selectwrap">
-            <select
-              name="track" value={track} onChange={(e) => setTrack(e.target.value)}
-              className="lux-field__control"
-            >
-              <option value="department">A department&apos;s own material</option>
-              <option value="general">General — every employee</option>
-            </select>
-          </span>
-        </label>
+        {departmentOnly ? (
+          <input type="hidden" name="track" value="department" />
+        ) : (
+          <label className="lux-field">
+            <span className="lux-field__label">Track</span>
+            <span className="lux-field__selectwrap">
+              <select
+                name="track" value={track} onChange={(e) => setTrack(e.target.value)}
+                className="lux-field__control"
+              >
+                <option value="department">A department&apos;s own material</option>
+                <option value="general">General — every employee</option>
+              </select>
+            </span>
+          </label>
+        )}
         {track === "department" ? (
           <Field
             name="unitNodeId" label="Department" type="select" optionItems={unitOptions} required
+            defaultValue={defaultUnit && unitOptions.some((o) => o.value === defaultUnit) ? defaultUnit : undefined}
             error={field === "unitNodeId" ? msg ?? undefined : undefined}
             hint="You may author for the departments you lead. The server checks this again."
           />

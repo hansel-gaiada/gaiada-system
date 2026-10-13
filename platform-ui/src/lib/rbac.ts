@@ -931,6 +931,17 @@ export function canInUnit(
   return ROLE_CAPS.org_unit_lead.includes(cap) && isLeadOf(me, unitPath);
 }
 
+/**
+ * DW-4g — may the UI OFFER `cap` because the person leads SOME unit in this company? For a page with no
+ * unit in hand (Learning › Authoring without `?unit=`) and for a server action that has no org tree.
+ * It never answers "may touch this unit": the server's `unitAncestors` containment decides that.
+ * Same limits as `canInUnit`: a company the person belongs to, and `org_unit_lead` must hold `cap`.
+ */
+export function leadsAnyUnitWith(me: Me, cap: Capability, companyId: string | null | undefined): boolean {
+  if (companyId == null || !me.companies.some((c) => c.id === companyId)) return false;
+  return ROLE_CAPS.org_unit_lead.includes(cap) && leadUnits(me).length > 0;
+}
+
 /** `[nodeId, parent, ..., root.id]` (inclusive, nearest first), or `[]` when nodeId is not in the tree. */
 export function unitPathOf(root: UnitTree, nodeId: string): string[] {
   if (root.id === nodeId) return [root.id];

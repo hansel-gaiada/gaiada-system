@@ -2232,7 +2232,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
 
   // LMS reads (L1c) — read-only fixture store (lib/demoLms.ts). Placed high so no later
   // `/api/:t/modules/*` catch-all can answer an LMS path with a generic {ok:true}.
-  const lms = lmsDemo(method, p, url.searchParams, body);
+  const lms = lmsDemo(method, p, url.searchParams, body, userId);
   if (lms) return lms;
 
   // Finance (/api/:t/finance/*) — fixture store (lib/demoFinance.ts). Placed beside

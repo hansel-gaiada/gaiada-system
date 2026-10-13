@@ -200,6 +200,9 @@ describe("gates are carried as data, unchanged (plan §2.6 rule 4)", () => {
     expect(learning.tabs.find((t) => t.key === "add")!.gate).toEqual({ kind: "unitCap", cap: "lms.authoring" });
     expect(learning.tabs.find((t) => t.key === "team")!.gate).toEqual({ kind: "unitCap", cap: "lms.progress.view" });
     expect(learning.tabs.find((t) => t.key === "mine")!.gate).toBeUndefined();
+    // DW-4g: a head's two tabs open the page for THEIR department (BFF §38), not the company-wide one.
+    expect(learning.tabs.find((t) => t.key === "add")!.href).toBe("/learning/authoring?unit={dept}");
+    expect(learning.tabs.find((t) => t.key === "team")!.href).toBe("/learning/compliance?unit={dept}");
     const reportsTeam = PERFORMANCE_ROWS.find((r) => r.key === "reports")!.tabs.find((t) => t.key === "team")!;
     expect(reportsTeam.gate).toEqual({ kind: "unitCap", cap: "reports.department.view" });
     expect(reportsTeam.href).toBe("/reports/team?unit={dept}");

@@ -925,8 +925,10 @@ export const PERFORMANCE_ROWS: readonly WorkspaceRow[] = [
       // is not offered the tab (the `{dept}` rule, `hrefFor`); the whole catalogue stays in the Company
       // area's "Learning catalogue" row.
       { key: "courses", label: "Department courses", href: "/learning/catalogue?unit={dept}", icon: "box" },
-      { key: "add", label: "Add material", href: "/learning/authoring", icon: "projects", gate: { kind: "unitCap", cap: "lms.authoring" } },
-      { key: "team", label: "Team progress", href: "/learning/compliance", icon: "check", gate: { kind: "unitCap", cap: "lms.progress.view" } },
+      // DW-4g: the page opens for a head through `canInUnit` on `?unit=` and offers only the units they lead.
+      { key: "add", label: "Add material", href: "/learning/authoring?unit={dept}", icon: "projects", gate: { kind: "unitCap", cap: "lms.authoring" } },
+      // DW-4g: this department's roster only, read through GET lms/compliance?unit= (BFF §38).
+      { key: "team", label: "Team progress", href: "/learning/compliance?unit={dept}", icon: "check", gate: { kind: "unitCap", cap: "lms.progress.view" } },
     ],
   },
 ];

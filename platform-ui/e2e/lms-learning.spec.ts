@@ -79,4 +79,19 @@ test.describe("Learning (LMS L1c)", () => {
     await expect(page.getByText("Waived").first()).toBeVisible();
     await expect(page.getByText("nobody is enrolled")).toHaveCount(0);
   });
+
+  // DW-4g (BFF §38): a department's Team progress. The demo user is company-wide, so the gate passes and
+  // what this proves is the honest reader's three answers: the roster size, a 0-person unit, a missing one.
+  test("team progress for one department says how many people it covers", async ({ page }) => {
+    await page.goto("/learning/compliance?unit=dept-1");
+    await expect(page.getByText(/2 people in/)).toBeVisible();
+    await expect(page.getByText("Mandatory coverage")).toBeVisible();
+  });
+
+  test("team progress for an empty department says 0 people, and for an unknown one says it does not exist", async ({ page }) => {
+    await page.goto("/learning/compliance?unit=dept-5");
+    await expect(page.getByText(/0 people in/)).toBeVisible();
+    await page.goto("/learning/compliance?unit=dept-nope");
+    await expect(page.getByText("This department does not exist.")).toBeVisible();
+  });
 });

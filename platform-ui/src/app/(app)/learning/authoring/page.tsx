@@ -3,10 +3,12 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { can } from "@/lib/rbac";
+import { can, canInUnit, leadUnits, leadsAnyUnitWith, unitPathOf } from "@/lib/rbac";
 import { listCourses, listPaths, formatDuration, LEVEL_LABEL } from "@/lib/lms";
 import { createCourse } from "@/lib/lmsActions";
 import { listDepartments } from "@/lib/departments";
+import { readOrgRoot } from "@/lib/campaigns-data";
+import type { OrgNode } from "@/lib/org";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ModuleDisabled } from "@/components/ModuleDisabled";
@@ -21,7 +23,43 @@ import { CourseForm } from "@/components/lms/CourseForm";
 // hiding it here would buy nothing and cost the one thing this page is for. What differs is the
 // controls: publish and retire appear only where the caller could plausibly use them, and the
 // server refuses regardless.
-export default async function AuthoringPage() {
+//
+// DW-4g (BFF §38): a department head holds `lms.authoring` / `lms.publish` only at their unit, which the
+// company-wide `can()` never counts. So the page opens for a company-wide holder as before, and for a head
+// through `canInUnit` on the unit in `?unit=` (their department's "Add material" tab), or, with no `unit`,
+// on any unit they lead. A head is offered department-track courses only, for the units they lead (the
+// subtree below a led unit included). This only decides what the page OFFERS; Cerbos' `unitAncestors`
+// containment on the server is the authority and refuses anything else.
+function findNode(root: OrgNode, id: string): OrgNode | null {
+  if (root.id === id) return root;
+  for (const c of root.children ?? []) {
+    const n = findNode(c, id);
+    if (n) return n;
+  }
+  return null;
+}
+
+/** A led unit and every department/division beneath it, as select options. */
+function ledUnitOptions(root: OrgNode, led: readonly string[]): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  const add = (n: OrgNode) => {
+    if ((n.kind === "department" || n.kind === "division") && !out.some((o) => o.value === n.id)) {
+      out.push({ value: n.id, label: n.name });
+    }
+    for (const c of n.children ?? []) add(c);
+  };
+  for (const id of led) {
+    const node = findNode(root, id);
+    if (node) add(node);
+  }
+  return out;
+}
+
+export default async function AuthoringPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ unit?: string | string[] }>;
+}) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -29,9 +67,33 @@ export default async function AuthoringPage() {
   if (!tenant) return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   if (!(await isModuleOnForActiveCompany("lms"))) return <ModuleDisabled module="lms" label="Learning" />;
 
+  const sp = await searchParams;
+  const unit = typeof sp.unit === "string" && sp.unit !== "" ? sp.unit : null;
+
+  // Company-wide holders keep exactly today's behaviour. The org tree is read only when it can change the
+  // answer: a `?unit=` to check, or a head (no company-wide right) whose led units must be found.
+  const wideAuthor = can(me, "lms.authoring", tenant);
+  const widePublish = can(me, "lms.publish", tenant);
+  const maybeHead = leadUnits(me).length > 0;
+  const root = unit !== null || (!wideAuthor && maybeHead) ? await readOrgRoot(me, tenant) : null;
+  const unitPath = unit !== null && root ? unitPathOf(root, unit) : [];
+
+  let mayAuthor: boolean;
+  let mayPublish: boolean;
+  if (unit !== null) {
+    mayAuthor = canInUnit(me, "lms.authoring", tenant, unitPath);
+    mayPublish = canInUnit(me, "lms.publish", tenant, unitPath);
+  } else {
+    // Without a unit a head needs to lead at least one unit that exists in this company's tree (a grant
+    // for a node of another company is not a lead here).
+    const ledHere = root ? leadUnits(me).filter((u) => unitPathOf(root, u).length > 0) : [];
+    mayAuthor = wideAuthor || (leadsAnyUnitWith(me, "lms.authoring", tenant) && ledHere.length > 0);
+    mayPublish = widePublish || (leadsAnyUnitWith(me, "lms.publish", tenant) && ledHere.length > 0);
+  }
+
   // Fail closed with a sentence rather than an empty authoring console. A head who lost the lead
   // position should be told, not left looking at a page whose buttons all 403.
-  if (!can(me, "lms.authoring", tenant)) {
+  if (!mayAuthor) {
     return (
       <EmptyNote>
         Authoring training is for department heads, HR and company administrators. You can browse
@@ -39,7 +101,9 @@ export default async function AuthoringPage() {
       </EmptyNote>
     );
   }
-  const canPublish = can(me, "lms.publish", tenant);
+  const canPublish = mayPublish;
+  // A head, not a company-wide author: department track only, and only the units they lead.
+  const departmentOnly = !wideAuthor;
 
   // `status` is deliberately omitted so DRAFTS come back too — the catalogue hides them by design,
   // and an authoring console that could not see its own unpublished work would be useless.
@@ -52,7 +116,9 @@ export default async function AuthoringPage() {
   const drafts = courses.filter((c) => c.status === "draft" || c.status === "in_review");
   const published = courses.filter((c) => c.status === "published");
   const retired = courses.filter((c) => c.status === "retired");
-  const unitOptions = departments.map((d) => ({ value: d.id, label: d.name }));
+  const unitOptions = departmentOnly && root
+    ? ledUnitOptions(root, leadUnits(me))
+    : departments.map((d) => ({ value: d.id, label: d.name }));
 
   const courseRows = (list: typeof courses) =>
     list.map((c) => [
@@ -87,7 +153,10 @@ export default async function AuthoringPage() {
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        <CourseForm create={createCourse} unitOptions={unitOptions} />
+        <CourseForm
+          create={createCourse} unitOptions={unitOptions}
+          departmentOnly={departmentOnly} defaultUnit={unit ?? undefined}
+        />
       </div>
 
       {!canPublish && (

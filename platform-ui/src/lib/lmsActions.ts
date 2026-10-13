@@ -17,7 +17,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
-import { can } from "./rbac";
+import { can, leadsAnyUnitWith } from "./rbac";
 import type { ActivityKind, Grading, Level, Track } from "./lms";
 
 export type LmsResult = {
@@ -75,8 +75,13 @@ function guard(me: Me, tenant: string, cap: "lms.authoring" | "lms.publish"): st
 export async function createCourse(formData: FormData): Promise<LmsResult> {
   const c = await ctx();
   if ("error" in c) return { ok: false, error: c.error };
-  const denied = guard(c.me, c.tenant, "lms.authoring");
-  if (denied) return { ok: false, error: denied };
+  // DW-4g: a department head holds `lms.authoring` only at their unit, which company-wide `can()` never
+  // counts. They may ask to create; Cerbos decides the unit (`unitAncestors`) and refuses any other.
+  const companyWide = can(c.me, "lms.authoring", c.tenant);
+  if (!companyWide && !leadsAnyUnitWith(c.me, "lms.authoring", c.tenant)) {
+    const denied = guard(c.me, c.tenant, "lms.authoring");
+    if (denied) return { ok: false, error: denied };
+  }
 
   const courseKey = String(formData.get("courseKey") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
@@ -104,6 +109,10 @@ export async function createCourse(formData: FormData): Promise<LmsResult> {
       ok: false, field: "track",
       error: "A general-track course belongs to no department — it is the material every employee takes.",
     };
+  }
+  // A head writes a department's own material only; the general track is the company administrator's.
+  if (!companyWide && track === "general") {
+    return { ok: false, field: "track", error: "A department head can author department courses only; the general track is for company administrators." };
   }
 
   const r = await send(c.tenant, c.userId, "/courses", "POST", {

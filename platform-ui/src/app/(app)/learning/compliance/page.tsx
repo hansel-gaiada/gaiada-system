@@ -2,10 +2,13 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { can } from "@/lib/rbac";
-import { getCompliance, type ComplianceRow } from "@/lib/lms";
+import { can, canInUnit, unitPathOf } from "@/lib/rbac";
+import { getCompliance, getUnitCompliance, type ComplianceRow } from "@/lib/lms";
+import { readOrgRoot } from "@/lib/campaigns-data";
+import type { OrgNode } from "@/lib/org";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { ModuleDisabled } from "@/components/ModuleDisabled";
 import { isModuleOnForActiveCompany } from "@/lib/modules";
 
@@ -15,7 +18,34 @@ import { isModuleOnForActiveCompany } from "@/lib/modules";
 // view should answer "are we covered" without spreading everybody's scores — failed attempts
 // included — across a dashboard half the company can open. The per-person register is the EXPORT,
 // and that sits behind `lms.enrollment.export` at the high-assurance tier.
-export default async function LearningCompliancePage() {
+//
+// DW-4g (BFF §38): with `?unit=<orgNodeId>` it is a department head's Team progress — the same counts
+// over ONE department's roster, read through `GET lms/compliance?unit=`. The gate is `canInUnit` (a
+// head of that unit or an enclosing one, or a company-wide holder), the read is an HONEST reader
+// (a refusal, a missing unit or a failed read is said as such, never an empty table), and the server
+// stays the authority. Without `unit` this page is exactly what it always was.
+const RESTRICTED = (
+  <EmptyNote>
+    Training compliance is restricted to HR, department heads and company administrators. Your
+    own assigned learning is on <strong>/me/learning</strong>.
+  </EmptyNote>
+);
+
+function nodeName(root: OrgNode | null, id: string): string {
+  if (!root) return id;
+  if (root.id === id) return root.name;
+  for (const c of root.children ?? []) {
+    const n = nodeName(c, id);
+    if (n !== id) return n;
+  }
+  return id;
+}
+
+export default async function LearningCompliancePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ unit?: string | string[] }>;
+}) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -27,18 +57,46 @@ export default async function LearningCompliancePage() {
   // Ask the gate first so the two never look alike.
   if (!(await isModuleOnForActiveCompany("lms"))) return <ModuleDisabled module="lms" label="Learning" />;
 
-  // Fail closed HERE rather than rendering empty cards off a backend that returns nothing — "you
-  // may not see this" and "nobody has any training" are different answers and must not look alike.
-  if (!can(me, "lms.progress.view", tenant)) {
+  const sp = await searchParams;
+  const unit = typeof sp.unit === "string" && sp.unit !== "" ? sp.unit : null;
+
+  let rows: ComplianceRow[];
+  // Set only for a unit read: who "this" is, and how many people the roster holds.
+  let scope: { name: string; learners: number } | null = null;
+
+  if (unit === null) {
+    // Fail closed HERE rather than rendering empty cards off a backend that returns nothing — "you
+    // may not see this" and "nobody has any training" are different answers and must not look alike.
+    if (!can(me, "lms.progress.view", tenant)) return RESTRICTED;
+    rows = await getCompliance(userId, tenant);
+  } else {
+    // A head's grant is unit-scoped, so company-wide `can()` never counts it: ask `canInUnit` over the
+    // unit's path in the org tree. When the tree cannot be read only a company-wide holder passes, and
+    // the server still decides.
+    const root = await readOrgRoot(me, tenant);
+    if (!canInUnit(me, "lms.progress.view", tenant, root ? unitPathOf(root, unit) : [])) return RESTRICTED;
+
+    const res = await getUnitCompliance(userId, tenant, unit);
+    if (res.kind === "forbidden") return <ReadRefusal subject="this department's training progress" kind="forbidden" />;
+    if (res.kind === "not_found") return <EmptyNote>This department does not exist.</EmptyNote>;
+    if (res.kind === "error") {
+      return <ReadRefusal subject="This department's training progress" kind="unavailable" reason={res.reason} />;
+    }
+    rows = res.data.paths;
+    scope = { name: nodeName(root, unit), learners: res.data.learners };
+  }
+
+  if (scope !== null && scope.learners === 0) {
+    // The roster size is a CLAIM the server makes; with nobody on it every count is zero and the
+    // "mandatory but nobody is enrolled" wording below would blame publishing for an empty team.
     return (
       <EmptyNote>
-        Training compliance is restricted to HR, department heads and company administrators. Your
-        own assigned learning is on <strong>/me/learning</strong>.
+        <strong>0 people in {scope.name}</strong> today, so there is no progress to show. People appear
+        here once they are placed in this department (their primary membership).
       </EmptyNote>
     );
   }
 
-  const rows = await getCompliance(userId, tenant);
   const mandatory = rows.filter((r) => r.isMandatory);
 
   const totalOutstanding = mandatory.reduce((n, r) => n + r.outstanding, 0);
@@ -84,6 +142,12 @@ export default async function LearningCompliancePage() {
 
   return (
     <>
+      {scope !== null && (
+        <p style={{ margin: "0 0 16px", font: "400 14px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>
+          <strong>{scope.learners} {scope.learners === 1 ? "person" : "people"} in {scope.name}</strong>
+          {" "}— every count below covers only them.
+        </p>
+      )}
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 22 }}>
         <KpiTile
           label="Mandatory coverage"
