@@ -5184,6 +5184,40 @@ ROLE, not by action — `client`'s own condition is unchanged).
   `Company` tab are the frontend agent's own piece (§3 of the plan).
 
 
+### Services & results (PV6-02, 2026-10-13) — `src/modules/clients/centre/results/`, `centre-results.controller.ts`, `src/core/portal-centre-results.controller.ts` — **STATUS: PROTOTYPED**
+
+Plan: `docs/plans/2026-10-13-pv6-business-areas-tickets.md` (PV6-02; findings 6 to 9). A client's service figures (social media, SEO, paid search, site analytics, website and uptime), one card per service, drawn on the matching Business area page by PV6-03.
+
+| Method + path | Authz | Notes |
+|---|---|---|
+| `GET /api/:t/clients/:clientId/centre/results` | `client` read (the same as the profile) | Staff, under `ModuleEnabledGuard("clients")`. Returns `BusinessResults`. Authorization runs before the id is looked at; an unknown, malformed or other-company `clientId` is 404. |
+| `GET /api/:t/portal/centre/:clientId/results` | `portal` read + `clientId ∈ scope.clientIds` + client-wide for that client | Client. Core controller, no module guard. A `clientId` outside scope is **404**. A contact who is in scope but **not client-wide for this client** (project-limited) gets **200 with `visible: false` and no services** (PV-D33, PV6-Q1); the UI says "ask your account manager". The client-wide test is `callerClientWideFor` in `portal-visibility.ts` (a `client_contacts` row with `project_id IS NULL`, active, any capability, or the legacy `clients.portal_user_id`), not inline SQL. |
+
+```ts
+type Kpi = { key: string; label: string; value: number | null; unit: "count" | "percent" | "position" | "ratio";
+             period: { from: string; to: string } | null;   // inclusive ISO dates; null for a point-in-time reading with no window
+             previous: number | null;                        // the same figure for the window before `period`
+             target: number | null; asOf: string | null };   // asOf: ISO date of the newest data point behind `value`
+type ServiceCard = { service: "social" | "search" | "search_ads" | "analytics" | "website";
+                     areaId: string;                          // "mk_social" | "se" | "mk_paid" | "mk_analytics" | "mk_web" (the area map)
+                     title: string; status: "active" | "paused" | "setting_up" | "ended"; since: string | null;
+                     items: { label: string; detail: string | null }[];   // accounts, domains, sites, campaigns
+                     kpis: Kpi[]; clientVisible: true };
+type BusinessResults = { clientId: string; generatedAt: string; visible: boolean;
+                         services: ServiceCard[]; unavailable: ServiceKey[] };
+```
+
+Rules the UI can rely on:
+- **Unknown is `null`, never 0.** A metric nobody pulled, a window with no rows, a target nobody set and a suppressed small cell are all `null` (print "no data yet"). A `0` is a real counted zero (posts published, open incidents).
+- **Three outcomes per service, never conflated.** A service the company has not enabled (or that the client has nothing in) is **absent** from `services`; a service whose read failed is listed in **`unavailable`** and the other services still return; an empty `services` with an empty `unavailable` is a true "nothing offered". `unavailable` carries service keys only, never error text.
+- **Services come back in a fixed order** (`social`, `search`, `search_ads`, `analytics`, `website`); a client with two engagements of one service gets two cards (title carries the engagement or domain then).
+- **No simulated figure ever**: every read of a table that carries `simulated` filters it out, whatever the instance's provider mode.
+- **Paid search carries no cost, spend, budget, bid or CPA figure** (PV6-Q2). Its `conversion_value` KPI is the client's own attributed revenue in major units, labelled with its currency (`"Conversion value (USD)"`), and is `null` when the rows span two currencies or none is recorded.
+- **KPI keys** (stable): `social.followers|reach|engagements|link_clicks|posts_published`; `search.top10_keywords|organic_clicks|impressions|avg_position|ai_citations`; `search_ads.clicks|conversions|conversion_value`; `analytics.sessions|engaged_sessions|conversions`; `website.uptime_30d|open_incidents|cert_days|domain_days`. Windows: 30 days (social, ads, analytics, website) and 28 days (search), ending today (UTC), against the same-length window before. `website.cert_days` / `domain_days` are whole days and negative once expired.
+- **Website cards**: one per registered site (`webdev_sites`), probes matched by host (the monitor's target host is the domain or a subdomain); and one "Website content" card per WebDesk-linked site (`webdesk_site_clients`), whose probe KPIs are `null` because the ERP holds no domain for a WebDesk site. Probe KPIs are `null` too when the company has no `monitoring` module.
+- **Staff and portal payloads are equal** for the same client (one composer); `visible` is always `true` on the staff route.
+
+
 ## 26. Client edit, owner, notes and history (CC-D10, 2026-09-29) — `src/modules/clients/clients.controller.ts`, `client-input.ts` — **STATUS: PROTOTYPED**
 
 Design: `docs/plans/2026-09-29-client-centre.md` (CC-D10). Migration `202609290551_client_owner.sql`

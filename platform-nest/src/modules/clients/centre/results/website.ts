@@ -28,7 +28,8 @@ export function hostOf(target: string | null): string | null {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
     try { h = new URL(target).hostname; } catch { return null; }
   } else {
-    h = target.replace(/^\[(.+)\](:\d+)?$/, "$1").split(/[/:]/)[0] ?? "";
+    const bracket = /^\[(.+)\](?::\d+)?$/.exec(target);
+    h = bracket ? bracket[1] : (target.split(/[/:]/)[0] ?? "");
   }
   h = h.toLowerCase().replace(/\.$/, "");
   return h ? h.replace(/^www\./, "") : null;

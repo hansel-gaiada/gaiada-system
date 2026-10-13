@@ -34,7 +34,7 @@ function snapshot(daily: DailyMetricInput[], posts: number, w: DateWindow): Map<
   const frozen = buildSocialReportSnapshot({
     rangeStart: w.from, rangeEnd: w.to, daily, posts: [], postsPublishedInPeriod: posts, kpiTargets: [],
   });
-  return new Map(frozen.kpis.map((k) => [k.metricKey, k.value]));
+  return new Map(frozen.kpis.map((k): [string, number] => [k.metricKey, k.value]));
 }
 
 export const socialBuilder: ResultsBuilder = {
@@ -90,7 +90,7 @@ export const socialBuilder: ResultsBuilder = {
         perEngagement.set(e.id, {
           posts: { cur: Number(posts.rows[0]?.cur ?? 0), prev: Number(posts.rows[0]?.prev ?? 0) },
           // the newest target per metric wins (rows are ordered oldest first)
-          targets: new Map(targets.rows.map((t) => [t.metric_key, Number(t.target_value)])),
+          targets: new Map(targets.rows.map((t): [string, number] => [t.metric_key, Number(t.target_value)])),
         });
       }
       return { engagements: engagements.rows, accounts: accounts.rows, daily: daily.rows, perEngagement };
