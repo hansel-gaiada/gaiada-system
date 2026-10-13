@@ -31,6 +31,7 @@ import { newId, withTenants } from "../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
 import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
 import { syncMetricDefinitions } from "../../rollups/engine";
+import { rebuildOrgUnitClosure } from "../../core/org-unit-closure";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -475,5 +476,139 @@ describe.skipIf(!TEST_URL)("TR-24 appraisal engine (live PG + RLS + Cerbos)", ()
     const r = await mineRoute(t2); // t2 was never patched/submitted in this suite
     expect(r.statusCode).toBe(200);
     expect(r.json().appraisals).toEqual([]);
+  });
+
+  // ═══════════════════ DW-4d — A DEPARTMENT HEAD'S TEAM APPRAISALS (BFF §39) ═══════════════════
+  // GET /appraisals for a caller holding `org_unit_lead`: the appraisals of subjects whose primary
+  // unit today is in the led subtree, UNION the rows they manage. Fixtures are this block's own. The
+  // org tree is written in the REAL stored shape (`{root: ...}`) and the org-unit closure is built
+  // with the PRODUCTION builder — without the closure every org_unit_lead rule denies. The heads are
+  // deliberately NOT placed in any unit, so the led scope here is grant-derived only.
+  describe("DW-4d — a head's list", () => {
+    let webHead: string; // org_unit_lead @ d-web ONLY (no manager grant)
+    let dualHead: string; // org_unit_lead @ d-web AND a company `manager`
+    let webSubj: string; // placed d-web, managed by managerA
+    let feSubj: string; // placed dv-fe (d-web's division), managed by dualHead
+    let seoSubj: string; // placed d-seo (outside), managed by dualHead
+    let seoSubj2: string; // placed d-seo (outside), managed by managerB
+    let loner: string; // placed nowhere, managed by managerB
+    let rowOf: Record<string, string>;
+
+    const place = (userId: string, unit: string) =>
+      withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO org_unit_memberships (id, tenant_id, user_id, unit_node_id, is_primary, valid_from, source, origin_site)
+           VALUES ($1,$2,$3,$4,true,'2020-01-01','manual',$5)`,
+          [newId(), co, userId, unit, config.originSite],
+        ),
+      );
+    type Listed = { json: () => { appraisals: Array<{ id: string; subjectUserId: string }> } };
+    const subjectsOf = (r: Listed) => r.json().appraisals.map((a) => a.subjectUserId).sort();
+    const idsOf = (r: Listed) => r.json().appraisals.map((a) => a.id);
+
+    beforeAll(async () => {
+      webHead = await createUser("web-head@dw4d.test");
+      dualHead = await createUser("dual-head@dw4d.test");
+      webSubj = await createUser("web-subj@dw4d.test");
+      feSubj = await createUser("fe-subj@dw4d.test");
+      seoSubj = await createUser("seo-subj@dw4d.test");
+      seoSubj2 = await createUser("seo-subj2@dw4d.test");
+      loner = await createUser("loner@dw4d.test");
+      const everyone = [webHead, dualHead, webSubj, feSubj, seoSubj, seoSubj2, loner];
+      for (const u of everyone) await addMembership(co, u);
+
+      const member = await createRole("member");
+      for (const u of everyone) await grantRole(u, member, "company", co);
+      const leadRole = await createRole("org_unit_lead");
+      await grantRole(webHead, leadRole, "org_unit", "d-web");
+      await grantRole(dualHead, leadRole, "org_unit", "d-web");
+      await grantRole(dualHead, await createRole("manager"), "company", co);
+
+      const root = {
+        id: "d-corp",
+        kind: "company",
+        name: "DW-4d Co",
+        children: [
+          { id: "d-web", kind: "department", name: "Web", children: [{ id: "dv-fe", kind: "division", name: "Frontend", children: [] }] },
+          { id: "d-seo", kind: "department", name: "SEO", children: [] },
+        ],
+      };
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1,$2,$3)
+           ON CONFLICT (tenant_id) DO UPDATE SET structure = EXCLUDED.structure`,
+          [co, JSON.stringify({ root }), config.originSite],
+        ),
+      );
+      await withTenants([co], (c) => rebuildOrgUnitClosure(c, co, root));
+      await place(webSubj, "d-web");
+      await place(feSubj, "dv-fe");
+      await place(seoSubj, "d-seo");
+      await place(seoSubj2, "d-seo");
+
+      for (const u of [webSubj, feSubj, seoSubj, seoSubj2, loner]) await seedSubject(u, 1, 0);
+      // The August calendar period is sealed by the cases above; generate into the SAME cycle.
+      const gen = await generateRoute(
+        cycleId,
+        {
+          subjects: [
+            { subjectUserId: webSubj, managerUserId: managerA, roleKey: "dw4d" },
+            { subjectUserId: feSubj, managerUserId: dualHead, roleKey: "dw4d" },
+            { subjectUserId: seoSubj, managerUserId: dualHead, roleKey: "dw4d" },
+            { subjectUserId: seoSubj2, managerUserId: managerB, roleKey: "dw4d" },
+            { subjectUserId: loner, managerUserId: managerB, roleKey: "dw4d" },
+          ],
+        },
+        hrAdmin,
+      );
+      expect(gen.statusCode).toBe(200);
+      expect(gen.json().generated).toHaveLength(5);
+      const all = await listRoute(`?cycleId=${cycleId}`, hrAdmin);
+      rowOf = Object.fromEntries((all.json().appraisals as Array<{ id: string; subjectUserId: string }>).map((a) => [a.subjectUserId, a.id]));
+    }, 60_000);
+
+    it("(a) an org_unit_lead-only head of d-web gets 200 with EXACTLY the d-web subtree's appraisals — the division member's included, a d-seo subject's and an unplaced subject's excluded", async () => {
+      const r = await listRoute(`?cycleId=${cycleId}`, webHead);
+      expect(r.statusCode).toBe(200);
+      expect(subjectsOf(r)).toEqual([webSubj, feSubj].sort());
+      expect(Object.keys(r.json().appraisals[0]).sort()).toEqual(["composite", "cycleId", "id", "managerUserId", "status", "subjectUserId"]);
+      // reading the list grants no write: scoring stays manager-of-subject
+      expect((await patchRoute(rowOf[webSubj], { scores: { delivery: { manager: 3 } } }, webHead)).statusCode).toBe(403);
+    });
+
+    it("(b) a head who ALSO holds manager gets the unit's rows plus the rows they manage (one outside their unit), with no duplicate ids", async () => {
+      const r = await listRoute(`?cycleId=${cycleId}`, dualHead);
+      expect(r.statusCode).toBe(200);
+      // webSubj (unit), feSubj (unit AND managed: must appear once), seoSubj (managed, outside the unit)
+      expect(subjectsOf(r)).toEqual([webSubj, feSubj, seoSubj].sort());
+      const ids = idsOf(r);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids).not.toContain(rowOf[seoSubj2]);
+      expect(ids).not.toContain(rowOf[loner]);
+    });
+
+    it("(c) subjectId of an out-of-scope subject the head does not manage returns an empty list; a managed or in-unit one still returns its row", async () => {
+      expect((await listRoute(`?cycleId=${cycleId}&subjectId=${seoSubj}`, webHead)).json().appraisals).toEqual([]);
+      expect((await listRoute(`?cycleId=${cycleId}&subjectId=${loner}`, webHead)).json().appraisals).toEqual([]);
+      expect((await listRoute(`?cycleId=${cycleId}&subjectId=${seoSubj2}`, dualHead)).json().appraisals).toEqual([]);
+      expect(idsOf(await listRoute(`?cycleId=${cycleId}&subjectId=${seoSubj}`, dualHead))).toEqual([rowOf[seoSubj]]);
+      expect(idsOf(await listRoute(`?cycleId=${cycleId}&subjectId=${feSubj}`, webHead))).toEqual([rowOf[feSubj]]);
+    });
+
+    it("(d) the broad tier, a manager-only caller and a plain member are unchanged", async () => {
+      // broad (HR): every row of the cycle, including the d-seo and unplaced subjects
+      const hr = await listRoute(`?cycleId=${cycleId}`, hrAdmin);
+      expect(hr.statusCode).toBe(200);
+      expect(idsOf(hr)).toEqual(expect.arrayContaining([rowOf[webSubj], rowOf[feSubj], rowOf[seoSubj], rowOf[seoSubj2], rowOf[loner]]));
+      // manager-only (no org_unit_lead): exactly the rows assigned to them
+      const mgr = await listRoute(`?cycleId=${cycleId}`, managerB);
+      expect(mgr.statusCode).toBe(200);
+      expect(idsOf(mgr)).toEqual(expect.arrayContaining([rowOf[seoSubj2], rowOf[loner], s5AppraisalId]));
+      expect(mgr.json().appraisals.every((a: { managerUserId: string }) => a.managerUserId === managerB)).toBe(true);
+      // plain member: only their own, from submitted on — a draft of theirs is not listed
+      const own = await listRoute(`?cycleId=${cycleId}`, webSubj);
+      expect(own.statusCode).toBe(200);
+      expect(own.json().appraisals).toEqual([]);
+    });
   });
 });

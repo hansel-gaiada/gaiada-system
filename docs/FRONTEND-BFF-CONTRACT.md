@@ -7328,7 +7328,7 @@ There is **no new Cerbos kind**. A link is part of the work it is on, so it is a
 - an unknown unit → 403 for the head, and 404 for a company-wide caller;
 - without `unit`, the head is still refused (unchanged).
 
-## 39. A department head's Team appraisals (DW-4d, 2026-10-13) — `platform-nest/src/modules/reports/appraisals.controller.ts` (`listRoute`) — **STATUS: PLANNED (contract first)**
+## 39. A department head's Team appraisals (DW-4d, 2026-10-13) — `platform-nest/src/modules/reports/appraisals.controller.ts` (`listRoute`) — **STATUS: BUILT, PROTOTYPED (appraisals.controller.db.test.ts on the Linux CI gate)**
 
 **Why.** Plan §5.3: the Appraisals row's Team tab is for heads ("score my people; who is written, scored and signed"). Today `GET /api/:t/appraisals` serves three tiers:
 - broad (HR, admin): every appraisal;

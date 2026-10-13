@@ -68,10 +68,11 @@ import {
   patchAppraisal,
   patchCycle,
   submitAppraisal,
+  type AppraisalRowShape,
   type GenerateSubjectInput,
 } from "./appraisal-engine";
 import type { AppraisalAxis } from "./appraisal-document";
-import { PERSON_SCOPE_MODULES, personAxisTier, resolveSubjectUnit, todayIsoInTz } from "./person-scope";
+import { PERSON_SCOPE_MODULES, loadLedUnitScope, loadUnitByUser, personAxisTier, resolveSubjectUnit, todayIsoInTz } from "./person-scope";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -150,6 +151,24 @@ function isOrgUnitLeadForSubject(principal: Principal, unitAncestors: string[]):
   return principal.roles.some(
     (g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId && unitAncestors.includes(g.scopeId),
   );
+}
+
+/** The list-row response shape every `GET /appraisals` branch returns. */
+function toAppraisalListItem(r: AppraisalRowShape) {
+  return { id: r.id, cycleId: r.cycleId, subjectUserId: r.subjectUserId, managerUserId: r.managerUserId, status: r.status, composite: r.composite === null ? null : Number(r.composite) };
+}
+
+/** The org units the caller leads by GRANT (`org_unit_lead`, `org_unit`-scoped), sorted so any
+ *  "pick one" is deterministic. Same grant reading as `isOrgUnitLeadForSubject` and
+ *  `loadLedUnitScope`; empty when the caller holds none. */
+function orgUnitLeadGrantScopeIds(principal: Principal): string[] {
+  return [
+    ...new Set(
+      principal.roles
+        .filter((g) => g.role === "org_unit_lead" && g.scopeType === "org_unit" && !!g.scopeId)
+        .map((g) => g.scopeId as string),
+    ),
+  ].sort();
 }
 
 function assertDate(value: string | undefined, field: string): string {
@@ -307,17 +326,16 @@ export class AppraisalsController {
 
   // ---------------- read: list / mine / single ----------------
 
-  // ⚠ HIER-2 BOUNDARY, stated rather than silently missed: this endpoint's `managerCoarse` branch
-  // (via `isManagerCoarseOnly` -> `personAxisTier`) now also classifies an `org_unit_lead`-only
-  // caller as `unit_scoped`, but the query below filters by an EXACT `managerUserId` match — the
-  // `manager`/`team_lead` tier's own semantic, not org_unit_lead's ancestor-based one. An
-  // org_unit_lead-only caller (no manager/team_lead grant) therefore fails CLOSED here: the coarse
-  // `authorize()` call below carries no `unitAncestors` (there is no single subject to resolve one
-  // for on a bulk list), so org_unit_lead's own Cerbos rule cannot fire and this throws a 403 —
-  // correctly denying, just via a less specific path than `getOneRoute`'s dedicated wiring. Listing
-  // is NOT part of this ticket's landing surface (only `getOneRoute` resolves and passes
-  // `unitAncestors`); wiring the list query to the subtree scope is left for the ticket that wants
-  // it, same "ship what you need, flag the boundary" posture this file's header already uses.
+  // Four tiers, in this order (BFF §39 for the third):
+  //   1. broad (HR / admin / company-wide): every appraisal;
+  //   2. a department head (holds an `org_unit_lead` grant, nothing broader, and a non-empty led
+  //      scope): the appraisals of subjects whose primary unit today is in the led subtree, plus
+  //      every row they are the `managerUserId` of. A bulk list has no single subject, so Cerbos is
+  //      asked once with the ancestors of one led unit (it confirms the caller leads there) and the
+  //      subtree narrowing is done here, as for the TR-25 report listing. An EMPTY scope falls
+  //      through to the branches below, never to "everything";
+  //   3. `manager`: only rows whose `managerUserId` is the caller;
+  //   4. everyone else: their own, from `submitted` on.
   @Get()
   async listRoute(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("cycleId") cycleId?: string, @Query("subjectId") subjectId?: string) {
     const principal = req.principal;
@@ -326,17 +344,55 @@ export class AppraisalsController {
 
     if (broad) {
       await authorize(principal, { kind: "appraisal", tenantId }, "read");
-      return { appraisals: (await listAppraisalRows(tenantId, { cycleId, subjectUserId: subjectId })).map((r) => ({ id: r.id, cycleId: r.cycleId, subjectUserId: r.subjectUserId, managerUserId: r.managerUserId, status: r.status, composite: r.composite === null ? null : Number(r.composite) })) };
+      return { appraisals: (await listAppraisalRows(tenantId, { cycleId, subjectUserId: subjectId })).map(toAppraisalListItem) };
+    }
+    const ledGrantIds = orgUnitLeadGrantScopeIds(principal);
+    if (ledGrantIds.length > 0 && principal.userId) {
+      const asOf = todayIsoInTz(config.reportsTz);
+      const led = await withTenants(
+        [tenantId],
+        async (c) => {
+          const scope = await loadLedUnitScope(c, tenantId, principal.userId, asOf, principal);
+          if (scope.size === 0) return null; // leads no unit ⇒ fall through, never "everything"
+          // One led unit's ancestor chain, picked deterministically: the sorted-first grant whose
+          // closure exists (a grant on a node with no closure rows yields [] and cannot match).
+          let unitAncestors: string[] = [];
+          for (const unitId of ledGrantIds) {
+            unitAncestors = await loadUnitAncestors(c, tenantId, unitId);
+            if (unitAncestors.length > 0) break;
+          }
+          return { scope, unitAncestors };
+        },
+        { modules: PERSON_SCOPE_MODULES },
+      );
+      if (led) {
+        await authorize(principal, { kind: "appraisal", tenantId, unitAncestors: led.unitAncestors }, "read");
+        // "unit rows UNION manager rows" in ONE read: it keeps listAppraisalRows' order
+        // (created_at DESC) and cannot duplicate a row; the subjectId / cycleId filters apply to
+        // both halves and cannot widen the scope.
+        const rows = await listAppraisalRows(tenantId, { cycleId, subjectUserId: subjectId });
+        const unitByUser = await withTenants(
+          [tenantId],
+          (c) => loadUnitByUser(c, tenantId, [...new Set(rows.map((r) => r.subjectUserId))], asOf),
+          { modules: PERSON_SCOPE_MODULES },
+        );
+        const visible = rows.filter((r) => {
+          if (r.managerUserId === principal.userId) return true;
+          const unit = unitByUser.get(r.subjectUserId);
+          return !!unit && led.scope.has(unit);
+        });
+        return { appraisals: visible.map(toAppraisalListItem) };
+      }
     }
     if (managerCoarse) {
       await authorize(principal, { kind: "appraisal", tenantId }, "read");
       if (!principal.userId) throw new BadRequestException("no principal user");
-      return { appraisals: (await listAppraisalRows(tenantId, { cycleId, subjectUserId: subjectId, managerUserId: principal.userId })).map((r) => ({ id: r.id, cycleId: r.cycleId, subjectUserId: r.subjectUserId, managerUserId: r.managerUserId, status: r.status, composite: r.composite === null ? null : Number(r.composite) })) };
+      return { appraisals: (await listAppraisalRows(tenantId, { cycleId, subjectUserId: subjectId, managerUserId: principal.userId })).map(toAppraisalListItem) };
     }
     if (!principal.userId) throw new BadRequestException("no principal user");
     await authorize(principal, { kind: "appraisal", tenantId, subjectUserId: principal.userId }, "read");
     const rows = await listAppraisalRows(tenantId, { cycleId, subjectUserId: principal.userId, minStatus: "submitted" });
-    return { appraisals: rows.map((r) => ({ id: r.id, cycleId: r.cycleId, subjectUserId: r.subjectUserId, managerUserId: r.managerUserId, status: r.status, composite: r.composite === null ? null : Number(r.composite) })) };
+    return { appraisals: rows.map(toAppraisalListItem) };
   }
 
   /** `GET /appraisals/mine` — MUST be declared before `:id` (both are single path segments; Nest
