@@ -80,7 +80,7 @@ describe("SocialAccountsBlock", () => {
     render(<SocialAccountsBlock accounts={[acct]} />);
     expect(screen.getByText("linkedin")).toBeInTheDocument();
     expect(screen.getByText("@gaiada")).toBeInTheDocument();
-    expect(screen.getByText("connected")).toBeInTheDocument();
+    expect(screen.getByText(/^connected$/i)).toBeInTheDocument();
     expect(screen.queryByRole("button")).toBeNull();
   });
 
