@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
+import { getMe } from "@/lib/platform";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getSystemStatus, getHubTools, getHubDetail, getHubAudit } from "@/lib/admin";
 import { PageHeader } from "@/components/PageHeader";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -24,6 +26,8 @@ export default async function HubSystemPage({
 }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
+
+  guardAdminRoute("/systems/hub", await getMe(userId), null); // DW-D20: before any read is issued
 
   const sp = await searchParams;
   const sourceFilter = sp.source ?? "";

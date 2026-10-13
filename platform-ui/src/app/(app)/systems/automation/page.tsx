@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getSystemStatus, getSystemConfig, getWorkflowExecutions, getBridgeHealth } from "@/lib/admin";
@@ -39,6 +40,7 @@ export default async function AutomationSystemPage() {
 
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
+  guardAdminRoute("/systems/automation", me, tenant); // DW-D20
 
   const [status, config, workflowList, executions, bridge, approvals, companyDetail] = await Promise.all([
     getSystemStatus(userId, "automation"),

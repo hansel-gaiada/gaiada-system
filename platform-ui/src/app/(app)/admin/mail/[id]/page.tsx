@@ -1,6 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
+import { guardAdminRoute } from "@/lib/adminGuard";
 import { getMe, PlatformError } from "@/lib/platform";
 import { getMailLogDetail, getMailLogThread, getMailPreview, entityHref, type MailLogRow } from "@/lib/mail";
 import { isUuidShaped } from "@/lib/mailFilters";
@@ -87,7 +88,7 @@ export default async function AdminMailDetailPage({ params }: { params: Promise<
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
-  await getMe(userId);
+  guardAdminRoute("/admin/mail", await getMe(userId), null); // DW-D20
 
   // MAIL-34 defect 1 — see invalidIdState()'s comment: a malformed id must never reach the
   // backend at all, since the detail endpoint has no shape check of its own.
