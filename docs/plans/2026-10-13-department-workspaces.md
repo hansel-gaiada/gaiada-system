@@ -683,6 +683,34 @@ is listed on the board as a Record item, not as a phase here.
   Needs you, so there is no second queue.
 - **The requester tracks it.** The request shows under their Sent tab with its status.
 
+### 7.3 DW-5 build notes (2026-10-13)
+
+The backend contracts come first. They are in `docs/FRONTEND-BFF-CONTRACT.md`: **§31, Campaign parts** (DW-5a) and **§32, Requests between departments** (DW-5c). Pilot users only, as for DW-2 and DW-3. Nothing below changes the classic layout.
+
+**Choices the contracts make.** Each is recommended and can be overturned by the owner:
+- **A part's money is an allocation from the campaign budget, never its own currency.** The server refuses allocations that add up to more than the budget, and it does the sums. Actual spend is not rolled up: each department's own campaign keeps its own budget (§31.3).
+- **A part's owner and its department's head may change its status and brief, but never its money.** Adding or removing departments and allocating money stay with managers (§31.2).
+- **Any staff member may send a request; viewers and bots may not.** The receiver's assignee delivers, the receiving head or a manager declines, and the requester may cancel while the request is open (§32.2).
+- **The work stays where each receiver already works.** An asset request is a PM task owned by Creatives, in a "Creatives · Requests" project made on the first request. An engineering request is a Web Dev change request with the `internal` source, triaged as today. One thin `work_requests` row carries the ask and its open, delivered, declined or cancelled state. Progress is read live from the work item (§32).
+- **Same company only in v1.** A group company with no Creatives of its own cannot yet ask another company's Creatives (§32.8).
+- **Every agency workspace gets Requests › Sent,** not only Web Dev: §7.2 says the requester tracks their request there. `/requests` lists a person's own requests, for people with no department. `/requests/new` and `/requests/[id]` are record pages (area `shared`, which keeps the area you came from, §2.3).
+
+**What already exists.**
+- **DW-5g is mostly built by PV-4.** The client page has a Conversation section with "awaiting our reply" first (PV4-09), and the client hub counts conversations awaiting a reply. What is left is a Needs-you source for threads awaiting a reply from me. It needs a "mine" filter on `GET conversation` and a queue item, and it lands after DW-3c, which owns Needs you.
+- **The Overview's Campaigns and Requests blocks belong to DW-3f.** They read `GET campaigns?unitId=` and `GET requests/summary`, both honest readers.
+
+**Order, one agent at a time:**
+1. 5a backend, including the new Cerbos kind.
+2. 5c backend, including its kind and the change-request sync.
+3. 5b: the Campaigns row, the campaign page's parts and the Social campaigns screen.
+4. 5c UI: the request form, the request page and Sent.
+5. 5d: Creatives › Requests and delivery from the Asset Library.
+6. 5e: Web Dev's Incoming shows internal requests and where they came from.
+7. 5f: the two quick actions, shown only where the receiving department exists.
+8. 5g: after DW-3c.
+
+**Tiers.** The contracts carry the design judgement, so the backends are Sonnet (senior-be, high effort) with an Opus review. The UI tickets are Sonnet, and 5f is Haiku.
+
 ---
 
 ## 8. The You block
