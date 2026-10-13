@@ -31,6 +31,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
+import { rankTop10 } from "./rank-top10";
 import { authorize, writeActivity } from "../../core/http";
 import { notifyBestEffort } from "../../core/client-notify";
 import { resolveAutomationApprovalDeciders } from "../../core/approval-deciders";
@@ -2848,15 +2849,9 @@ export class SearchController {
         // two — it feeds a CLIENT-facing report narrative, so an unfiltered count would land blended
         // synthetic rankings in front of the person least equipped to notice. Filter lands now, before
         // SM-14 gives this table its first writer (§4d fail-open class).
-        const rankTop10 = await c.query<{ n: string }>(
-          `SELECT count(*) AS n FROM (
-             SELECT DISTINCT ON (keyword_id, engine, device) position
-             FROM search_rank_snapshots WHERE property_id = $1
-               AND simulated = $2
-             ORDER BY keyword_id, engine, device, captured_at DESC
-           ) latest WHERE latest.position BETWEEN 1 AND 10`,
-          [engagement.propertyId, config.search.providerMode === "simulate"],
-        );
+        const rankTop10Now = await rankTop10(c, {
+          propertyId: engagement.propertyId, simulated: config.search.providerMode === "simulate",
+        });
         const criticalOpen = await c.query<{ n: string }>(
           `SELECT count(*) AS n FROM search_audit_findings saf
              JOIN search_audits sa ON sa.id = saf.audit_id
@@ -2870,7 +2865,7 @@ export class SearchController {
         return {
           existing: existing.rows[0] ?? null,
           engagementName: engRow.rows[0]?.name ?? "engagement",
-          rankTop10: Number(rankTop10.rows[0]?.n ?? 0),
+          rankTop10: rankTop10Now.top10,
           criticalFindingsOpen: Number(criticalOpen.rows[0]?.n ?? 0),
           kpiTargets: kpiTargets.rows.map((r) => ({ metric: r.metric_key, target: Number(r.target_value), direction: r.direction })),
         };

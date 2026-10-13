@@ -414,3 +414,37 @@ export function meetingMinutesInPortalScope(minutesAlias: string, meetingAlias: 
 export function staffMeetingMinutesClientVisible(minutesAlias: string, meetingAlias: string): string {
   return staffClientVisible(meetingAlias, meetingMinutesClientVisible(minutesAlias, meetingAlias));
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+// Client-wide for ONE client (PV6-02): who may read a client's Services & results
+// ════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Plan: docs/plans/2026-10-13-pv6-business-areas-tickets.md (PV6-02; finding 8; PV-D33; PV6-Q1).
+// `resolvePortalScope` answers "which clients is this caller a contact of" and flattens the project restriction
+// ACROSS those clients (its known flaw: one client-wide grant anywhere un-restricts every client). Results are
+// the client's own company-wide figures, so they need the sharper per-CLIENT question the Client Centre editor
+// rule already asks inline (`canEditCentre`): "does THIS caller hold a client-wide (`project_id IS NULL`) active
+// contact row for THIS client". A project-limited contact may be someone outside the client's organisation (an
+// agency hired for one site), so they are in scope but see no results (`visible: false`), never a partial view.
+//
+// Any capability qualifies (a client-wide viewer reads results; signing is not what is asked), and so does the
+// legacy whole-client `clients.portal_user_id`, exactly as `callerClientIds` unions it in.
+
+/** Positional parameter indexes: `user` binds the caller's user id (uuid), `client` the client id (uuid). */
+export interface ClientWideParams {
+  user: number;
+  client: number;
+}
+
+/** A boolean SQL expression, true when the caller is an ACTIVE CLIENT-WIDE contact of the one client `$client`.
+ *  Used as `SELECT <expr> AS wide`. Binds no row alias: it is a scalar over the two parameters. */
+export function callerClientWideFor(params: ClientWideParams): string {
+  const u = ph(params.user);
+  const c = ph(params.client);
+  return `(EXISTS (SELECT 1 FROM client_contacts cw
+                    WHERE cw.user_id = ${u}::uuid AND cw.client_id = ${c}::uuid AND cw.project_id IS NULL
+                      AND cw.status = 'active' AND cw.deleted_at IS NULL)
+        OR EXISTS (SELECT 1 FROM clients lg
+                    WHERE lg.id = ${c}::uuid AND lg.portal_user_id = ${u}::uuid
+                      AND lg.deleted_at IS NULL AND NOT lg.is_internal))`;
+}

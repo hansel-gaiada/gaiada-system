@@ -11,6 +11,7 @@
 // start writing into them — nothing here is a stub, the numbers just start at 0 and light up as
 // later tickets land, exactly like every other module's rollups did before their write paths shipped.
 import { config } from "../../config";
+import { rankTop10 } from "./rank-top10";
 import { registerSearchGoogleSurfaces } from "./google/property-binding";
 import type { ModuleContract, RollupProvider } from "../contract";
 import { ANALYTICS_MCP_TOOLS } from "./umami-mcp-tools";
@@ -59,15 +60,7 @@ const searchRollups: RollupProvider = {
     // blend simulated and real rank history the moment a writer lands (SM-14). Harmless today only
     // because search_rank_snapshots is empty in every env; that safety expires silently at SM-14, so
     // the filter lands now rather than later (§4d fail-open class).
-    const top10 = await client.query<{ n: string }>(
-      `SELECT count(*) AS n FROM (
-         SELECT DISTINCT ON (keyword_id, engine, device) position
-         FROM search_rank_snapshots
-         WHERE simulated = $1
-         ORDER BY keyword_id, engine, device, captured_at DESC
-       ) latest WHERE latest.position BETWEEN 1 AND 10`,
-      [config.search.providerMode === "simulate"],
-    );
+    const top10 = await rankTop10(client, { propertyId: null, simulated: config.search.providerMode === "simulate" });
     const criticalOpen = await client.query<{ n: string }>(
       `SELECT count(*) AS n FROM search_audit_findings WHERE severity = 'critical' AND status = 'open'`,
     );
@@ -106,7 +99,7 @@ const searchRollups: RollupProvider = {
     );
     return [
       { metricKey: "search.engagements.active", numerator: Number(active.rows[0].n) },
-      { metricKey: "search.rank.top10", numerator: Number(top10.rows[0].n) },
+      { metricKey: "search.rank.top10", numerator: top10.top10 },
       { metricKey: "search.audits.critical_open", numerator: Number(criticalOpen.rows[0].n) },
       // provider cost is numeric(12,6) USD; rollups carry money in MINOR units (cents).
       { metricKey: "search.provider_cost.month", numerator: Math.round(Number(providerCost.rows[0].n) * 100), currency: "USD" },
