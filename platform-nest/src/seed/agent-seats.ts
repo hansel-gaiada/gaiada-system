@@ -64,7 +64,7 @@ const SEATS: SeatSpec[] = [
     capabilityTags: ["website", "deploy", "code", "scope"],
     toolNamespaces: ["webdev", "pipeline", "code", "github", "deploy"],
     maxImpact: "low_write", modelClass: "code",
-    notes: "R0 on delphi (staging); production is R2/R3 via the risk ladder.",
+    notes: "R0 on staging; production is R2/R3 via the risk ladder.",
   },
   {
     name: "dept-seo", kind: "department",

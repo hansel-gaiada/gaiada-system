@@ -35,7 +35,7 @@ describe("SiteRegistryPanel — the staleness banner is present on the real, nor
 describe("SiteRegistryPanel — the two-column env split (design §08 v1.1)", () => {
   it("frontend deployment column is the SAME honest 'not reported' sentence on every row, never a fabricated per-row value", () => {
     render(<SiteRegistryPanel deptId="dept-1" sites={[row({ slug: "a" }), row({ slug: "b" })]} meta={STALE_META} pins={[]} pinsAvailable />);
-    const notes = screen.getAllByText(/WSK-D26 \(delphi\/helios\/Hostinger\) has no deploy state reaching the ERP yet/i);
+    const notes = screen.getAllByText(/a site's own CI delivers it \(WSK-D79\) and no deploy state reaches the ERP yet/i);
     expect(notes).toHaveLength(2);
   });
 
