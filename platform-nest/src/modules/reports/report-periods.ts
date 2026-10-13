@@ -6,7 +6,7 @@
 //
 // ─────────────────────── WHY CALENDAR PERIODS NEED A LAZY-BACKSTOP WRITER ───────────────────────
 // §0057 rule 1 says the only WRITER of `period_kind='custom'` rows is the explicit pin endpoint —
-// it says nothing about calendar (day/week/month) rows, and the endpoint surface (§6.2) has no
+// it says nothing about calendar (day/week/month/quarter/semester/year) rows, and the endpoint surface (§6.2) has no
 // `POST /periods` to create one ahead of time. `POST /periods/:id/seal` acts on an existing
 // `report_periods.id`, so something has to mint that row before a client can ever call seal on
 // it. The chosen design (a genuine judgment call the doc leaves open, not a schema/contract
@@ -21,12 +21,13 @@
 // never vivifies either — it only reads whatever the list call (or a pin) already created.
 import { withTenants } from "../../db";
 import { config } from "../../config";
-import { addDaysIso } from "../../core/dept-resolution";
-import { mondayOnOrBefore, resolveCalendarRange } from "./document-builder";
+import { enumerateCalendarStarts, isCalendarKind, resolveCalendarRange, type CalendarKind } from "./report-calendar";
 import type { ReportPeriodKind } from "./report-document";
 
 export type PeriodStatus = "open" | "sealed" | "amended";
-export type CalendarKind = "day" | "week" | "month";
+// DW-4a: the calendar math (and `CalendarKind`) lives in ./report-calendar; re-exported for older importers.
+export { enumerateCalendarStarts } from "./report-calendar";
+export type { CalendarKind } from "./report-calendar";
 
 export interface PeriodRow {
   id: string;
@@ -53,34 +54,6 @@ export const PERIOD_COLUMNS = `
 `;
 
 const PERIOD_MODULE_SCOPE = ["reports"] as const;
-
-// ═══════════════════════════════ PURE — calendar candidate enumeration ═══════════════════════
-
-/** The month-start ('YYYY-MM-01') immediately after `monthStartIso`. Pure; no clock. */
-function nextMonthStart(monthStartIso: string): string {
-  const d = new Date(`${monthStartIso}T00:00:00.000Z`);
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Every calendar `period_start` of `kind` whose period overlaps or falls within [from, to] —
- *  pure, no DB. Bounded by construction: the controller caps [from,to] at
- *  `MAX_CUSTOM_RANGE_DAYS` (400) before this ever runs, so day-kind emits at most 400 starts,
- *  week ~57, month ~14. */
-export function enumerateCalendarStarts(kind: CalendarKind, from: string, to: string): string[] {
-  const starts: string[] = [];
-  if (kind === "day") {
-    for (let d = from; d <= to; d = addDaysIso(d, 1)) starts.push(d);
-    return starts;
-  }
-  if (kind === "week") {
-    for (let s = mondayOnOrBefore(from); s <= to; s = addDaysIso(s, 7)) starts.push(s);
-    return starts;
-  }
-  // month
-  for (let s = `${from.slice(0, 7)}-01`; s <= to; s = nextMonthStart(s)) starts.push(s);
-  return starts;
-}
 
 // ═══════════════════════════════ I/O — reads ═══════════════════════════════
 
@@ -111,7 +84,7 @@ export async function getCalendarPeriod(tenantId: string, kind: CalendarKind, st
  *  `kind==='custom'` or an omitted kind, lists whatever rows already exist (custom rows are
  *  never vivified — only `pinCustomPeriod` writes those). */
 export async function listPeriods(tenantId: string, kind: string | undefined, from: string, to: string): Promise<PeriodRow[]> {
-  if (kind === "day" || kind === "week" || kind === "month") {
+  if (isCalendarKind(kind)) {
     return ensureCalendarPeriodRows(tenantId, kind, from, to);
   }
   const params: unknown[] = [tenantId, to, from];

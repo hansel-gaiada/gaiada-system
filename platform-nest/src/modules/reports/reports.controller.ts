@@ -59,11 +59,11 @@ import {
   buildHeadlineKpis,
   buildReportDocument,
   computeReportRangeRows,
-  resolveCalendarRange,
   resolveScopeNamesBulk,
   rowGrainShape,
 } from "./document-builder";
 import { inclusiveDayCount } from "./metrics";
+import { CALENDAR_KINDS, isCalendarKind, resolveCalendarRange } from "./report-calendar";
 import type { ReportDocument, ReportGrain, ReportPeriodKind } from "./report-document";
 import { getCalendarPeriod, getPeriodById, listPeriods, pinCustomPeriod } from "./report-periods";
 import { CUSTOM_SEAL_REJECT_MESSAGE, amendPeriod, fetchSealedDocument, sealPeriod } from "./report-seal";
@@ -82,7 +82,8 @@ import { loadUnitAncestors } from "../../core/org-unit-closure";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GRAINS = new Set(["person", "project", "department", "company"]);
-const PERIOD_KINDS = new Set(["day", "week", "month", "custom"]);
+// DW-4a: every calendar kind (day, week, month, quarter, semester, year) plus `custom`.
+const PERIOD_KINDS = new Set<string>([...CALENDAR_KINDS, "custom"]);
 
 // ─────────────────────────────── shared grain/range/authz/fetch helpers ───────────────────────
 // Module-level (not class methods) so TR-18's export endpoints can call the EXACT SAME validation
@@ -104,13 +105,13 @@ function resolveGrain(raw?: string): ReportGrain {
  *  `periodKind=custom` and IGNORED (re-derived from `start`) otherwise. */
 export function resolveRange(periodKindRaw?: string, start?: string, end?: string): { periodKind: ReportPeriodKind; start: string; end: string } {
   if (!periodKindRaw || !PERIOD_KINDS.has(periodKindRaw)) {
-    throw new BadRequestException({ message: "periodKind must be one of day, week, month, custom", field: "periodKind" });
+    throw new BadRequestException({ message: "periodKind must be one of day, week, month, quarter, semester, year, custom", field: "periodKind" });
   }
   const periodKind = periodKindRaw as ReportPeriodKind;
   if (!start || !DATE_RE.test(start)) {
     throw new BadRequestException({ message: "start must be a YYYY-MM-DD date", field: "start" });
   }
-  if (periodKind !== "custom") {
+  if (isCalendarKind(periodKind)) {
     return { periodKind, ...resolveCalendarRange(periodKind, start) };
   }
   if (!end || !DATE_RE.test(end)) {
@@ -506,7 +507,7 @@ export class ReportsController {
     if (!to || !DATE_RE.test(to)) throw new BadRequestException({ message: "to must be a YYYY-MM-DD date", field: "to" });
     if (to < from) throw new BadRequestException({ message: "to must be on or after from", field: "to" });
     if (kind && !PERIOD_KINDS.has(kind)) {
-      throw new BadRequestException({ message: "kind must be one of day, week, month, custom", field: "kind" });
+      throw new BadRequestException({ message: "kind must be one of day, week, month, quarter, semester, year, custom", field: "kind" });
     }
     if (inclusiveDayCount(from, to) > MAX_CUSTOM_RANGE_DAYS) {
       throw new UnprocessableEntityException({ message: "range_too_large", field: "to" });

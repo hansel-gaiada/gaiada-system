@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.118.1` - PV-6 follow-up: a website nothing probes says "Uptime monitoring: Not set up" (2026-10-13) - PROTOTYPED
+
+- Found in the PV6-06 live drive: all 81 live website cards carried four null probe figures, so clients would read "Not measured yet" four times on every site. A site with no matched monitor (or a company without the `monitoring` module) now gets no figures and the item "Uptime monitoring: Not set up"; a matched monitor with no checks yet still reads null. `results/website.ts`; the no-monitoring test now pins `kpis: []` and the item.
+
+### platform-nest `0.118.0` - DW-4a: quarter, semester and year report periods (2026-10-13) - PROTOTYPED
+
+Contract: `docs/blueprints/tracker-reporting-foundation.md` §15, the DW-4a entry (with §6.1 and §6.2). Plan: `docs/plans/2026-10-13-department-workspaces.md` §5.6.
+- **Three new calendar kinds.** `ReportPeriodKind` gains `quarter` (calendar quarters), `semester` (Jan–Jun, Jul–Dec) and `year`. `start` may be any date inside the period; the server snaps it to the first day. Labels read `Q3 2026`, `Semester 2 2026` and `Year 2026`. The comparison is the preceding period of the same kind over its own day count (Q1 2027 against Q4 2026).
+- **One resolver.** New pure `reports/report-calendar.ts` holds the calendar math (snap, end, previous period, label, the period starts in a window). `document-builder.ts`, `report-periods.ts` and the check-in compliance resolver all use it; the check-ins' own copy of the week and month math is gone. The moved names are re-exported, so no importer changed.
+- **Endpoints.** `document`, `overview`, `export`, `periods`, `checkins/compliance` and the group report accept the three kinds; the 400 message lists all seven. `GET /reports/periods?kind=quarter|semester|year` vivifies those rows like months. They can be sealed and amended; appraisals still freeze from sealed months only. No new schedule.
+- **Migration `202610140010_reports_period_kinds_quarter_semester_year.sql`** widens `report_periods.period_kind`'s CHECK to the seven kinds. The constraint is found by its column set (`report_periods_custom_needs_label` is not touched); a re-run is harmless.
+- **MCP.** The reports document, periods and check-in compliance tools' enums and descriptions name the new kinds. The capability inventory lists no schemas, so it is unchanged.
+- **Tests.** `report-calendar.test.ts` (20, a 13-row golden table shared byte-for-byte with platform-ui), `checkins.controller.test.ts`, `document-builder.test.ts` (warnings for a quarter in progress, an elapsed year and semester, a year before fact history) and `report-seal.db.test.ts` (quarter rows vivified idempotently; semester and year through the endpoint; an unknown kind is a 400).
+- **CI:** GitHub Actions `ci.yml` run 38380883077 on `9dd92e1e`: success, all 16 jobs; platform-nest 743 files across four shards, `report-seal.db.test.ts` 20 tests on live Postgres. The landing sha gets its own run in its slot.
+- No Cerbos change, no compose change, no new route.
+
+### platform-ui `0.117.0` - DW-4a: the six report periods exist (2026-10-13) - PROTOTYPED
+
+- `lib/reports.ts`: `ReportPeriodKind` gains `quarter`, `semester` and `year` (the source of truth for the contract type).
+- New pure `lib/reportCalendar.ts`, the demo backend's mirror of the nest resolver. `demoReports.ts` and `demoCheckins.ts` use it: the demo resolves, labels and compares the new kinds as the server does, a calendar month now compares to the preceding month (it used an equal-length window), and an unknown kind is a 400 (demo check-ins used to treat it as a month). `demoReports.test.ts` pins the same golden table as platform-nest.
+- `lib/workspaces.ts`: `REPORT_PERIODS` drops its three `DW-4a` tickets, so the Overview's period selector can offer Quarterly, Semester and Yearly. The report pages' own selector gains them in DW-4b.
+- **CI:** in the platform-nest entry above (run 38380883077): platform-ui 427 files, 7517 tests, typecheck, `next build` and smoke all green.
+
 ### platform-nest `0.117.0` - PV-6: Business areas, Services & results, the discovery fill and agent tools (2026-10-13) - PROTOTYPED
 
 Tickets: `docs/plans/2026-10-13-pv6-business-areas-tickets.md` (PV6-01, 02, 04, 05). Ruling PV-D30.

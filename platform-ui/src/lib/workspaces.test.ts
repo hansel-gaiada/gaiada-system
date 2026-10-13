@@ -262,11 +262,9 @@ describe("the Overview, Performance and tools data", () => {
     }
   });
 
-  it("never fakes a report period: quarter, semester and year wait for DW-4a", () => {
-    expect(REPORT_PERIODS.filter((p) => !p.ticket).map((p) => p.key)).toEqual(["day", "week", "month"]);
-    expect(REPORT_PERIODS.filter((p) => p.ticket).map((p) => [p.key, p.ticket])).toEqual([
-      ["quarter", "DW-4a"], ["semester", "DW-4a"], ["year", "DW-4a"],
-    ]);
+  it("offers all six report periods, none waiting on a ticket (DW-4a built them in the backend)", () => {
+    expect(REPORT_PERIODS.map((p) => p.key)).toEqual(["day", "week", "month", "quarter", "semester", "year"]);
+    expect(REPORT_PERIODS.filter((p) => p.ticket)).toEqual([]);
   });
 
   it("gives every workspace a KPI starting set (plan §5.5)", () => {

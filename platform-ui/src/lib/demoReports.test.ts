@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reportsDemo } from "./demoReports";
+import { reportsDemo, resolveDemoPeriod } from "./demoReports";
 import type { ReportDocument } from "./reports";
 
 function call(path: string, query: Record<string, string>, userId = "demo-hansel") {
@@ -115,5 +115,55 @@ describe("demoReports — reportsDemo (DEMO_MODE fixtures, TR-17)", () => {
 
   it("returns null for a path it doesn't own, so the dispatch chain can fall through", () => {
     expect(reportsDemo("GET", "/api/co-agency/pm/tasks", new URLSearchParams(), undefined, "demo-hansel")).toBeNull();
+  });
+});
+
+// DW-4a — the golden table. BYTE-IDENTICAL to the one in
+// platform-nest/src/modules/reports/report-calendar.test.ts (its twin): the demo backend
+// re-implements the backend's calendar math, so both must give the same snapped range, label and
+// comparison for the same input. Change one table and you must change the other.
+// ---- GOLDEN TABLE (byte-identical twin) ----
+const GOLDEN = [
+  { kind: "day", input: "2026-10-14", start: "2026-10-14", end: "2026-10-14", dayCount: 1, label: "14 Oct 2026", prevStart: "2026-10-13", prevEnd: "2026-10-13", prevDayCount: 1 },
+  { kind: "week", input: "2026-10-14", start: "2026-10-12", end: "2026-10-18", dayCount: 7, label: "Week 42 2026", prevStart: "2026-10-05", prevEnd: "2026-10-11", prevDayCount: 7 },
+  { kind: "month", input: "2026-02-10", start: "2026-02-01", end: "2026-02-28", dayCount: 28, label: "February 2026", prevStart: "2026-01-01", prevEnd: "2026-01-31", prevDayCount: 31 },
+  { kind: "quarter", input: "2026-08-17", start: "2026-07-01", end: "2026-09-30", dayCount: 92, label: "Q3 2026", prevStart: "2026-04-01", prevEnd: "2026-06-30", prevDayCount: 91 },
+  { kind: "quarter", input: "2027-01-15", start: "2027-01-01", end: "2027-03-31", dayCount: 90, label: "Q1 2027", prevStart: "2026-10-01", prevEnd: "2026-12-31", prevDayCount: 92 },
+  { kind: "quarter", input: "2026-12-31", start: "2026-10-01", end: "2026-12-31", dayCount: 92, label: "Q4 2026", prevStart: "2026-07-01", prevEnd: "2026-09-30", prevDayCount: 92 },
+  { kind: "quarter", input: "2028-02-29", start: "2028-01-01", end: "2028-03-31", dayCount: 91, label: "Q1 2028", prevStart: "2027-10-01", prevEnd: "2027-12-31", prevDayCount: 92 },
+  { kind: "semester", input: "2026-03-03", start: "2026-01-01", end: "2026-06-30", dayCount: 181, label: "Semester 1 2026", prevStart: "2025-07-01", prevEnd: "2025-12-31", prevDayCount: 184 },
+  { kind: "semester", input: "2026-12-31", start: "2026-07-01", end: "2026-12-31", dayCount: 184, label: "Semester 2 2026", prevStart: "2026-01-01", prevEnd: "2026-06-30", prevDayCount: 181 },
+  { kind: "semester", input: "2028-02-29", start: "2028-01-01", end: "2028-06-30", dayCount: 182, label: "Semester 1 2028", prevStart: "2027-07-01", prevEnd: "2027-12-31", prevDayCount: 184 },
+  { kind: "year", input: "2026-06-15", start: "2026-01-01", end: "2026-12-31", dayCount: 365, label: "Year 2026", prevStart: "2025-01-01", prevEnd: "2025-12-31", prevDayCount: 365 },
+  { kind: "year", input: "2028-07-01", start: "2028-01-01", end: "2028-12-31", dayCount: 366, label: "Year 2028", prevStart: "2027-01-01", prevEnd: "2027-12-31", prevDayCount: 365 },
+  { kind: "year", input: "2029-01-01", start: "2029-01-01", end: "2029-12-31", dayCount: 365, label: "Year 2029", prevStart: "2028-01-01", prevEnd: "2028-12-31", prevDayCount: 366 },
+] as const;
+// ---- END GOLDEN TABLE ----
+
+describe("demoReports — DW-4a calendar periods (golden table, twin of report-calendar.test.ts)", () => {
+  it.each(GOLDEN)("$kind $input -> $label", (row) => {
+    const p = resolveDemoPeriod(row.kind, row.input);
+    expect({ start: p.start, end: p.end }).toEqual({ start: row.start, end: row.end });
+    expect(p.dayCount).toBe(row.dayCount);
+    expect(p.label).toBe(row.label);
+    expect(p.comparison).toEqual({ periodStart: row.prevStart, periodEnd: row.prevEnd, dayCount: row.prevDayCount });
+  });
+
+  it("serves a quarter, semester and year document with the snapped range, label and comparison", () => {
+    const get = (periodKind: string, start: string) =>
+      call("/api/co-agency/reports/document", { grain: "person", scopeRef: "demo-hansel", periodKind, start })!.json as ReportDocument;
+    const q = get("quarter", "2026-08-17").header;
+    expect([q.periodStart, q.periodEnd, q.dayCount, q.periodLabel]).toEqual(["2026-07-01", "2026-09-30", 92, "Q3 2026"]);
+    expect(q.comparison).toEqual({ periodStart: "2026-04-01", periodEnd: "2026-06-30", dayCount: 91 });
+    const s = get("semester", "2026-12-31").header;
+    expect([s.periodStart, s.periodEnd, s.periodLabel]).toEqual(["2026-07-01", "2026-12-31", "Semester 2 2026"]);
+    const y = get("year", "2028-07-01").header;
+    expect([y.periodStart, y.periodEnd, y.dayCount, y.periodLabel]).toEqual(["2028-01-01", "2028-12-31", 366, "Year 2028"]);
+  });
+
+  it("400s an unknown periodKind with the message that lists all seven kinds", () => {
+    const res = call("/api/co-agency/reports/document", { grain: "person", scopeRef: "demo-hansel", periodKind: "decade", start: "2026-07-01" });
+    expect(res?.status).toBe(400);
+    expect((res!.json as { error: string }).error).toBe("periodKind must be one of day, week, month, quarter, semester, year, custom");
   });
 });

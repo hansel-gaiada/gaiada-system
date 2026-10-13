@@ -16,6 +16,7 @@ import "server-only";
 // console's People tab reads the grid company-wide. The fixture below derives the grid from the SAME
 // per-person store the history endpoint reads, so a submit made in the browser moves the compliance
 // number on the next page load — the whole reason this file is stateful rather than static.
+import { isCalendarKind, resolveCalendarRange } from "./reportCalendar";
 import { formatMinutes, type CheckinHistoryEntry, type CheckinPrefill, type CheckinToday, type CheckinSubmitResult } from "./checkins";
 
 interface DemoResult { status: number; json: unknown }
@@ -230,6 +231,7 @@ export function checkinsDemo(method: string, p: string, params: URLSearchParams,
     const tenantId = complianceMatch[1];
     const periodKind = params.get("periodKind") ?? "day";
     const start = params.get("start");
+    if (!isCalendarKind(periodKind) && periodKind !== "custom") return err(400, "periodKind must be one of day, week, month, quarter, semester, year, custom");
     if (!start) return err(400, "start must be a YYYY-MM-DD date");
     const end = params.get("end");
     if (periodKind === "custom" && !end) return err(400, "end is required when periodKind=custom");
@@ -268,21 +270,14 @@ export function checkinsDemo(method: string, p: string, params: URLSearchParams,
  *  console uses rather than showing raw ids. */
 const DEMO_COHORT = ["demo-hansel", "gede-ic", "u-dev", "u-pm", "seo-staff"];
 
-/** `periodKind` -> an inclusive [from, to]. Plain ISO-week / calendar-month arithmetic, mirroring
- *  `resolveCheckinPeriod` in checkins.controller.ts — deliberately not the full report-period
- *  machinery, which is a different (sealed-period) concern. */
+/** `periodKind` -> an inclusive [from, to]. Calendar kinds (day, week, month, quarter, semester,
+ *  year — DW-4a) use the same snap rule as `resolveCheckinPeriod` in checkins.controller.ts, via
+ *  `./reportCalendar` (a mirror of platform-nest's report-calendar.ts); `start` may be any date
+ *  inside the period. Deliberately not the full report-period machinery (a sealed-period concern). */
 function resolveDemoPeriod(kind: string, start: string, end: string | null): { from: string; to: string } {
-  if (kind === "custom") return { from: start, to: end ?? start };
-  if (kind === "day") return { from: start, to: start };
-  if (kind === "week") {
-    // ISO week: Monday-start. `getUTCDay()` is 0 for Sunday, so map it to 7 before subtracting.
-    const dow = new Date(`${start}T00:00:00Z`).getUTCDay() || 7;
-    const from = addDaysIso(start, 1 - dow);
-    return { from, to: addDaysIso(from, 6) };
+  if (isCalendarKind(kind)) {
+    const r = resolveCalendarRange(kind, start);
+    return { from: r.start, to: r.end };
   }
-  // month
-  const d = new Date(`${start}T00:00:00Z`);
-  const from = `${start.slice(0, 7)}-01`;
-  const to = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
-  return { from, to };
+  return { from: start, to: end ?? start }; // custom
 }

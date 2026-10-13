@@ -26,7 +26,8 @@
 // whoever seeds a text-unit metric later doesn't have to reverse-engineer intent.
 
 export type ReportGrain = "person" | "project" | "department" | "company";
-export type ReportPeriodKind = "day" | "week" | "month" | "custom";
+// DW-4a (2026-10-13): quarter, semester and year are calendar kinds like month (§15, DW-4a entry).
+export type ReportPeriodKind = "day" | "week" | "month" | "quarter" | "semester" | "year" | "custom";
 export type ReportUnit = "count" | "minutes" | "percent" | "score" | "text";
 
 export interface ReportHeader {
@@ -38,7 +39,7 @@ export interface ReportHeader {
   periodStart: string;         // ISO date (inclusive)
   periodEnd: string;           // ISO date (inclusive)
   dayCount: number;            // inclusive days in range — the denominator for every per-day ratio (§5.4)
-  periodLabel: string;         // display: "16 Jul 2026" | "Week 29 2026" | "July 2026" | "16 Jul – 3 Aug 2026"
+  periodLabel: string;         // display: "16 Jul 2026" | "Week 29 2026" | "July 2026" | "Q3 2026" | "Semester 2 2026" | "Year 2026" | "16 Jul – 3 Aug 2026"
   customLabel?: string;        // pinned custom ranges only (report_periods.label)
   generatedAt: string;         // ISO datetime
   sealed: boolean;

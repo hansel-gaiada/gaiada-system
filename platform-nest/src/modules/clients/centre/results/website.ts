@@ -126,7 +126,11 @@ export const websiteBuilder: ResultsBuilder = {
       const domainDays = mine.map((m) => daysUntil(m.domain_expires_at, ctx.now)).filter((d): d is number => d !== null);
       const asOf = isoDate(probe?.latest ?? null);
       const period = probe ? { from: isoDate(new Date(ctx.now.getTime() - 29 * DAY))!, to: isoDate(ctx.now)! } : null;
-      const kpis: Kpi[] = [
+      // No matched monitor (or no monitoring module): the probe figures cannot be measured at all, so the card says
+      // "Uptime monitoring: Not set up" and carries no figures, rather than four "Not measured yet" (found live
+      // 2026-10-13: 81 website cards, every probe figure null). Null stays for a monitor with no checks yet.
+      const monitored = mine.length > 0;
+      const kpis: Kpi[] = !monitored ? [] : [
         kpi("website.uptime_30d", "Uptime, last 30 days", "percent", probe?.uptime ?? null, { period, previous: probe?.uptimePrev ?? null, asOf }),
         kpi("website.open_incidents", "Open incidents", "count", probe ? probe.open : null, { asOf: isoDate(ctx.now) }),
         kpi("website.cert_days", "Days until the certificate expires", "count", certDays.length ? Math.min(...certDays) : null, { asOf: isoDate(ctx.now) }),
@@ -138,7 +142,9 @@ export const websiteBuilder: ResultsBuilder = {
         title: total > 1 ? `Website: ${s.domain}` : "Website",
         status: "active",
         since: s.since,
-        items: [{ label: s.domain, detail: liveState(mine.map((m) => m.status)) }],
+        items: monitored
+          ? [{ label: s.domain, detail: liveState(mine.map((m) => m.status)) }]
+          : [{ label: s.domain, detail: null }, { label: "Uptime monitoring", detail: "Not set up" }],
         kpis,
         clientVisible: true,
       });
