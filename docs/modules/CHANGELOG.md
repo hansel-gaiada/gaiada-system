@@ -11,6 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.136.0` - DW-5 polish found in the live browser drive (2026-10-13) - PROTOTYPED
+
+- **Web Dev's triage queue, Origin column.** In the classic department shell beside the My-work rail, the cell ("From <dept> · <person> Open request") wrapped over five lines and squeezed the request titles. It is now one link, the department, with the person in its tooltip and its accessible name, and the column is narrower (`components/departments/ChangeRequestsPanel.tsx`; its test asserts the link's name, text, title and href).
+- **The campaign page's Project row** showed the project's raw id; it now shows the project's name (`getProject`), or "Open the project" when that read fails, never the id (`app/(app)/agency/[campaignId]/page.tsx`).
+- Local: typecheck clean; `ChangeRequestsPanel.test.tsx` and the campaigns tests, 3 files, 96 tests. UI only, no backend change.
+
 ### platform-ui `0.135.0` - DW-3f: the Overview's Projects, Campaigns and Requests (2026-10-13) - PROTOTYPED
 
 - **What.** The Overview's Work band (pilot only): Projects, Campaigns and Requests, each its own block behind its own Suspense and WidgetBoundary. Pure rules in `lib/overviewWork.ts`; widgets in `components/overview/widgets/{Projects,Campaigns,Requests,WorkBlocks}.tsx`.
