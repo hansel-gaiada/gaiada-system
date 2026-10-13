@@ -12,6 +12,6 @@ tarballs) and `CONTRACT.lock`. `src/layouts/` and `src/components/` are the hand
 
 - No hand-rolled `fetch` to WebDesk; every page goes through `src/lib/webdesk-sdk.ts`.
 - No secrets, tokens or client names in the repo; values come from CI secrets or the preview environment.
-- No deploy target or Cloudflare account here: deployment is configuration (M6-P6), gated by
+- No deploy target or Cloudflare account here: deployment is configuration (M6-P6f; the per-site secret and `.webdesk/deploy/`), gated by
   `WEBDESK_DEPLOY_GRANT` in `.github/workflows/site.yml`.
 - Nothing builds or deploys without `CONTRACT.lock`.

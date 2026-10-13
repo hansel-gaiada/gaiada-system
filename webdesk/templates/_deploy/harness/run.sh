@@ -34,8 +34,21 @@ for i in $(seq 1 40); do
 done
 docker compose -p "$P" ps --format '{{.Name}} {{.Status}}'
 
-docker compose -p "$P" exec -T -e PW_A -e PW_B client bash /harness/cases.sh 2>&1 | tee "$LOG"
-rc=${PIPESTATUS[0]}
+# P6E_CASES: p6e (default: the transport cases of M6-P6e) | p6f (the per-site secret, wp theme-only and static cases of M6-P6f) | all
+rc=0
+: >"$LOG"
+for set in ${P6E_CASES:-p6e}; do
+  case "$set" in
+    p6e) script=cases.sh ;;
+    p6f) script=cases-p6f.sh ;;
+    all) script="cases.sh cases-p6f.sh" ;;
+    *) echo "unknown P6E_CASES '$set'"; exit 2 ;;
+  esac
+  for sc in $script; do
+    docker compose -p "$P" exec -T -e PW_A -e PW_B -e P6E_TRANSPORTS client bash "/harness/$sc" 2>&1 | tee -a "$LOG"
+    [ "${PIPESTATUS[0]}" = 0 ] || rc=1
+  done
+done
 
 echo
 echo "================ daemon-side evidence ================"

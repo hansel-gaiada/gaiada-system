@@ -1,5 +1,7 @@
 node_modules/
 dist/
 .next/
+out/
+webdesk-out/
 .env
 *.log

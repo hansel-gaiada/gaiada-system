@@ -34,7 +34,8 @@
 //   1. the fixed list, `WEBDESK_DEPLOY_SECRET_NAMES` (default `WEBDESK_DEPLOY_GRANT`, the marker the templates check);
 //   2. ONE per-site secret, `siteDeploySecretName()`: P6's deploy principal for this site and environment, locked to one
 //      document root, whose CI copy an org owner creates BY HAND with visibility limited to this site's repo. Its name
-//      is derived from the site alone and recorded on the row, so no other site's grant can ever name it.
+//      is derived from the repo's name, the environment and the repo's GitHub id (M6-P6f: the repo's own workflow derives
+//      the same name) and recorded on the row, so no other site's grant can ever name it.
 //
 // A secret that does not exist YET (404) is not an error: the grant stays `pending`, the name is listed as pending on
 // the row and in the answer, and the next grant run (the route, or the next trigger) completes it once the owner has
@@ -44,7 +45,6 @@
 //
 // The automatic trigger (after the scaffold commit) never re-grants a `revoked` site: only an operator's POST undoes an
 // operator's revoke.
-import { createHash } from "node:crypto";
 import { getBranchHead, type GitCaller, type RepoRef } from "../../core/github/git-data";
 import {
   addRepoToOrgSecret, getFileAtRef, getOrgSecret, getRepoInfo, isValidSecretName, removeRepoFromOrgSecret,
@@ -132,25 +132,37 @@ export function parseDeploySecretNames(raw: string | undefined | null): string[]
 /**
  * THE per-site deploy secret's name (P6: one deploy principal per site and environment, locked to one document root).
  *
- *   WEBDESK_DEPLOY_<SLUG>_<ENV>_<H8>      e.g. WEBDESK_DEPLOY_ACME_SITE_STAGING_1A2B3C4D
+ *   WEBDESK_DEPLOY_<SLUG>_<ENV>_<REPOID>      e.g. WEBDESK_DEPLOY_ACME_SITE_STAGING_123456789
  *
- * `<SLUG>` and `<ENV>` are uppercased with every non-alphanumeric run kept as `_` per character (readable for the owner
- * who creates the secret by hand). That readable part ALONE CAN COLLIDE: slugs are unique only per company
- * (`ux_wps_slug` is `(tenant_id, slug)`) while org secret names are org-wide, and any mapping of `-`/`_` to `_` merges
- * slugs that differ only there. So `<H8>`, the first 8 hex of sha256(the provisioned site's id), uppercased, is part of
- * the name: it is the identity, and two sites can only share a name if their ids share a 32-bit hash prefix, which a
- * grant additionally never acts on (each site only ever PUTs its OWN repo id into its OWN derived name).
+ * `<SLUG>` and `<ENV>` are uppercased with every character outside A-Z0-9 replaced by `_` (readable for the owner who
+ * creates the secret by hand). `<REPOID>` is the GitHub repository's numeric id: the identity. M6-P6f changed this from
+ * `<H8>` (8 hex of sha256(the provisioned site's id)), because a site repo's own workflow has to derive the name of its
+ * own secret and it never sees a provisioned site's id; every workflow knows `github.repository_id`, and a repository id
+ * is unique across GitHub, so two sites can never share a name (the readable part alone can collide: slugs are unique
+ * only per company while org secret names are org-wide, and `-`/`_`/`.` all map to `_`).
+ *
+ * Callers pass the RESOLVED repo's name and id (what the workflow sees as `github.event.repository.name` and
+ * `github.repository_id`). The ERP only learns the id when a grant reads the repo, so before the first claim there is no
+ * name: see `SITE_SECRET_NOT_DERIVABLE`.
+ *
+ * The shell twin is webdesk/templates/_deploy/secret-name.sh; both are tested against ONE fixture,
+ * webdesk/templates/_deploy/secret-name.fixture.json, so they cannot drift. Refuses (throws) what the twin refuses.
  */
-export function siteDeploySecretName(site: { id: string; slug: string; environment: string }): string {
+export function siteDeploySecretName(site: { slug: string; environment: string; repositoryId: number }): string {
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(site.slug)) throw new Error("a per-site deploy secret needs a slug of A-Z a-z 0-9 . _ -");
+  if (!/^[A-Za-z0-9._-]{1,40}$/.test(site.environment)) throw new Error("a per-site deploy secret needs an environment of A-Z a-z 0-9 . _ -");
+  if (typeof site.repositoryId !== "number" || !Number.isSafeInteger(site.repositoryId) || site.repositoryId <= 0) {
+    throw new Error("a per-site deploy secret needs the GitHub repository id (a positive integer)");
+  }
   const part = (v: string): string => v.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  const slug = part(site.slug.trim());
-  const env = part(site.environment.trim());
-  if (!slug || !env) throw new Error("a per-site deploy secret needs a slug and an environment");
-  const h8 = createHash("sha256").update(site.id.trim().toLowerCase()).digest("hex").slice(0, 8).toUpperCase();
-  const name = `WEBDESK_DEPLOY_${slug}_${env}_${h8}`;
+  const name = `WEBDESK_DEPLOY_${part(site.slug)}_${part(site.environment)}_${site.repositoryId}`;
   if (!isValidSecretName(name)) throw new Error(`derived an invalid secret name: ${name}`);
   return name;
 }
+
+/** What the console shows in place of the per-site secret's name while the ERP does not know the repository id yet. */
+export const SITE_SECRET_NOT_DERIVABLE =
+  "not derivable yet: the name ends in the repository's GitHub id, which the ERP records at the first grant (it needs the repo to exist and be readable)";
 
 // ── the row and the ports ───────────────────────────────────────────────────────────────────────────
 
@@ -175,7 +187,7 @@ export interface DeployGrantRow {
   grantRepositoryId: number | null;
   grantHeadSha: string | null;
   grantError: string | null;
-  /** The per-site secret's derived name, recorded at claim (`siteDeploySecretName`). */
+  /** The per-site secret's derived name, recorded at claim together with the repository id it ends in (`siteDeploySecretName`). */
   grantSiteSecretName: string | null;
   /** Names the owner has not created yet (404): the grant completes when they exist. [] when none. */
   grantPendingNames: string[];
@@ -244,8 +256,11 @@ export interface DeployGrantResult {
    *  trigger found an operator's revoke and left it. */
   outcome: "granted" | "already_granted" | "pending" | "partial" | "skipped_revoked";
   siteId: string;
-  /** This site's derived per-site secret name (null only when the site was refused before it could be derived). */
+  /** This site's derived per-site secret name (null until a grant has read the repo: the name ends in its GitHub id,
+   *  and `siteSecretNote` then says why). */
   siteSecretName: string | null;
+  /** Why `siteSecretName` is null (`SITE_SECRET_NOT_DERIVABLE`), else null. */
+  siteSecretNote: string | null;
   /** Secret names the owner has not created yet. */
   pending: string[];
   state: DeployGrantState | null;
@@ -366,6 +381,7 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
     outcome,
     siteId: row.id,
     siteSecretName: row.grantSiteSecretName,
+    siteSecretNote: row.grantSiteSecretName ? null : SITE_SECRET_NOT_DERIVABLE,
     pending: row.grantPendingNames,
     state: row.grantState,
     repo: repo ? repoName(repo) : null,
@@ -395,20 +411,22 @@ export async function grantDeploySecrets(deps: DeployGrantDeps, req: GrantReques
     if (!repo) return refuse("deploy_grant_repo_unresolved", "the GH-12 repo for this site could not be proven (approval, org or repo_url disagree)");
     const registry0 = first.registry as RegistryFacts;
     checkRegistryNamesRepo(registry0, repo);
-    // The fixed list, then THIS site's own per-site secret (derived from the site, never from the caller).
-    const siteSecretName = siteDeploySecretName({ id: row0.id, slug: row0.slug, environment: registry0.environment });
-    const names = [...new Set([...fixedNames, siteSecretName])];
-
-    // The scaffold job re-submitting the same tree: already granted for these names and this pin, nothing to do.
-    if (
-      req.trigger === "scaffold" && row0.grantState === "granted" && row0.grantSnapshotId === row0.contractSnapshotId
-      && row0.grantSiteSecretName === siteSecretName && names.every((n) => row0.grantSecretNames.includes(n))
-    ) {
-      return result(row0, "already_granted", repo, names.map((name) => ({ name, result: "granted" as const })));
+    // The scaffold job re-submitting the same tree: already granted for these names and this pin, nothing to do. The per-site
+    // name ends in the repository id, so it is derived here from the id the last grant recorded (none: nothing to compare).
+    if (req.trigger === "scaffold" && row0.grantState === "granted" && row0.grantSnapshotId === row0.contractSnapshotId && row0.grantRepositoryId !== null) {
+      const recorded = siteDeploySecretName({ slug: repo.name, environment: registry0.environment, repositoryId: row0.grantRepositoryId });
+      const held = [...new Set([...fixedNames, recorded])];
+      if (row0.grantSiteSecretName === recorded && held.every((n) => row0.grantSecretNames.includes(n))) {
+        return result(row0, "already_granted", repo, held.map((name) => ({ name, result: "granted" as const })));
+      }
     }
 
     // Fresh reads at GitHub: which repo (its id), its default branch's head, the lock at that head.
     const info = await getRepoInfo(deps.git, repo);
+    // The fixed list, then THIS site's own per-site secret, derived from the resolved repo's name and id (what the site's own
+    // workflow sees as `github.event.repository.name` / `github.repository_id`), never from the caller.
+    const siteSecretName = siteDeploySecretName({ slug: repo.name, environment: registry0.environment, repositoryId: info.id });
+    const names = [...new Set([...fixedNames, siteSecretName])];
     const head = await getBranchHead(deps.git, repo, info.defaultBranch);
     if (!head) return refuse("deploy_grant_no_lock", `the default branch ${info.defaultBranch} does not exist`);
     const where = `${info.defaultBranch}@${head.slice(0, 12)}`;
@@ -537,7 +555,7 @@ export async function revokeDeploySecrets(deps: DeployGrantDeps, req: RevokeRequ
       const repositoryId = r.grantRepositoryId ?? knownId;
       // The fixed list, what the row recorded, and this site's own per-site secret (recorded, else derived now).
       const reg = r.webdevSiteId ? await tx.readRegistry(r.webdevSiteId) : null;
-      const siteSecret = r.grantSiteSecretName ?? (reg ? siteDeploySecretName({ id: r.id, slug: r.slug, environment: reg.environment }) : null);
+      const siteSecret = r.grantSiteSecretName ?? (reg ? siteDeploySecretName({ slug: repo.name, environment: reg.environment, repositoryId }) : null);
       const names = union(union(deps.secretNames, r.grantSecretNames), siteSecret ? [siteSecret] : []);
       let remaining = [...r.grantSecretNames];
       const secrets: SecretOutcome[] = [];
