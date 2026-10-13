@@ -9,6 +9,7 @@ import {
   buildHighlights,
   buildKpis,
   buildNarrative,
+  computeComparisonFlags,
   computeHeaderWarnings,
   formatPeriodLabel,
   matchesScope,
@@ -121,7 +122,7 @@ describe("buildKpis", () => {
   ];
 
   it("carries numerator/denominator for a ratio metric, and computes value = n/d (never re-averaged)", () => {
-    const kpis = buildKpis("person", ALICE, currentRows, previousRows, undefined, { current: 0, previous: 0 });
+    const kpis = buildKpis("person", ALICE, currentRows, previousRows, undefined, { current: 0, previous: 0 }, false);
     const onTime = kpis.find((k) => k.metricKey === "delivery.on_time_rate")!;
     expect(onTime.numerator).toBe(3);
     expect(onTime.denominator).toBe(4);
@@ -129,14 +130,14 @@ describe("buildKpis", () => {
   });
 
   it("computes delta vs the comparison period's value in the same unit", () => {
-    const kpis = buildKpis("person", ALICE, currentRows, previousRows, undefined, { current: 0, previous: 0 });
+    const kpis = buildKpis("person", ALICE, currentRows, previousRows, undefined, { current: 0, previous: 0 }, false);
     const completed = kpis.find((k) => k.metricKey === "delivery.tasks_completed")!;
     expect(completed.value).toBe(4);
     expect(completed.delta).toBe(2); // 4 - 2
   });
 
   it("never emits a plain-sum metric with a denominator, and #20 carries pointInTime (never a KPI text unit)", () => {
-    const kpis = buildKpis("person", ALICE, currentRows, previousRows, undefined, { current: 0, previous: 0 });
+    const kpis = buildKpis("person", ALICE, currentRows, previousRows, undefined, { current: 0, previous: 0 }, false);
     const completed = kpis.find((k) => k.metricKey === "delivery.tasks_completed")!;
     expect(completed.denominator).toBeUndefined();
     expect(completed.unit).not.toBe("text");
@@ -147,7 +148,7 @@ describe("buildKpis", () => {
   });
 
   it("#22 evidence.source_diversity carries distinctOver and reads from the dedicated diversity pair, not currentRows", () => {
-    const kpis = buildKpis("person", ALICE, [], [], undefined, { current: 3, previous: 1 });
+    const kpis = buildKpis("person", ALICE, [], [], undefined, { current: 3, previous: 1 }, false);
     const diversity = kpis.find((k) => k.metricKey === "evidence.source_diversity")!;
     expect(diversity.distinctOver).toBe(true);
     expect(diversity.value).toBe(3);
@@ -155,7 +156,7 @@ describe("buildKpis", () => {
   });
 
   it("a metric with no matching row reads as an honest zero (empty-but-valid), never throws", () => {
-    const kpis = buildKpis("person", BOB, currentRows, previousRows, undefined, { current: 0, previous: 0 });
+    const kpis = buildKpis("person", BOB, currentRows, previousRows, undefined, { current: 0, previous: 0 }, false);
     const completed = kpis.find((k) => k.metricKey === "delivery.tasks_completed")!;
     expect(completed.value).toBe(0);
     const onTime = kpis.find((k) => k.metricKey === "delivery.on_time_rate")!;
@@ -166,8 +167,97 @@ describe("buildKpis", () => {
 
   it("only emits KPIs applicable to the requested grain", () => {
     // milestone_hit_rate is project/department/company only, never person.
-    const kpis = buildKpis("person", ALICE, [], [], undefined, { current: 0, previous: 0 });
+    const kpis = buildKpis("person", ALICE, [], [], undefined, { current: 0, previous: 0 }, false);
     expect(kpis.some((k) => k.metricKey === "delivery.milestone_hit_rate")).toBe(false);
+  });
+
+  // ── DW-4m: a comparison says when its baseline is not real (§15) ──
+  const keyOf = (kpis: ReturnType<typeof buildKpis>, key: string) => kpis.find((k) => k.metricKey === key)!;
+
+  it("DW-4m (a): a ratio whose comparison denominator is 0 has NO delta key; previous carries the empty parts", () => {
+    const kpis = buildKpis("person", ALICE, currentRows, [], undefined, { current: 0, previous: 0 }, false);
+    const onTime = keyOf(kpis, "delivery.on_time_rate");
+    expect(onTime.value).toBeCloseTo(0.75);
+    expect("delta" in onTime).toBe(false);
+    expect(onTime.previous).toEqual({ value: 0, numerator: 0, denominator: 0 });
+    // an additive metric next to it keeps its delta (baseline of 0 tasks is a real, if empty, count)
+    expect(keyOf(kpis, "delivery.tasks_completed").delta).toBe(4);
+  });
+
+  it("DW-4m (b): a ratio whose CURRENT denominator is 0 (previous measured) has no delta either", () => {
+    const kpis = buildKpis("person", ALICE, [], previousRows, undefined, { current: 0, previous: 0 }, false);
+    const onTime = keyOf(kpis, "delivery.on_time_rate");
+    expect(onTime.value).toBe(0);
+    expect(onTime.denominator).toBe(0);
+    expect("delta" in onTime).toBe(false);
+    expect(onTime.previous).toEqual({ value: 0.5, numerator: 1, denominator: 2 });
+  });
+
+  it("DW-4m (c): both sides measured -> delta is the difference and previous carries the parts", () => {
+    const kpis = buildKpis("person", ALICE, currentRows, previousRows, undefined, { current: 0, previous: 0 }, false);
+    const onTime = keyOf(kpis, "delivery.on_time_rate");
+    expect(onTime.delta).toBeCloseTo(0.25); // 0.75 - 0.5
+    expect(onTime.previous).toEqual({ value: 0.5, numerator: 1, denominator: 2 });
+    const completed = keyOf(kpis, "delivery.tasks_completed");
+    expect(completed.delta).toBe(2);
+    expect(completed.previous).toEqual({ value: 2 }); // an additive metric has no parts
+  });
+
+  it("DW-4m (d): noFacts -> an additive metric has no delta, and previous.value is 0", () => {
+    const kpis = buildKpis("person", ALICE, currentRows, [], undefined, { current: 0, previous: 0 }, true);
+    const completed = keyOf(kpis, "delivery.tasks_completed");
+    expect(completed.value).toBe(4);
+    expect("delta" in completed).toBe(false);
+    expect(completed.previous).toEqual({ value: 0 });
+    for (const k of kpis) expect("delta" in k, k.metricKey).toBe(false);
+  });
+
+  it("DW-4m (e): noFacts -> source diversity has no delta either; with facts it keeps one; previous is always carried", () => {
+    const empty = keyOf(buildKpis("person", ALICE, [], [], undefined, { current: 3, previous: 0 }, true), "evidence.source_diversity");
+    expect(empty.value).toBe(3);
+    expect("delta" in empty).toBe(false);
+    expect(empty.previous).toEqual({ value: 0 });
+    const real = keyOf(buildKpis("person", ALICE, [], [], undefined, { current: 3, previous: 1 }, false), "evidence.source_diversity");
+    expect(real.delta).toBe(2);
+    expect(real.previous).toEqual({ value: 1 });
+  });
+
+  it("DW-4m: the overview listing's headline KPIs stay unchanged: no previous, no delta", () => {
+    for (const k of buildHeadlineKpis("person", ALICE, currentRows)) {
+      expect("previous" in k).toBe(false);
+      expect("delta" in k).toBe(false);
+    }
+  });
+});
+
+describe("computeComparisonFlags (DW-4m)", () => {
+  const window = { start: "2026-04-01", end: "2026-04-30", dayCount: 30 };
+
+  it("a window wholly before the first fact: precedesFactHistory covers every day, and noFacts", () => {
+    expect(computeComparisonFlags(window, "2026-05-01")).toEqual({
+      precedesFactHistory: { firstFactDate: "2026-05-01", affectedDays: 30 },
+      noFacts: true,
+    });
+  });
+
+  it("a window straddling the first fact: precedesFactHistory with the right affectedDays, no noFacts", () => {
+    const flags = computeComparisonFlags(window, "2026-04-11");
+    expect(flags).toEqual({ precedesFactHistory: { firstFactDate: "2026-04-11", affectedDays: 10 } }); // Apr 1..10
+    expect("noFacts" in flags).toBe(false);
+  });
+
+  it("a window on or after the first fact: neither flag", () => {
+    expect(computeComparisonFlags(window, "2026-04-01")).toEqual({});
+    expect(computeComparisonFlags(window, "2026-03-01")).toEqual({});
+  });
+
+  it("no first fact date at all: neither flag (nothing to compare against)", () => {
+    expect(computeComparisonFlags(window, null)).toEqual({});
+  });
+
+  it("agrees with the current window's warning on the same dates (one shared arithmetic)", () => {
+    const w = computeHeaderWarnings({ periodKind: "custom", start: "2026-04-01", end: "2026-04-30", today: "2026-08-15", firstFactDate: "2026-04-11" });
+    expect(computeComparisonFlags(window, "2026-04-11").precedesFactHistory).toEqual(w?.precedesFactHistory);
   });
 });
 
@@ -244,6 +334,7 @@ describe("buildHighlights + buildNarrative — deterministic, never AI", () => {
       [],
       undefined,
       { current: 0, previous: 0 },
+      false,
     );
     const highlights = buildHighlights(kpis, "2026-07-31", "2026-08-15");
     const achievement = highlights.find((h) => h.kind === "achievement");
@@ -256,7 +347,7 @@ describe("buildHighlights + buildNarrative — deterministic, never AI", () => {
   });
 
   it("the overdue-open highlight carries the point-in-time honesty note on a PAST unsealed range", () => {
-    const kpis = buildKpis("person", ALICE, [{ metricKey: "discipline.overdue_open", numerator: 2, dimensions: { userId: ALICE } }], [], undefined, { current: 0, previous: 0 });
+    const kpis = buildKpis("person", ALICE, [{ metricKey: "discipline.overdue_open", numerator: 2, dimensions: { userId: ALICE } }], [], undefined, { current: 0, previous: 0 }, false);
     const past = buildHighlights(kpis, "2026-07-20", "2026-08-15");
     const compliance = past.find((h) => h.kind === "compliance");
     expect(compliance?.text).toContain("point-in-time, unsealed");

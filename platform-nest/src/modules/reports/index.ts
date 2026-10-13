@@ -120,7 +120,7 @@ export const reportsModule: ModuleContract = {
     {
       name: "reports.getDocument",
       description:
-        "Fetch a person/project/department/company work report (ReportDocument JSON) for a day, week, month, quarter, semester, year, or an arbitrary custom date range. For periodKind='custom', 'end' is the actual boundary and the range is computed live (unsealed, not appraisal-admissible); max span 400 days. HUB-FRONTING NOTE: all five fields are required on every call (see this file's header) — for every periodKind except custom (day, week, month, quarter, semester, year), pass end equal to start; the server derives the real range from start alone and ignores end in that case.",
+        "Fetch a person/project/department/company work report (ReportDocument JSON) for a day, week, month, quarter, semester, year, or an arbitrary custom date range. For periodKind='custom', 'end' is the actual boundary and the range is computed live (unsealed, not appraisal-admissible); max span 400 days. HUB-FRONTING NOTE: all five fields are required on every call (see this file's header) — for every periodKind except custom (day, week, month, quarter, semester, year), pass end equal to start; the server derives the real range from start alone and ignores end in that case. A KPI without `delta` means there was no real baseline (the comparison window has no records, or a ratio had nothing to measure on one side); its `previous` carries the comparison window's value and parts.",
       minAssurance: "low",
       method: "GET",
       pathTemplate: "/api/:tenantId/reports/document?grain=:grain&scopeRef=:scopeRef&periodKind=:periodKind&start=:start&end=:end",

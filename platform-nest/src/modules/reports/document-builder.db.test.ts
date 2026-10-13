@@ -208,11 +208,57 @@ describe.skipIf(!TEST_URL)("TR-13 ReportDocument builder + endpoints (live PG + 
     expect(body.header.periodStart).toBe("2026-07-01");
     expect(body.header.periodEnd).toBe("2026-07-31");
     expect(body.header.dayCount).toBe(31);
-    expect(body.header.comparison).toEqual({ periodStart: "2026-06-01", periodEnd: "2026-06-30", dayCount: 30 });
+    // DW-4m: the comparison window also carries its own fact-history flags (this fixture's facts
+    // begin inside June, so June may be partly empty) — the window itself is what this case pins.
+    expect(body.header.comparison).toMatchObject({ periodStart: "2026-06-01", periodEnd: "2026-06-30", dayCount: 30 });
 
     const completed = body.kpis.find((k) => k.metricKey === "delivery.tasks_completed")!;
     expect(completed.value).toBe(6); // 07-01..07-06
     expect(completed.delta).toBe(0); // June also had 6 (06-25..06-30) -> 6 - 6 = 0
+  });
+
+  // ═══════════════════════════════ DW-4m: a comparison says when its baseline is not real ═══════
+
+  it("DW-4m: a comparison window that starts before the first fact is flagged (partly empty keeps deltas); one wholly before has noFacts and no KPI carries a delta", async () => {
+    // Windows are placed relative to the tenant's REAL first fact date, so the case does not depend
+    // on which days the fixtures above happen to produce rows for. Custom ranges compare against
+    // the immediately preceding equal-length window [start - dayCount, start - 1].
+    const { rows } = await adminPool().query<{ d: string }>(`SELECT to_char(MIN(fact_date), 'YYYY-MM-DD') AS d FROM report_work_facts WHERE tenant_id = $1`, [co]);
+    const first = rows[0].d;
+    expect(first).toBeTruthy();
+    const shift = (iso: string, days: number): string => {
+      const t = new Date(`${iso}T00:00:00Z`);
+      t.setUTCDate(t.getUTCDate() + days);
+      return t.toISOString().slice(0, 10);
+    };
+
+    // Straddling: current = first+3 .. first+9 (starts after the first fact); comparison = first-4 .. first+2.
+    const partly = (await doc({ grain: "person", scopeRef: alice, periodKind: "custom", start: shift(first, 3), end: shift(first, 9) })).body as ReportDocument;
+    expect(partly.header.comparison).toEqual({
+      periodStart: shift(first, -4),
+      periodEnd: shift(first, 2),
+      dayCount: 7,
+      precedesFactHistory: { firstFactDate: first, affectedDays: 4 },
+    });
+    expect(partly.header.warnings?.precedesFactHistory).toBeUndefined(); // the current window is fine
+    const partlyCompleted = partly.kpis.find((k) => k.metricKey === "delivery.tasks_completed")!;
+    expect(partlyCompleted.delta).toBeDefined(); // a partly empty baseline keeps its delta
+    expect(partlyCompleted.previous).toBeDefined();
+
+    // Wholly before: current = first .. first+6; comparison = first-7 .. first-1.
+    const none = (await doc({ grain: "person", scopeRef: alice, periodKind: "custom", start: first, end: shift(first, 6) })).body as ReportDocument;
+    expect(none.header.comparison).toEqual({
+      periodStart: shift(first, -7),
+      periodEnd: shift(first, -1),
+      dayCount: 7,
+      precedesFactHistory: { firstFactDate: first, affectedDays: 7 },
+      noFacts: true,
+    });
+    expect(none.kpis.length).toBeGreaterThan(0);
+    for (const k of none.kpis) {
+      expect("delta" in k, k.metricKey).toBe(false);
+      expect(k.previous, k.metricKey).toBeDefined();
+    }
   });
 
   // ═══════════════════════════════ THE ADDITIVITY PROOF ═══════════════════════════════
