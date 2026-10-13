@@ -617,6 +617,43 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "agency.campaign.delete" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # perm_agency_campaign_part_* — DW-5a (2026-10-13, docs/FRONTEND-BFF-CONTRACT.md §31.2). One generic
+    # global-or-company mirror for read/create/delete/allocate. NO `update` mirror, on purpose: `update` is
+    # reachable by an owner rule (self-scoped) and an org_unit_lead rule (attribute-dependent) as well as by
+    # company_admin/manager, and a flat `perms` mirror cannot tell those apart (permission-arm-hazard-scan Pattern B,
+    # iam-04-reg1-mirror-reach-invariant). Same call as time_entry's update/delete.
+    - name: perm_agency_campaign_part_read
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign_part.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_campaign_part_create
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign_part.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_campaign_part_delete
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign_part.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_agency_campaign_part_allocate
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "agency.campaign_part.allocate" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_agency_creative_asset_* — IAM-04-ROLLOUT-B12
     - name: perm_agency_creative_asset_read
       parentRoles: ["user"]
