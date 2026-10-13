@@ -18,14 +18,34 @@
 // falls through to the unconditional LastResortExceptionFilter, which always answers 500
 // { error: "internal error", code: "internal_error" } regardless of the thrown error's own `.status`.
 // The assertion below pins the REAL status (500), not the one the comment describes — see the report.
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
+import { newId } from "../db";
 import { buildApp } from "../main";
 import { resetModules } from "../modules/registry";
 import { resetCoreRollupProviders } from "../rollups/engine";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createClient, createProject } from "../testing/fixtures";
+
+// The revoke tests below need to SEE whether the IdP disable is attempted, which an unconfigured Keycloak
+// cannot show (it throws before any call). So the two Keycloak admin calls the revoke handler makes are
+// wrapped: with no hook installed they run the REAL implementation (every other test in this file keeps its
+// fail-closed, KeycloakNotConfiguredError behaviour), and the "last-contact" describe installs hooks.
+const kc = vi.hoisted(() => ({
+  find: null as null | ((email: string) => Promise<{ id: string } | null>),
+  disable: null as null | ((id: string) => Promise<void>),
+}));
+vi.mock("./keycloak-admin", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("./keycloak-admin")>();
+  return {
+    ...orig,
+    findUserByEmail: (...a: Parameters<typeof orig.findUserByEmail>) =>
+      kc.find ? (kc.find(a[0]) as ReturnType<typeof orig.findUserByEmail>) : orig.findUserByEmail(...a),
+    disableUser: (...a: Parameters<typeof orig.disableUser>) =>
+      kc.disable ? kc.disable(a[0]) : orig.disableUser(...a),
+  };
+});
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -370,5 +390,83 @@ describe.skipIf(!TEST_URL)("client-contacts HTTP surface (W0-4)", () => {
     const ownList = await app.inject({ method: "GET", url: `/api/${other}/clients/${otherClientId}/contacts`, headers: asUser(otherAdmin) });
     expect(ownList.statusCode).toBe(200);
     expect(ownList.json()).toHaveLength(0);
+  });
+
+  // Kept LAST on purpose: it seeds a (revoked) contact in the rival company, and the tenant-isolation test
+  // above asserts that company lists zero contacts.
+  // ---- revoke: the IdP account is disabled only when this was the person's LAST active contact ANYWHERE ----
+  //
+  // Regression for the live bug of 2026-10-13. The "still a contact elsewhere?" read ran on a bare
+  // `withGlobal` connection; `client_contacts` is FORCE RLS and that connection set neither the tenant GUC nor
+  // `app.principal_user_id`, so the read saw ZERO rows and every revoke disabled the Keycloak account, even for
+  // a person with an active contact on another client (the owner's own account is one). The two contacts are
+  // deliberately in two DIFFERENT companies: only the cross-tenant `principal_lookup` read can see the other
+  // one from inside the first company's request.
+  describe("revoke disables the IdP account only for the person's last active contact", () => {
+    let otherManager: string;
+    let person: string;
+    let contactInCo: string;
+    let contactInOther: string;
+    const disableCalls: string[] = [];
+
+    beforeAll(async () => {
+      kc.find = async () => ({ id: "kc-multi-contact-user" });
+      kc.disable = async (id: string) => { disableCalls.push(id); };
+
+      otherManager = await createUser("manager@rival-cc.test");
+      await addMembership(other, otherManager);
+      await grantRole(otherManager, await createRole("manager"), "company", other);
+
+      person = await createUser("two-engagements@cc.test");
+      contactInCo = newId();
+      contactInOther = newId();
+      for (const [id, tenant, client] of [
+        [contactInCo, co, clientId],
+        [contactInOther, other, otherClientId],
+      ]) {
+        await adminPool().query(
+          `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, project_id, capability, status, origin_site, activated_at)
+           VALUES ($1, $2, $3, $4, NULL, 'viewer', 'active', $5, now())`,
+          [id, tenant, client, person, config.originSite],
+        );
+      }
+    });
+    afterAll(() => {
+      kc.find = null;
+      kc.disable = null;
+    });
+
+    it("seed: the person holds two ACTIVE contacts, one in each of two companies", async () => {
+      const r = await adminPool().query(
+        `SELECT tenant_id FROM client_contacts WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL`,
+        [person],
+      );
+      expect(r.rows.map((x) => x.tenant_id).sort()).toEqual([co, other].sort());
+    });
+
+    it("revoking one of two active contacts keeps the IdP account: disable NOT called, keptAccountForOtherEngagements true", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${co}/client-contacts/${contactInCo}/revoke`, headers: asUser(manager) });
+      expect(r.statusCode).toBe(200);
+      const body = r.json();
+      expect(body.status).toBe("revoked");
+      expect(body.keptAccountForOtherEngagements).toBe(true);
+      expect(body.idpDisabled).toBe(false);
+      expect(body.idpError).toBeNull();
+      expect(disableCalls).toEqual([]);
+
+      const row = await adminPool().query(`SELECT status FROM client_contacts WHERE id = $1`, [contactInCo]);
+      expect(row.rows[0].status).toBe("revoked");
+    });
+
+    it("revoking the LAST active contact disables the IdP account exactly once: idpDisabled true, kept false", async () => {
+      const r = await app.inject({ method: "POST", url: `/api/${other}/client-contacts/${contactInOther}/revoke`, headers: asUser(otherManager) });
+      expect(r.statusCode).toBe(200);
+      const body = r.json();
+      expect(body.status).toBe("revoked");
+      expect(body.keptAccountForOtherEngagements).toBe(false);
+      expect(body.idpDisabled).toBe(true);
+      expect(body.idpError).toBeNull();
+      expect(disableCalls).toEqual(["kc-multi-contact-user"]);
+    });
   });
 });

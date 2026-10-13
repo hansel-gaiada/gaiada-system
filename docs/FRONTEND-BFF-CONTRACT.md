@@ -2034,7 +2034,7 @@ admin_revoked` (`previousCapability` / `restoredCapability`). A revoke also bump
 
 Existing endpoint touched: `POST /api/:t/client-contacts/:id/revoke` now also deletes that contact's `client_website_editor` grant (when
 the row is client-wide) and writes its audit row (`reason:'contact_revoked'`) in the same transaction, so a dormant grant cannot come
-back to life if the contact is ever re-invited. `POST /api/:t/clients/:clientId/contacts` still accepts only `signer|viewer`.
+back to life if the contact is ever re-invited. **Fix (2026-10-13):** the "does this person still hold another ACTIVE contact anywhere?" check that decides whether the Keycloak account is disabled now reads under the `principal_lookup` policy (transaction-local `app.principal_user_id`), so `idpDisabled`/`keptAccountForOtherEngagements` are true to the data; before, the read saw zero rows and every revoke disabled the account even for a person with an active contact on another client. `POST /api/:t/clients/:clientId/contacts` still accepts only `signer|viewer`.
 Generic grant surfaces (`POST /api/:t/users/:id/roles`, `POST /api/:t/role-grants`) refuse `scope_type='client'` and the role itself
 (`400 client_scope_dedicated_path`); a DB trigger (`user_roles_client_scope_guard`) welds the role to the client scope for any writer.
 

@@ -263,12 +263,30 @@ export class ClientContactsController {
     // Keycloak hiccup must not leave the contact active on our side. Reported, never swallowed.
     let idpDisabled = false;
     let idpError: string | null = null;
-    const stillElsewhere = await withGlobal((c) =>
-      c.query(
-        `SELECT 1 FROM client_contacts WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
-        [contact.user_id],
-      ),
-    );
+    //
+    // ⚠ THE RLS ZERO-ROW TRAP (found live 2026-10-13): `client_contacts` is FORCE RLS, and a bare `withGlobal`
+    // connection sets neither `app.current_tenant_ids` nor `app.principal_user_id`, so this read saw ZERO rows
+    // for everyone. `stillElsewhere` was always empty and EVERY revoke disabled the person's Keycloak account,
+    // even when they held an active contact on another client (the owner's own account is one such person).
+    // The sanctioned cross-tenant read is the `principal_lookup` policy (0072 §7b): it admits exactly the rows
+    // of the ONE user named in `app.principal_user_id`, across all tenants. The GUC is transaction-local
+    // (`set_config(..., true)`), hence the explicit BEGIN/COMMIT, exactly as `assemblePrincipal()` does it. Never
+    // a session-level SET: it would leak to the next request on this pooled connection.
+    const stillElsewhere = await withGlobal(async (c) => {
+      await c.query("BEGIN");
+      try {
+        await c.query("SELECT set_config('app.principal_user_id', $1, true)", [contact.user_id]);
+        const r = await c.query(
+          `SELECT 1 FROM client_contacts WHERE user_id = $1 AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
+          [contact.user_id],
+        );
+        await c.query("COMMIT");
+        return r;
+      } catch (e) {
+        try { await c.query("ROLLBACK"); } catch { /* connection already gone; keep the original error */ }
+        throw e;
+      }
+    });
     // Only disable the account if this was their LAST active contact row anywhere. The same person may
     // be a stakeholder on another client or project; revoking one engagement must not lock them out of
     // the others.
