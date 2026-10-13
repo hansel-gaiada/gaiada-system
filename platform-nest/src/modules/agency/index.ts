@@ -44,6 +44,12 @@ export const agencyModule: ModuleContract = {
   permissions: [
     { key: "agency.campaign.read", description: "View campaigns" },
     { key: "agency.campaign.create", description: "Create campaigns" },
+    // DW-5a (docs/FRONTEND-BFF-CONTRACT.md §31.2): campaign parts, one per taking-part department.
+    { key: "agency.campaign_part.read", description: "View a campaign's parts" },
+    { key: "agency.campaign_part.create", description: "Add a department to a campaign" },
+    { key: "agency.campaign_part.update", description: "Update a campaign part" },
+    { key: "agency.campaign_part.delete", description: "Remove a department from a campaign" },
+    { key: "agency.campaign_part.allocate", description: "Set a campaign part's budget allocation" },
     { key: "agency.brief.create", description: "Create campaign briefs" },
     { key: "agency.brief.update", description: "Edit campaign briefs" },
     { key: "agency.brief.delete", description: "Delete campaign briefs" },

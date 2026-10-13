@@ -27,12 +27,13 @@ export class HttpErrorFilter implements ExceptionFilter {
     let site: Record<string, unknown> | undefined;
     let reason: string | undefined;
     let blockers: unknown[] | undefined;
+    let detail: Record<string, unknown> | undefined;
     if (typeof res === "string") {
       error = res;
     } else {
       const r = res as {
         message?: string | string[]; field?: string; existing?: unknown; site?: unknown;
-        reason?: string; blockers?: unknown;
+        reason?: string; blockers?: unknown; detail?: unknown;
       };
       const m = r.message;
       error = Array.isArray(m) ? m.join(", ") : m ?? exception.message;
@@ -48,6 +49,12 @@ export class HttpErrorFilter implements ExceptionFilter {
       // PV5-04: `blockers`, same additive rule. Issuing an invoice refuses with EVERY missing prerequisite at once
       // (`[{ code, message }]`), so the UI can list them instead of showing the first one and failing again.
       if (Array.isArray(r.blockers)) blockers = r.blockers;
+      // DW-5a: `detail`, same additive rule. A typed money refusal carries the figures that explain it
+      // (`allocation_exceeds_budget` -> `{budgetMinor, allocatedMinor, requestedMinor}`, FRONTEND-BFF-CONTRACT §31.3),
+      // so the UI shows them without a second read. Only present when the thrower set it.
+      if (r.detail && typeof r.detail === "object" && !Array.isArray(r.detail)) {
+        detail = r.detail as Record<string, unknown>;
+      }
       if (r.existing && typeof r.existing === "object" && !Array.isArray(r.existing)) {
         existing = r.existing as Record<string, unknown>;
       }
@@ -72,6 +79,7 @@ export class HttpErrorFilter implements ExceptionFilter {
       ...(existing ? { existing } : {}),
       ...(site ? { site } : {}),
       ...(blockers ? { blockers } : {}),
+      ...(detail ? { detail } : {}),
     });
   }
 }
