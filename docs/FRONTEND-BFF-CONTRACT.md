@@ -6877,7 +6877,7 @@ MCP hub tools are unchanged by this section.
   - A caller refused `read` gets 403 even with a malformed `departmentId`.
 - **The closure is built by the real org save path** (`putOrg`), not inserted by hand, so the suite proves the tree the product writes.
 
-## 34. Pull requests and CI status on tasks (DW-6f, 2026-10-13) — `platform-nest/src/core/github-pull-requests.ts` (new), `core/github-webhook-handlers.ts`, `modules/pm/pm.controller.ts` — **STATUS: CONTRACT (nothing built)**
+## 34. Pull requests and CI status on tasks (DW-6f, 2026-10-13) — `platform-nest/src/core/github-pull-requests.ts` (new), `core/github-webhook-handlers.ts`, `modules/pm/pm.controller.ts` — **STATUS: BUILT, PROTOTYPED (suites github-pull-requests.test.ts, github-pull-requests.db.test.ts and PullRequests.test.tsx; the DB suite needs the Linux CI gate)**
 
 Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 ("launch and return": a pull request appears on the task). Code is written outside the ERP, in VS Code and Claude Code. Its result comes back as the pull requests and their CI status on the task the work is for.
 
@@ -7006,6 +7006,14 @@ Plan: `docs/plans/2026-10-13-department-workspaces.md` §4.2 (DW-6f) and §14.1 
   - The read: authorised like the task. A caller refused `read` gets 403. A task from another tenant gets 404. `linkable: false` in a non-org tenant. Open pull requests come first.
   - A replayed delivery (same `delivery_id`) writes nothing twice.
 - **Fixtures** are taken from real GitHub payload shapes (`pull_request` and `workflow_run`), trimmed. No invented field.
+
+### 34.9 As built (2026-10-13)
+
+- **Migration** `202610140720_github_pull_requests.sql`. `pm_task_id` is a plain FK to `pm_tasks(id)` with `ON DELETE SET NULL`, not the tenant-scoped composite the other pm_* tables use: a composite `SET NULL` would also null the `NOT NULL` `tenant_id`. The link is resolved inside the org tenant under RLS before the id is written.
+- **`linkTaskKey` is split.** `extractTaskKeys` and `candidateTaskKeys` (title, then branch) are pure and unit-tested without a database; `resolveTaskKey` and `linkTaskKey(client, tenantId, { title, headRef })` do the lookup in the org tenant. `task_key` stores the matched key as written (`web-12`); the task's own key on the read comes from the task.
+- **Handler notes.** The delivery's `note` carries `pr_store=applied|stale|skipped(...)|failed(...)`, `link=<key>|none` and `ci_store=<rows updated>`. A failure in the new part is caught, logged and named in the note; the existing writes are already done.
+- **CI summary.** `failing` covers any completed run whose conclusion is not `success`, `skipped` or `neutral` (so `startup_failure`, `stale` and a completed run with no conclusion count as failing as well as the four the contract names). `running` is any entry not `completed`. The summary is `summarizeCi` in `github-pull-requests.ts`; the read answers it per pull request next to the per-workflow `runs`.
+- **UI.** `lib/pmPullRequests-data.ts` (`getTaskPullRequests`, a `ReadResult`) and `components/pm/PullRequests.tsx`, mounted in `TaskDetailView`. A refused read (403, not expected: same authorisation as the task) shows "You don't have access to pull requests." The demo backend answers `linkable: false`, so the section stays out of demo mode.
 
 ## 37. A unit's roster on the person-grain report overview (DW-4b, 2026-10-13) — `platform-nest/src/modules/reports/reports.controller.ts` (`getOverview`), `person-scope.ts` — **STATUS: BUILT, PROTOTYPED (DB suite tr25-person-axis.db.test.ts on the Linux CI gate)**
 
