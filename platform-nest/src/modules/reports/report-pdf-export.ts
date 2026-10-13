@@ -156,12 +156,20 @@ export interface RenderPdfViaSidecarOptions {
  *  fetch-with-AbortController-timeout idiom `admin-systems.controller.ts` already uses for every
  *  other downstream-service probe in this codebase. */
 export async function renderPdfViaSidecar(jobToken: string, opts: RenderPdfViaSidecarOptions): Promise<Buffer> {
+  return renderPrintPathViaSidecar(`/print/reports/${jobToken}`, opts);
+}
+
+/** PV5-07: the same round trip for any platform-ui print path (`/print/invoices/:jobToken`,
+ *  `/print/contracts/:jobToken`). `printPath` is always built by platform-nest from a fixed prefix and a freshly
+ *  minted one-shot token, never from request input; the sidecar's same-origin guard still pins the origin. */
+export async function renderPrintPathViaSidecar(printPath: string, opts: RenderPdfViaSidecarOptions): Promise<Buffer> {
   if (!opts.rendererUrl || !opts.rendererToken || !opts.platformUiInternalUrl) {
     throw new PdfRendererNotConfiguredError(
       "report-renderer is not configured (REPORT_RENDERER_URL / RENDERER_TOKEN / PLATFORM_UI_INTERNAL_URL)",
     );
   }
-  const printUrl = `${opts.platformUiInternalUrl.replace(/\/$/, "")}/print/reports/${jobToken}`;
+  if (!/^\/print\/[a-z-]+\/[A-Za-z0-9_-]+$/.test(printPath)) throw new PdfRenderFailedError("refusing an unexpected print path");
+  const printUrl = `${opts.platformUiInternalUrl.replace(/\/$/, "")}${printPath}`;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts.timeoutMs ?? 30000);
   try {
