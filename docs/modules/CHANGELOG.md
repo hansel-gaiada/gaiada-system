@@ -22,7 +22,7 @@ local stack). None of these mean "production-done".
 - **Where:** `lib/shellModel.ts` (pure, serialisable: `buildShellModel`, `workspaceForArea`, `activeLocation`); `components/shell/WorkspaceShellSidebar.tsx` (server half) and `WorkspaceSidebar.tsx` (client: area from `usePathname()` + `areaFor`/`resolveArea`, the last area kept in `sessionStorage`); `workspace-sidebar.css` on the existing tokens; `app/(app)/layout.tsx` and `Shell.tsx` wiring.
 - **The pilot switch is visible:** the account menu offers "Try the new layout" / "Back to the classic layout" (`setShellLayoutAction`), in both shells.
 - **Not changed:** the classic shell (everyone's default) renders exactly as before and makes no extra server call; the top bar, the floating assistant button, the palette, `nav.ts`, the server, Cerbos and every URL. A model that cannot be built falls back to the classic sidebar.
-- **Tests:** `lib/shellModel.test.ts`, `components/shell/WorkspaceSidebar.test.tsx`, `UserMenu.test.tsx` (switch item); fixtures shared in `lib/workspaceFixtures.ts`. CI run: PENDING.
+- **Tests:** `lib/shellModel.test.ts`, `components/shell/WorkspaceSidebar.test.tsx`, `UserMenu.test.tsx` (switch item); fixtures shared in `lib/workspaceFixtures.ts`. CI run 38339729938 green (platform-ui: typecheck, 402 test files, `next build`, smoke; every other job green).
 
 ### webdesk `0.27.0` - M6-P6e: the site deploy transport, SFTP or explicit-TLS FTPS, with its container harness (2026-10-13) - DEV-VERIFIED (script and harness, on sumopod; not wired into any template yet)
 
