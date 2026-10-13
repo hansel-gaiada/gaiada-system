@@ -582,6 +582,39 @@ The Appraisals › Department tab shows it next to how the people's appraisals w
 - A department KPI is never pinned on one person automatically. The "top contributors to a miss"
   list is for the HOD's understanding, not a judgement.
 
+### 5.6 Build notes (DW-4, 2026-10-13)
+
+Written when DW-4 started, from a survey of every source on main (`ad42d529`).
+
+**Order, one agent at a time:** 4a → 4b → 4f → 4g → 4d → 4c → 4e → 4j → 4h → 4i.
+- 4a's contract carries the judgement, so Sonnet builds it and Opus reviews.
+- 4g (access) and 4e (KPIs) are the Opus tickets, in separate windows.
+- 4e and 4h write their contracts first. DW-3k and DW-3i's "by condition" wait for 4e.
+
+**4a, the contract.** It is written into the reporting blueprint
+(`docs/blueprints/tracker-reporting-foundation.md` §15, the DW-4a entry). In short:
+- Quarter, semester and year are calendar kinds like month. Calendar quarters and semesters (DW-Q3).
+- Labels read `Q3 2026`, `Semester 2 2026` and `Year 2026`.
+- The comparison is the preceding period of the same kind.
+- One resolver serves reports, periods and check-ins.
+- They can be sealed, but appraisals still freeze from sealed months only.
+- No new schedule.
+- `REPORT_PERIODS` drops its tickets in the same change, so no page offers a kind the server refuses.
+
+**What exists, ticket by ticket:**
+
+| Ticket | Built on | Gap |
+|---|---|---|
+| 4b Reports | `/reports/person` and `/reports/department` read `getReportDocument` and `getReportOverview` with `?periodKind&start&end&scopeRef`. TR-25's person-scope rule narrows a head to their led subtree (`person-scope.ts`, `assertPersonInLedScope`) | `/reports/team` does not exist, and there is no team grain. Team becomes a page listing the head's people, from the person-grain overview the server already narrows, each linking to their person report. Check which report pages carry export today (`POST /reports/export`, PDF via the sidecar) and give all three the same |
+| 4f Learning | All four pages exist. `GET lms/courses` already takes `unitNodeId` | The catalogue page has no department filter. "Department courses" passes the workspace's unit node |
+| 4g Access | `org_unit_lead` exists: the derived role (`cerbos/policies/derived_roles.yaml`), seeded in `0102`, with the UI bundle in `lib/rbac.ts`. Its `lms_course` rule is limited to the own unit, and it has no waive right (only HR and the admin tier hold `lms.waive`) | Whether a lead position already creates the grant is not traced. Positions carry `is_lead` and role bundles with a scope kind (`admin/positions.controller.ts`), so 4g may be data (a lead position's bundle), not code. Trace it first |
+| 4d Appraisals | Mine and Team exist and are in the registry | `GET /appraisals` answers 403 to a caller who holds only `org_unit_lead` (a documented boundary in `appraisals.controller.ts`), yet the Team tab's gate admits `unitCap appraisal.read`. After 4g, the listing must serve the led subtree, or the gate must narrow. A tab must never open a 403 (DW-D20) |
+| 4c Analytics | Work is `/departments/{d}/charts`. Each department's own analytics pages exist: `website/analytics`, `rankings`, `gsc-ga4`, Social's `analytics`, `/hr/analytics` and `/finance/reports` | Three registry hrefs point at pages that do not exist: `analytics/sites`, `analytics/rankings` and `/finance/analytics`. URLs never move, so 4c points those tabs at the existing pages, and a page that moves to Analytics leaves its Work row. One page, one row |
+| 4e KPIs | The registry's `DeptKpi` labels per workspace. The department-grain metrics in `metrics.ts`: on-time rate, tasks completed, milestone hit rate, reopen rate, overdue open, check-in compliance, minutes logged | No targets, conditions or department appraisal exist. Most starting-set KPIs beyond PM need a module read (requests within the SLA, site uptime, payroll on time, close on time). A KPI without an honest reader shows "unavailable" and never takes a condition |
+| 4j Awareness | `notify()` (`core/http.ts`) writes the Inbox row and taps mail | Detecting a condition change needs a periodic evaluation. The reports house rule is that n8n schedules and the platform exposes an endpoint (blueprint §10), so the 4e contract names the endpoint and 4j adds the flow |
+| 4h Activity | `work_activity` (`0030`), fed from pm, pipeline, github, google_drive, claude, manual and system. `GET /pm/productivity` builds the daily map from it plus PM tables | Most modules emit nothing yet (WebDesk, Social, SEO, Creatives, Finance, HR, meetings, learning, check-ins). The contract names each event and its source |
+| 4i My activity | The map renders at `/project-management?view=productivity`. Its visibility rule is `assertProductivityReadAllowed` (self, the company-wide tiers and the led subtree) | Moving it to Analytics › My activity needs a page with an `AREA_RULES` entry. The visibility rule is unchanged (DW-D19) |
+
 ---
 
 ## 6. The AI Assistant, and what "Intelligence" was for
