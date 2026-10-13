@@ -9,6 +9,7 @@ import { currentVia, currentApproval, memoiseSessionCurrent } from "./request-co
 import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal } from "../rbac/principal";
 import { check, type Resource } from "../rbac/cerbos";
 import { mailIntake } from "../mail/intake";
+import { deniedOnlyForAssurance } from "../auth/step-up";
 
 /**
  * ── NAMING THE CAUSE WHEN AN UNRESOLVED ENVELOPE IS THE CAUSE (2026-08-24) ───────────────────────
@@ -49,6 +50,15 @@ export async function authorize(principal: Principal, resource: Resource, action
     await auditDecision(
       resource.tenantId ?? null, principal, action, resource.kind, resource.id ?? null, false, reason,
     );
+    // PV5-14 / PV-D40: when ONLY the assurance tier stands in the way (the same request would be allowed at
+    // "high"), say so in a machine code the UI can act on. The decision is unchanged; flag off, or any other
+    // principal, and this adds nothing (see deniedOnlyForAssurance).
+    if (await deniedOnlyForAssurance(principal, resource, action)) {
+      throw new ForbiddenException({
+        message: `not authorized: ${reason} (this action needs a second factor)`,
+        reason: "assurance_required",
+      });
+    }
     throw new ForbiddenException(`not authorized: ${reason}`);
   }
 

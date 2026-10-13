@@ -75,6 +75,15 @@ describe("saveBankDetailsAction", () => {
     expect(r.error).not.toMatch(/cerbos|not authorized/i);
   });
 
+  it("PV5-14: a 403 the platform NAMES as assurance_required goes through /step-up (the server's code wins over a stale /api/me)", async () => {
+    asMe("high");
+    fetchMock.mockRejectedValue(
+      new PlatformError(403, "not authorized: cerbos denied set_bank_details on finance_config (this action needs a second factor)", undefined, undefined, "assurance_required"),
+    );
+    await expect(saveBankDetailsAction(null, form(BANK))).rejects.toThrow("NEXT_REDIRECT /step-up?return=");
+    expect(redirect).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses an incomplete bank block before any request, naming the field", async () => {
     asMe("high");
     const r = await saveBankDetailsAction(null, form({ ...BANK, accountNo: " " }));

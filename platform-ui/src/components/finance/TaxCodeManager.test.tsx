@@ -6,6 +6,10 @@ import type { TaxCode } from "@/lib/finance";
 // that the screen offers the right actions, never offers a rate edit, and shows the server's answer verbatim.
 const fa = vi.hoisted(() => ({ addTaxCode: vi.fn(), endTaxCode: vi.fn(), addStandardPpnCodes: vi.fn() }));
 vi.mock("@/lib/financeActions", () => fa);
+// PV5-14: the second-factor prompt the card shows on an `assurance_required` refusal.
+const su = vi.hoisted(() => ({ getStepUpStatusAction: vi.fn(), simulateSecondFactorAction: vi.fn() }));
+vi.mock("@/lib/stepUpActions", () => su);
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
 
 import { TaxCodeManager, baseLabel } from "./TaxCodeManager";
 
@@ -75,5 +79,23 @@ describe("TaxCodeManager", () => {
       code: "PPN", name: "PPN 13%", kind: "ppn_output", rate: "13", baseMultiplier: "1",
       effectiveFrom: "2026-01-01", effectiveTo: null,
     });
+  });
+
+  it("PV5-14: a refusal that names assurance shows 'This action needs a second factor' and, when the server offers it, the simulate button", async () => {
+    su.getStepUpStatusAction.mockResolvedValue({ available: true, active: false, simulated: false, expiresAt: null, assurance: "linked", ttlSeconds: 900 });
+    fa.addStandardPpnCodes.mockResolvedValue({ ok: false, error: "not authorized: cerbos denied configure on finance_tax (this action needs a second factor)", reason: "assurance_required" });
+    render(<TaxCodeManager codes={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add the standard PPN codes" }));
+    expect(await screen.findByText("This action needs a second factor")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Simulate second factor (dev stage)" })).toBeInTheDocument();
+  });
+
+  it("PV5-14: any other refusal shows no second-factor prompt", async () => {
+    fa.addStandardPpnCodes.mockResolvedValue({ ok: false, error: "not authorized: cerbos denied configure on finance_tax" });
+    render(<TaxCodeManager codes={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add the standard PPN codes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("cerbos denied configure");
+    expect(screen.queryByText("This action needs a second factor")).not.toBeInTheDocument();
+    expect(su.getStepUpStatusAction).not.toHaveBeenCalled();
   });
 });

@@ -197,6 +197,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/admin/positions.controller.ts` |
 | `/api` | `platform-nest/src/admin/role-grants.controller.ts` |
 | `/api` | `platform-nest/src/admin/service-assignments.controller.ts` |
+| `/api` | `platform-nest/src/auth/step-up.controller.ts` |
 | `/api` | `platform-nest/src/core/agency-intake-portal.controller.ts` |
 | `/api` | `platform-nest/src/core/agency-lead-convert.controller.ts` |
 | `/api` | `platform-nest/src/core/agency-leads.controller.ts` |

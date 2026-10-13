@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Eyebrow } from "@/components/ui";
 import { sanitizeReturnToParam } from "@/lib/returnTo";
+import { getSessionUserId } from "@/lib/session-server";
+import { SecondFactorPrompt } from "@/components/auth/SecondFactorPrompt";
 import "../login/login.css";
 
 // D4 identity step-up landing. WA/Telegram (low-assurance) users are routed
@@ -16,6 +18,10 @@ export default async function StepUpPage({ searchParams }: { searchParams: SP })
   const sp = await searchParams;
   const returnTo = sanitizeReturnToParam(sp.return);
   const signInHref = `/login?return=${encodeURIComponent(returnTo)}`;
+  // PV5-14 / PV-D40: a signed-in person sent here by a refusal that needs a second factor (e.g. the bank details on
+  // /finance/settings/billing-profile) is offered the SIMULATED one, when the server has it switched on (dev stage).
+  // The prompt asks the platform itself; signed out, or switched off, only the sign-in path below shows.
+  const signedIn = !!(await getSessionUserId());
 
   return (
     <main className="auth-single">
@@ -32,6 +38,8 @@ export default async function StepUpPage({ searchParams }: { searchParams: SP })
           (WhatsApp / Telegram) are low-assurance, so we need you to complete a full sign-in
           before continuing. Once verified, you&apos;ll be returned to where you left off.
         </p>
+
+        {signedIn && <SecondFactorPrompt returnTo={returnTo} />}
 
         <div className="auth-card__return">
           <Eyebrow className="auth-card__return-label">Returning to</Eyebrow>

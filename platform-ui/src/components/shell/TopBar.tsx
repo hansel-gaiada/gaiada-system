@@ -9,6 +9,7 @@ import { UserMenu } from "./UserMenu";
 import { NavToggle } from "./NavToggle";
 import { CommandPaletteTrigger } from "./CommandPaletteTrigger";
 import { ThemeToggle } from "./ThemeToggle";
+import { SimulatedFactorBadge } from "@/components/auth/SimulatedFactorBadge";
 
 export async function TopBar({ me, tenantId, moduleLabel, theme, shell }: { me: Me; tenantId: string | null; moduleLabel: string; theme: Theme; shell?: ShellLayout }) {
   const dateLine = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
@@ -38,6 +39,8 @@ export async function TopBar({ me, tenantId, moduleLabel, theme, shell }: { me: 
       <CommandPaletteTrigger />
       <ThemeToggle theme={theme} />
       <div className="erp-top__actions">
+        {/* PV5-14 / PV-D40: only while a simulated second factor holds this sign-in (dev stage). */}
+        {me.assuranceSource === "simulated" && me.assuranceExpiresAt && <SimulatedFactorBadge expiresAt={me.assuranceExpiresAt} />}
         {/* The design puts the account control in the TOP BAR and the global
             create action at the SIDEBAR FLOOR — the reverse of where they
             used to sit. Both moved wholesale; neither lost an item. */}

@@ -3,6 +3,8 @@ import { useState, useTransition } from "react";
 import { Card, Button, HairlineTable, StatusBadge } from "@/components/ui";
 import { addTaxCode, endTaxCode, addStandardPpnCodes } from "@/lib/financeActions";
 import type { TaxCode } from "@/lib/finance";
+import { SecondFactorPrompt } from "@/components/auth/SecondFactorPrompt";
+import { isAssuranceRefusal } from "@/lib/stepUp";
 
 // PV5-F2 — tax-code setup. Since PV5-04 a taxed invoice, bill or journal line must name a tax code; a company that has
 // none cannot issue a taxed invoice. This is where Finance creates them.
@@ -31,6 +33,8 @@ export function TaxCodeManager({ codes }: { codes: TaxCode[] }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // PV5-14: the last refusal named assurance (`finance_tax` configure is a high-assurance action).
+  const [needsFactor, setNeedsFactor] = useState(false);
   const [form, setForm] = useState({
     code: "", name: "", kind: "ppn_output", rate: "", baseMultiplier: "1", effectiveFrom: "", effectiveTo: "",
   });
@@ -41,8 +45,10 @@ export function TaxCodeManager({ codes }: { codes: TaxCode[] }) {
   function standard() {
     setError(null);
     setNotice(null);
+    setNeedsFactor(false);
     start(async () => {
       const r = await addStandardPpnCodes();
+      setNeedsFactor(!r.ok && isAssuranceRefusal(r.reason));
       if (!r.ok || !r.result) return setError(r.error ?? "Could not add the standard PPN codes.");
       const { created, skipped } = r.result;
       setNotice(
@@ -56,12 +62,14 @@ export function TaxCodeManager({ codes }: { codes: TaxCode[] }) {
   function add() {
     setError(null);
     setNotice(null);
+    setNeedsFactor(false);
     start(async () => {
       const r = await addTaxCode({
         code: form.code.trim(), name: form.name.trim(), kind: form.kind, rate: form.rate.trim(),
         baseMultiplier: form.baseMultiplier.trim() || "1", effectiveFrom: form.effectiveFrom,
         effectiveTo: form.effectiveTo || null,
       });
+      setNeedsFactor(!r.ok && isAssuranceRefusal(r.reason));
       if (!r.ok) return setError(r.error ?? "Could not add this tax code.");
       setNotice(`Added ${form.code.trim()} from ${form.effectiveFrom}.`);
       setForm({ code: "", name: "", kind: "ppn_output", rate: "", baseMultiplier: "1", effectiveFrom: "", effectiveTo: "" });
@@ -73,8 +81,10 @@ export function TaxCodeManager({ codes }: { codes: TaxCode[] }) {
     if (!to) return setError("Pick the last day this row applies.");
     setError(null);
     setNotice(null);
+    setNeedsFactor(false);
     start(async () => {
       const r = await endTaxCode(c.id, to);
+      setNeedsFactor(!r.ok && isAssuranceRefusal(r.reason));
       if (!r.ok) return setError(r.error ?? "Could not end-date this tax code.");
       setNotice(`${c.code} from ${c.effectiveFrom} now ends on ${to}.`);
     });
@@ -178,6 +188,7 @@ export function TaxCodeManager({ codes }: { codes: TaxCode[] }) {
       </Card>
 
       {error && <p className="fin-form__error" role="alert">{error}</p>}
+      {needsFactor && <SecondFactorPrompt />}
       {notice && <p className="fin-muted" role="status" style={{ marginTop: 12 }}>{notice}</p>}
     </>
   );

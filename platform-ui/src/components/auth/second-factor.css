@@ -1,0 +1,8 @@
+/* PV5-14 / PV-D40 — the simulated second factor's prompt and header badge. Tokens only, so both themes follow. */
+.erp-sf { margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent); border-radius: var(--radius-md); background: var(--status-warning-bg); color: var(--text-primary); }
+.erp-sf__title { margin: 0 0 4px; font: 600 13.5px var(--font-body); }
+.erp-sf__note { margin: 0; font: 400 12.5px var(--font-body); line-height: 1.45; color: var(--text-primary); }
+.erp-sf__actions { margin-top: 10px; }
+.erp-sf__error { margin: 8px 0 0; font: 400 12.5px var(--font-body); color: var(--status-critical); }
+.erp-sf-badge { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: var(--radius-pill); border: 0.5px solid color-mix(in srgb, var(--status-warning) 50%, transparent); background: var(--status-warning-bg); color: var(--status-warning-fg); font: 600 11px var(--font-body); white-space: nowrap; }
+@media (max-width: 640px) { .erp-sf-badge { max-width: 46vw; overflow: hidden; text-overflow: ellipsis; } }

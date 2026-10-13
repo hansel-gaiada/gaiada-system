@@ -158,6 +158,10 @@ export interface ServiceScope {
 
 export interface Me {
   userId: string; name: string; email: string; title: string | null; assurance: string;
+  /** PV5-14 / PV-D40 (dev stage): present only while a SIMULATED second factor holds this sign-in at high
+   *  assurance, with when it ends (ISO). The header badge reads them; never shown as real MFA. */
+  assuranceSource?: "simulated";
+  assuranceExpiresAt?: string | null;
   /** PV1-01 added `vertical` (the company's business line, which selects its pack), `enabledModules`
    *  (the effective set the module gate uses) and `rootCompanyId`. Optional for an older backend:
    *  treat a missing vertical as "general", missing modules as unknown (hide nothing), and a missing

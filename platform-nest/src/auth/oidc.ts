@@ -8,6 +8,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { newId, withGlobal } from "../db";
 import { config } from "../config";
 import { assemblePrincipal, type Principal } from "../rbac/principal";
+import { applySimulatedStepUp, sessionIdFromClaims, sessionRefFor } from "./step-up";
 
 // jwtVerify's key-getter type (works for both remote and local JWKS factories).
 type KeyGetter = Parameters<typeof jwtVerify>[1];
@@ -40,6 +41,9 @@ export interface VerifiedToken {
   // once a step-up authenticator with a reference value completes); it is never omitted by a
   // correctly-wired client. So an absent claim key is not "the user didn't do MFA", it's "this
   // client/realm was never configured to say so" — see infra/runbooks/enable-mfa.md.
+  sessionId: string | null; // PV5-14: the IdP SESSION this token belongs to (`sid`, else `session_state`),
+  // read from inside the signature. The simulated step-up (./step-up.ts) is bound to it; null => the token
+  // cannot be stepped up at all. Never logged or stored raw (only hashed with the user id).
 }
 
 export async function verifyToken(token: string): Promise<VerifiedToken> {
@@ -70,6 +74,7 @@ export async function verifyToken(token: string): Promise<VerifiedToken> {
     name: p.name ?? p.preferred_username ?? email ?? p.sub,
     amr: amrClaimPresent ? (p.amr as string[]) : [],
     amrClaimPresent,
+    sessionId: sessionIdFromClaims(p as Record<string, unknown>),
   };
 }
 
@@ -156,7 +161,20 @@ function assuranceFor(tok: VerifiedToken): "high" | "linked" {
 
 /** Full path: verify token → provision → assemble principal at the right assurance. */
 export async function principalFromToken(token: string): Promise<Principal | null> {
+  return (await sessionPrincipalFromToken(token)).principal;
+}
+
+/** PV5-14: the same path, plus the opaque reference of the IdP session the token belongs to (null when the
+ *  token names none). The AuthGuard keeps the reference on the request so `POST /api/auth/step-up/simulate`
+ *  can bind a step-up to THIS session; a principal is raised by a simulated step-up only here, never on the
+ *  service-token paths (OBO envelope, agent, D14 re-drive, dev header). Flag off: identical to before. */
+export async function sessionPrincipalFromToken(
+  token: string,
+): Promise<{ principal: Principal | null; sessionRef: string | null }> {
   const tok = await verifyToken(token);
   const userId = await provisionUser(tok);
-  return assemblePrincipal(userId, assuranceFor(tok));
+  const principal = await assemblePrincipal(userId, assuranceFor(tok));
+  const sessionRef = tok.sessionId ? sessionRefFor(userId, tok.sessionId) : null;
+  if (!principal) return { principal: null, sessionRef };
+  return { principal: await applySimulatedStepUp(principal, sessionRef), sessionRef };
 }

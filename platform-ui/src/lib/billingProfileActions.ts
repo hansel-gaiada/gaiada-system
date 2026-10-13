@@ -23,6 +23,7 @@ import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { BILLING_PROFILE_PATH, profileBody, validateProfileForm, type ProfileSaveResult } from "./billingProfile";
 import { classifyBankRefusal, stepUpHref, validateBank } from "./billingView";
+import { isAssuranceRefusal } from "./stepUp";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 
@@ -76,7 +77,9 @@ export async function saveBankDetailsAction(_prev: ProfileSaveResult | null, for
   } catch (e) {
     if (!(e instanceof PlatformError)) throw e;
     if (e.status === 403) {
-      if (classifyBankRefusal(c.assurance) === "step_up") stepUp = true;
+      // PV5-14: the platform now NAMES an assurance refusal (`reason: "assurance_required"`, while the simulated
+      // second factor is switched on); the caller's own assurance stays the fallback for a server that does not.
+      if (isAssuranceRefusal(e.reason) || classifyBankRefusal(c.assurance) === "step_up") stepUp = true;
       else return { ok: false, error: "Only an owner or a finance manager of this company, or the platform administrator, can change the bank account clients pay into." };
     } else if (e.status === 404) {
       return { ok: false, error: "Save the billing profile first. The bank account is part of it." };

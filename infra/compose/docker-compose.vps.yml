@@ -547,6 +547,11 @@ services:
       # 5c.4 file store — persistent volume so attachments survive restarts.
       FILES_DIR: /data/files
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # PV5-14 / owner ruling PV-D40 (DEV STAGE ONLY): the simulated second factor. Default off ("0"); "1"
+      # lets a staff member's own interactive session reach high assurance for 15 minutes via a labelled,
+      # audited "Simulate second factor" step. This row is what makes the flag reach the container at all
+      # (a `.env` value alone is only interpolation). Turn it OFF before the ERP holds real client data.
+      MFA_SIMULATION_ENABLED: ${MFA_SIMULATION_ENABLED:-0}
       # Admin/Systems console aggregator (Phase C) — read-only probes of each downstream
       # service. All fail-soft: an unset URL just reports "not configured" in the console.
       GATEWAY_URL: http://ai-gateway:3002

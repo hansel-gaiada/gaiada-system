@@ -408,6 +408,13 @@ const configBase = {
   assistantIntentTtlMs: Number(process.env.ASSISTANT_INTENT_TTL_MS ?? 60 * 60 * 1000),
   // Event backbone (5c continuation): Redis Streams for outbox relay + consumption.
   redisUrl: process.env.REDIS_URL ?? "",
+  // PV5-14 / owner ruling PV-D40 (dev stage ONLY): the SIMULATED second factor (src/auth/step-up.ts). Default
+  // OFF; "1"/"true" turns on `POST /api/auth/step-up/simulate` and lets a staff member's OWN interactive session
+  // reach high assurance for 15 minutes. Off: the routes 404 and nothing else changes. Must be OFF before the
+  // ERP holds real client data (then real MFA, infra/runbooks/enable-mfa.md). Needs the compose passthrough row
+  // (`MFA_SIMULATION_ENABLED: ${MFA_SIMULATION_ENABLED:-0}`): a `.env` value alone never reaches the container.
+  mfaSimulationEnabled:
+    process.env.MFA_SIMULATION_ENABLED === "1" || process.env.MFA_SIMULATION_ENABLED === "true",
   // ORG-6 release train (A4): the whole shared-service reconciler is DARK by default. When off,
   // the reconcile consumer drains its stream but materializes nothing — assignments stay dormant
   // metadata (exactly as ORG-2/ORG-3 left them). Flips on only with the rest of the train green.

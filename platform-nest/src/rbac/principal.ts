@@ -82,6 +82,16 @@ export interface Principal {
    */
   kind?: PrincipalKind;
   assurance: Assurance;
+  /**
+   * PV5-14 / PV-D40 (dev stage only). Set ONLY by `applySimulatedStepUp()` (src/auth/step-up.ts) when a
+   * "linked" OIDC session was raised to "high" by the SIMULATED second factor, so `assurance: "high"` is never
+   * mistaken for a real one. Sent to Cerbos as `principal.attr.assuranceSource` (no policy reads it; it is
+   * there to be seen in audit and decision logs) and returned by `/api/me`. Absent on every other principal,
+   * a real `amr` "high" included. Authorization-NEUTRAL: nothing grants or denies on it.
+   */
+  assuranceSource?: "simulated";
+  /** PV5-14: when the simulated step-up above ends (ISO). Set together with `assuranceSource`, never alone. */
+  assuranceExpiresAt?: string;
   companies: string[]; // authorized tenant set (active memberships)
   /** MON-00c (Wall 2). Every company sharing this principal's ROOT company tree. Cerbos's `inRoot`
    *  variable tests `resource.tenantId in rootCompanies`, which needs no handler change because

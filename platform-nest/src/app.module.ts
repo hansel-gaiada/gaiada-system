@@ -6,6 +6,8 @@
 import { Module } from "@nestjs/common";
 import { HealthController } from "./health/health.controller";
 import { IdentityController } from "./identity/identity.controller";
+// PV5-14 / PV-D40 — the simulated second factor (dev stage only; 404 while MFA_SIMULATION_ENABLED is off).
+import { StepUpController } from "./auth/step-up.controller";
 import { CoreController } from "./core/core.controller";
 import { CustomFieldsController } from "./core/custom-fields.controller";
 import { AuthzCheckController } from "./core/authz-check.controller";
@@ -205,7 +207,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 
 @Module({
   controllers: [
-    HealthController, IdentityController, CoreController, CustomFieldsController,
+    HealthController, IdentityController, StepUpController, CoreController, CustomFieldsController,
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, BillingProfileController, BillingProfileAgentController, BillingNumberingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalDocumentsController, ClientDocumentsController, PortalProfileController, PortalCentreController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, PortalConversationController, ConversationController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, AgencyPrivacyController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, ClientWebsiteAccessController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).

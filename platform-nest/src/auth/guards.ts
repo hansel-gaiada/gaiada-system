@@ -7,7 +7,7 @@ import type { FastifyRequest } from "fastify";
 import { config } from "../config";
 import { assemblePrincipal, ANONYMOUS } from "../rbac/principal";
 import { setRequestVia } from "../core/request-context";
-import { principalFromToken } from "./oidc";
+import { sessionPrincipalFromToken } from "./oidc";
 import { withGlobal } from "../db";
 
 function safeEqual(a: string, b: string): boolean {
@@ -48,9 +48,12 @@ export class AuthGuard implements CanActivate {
     // so real SSO and the service-token/dev-login BFF can coexist. Prod uses "oidc".
     if ((config.authMode === "oidc" || config.authMode === "hybrid") && bearer && bearer !== config.serviceToken) {
       try {
-        const principal = await principalFromToken(bearer);
+        const { principal, sessionRef } = await sessionPrincipalFromToken(bearer);
         if (principal) {
           req.principal = principal;
+          // PV5-14: marks this request as an INTERACTIVE IdP session (the only kind a simulated second factor
+          // can be bound to). Set on this path alone, so every service-token path below leaves it undefined.
+          req.authSession = { kind: "oidc", sessionRef };
           return true;
         }
         throw new UnauthorizedException("unknown or inactive user");

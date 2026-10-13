@@ -1871,7 +1871,7 @@ that this **stays**, and added a bar: **PV-D26: the operator keeps access; high 
 
 | Where | Action | Effect |
 |---|---|---|
-| `resource_finance_config.yaml` | `set_bank_details` (our own account) | owner, finance_manager and platform_admin all need high assurance (PV-D26); **relaxed for an owner / finance_manager of the company by PV-D29 below** |
+| `resource_finance_config.yaml` | `set_bank_details` (our own account) | owner, finance_manager and platform_admin all need high assurance (PV-D26); relaxed for an owner / finance_manager by PV-D29 below, **relaxation lifted 2026-10-13 by PV-D40 (PV5-14): unconditional again** |
 | `resource_finance_ap.yaml` | `vendor_master` (**supplier** bank details; scope note: an AP change made by this ticket) | its ALLOW already required high, but the `*` wildcard bypassed it; platform_admin now needs high too |
 
 Every other AP rule is byte-identical. The notification to all owners is wired by PV5-04, not here.
@@ -1886,6 +1886,20 @@ ALLOW); `platform_admin` still needs high, which is unreachable today, so the op
 DENY; `company_admin` has no ALLOW at all. **`finance_ap` `vendor_master` is unchanged**: the ruling covers our own bank details only, and
 PV-D26's unconditional DENY stays there. To restore PV-D26 for `set_bank_details`, drop the grant clause from that DENY and flip the two
 `linked` owner / finance_manager expectations in `pv5-billing-actions-cerbos.test.ts`.
+
+**PV-D40 (owner ruling, 2026-10-13; PV5-14): PV-D29's bypass is LIFTED, PV-D26 applies in full again, met on the dev stage
+by a SIMULATED second factor.** The `set_bank_details` assurance DENY in `resource_finance_config.yaml` is unconditional again
+(`!has(request.principal.attr.assurance) || request.principal.attr.assurance != "high"`, the same expression as `vendor_master`):
+an owner or finance_manager of the company at `linked` is denied, as is platform_admin. No policy was added for the simulation:
+"high" is reached through `POST /api/auth/step-up/simulate` (platform-nest `src/auth/step-up.ts`; flag `MFA_SIMULATION_ENABLED`,
+default off), which raises ONLY the caller's own interactive OIDC session (bound to the IdP `sid`), only for an `employee` with a
+staff grant and membership, for 15 minutes, audited (`auth.step_up_simulated`). Such a principal reaches Cerbos with
+`attr.assurance: "high"` and an extra, authorization-neutral `attr.assuranceSource: "simulated"` (sent only then; no policy reads
+it). OBO envelopes, agents, D14 re-drives, bots, automation and portal principals can never be raised. Every other high-assurance
+rule (finance tax configure and file, period close, write-offs, AP approve and payment release, vendor master, statement export,
+posting-rule activate, control duties, HR exports and approvals) is unchanged and is met the same way. **Before real data:** the
+flag goes off and real MFA is enabled (`infra/runbooks/enable-mfa.md`). The test flips are in `pv5-billing-actions-cerbos.test.ts`
+(owner and finance_manager at `linked` now denied; a `simulated` principal decides exactly as `high`).
 
 **Proof.** `src/rbac/pv5-billing-actions-cerbos.test.ts` (live Cerbos; per action a member denied, a bot and an automation account denied, the right
 roles allowed, `company_admin` denied `set_bank_details`, a delegated bot call denied, and the PV-D26 assurance matrix for `set_bank_details` and `vendor_master`: owner, finance_manager and platform_admin each denied at `linked`, allowed at `high`), plus the static pins above and

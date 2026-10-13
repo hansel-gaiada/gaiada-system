@@ -126,6 +126,9 @@ export function principalPayload(p: Principal) {
     roles: ["user"], // base role; the real logic is in derived roles over attr.grants / attr.perms
     attr: {
       assurance: p.assurance,
+      // PV5-14 / PV-D40: present ONLY when the "high" above came from the simulated second factor (dev stage).
+      // Conditional, so every other principal's payload is byte-identical to before. No policy reads it.
+      ...(p.assuranceSource ? { assuranceSource: p.assuranceSource } : {}),
       // T7 (WebDesk M3). `users.kind` (employee | client | automation | bot). This function is an
       // explicit allow-list: an attribute not named here silently never reaches Cerbos, so without
       // this line the `kind in ["automation","bot"]` DENY in resource_webdesk_content_item.yaml

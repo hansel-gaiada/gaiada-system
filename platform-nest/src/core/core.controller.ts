@@ -104,6 +104,11 @@ export class CoreController {
     return {
       userId: req.principal.userId,
       assurance: req.principal.assurance,
+      // PV5-14 / PV-D40: present only while a SIMULATED second factor holds this session at "high" (dev stage),
+      // so the UI can badge it and never present it as real MFA. Absent otherwise (a real `amr` "high" included).
+      ...(req.principal.assuranceSource
+        ? { assuranceSource: req.principal.assuranceSource, assuranceExpiresAt: req.principal.assuranceExpiresAt ?? null }
+        : {}),
       name: profile.rows[0]?.name ?? "",
       email: profile.rows[0]?.email ?? "",
       title: profile.rows[0]?.title ?? null,

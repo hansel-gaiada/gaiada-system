@@ -7,6 +7,7 @@ import { NotificationBell, type BellItem } from "./NotificationBell";
 import { SpecialAccessChip } from "./SpecialAccessChip";
 import { TopBarSearch } from "./TopBarSearch";
 import { UserMenu } from "./UserMenu";
+import { SimulatedFactorBadge } from "@/components/auth/SimulatedFactorBadge";
 import "./workspace-topbar.css";
 
 // DW-2c: the workspace shell's top bar (plan §2.5), drawn only for people on the pilot switch. The
@@ -50,6 +51,8 @@ export async function WorkspaceTopBar({ me, tenantId, theme, shell, special, unr
       <TopBarSearch />
       <div className="erp-top__actions">
         {special && <SpecialAccessChip unrestricted={unrestricted} />}
+        {/* PV5-14 / PV-D40: only while a simulated second factor holds this sign-in (dev stage). */}
+        {me.assuranceSource === "simulated" && me.assuranceExpiresAt && <SimulatedFactorBadge expiresAt={me.assuranceExpiresAt} />}
         <NotificationBell unread={unread?.count ?? null} items={unread?.items ?? []} />
         <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} compact clientView={(me.clientOf ?? []).length > 0} shellLayout={shell} theme={theme} />
       </div>

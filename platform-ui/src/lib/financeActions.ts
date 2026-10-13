@@ -25,7 +25,9 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 
-export type FinanceActionResult<T = undefined> = { ok: boolean; error?: string; result?: T };
+// `reason` (PV5-14, additive): the platform's machine code when it sent one, e.g. `assurance_required` when only a
+// second factor stands in the way, so a form can offer the (simulated, dev stage) step-up there.
+export type FinanceActionResult<T = undefined> = { ok: boolean; error?: string; reason?: string; result?: T };
 
 async function ctx(): Promise<{ userId: string; tenant: string } | { error: string }> {
   const userId = await getSessionUserId();
@@ -55,7 +57,7 @@ async function send<T>(path: string, body: unknown): Promise<FinanceActionResult
       // Verbatim. The database wrote a message worth reading — "this company has PPN posted
       // (balance 11000000). Turning PKP off would orphan tax already charged" — and replacing it
       // with "Could not save" would throw away the only part that tells the user what to do.
-      return { ok: false, error: e.message };
+      return { ok: false, error: e.message, ...(e.reason ? { reason: e.reason } : {}) };
     }
     throw e;
   }
